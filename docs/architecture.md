@@ -39,13 +39,4 @@ The default host is `127.0.0.1`. No authentication or LAN deployment hardening i
 
 ## Foundation roadmap
 
-1. Add a real geometry-kernel adapter and kernel conformance tests.
-2. Extend document semantics for sketches, constraints, parts, and stable references.
-3. Add migration rules for project/document format versions.
-4. Add lease persistence or a cross-process coordination store before multi-process hosting.
-5. Add safe stop requests that finish the current atomic command and validate before release.
-6. Add renderer/viewport APIs shared by browser and agents.
-7. Add structured validation reports and richer geometry inspection/measurement.
-8. Expand the browser into a read-only model/history observer and a guarded manual editor.
-9. Add an agent runtime/provider adapter without coupling Core to one LLM.
-10. Build scan preprocessing and editable scan-to-CAD reconstruction only after the geometry foundation is established.
+The proposed development sequence, including the authentication gate for LAN access and the dependencies for multi-process hosting and Scan-to-CAD, is maintained in the [CADYX project roadmap](../.codex/roadmap.md). Inspect the current implementation before treating a proposed milestone as unfinished or complete.

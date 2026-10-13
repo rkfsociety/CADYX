@@ -5,4 +5,4 @@
 - Confirmed: edit leases are process-local, heartbeat-based, and required for all document mutations. Expired leases stay locked until Core reloads and validates the saved project before recovery. One host process per workspace is required by this implementation.
 - Confirmed: Web API commands require a human lease; Agent API commands require an agent lease. Both invoke the same Command System.
 - Confirmed: `PrimitiveKernelAdapter` is a descriptor-only demo implementation of the `GeometryKernel` protocol; it does not create B-Rep geometry or render a model.
-- Canonical sources: [run instructions](../README.md), [architecture guide](../docs/architecture.md), [project format v1](../docs/project-format-v1.md), and the implementation in `cadyx/`.
+- Canonical sources: [run instructions](../README.md), [architecture guide](../docs/architecture.md), [project roadmap](roadmap.md), [project format v1](../docs/project-format-v1.md), and the implementation in `cadyx/`.
