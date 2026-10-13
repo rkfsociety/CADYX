@@ -64,9 +64,25 @@
               </div>
             </div>
           </header>
-          <section class="panel folder-project-card">
-            <h2>Папка проекта</h2>
-            <p>Содержимое этой папки определяет проект. Агент разберёт файлы, когда начнёт с ним работу.</p>
+          <section class="panel folder-files-panel" aria-labelledby="folder-files-title">
+            <div class="panel-heading">
+              <div><span class="panel-index">01</span><h2 id="folder-files-title">Файлы проекта</h2></div>
+              <span id="folder-file-count" class="subtle-count">0</span>
+            </div>
+            <div class="folder-files-layout">
+              <nav id="folder-file-list" class="folder-file-list" aria-label="Файлы проекта"></nav>
+              <div class="folder-preview-area">
+                <div class="folder-preview-heading">
+                  <strong id="folder-preview-title">Предпросмотр</strong>
+                  <small id="folder-preview-info">Выберите файл проекта</small>
+                </div>
+                <div class="folder-preview-stage">
+                  <canvas id="ply-preview-canvas" class="ply-preview-canvas" aria-label="3D предпросмотр файла PLY" hidden></canvas>
+                  <p id="folder-preview-placeholder" class="folder-preview-placeholder">Здесь появится предпросмотр файла</p>
+                </div>
+                <p class="folder-preview-hint">Перетаскивайте для поворота · колесо для масштаба · двойной щелчок сбрасывает ракурс.</p>
+              </div>
+            </div>
           </section>
         </section>
 
@@ -178,6 +194,7 @@
     </div>
 
     <p id="toast" class="toast" role="status" aria-live="polite"></p>
+    <script src="/assets/ply-preview.js" defer></script>
     <script src="/assets/app.js" defer></script>
   </body>
 </html>

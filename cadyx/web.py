@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import mimetypes
+import os
 import queue
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from .core import CadyxCore
 from .errors import CadyxError, NotFoundError, ValidationError
@@ -42,6 +44,19 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
                     self._json(200, core.list_workspace())
                     return
                 parts = parsed.path.strip("/").split("/")
+                folder_files_prefix = ["api", "v1", "workspace", "folders"]
+                if (
+                    len(parts) in {6, 7}
+                    and parts[:4] == folder_files_prefix
+                    and parts[5] == "files"
+                ):
+                    folder_name = unquote(parts[4])
+                    if len(parts) == 6:
+                        self._json(200, {"files": core.workspace.list_folder_files(folder_name)})
+                    else:
+                        file_name = unquote(parts[6])
+                        self._binary_file(core.workspace.resolve_folder_file(folder_name, file_name))
+                    return
                 prefix = ["api", "v1", "projects"]
                 agent_prefix = ["api", "v1", "agent", "projects"]
                 if len(parts) == 4 and parts[:3] == prefix:
@@ -58,6 +73,9 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
                     return
                 if parsed.path == "/assets/app.js":
                     self._static("app.js", "text/javascript; charset=utf-8")
+                    return
+                if parsed.path == "/assets/ply-preview.js":
+                    self._static("ply-preview.js", "text/javascript; charset=utf-8")
                     return
                 if parsed.path == "/assets/style.css":
                     self._static("style.css", "text/css; charset=utf-8")
@@ -154,6 +172,26 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(data)
+
+        def _binary_file(self, path: Path) -> None:
+            try:
+                stream = path.open("rb")
+            except OSError as exc:
+                raise NotFoundError("Project file was not found.") from exc
+            with stream:
+                size = os.fstat(stream.fileno()).st_size
+                content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(size))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Disposition", "inline")
+                self.end_headers()
+                try:
+                    while chunk := stream.read(64 * 1024):
+                        self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
 
         def _stream_events(self, project_id: str | None) -> None:
             if project_id:

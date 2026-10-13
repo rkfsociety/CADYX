@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import re
 import tempfile
@@ -100,6 +101,68 @@ class ProjectWorkspace:
             folders.append(entry.name)
         folders.sort(key=str.casefold)
         return folders
+
+    def list_folder_files(self, folder_name: str) -> list[dict[str, Any]]:
+        folder = self._workspace_folder_path(folder_name)
+        files: list[dict[str, Any]] = []
+        for entry in folder.iterdir():
+            if entry.is_symlink() or not entry.is_file():
+                continue
+            try:
+                resolved = entry.resolve(strict=True)
+                if resolved.parent != folder:
+                    continue
+                stat = resolved.stat()
+            except OSError:
+                continue
+            files.append({
+                "name": entry.name,
+                "size": stat.st_size,
+                "media_type": mimetypes.guess_type(entry.name)[0] or "application/octet-stream",
+            })
+        files.sort(key=lambda item: item["name"].casefold())
+        return files
+
+    def resolve_folder_file(self, folder_name: str, file_name: str) -> Path:
+        folder = self._workspace_folder_path(folder_name)
+        if not self._is_single_path_segment(file_name):
+            raise NotFoundError("Project file was not found.")
+        path = folder / file_name
+        if path.is_symlink() or not path.is_file():
+            raise NotFoundError("Project file was not found.")
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as exc:
+            raise NotFoundError("Project file was not found.") from exc
+        if resolved.parent != folder:
+            raise NotFoundError("Project file was not found.")
+        return resolved
+
+    def _workspace_folder_path(self, folder_name: str) -> Path:
+        if not self._is_single_path_segment(folder_name):
+            raise NotFoundError("Project folder was not found.")
+        path = self.root / folder_name
+        if path.is_symlink() or not path.is_dir():
+            raise NotFoundError("Project folder was not found.")
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as exc:
+            raise NotFoundError("Project folder was not found.") from exc
+        if resolved.parent != self.root:
+            raise NotFoundError("Project folder was not found.")
+        return resolved
+
+    @staticmethod
+    def _is_single_path_segment(value: str) -> bool:
+        return (
+            isinstance(value, str)
+            and value not in {"", ".", ".."}
+            and "\x00" not in value
+            and ":" not in value
+            and "/" not in value
+            and "\\" not in value
+            and Path(value).name == value
+        )
 
     @staticmethod
     def validate(project: Any, *, expected_id: str | None = None) -> None:

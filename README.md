@@ -33,6 +33,7 @@ See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](do
 
 - `GET /api/v1/projects` and `GET /api/v1/agent/projects` (CADYX project records plus `folders` for immediate project directories); `POST /api/v1/projects` creates a CADYX project record
 - `GET /api/v1/projects/{id}`
+- `GET /api/v1/workspace/folders/{folder}/files` and `GET /api/v1/workspace/folders/{folder}/files/{name}` for safe in-folder file preview
 - `POST /api/v1/projects/{id}/leases` with `owner_type` and `owner_id`
 - `POST /api/v1/projects/{id}/commands` with a human `lease_id` and a command
 - Agent equivalents under `/api/v1/agent/projects`

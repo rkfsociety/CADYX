@@ -12,6 +12,10 @@ const $ = (selector) => document.querySelector(selector);
 const projectList = $("#project-list");
 const projectDetail = $("#project-detail");
 const noSelection = $("#no-selection");
+const folderFileList = $("#folder-file-list");
+const folderPreviewCanvas = $("#ply-preview-canvas");
+const folderPreviewPlaceholder = $("#folder-preview-placeholder");
+const plyViewer = window.CadyxPlyPreview.createViewer(folderPreviewCanvas);
 const toast = $("#toast");
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const dateFormat = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -27,6 +31,11 @@ let selectedBodyId = null;
 let currentObjects = [];
 let toastTimer;
 let refreshTimer;
+let activeFolderName = null;
+let folderFiles = [];
+let selectedFolderFileName = null;
+let folderListRequest = 0;
+let previewRequest = 0;
 const FOLDER_SELECTION_PREFIX = "folder:";
 
 function readSelectedProject() {
@@ -223,12 +232,114 @@ function selectProject(id) {
 }
 
 function showFolderDetail(name) {
+  const folderChanged = activeFolderName !== name;
+  activeFolderName = name;
   projectDetail.hidden = true;
   noSelection.hidden = true;
   $("#folder-detail").hidden = false;
   $("#topbar-project-name").textContent = name;
   $("#folder-detail-name").textContent = name;
   $("#folder-detail-path").textContent = `projects/${name}`;
+  if (folderChanged) {
+    folderFiles = [];
+    selectedFolderFileName = null;
+    folderFileList.replaceChildren();
+    $("#folder-file-count").textContent = "0";
+    folderPreviewCanvas.hidden = true;
+    folderPreviewPlaceholder.hidden = false;
+    folderPreviewPlaceholder.textContent = "Загружаю список файлов…";
+    $("#folder-preview-title").textContent = "Предпросмотр";
+    $("#folder-preview-info").textContent = "";
+    loadFolderFiles(name).catch((error) => showFolderLoadError(name, error));
+  }
+}
+
+function formatFileSize(size) {
+  if (size < 1024) return `${size} Б`;
+  if (size < 1024 * 1024) return `${numberFormat.format(size / 1024)} КБ`;
+  return `${numberFormat.format(size / (1024 * 1024))} МБ`;
+}
+
+function showFolderLoadError(name, error) {
+  if (activeFolderName !== name) return;
+  folderFileList.replaceChildren();
+  folderPreviewPlaceholder.hidden = false;
+  folderPreviewPlaceholder.textContent = error.message;
+  $("#folder-preview-title").textContent = "Не удалось открыть папку";
+  $("#folder-preview-info").textContent = "";
+}
+
+async function loadFolderFiles(name) {
+  const request = ++folderListRequest;
+  const response = await api(`/api/v1/workspace/folders/${encodeURIComponent(name)}/files`);
+  if (request !== folderListRequest || activeFolderName !== name) return;
+  folderFiles = response.files;
+  $("#folder-file-count").textContent = String(folderFiles.length);
+  renderFolderFiles();
+  const firstPreview = folderFiles.find((file) => file.name.toLowerCase().endsWith(".ply")) || folderFiles[0];
+  if (firstPreview) previewFolderFile(name, firstPreview);
+  else {
+    $("#folder-preview-title").textContent = "Файлов нет";
+    $("#folder-preview-info").textContent = "";
+    folderPreviewPlaceholder.hidden = false;
+    folderPreviewPlaceholder.textContent = "В этой папке пока нет файлов.";
+  }
+}
+
+function renderFolderFiles() {
+  folderFileList.replaceChildren();
+  for (const file of folderFiles) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "folder-file-item";
+    button.classList.toggle("selected", file.name === selectedFolderFileName);
+    button.dataset.fileName = file.name;
+    button.setAttribute("aria-pressed", file.name === selectedFolderFileName ? "true" : "false");
+    const name = document.createElement("strong");
+    name.textContent = file.name;
+    const size = document.createElement("small");
+    size.textContent = formatFileSize(file.size);
+    button.append(name, size);
+    folderFileList.append(button);
+  }
+}
+
+async function previewFolderFile(folderName, file) {
+  selectedFolderFileName = file.name;
+  renderFolderFiles();
+  const request = ++previewRequest;
+  $("#folder-preview-title").textContent = file.name;
+  $("#folder-preview-info").textContent = formatFileSize(file.size);
+  folderPreviewCanvas.hidden = true;
+  folderPreviewPlaceholder.hidden = false;
+
+  if (!file.name.toLowerCase().endsWith(".ply")) {
+    folderPreviewPlaceholder.textContent = "Предпросмотр этого формата пока не поддерживается.";
+    return;
+  }
+
+  folderPreviewPlaceholder.textContent = "Загружаю 3D модель…";
+  try {
+    const url = `/api/v1/workspace/folders/${encodeURIComponent(folderName)}/files/${encodeURIComponent(file.name)}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || "Не удалось загрузить файл.");
+    }
+    const geometry = window.CadyxPlyPreview.parse(await response.arrayBuffer());
+    if (request !== previewRequest || activeFolderName !== folderName) return;
+    plyViewer.load(geometry);
+    folderPreviewCanvas.hidden = false;
+    folderPreviewPlaceholder.hidden = true;
+    $("#folder-preview-info").textContent = geometry.faceCount
+      ? `${formatNumber(geometry.vertexCount)} вершин · ${formatNumber(geometry.faceCount)} граней · в сцене ${formatNumber(geometry.previewFaceCount)}`
+      : `${formatNumber(geometry.vertexCount)} точек · отображается до 24 000`;
+  } catch (error) {
+    if (request !== previewRequest || activeFolderName !== folderName) return;
+    folderPreviewPlaceholder.hidden = false;
+    folderPreviewPlaceholder.textContent = error.message;
+    $("#folder-preview-info").textContent = "";
+  }
 }
 
 async function refreshWorkspace() {
@@ -552,6 +663,12 @@ projectList.addEventListener("click", (event) => {
   }
   const folder = event.target.closest("button[data-folder-name]");
   if (folder) selectProject(folderSelectionId(folder.dataset.folderName));
+});
+
+folderFileList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-file-name]");
+  const file = folderFiles.find((item) => item.name === button?.dataset.fileName);
+  if (button && file && activeFolderName) previewFolderFile(activeFolderName, file);
 });
 
 $("#acquire-human").addEventListener("click", () => withSelected(async (id) => {
