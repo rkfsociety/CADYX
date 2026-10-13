@@ -55,6 +55,12 @@ input:focus { border-color: #879b62; outline: none; }
 .project-item { display: grid; grid-template-columns: 8px minmax(0, 1fr) 12px; align-items: center; gap: 9px; width: 100%; min-height: 51px; padding: 7px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; text-align: left; cursor: pointer; }
 .project-item:hover { background: var(--surface-soft); }
 .project-item.selected { border-color: #43513a; background: #b8e66a0d; }
+.project-folder { grid-template-columns: 10px minmax(0, 1fr) 12px; }
+.project-folder .project-marker { position: relative; width: 9px; height: 7px; border: 1px solid #718052; border-radius: 2px; background: transparent; }
+.project-folder .project-marker::before { position: absolute; top: -3px; left: 0; width: 4px; height: 2px; border: 1px solid #718052; border-bottom: 0; border-radius: 2px 2px 0 0; content: ""; }
+.folder-project-card { max-width: 760px; padding: 24px; }
+.folder-project-card h2 { margin: 0 0 10px; font-size: 16px; }
+.folder-project-card p { max-width: 580px; margin: 0; color: var(--muted); line-height: 1.6; }
 .project-marker { width: 7px; height: 7px; border-radius: 2px; background: var(--dim); }
 .project-marker[data-state="AI_LOCKED"] { background: var(--agent); }
 .project-marker[data-state="HUMAN_LOCKED"] { background: var(--warning); }

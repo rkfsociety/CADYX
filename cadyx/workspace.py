@@ -84,6 +84,23 @@ class ProjectWorkspace:
         projects.sort(key=lambda item: (item["name"].casefold(), item["id"]))
         return projects
 
+    def list_folder_projects(self) -> list[str]:
+        """Return direct workspace directories that do not contain a CADYX project record."""
+        folders: list[str] = []
+        for entry in self.root.iterdir():
+            if not entry.is_dir() or entry.is_symlink():
+                continue
+            if _PROJECT_ID.fullmatch(entry.name) and (entry / "project.json").is_file():
+                continue
+            try:
+                if entry.resolve(strict=True).parent != self.root:
+                    continue
+            except OSError:
+                continue
+            folders.append(entry.name)
+        folders.sort(key=str.casefold)
+        return folders
+
     @staticmethod
     def validate(project: Any, *, expected_id: str | None = None) -> None:
         if not isinstance(project, dict):

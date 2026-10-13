@@ -35,8 +35,11 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
                 if parsed.path == "/api/v1/health":
                     self._json(200, {"status": "ok", "api_version": 1})
                     return
-                if parsed.path in {"/api/v1/projects", "/api/v1/agent/projects"}:
-                    self._json(200, {"projects": core.list_projects()})
+                if parsed.path == "/api/v1/projects":
+                    self._json(200, core.list_workspace())
+                    return
+                if parsed.path == "/api/v1/agent/projects":
+                    self._json(200, core.list_workspace())
                     return
                 parts = parsed.path.strip("/").split("/")
                 prefix = ["api", "v1", "projects"]

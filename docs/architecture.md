@@ -15,7 +15,7 @@ The first pass is a local single-process prototype. It uses Python 3.12+ standar
 
 ## Core and storage
 
-`cadyx/core.py` is the application boundary used by both API surfaces. `ProjectWorkspace` stores one versioned `project.json` per UUID project directory. The project file contains metadata, document state, revision, and command history. Each accepted command updates a copied in-memory project and atomically replaces `project.json`; document revision and successful command history are committed together.
+`cadyx/core.py` is the application boundary used by both API surfaces. `ProjectWorkspace` stores one versioned `project.json` per UUID project directory. The project file contains metadata, document state, revision, and command history. Each accepted command updates a copied in-memory project and atomically replaces `project.json`; document revision and successful command history are committed together. Both project-list endpoints also report immediate directories without a CADYX `project.json` in `folders`. The browser treats these as selectable projects and displays their workspace path; their file formats and contents are left for the agent to inspect when it works on them.
 
 The `projects/` directory is runtime data. Its contents are ignored by Git apart from `.gitkeep`. Source scans, meshes, CAD files, images, measurements, and references must be treated as user data and must not be overwritten or removed as part of routine development.
 
@@ -33,7 +33,7 @@ The initial command registry supports `create_box` and `set_parameter` for box d
 
 ## APIs and events
 
-The HTTP API uses JSON under `/api/v1`. The Agent API is under `/api/v1/agent`; it shares Core operations and requires an agent lease for commands. The browser API is under `/api/v1/projects` and requires a human lease for commands. Both routes enter the same Command System. Project updates are broadcast in-process over server-sent events at `/api/v1/events`; event history is not replayed after reconnect, so clients refresh project state through the API.
+The HTTP API uses JSON under `/api/v1`. The Agent API is under `/api/v1/agent`; it shares Core operations and requires an agent lease for commands. Both `GET /api/v1/projects` and `GET /api/v1/agent/projects` return persisted CADYX projects in `projects` and immediate project-directory names in `folders`. Folder entries are available for discovery; project inspection, leases, and CADYX document commands continue to apply to persisted CADYX project records. The browser API is under `/api/v1/projects` and requires a human lease for commands. Both command routes enter the same Command System. Project updates are broadcast in-process over server-sent events at `/api/v1/events`; event history is not replayed after reconnect, so clients refresh project state through the API.
 
 The default host is `127.0.0.1`. No authentication or LAN deployment hardening is implemented in this foundation pass.
 

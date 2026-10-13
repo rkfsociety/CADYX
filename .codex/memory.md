@@ -2,6 +2,7 @@
 
 - Confirmed: CADYX is a Python 3.12+ application under `cadyx/`, with a browser-native interface under `web/`; its pinned Open CASCADE bindings are declared in `requirements.txt`.
 - Confirmed: `CadyxCore` is shared by the web API and Agent API. `ProjectWorkspace` writes each project's metadata, document, revision, and command history together in `projects/<uuid>/project.json` using atomic replacement.
+- Confirmed: `GET /api/v1/projects` and `GET /api/v1/agent/projects` list immediate directories without a CADYX `project.json` in `folders`. The web UI treats them as selectable projects; CADYX document inspection/leases/commands still require a persisted project record. See [architecture](../docs/architecture.md).
 - Confirmed: edit leases are process-local, heartbeat-based, and required for all document mutations. Expired leases stay locked until Core reloads and validates the saved project before recovery. One host process per workspace is required by this implementation.
 - Confirmed: Web API commands require a human lease; Agent API commands require an agent lease. Both invoke the same Command System.
 - Confirmed: the browser workspace displays supported box geometry visually and refreshes from project snapshots after SSE events; SSE updates status and the selected body, while agent command details are not shown as a feed. No Agent Runtime is embedded in the web server; agents connect through the Agent API. See [architecture](../docs/architecture.md).

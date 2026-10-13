@@ -21,11 +21,13 @@ const modelStates = new Map();
 const modelStateTimers = new Map();
 const documentRevisions = new Map();
 let projects = [];
+let folders = [];
 let selectedProjectId = readSelectedProject();
 let selectedBodyId = null;
 let currentObjects = [];
 let toastTimer;
 let refreshTimer;
+const FOLDER_SELECTION_PREFIX = "folder:";
 
 function readSelectedProject() {
   try { return localStorage.getItem("cadyx.selected-project"); }
@@ -58,6 +60,16 @@ function formatDate(value) {
 
 function getProject(id) {
   return projects.find((item) => item.project.id === id);
+}
+
+function folderSelectionId(name) {
+  return `${FOLDER_SELECTION_PREFIX}${name}`;
+}
+
+function getSelectedFolder() {
+  if (!selectedProjectId?.startsWith(FOLDER_SELECTION_PREFIX)) return null;
+  const name = selectedProjectId.slice(FOLDER_SELECTION_PREFIX.length);
+  return folders.includes(name) ? name : null;
 }
 
 function stateLabel(state) {
@@ -130,11 +142,43 @@ function setModelState(projectId, state, label) {
 }
 
 function renderProjectList() {
-  $("#project-count").textContent = String(projects.length);
-  $("#empty-projects").hidden = projects.length > 0;
+  const entries = [
+    ...projects.map((item) => ({ kind: "project", name: item.project.name, item })),
+    ...folders.map((name) => ({ kind: "folder", name })),
+  ].sort((left, right) => left.name.localeCompare(right.name, "ru", { sensitivity: "base" }));
+  $("#project-count").textContent = String(entries.length);
+  $("#empty-projects").hidden = entries.length > 0;
   projectList.replaceChildren();
 
-  for (const item of projects) {
+  for (const entry of entries) {
+    if (entry.kind === "folder") {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "project-item project-folder";
+      row.classList.toggle("selected", selectedProjectId === folderSelectionId(entry.name));
+      row.dataset.folderName = entry.name;
+      row.setAttribute("aria-current", selectedProjectId === folderSelectionId(entry.name) ? "page" : "false");
+      const marker = document.createElement("span");
+      marker.className = "project-marker";
+      marker.setAttribute("aria-hidden", "true");
+      const copy = document.createElement("span");
+      copy.className = "project-copy";
+      const name = document.createElement("strong");
+      name.className = "project-name";
+      name.textContent = entry.name;
+      const detail = document.createElement("small");
+      detail.textContent = "Папка проекта";
+      copy.append(name, detail);
+      const arrow = document.createElement("span");
+      arrow.className = "project-arrow";
+      arrow.setAttribute("aria-hidden", "true");
+      arrow.textContent = "›";
+      row.append(marker, copy, arrow);
+      projectList.append(row);
+      continue;
+    }
+
+    const item = entry.item;
     const project = item.project;
     const button = document.createElement("button");
     button.type = "button";
@@ -170,28 +214,55 @@ function selectProject(id) {
   selectedBodyId = null;
   saveSelectedProject(id);
   renderProjectList();
+  const folder = getSelectedFolder();
+  if (folder) {
+    showFolderDetail(folder);
+    return;
+  }
   refreshDetail().catch((error) => notify(error.message, true));
+}
+
+function showFolderDetail(name) {
+  projectDetail.hidden = true;
+  noSelection.hidden = true;
+  $("#folder-detail").hidden = false;
+  $("#topbar-project-name").textContent = name;
+  $("#folder-detail-name").textContent = name;
+  $("#folder-detail-path").textContent = `projects/${name}`;
 }
 
 async function refreshWorkspace() {
   const response = await api("/api/v1/projects");
   projects = response.projects;
+  folders = response.folders || [];
 
-  if (!projects.some((item) => item.project.id === selectedProjectId)) {
+  const selectionExists = projects.some((item) => item.project.id === selectedProjectId)
+    || folders.includes(selectedProjectId?.startsWith(FOLDER_SELECTION_PREFIX)
+      ? selectedProjectId.slice(FOLDER_SELECTION_PREFIX.length)
+      : "");
+  if (!selectionExists) {
     const saved = readSelectedProject();
+    const savedFolder = saved?.startsWith(FOLDER_SELECTION_PREFIX)
+      ? saved.slice(FOLDER_SELECTION_PREFIX.length)
+      : null;
     selectedProjectId = projects.some((item) => item.project.id === saved)
       ? saved
-      : projects[0]?.project.id || null;
+      : savedFolder && folders.includes(savedFolder)
+        ? saved
+        : projects[0]?.project.id || (folders[0] ? folderSelectionId(folders[0]) : null);
     selectedBodyId = null;
     saveSelectedProject(selectedProjectId);
   }
 
   renderProjectList();
-  $("#topbar-project-name").textContent = getProject(selectedProjectId)?.project.name || "Не выбран";
-  if (selectedProjectId) await refreshDetail();
+  const selectedFolder = getSelectedFolder();
+  if (selectedFolder) showFolderDetail(selectedFolder);
+  else if (selectedProjectId && getProject(selectedProjectId)) await refreshDetail();
   else {
     projectDetail.hidden = true;
+    $("#folder-detail").hidden = true;
     noSelection.hidden = false;
+    $("#topbar-project-name").textContent = "Не выбран";
   }
 }
 
@@ -211,6 +282,7 @@ async function refreshDetail() {
   const info = await api(`/api/v1/projects/${encodeURIComponent(projectId)}`);
   if (projectId !== selectedProjectId) return;
 
+  $("#folder-detail").hidden = true;
   projectDetail.hidden = false;
   noSelection.hidden = true;
   $("#topbar-project-name").textContent = info.project.name;
@@ -474,7 +546,12 @@ $("#create-project-form").addEventListener("submit", async (event) => {
 
 projectList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-project-id]");
-  if (button) selectProject(button.dataset.projectId);
+  if (button) {
+    selectProject(button.dataset.projectId);
+    return;
+  }
+  const folder = event.target.closest("button[data-folder-name]");
+  if (folder) selectProject(folderSelectionId(folder.dataset.folderName));
 });
 
 $("#acquire-human").addEventListener("click", () => withSelected(async (id) => {

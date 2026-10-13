@@ -58,6 +58,9 @@ class CadyxCore:
             for project in self.workspace.list()
         ]
 
+    def list_workspace(self) -> dict[str, Any]:
+        return {"projects": self.list_projects(), "folders": self.workspace.list_folder_projects()}
+
     def inspect_project(self, project_id: str) -> dict[str, Any]:
         project = self.workspace.load(project_id)
         document = Document.from_dict(project["document"])
