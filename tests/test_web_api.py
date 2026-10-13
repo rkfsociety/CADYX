@@ -119,6 +119,27 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertIn(b"CADYX", response.read())
 
+    def test_agent_stop_resume_revision_contract(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "Stop API"})
+        project = created["project"]["id"]
+        base = f"/api/v1/agent/projects/{project}"
+        _, acquired = self.request(base + "/leases", {"owner_id": "agent"})
+        status, stopped = self.request(base + "/stop", {"lease_id": acquired["lease"]["lease_id"]})
+        self.assertEqual(status, 200)
+        self.assertTrue(stopped["stopped"])
+        self.assertEqual(stopped["lock"]["state"], "FREE")
+        self.assertEqual(self.request(base + "/resume", {"owner_id": "agent"})[0], 400)
+        self.assertEqual(self.request(base + "/resume", {"owner_id": "agent", "expected_revision": 2})[0], 409)
+        status, resumed = self.request(base + "/resume", {"owner_id": "agent", "expected_revision": 0})
+        self.assertEqual(status, 200)
+        command = {"lease_id": resumed["lease"]["lease_id"], "command": {"type": "create_sketch"}}
+        self.assertEqual(self.request(base + "/commands", command)[0], 400)
+        command["expected_revision"] = 0
+        self.assertEqual(self.request(base + "/commands", command)[0], 200)
+        status, error = self.request(base + "/commands", command)
+        self.assertEqual((status, error["error"]), (409, "REVISION_CONFLICT"))
+        self.assertEqual(self.request(base)[1]["document"]["revision"], 1)
+
     def test_sketch_commands_through_both_api_surfaces(self) -> None:
         for surface, owner in [("projects", "human"), ("agent/projects", "agent")]:
             with self.subTest(surface=surface):

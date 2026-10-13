@@ -22,6 +22,10 @@ Every project lives at `projects/<project-id>/project.json`, where `project-id` 
 
 The document and its successful command history are replaced together using a temporary file and an atomic filesystem replace. Edit leases are stored separately in a per-project `.cadyx-leases.sqlite3` runtime sidecar; live host sessions and leases are not serialized into `project.json`. See the [local multi-process lease contract](architecture.md#edit-leases) for lifecycle and backup restrictions. Unknown project or document versions are rejected rather than silently interpreted.
 
+Agent stop fences and resumed-lease revision protection are stored separately
+in `.cadyx-agent.sqlite3`; they do not change the portable schema. See the
+[stop/resume contract](architecture.md#safe-agent-stop-and-resume).
+
 The project envelope remains version 1; the nested document now uses version 2.
 Legacy document v1 is explicitly upgraded in memory on read and persisted only
 with a successful command. See [Document Model v2](document-model-v2.md) for the

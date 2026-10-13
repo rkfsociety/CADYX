@@ -27,7 +27,53 @@ All document writes pass through `CadyxCore.execute_command`, which requires the
 
 A heartbeat timeout marks the lease stale but does not free the project. Recovery obtains the same lock, reloads the last atomically saved project and validates its document and geometry before deleting the stale lease. An in-flight command that started with a valid lease may finish after its heartbeat expires; recovery cannot overlap its save. A process crash releases the SQLite lock but preserves the committed lease, including across server restarts. Recovery remains required after expiry. A crash before the atomic replacement leaves the previous revision; a crash after it leaves the complete new revision and history. The client may not have received a response, so inspect saved history before retrying a command after a connection loss.
 
-This supports cooperating current CADYX hosts on one local machine and local filesystem. Stop older hosts before upgrading: their process-local locks do not participate. Do not remove or replace lease databases/journals while hosts are running. Back up or move projects with hosts stopped; lease sidecars are runtime coordination data, separate from the portable `project.json`. Direct file writers and network filesystems are outside this coordination contract. SSE delivery remains process-local; clients observing a different host must refresh via the API to see external changes.
+This supports cooperating current CADYX hosts on one local machine and local filesystem. Stop older hosts before upgrading: earlier hosts do not participate in the current agent stop protocol, and the earliest hosts also lack shared lease locks. Do not remove or replace coordination databases/journals while hosts are running. Back up or move projects with hosts stopped; coordination sidecars are runtime data, separate from the portable `project.json`. Direct file writers and network filesystems are outside this coordination contract. SSE delivery remains process-local; clients observing a different host must refresh via the API to see external changes.
+
+## Safe agent stop and resume
+
+External agents use `POST /api/v1/agent/projects/{id}/stop` with `lease_id`.
+The Core first commits a fence for that token in `.cadyx-agent.sqlite3`,
+independently of the document/lease transaction. A command starts when it checks
+this fence under the project guard: commands admitted before the fence may finish;
+later commands using that token return `AGENT_STOPPING`. Stop then obtains the
+same project guard, checks that the token is the current agent lease, reloads
+and validates the saved document and geometry, and releases the lease. This also
+permits validated stopping of an expired agent lease. Human and replacement
+leases cannot be released by an old stop request. No command is forcibly interrupted.
+
+The successful response contains `stopped: true`, `project`, `document`, `history`
+and the now-free `lock`; revision and history reflect the last complete atomic
+save. Failed validation retains the lease and the durable stop fence. A busy
+project can return `PROJECT_BUSY` after five seconds while its fence remains
+active; retry stop with the same token. A host crash preserves the fence. If the
+stop response is lost, inspect the project: a free or replacement lease means
+the old token no longer owns it; retrying stop cannot release the replacement.
+Expired-lease recovery remains available and still validates saved state.
+
+To continue (or begin work with revision protection), inspect the project and
+call `POST /api/v1/agent/projects/{id}/resume` with `owner_id` and integer
+`expected_revision`. Under one project guard, Core validates saved state,
+compares its revision, acquires a fresh agent lease, and returns `resumed: true`,
+`lease` and the complete inspection snapshot. Active leases are never stolen;
+expired leases require stop/recovery first. A human edit since the inspected
+revision returns `REVISION_CONFLICT`; inspect again and reconsider the next
+command. Resume does not run commands or restore a previous model snapshot.
+
+Every command on a resumed lease requires `expected_revision`; absent/invalid
+values return `VALIDATION_ERROR`, and changed revisions return `REVISION_CONFLICT`
+before execution. Increment the expected revision from each successful response.
+After a lost command response, inspect revision and saved history to establish
+whether the command was saved before deciding to submit another command; do not
+automatically replay it. Retrying with the same expected revision cannot create
+a second successful save. The existing `/leases` acquisition and commands remain
+compatible: those leases accept optional `expected_revision`, but do not enforce
+its presence. New agents should use `/resume` for guarded work.
+
+The control sidecar records only token fences and revision-protection flags;
+new resumed leases prune previous tokens. It does not change the portable project
+or document schema, so no format migration is needed. Preserve both SQLite
+sidecars while hosts run. Agent Runtime, provider integration and UI stop controls
+are outside this API milestone.
 
 ## Commands and geometry
 

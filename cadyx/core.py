@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Iterator
 
 from .commands import CommandSystem
-from .errors import ConflictError
+from .errors import ConflictError, ValidationError
 from .events import EventBroker
 from .kernel import GeometryKernel, OCPKernelAdapter
 from .lease import EditLeaseManager
@@ -109,6 +109,36 @@ class CadyxCore:
             )
             return {"recovered": True, "lock": snapshot}
 
+    def stop_agent(self, project_id: str, lease_id: str) -> dict[str, Any]:
+        # Commit the fence before waiting for any in-flight command's guard.
+        self.leases.request_agent_stop(project_id, lease_id)
+        with self._project_guard(project_id):
+            lease = self.leases.get(project_id)
+            if lease is None or lease.lease_id != lease_id or lease.owner_type is not OwnerType.AGENT:
+                raise ConflictError("The supplied lease is not the current agent lease.", code="PROJECT_LOCKED")
+            detail = self.inspect_project(project_id)
+            self.leases.release_stopped_agent(project_id, lease_id)
+            detail["lock"] = self.leases.snapshot(project_id)
+            self.events.publish("project.lock.changed", project_id, detail["lock"])
+            return {"stopped": True, **detail}
+
+    @staticmethod
+    def _check_revision(document: Document, expected_revision: Any) -> None:
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValidationError("expected_revision must be a non-negative integer.")
+        if document.revision != expected_revision:
+            raise ConflictError("Saved revision changed; inspect the project before continuing.", code="REVISION_CONFLICT")
+
+    def resume_agent(self, project_id: str, owner_id: str, expected_revision: int) -> dict[str, Any]:
+        with self._project_guard(project_id):
+            detail = self.inspect_project(project_id)
+            self._check_revision(Document.from_dict(detail["document"]), expected_revision)
+            lease = self.leases.acquire(project_id, "agent", owner_id)
+            self.leases.mark_resumed(project_id, lease.lease_id)
+            detail["lock"] = self.leases.snapshot(project_id)
+            self.events.publish("project.lock.changed", project_id, detail["lock"])
+            return {"resumed": True, "lease": lease.as_dict(), **detail}
+
     def execute_command(
         self,
         project_id: str,
@@ -116,6 +146,7 @@ class CadyxCore:
         command: dict[str, Any],
         *,
         expected_owner_type: OwnerType | None = None,
+        expected_revision: int | None = None,
     ) -> dict[str, Any]:
         with self._project_guard(project_id):
             lease = self.leases.require(project_id, lease_id)
@@ -125,6 +156,12 @@ class CadyxCore:
                     code="PROJECT_LOCKED",
                 )
             project = self.workspace.load(project_id)
+            if lease.owner_type is OwnerType.AGENT:
+                revision_required = self.leases.check_agent_command(project_id, lease.lease_id)
+                if revision_required or expected_revision is not None:
+                    self._check_revision(Document.from_dict(project["document"]), expected_revision)
+            elif expected_revision is not None:
+                self._check_revision(Document.from_dict(project["document"]), expected_revision)
             command_name = command.get("type") if isinstance(command, dict) else None
             self.events.publish("command.started", project_id, {"command": command_name, "actor_id": lease.owner_id})
             try:

@@ -37,6 +37,7 @@ See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](do
 - `POST /api/v1/projects/{id}/leases` with `owner_type` and `owner_id`
 - `POST /api/v1/projects/{id}/commands` with a human `lease_id` and a command
 - Agent equivalents under `/api/v1/agent/projects`
+- Agent `/stop` with `lease_id` and `/resume` with `owner_id` / `expected_revision`; resumed commands require `expected_revision`. See the [stop/resume contract](docs/architecture.md#safe-agent-stop-and-resume).
 - `GET /api/v1/events` for the SSE update channel
 
 The API is versioned and provider-neutral. See the architecture guide for current limits and the next implementation stages.

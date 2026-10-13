@@ -1,5 +1,10 @@
 # CADYX architectural decisions
 
+## Safe agent stop and resume
+
+- **Decision:** persist per-token stop fences in a separate SQLite runtime sidecar, independently of the full-command lease transaction. Validate saved document/geometry under the existing project guard before freeing an agent lease. Resume under that guard with a revision comparison and a new token; require expected revisions for its commands. **Reason:** a stop request must block queued commands while an atomic command still holds the lease database; revisions prevent replaying a committed command after a lost response and detect intervening human edits. **Constraint:** current cooperating hosts only; legacy lease acquisition remains compatible and does not require revision arguments. No Agent Runtime or portable schema change. **Source:** `cadyx/core.py`, `cadyx/lease.py`, [API contract](../docs/architecture.md#safe-agent-stop-and-resume).
+- **Status:** active.
+
 ## Foundation pass — 2026-10-14
 
 - **Decision:** use Python 3.12+ standard library for Core, local HTTP API, and SSE; use browser-native HTML/CSS/JavaScript for the first UI. **Reason:** this gives a working local vertical slice without provider coupling. **Constraint:** the original single-process restriction is superseded by the multi-process lease decision below. **Source:** `docs/architecture.md`.

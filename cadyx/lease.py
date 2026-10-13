@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Iterator
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from .errors import ConflictError, LeaseRequiredError, NotFoundError, ValidationError
 from .models import EditLease, OwnerType, lock_state_for
@@ -78,6 +78,60 @@ class EditLeaseManager:
             "SELECT owner_type, owner_id, acquired_at, heartbeat_at, lease_id FROM lease"
         ).fetchone()
         return EditLease(project_id, OwnerType(row[0]), *row[1:]) if row else None
+
+    @contextmanager
+    def agent_control(self, project_id: str) -> Iterator[sqlite3.Connection]:
+        """Independent durable signals: never wait for the document transaction."""
+        path = self._project_directory(project_id) / ".cadyx-agent.sqlite3"
+        if not path.parent.is_dir() or not (path.parent / "project.json").is_file():
+            raise NotFoundError("Project was not found.")
+        if path.is_symlink():
+            raise ValidationError("Agent control database must not be a symbolic link.")
+        connection = sqlite3.connect(path, timeout=5)
+        try:
+            with connection:
+                connection.execute("""CREATE TABLE IF NOT EXISTS control (
+                    lease_id TEXT PRIMARY KEY, stopped INTEGER NOT NULL,
+                    revision_required INTEGER NOT NULL
+                )""")
+                yield connection
+        except sqlite3.OperationalError as exc:
+            if exc.sqlite_errorcode == sqlite3.SQLITE_BUSY:
+                raise ConflictError("Agent control is busy; retry later.", code="PROJECT_BUSY") from exc
+            raise
+        finally:
+            connection.close()
+
+    def request_agent_stop(self, project_id: str, lease_id: str) -> None:
+        try:
+            UUID(lease_id)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValidationError("lease_id must be a UUID.") from exc
+        with self.agent_control(project_id) as connection:
+            connection.execute("""INSERT INTO control VALUES (?, 1, 0)
+                ON CONFLICT(lease_id) DO UPDATE SET stopped = 1""", (lease_id,))
+
+    def check_agent_command(self, project_id: str, lease_id: str) -> bool:
+        with self.agent_control(project_id) as connection:
+            row = connection.execute(
+                "SELECT stopped, revision_required FROM control WHERE lease_id = ?", (lease_id,),
+            ).fetchone()
+        if row and row[0]:
+            raise ConflictError("Agent work is stopping; no new commands are allowed.", code="AGENT_STOPPING")
+        return bool(row and row[1])
+
+    def mark_resumed(self, project_id: str, lease_id: str) -> None:
+        with self.agent_control(project_id) as connection:
+            connection.execute("DELETE FROM control WHERE lease_id != ?", (lease_id,))
+            connection.execute("INSERT INTO control VALUES (?, 0, 1)", (lease_id,))
+
+    def release_stopped_agent(self, project_id: str, lease_id: str) -> EditLease:
+        with self.guard(project_id):
+            lease = self._read(project_id)
+            if lease is None or lease.lease_id != lease_id or lease.owner_type is not OwnerType.AGENT:
+                raise ConflictError("The supplied lease is not the current agent lease.", code="PROJECT_LOCKED")
+            self._local.connections[project_id].execute("DELETE FROM lease")
+            return lease
 
     def _expired(self, lease: EditLease) -> bool:
         timeout = self._local.connections[lease.project_id].execute(

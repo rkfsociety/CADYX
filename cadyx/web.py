@@ -111,6 +111,15 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
                 self._json(201, result)
                 return
             project_id = parts[0]
+            if agent_api and len(parts) == 2 and parts[1] in {"stop", "resume"}:
+                if body is None:
+                    raise ValidationError("A JSON request body is required.")
+                if parts[1] == "stop":
+                    result = core.stop_agent(project_id, body.get("lease_id"))
+                else:
+                    result = core.resume_agent(project_id, body.get("owner_id"), body.get("expected_revision"))
+                self._json(200, result)
+                return
             if len(parts) == 2 and parts[1] == "leases":
                 if body is None:
                     raise ValidationError("A JSON request body is required.")
@@ -123,7 +132,8 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
                     raise ValidationError("A JSON request body is required.")
                 command = body.get("command")
                 expected = OwnerType.AGENT if agent_api else OwnerType.HUMAN
-                self._json(200, core.execute_command(project_id, body.get("lease_id"), command, expected_owner_type=expected))
+                self._json(200, core.execute_command(project_id, body.get("lease_id"), command,
+                           expected_owner_type=expected, expected_revision=body.get("expected_revision")))
                 return
             if len(parts) == 3 and parts[1:] == ["leases", "recover"]:
                 self._json(200, core.recover_expired_lease(project_id))

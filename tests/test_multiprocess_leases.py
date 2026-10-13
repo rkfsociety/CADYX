@@ -3,11 +3,12 @@ from __future__ import annotations
 import multiprocessing
 import queue
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
 from cadyx.core import CadyxCore
-from cadyx.errors import CadyxError
+from cadyx.errors import CadyxError, ValidationError
 from cadyx.kernel import PrimitiveKernelAdapter
 
 
@@ -29,15 +30,20 @@ def worker(root, project_id, action, args, now, output, start=None, entered=None
             entered.set()
             if not finish.wait(10):
                 raise RuntimeError("Test command was not released")
+            if action == "failed_save":
+                raise ValidationError("Save rejected by test")
             if action != "saved_crash":
                 original(project)
 
         core.workspace.save = save
     try:
-        method = "execute_command" if action == "saved_crash" else action
+        method = "execute_command" if action in {"saved_crash", "failed_save"} else action
         if attempted is not None:
             attempted.set()
-        result = getattr(core, method)(project_id, *args)
+        if action == "guarded_command":
+            result = core.execute_command(project_id, args[0], args[1], expected_revision=args[2])
+        else:
+            result = getattr(core, method)(project_id, *args)
         output.put(("ok", result))
     except CadyxError as exc:
         output.put(("error", exc.code))
@@ -183,6 +189,94 @@ class MultiprocessLeaseTests(unittest.TestCase):
         self.assertEqual(self.call("acquire_lease", ("human", "human"), 106),
                          ("error", "LEASE_RECOVERY_REQUIRED"))
         self.assertEqual(self.call("recover_expired_lease", now=106)[0], "ok")
+
+    def wait_for_stop_fence(self, token):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            with self.core.leases.agent_control(self.project_id) as connection:
+                row = connection.execute("SELECT stopped FROM control WHERE lease_id = ?", (token,)).fetchone()
+            if row and row[0]:
+                return
+            time.sleep(0.02)
+        self.fail("Stop fence was not persisted")
+
+    def test_stop_fences_queued_commands_and_waits_for_atomic_save(self):
+        token = self.core.acquire_lease(self.project_id, "agent", "agent")["lease_id"]
+        entered, finish = self.context.Event(), self.context.Event()
+        command = self.launch("execute_command", (token, BOX), entered=entered, finish=finish)
+        self.assertTrue(entered.wait(10))
+        stop = self.launch("stop_agent", (token,))
+        self.wait_for_stop_fence(token)
+        queued = self.launch("execute_command", (token, BOX))
+        with self.assertRaises(queue.Empty):
+            stop[1].get(timeout=0.2)
+        finish.set()
+        self.assertEqual(self.result(command)[0], "ok")
+        stopped = self.result(stop)
+        self.assertEqual(stopped[0], "ok")
+        self.assertEqual(stopped[1]["document"]["revision"], 1)
+        rejected = self.result(queued)
+        self.assertEqual(rejected[0], "error")
+        self.assertIn(rejected[1], ("AGENT_STOPPING", "EDIT_LOCK_REQUIRED"))
+        resumed = self.call("resume_agent", ("agent", 1))[1]
+        self.assertNotEqual(resumed["lease"]["lease_id"], token)
+        self.assertEqual(len(resumed["history"]), 1)
+
+    def test_stop_after_command_process_crash_returns_known_revision(self):
+        for action, revision in (("execute_command", 0), ("saved_crash", 1)):
+            with self.subTest(action=action):
+                self.project_id = self.core.create_project(action)["project"]["id"]
+                token = self.core.acquire_lease(self.project_id, "agent", "agent")["lease_id"]
+                entered, finish = self.context.Event(), self.context.Event()
+                command = self.launch(action, (token, BOX), entered=entered, finish=finish)
+                self.assertTrue(entered.wait(10))
+                stop = self.launch("stop_agent", (token,), now=106)
+                self.wait_for_stop_fence(token)
+                command[0].terminate()
+                command[0].join(10)
+                stopped = self.result(stop)
+                self.assertEqual(stopped[0], "ok")
+                self.assertEqual(stopped[1]["document"]["revision"], revision)
+                self.assertEqual(len(stopped[1]["history"]), revision)
+                self.assertEqual(self.call("resume_agent", ("agent", revision), 106)[0], "ok")
+
+    def test_stop_returns_prior_revision_after_failed_command(self):
+        token = self.core.acquire_lease(self.project_id, "agent", "agent")["lease_id"]
+        entered, finish = self.context.Event(), self.context.Event()
+        command = self.launch("failed_save", (token, BOX), entered=entered, finish=finish)
+        self.assertTrue(entered.wait(10))
+        stop = self.launch("stop_agent", (token,))
+        self.wait_for_stop_fence(token)
+        finish.set()
+        self.assertEqual(self.result(command), ("error", "VALIDATION_ERROR"))
+        stopped = self.result(stop)
+        self.assertEqual(stopped[0], "ok")
+        self.assertEqual(stopped[1]["document"]["revision"], 0)
+        self.assertEqual(stopped[1]["history"], [])
+
+    def test_stop_request_survives_stopper_process_crash(self):
+        token = self.core.acquire_lease(self.project_id, "agent", "agent")["lease_id"]
+        entered, finish = self.context.Event(), self.context.Event()
+        command = self.launch("execute_command", (token, BOX), entered=entered, finish=finish)
+        self.assertTrue(entered.wait(10))
+        stop = self.launch("stop_agent", (token,))
+        self.wait_for_stop_fence(token)
+        stop[0].terminate()
+        stop[0].join(10)
+        finish.set()
+        self.assertEqual(self.result(command)[0], "ok")
+        self.assertEqual(self.call("execute_command", (token, BOX)), ("error", "AGENT_STOPPING"))
+        self.assertEqual(self.call("stop_agent", (token,))[1]["document"]["revision"], 1)
+
+    def test_resumed_revision_check_serializes_competing_commands(self):
+        token = self.core.resume_agent(self.project_id, "agent", 0)["lease"]["lease_id"]
+        start = self.context.Event()
+        jobs = [self.launch("guarded_command", (token, BOX, 0), start=start) for _ in range(2)]
+        start.set()
+        results = [self.result(job) for job in jobs]
+        self.assertEqual(sorted(result[0] for result in results), ["error", "ok"])
+        self.assertIn(("error", "REVISION_CONFLICT"), results)
+        self.assertEqual(len(self.core.inspect_project(self.project_id)["history"]), 1)
 
 
 if __name__ == "__main__":
