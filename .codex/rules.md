@@ -5,5 +5,5 @@
 - Every document mutation must hold the project's current edit lease. AI and human must never edit the same project concurrently.
 - Treat `projects/` as user workspace data. Do not overwrite or delete imported CAD files, scans, meshes, images, measurements, or references during routine work.
 - Keep geometry-kernel-specific APIs behind the `GeometryKernel` boundary; do not represent the demo primitive adapter as a production CAD kernel.
-- Prefer the standard library and existing mechanisms. A new production dependency requires explicit user approval.
+- Prefer existing mechanisms and avoid dependencies with only marginal benefit. Standing user authorization: add a mature third-party dependency when it provides a concrete improvement to performance, correctness, maintainability, or UX; no separate approval is needed for each such dependency. Keep the choice scoped, record why it helps, and update dependency manifests/lockfiles as required.
 - Before every commit, review `.codex/memory.md` against the confirmed current project state: add useful durable facts, update changed facts, and remove stale ones. Keep canonical details in project documentation or code instead of duplicating them in memory.
