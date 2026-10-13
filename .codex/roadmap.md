@@ -1,6 +1,6 @@
 # CADYX project roadmap
 
-This is the current development sequence. The milestones are goals, not claims that the corresponding capabilities are entirely absent; inspect the implementation before starting work or changing a milestone's status. Stages 1–4 are complete; later stages remain proposed.
+This is the current development sequence. The milestones are goals, not claims that the corresponding capabilities are entirely absent; inspect the implementation before starting work or changing a milestone's status. Stages 1–5 are complete; later stages remain proposed.
 
 ## Stages
 
@@ -8,7 +8,7 @@ This is the current development sequence. The milestones are goals, not claims t
 2. **Complete — Live visual workspace:** show supported box geometry and parameter changes in the browser as the Agent API updates the project; keep SSE command details out of the UI. Current scope supports box previews. Evidence: [`web/`](../web/), [`cadyx/web.py`](../cadyx/web.py), and [architecture](../docs/architecture.md).
 3. **Complete — Richer Document Model:** persisted XY sketches with points, lines, circles, checked horizontal/vertical/coincident/distance/radius constraints, stable typed UUID references, atomic batch edits and guarded deletion. Constraints validate supplied geometry; no solver or browser sketch editor is included. Document v1 upgrades explicitly to v2 in memory, preserving legacy solids/history. Evidence: [`cadyx/models.py`](../cadyx/models.py), [`cadyx/sketches.py`](../cadyx/sketches.py), [`cadyx/commands.py`](../cadyx/commands.py), [`tests/test_document.py`](../tests/test_document.py), [`tests/test_web_api.py`](../tests/test_web_api.py), and [document contract](../docs/document-model-v2.md).
 4. **Complete — Project Format migrations:** explicit sequential migrations with independent project-envelope/document versions, copy-only reads, current-schema validation and persistence through successful leased commands and the existing atomic save path. Envelope v1 and document v2 remain current. Evidence: [`cadyx/migrations.py`](../cadyx/migrations.py), [`tests/test_migrations.py`](../tests/test_migrations.py), [`tests/test_web_api.py`](../tests/test_web_api.py), and [migration contract](../docs/project-format-v1.md#migration-contract).
-5. **Multi-process leases:** make lease coordination reliable when multiple processes access the same project workspace.
+5. **Complete — Multi-process leases:** durable per-project SQLite leases and a shared lock spanning the full Core command, inspection and validated stale-lease recovery on local filesystems; process crashes retain recoverable lease ownership and atomic project state. Independent projects remain concurrent. SSE stays process-local. Evidence: [`cadyx/lease.py`](../cadyx/lease.py), [`cadyx/core.py`](../cadyx/core.py), [`tests/test_multiprocess_leases.py`](../tests/test_multiprocess_leases.py), and [lease contract](../docs/architecture.md#edit-leases).
 6. **Safe agent stop and resume:** let agent work stop safely after the current atomic command, validate saved state, and resume from a known state.
 7. **Shared rendering and viewport API:** expose general model rendering and viewport capabilities beyond the current box preview.
 8. **Model inspection and manual editing:** expand browser inspection and guarded manual edits under a human lease beyond the current box preview and manual test form.
@@ -19,7 +19,7 @@ This is the current development sequence. The milestones are goals, not claims t
 ## Sequencing gates
 
 - Plan format migrations alongside any change that evolves persisted project or document data.
-- Do not allow multiple host processes to share a workspace until stage 5 is complete.
+- Multiple current host processes may share a workspace on one local machine after stage 5; older hosts, direct writers and network filesystems do not participate in the lease contract.
 - Do not expose the host on a LAN until stage 9 is complete.
 - Start Scan-to-CAD only when the geometry kernel and Document Model foundations from stages 1 and 3 are adequate for editable reconstruction.
 

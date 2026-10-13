@@ -2,7 +2,7 @@
 
 ## Foundation pass — 2026-10-14
 
-- **Decision:** use Python 3.12+ standard library for Core, local HTTP API, and SSE; use browser-native HTML/CSS/JavaScript for the first UI. **Reason:** this gives a working local vertical slice without provider coupling. **Constraint:** keep the host single-process until leases have cross-process coordination. **Source:** `docs/architecture.md`.
+- **Decision:** use Python 3.12+ standard library for Core, local HTTP API, and SSE; use browser-native HTML/CSS/JavaScript for the first UI. **Reason:** this gives a working local vertical slice without provider coupling. **Constraint:** the original single-process restriction is superseded by the multi-process lease decision below. **Source:** `docs/architecture.md`.
 - **Decision:** keep all mutations in the Core Command System and require an opaque edit lease; a stale lease blocks edits until saved state is reloaded and validated. **Reason:** AI and human must not mutate the same document concurrently, and timeout alone cannot prove safe recovery. **Source:** `cadyx/core.py`, `cadyx/lease.py`.
 - **Decision:** the Web API accepts only human-owned leases for commands and the Agent API accepts only agent-owned leases; both delegate to the same command implementation. **Reason:** preserve one mutation path while enforcing the editor/observer boundary at each API surface. **Source:** `cadyx/web.py`, `docs/architecture.md`.
 - **Decision:** store project metadata, current document, revision, and successful command history in one versioned `project.json`, replaced atomically per command; keep runtime leases out of that file. **Reason:** a command and its audit entry should become durable together, while lease state is host runtime state. **Source:** `docs/project-format-v1.md`, `cadyx/workspace.py`.
@@ -24,3 +24,8 @@
 
 - **Decision:** centralize independent project/document schema versions and consecutive migration steps in `cadyx/migrations.py`. Migrate copies on load, validate through the existing domain/workspace checks, and persist through the existing leased Core command and atomic save path. Keep envelope v1 and document v2 until an actual schema change requires another version. **Reason:** future schema evolution needs explicit transitions without rewriting user data on reads or introducing a second mutation path. **Source:** `docs/project-format-v1.md`, `cadyx/migrations.py`, `tests/test_migrations.py`.
 - **Status:** active.
+
+## Multi-process edit leases
+
+- **Decision:** use a per-project SQLite runtime sidecar and `BEGIN IMMEDIATE` for shared leases and the complete Core command/recovery critical section; keep `project.json` and its atomic replacement unchanged. **Reason:** standard-library OS-backed coordination releases locks on process death while retaining lease ownership for validated recovery, without blocking unrelated projects. **Constraint:** cooperating current hosts on local filesystems only; SSE remains process-local. Sidecars must not be removed while hosts are active. **Source:** `cadyx/lease.py`, `cadyx/core.py`, [lease contract](../docs/architecture.md#edit-leases), `tests/test_multiprocess_leases.py`.
+- **Status:** active; supersedes the foundation's process-local lease restriction.

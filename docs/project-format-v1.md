@@ -20,7 +20,7 @@ Every project lives at `projects/<project-id>/project.json`, where `project-id` 
 }
 ```
 
-The document and its successful command history are replaced together using a temporary file and an atomic filesystem replace. Edit leases and live host sessions are runtime state and are not serialized into `project.json`. Unknown project or document versions are rejected rather than silently interpreted.
+The document and its successful command history are replaced together using a temporary file and an atomic filesystem replace. Edit leases are stored separately in a per-project `.cadyx-leases.sqlite3` runtime sidecar; live host sessions and leases are not serialized into `project.json`. See the [local multi-process lease contract](architecture.md#edit-leases) for lifecycle and backup restrictions. Unknown project or document versions are rejected rather than silently interpreted.
 
 The project envelope remains version 1; the nested document now uses version 2.
 Legacy document v1 is explicitly upgraded in memory on read and persisted only

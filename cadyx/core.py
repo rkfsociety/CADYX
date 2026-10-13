@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterator
@@ -30,18 +29,14 @@ class CadyxCore:
         self.kernel = kernel if kernel is not None else OCPKernelAdapter()
         self.commands = CommandSystem(self.kernel)
         if lease_clock is None:
-            self.leases = EditLeaseManager(timeout_seconds=lease_timeout_seconds)
+            self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds)
         else:
-            self.leases = EditLeaseManager(timeout_seconds=lease_timeout_seconds, clock=lease_clock)
+            self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds, clock=lease_clock)
         self.events = EventBroker()
-        self._project_guards: dict[str, threading.RLock] = {}
-        self._guard_map_lock = threading.Lock()
 
     @contextmanager
     def _project_guard(self, project_id: str) -> Iterator[None]:
-        with self._guard_map_lock:
-            guard = self._project_guards.setdefault(project_id, threading.RLock())
-        with guard:
+        with self.leases.guard(project_id):
             yield
 
     def create_project(self, name: str) -> dict[str, Any]:
@@ -53,24 +48,30 @@ class CadyxCore:
         return {"project": summary, "lock": lock}
 
     def list_projects(self) -> list[dict[str, Any]]:
-        return [
-            {"project": self._summary(project), "lock": self.leases.snapshot(project["id"])}
-            for project in self.workspace.list()
-        ]
+        result = []
+        for project in self.workspace.list():
+            project_id = project["id"]
+            with self._project_guard(project_id):
+                result.append({
+                    "project": self._summary(self.workspace.load(project_id)),
+                    "lock": self.leases.snapshot(project_id),
+                })
+        return result
 
     def list_workspace(self) -> dict[str, Any]:
         return {"projects": self.list_projects(), "folders": self.workspace.list_folder_projects()}
 
     def inspect_project(self, project_id: str) -> dict[str, Any]:
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
-        self._validate_geometry(document)
-        return {
-            "project": self._summary(project),
-            "lock": self.leases.snapshot(project_id),
-            "document": document.to_dict(),
-            "history": copy.deepcopy(project["history"]),
-        }
+        with self._project_guard(project_id):
+            project = self.workspace.load(project_id)
+            document = Document.from_dict(project["document"])
+            self._validate_geometry(document)
+            return {
+                "project": self._summary(project),
+                "lock": self.leases.snapshot(project_id),
+                "document": document.to_dict(),
+                "history": copy.deepcopy(project["history"]),
+            }
 
     def acquire_lease(self, project_id: str, owner_type: str, owner_id: str) -> dict[str, Any]:
         with self._project_guard(project_id):
