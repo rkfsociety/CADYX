@@ -1,0 +1,37 @@
+# CADYX
+
+CADYX is an AI-first CAD foundation prototype. An AI agent and a human use the same Core and Command System; a per-project edit lease ensures only one of them can mutate the document at a time. The browser is an observer and API client, while the Core owns project state.
+
+## Run locally
+
+Requires Python 3.12 or newer. The first pass uses only the Python standard library.
+
+```powershell
+python -m cadyx
+```
+
+Open <http://127.0.0.1:8000>. To use another port or workspace, pass `--port` / `--projects-dir`, or set `CADYX_PORT`, `CADYX_HOST`, and `CADYX_PROJECTS_DIR`. The default host is loopback. Binding to a LAN interface is available with `--host`, but this prototype has no authentication.
+
+The project workspace is `projects/`. Runtime project data is ignored by Git; keep source CAD files and scans backed up as user data.
+
+## Check
+
+```powershell
+python -m unittest discover -s tests -v
+python -m compileall -q cadyx tests
+```
+
+## Architecture
+
+See [docs/architecture.md](docs/architecture.md) and [docs/project-format-v1.md](docs/project-format-v1.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, an in-memory edit lease manager, a shared command system, and a geometry-kernel adapter boundary. The current primitive adapter is a descriptor-only demo; it is not a production CAD kernel.
+
+## API starting points
+
+- `GET /api/v1/projects` and `POST /api/v1/projects`
+- `GET /api/v1/projects/{id}`
+- `POST /api/v1/projects/{id}/leases` with `owner_type` and `owner_id`
+- `POST /api/v1/projects/{id}/commands` with a human `lease_id` and a command
+- Agent equivalents under `/api/v1/agent/projects`
+- `GET /api/v1/events` for the SSE update channel
+
+The API is versioned and provider-neutral. See the architecture guide for current limits and the next implementation stages.

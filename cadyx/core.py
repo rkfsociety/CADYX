@@ -1,0 +1,168 @@
+"""Application Core shared by agent tools and the web interface."""
+
+from __future__ import annotations
+
+import copy
+import threading
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import Any, Callable, Iterator
+
+from .commands import CommandSystem
+from .errors import ConflictError
+from .events import EventBroker
+from .kernel import GeometryKernel, PrimitiveKernelAdapter
+from .lease import EditLeaseManager
+from .models import Document, OwnerType
+from .workspace import ProjectWorkspace, utc_now
+
+
+class CadyxCore:
+    def __init__(
+        self,
+        projects_dir: str,
+        *,
+        kernel: GeometryKernel | None = None,
+        lease_timeout_seconds: float = 60.0,
+        lease_clock: Callable[[], float] | None = None,
+    ) -> None:
+        self.workspace = ProjectWorkspace(projects_dir)
+        self.kernel = kernel or PrimitiveKernelAdapter()
+        self.commands = CommandSystem(self.kernel)
+        if lease_clock is None:
+            self.leases = EditLeaseManager(timeout_seconds=lease_timeout_seconds)
+        else:
+            self.leases = EditLeaseManager(timeout_seconds=lease_timeout_seconds, clock=lease_clock)
+        self.events = EventBroker()
+        self._project_guards: dict[str, threading.RLock] = {}
+        self._guard_map_lock = threading.Lock()
+
+    @contextmanager
+    def _project_guard(self, project_id: str) -> Iterator[None]:
+        with self._guard_map_lock:
+            guard = self._project_guards.setdefault(project_id, threading.RLock())
+        with guard:
+            yield
+
+    def create_project(self, name: str) -> dict[str, Any]:
+        project = self.workspace.create(name)
+        summary = self._summary(project)
+        lock = self.leases.snapshot(project["id"])
+        self.events.publish("project.created", project["id"], summary)
+        self.events.publish("project.lock.changed", project["id"], lock)
+        return {"project": summary, "lock": lock}
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        return [
+            {"project": self._summary(project), "lock": self.leases.snapshot(project["id"])}
+            for project in self.workspace.list()
+        ]
+
+    def inspect_project(self, project_id: str) -> dict[str, Any]:
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        self._validate_geometry(document)
+        return {
+            "project": self._summary(project),
+            "lock": self.leases.snapshot(project_id),
+            "document": document.to_dict(),
+            "history": copy.deepcopy(project["history"]),
+        }
+
+    def acquire_lease(self, project_id: str, owner_type: str, owner_id: str) -> dict[str, Any]:
+        with self._project_guard(project_id):
+            self.workspace.load(project_id)
+            lease = self.leases.acquire(project_id, owner_type, owner_id)
+            snapshot = self.leases.snapshot(project_id)
+            self.events.publish("project.lock.changed", project_id, snapshot)
+            return lease.as_dict()
+
+    def heartbeat(self, project_id: str, lease_id: str) -> dict[str, Any]:
+        with self._project_guard(project_id):
+            self.workspace.load(project_id)
+            lease = self.leases.heartbeat(project_id, lease_id)
+            return lease.as_dict()
+
+    def release_lease(self, project_id: str, lease_id: str) -> dict[str, Any]:
+        with self._project_guard(project_id):
+            lease = self.leases.release(project_id, lease_id)
+            snapshot = self.leases.snapshot(project_id)
+            self.events.publish("project.lock.changed", project_id, snapshot)
+            return {"released": True, "lease": lease.as_dict(), "lock": snapshot}
+
+    def recover_expired_lease(self, project_id: str) -> dict[str, Any]:
+        """Release only after reloading and validating the last atomic project save."""
+        with self._project_guard(project_id):
+            project = self.workspace.load(project_id)
+            document = Document.from_dict(project["document"])
+            self._validate_geometry(document)
+            lease = self.leases.release_expired(project_id)
+            snapshot = self.leases.snapshot(project_id)
+            self.events.publish(
+                "project.lock.changed",
+                project_id,
+                {**snapshot, "recovered_owner_type": lease.owner_type.value, "recovered_owner_id": lease.owner_id},
+            )
+            return {"recovered": True, "lock": snapshot}
+
+    def execute_command(
+        self,
+        project_id: str,
+        lease_id: str | None,
+        command: dict[str, Any],
+        *,
+        expected_owner_type: OwnerType | None = None,
+    ) -> dict[str, Any]:
+        with self._project_guard(project_id):
+            lease = self.leases.require(project_id, lease_id)
+            if expected_owner_type is not None and lease.owner_type is not expected_owner_type:
+                raise ConflictError(
+                    f"This API requires a {expected_owner_type.value} edit lease.",
+                    code="PROJECT_LOCKED",
+                )
+            project = self.workspace.load(project_id)
+            command_name = command.get("type") if isinstance(command, dict) else None
+            self.events.publish("command.started", project_id, {"command": command_name, "actor_id": lease.owner_id})
+            try:
+                document = Document.from_dict(project["document"])
+                result = self.commands.execute(document, command)
+                document.revision += 1
+                document.validate()
+                self._validate_geometry(document)
+                history_entry = {
+                    "actor_type": lease.owner_type.value,
+                    "actor_id": lease.owner_id,
+                    "command": copy.deepcopy(command),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "result": copy.deepcopy(result),
+                    "revision": document.revision,
+                }
+                next_project = copy.deepcopy(project)
+                next_project["document"] = document.to_dict()
+                next_project["history"].append(history_entry)
+                next_project["modified_at"] = utc_now()
+                self.workspace.save(next_project)
+            except Exception as exc:
+                self.events.publish(
+                    "command.failed",
+                    project_id,
+                    {"command": command_name, "actor_id": lease.owner_id, "message": str(exc)},
+                )
+                raise
+
+            self.events.publish("document.changed", project_id, {"revision": document.revision})
+            self.events.publish("command.completed", project_id, history_entry)
+            return {"document": document.to_dict(), "history_entry": history_entry}
+
+    def _validate_geometry(self, document: Document) -> None:
+        for item in document.objects:
+            geometry = item.get("geometry")
+            if geometry is not None:
+                self.kernel.validate(geometry)
+
+    @staticmethod
+    def _summary(project: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: project[key]
+            for key in ("id", "format", "version", "name", "created_at", "modified_at")
+        }
