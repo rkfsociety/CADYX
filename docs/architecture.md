@@ -11,7 +11,7 @@ Browser ----------------> Web API -> CADYX Core -> Project Workspace
                                       +-> event broker -> SSE -> Browser
 ```
 
-The first pass is a local single-process prototype. It uses Python 3.12+ standard-library modules for the Core and HTTP server, with plain browser HTML/CSS/JavaScript. There are no runtime package dependencies or AI-provider integrations.
+The first pass is a local single-process prototype. It uses Python 3.12+ standard-library modules for the Core and HTTP server, with plain browser HTML/CSS/JavaScript. Open CASCADE is provided through the pinned `cadquery-ocp` bindings, including VTK for the planned rendering and viewport work; there are no AI-provider integrations.
 
 ## Core and storage
 
@@ -29,7 +29,7 @@ This initial lease manager is process-local. Run only one CADYX host against a g
 
 ## Commands and geometry
 
-The initial command registry supports `create_box` and `set_parameter` for box dimensions. Object ids use typed UUIDs such as `body:<uuid>` and `feature:<uuid>`. The `GeometryKernel` protocol isolates CADYX Core from a specific kernel. `PrimitiveKernelAdapter` validates and stores analytic box descriptors for demonstration; it does not create B-Rep or renderable mesh geometry.
+The initial command registry supports `create_box` and `set_parameter` for box dimensions. Object ids use typed UUIDs such as `body:<uuid>` and `feature:<uuid>`. The `GeometryKernel` protocol isolates CADYX Core from a specific kernel. The default `OCPKernelAdapter` creates box B-reps with Open CASCADE, checks topology with `BRepCheck_Analyzer`, and gets volume from kernel mass properties. Project files store JSON-safe dimensions and measured volume; the kernel shape is regenerated and checked instead of serializing a native object. The adapter continues to validate existing `primitive-v1` descriptors. `PrimitiveKernelAdapter` remains available for demos and does not create B-rep geometry.
 
 ## APIs and events
 

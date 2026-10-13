@@ -11,7 +11,7 @@ from typing import Any, Callable, Iterator
 from .commands import CommandSystem
 from .errors import ConflictError
 from .events import EventBroker
-from .kernel import GeometryKernel, PrimitiveKernelAdapter
+from .kernel import GeometryKernel, OCPKernelAdapter
 from .lease import EditLeaseManager
 from .models import Document, OwnerType
 from .workspace import ProjectWorkspace, utc_now
@@ -27,7 +27,7 @@ class CadyxCore:
         lease_clock: Callable[[], float] | None = None,
     ) -> None:
         self.workspace = ProjectWorkspace(projects_dir)
-        self.kernel = kernel or PrimitiveKernelAdapter()
+        self.kernel = kernel if kernel is not None else OCPKernelAdapter()
         self.commands = CommandSystem(self.kernel)
         if lease_clock is None:
             self.leases = EditLeaseManager(timeout_seconds=lease_timeout_seconds)

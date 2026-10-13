@@ -4,7 +4,11 @@ CADYX is an AI-first CAD foundation prototype. An AI agent and a human use the s
 
 ## Run locally
 
-Requires Python 3.12 or newer. The first pass uses only the Python standard library.
+Requires Python 3.12–3.14 and the pinned Open CASCADE Python bindings:
+
+```powershell
+python -m pip install -r requirements.txt
+```
 
 ```powershell
 python -m cadyx
@@ -23,7 +27,7 @@ python -m compileall -q cadyx tests
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md) and [docs/project-format-v1.md](docs/project-format-v1.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, an in-memory edit lease manager, a shared command system, and a geometry-kernel adapter boundary. The current primitive adapter is a descriptor-only demo; it is not a production CAD kernel.
+See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](docs/project-format-v1.md), and [.codex/roadmap.md](.codex/roadmap.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, an in-memory edit lease manager, a shared command system, and an Open CASCADE geometry-kernel adapter. Geometry is rebuilt from JSON-safe parameters when validated; native kernel objects are not stored in project files.
 
 ## API starting points
 

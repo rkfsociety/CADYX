@@ -1,10 +1,10 @@
 # CADYX project roadmap
 
-This is the current proposed development sequence. The milestones are goals, not claims that the corresponding capabilities are entirely absent; inspect the implementation before starting work or changing a milestone's status. No milestone is currently marked complete or in progress by this roadmap.
+This is the current development sequence. The milestones are goals, not claims that the corresponding capabilities are entirely absent; inspect the implementation before starting work or changing a milestone's status. Stage 1 is complete; the remaining stages are proposed.
 
-## Proposed stages
+## Stages
 
-1. **Real geometry kernel:** select and integrate a real geometry kernel behind `GeometryKernel`, with adapter conformance tests.
+1. **Complete — Real geometry kernel:** integrate Open CASCADE behind `GeometryKernel`, validate reconstructed box B-reps, retain compatibility with saved `primitive-v1` descriptors, and cover the adapter with conformance tests. Evidence: [`cadyx/kernel.py`](../cadyx/kernel.py), [`tests/test_kernel.py`](../tests/test_kernel.py), and [`requirements.txt`](../requirements.txt).
 2. **Richer Document Model:** add sketches, constraints, and stable relationships between objects.
 3. **Project Format migrations:** add explicit migrations between persisted format versions as the model evolves.
 4. **Multi-process leases:** make lease coordination reliable when multiple processes access the same project workspace.

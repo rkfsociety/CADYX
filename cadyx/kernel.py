@@ -1,9 +1,14 @@
-"""Geometry boundary. The initial adapter stores validated analytic descriptors."""
+"""Geometry-kernel boundary and CADYX kernel adapters."""
 
 from __future__ import annotations
 
 import math
 from typing import Any, Protocol
+
+from OCP.BRepCheck import BRepCheck_Analyzer
+from OCP.BRepGProp import BRepGProp
+from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+from OCP.GProp import GProp_GProps
 
 from .errors import ValidationError
 
@@ -12,6 +17,95 @@ class GeometryKernel(Protocol):
     def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]: ...
 
     def validate(self, geometry: dict[str, Any]) -> None: ...
+
+
+def _box_dimensions(width: Any, height: Any, depth: Any) -> dict[str, float]:
+    dimensions = {"width": width, "height": height, "depth": depth}
+    normalized: dict[str, float] = {}
+    for name, value in dimensions.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValidationError(f"{name} must be a number.")
+        try:
+            number = float(value)
+        except OverflowError as exc:
+            raise ValidationError(f"{name} must be a finite positive number.") from exc
+        if not math.isfinite(number) or number <= 0:
+            raise ValidationError(f"{name} must be a finite positive number.")
+        normalized[name] = number
+    return normalized
+
+
+class OCPKernelAdapter:
+    """Build and validate box B-reps with Open CASCADE Technology."""
+
+    kernel_id = "occt-v1"
+    _accepted_kernel_ids = {kernel_id, "primitive-v1"}
+
+    def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]:
+        dimensions = _box_dimensions(width, height, depth)
+        volume = self._box_volume(dimensions)
+        return {
+            "kernel": self.kernel_id,
+            "kind": "box",
+            "dimensions": dimensions,
+            "volume": volume,
+        }
+
+    def validate(self, geometry: dict[str, Any]) -> None:
+        if not isinstance(geometry, dict):
+            raise ValidationError("Geometry does not match a supported box format.")
+        kernel_id = geometry.get("kernel")
+        if not isinstance(kernel_id, str) or kernel_id not in self._accepted_kernel_ids:
+            raise ValidationError("Geometry does not match a supported box format.")
+        if set(geometry) != {"kernel", "kind", "dimensions", "volume"} or geometry.get("kind") != "box":
+            raise ValidationError("Geometry does not match a supported box format.")
+
+        dimensions = geometry.get("dimensions")
+        if not isinstance(dimensions, dict) or set(dimensions) != {"width", "height", "depth"}:
+            raise ValidationError("Geometry dimensions are missing or invalid.")
+        normalized = _box_dimensions(
+            width=dimensions["width"],
+            height=dimensions["height"],
+            depth=dimensions["depth"],
+        )
+        saved_volume = geometry.get("volume")
+        if isinstance(saved_volume, bool) or not isinstance(saved_volume, (int, float)):
+            raise ValidationError("Geometry volume is invalid.")
+        try:
+            saved_volume = float(saved_volume)
+        except OverflowError as exc:
+            raise ValidationError("Geometry volume is invalid.") from exc
+        if not math.isfinite(saved_volume) or saved_volume <= 0:
+            raise ValidationError("Geometry volume is invalid.")
+
+        actual_volume = self._box_volume(normalized)
+        if not math.isclose(saved_volume, actual_volume, rel_tol=1e-12, abs_tol=1e-12):
+            raise ValidationError("Saved geometry volume does not match the Open CASCADE solid.")
+
+    @staticmethod
+    def _box_volume(dimensions: dict[str, float]) -> float:
+        try:
+            builder = BRepPrimAPI_MakeBox(
+                dimensions["width"], dimensions["height"], dimensions["depth"]
+            )
+            builder.Build()
+            if not builder.IsDone():
+                raise ValidationError("Open CASCADE could not construct the box solid.")
+            shape = builder.Shape()
+            if shape.IsNull() or not BRepCheck_Analyzer(shape).IsValid():
+                raise ValidationError("Open CASCADE constructed an invalid box solid.")
+
+            properties = GProp_GProps()
+            BRepGProp.VolumeProperties_s(shape, properties)
+            volume = float(properties.Mass())
+        except ValidationError:
+            raise
+        except Exception as exc:
+            raise ValidationError("Open CASCADE failed to construct or measure the box solid.") from exc
+
+        if not math.isfinite(volume) or volume <= 0:
+            raise ValidationError("Open CASCADE returned an invalid box volume.")
+        return volume
 
 
 class PrimitiveKernelAdapter:
