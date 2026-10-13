@@ -28,3 +28,28 @@ with a successful command. See [Document Model v2](document-model-v2.md) for the
 sketch schema, constraint semantics and compatibility policy.
 
 Box geometry is stored as a JSON descriptor with its kernel id, dimensions, and measured volume. New descriptors use `occt-v1`; Open CASCADE reconstructs the B-rep from dimensions and checks its validity when creating or validating a project. Native kernel objects are not serialized. Existing `primitive-v1` box descriptors remain readable and are checked by rebuilding the corresponding Open CASCADE solid.
+
+## Migration contract
+
+`cadyx/migrations.py` owns current schema versions and explicit one-version
+steps. Project-envelope and document versions are independent: migrate the
+envelope first, then the nested document. The envelope is still v1 (no envelope
+step is needed); the supported document step is v1 to v2. New schema changes
+must add each required consecutive step instead of relabelling an unknown
+snapshot. Missing steps, unsupported versions (including future versions), and
+non-integer version tags are errors.
+
+Workspace load and validation migrate deep copies and then validate the current
+document, references, project identity and revision/history consistency. Saved
+documents must include id, revision and objects; incomplete snapshots are
+rejected. Core additionally validates geometry on inspection and commands.
+Migration preserves metadata, ids, geometry, references and existing history;
+it never adds a command or increments a revision. Reapplying migration to a
+current snapshot leaves its value unchanged.
+
+Reads, listings, lease operations and rejected commands do not rewrite legacy
+files. The next successful Core command under the current edit lease commits
+the migrated snapshot and its command/history change through the existing
+atomic save. A failed atomic replacement leaves the original file intact.
+There is no standalone migration write endpoint. Source CAD and scan files are
+outside migration scope. Older hosts are not guaranteed to read newer schemas.

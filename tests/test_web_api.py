@@ -37,6 +37,34 @@ class WebApiTests(unittest.TestCase):
         except HTTPError as error:
             return error.code, json.loads(error.read())
 
+    def test_legacy_migration_uses_both_api_command_paths(self) -> None:
+        for prefix, owner in (("/api/v1/projects", "human"), ("/api/v1/agent/projects", "agent")):
+            with self.subTest(owner=owner):
+                _, created = self.request("/api/v1/projects", {"name": "Legacy API"})
+                project_id = created["project"]["id"]
+                path = self.core.workspace.root / project_id / "project.json"
+                legacy = json.loads(path.read_text())
+                legacy["document"]["version"] = 1
+                path.write_text(json.dumps(legacy))
+                before = path.read_bytes()
+                status, detail = self.request(f"{prefix}/{project_id}")
+                self.assertEqual(status, 200)
+                self.assertEqual(detail["document"]["version"], 2)
+                _, acquired = self.request(f"{prefix}/{project_id}/leases",
+                                          {"owner_type": owner, "owner_id": "migration-test"})
+                lease = acquired["lease"]["lease_id"]
+                status, _ = self.request(f"{prefix}/{project_id}/commands",
+                                         {"lease_id": lease, "command": {"type": "create_sketch", "plane": "bad"}})
+                self.assertEqual(status, 400)
+                self.assertEqual(path.read_bytes(), before)
+                status, _ = self.request(f"{prefix}/{project_id}/commands",
+                                         {"lease_id": lease, "command": {"type": "create_sketch"}})
+                self.assertEqual(status, 200)
+                saved = json.loads(path.read_text())
+                self.assertEqual(saved["version"], 1)
+                self.assertEqual(saved["document"]["version"], 2)
+                self.assertEqual(saved["history"][0]["actor_type"], owner)
+
     def test_agent_and_web_api_share_core_locking(self) -> None:
         status, created = self.request("/api/v1/projects", {"name": "API test"})
         self.assertEqual(status, 201)

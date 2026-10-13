@@ -17,5 +17,10 @@
 ## Document Model v2
 
 - **Decision:** represent XY sketches, points, lines, circles and constraints as document objects with stable typed UUID references. Membership has one source (`sketch_id`); constraints validate geometry with absolute tolerance 1e-7 instead of implying a solver. Batch coordinate updates use the existing atomic Core command path. **Reason:** add editable, persistent relationships with explicit invariant checks without introducing a separate mutation system. **Source:** `docs/document-model-v2.md`, `cadyx/sketches.py`, `cadyx/commands.py`.
-- **Decision:** explicitly upgrade document v1 to v2 in memory and save it only with the next successful command; keep project envelope v1. **Reason:** legacy bodies, features and history remain intact and read-only inspection does not rewrite user data. Older hosts reject v2; general migration chains remain stage 4. **Source:** `cadyx/models.py`, `docs/document-model-v2.md`, `tests/test_document.py`.
+- **Decision:** explicitly upgrade document v1 to v2 in memory and save it only with the next successful command; keep project envelope v1. **Reason:** legacy bodies, features and history remain intact and read-only inspection does not rewrite user data. Older hosts reject v2; sequential migrations are now centralized in `cadyx/migrations.py`. **Source:** `cadyx/models.py`, `docs/document-model-v2.md`, `tests/test_document.py`.
+- **Status:** active.
+
+## Project Format migrations
+
+- **Decision:** centralize independent project/document schema versions and consecutive migration steps in `cadyx/migrations.py`. Migrate copies on load, validate through the existing domain/workspace checks, and persist through the existing leased Core command and atomic save path. Keep envelope v1 and document v2 until an actual schema change requires another version. **Reason:** future schema evolution needs explicit transitions without rewriting user data on reads or introducing a second mutation path. **Source:** `docs/project-format-v1.md`, `cadyx/migrations.py`, `tests/test_migrations.py`.
 - **Status:** active.

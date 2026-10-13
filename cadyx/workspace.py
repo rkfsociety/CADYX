@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from .errors import NotFoundError, ValidationError
 from .models import Document, OwnerType
+from .migrations import PROJECT_VERSION, migrate_project
 
 _PROJECT_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
@@ -42,7 +43,7 @@ class ProjectWorkspace:
         now = utc_now()
         project: dict[str, Any] = {
             "format": "cadyx-project",
-            "version": 1,
+            "version": PROJECT_VERSION,
             "id": project_id,
             "name": name.strip(),
             "created_at": now,
@@ -64,13 +65,15 @@ class ProjectWorkspace:
             raise NotFoundError("Project was not found.") from exc
         except (json.JSONDecodeError, OSError) as exc:
             raise ValidationError(f"Project file could not be read: {exc}.") from exc
-        self.validate(project, expected_id=project_id)
+        project = migrate_project(project)
+        self._validate_current(project, expected_id=project_id)
         return project
 
     def save(self, project: dict[str, Any]) -> None:
+        project = migrate_project(project)
         project_id = project.get("id") if isinstance(project, dict) else None
         project_dir = self._project_dir(project_id)
-        self.validate(project, expected_id=project_id)
+        self._validate_current(project, expected_id=project_id)
         self._write_atomic(project_dir / "project.json", project)
 
     def list(self) -> list[dict[str, Any]]:
@@ -166,9 +169,13 @@ class ProjectWorkspace:
 
     @staticmethod
     def validate(project: Any, *, expected_id: str | None = None) -> None:
+        ProjectWorkspace._validate_current(migrate_project(project), expected_id=expected_id)
+
+    @staticmethod
+    def _validate_current(project: Any, *, expected_id: str | None = None) -> None:
         if not isinstance(project, dict):
             raise ValidationError("Project file must contain a JSON object.")
-        if project.get("format") != "cadyx-project" or type(project.get("version")) is not int or project.get("version") != 1:
+        if project.get("format") != "cadyx-project" or type(project.get("version")) is not int or project.get("version") != PROJECT_VERSION:
             raise ValidationError("Unsupported project format or version.")
         project_id = project.get("id")
         if not isinstance(project_id, str) or not _PROJECT_ID.fullmatch(project_id):

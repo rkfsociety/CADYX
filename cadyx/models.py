@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Any
 
 from .errors import ValidationError
+from .migrations import DOCUMENT_VERSION, migrate_document
 from .sketches import typed_id, validate_sketches
 
 
@@ -27,7 +28,7 @@ class LockState(StrEnum):
 @dataclass(slots=True)
 class Document:
     id: str
-    version: int = 2
+    version: int = DOCUMENT_VERSION
     revision: int = 0
     objects: list[dict[str, Any]] = field(default_factory=list)
 
@@ -39,17 +40,10 @@ class Document:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> Document:
-        if not isinstance(value, dict):
-            raise ValidationError("The saved document must be an object.")
-        version = value.get("version", 0)
-        if type(version) is not int or version not in {1, 2}:
-            raise ValidationError(f"Unsupported document version: {version!r}.")
-        if version == 1 and isinstance(value.get("objects"), list):
-            if any(isinstance(item, dict) and item.get("type") not in ("body", "feature") for item in value["objects"]):
-                raise ValidationError("Version 1 supports only bodies and features.")
+        value = migrate_document(value)
         document = cls(
             id=value.get("id", ""),
-            version=2,
+            version=value["version"],
             revision=value.get("revision", 0),
             objects=deepcopy(value.get("objects", [])),
         )
@@ -66,7 +60,7 @@ class Document:
 
     def validate(self) -> None:
         typed_id(self.id, "document")
-        if type(self.version) is not int or self.version != 2:
+        if type(self.version) is not int or self.version != DOCUMENT_VERSION:
             raise ValidationError(f"Unsupported document version: {self.version!r}.")
         if not isinstance(self.revision, int) or isinstance(self.revision, bool) or self.revision < 0:
             raise ValidationError("Document revision must be a non-negative integer.")

@@ -6,8 +6,8 @@ objects, revision, history or files. The next successful command atomically save
 the upgraded document with its new history entry. Failed commands leave the file
 unchanged. Unknown versions are rejected. A v1 document supports only bodies and
 features. Older CADYX hosts cannot read document v2; this is a forward schema
-change, not a claim of backwards host compatibility. General migration chains
-remain roadmap stage 4.
+change, not a claim of backwards host compatibility. Sequential migration steps are defined in `cadyx/migrations.py`; see the
+[project migration contract](project-format-v1.md#migration-contract).
 
 ## Supported sketch objects
 
