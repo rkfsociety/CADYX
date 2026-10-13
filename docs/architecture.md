@@ -11,7 +11,7 @@ Browser ----------------> Web API -> CADYX Core -> Project Workspace
                                       +-> event broker -> SSE -> Browser
 ```
 
-The first pass is a local single-process prototype. It uses Python 3.12+ standard-library modules for the Core and HTTP server, with plain browser HTML/CSS/JavaScript. Open CASCADE is provided through the pinned `cadquery-ocp` bindings, including VTK for the planned rendering and viewport work; there are no AI-provider integrations.
+The first pass is a local single-process prototype. It uses Python 3.12+ standard-library modules for the Core and HTTP server, with plain browser HTML/CSS/JavaScript. Open CASCADE is provided through the pinned `cadquery-ocp` bindings, including VTK for the planned shared rendering and viewport API; there are no AI-provider integrations. The browser currently displays supported box geometry as an isometric SVG preview and refreshes that view from project snapshots after SSE events. The stream is an internal synchronization mechanism; the UI does not expose an agent command feed. There is no embedded Agent Runtime yet, so an external agent must use the Agent API.
 
 ## Core and storage
 

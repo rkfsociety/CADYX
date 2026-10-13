@@ -1,25 +1,26 @@
 # CADYX project roadmap
 
-This is the current development sequence. The milestones are goals, not claims that the corresponding capabilities are entirely absent; inspect the implementation before starting work or changing a milestone's status. Stage 1 is complete; the remaining stages are proposed.
+This is the current development sequence. The milestones are goals, not claims that the corresponding capabilities are entirely absent; inspect the implementation before starting work or changing a milestone's status. Stages 1 and 2 are complete; later stages remain proposed.
 
 ## Stages
 
 1. **Complete — Real geometry kernel:** integrate Open CASCADE behind `GeometryKernel`, validate reconstructed box B-reps, retain compatibility with saved `primitive-v1` descriptors, and cover the adapter with conformance tests. Evidence: [`cadyx/kernel.py`](../cadyx/kernel.py), [`tests/test_kernel.py`](../tests/test_kernel.py), and [`requirements.txt`](../requirements.txt).
-2. **Richer Document Model:** add sketches, constraints, and stable relationships between objects.
-3. **Project Format migrations:** add explicit migrations between persisted format versions as the model evolves.
-4. **Multi-process leases:** make lease coordination reliable when multiple processes access the same project workspace.
-5. **Safe agent stop and resume:** let agent work stop safely after the current atomic command, validate saved state, and resume from a known state.
-6. **Shared rendering and viewport API:** expose model rendering and viewport capabilities for the browser and agents.
-7. **Model inspection and manual editing:** expand the browser UI to inspect model state and support guarded manual edits under a human lease.
-8. **Provider-neutral Agent Runtime:** add an agent runtime without coupling Core to a specific AI provider.
-9. **Authentication before LAN access:** implement and verify authentication before supporting access from other machines.
-10. **Scan-to-CAD:** build scan preprocessing and editable reconstruction after the geometry foundation is established.
+2. **Complete — Live visual workspace:** show supported box geometry and parameter changes in the browser as the Agent API updates the project; keep SSE command details out of the UI. Current scope supports box previews. Evidence: [`web/`](../web/), [`cadyx/web.py`](../cadyx/web.py), and [architecture](../docs/architecture.md).
+3. **Richer Document Model:** add sketches, constraints, and stable relationships between objects.
+4. **Project Format migrations:** add explicit migrations between persisted format versions as the model evolves.
+5. **Multi-process leases:** make lease coordination reliable when multiple processes access the same project workspace.
+6. **Safe agent stop and resume:** let agent work stop safely after the current atomic command, validate saved state, and resume from a known state.
+7. **Shared rendering and viewport API:** expose general model rendering and viewport capabilities beyond the current box preview.
+8. **Model inspection and manual editing:** expand browser inspection and guarded manual edits under a human lease beyond the current box preview and manual test form.
+9. **Provider-neutral Agent Runtime:** add an agent runtime without coupling Core to a specific AI provider.
+10. **Authentication before LAN access:** implement and verify authentication before supporting access from other machines.
+11. **Scan-to-CAD:** build scan preprocessing and editable reconstruction after the geometry foundation is established.
 
 ## Sequencing gates
 
 - Plan format migrations alongside any change that evolves persisted project or document data.
 - Do not allow multiple host processes to share a workspace until stage 4 is complete.
 - Do not expose the host on a LAN until stage 9 is complete.
-- Start Scan-to-CAD only when the geometry kernel and Document Model foundations from stages 1 and 2 are adequate for editable reconstruction.
+- Start Scan-to-CAD only when the geometry kernel and Document Model foundations from stages 1 and 3 are adequate for editable reconstruction.
 
 Before marking a stage complete, verify its result against the current code and relevant checks, then update this roadmap. Architecture details and current implementation constraints remain in [the architecture guide](../docs/architecture.md); durable technical decisions belong in [decisions](decisions.md).

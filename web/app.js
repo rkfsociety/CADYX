@@ -2,179 +2,520 @@ const api = (path, options = {}) => fetch(path, {
   ...options,
   headers: { "Content-Type": "application/json", ...(options.headers || {}) },
 }).then(async (response) => {
-  const value = await response.json();
-  if (!response.ok) throw new Error(value.message || value.error || "Request failed");
+  const contentType = response.headers.get("content-type") || "";
+  const value = contentType.includes("application/json") ? await response.json() : {};
+  if (!response.ok) throw new Error(value.message || value.error || "Ошибка запроса");
   return value;
 });
 
-const projectList = document.querySelector("#project-list");
-const emptyProjects = document.querySelector("#empty-projects");
-const noSelection = document.querySelector("#no-selection");
-const projectDetail = document.querySelector("#project-detail");
-const toast = document.querySelector("#toast");
-let projects = [];
-let selectedProjectId = null;
+const $ = (selector) => document.querySelector(selector);
+const projectList = $("#project-list");
+const projectDetail = $("#project-detail");
+const noSelection = $("#no-selection");
+const toast = $("#toast");
+const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
+const dateFormat = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 const heldLeases = new Map();
+const activeAgents = new Map();
+const modelStates = new Map();
+const modelStateTimers = new Map();
+const documentRevisions = new Map();
+let projects = [];
+let selectedProjectId = readSelectedProject();
+let selectedBodyId = null;
+let currentObjects = [];
 let toastTimer;
+let refreshTimer;
+
+function readSelectedProject() {
+  try { return localStorage.getItem("cadyx.selected-project"); }
+  catch { return null; }
+}
+
+function saveSelectedProject(id) {
+  try {
+    if (id) localStorage.setItem("cadyx.selected-project", id);
+    else localStorage.removeItem("cadyx.selected-project");
+  } catch { /* Selection still works when browser storage is unavailable. */ }
+}
 
 function notify(message, isError = false) {
   toast.textContent = message;
   toast.classList.toggle("error", isError);
   toast.classList.add("visible");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove("visible"), 2800);
+  toastTimer = setTimeout(() => toast.classList.remove("visible"), 3000);
+}
+
+function formatNumber(value) {
+  return Number.isFinite(Number(value)) ? numberFormat.format(Number(value)) : "—";
+}
+
+function formatDate(value) {
+  const date = value ? new Date(value) : null;
+  return date && Number.isFinite(date.getTime()) ? dateFormat.format(date) : "—";
 }
 
 function getProject(id) {
   return projects.find((item) => item.project.id === id);
 }
 
-async function refreshProjects() {
-  const response = await api("/api/v1/projects");
-  projects = response.projects;
-  document.querySelector("#project-count").textContent = String(projects.length);
-  emptyProjects.hidden = projects.length > 0;
+function stateLabel(state) {
+  if (state === "FREE") return "Свободен";
+  if (state === "AI_LOCKED") return "Агент";
+  if (state === "HUMAN_LOCKED") return "Пользователь";
+  if (state === "SYSTEM_LOCKED") return "Система";
+  return state;
+}
+
+function lockLabel(lock) {
+  if (lock.recovery_required) return "ТРЕБУЕТСЯ ПРОВЕРКА";
+  return ({
+    FREE: "ДОСТУП СВОБОДЕН",
+    AI_LOCKED: "ДОСТУП У АГЕНТА",
+    HUMAN_LOCKED: "ДОСТУП У ПОЛЬЗОВАТЕЛЯ",
+    SYSTEM_LOCKED: "СИСТЕМНАЯ БЛОКИРОВКА",
+  })[lock.state] || lock.state;
+}
+
+function lockClass(lock) {
+  const owner = lock.lease?.owner_type;
+  const variant = owner === "agent" ? "agent" : owner === "human" ? "human" : owner === "system" ? "system" : "free";
+  return `lock-badge ${variant}${lock.recovery_required ? " expired" : ""}`;
+}
+
+function setConnection(state) {
+  const label = ({
+    connecting: "Подключение",
+    connected: "События подключены",
+    reconnecting: "Переподключение",
+    offline: "События недоступны",
+  })[state] || state;
+  const indicator = $("#connection-status");
+  indicator.dataset.state = state;
+  $("#connection-label").textContent = label;
+}
+
+function setModelState(projectId, state, label) {
+  clearTimeout(modelStateTimers.get(projectId));
+  const timestamp = new Date().toISOString();
+  modelStates.set(projectId, { state, label, timestamp });
+
+  if (projectId === selectedProjectId) {
+    const root = $("#model-live-state");
+    root.dataset.state = state;
+    $("#model-live-label").textContent = label;
+    const preview = $("#model-preview");
+    preview.classList.remove("changed");
+    if (state === "updated") requestAnimationFrame(() => {
+      if (projectId === selectedProjectId && modelStates.get(projectId)?.timestamp === timestamp) {
+        preview.classList.add("changed");
+      }
+    });
+  }
+
+  if (state === "updated") {
+    modelStateTimers.set(projectId, setTimeout(() => {
+      const current = modelStates.get(projectId);
+      if (current?.timestamp !== timestamp) return;
+      modelStateTimers.delete(projectId);
+      modelStates.set(projectId, { state: "idle", label: "Актуальная модель", timestamp });
+      if (projectId === selectedProjectId) {
+        $("#model-live-state").dataset.state = "idle";
+        $("#model-live-label").textContent = "Актуальная модель";
+        $("#model-preview").classList.remove("changed");
+      }
+    }, 2400));
+  }
+}
+
+function renderProjectList() {
+  $("#project-count").textContent = String(projects.length);
+  $("#empty-projects").hidden = projects.length > 0;
   projectList.replaceChildren();
+
   for (const item of projects) {
+    const project = item.project;
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `project-item${item.project.id === selectedProjectId ? " selected" : ""}`;
-    const name = document.createElement("span");
+    button.className = `project-item${project.id === selectedProjectId ? " selected" : ""}`;
+    button.dataset.projectId = project.id;
+    button.setAttribute("aria-current", project.id === selectedProjectId ? "page" : "false");
+
+    const marker = document.createElement("span");
+    marker.className = "project-marker";
+    marker.dataset.state = item.lock.state;
+    marker.setAttribute("aria-hidden", "true");
+
+    const copy = document.createElement("span");
+    copy.className = "project-copy";
+    const name = document.createElement("strong");
     name.className = "project-name";
-    name.textContent = item.project.name;
-    const state = document.createElement("span");
-    state.className = `mini-state${item.lock.state === "FREE" ? "" : " locked"}`;
-    state.textContent = item.lock.state.replace("_LOCKED", "");
-    button.append(name, state);
-    button.addEventListener("click", () => selectProject(item.project.id));
+    name.textContent = project.name;
+    const detail = document.createElement("small");
+    detail.textContent = `${stateLabel(item.lock.state)} · изм. ${formatDate(project.modified_at)}`;
+    copy.append(name, detail);
+
+    const arrow = document.createElement("span");
+    arrow.className = "project-arrow";
+    arrow.setAttribute("aria-hidden", "true");
+    arrow.textContent = "›";
+    button.append(marker, copy, arrow);
     projectList.append(button);
   }
-  if (selectedProjectId && getProject(selectedProjectId)) await refreshDetail();
-  else if (selectedProjectId) {
-    selectedProjectId = null;
+}
+
+function selectProject(id) {
+  selectedProjectId = id;
+  selectedBodyId = null;
+  saveSelectedProject(id);
+  renderProjectList();
+  refreshDetail().catch((error) => notify(error.message, true));
+}
+
+async function refreshWorkspace() {
+  const response = await api("/api/v1/projects");
+  projects = response.projects;
+
+  if (!projects.some((item) => item.project.id === selectedProjectId)) {
+    const saved = readSelectedProject();
+    selectedProjectId = projects.some((item) => item.project.id === saved)
+      ? saved
+      : projects[0]?.project.id || null;
+    selectedBodyId = null;
+    saveSelectedProject(selectedProjectId);
+  }
+
+  renderProjectList();
+  $("#topbar-project-name").textContent = getProject(selectedProjectId)?.project.name || "Не выбран";
+  if (selectedProjectId) await refreshDetail();
+  else {
     projectDetail.hidden = true;
     noSelection.hidden = false;
   }
 }
 
-async function selectProject(id) {
-  selectedProjectId = id;
-  await refreshProjects();
-  await refreshDetail();
+function scheduleWorkspaceRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    refreshWorkspace().catch((error) => {
+      setConnection("offline");
+      notify(error.message, true);
+    });
+  }, 60);
 }
 
 async function refreshDetail() {
-  if (!selectedProjectId) return;
-  const info = await api(`/api/v1/projects/${encodeURIComponent(selectedProjectId)}`);
-  const project = info.project;
-  const lock = info.lock;
-  noSelection.hidden = true;
-  projectDetail.hidden = false;
-  document.querySelector("#detail-name").textContent = project.name;
-  document.querySelector("#detail-id").textContent = project.id;
-  const badge = document.querySelector("#lock-badge");
-  badge.textContent = lock.recovery_required ? `${lock.state} · RECOVERY REQUIRED` : lock.state;
-  badge.className = `lock-badge${lock.state === "AI_LOCKED" ? " ai" : lock.state === "HUMAN_LOCKED" ? " human" : lock.state === "SYSTEM_LOCKED" ? " system" : ""}${lock.recovery_required ? " expired" : ""}`;
-  const owner = lock.lease;
-  document.querySelector("#lock-owner").textContent = owner ? `${owner.owner_type}: ${owner.owner_id}` : "Free";
-  document.querySelector("#current-agent").textContent = owner?.owner_type === "agent" ? owner.owner_id : "None";
-  document.querySelector("#document-revision").textContent = String(info.document.revision);
-  document.querySelector("#object-count").textContent = String(info.document.objects.length);
+  const projectId = selectedProjectId;
+  if (!projectId) return;
+  const info = await api(`/api/v1/projects/${encodeURIComponent(projectId)}`);
+  if (projectId !== selectedProjectId) return;
 
-  const held = heldLeases.get(project.id);
-  const controlsAvailable = !owner && !lock.recovery_required;
-  document.querySelector("#acquire-human").disabled = !controlsAvailable;
-  document.querySelector("#acquire-agent").disabled = !controlsAvailable;
-  const release = document.querySelector("#release-lease");
-  release.hidden = !held;
-  document.querySelector("#demo-command-panel").hidden = held?.ownerType !== "human";
-  renderHistory(info.history);
+  projectDetail.hidden = false;
+  noSelection.hidden = true;
+  $("#topbar-project-name").textContent = info.project.name;
+  $("#detail-name").textContent = info.project.name;
+  $("#detail-id").textContent = info.project.id;
+
+  const lock = info.lock;
+  const badge = $("#lock-badge");
+  badge.textContent = lockLabel(lock);
+  badge.className = lockClass(lock);
+  updateAgentState(projectId, lock);
+  updateManualControls(projectId, lock);
+
+  const previousRevision = documentRevisions.get(projectId);
+  const objects = info.document.objects;
+  const bodies = objects.filter((item) => item.type === "body");
+  const features = objects.filter((item) => item.type === "feature");
+  if (selectedBodyId && !bodies.some((item) => item.id === selectedBodyId)) selectedBodyId = null;
+  if (!selectedBodyId && bodies.length) selectedBodyId = bodies[bodies.length - 1].id;
+  if (previousRevision === undefined || info.document.revision !== previousRevision) {
+    documentRevisions.set(projectId, info.document.revision);
+    if (!modelStates.has(projectId)) {
+      const label = info.document.revision ? "Актуальная версия" : "Без изменений";
+      modelStates.set(projectId, { state: "idle", label, timestamp: null });
+    }
+  }
+
+  currentObjects = objects;
+  $("#document-revision").textContent = String(info.document.revision);
+  $("#object-count").textContent = `${bodies.length} / ${features.length}`;
+  $("#last-modified").textContent = info.project.modified_at
+    ? `Изменено ${formatDate(info.project.modified_at)}`
+    : "Изменений пока нет";
+
+  const visualState = modelStates.get(projectId);
+  if (visualState) {
+    $("#model-live-state").dataset.state = visualState.state;
+    $("#model-live-label").textContent = visualState.label;
+  }
+  renderViewport(bodies);
+  renderObjectTree(bodies);
+  renderProperties(bodies);
 }
 
-function renderHistory(history) {
-  const root = document.querySelector("#history-list");
-  root.replaceChildren();
-  document.querySelector("#history-count").textContent = `${history.length} ${history.length === 1 ? "entry" : "entries"}`;
-  if (!history.length) {
-    const empty = document.createElement("p");
-    empty.className = "history-empty";
-    empty.textContent = "No commands have been committed to this document.";
-    root.append(empty);
+function updateAgentState(projectId, lock) {
+  const active = lock.lease;
+  const running = activeAgents.get(projectId);
+  const status = $("#agent-state");
+  const detail = $("#current-agent");
+
+  if (running) {
+    status.textContent = "Вносит изменения";
+    detail.textContent = running;
+  } else if (active?.owner_type === "agent") {
+    status.textContent = "Доступ у агента";
+    detail.textContent = active.owner_id;
+  } else if (active?.owner_type === "human") {
+    status.textContent = "Пауза для агента";
+    detail.textContent = `Проект редактирует пользователь · ${active.owner_id}`;
+  } else {
+    status.textContent = "Ожидание";
+    detail.textContent = "Состояние синхронизируется в реальном времени";
+  }
+}
+
+function updateManualControls(projectId, lock) {
+  const held = heldLeases.get(projectId);
+  const available = !lock.lease && !lock.recovery_required;
+  $("#acquire-human").disabled = !available;
+  $("#acquire-human").hidden = Boolean(held);
+  $("#release-lease").hidden = !held;
+  $("#create-box-form").hidden = held?.ownerType !== "human";
+}
+
+function svgElement(name, attributes = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", name);
+  for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
+  return element;
+}
+
+function renderViewport(bodies) {
+  const empty = $("#viewport-empty");
+  const preview = $("#model-preview");
+  const meta = $("#viewport-meta");
+  const faces = $("#model-faces");
+  const edges = $("#model-edges");
+  const body = bodies.find((item) => item.id === selectedBodyId) || bodies[bodies.length - 1];
+
+  if (!body || !body.geometry?.dimensions) {
+    selectedBodyId = null;
+    empty.hidden = false;
+    preview.hidden = true;
+    meta.hidden = true;
+    $("#viewport-label").textContent = "Нет тел";
+    $("#properties-empty").hidden = false;
+    $("#properties-list").hidden = true;
+    faces.replaceChildren();
+    edges.replaceChildren();
     return;
   }
-  for (const entry of [...history].reverse()) {
-    const row = document.createElement("div");
-    row.className = "history-entry";
-    const time = document.createElement("time");
-    time.className = "history-time";
-    time.dateTime = entry.timestamp;
-    time.textContent = new Date(entry.timestamp).toLocaleString();
-    const actor = document.createElement("span");
-    actor.className = "history-actor";
-    actor.textContent = `${entry.actor_type} · ${entry.actor_id}`;
-    const command = document.createElement("span");
-    command.className = "history-command";
-    command.textContent = `${entry.command.type} · revision ${entry.revision}`;
-    row.append(time, actor, command);
-    root.append(row);
+
+  selectedBodyId = body.id;
+  empty.hidden = true;
+  preview.hidden = false;
+  meta.hidden = false;
+  $("#viewport-label").textContent = `${bodies.length} ${bodies.length === 1 ? "тело" : bodies.length < 5 ? "тела" : "тел"}`;
+
+  const { width, height, depth } = body.geometry.dimensions;
+  const scale = 106 / Math.max(width, height, depth);
+  const point = (x, y, z) => [
+    300 + (x - y) * scale,
+    255 + (x + y) * scale * 0.36 - z * scale * 0.78,
+  ];
+  const points = [
+    point(0, 0, 0), point(width, 0, 0), point(width, depth, 0), point(0, depth, 0),
+    point(0, 0, height), point(width, 0, height), point(width, depth, height), point(0, depth, height),
+  ];
+  const pointString = (indexes) => indexes.map((index) => points[index].map((value) => value.toFixed(1)).join(",")).join(" ");
+
+  faces.replaceChildren(
+    svgElement("polygon", { points: pointString([0, 1, 5, 4]), class: "face-front" }),
+    svgElement("polygon", { points: pointString([1, 2, 6, 5]), class: "face-side" }),
+    svgElement("polygon", { points: pointString([4, 5, 6, 7]), class: "face-top" }),
+  );
+  const path = [
+    `M ${points[0].join(" ")} L ${points[1].join(" ")} L ${points[2].join(" ")} L ${points[3].join(" ")} Z`,
+    `M ${points[4].join(" ")} L ${points[5].join(" ")} L ${points[6].join(" ")} L ${points[7].join(" ")} Z`,
+    `M ${points[0].join(" ")} L ${points[4].join(" ")}`,
+    `M ${points[1].join(" ")} L ${points[5].join(" ")}`,
+    `M ${points[2].join(" ")} L ${points[6].join(" ")}`,
+    `M ${points[3].join(" ")} L ${points[7].join(" ")}`,
+  ].join(" ");
+  edges.replaceChildren(svgElement("path", { d: path, class: "model-outline" }));
+
+  $("#selected-object-name").textContent = body.name || "Тело";
+  $("#selected-object-dimensions").textContent = `${formatNumber(width)} × ${formatNumber(height)} × ${formatNumber(depth)}`;
+  $("#selected-object-volume").textContent = `V ${formatNumber(body.geometry.volume)}`;
+}
+
+function renderObjectTree(bodies) {
+  const root = $("#object-tree");
+  root.replaceChildren();
+  $("#tree-count").textContent = String(bodies.length);
+  $("#objects-empty").hidden = bodies.length > 0;
+
+  for (const body of bodies) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `object-row${body.id === selectedBodyId ? " selected" : ""}`;
+    button.setAttribute("aria-pressed", String(body.id === selectedBodyId));
+    const marker = document.createElement("span");
+    marker.className = "object-symbol";
+    marker.setAttribute("aria-hidden", "true");
+    marker.textContent = "▰";
+    const copy = document.createElement("span");
+    copy.className = "object-copy";
+    const name = document.createElement("strong");
+    name.textContent = body.name || "Тело";
+    const detail = document.createElement("small");
+    detail.textContent = dimensionsText(body.geometry?.dimensions);
+    copy.append(name, detail);
+    button.append(marker, copy);
+    button.addEventListener("click", () => {
+      selectedBodyId = body.id;
+      renderViewport([body, ...currentObjects.filter((item) => item.type === "body" && item.id !== body.id)]);
+      renderObjectTree(currentObjects.filter((item) => item.type === "body"));
+      renderProperties([body]);
+    });
+    root.append(button);
   }
 }
 
-async function withSelected(action) {
-  if (!selectedProjectId) return;
-  try { await action(selectedProjectId); }
-  catch (error) { notify(error.message, true); }
+function dimensionsText(dimensions) {
+  if (!dimensions) return "";
+  return `${formatNumber(dimensions.width)} × ${formatNumber(dimensions.height)} × ${formatNumber(dimensions.depth)}`;
 }
 
-document.querySelector("#create-project-form").addEventListener("submit", async (event) => {
+function renderProperties(bodies) {
+  const body = bodies.find((item) => item.id === selectedBodyId) || bodies[bodies.length - 1];
+  if (!body?.geometry?.dimensions) {
+    $("#properties-empty").hidden = false;
+    $("#properties-list").hidden = true;
+    return;
+  }
+  const dimensions = body.geometry.dimensions;
+  $("#properties-empty").hidden = true;
+  $("#properties-list").hidden = false;
+  $("#property-name").textContent = body.name || "Тело";
+  $("#property-width").textContent = formatNumber(dimensions.width);
+  $("#property-height").textContent = formatNumber(dimensions.height);
+  $("#property-depth").textContent = formatNumber(dimensions.depth);
+  $("#property-volume").textContent = formatNumber(body.geometry.volume);
+}
+
+function selectBodyFromResult(projectId, result) {
+  let bodyId = result?.body_id;
+  if (!bodyId && result?.feature_id) {
+    bodyId = currentObjects.find((item) => item.id === result.feature_id)?.body_id;
+  }
+  if (projectId === selectedProjectId && bodyId) selectedBodyId = bodyId;
+}
+
+function handleStreamEvent(type, event) {
+  const projectId = event.project_id;
+  if (!projectId) return;
+  const data = event.data || {};
+
+  if (type === "command.started") {
+    activeAgents.set(projectId, data.actor_id || "Агент");
+    setModelState(projectId, "working", "Агент вносит изменения");
+  } else if (type === "command.completed") {
+    activeAgents.delete(projectId);
+    selectBodyFromResult(projectId, data.result);
+    setModelState(projectId, "updated", "Модель обновлена");
+    scheduleWorkspaceRefresh();
+  } else if (type === "command.failed") {
+    activeAgents.delete(projectId);
+    setModelState(projectId, "failed", "Не удалось обновить модель");
+  } else if (type === "document.changed") {
+    scheduleWorkspaceRefresh();
+  } else if (type === "project.lock.changed" || type === "project.created") {
+    scheduleWorkspaceRefresh();
+  }
+
+  if (type === "project.lock.changed" && data.lease?.owner_type === "agent") {
+    activeAgents.set(projectId, data.lease.owner_id);
+  } else if (type === "project.lock.changed" && !data.lease) {
+    activeAgents.delete(projectId);
+  }
+
+  if (projectId === selectedProjectId) {
+    const project = getProject(projectId);
+    if (project) updateAgentState(projectId, project.lock);
+  }
+}
+
+function withSelected(action) {
+  if (!selectedProjectId) return;
+  return action(selectedProjectId).catch((error) => notify(error.message, true));
+}
+
+$("#create-project-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = event.currentTarget.elements.name;
+  const button = event.currentTarget.querySelector("button");
+  button.disabled = true;
   try {
     const response = await api("/api/v1/projects", { method: "POST", body: JSON.stringify({ name: input.value }) });
     input.value = "";
-    await refreshProjects();
-    await selectProject(response.project.id);
-    notify("Project created.");
-  } catch (error) { notify(error.message, true); }
+    selectedProjectId = response.project.id;
+    selectedBodyId = null;
+    saveSelectedProject(selectedProjectId);
+    await refreshWorkspace();
+    notify("Проект создан");
+  } catch (error) {
+    notify(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
 });
 
-document.querySelector("#acquire-human").addEventListener("click", () => withSelected(async (id) => {
-  const response = await api(`/api/v1/projects/${id}/leases`, {
-    method: "POST", body: JSON.stringify({ owner_type: "human", owner_id: "web-user" }),
+projectList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-project-id]");
+  if (button) selectProject(button.dataset.projectId);
+});
+
+$("#acquire-human").addEventListener("click", () => withSelected(async (id) => {
+  const response = await api(`/api/v1/projects/${encodeURIComponent(id)}/leases`, {
+    method: "POST",
+    body: JSON.stringify({ owner_type: "human", owner_id: "web-user" }),
   });
   heldLeases.set(id, { leaseId: response.lease.lease_id, ownerType: "human" });
-  await refreshProjects();
-  notify("Human edit lease acquired.");
+  await refreshWorkspace();
+  notify("Доступ получен");
 }));
 
-document.querySelector("#acquire-agent").addEventListener("click", () => withSelected(async (id) => {
-  const response = await api(`/api/v1/agent/projects/${id}/leases`, {
-    method: "POST", body: JSON.stringify({ owner_id: "demo-agent" }),
-  });
-  heldLeases.set(id, { leaseId: response.lease.lease_id, ownerType: "agent" });
-  await refreshProjects();
-  notify("Demo agent lease acquired.");
-}));
-
-document.querySelector("#release-lease").addEventListener("click", () => withSelected(async (id) => {
+$("#release-lease").addEventListener("click", () => withSelected(async (id) => {
   const held = heldLeases.get(id);
   if (!held) return;
-  const leaseId = held.leaseId;
-  await api(`/api/v1/projects/${id}/leases/${leaseId}/release`, { method: "POST", body: "{}" });
+  await api(`/api/v1/projects/${encodeURIComponent(id)}/leases/${encodeURIComponent(held.leaseId)}/release`, {
+    method: "POST",
+    body: "{}",
+  });
   heldLeases.delete(id);
-  await refreshProjects();
-  notify("Edit lease released.");
+  await refreshWorkspace();
+  notify("Доступ освобождён");
 }));
 
-document.querySelector("#create-box-form").addEventListener("submit", (event) => {
+$("#create-box-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  withSelected(async (id) => {
-    const form = new FormData(event.currentTarget);
-    const leaseId = heldLeases.get(id)?.leaseId;
-    await api(`/api/v1/projects/${id}/commands`, {
+  if (!selectedProjectId) return;
+  const id = selectedProjectId;
+  const form = new FormData(event.currentTarget);
+  const held = heldLeases.get(id);
+  if (!held) {
+    notify("Сначала захватите доступ к проекту", true);
+    return;
+  }
+  const button = event.currentTarget.querySelector("button[type=submit]");
+  button.disabled = true;
+  try {
+    const response = await api(`/api/v1/projects/${encodeURIComponent(id)}/commands`, {
       method: "POST",
       body: JSON.stringify({
-        lease_id: leaseId,
+        lease_id: held.leaseId,
         command: {
           type: "create_box",
           name: form.get("name"),
@@ -184,23 +525,49 @@ document.querySelector("#create-box-form").addEventListener("submit", (event) =>
         },
       }),
     });
-    await refreshProjects();
-    notify("Command saved to project history.");
-  });
+    selectBodyFromResult(id, response.history_entry?.result);
+    setModelState(id, "updated", "Модель обновлена");
+    await refreshWorkspace();
+    notify("Тело добавлено в модель");
+  } catch (error) {
+    notify(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
 });
 
-const events = new EventSource("/api/v1/events");
-for (const name of ["project.created", "project.lock.changed", "command.started", "command.completed", "command.failed", "document.changed"]) {
-  events.addEventListener(name, () => {
-    refreshProjects().catch((error) => notify(error.message, true));
+const stream = new EventSource("/api/v1/events");
+const eventTypes = ["project.created", "project.lock.changed", "command.started", "command.completed", "command.failed", "document.changed"];
+for (const type of eventTypes) {
+  stream.addEventListener(type, (message) => {
+    try { handleStreamEvent(type, JSON.parse(message.data)); }
+    catch { setModelState(selectedProjectId, "failed", "Ошибка обновления"); }
   });
 }
 
+stream.addEventListener("open", () => {
+  setConnection("connected");
+  scheduleWorkspaceRefresh();
+});
+stream.addEventListener("error", () => {
+  setConnection(stream.readyState === EventSource.CLOSED ? "offline" : "reconnecting");
+});
+
 setInterval(() => {
   for (const [projectId, held] of heldLeases) {
-    api(`/api/v1/projects/${projectId}/leases/${held.leaseId}/heartbeat`, { method: "POST", body: "{}" })
-      .catch(() => heldLeases.delete(projectId));
+    api(`/api/v1/projects/${encodeURIComponent(projectId)}/leases/${encodeURIComponent(held.leaseId)}/heartbeat`, {
+      method: "POST",
+      body: "{}",
+    }).catch(() => {
+      heldLeases.delete(projectId);
+      if (projectId === selectedProjectId) refreshWorkspace().catch((error) => notify(error.message, true));
+    });
   }
 }, 15_000);
 
-refreshProjects().catch((error) => notify(error.message, true));
+$("#server-address").textContent = location.host;
+setConnection("connecting");
+refreshWorkspace().catch((error) => {
+  setConnection("offline");
+  notify(error.message, true);
+});

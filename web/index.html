@@ -1,81 +1,166 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>CADYX — AI-native CAD foundation</title>
+    <meta name="theme-color" content="#15191d">
+    <title>CADYX — Проекты</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/assets/style.css">
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/" aria-label="CADYX home"><span class="brand-mark">C</span> CADYX</a>
-      <span class="topbar-note"><span class="pulse"></span> Local CADYX host</span>
+      <a class="brand" href="/" aria-label="CADYX — проекты">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span>CADYX</span>
+      </a>
+      <div class="topbar-project" aria-live="polite">
+        <span>Проект</span><span class="crumb-separator">/</span>
+        <strong id="topbar-project-name">Не выбран</strong>
+      </div>
+      <div id="connection-status" class="connection-status" data-state="connecting" role="status" aria-live="polite">
+        <span class="connection-dot" aria-hidden="true"></span>
+        <span id="connection-label">Подключение</span>
+      </div>
     </header>
-    <main class="shell">
-      <section class="intro">
-        <p class="eyebrow">AI-native CAD foundation</p>
-        <h1>One model. One editor at a time.</h1>
-        <p class="lead">Watch project ownership, inspect command history, and hand edit access between an agent and a person.</p>
-      </section>
 
-      <section class="workspace-layout" aria-label="Project workspace">
-        <aside class="panel project-panel">
-          <div class="panel-heading">
-            <div><p class="eyebrow">Workspace</p><h2>Projects</h2></div>
-            <span id="project-count" class="count">0</span>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Проекты">
+        <div class="sidebar-heading">
+          <div>
+            <p class="section-label">РАБОЧАЯ ОБЛАСТЬ</p>
+            <h2>Проекты</h2>
           </div>
-          <form id="create-project-form" class="create-project-form">
-            <label class="sr-only" for="project-name">Project name</label>
-            <input id="project-name" name="name" maxlength="120" placeholder="New project name" required>
-            <button class="button button-primary" type="submit" aria-label="Create project">+</button>
-          </form>
-          <div id="project-list" class="project-list" aria-live="polite"></div>
-          <p id="empty-projects" class="empty-note">No projects yet. Create one to begin.</p>
-        </aside>
+          <span id="project-count" class="count">0</span>
+        </div>
+        <form id="create-project-form" class="create-project-form">
+          <label class="sr-only" for="project-name">Название проекта</label>
+          <input id="project-name" name="name" maxlength="120" placeholder="Новый проект" required>
+          <button class="icon-button create-button" type="submit" aria-label="Создать проект" title="Создать проект">+</button>
+        </form>
+        <div id="project-list" class="project-list" aria-live="polite"></div>
+        <p id="empty-projects" class="empty-note" hidden>Проектов пока нет.</p>
+        <div class="sidebar-footer">
+          <span class="footer-indicator" aria-hidden="true"></span>
+          <div><span>Локальный узел</span><small id="server-address"></small></div>
+        </div>
+      </aside>
 
-        <section class="panel detail-panel" aria-live="polite">
-          <div id="no-selection" class="empty-state">
-            <div class="empty-icon">◇</div>
-            <h2>Select a project</h2>
-            <p>Project status, the current agent, model objects, and command history will appear here.</p>
-          </div>
-          <div id="project-detail" hidden>
-            <div class="detail-heading">
-              <div>
-                <p class="eyebrow">Current project</p>
-                <h2 id="detail-name"></h2>
+      <main class="workspace">
+        <section id="no-selection" class="empty-workspace">
+          <div class="empty-mark" aria-hidden="true">◇</div>
+          <h1>Выберите проект</h1>
+          <p>Выберите проект, чтобы увидеть модель.</p>
+        </section>
+
+        <div id="project-detail" class="project-detail" hidden>
+          <header class="workspace-header">
+            <div class="project-heading">
+              <div class="project-icon" aria-hidden="true">▧</div>
+              <div class="project-heading-copy">
+                <p class="section-label">ПРОЕКТ</p>
+                <h1 id="detail-name"></h1>
                 <p id="detail-id" class="project-id"></p>
               </div>
+            </div>
+            <div class="workspace-actions">
               <span id="lock-badge" class="lock-badge"></span>
+              <button id="acquire-human" class="button button-secondary" type="button">Захватить доступ</button>
+              <button id="release-lease" class="button button-quiet" type="button" hidden>Освободить доступ</button>
             </div>
-            <div class="status-grid">
-              <div class="status-card"><span class="status-label">Edit access</span><strong id="lock-owner">Free</strong></div>
-              <div class="status-card"><span class="status-label">Current agent</span><strong id="current-agent">None</strong></div>
-              <div class="status-card"><span class="status-label">Document revision</span><strong id="document-revision">0</strong></div>
-              <div class="status-card"><span class="status-label">Objects</span><strong id="object-count">0</strong></div>
-            </div>
-            <div class="actions">
-              <button id="acquire-human" class="button button-secondary" type="button">Edit as human</button>
-              <button id="acquire-agent" class="button button-secondary" type="button">Acquire for demo agent</button>
-              <button id="release-lease" class="button button-quiet" type="button" hidden>Release my lease</button>
-            </div>
-            <section id="demo-command-panel" class="demo-command" hidden>
-              <div><p class="eyebrow">Shared Command System</p><h3>Create a demo box</h3></div>
-              <form id="create-box-form" class="box-form">
-                <label>Name<input name="name" value="Box" maxlength="120" required></label>
-                <label>Width<input name="width" type="number" min="0.001" step="any" value="20" required></label>
-                <label>Height<input name="height" type="number" min="0.001" step="any" value="10" required></label>
-                <label>Depth<input name="depth" type="number" min="0.001" step="any" value="5" required></label>
-                <button class="button button-primary" type="submit">Run command</button>
-              </form>
+          </header>
+
+          <section class="metric-grid" aria-label="Состояние проекта">
+            <article class="metric-card">
+              <span class="metric-label">АГЕНТ</span>
+              <strong id="agent-state">Не подключён</strong>
+              <small id="current-agent">Состояние проекта</small>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">РЕВИЗИЯ</span>
+              <strong id="document-revision">0</strong>
+              <small id="last-modified">Изменений пока нет</small>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">ТЕЛА / ЭЛЕМЕНТЫ</span>
+              <strong id="object-count">0 / 0</strong>
+              <small>Текущее состояние документа</small>
+            </article>
+          </section>
+
+          <div class="primary-grid">
+            <section class="panel model-panel" aria-labelledby="model-title">
+              <div class="panel-heading">
+                <div><span class="panel-index">01</span><h2 id="model-title">Модель</h2></div>
+                <div class="model-toolbar">
+                  <span id="viewport-label" class="panel-note">Нет тел</span>
+                  <span id="model-live-state" class="model-live-state" data-state="idle">
+                    <span class="live-dot" aria-hidden="true"></span><span id="model-live-label">Без изменений</span>
+                  </span>
+                </div>
+              </div>
+              <div class="viewport" id="viewport">
+                <svg id="model-preview" class="model-preview" viewBox="0 0 600 360" role="img" aria-label="Схематичный вид выбранного тела" hidden>
+                  <g id="model-faces"></g>
+                  <g id="model-edges"></g>
+                </svg>
+                <div id="viewport-empty" class="viewport-empty">
+                  <span class="empty-cube" aria-hidden="true">⬡</span>
+                  <p>Модель ещё не построена</p>
+                  <small>Вид модели будет обновляться при изменениях</small>
+                </div>
+              </div>
+              <div id="viewport-meta" class="viewport-meta" hidden>
+                <span id="selected-object-name"></span>
+                <span id="selected-object-dimensions" class="dimension-value"></span>
+                <span id="selected-object-volume" class="dimension-value"></span>
+              </div>
             </section>
-            <div class="history-heading"><div><p class="eyebrow">Audit trail</p><h3>Command history</h3></div><span id="history-count" class="muted"></span></div>
-            <div id="history-list" class="history-list"></div>
+
+            <aside class="inspector-stack">
+              <section class="panel object-panel" aria-labelledby="objects-title">
+                <div class="panel-heading">
+                  <div><span class="panel-index">02</span><h2 id="objects-title">Тела</h2></div>
+                  <span id="tree-count" class="subtle-count">0</span>
+                </div>
+                <div id="object-tree" class="object-tree"></div>
+                <p id="objects-empty" class="panel-empty">В этой модели пока нет тел.</p>
+              </section>
+
+              <section class="panel properties-panel" aria-labelledby="properties-title">
+                <div class="panel-heading">
+                  <div><span class="panel-index">03</span><h2 id="properties-title">Параметры тела</h2></div>
+                </div>
+                <div id="properties-empty" class="properties-empty">Выберите тело модели.</div>
+                <dl id="properties-list" class="properties-list" hidden>
+                  <div><dt>Имя</dt><dd id="property-name"></dd></div>
+                  <div><dt>Ширина</dt><dd id="property-width"></dd></div>
+                  <div><dt>Высота</dt><dd id="property-height"></dd></div>
+                  <div><dt>Глубина</dt><dd id="property-depth"></dd></div>
+                  <div><dt>Объём</dt><dd id="property-volume"></dd></div>
+                </dl>
+              </section>
+            </aside>
           </div>
-        </section>
-      </section>
-      <p id="toast" class="toast" role="status" aria-live="polite"></p>
-    </main>
+
+          <details class="panel manual-tools">
+            <summary>Ручная проверка модели</summary>
+            <div class="manual-content">
+              <p class="manual-access">Ручное редактирование доступно, когда проект не заблокирован агентом.</p>
+              <form id="create-box-form" class="box-form" hidden>
+                <label>Имя тела<input name="name" value="Коробка" maxlength="120" required></label>
+                <label>Ширина<input name="width" type="number" min="0.001" step="any" value="20" required></label>
+                <label>Высота<input name="height" type="number" min="0.001" step="any" value="10" required></label>
+                <label>Глубина<input name="depth" type="number" min="0.001" step="any" value="5" required></label>
+                <button class="button button-primary" type="submit">Создать тело</button>
+              </form>
+            </div>
+          </details>
+        </div>
+      </main>
+    </div>
+
+    <p id="toast" class="toast" role="status" aria-live="polite"></p>
     <script src="/assets/app.js" defer></script>
   </body>
 </html>

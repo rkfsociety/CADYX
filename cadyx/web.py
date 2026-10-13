@@ -50,6 +50,9 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
                 if parsed.path == "/":
                     self._static("index.html", "text/html; charset=utf-8")
                     return
+                if parsed.path == "/favicon.svg":
+                    self._static("favicon.svg", "image/svg+xml")
+                    return
                 if parsed.path == "/assets/app.js":
                     self._static("app.js", "text/javascript; charset=utf-8")
                     return
