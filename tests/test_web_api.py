@@ -91,6 +91,32 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertIn(b"CADYX", response.read())
 
+    def test_sketch_commands_through_both_api_surfaces(self) -> None:
+        for surface, owner in [("projects", "human"), ("agent/projects", "agent")]:
+            with self.subTest(surface=surface):
+                _, created = self.request("/api/v1/projects", {"name": "Sketch API"})
+                project = created["project"]["id"]
+                base = f"/api/v1/{surface}/{project}"
+                _, acquired = self.request(base + "/leases", {"owner_type": owner, "owner_id": "test"})
+                lease = acquired["lease"]["lease_id"]
+
+                def command(value, expected=200):
+                    status, result = self.request(base + "/commands", {"lease_id": lease, "command": value})
+                    self.assertEqual(status, expected, result)
+                    return result
+
+                sketch = command({"type": "create_sketch"})["history_entry"]["result"]["sketch_id"]
+                points = [command({"type": "add_sketch_element", "sketch_id": sketch, "element_type": "point", "x": x, "y": 0})["history_entry"]["result"]["object_id"] for x in [0, 3]]
+                line = command({"type": "add_sketch_element", "sketch_id": sketch, "element_type": "line", "start_id": points[0], "end_id": points[1]})["history_entry"]["result"]["object_id"]
+                command({"type": "add_sketch_constraint", "sketch_id": sketch, "kind": "horizontal", "references": [line]})
+                _, before = self.request(base)
+                command({"type": "update_sketch_elements", "updates": [{"object_id": points[1], "changes": {"y": 1}}]}, 400)
+                _, after = self.request(base)
+                self.assertEqual(before["document"], after["document"])
+                self.assertEqual(before["history"], after["history"])
+                command({"type": "update_sketch_elements", "updates": [{"object_id": point, "changes": {"y": 2}} for point in points]})
+                self.assertEqual(self.core.inspect_project(project)["document"]["revision"], 6)
+
 
 if __name__ == "__main__":
     unittest.main()

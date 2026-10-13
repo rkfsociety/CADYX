@@ -1,12 +1,12 @@
 # CADYX project roadmap
 
-This is the current development sequence. The milestones are goals, not claims that the corresponding capabilities are entirely absent; inspect the implementation before starting work or changing a milestone's status. Stages 1 and 2 are complete; later stages remain proposed.
+This is the current development sequence. The milestones are goals, not claims that the corresponding capabilities are entirely absent; inspect the implementation before starting work or changing a milestone's status. Stages 1–3 are complete; later stages remain proposed.
 
 ## Stages
 
 1. **Complete — Real geometry kernel:** integrate Open CASCADE behind `GeometryKernel`, validate reconstructed box B-reps, retain compatibility with saved `primitive-v1` descriptors, and cover the adapter with conformance tests. Evidence: [`cadyx/kernel.py`](../cadyx/kernel.py), [`tests/test_kernel.py`](../tests/test_kernel.py), and [`requirements.txt`](../requirements.txt).
 2. **Complete — Live visual workspace:** show supported box geometry and parameter changes in the browser as the Agent API updates the project; keep SSE command details out of the UI. Current scope supports box previews. Evidence: [`web/`](../web/), [`cadyx/web.py`](../cadyx/web.py), and [architecture](../docs/architecture.md).
-3. **Richer Document Model:** add sketches, constraints, and stable relationships between objects.
+3. **Complete — Richer Document Model:** persisted XY sketches with points, lines, circles, checked horizontal/vertical/coincident/distance/radius constraints, stable typed UUID references, atomic batch edits and guarded deletion. Constraints validate supplied geometry; no solver or browser sketch editor is included. Document v1 upgrades explicitly to v2 in memory, preserving legacy solids/history. Evidence: [`cadyx/models.py`](../cadyx/models.py), [`cadyx/sketches.py`](../cadyx/sketches.py), [`cadyx/commands.py`](../cadyx/commands.py), [`tests/test_document.py`](../tests/test_document.py), [`tests/test_web_api.py`](../tests/test_web_api.py), and [document contract](../docs/document-model-v2.md).
 4. **Project Format migrations:** add explicit migrations between persisted format versions as the model evolves.
 5. **Multi-process leases:** make lease coordination reliable when multiple processes access the same project workspace.
 6. **Safe agent stop and resume:** let agent work stop safely after the current atomic command, validate saved state, and resume from a known state.

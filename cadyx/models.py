@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Any
 
 from .errors import ValidationError
+from .sketches import typed_id, validate_sketches
 
 
 class OwnerType(StrEnum):
@@ -26,7 +27,7 @@ class LockState(StrEnum):
 @dataclass(slots=True)
 class Document:
     id: str
-    version: int = 1
+    version: int = 2
     revision: int = 0
     objects: list[dict[str, Any]] = field(default_factory=list)
 
@@ -40,9 +41,15 @@ class Document:
     def from_dict(cls, value: dict[str, Any]) -> Document:
         if not isinstance(value, dict):
             raise ValidationError("The saved document must be an object.")
+        version = value.get("version", 0)
+        if type(version) is not int or version not in {1, 2}:
+            raise ValidationError(f"Unsupported document version: {version!r}.")
+        if version == 1 and isinstance(value.get("objects"), list):
+            if any(isinstance(item, dict) and item.get("type") not in ("body", "feature") for item in value["objects"]):
+                raise ValidationError("Version 1 supports only bodies and features.")
         document = cls(
             id=value.get("id", ""),
-            version=value.get("version", 0),
+            version=2,
             revision=value.get("revision", 0),
             objects=deepcopy(value.get("objects", [])),
         )
@@ -58,9 +65,8 @@ class Document:
         }
 
     def validate(self) -> None:
-        if not isinstance(self.id, str) or not self.id.startswith("document:"):
-            raise ValidationError("Document id must use the stable 'document:<uuid>' form.")
-        if type(self.version) is not int or self.version != 1:
+        typed_id(self.id, "document")
+        if type(self.version) is not int or self.version != 2:
             raise ValidationError(f"Unsupported document version: {self.version!r}.")
         if not isinstance(self.revision, int) or isinstance(self.revision, bool) or self.revision < 0:
             raise ValidationError("Document revision must be a non-negative integer.")
@@ -76,6 +82,10 @@ class Document:
                 raise ValidationError("Every document object needs a stable typed id.")
             if object_id in seen:
                 raise ValidationError(f"Duplicate document object id: {object_id}.")
+            kind = item.get("type")
+            if not isinstance(kind, str) or kind not in {"body", "feature", "sketch", "point", "line", "circle", "constraint"}:
+                raise ValidationError("Unsupported document object type.")
+            typed_id(object_id, kind)
             seen.add(object_id)
 
         by_id = {item["id"]: item for item in self.objects}
@@ -84,14 +94,18 @@ class Document:
                 feature_ids = item.get("feature_ids", [])
                 if not isinstance(feature_ids, list):
                     raise ValidationError("Body feature_ids must be a list.")
+                if len(set(feature_id for feature_id in feature_ids if isinstance(feature_id, str))) != len(feature_ids):
+                    raise ValidationError("Body feature_ids must be unique strings.")
                 for feature_id in feature_ids:
                     feature = by_id.get(feature_id)
                     if not feature or feature.get("type") != "feature" or feature.get("body_id") != item["id"]:
                         raise ValidationError("Body feature references must point to its own saved features.")
             elif item.get("type") == "feature":
+                typed_id(item.get("body_id"), "body")
                 body = by_id.get(item.get("body_id"))
-                if not body or body.get("type") != "body" or item["id"] not in body.get("feature_ids", []):
+                if not body or body.get("type") != "body" or not isinstance(body.get("feature_ids", []), list) or item["id"] not in body.get("feature_ids", []):
                     raise ValidationError("Feature must reference a body that includes the feature id.")
+        validate_sketches(self.objects)
 
 
 @dataclass(frozen=True, slots=True)

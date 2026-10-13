@@ -33,6 +33,17 @@ The initial command registry supports `create_box` and `set_parameter` for box d
 
 ## APIs and events
 
+Document Model v2 adds independent XY sketches, points, lines, circles and
+checked geometric/dimensional constraints. Sketch references use stable typed
+UUIDs and are validated on load and after every command. Coordinate updates can
+be batched atomically; deletions cannot leave dangling references. Constraints
+check the supplied geometry without solving it. The existing command endpoints
+support these objects under the same leases and atomic save path. Document v1
+is upgraded in memory; the project envelope stays at version 1. See
+[Document Model v2](document-model-v2.md) for the supported commands, migration
+policy and exact semantics. Sketch rendering/editing in the browser remains
+future work.
+
 The HTTP API uses JSON under `/api/v1`. The Agent API is under `/api/v1/agent`; it shares Core operations and requires an agent lease for commands. Both `GET /api/v1/projects` and `GET /api/v1/agent/projects` return persisted CADYX projects in `projects` and immediate project-directory names in `folders`. `GET /api/v1/workspace/folders/{folder}/files` lists direct regular files; the corresponding `/files/{name}` route serves an individual file for browser preview. Folder entries are available for discovery and preview; project inspection, leases, and CADYX document commands continue to apply to persisted CADYX project records. The browser API is under `/api/v1/projects` and requires a human lease for commands. Both command routes enter the same Command System. Project updates are broadcast in-process over server-sent events at `/api/v1/events`; event history is not replayed after reconnect, so clients refresh project state through the API.
 
 The default host is `127.0.0.1`. No authentication or LAN deployment hardening is implemented in this foundation pass.

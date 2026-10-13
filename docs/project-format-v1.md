@@ -12,7 +12,7 @@ Every project lives at `projects/<project-id>/project.json`, where `project-id` 
   "modified_at": "<UTC ISO-8601>",
   "document": {
     "id": "document:<uuid>",
-    "version": 1,
+    "version": 2,
     "revision": 0,
     "objects": []
   },
@@ -21,5 +21,10 @@ Every project lives at `projects/<project-id>/project.json`, where `project-id` 
 ```
 
 The document and its successful command history are replaced together using a temporary file and an atomic filesystem replace. Edit leases and live host sessions are runtime state and are not serialized into `project.json`. Unknown project or document versions are rejected rather than silently interpreted.
+
+The project envelope remains version 1; the nested document now uses version 2.
+Legacy document v1 is explicitly upgraded in memory on read and persisted only
+with a successful command. See [Document Model v2](document-model-v2.md) for the
+sketch schema, constraint semantics and compatibility policy.
 
 Box geometry is stored as a JSON descriptor with its kernel id, dimensions, and measured volume. New descriptors use `occt-v1`; Open CASCADE reconstructs the B-rep from dimensions and checks its validity when creating or validating a project. Native kernel objects are not serialized. Existing `primitive-v1` box descriptors remain readable and are checked by rebuilding the corresponding Open CASCADE solid.

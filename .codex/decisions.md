@@ -13,3 +13,9 @@
 
 - **Decision:** use Open CASCADE through the pinned `cadquery-ocp` Python bindings behind `GeometryKernel`; store box dimensions and kernel-measured volume as JSON descriptors, then rebuild and validate B-reps instead of serializing native kernel objects. Continue accepting `primitive-v1` descriptors. Include its VTK runtime for the planned shared rendering and viewport work. **Reason:** this adds real B-rep construction while preserving portable project files and existing projects, and prepares the selected visualization runtime for the next roadmap stage. **Constraint:** kernel-specific code stays inside the adapter. **Source:** `cadyx/kernel.py`, `docs/project-format-v1.md`, `requirements.txt`.
 - **Status:** active.
+
+## Document Model v2
+
+- **Decision:** represent XY sketches, points, lines, circles and constraints as document objects with stable typed UUID references. Membership has one source (`sketch_id`); constraints validate geometry with absolute tolerance 1e-7 instead of implying a solver. Batch coordinate updates use the existing atomic Core command path. **Reason:** add editable, persistent relationships with explicit invariant checks without introducing a separate mutation system. **Source:** `docs/document-model-v2.md`, `cadyx/sketches.py`, `cadyx/commands.py`.
+- **Decision:** explicitly upgrade document v1 to v2 in memory and save it only with the next successful command; keep project envelope v1. **Reason:** legacy bodies, features and history remain intact and read-only inspection does not rewrite user data. Older hosts reject v2; general migration chains remain stage 4. **Source:** `cadyx/models.py`, `docs/document-model-v2.md`, `tests/test_document.py`.
+- **Status:** active.
