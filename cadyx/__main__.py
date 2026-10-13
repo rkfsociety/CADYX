@@ -13,7 +13,7 @@ from .web import CadyxHTTPServer, make_request_handler
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the local CADYX Core and web interface.")
     parser.add_argument("--host", default=os.environ.get("CADYX_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("CADYX_PORT", "8000")))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("CADYX_PORT", "8888")))
     parser.add_argument(
         "--projects-dir",
         default=os.environ.get("CADYX_PROJECTS_DIR", str(Path.cwd() / "projects")),

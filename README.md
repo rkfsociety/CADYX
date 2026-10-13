@@ -10,7 +10,7 @@ Requires Python 3.12 or newer. The first pass uses only the Python standard libr
 python -m cadyx
 ```
 
-Open <http://127.0.0.1:8000>. To use another port or workspace, pass `--port` / `--projects-dir`, or set `CADYX_PORT`, `CADYX_HOST`, and `CADYX_PROJECTS_DIR`. The default host is loopback. Binding to a LAN interface is available with `--host`, but this prototype has no authentication.
+Open <http://127.0.0.1:8888>. To use another port or workspace, pass `--port` / `--projects-dir`, or set `CADYX_PORT`, `CADYX_HOST`, and `CADYX_PROJECTS_DIR`. The default host is loopback. Binding to a LAN interface is available with `--host`, but this prototype has no authentication.
 
 The project workspace is `projects/`. Runtime project data is ignored by Git; keep source CAD files and scans backed up as user data.
 
