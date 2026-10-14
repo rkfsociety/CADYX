@@ -127,6 +127,8 @@ def make_request_handler(
         def _require_auth(self) -> bool:
             if authorization_matches(self.headers.get("Authorization"), auth_token):
                 return True
+            # Do not reuse a connection whose unauthenticated request body was not read.
+            self.close_connection = True
             self._json(
                 401,
                 {
@@ -136,6 +138,7 @@ def make_request_handler(
                 extra_headers=(
                     ("WWW-Authenticate", 'Basic realm="CADYX", charset="UTF-8"'),
                     ("WWW-Authenticate", 'Bearer realm="CADYX"'),
+                    ("Connection", "close"),
                 ),
             )
             return False
