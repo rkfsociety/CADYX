@@ -119,7 +119,8 @@ This is an authentication boundary, not transport encryption. The built-in serve
 
 ## APIs and events
 
-Document Model v3 supports XY/XZ sketches, points, lines, circles, checked
+Document Model v3 supports XY/XZ sketches, point/line/circle primitives,
+atomic builders for polylines/polygons, rectangles, and circles, checked
 geometric/dimensional constraints, and linked OCCT extrusion, revolution, sweep,
 fuse, and fillet features.
 Sketch references use stable typed

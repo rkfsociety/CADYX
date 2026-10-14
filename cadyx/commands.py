@@ -15,10 +15,25 @@ from .scan import DEFAULT_SCAN_PARAMETERS, ScanProcessor, normalize_scan_paramet
 from .sketches import closed_profile, open_path
 
 
+def _finite_number(value: Any, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValidationError(f"{name} must be a number.")
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        raise ValidationError(f"{name} must be a finite number.") from None
+    if not math.isfinite(result):
+        raise ValidationError(f"{name} must be a finite number.")
+    return result
+
+
 def _number(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValidationError(f"{name} must be a number.")
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        raise ValidationError(f"{name} must be a finite positive number.") from None
     if not math.isfinite(result) or result <= 0:
         raise ValidationError(f"{name} must be a finite positive number.")
     return result
@@ -82,6 +97,12 @@ class CommandSystem:
                 **{key: command.get(key) for key in fields[element_kind]},
             })
             return {"object_id": object_id}
+        if kind == "add_sketch_polyline":
+            return self._add_sketch_polyline(document, command, progress=progress)
+        if kind == "add_sketch_rectangle":
+            return self._add_sketch_rectangle(document, command, progress=progress)
+        if kind == "add_sketch_circle":
+            return self._add_sketch_circle(document, command, progress=progress)
         if kind == "add_sketch_constraint":
             object_id = f"constraint:{uuid4()}"
             document.objects.append({
@@ -133,6 +154,129 @@ class CommandSystem:
             document.objects.remove(item)
             return {"object_id": object_id}
         raise ValidationError(f"Unsupported command type: {kind!r}.")
+
+    def _add_sketch_polyline(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch_id = command.get("sketch_id")
+        coordinates = command.get("points")
+        closed = command.get("closed", False)
+        if not isinstance(closed, bool):
+            raise ValidationError("closed must be a boolean.")
+        minimum, maximum = (3, 4096) if closed else (2, 512)
+        if not isinstance(coordinates, list) or not minimum <= len(coordinates) <= maximum:
+            shape = "closed polygon" if closed else "polyline"
+            raise ValidationError(f"A {shape} needs between {minimum} and {maximum} points.")
+
+        points: list[tuple[float, float]] = []
+        for point in coordinates:
+            if not isinstance(point, dict) or set(point) != {"x", "y"}:
+                raise ValidationError("Every polyline point needs x and y coordinates.")
+            points.append((
+                _finite_number(point["x"], "Polyline x coordinate"),
+                _finite_number(point["y"], "Polyline y coordinate"),
+            ))
+
+        sketch = self._find_sketch(document, sketch_id)
+        return self._append_sketch_polyline(
+            document, sketch, points, closed=closed, operation="add_sketch_polyline", progress=progress,
+        )
+
+    def _add_sketch_rectangle(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        x = _finite_number(command.get("x"), "Rectangle x coordinate")
+        y = _finite_number(command.get("y"), "Rectangle y coordinate")
+        width = _number(command.get("width"), "width")
+        height = _number(command.get("height"), "height")
+        right, top = x + width, y + height
+        if not math.isfinite(right) or not math.isfinite(top):
+            raise ValidationError("Rectangle coordinates must be finite numbers.")
+        points = [(x, y), (right, y), (right, top), (x, top)]
+        return self._append_sketch_polyline(
+            document, sketch, points, closed=True, operation="add_sketch_rectangle", progress=progress,
+        )
+
+    def _add_sketch_circle(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        x = _finite_number(command.get("x"), "Circle x coordinate")
+        y = _finite_number(command.get("y"), "Circle y coordinate")
+        radius = _number(command.get("radius"), "radius")
+        if any(not math.isfinite(value) for value in (x - radius, x + radius, y - radius, y + radius)):
+            raise ValidationError("Circle coordinates must be finite numbers.")
+        if progress is not None:
+            progress({"phase": "add_sketch_circle"})
+        sketch_id = sketch["id"]
+        point_id = f"point:{uuid4()}"
+        circle_id = f"circle:{uuid4()}"
+        sketch_index = document.objects.index(sketch)
+        document.objects[sketch_index + 1:sketch_index + 1] = [
+            {"id": point_id, "type": "point", "sketch_id": sketch_id, "x": x, "y": y},
+            {"id": circle_id, "type": "circle", "sketch_id": sketch_id,
+             "center_id": point_id, "radius": radius},
+        ]
+        self._rebuild_changed_features(document, {sketch_id}, progress=progress)
+        return {"sketch_id": sketch_id, "point_id": point_id, "circle_id": circle_id}
+
+    @staticmethod
+    def _find_sketch(document: Document, sketch_id: Any) -> dict[str, Any]:
+        sketch = next((item for item in document.objects
+                       if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
+        if sketch is None:
+            raise NotFoundError("Sketch was not found.")
+        return sketch
+
+    def _append_sketch_polyline(
+        self,
+        document: Document,
+        sketch: dict[str, Any],
+        points: list[tuple[float, float]],
+        *,
+        closed: bool,
+        operation: str,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        segments = list(zip(points, points[1:]))
+        if closed:
+            segments.append((points[-1], points[0]))
+        lengths = [math.hypot(start[0] - end[0], start[1] - end[1]) for start, end in segments]
+        if any(not math.isfinite(length) or length <= 1e-7 for length in lengths):
+            raise ValidationError("Polyline segments must have distinct endpoints.")
+
+        if progress is not None:
+            progress({"phase": operation})
+        sketch_id = sketch["id"]
+        point_ids = [f"point:{uuid4()}" for _ in points]
+        line_count = len(points) if closed else len(points) - 1
+        line_ids = [f"line:{uuid4()}" for _ in range(line_count)]
+        elements = [
+            {"id": point_id, "type": "point", "sketch_id": sketch_id, "x": x, "y": y}
+            for point_id, (x, y) in zip(point_ids, points, strict=True)
+        ]
+        elements.extend(
+            {"id": line_id, "type": "line", "sketch_id": sketch_id,
+             "start_id": point_ids[index], "end_id": point_ids[(index + 1) % len(points)]}
+            for index, line_id in enumerate(line_ids)
+        )
+        sketch_index = document.objects.index(sketch)
+        document.objects[sketch_index + 1:sketch_index + 1] = elements
+        self._rebuild_changed_features(document, {sketch_id}, progress=progress)
+        return {"sketch_id": sketch_id, "point_ids": point_ids, "line_ids": line_ids, "closed": closed}
 
     def _publish_scan_output(
         self,

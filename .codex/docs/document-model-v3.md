@@ -54,6 +54,17 @@ their respective human/agent edit leases. Results below appear inside
   Returns `sketch_id`.
 - `add_sketch_element`: `sketch_id`, `element_type` (point, line or circle),
   and that element's fields from the table. Returns `object_id`.
+- `add_sketch_polyline`: `sketch_id`, `points` (`{x, y}` coordinates), and
+  optional `closed` (default `false`). Adds one open chain of 2–512 points, or
+  one closed polygon of 3–4096 points, in a single command. Adjacent points,
+  including the closing pair for a polygon, must be more than 1e-7 apart.
+  Returns the created `point_ids`, `line_ids`, and `closed` state. These are
+  ordinary point and line objects in the document.
+- `add_sketch_rectangle`: `sketch_id`, lower-left `x` and `y`, positive `width`
+  and `height`. Adds a closed four-sided profile as ordinary points and lines
+  and returns their ids in one command.
+- `add_sketch_circle`: `sketch_id`, center `x` and `y`, and positive `radius`.
+  Adds the center point and circle together and returns `point_id` and `circle_id`.
 - `add_sketch_constraint`: `sketch_id`, `kind`, ordered `references`, and `value`
   for distance/radius. Returns `constraint_id`.
 - `update_sketch_elements`: non-empty `updates` list of

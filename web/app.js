@@ -879,6 +879,17 @@ function handleStreamEvent(type, event) {
           type: command.element_type === "point" ? "sketch-point" : "sketch-lines",
           durationMs: command.element_type === "circle" ? 700 : 460,
         };
+      } else if (["add_sketch_polyline", "add_sketch_rectangle"].includes(command.type)) {
+        activeSketchId = command.sketch_id || activeSketchId;
+        pendingViewportTransition = activeSketchId ? {
+          projectId, sketchId: activeSketchId, allSketchLines: true,
+          type: "sketch-lines", durationMs: Math.min(1800, Math.max(460, 250 + (result.line_ids?.length || 0) * 3)),
+        } : null;
+      } else if (command.type === "add_sketch_circle") {
+        activeSketchId = command.sketch_id || activeSketchId;
+        pendingViewportTransition = {
+          projectId, objectId: result.circle_id, type: "sketch-lines", durationMs: 700,
+        };
       } else if (command.type === "add_sketch_constraint") {
         activeSketchId = command.sketch_id || activeSketchId;
         pendingViewportTransition = null;
