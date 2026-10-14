@@ -139,16 +139,11 @@ const FOLDER_SELECTION_PREFIX = "folder:";
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
 const folderInspector = $("#folder-inspector");
-const dockMenus = [...document.querySelectorAll(".dock-control")];
-dockMenus.forEach((menu) => menu.addEventListener("toggle", () => {
-  if (menu.open) dockMenus.forEach((other) => { if (other !== menu) other.open = false; });
-}));
 $("#workspace-navigation").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-workspace-view]");
   if (!button || button.disabled) return;
   const view = button.dataset.workspaceView;
   setWorkspaceNavigation(view);
-  dockMenus.forEach((menu) => { menu.open = false; });
   if (view === "overview") {
     $("#viewport-fit").focus({ preventScroll: true });
   } else if (view === "geometry") {
@@ -862,7 +857,6 @@ async function refreshDetail() {
   }
   currentObjects = visibleObjects;
   renderObjectTree(visibleObjects);
-  renderProperties(visibleObjects);
 }
 
 async function refreshActivitySnapshot(projectId) {
@@ -961,18 +955,6 @@ function displayObjectName(name) {
   return name;
 }
 
-const geometryTypeLabels = {
-  box: "Параллелепипед",
-  extruded_profile: "Выдавленный профиль",
-  revolved_profile: "Тело вращения",
-  fused_profiles: "Объединённое тело",
-  fused_solids: "Объединённое тело",
-  swept_pipe: "Труба по траектории",
-  metric_thread: "Метрическая резьба",
-  imported_brep: "Импортированная граничная модель",
-  filleted_solid: "Тело со скруглениями",
-  "cadyx-mesh-v1": "Треугольная сетка",
-};
 const featureOperationLabels = {
   create_box: "Построение параллелепипеда",
   metric_thread: "Построение метрической резьбы",
@@ -986,44 +968,6 @@ const featureOperationLabels = {
   sweep_sketch: "Протяжка профиля по траектории",
   fillet_edges: "Скругление рёбер",
 };
-const parameterLabels = {
-  depth: "Глубина выдавливания",
-  centered: "Симметричное выдавливание",
-  angle_degrees: "Угол поворота",
-  radius: "Радиус",
-  major_diameter: "Наружный диаметр резьбы",
-  pitch: "Шаг резьбы",
-  length: "Длина резьбы",
-  handedness: "Направление резьбы",
-  x_start: "Начало участка по оси X",
-  x_end: "Конец участка по оси X",
-  diameter_delta: "Изменение диаметра",
-  axis_origin_y: "Центр оси Y",
-  axis_origin_z: "Центр оси Z",
-  rotation_axis: "Ось поворота",
-  translation: "Смещение XYZ",
-  voxel_size: "Размер вокселя",
-  target_triangles: "Целевое число треугольников",
-  outlier_neighbors: "Число соседних точек",
-  outlier_std_ratio: "Порог фильтрации выбросов",
-  poisson_depth: "Глубина реконструкции",
-};
-
-function geometryTypeLabel(kind) {
-  return geometryTypeLabels[kind] || "Геометрия";
-}
-
-function featureOperationLabel(operation) {
-  return featureOperationLabels[operation] || "Другая операция";
-}
-
-function formatParameterValue(key, value) {
-  if (typeof value === "boolean") return value ? "Да" : "Нет";
-  if (Array.isArray(value)) return value.map(formatNumber).join(", ");
-  if (key === "handedness") return ({ right: "Правая", left: "Левая" })[value] || "Не задано";
-  return formatNumber(value);
-}
-
 function objectSummary(item, objects = currentObjects) {
   if (item.type === "body") return dimensionsText(item.geometry?.dimensions);
   if (item.type === "feature") {
@@ -1083,7 +1027,6 @@ function renderObjectTree(objects) {
       selectedObjectId = item.id;
       renderViewport(currentObjects);
       renderObjectTree(currentObjects);
-      renderProperties(currentObjects);
     });
     parent.append(button);
   };
@@ -1127,83 +1070,6 @@ function renderObjectTree(objects) {
 function dimensionsText(dimensions) {
   if (!dimensions) return "";
   return `${formatNumber(dimensions.width)} × ${formatNumber(dimensions.height)} × ${formatNumber(dimensions.depth)}`;
-}
-
-function referenceText(id, objects) {
-  const target = objects.find((item) => item.id === id);
-  if (!target) return "Объект не найден";
-  if (target.name) return displayObjectName(target.name);
-  const summary = objectSummary(target, objects);
-  return summary ? `${objectTypeLabel(target)} · ${summary}` : objectTypeLabel(target);
-}
-
-function propertyRows(item, objects) {
-  if (item.type === "body") return [
-    ["Имя", displayObjectName(item.name) || "Тело"], ["Геометрия", geometryTypeLabel(item.geometry?.kind)],
-    ["Ширина", formatNumber(item.geometry?.dimensions?.width)],
-    ["Высота", formatNumber(item.geometry?.dimensions?.height)],
-    ["Глубина", formatNumber(item.geometry?.dimensions?.depth)],
-    ["Объём", formatNumber(item.geometry?.volume)], ["Операций", String(item.feature_ids?.length || 0)],
-  ];
-  if (item.type === "feature") return [
-    ["Тип", featureOperationLabel(item.operation)], ["Тело", referenceText(item.body_id, objects)],
-    ...Object.entries(item.parameters || {}).map(([key, value]) => [
-      parameterLabels[key] || "Параметр",
-      formatParameterValue(key, value),
-    ]),
-    ...(item.operation === "fuse_bodies" ? [
-      ["Основание", referenceText(item.base_body_id, objects)],
-      ["Объединяемое тело", referenceText(item.tool_body_id, objects)],
-    ] : item.operation === "fillet_edges" ? [
-      ["Исходное тело", referenceText(item.source_body_id, objects)],
-      ["Рёбра", item.edge_indices.join(", ")],
-    ] : item.operation === "sweep_sketch" ? [
-      ["Траектория", referenceText(item.source_sketch_id, objects)],
-    ] : []),
-  ];
-  if (item.type === "sketch") return [
-    ["Имя", displayObjectName(item.name)], ["Плоскость", item.plane],
-    ["Объектов", String(objects.filter((child) => child.sketch_id === item.id).length)],
-  ];
-  if (item.type === "point") return [
-    ["Эскиз", referenceText(item.sketch_id, objects)], ["X", formatNumber(item.x)], ["Y", formatNumber(item.y)],
-  ];
-  if (item.type === "line") return [
-    ["Эскиз", referenceText(item.sketch_id, objects)], ["Начало", referenceText(item.start_id, objects)],
-    ["Конец", referenceText(item.end_id, objects)],
-  ];
-  if (item.type === "circle") return [
-    ["Эскиз", referenceText(item.sketch_id, objects)], ["Центр", referenceText(item.center_id, objects)],
-    ["Радиус", formatNumber(item.radius)],
-  ];
-  return [
-    ["Эскиз", referenceText(item.sketch_id, objects)], ["Тип", constraintLabel(item.kind)],
-    ["Ссылки", (item.references || []).map((id) => referenceText(id, objects)).join("; ") || "—"],
-    ...(item.value === undefined ? [] : [["Значение", formatNumber(item.value)]]),
-  ];
-}
-
-function renderProperties(objects) {
-  const item = objects.find((object) => object.id === selectedObjectId);
-  if (!item) {
-    $("#properties-empty").hidden = false;
-    $("#properties-list").hidden = true;
-    return;
-  }
-  $("#properties-empty").hidden = true;
-  $("#properties-list").hidden = false;
-  const list = $("#properties-list");
-  list.replaceChildren();
-  for (const [name, value] of propertyRows(item, objects)) {
-    const row = document.createElement("div");
-    const term = document.createElement("dt");
-    term.textContent = name;
-    const description = document.createElement("dd");
-    description.textContent = String(value ?? "—");
-    description.title = String(value ?? "");
-    row.append(term, description);
-    list.append(row);
-  }
 }
 
 function selectObjectFromResult(projectId, result) {
