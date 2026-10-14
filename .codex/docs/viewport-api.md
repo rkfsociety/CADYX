@@ -113,6 +113,16 @@ is process-local and is cleared when the host restarts. Hardware telemetry is
 not currently reported, so the UI does not display invented CPU/GPU/memory
 values.
 
+For a modeling request, the agent should inspect the project and references,
+then publish a concrete ordered plan before its first model command. Use
+3–7 request-specific phases with observable outcomes, initially all `pending`,
+and report 0% progress. Set ETA only when it can be estimated honestly; use
+`null` otherwise, and leave the task queue empty unless work is actually queued.
+Update phase states, progress, and ETA as work advances; publish a revised plan
+before continuing if findings change the steps. Mark phases complete only after
+verification, and mark failed work explicitly. This early report lets the
+browser show the intended workflow before geometry changes begin.
+
 `window.CadyxViewport.createViewer(canvas)` is shared with PLY preview and returns:
 
 - `load({positions, triangles, bounds, lines?, points?}, {reset = true, transition?})`;
