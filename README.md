@@ -13,7 +13,20 @@ The verified Windows x64 runtime uses Python 3.15.0 and OCCT 8.0.1. Setup downlo
 
 Run setup again after moving the checkout (the embedded Python import path is local to it). Stop running hosts before rebuilding the native DLL. This setup targets Windows x64; other platforms need their own OCCT SDK and bridge build. CMake and MSVC are build prerequisites, not downloaded by the setup script.
 
-Open <http://127.0.0.1:8888>. Port `8888` is the default; to use another port or workspace, pass `--port` / `--projects-dir`, or set `CADYX_PORT`, `CADYX_HOST`, and `CADYX_PROJECTS_DIR`. The default host is loopback. Binding to a LAN interface is available with `--host`, but this prototype has no authentication.
+Open <http://127.0.0.1:8888>. Port `8888` is the default; to use another port or workspace, pass `--port` / `--projects-dir`, or set `CADYX_PORT`, `CADYX_HOST`, and `CADYX_PROJECTS_DIR`. The default host is loopback and remains usable without HTTP authentication. A non-loopback bind is refused unless an authentication token is configured.
+
+## Authentication and LAN access
+
+CADYX treats LAN exposure as an explicit authenticated mode. Configure one reusable token of at least 32 non-whitespace characters through `CADYX_AUTH_TOKEN`, or store it in a UTF-8 file and pass `--auth-token-file` (or set `CADYX_AUTH_TOKEN_FILE`). Do not configure both sources. For example, in PowerShell:
+
+```powershell
+$env:CADYX_AUTH_TOKEN = & .\.runtime\python\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
+.\.runtime\python\python.exe -m cadyx --host 0.0.0.0
+```
+
+API and agent clients authenticate with `Authorization: Bearer <token>`. A browser can open the protected host using HTTP Basic authentication: username `cadyx`, password equal to the same token. Browser authentication then applies to the same-origin API requests and event stream. The token is never accepted in a URL or query string. `GET /api/v1/health` is intentionally unauthenticated and returns only minimal readiness metadata; all application UI, project APIs, workspace files, viewport data/images, commands, leases and SSE require credentials when authentication is enabled.
+
+This gate prevents accidental unauthenticated LAN exposure, but it does not add transport encryption. Use LAN mode only on a trusted private network. Put CADYX behind TLS termination or a trusted VPN before using it across an untrusted network, and do not expose the plain-HTTP host directly to the Internet.
 
 ## Keep the Windows host running
 
@@ -50,6 +63,7 @@ See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](do
 
 ## API starting points
 
+- `GET /api/v1/health` for minimal unauthenticated readiness
 - `GET /api/v1/projects` and `GET /api/v1/agent/projects` (CADYX project records plus `folders` for immediate project directories); agent project creation uses `POST /api/v1/agent/projects`
 - `GET /api/v1/projects/{id}`
 - `GET /api/v1/projects/{id}/viewport` and its Agent API equivalent return the same read-only render scene
@@ -61,7 +75,7 @@ See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](do
 - Agent `/stop` with `lease_id` and `/resume` with `owner_id` / `expected_revision`; resumed commands require `expected_revision`. See the [stop/resume contract](docs/architecture.md#safe-agent-stop-and-resume).
 - `GET /api/v1/events` for the SSE update channel
 
-The API is versioned and provider-neutral. See the architecture guide for current limits and the next implementation stages.
+The API is versioned and provider-neutral. When host authentication is configured, every endpoint above except `/api/v1/health` requires valid credentials. See the architecture guide for the exact boundary and current limits.
 
 ## Agent Runtime
 
