@@ -149,6 +149,49 @@ class EditLeaseManager:
                 "recovery_required": bool(expired),
             }
 
+    def snapshot_for_listing(self, project_id: str) -> dict[str, object]:
+        """Read a display-only lease snapshot without taking the document write lock."""
+        path = self._project_directory(project_id) / ".cadyx-leases.sqlite3"
+        if not path.parent.is_dir() or not (path.parent / "project.json").is_file():
+            raise NotFoundError("Project was not found.")
+        if path.is_symlink():
+            raise ValidationError("Lease database must not be a symbolic link.")
+        if not path.exists():
+            return {"state": "FREE", "lease": None, "recovery_required": False}
+
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(
+                f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=0, isolation_level=None,
+            )
+            table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lease'"
+            ).fetchone()
+            if table is None:
+                return {"state": "FREE", "lease": None, "recovery_required": False}
+            row = connection.execute(
+                "SELECT owner_type, owner_id, acquired_at, heartbeat_at, lease_id, timeout_seconds "
+                "FROM lease WHERE singleton = 1"
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            error_code = exc.sqlite_errorcode or 0
+            if error_code & 0xFF in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+                return {"state": "BUSY", "lease": None, "recovery_required": False}
+            raise
+        finally:
+            if connection is not None:
+                connection.close()
+
+        if row is None:
+            return {"state": "FREE", "lease": None, "recovery_required": False}
+        lease = EditLease(project_id, OwnerType(row[0]), *row[1:5])
+        expired = self._clock() - lease.heartbeat_at > row[5]
+        return {
+            "state": lock_state_for(lease).value,
+            "lease": lease.as_dict(expired=expired),
+            "recovery_required": bool(expired),
+        }
+
     def get(self, project_id: str) -> EditLease | None:
         with self.guard(project_id):
             return self._read(project_id)

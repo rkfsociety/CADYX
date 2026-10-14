@@ -7,6 +7,7 @@ const api = (path, options = {}) => fetch(path, {
   if (!response.ok) {
     const error = new Error(value.message || value.error || "Ошибка запроса");
     error.status = response.status;
+    error.code = value.error;
     throw error;
   }
   return value;
@@ -24,6 +25,8 @@ const modelViewer = window.CadyxViewport.createViewer($("#model-preview"));
 let cameraAnimationId = 0;
 let renderedSceneKey = null;
 let detailRequest = 0;
+let detailedProjectId = null;
+let detailedProjectModifiedAt = null;
 $("#viewport-fit").addEventListener("click", () => modelViewer.fit());
 const toast = $("#toast");
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
@@ -36,6 +39,9 @@ let activeSketchId = null;
 let pendingViewportTransition = null;
 let toastTimer;
 let refreshTimer;
+let workspaceRefreshInFlight = false;
+let workspaceRefreshPending = false;
+let workspaceRefreshRetryDelayMs = 250;
 let activeFolderName = null;
 let folderFiles = [];
 let folderFilesSignature = null;
@@ -81,6 +87,20 @@ function formatNumber(value) {
 
 function getProject(id) {
   return projects.find((item) => item.project.id === id);
+}
+
+function showProjectLoading(name) {
+  activeFolderName = null;
+  $("#folder-detail").hidden = true;
+  projectDetail.hidden = false;
+  noSelection.hidden = true;
+  $("#object-panel").hidden = true;
+  $("#document-title").textContent = name;
+  if (!renderedSceneKey?.startsWith(`${selectedProjectId}:`)) {
+    $("#model-preview").hidden = true;
+    $("#viewport-empty").hidden = false;
+    $("#viewport-empty").querySelector("p").textContent = "Загружаю последнюю сохранённую модель…";
+  }
 }
 
 function folderSelectionId(name) {
@@ -167,7 +187,8 @@ function selectProject(id) {
     showFolderDetail(folder);
     return;
   }
-  refreshDetail().catch((error) => notify(error.message, true));
+  showProjectLoading(getProject(id)?.project.name || "Загружаю проект…");
+  refreshDetail().catch(handleRefreshError);
 }
 
 function showFolderDetail(name) {
@@ -295,6 +316,33 @@ async function previewFolderFile(folderName, file) {
 }
 
 async function refreshWorkspace() {
+  if (workspaceRefreshInFlight) {
+    workspaceRefreshPending = true;
+    return;
+  }
+  workspaceRefreshInFlight = true;
+  try {
+    do {
+      workspaceRefreshPending = false;
+      await refreshWorkspacePass();
+      workspaceRefreshRetryDelayMs = 250;
+    } while (workspaceRefreshPending);
+  } catch (error) {
+    if (error.code === "PROJECT_BUSY") {
+      const delay = workspaceRefreshRetryDelayMs;
+      workspaceRefreshRetryDelayMs = Math.min(delay * 2, 4000);
+      workspaceRefreshPending = false;
+      scheduleWorkspaceRefresh(delay);
+      return;
+    }
+    throw error;
+  } finally {
+    workspaceRefreshInFlight = false;
+    if (workspaceRefreshPending) scheduleWorkspaceRefresh();
+  }
+}
+
+async function refreshWorkspacePass() {
   const response = await api("/api/v1/projects");
   projects = response.projects;
   folders = response.folders || [];
@@ -320,7 +368,14 @@ async function refreshWorkspace() {
   renderProjectList();
   const selectedFolder = getSelectedFolder();
   if (selectedFolder) showFolderDetail(selectedFolder);
-  else if (selectedProjectId && getProject(selectedProjectId)) await refreshDetail();
+  else if (selectedProjectId && getProject(selectedProjectId)) {
+    const selected = getProject(selectedProjectId).project;
+    if (!renderedSceneKey?.startsWith(`${selectedProjectId}:`)) showProjectLoading(selected.name);
+    const modifiedAt = selected.modified_at;
+    if (detailedProjectId !== selectedProjectId || detailedProjectModifiedAt !== modifiedAt || !renderedSceneKey) {
+      await refreshDetail();
+    }
+  }
   else {
     projectDetail.hidden = true;
     $("#object-panel").hidden = true;
@@ -330,13 +385,20 @@ async function refreshWorkspace() {
   }
 }
 
-function scheduleWorkspaceRefresh() {
+function handleRefreshError(error) {
+  if (error.code === "PROJECT_BUSY") {
+    scheduleWorkspaceRefresh(workspaceRefreshRetryDelayMs);
+    workspaceRefreshRetryDelayMs = Math.min(workspaceRefreshRetryDelayMs * 2, 4000);
+    return;
+  }
+  notify(error.message, true);
+}
+
+function scheduleWorkspaceRefresh(delayMs = 60) {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
-    refreshWorkspace().catch((error) => {
-      notify(error.message, true);
-    });
-  }, 60);
+    refreshWorkspace().catch(handleRefreshError);
+  }, delayMs);
 }
 
 async function checkAutomaticUpdates() {
@@ -406,12 +468,13 @@ async function refreshDetail() {
     noSelection.hidden = true;
     const selected = getProject(projectId);
     $("#document-title").textContent = selected?.project.name || "CADYX · работа агента";
-    return;
   }
   const info = await api(`/api/v1/projects/${encodeURIComponent(projectId)}`);
   const scene = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/viewport`);
   if (projectId !== selectedProjectId || request !== detailRequest) return;
   if (scene.revision !== info.document.revision) { scheduleWorkspaceRefresh(); return; }
+  detailedProjectId = projectId;
+  detailedProjectModifiedAt = info.project.modified_at;
   const objects = info.document.objects;
   const objectsById = new Map(objects.map((item) => [item.id, item]));
   const visibleSketchId = activeSketchId
@@ -481,13 +544,16 @@ async function refreshDetail() {
     }
     if (!targetFound) transition = null;
     modelViewer.load({ positions, triangles, lines, points, bounds, rotationAxes }, {
-      reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition,
+      reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition, smoothShading: true,
     });
     if (pendingViewportTransition?.projectId === projectId) pendingViewportTransition = null;
     renderedSceneKey = key;
   }
   const hasVisibleGeometry = visibleObjects.some((item) => item.type === "body")
     || visibleSketchId !== null && visibleObjects.some((item) => item.sketch_id === visibleSketchId);
+  if (!hasVisibleGeometry) {
+    $("#viewport-empty").querySelector("p").textContent = "Модель ещё не построена";
+  }
   $("#viewport-empty").hidden = hasVisibleGeometry;
   $("#model-preview").hidden = !hasVisibleGeometry;
   modelViewer.render();
@@ -568,7 +634,7 @@ function constraintLabel(kind) {
 
 function objectSummary(item, objects = currentObjects) {
   if (item.type === "body") return dimensionsText(item.geometry?.dimensions);
-  if (item.type === "feature") return `${({ fuse_bodies: "Объединение тел" })[item.operation] || item.operation || "Операция"} · ${dimensionsText(item.parameters)}`;
+  if (item.type === "feature") return `${({ fuse_bodies: "Объединение тел", sweep_sketch: "Трубчатое выдавливание", fillet_edges: "Скругление рёбер" })[item.operation] || item.operation || "Операция"} · ${dimensionsText(item.parameters)}`;
   if (item.type === "sketch") return `${item.plane} · ${objects.filter((child) => child.sketch_id === item.id).length} объектов`;
   if (item.type === "point") return `(${formatNumber(item.x)}, ${formatNumber(item.y)})`;
   if (item.type === "line") {
@@ -584,7 +650,8 @@ function objectSummary(item, objects = currentObjects) {
 
 function containsRevolvedProfile(geometry) {
   return geometry?.kind === "revolved_profile"
-    || geometry?.kind === "fused_profiles"
+    || geometry?.kind === "filleted_solid" && containsRevolvedProfile(geometry.base)
+    || ["fused_profiles", "fused_solids"].includes(geometry?.kind)
       && (containsRevolvedProfile(geometry.base) || containsRevolvedProfile(geometry.tool));
 }
 
@@ -623,8 +690,9 @@ function renderObjectTree(objects) {
 
   const bodies = objects.filter((item) => item.type === "body");
   const consumedBodies = new Set(objects
-    .filter((item) => item.type === "feature" && item.operation === "fuse_bodies")
-    .flatMap((item) => [item.base_body_id, item.tool_body_id]));
+    .filter((item) => item.type === "feature")
+    .flatMap((item) => item.operation === "fuse_bodies" ? [item.base_body_id, item.tool_body_id]
+      : item.operation === "fillet_edges" ? [item.source_body_id] : []));
   const sketches = objects.filter((item) => item.type === "sketch");
   for (const body of bodies) {
     if (consumedBodies.has(body.id)) continue;
@@ -641,6 +709,7 @@ function renderObjectTree(objects) {
     root.append(group);
   }
   for (const sketch of sketches) {
+    if (sketch.id !== activeSketchId) continue;
     const group = document.createElement("div");
     group.className = "object-group";
     appendRow(group, sketch);
@@ -685,6 +754,11 @@ function propertyRows(item, objects) {
     ...(item.operation === "fuse_bodies" ? [
       ["Основание", referenceText(item.base_body_id, objects)],
       ["Объединяемое тело", referenceText(item.tool_body_id, objects)],
+    ] : item.operation === "fillet_edges" ? [
+      ["Исходное тело", referenceText(item.source_body_id, objects)],
+      ["Рёбра", item.edge_indices.join(", ")],
+    ] : item.operation === "sweep_sketch" ? [
+      ["Траектория", referenceText(item.source_sketch_id, objects)],
     ] : []),
   ];
   if (item.type === "sketch") return [
@@ -822,6 +896,12 @@ function handleStreamEvent(type, event) {
           projectId, sketchId: activeSketchId, allSketchLines: true,
           type: "sketch-lines", durationMs: 1600,
         } : null;
+      } else if (command.type === "replace_sketch_path") {
+        activeSketchId = command.sketch_id || null;
+        pendingViewportTransition = activeSketchId ? {
+          projectId, sketchId: activeSketchId, allSketchLines: true,
+          type: "sketch-lines", durationMs: 1800,
+        } : null;
       } else if (command.type === "remove_sketch_object") {
         if (command.object_id === activeSketchId) activeSketchId = null;
         pendingViewportTransition = null;
@@ -837,12 +917,24 @@ function handleStreamEvent(type, event) {
         pendingViewportTransition = {
           projectId, bodyId: result.body_id, type: "fuse", durationMs: 1200,
         };
+      } else if (command.type === "sweep_sketch") {
+        activeSketchId = null;
+        pendingViewportTransition = {
+          projectId, bodyId: result.body_id, type: "sweep", plane: result.geometry?.plane || "XZ",
+          path: result.geometry?.path || [], durationMs: 1800,
+        };
+      } else if (command.type === "fillet_edges") {
+        activeSketchId = null;
+        pendingViewportTransition = { projectId, bodyId: result.body_id, type: "fillet", durationMs: 1500 };
       } else if (command.type === "set_parameter" && result.geometry?.kind) {
         const transitionType = result.geometry.kind === "revolved_profile" ? "revolve"
-          : result.geometry.kind === "extruded_profile" ? "extrude" : null;
+          : result.geometry.kind === "extruded_profile" ? "extrude"
+          : result.geometry.kind === "swept_pipe" ? "sweep"
+          : result.geometry.kind === "filleted_solid" ? "fillet"
+          : ["fused_profiles", "fused_solids"].includes(result.geometry.kind) ? "fuse" : null;
         pendingViewportTransition = transitionType ? {
           projectId, featureId: result.feature_id, type: transitionType,
-          plane: result.geometry.plane || "XZ", durationMs: 1100,
+          plane: result.geometry.plane || "XZ", path: result.geometry.path || [], durationMs: 1400,
         } : null;
         activeSketchId = null;
       }
@@ -861,7 +953,8 @@ function handleStreamEvent(type, event) {
     saveSelectedProject(projectId);
     scheduleWorkspaceRefresh();
   } else if (type === "project.lock.changed") {
-    scheduleWorkspaceRefresh();
+    // Lease changes do not alter the document or viewport. Re-rendering the
+    // kernel scene here can contend with the agent's next modeling command.
   }
 }
 
@@ -894,21 +987,21 @@ stream.addEventListener("open", () => {
   activitiesByProject.clear();
   activityRevisionsByProject.clear();
   checkAutomaticUpdates();
-  scheduleWorkspaceRefresh();
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     checkAutomaticUpdates();
-    scheduleWorkspaceRefresh();
   }
 });
 window.addEventListener("online", () => {
   checkAutomaticUpdates();
-  scheduleWorkspaceRefresh();
 });
 window.addEventListener("pageshow", checkAutomaticUpdates);
 setInterval(checkAutomaticUpdates, 5000);
 checkAutomaticUpdates();
+if (selectedProjectId && !selectedProjectId.startsWith(FOLDER_SELECTION_PREFIX)) {
+  showProjectLoading("Восстанавливаю последний проект…");
+}
 refreshWorkspace().catch((error) => {
-  notify(error.message, true);
+  handleRefreshError(error);
 });

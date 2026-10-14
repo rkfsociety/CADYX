@@ -16,8 +16,11 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
     consumed_bodies = {
         source_id
         for item in document.objects
-        if item.get("type") == "feature" and item.get("operation") == "fuse_bodies"
-        for source_id in (item.get("base_body_id"), item.get("tool_body_id"))
+        if item.get("type") == "feature"
+        for source_id in ((item.get("base_body_id"), item.get("tool_body_id"))
+                          if item.get("operation") == "fuse_bodies"
+                          else (item.get("source_body_id"),)
+                          if item.get("operation") == "fillet_edges" else ())
     }
 
     def sketch_position(sketch_id: str, x: float, y: float) -> list[float]:

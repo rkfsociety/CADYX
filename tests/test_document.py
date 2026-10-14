@@ -20,7 +20,7 @@ class SketchDocumentTests(unittest.TestCase):
         self.core = CadyxCore(self.temp.name, kernel=PrimitiveKernelAdapter())
         self.project = self.core.create_project("Sketch test")["project"]["id"]
         self.lease = self.core.acquire_lease(self.project, "agent", "test")["lease_id"]
-        self.path = Path(self.temp.name) / self.project / "project.json"
+        self.path = self.core.workspace._project_dir(self.project) / "project.json"
         self.sketch = self.command(type="create_sketch")["sketch_id"]
         self.a = self.point(0, 0)
         self.b = self.point(3, 0)
@@ -157,7 +157,7 @@ class SketchDocumentTests(unittest.TestCase):
         project = self.core.create_project("Legacy")["project"]["id"]
         lease = self.core.acquire_lease(project, "human", "legacy")["lease_id"]
         box = self.core.execute_command(project, lease, {"type": "create_box", "width": 2, "height": 3, "depth": 4})
-        path = Path(self.temp.name) / project / "project.json"
+        path = self.core.workspace._project_dir(project) / "project.json"
         legacy = json.loads(path.read_text())
         legacy["document"]["version"] = 1
         path.write_text(json.dumps(legacy))

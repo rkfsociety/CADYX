@@ -13,8 +13,49 @@
     let screenY = new Float64Array(0);
     let faceRecords = new Float64Array(0);
     let faceOrder = new Uint32Array(0);
+    let vertexLight = new Float32Array(0);
     let transition = null;
     let transitionFrame = 0;
+    let cameraFrame = 0;
+    let sweepProgress = null;
+
+    function scheduleCameraRender() {
+      if (cameraFrame) return;
+      cameraFrame = requestAnimationFrame(() => {
+        cameraFrame = 0;
+        render();
+      });
+    }
+
+    function orbitCenterFor(value) {
+      const axes = value.rotationAxes || [];
+      const first = axes[0];
+      if (!first || !Array.isArray(first.start) || !Array.isArray(first.end)
+          || first.start.length !== 3 || first.end.length !== 3
+          || ![...first.start, ...first.end].every(Number.isFinite)
+          || Math.abs(first.start[0] - first.end[0]) > 1e-9
+          || Math.abs(first.start[1] - first.end[1]) > 1e-9) return null;
+      const [x, y] = first.start;
+      if (!axes.every((axis) => Array.isArray(axis.start) && Array.isArray(axis.end)
+          && axis.start.length === 3 && axis.end.length === 3
+          && [...axis.start, ...axis.end].every(Number.isFinite)
+          && Math.abs(axis.start[0] - x) <= 1e-9 && Math.abs(axis.start[1] - y) <= 1e-9
+          && Math.abs(axis.start[0] - axis.end[0]) <= 1e-9
+          && Math.abs(axis.start[1] - axis.end[1]) <= 1e-9)) return null;
+      return [x, y, value.bounds.min[2] / 2 + value.bounds.max[2] / 2];
+    }
+
+    function fitRadiusFromBounds(bounds, center) {
+      let radius = 0;
+      for (const x of [bounds.min[0], bounds.max[0]]) {
+        for (const y of [bounds.min[1], bounds.max[1]]) {
+          for (const z of [bounds.min[2], bounds.max[2]]) {
+            radius = Math.max(radius, Math.hypot(x - center[0], y - center[1], z - center[2]));
+          }
+        }
+      }
+      return Math.max(radius, 0.001);
+    }
 
     function render() {
       const rect = canvas.getBoundingClientRect();
@@ -44,9 +85,9 @@
       }
 
       const { positions, triangles, bounds } = geometry;
-      const center = bounds.min.map((value, axis) => value / 2 + bounds.max[axis] / 2);
+      const center = geometry.orbitCenter || bounds.min.map((value, axis) => value / 2 + bounds.max[axis] / 2);
       const extent = bounds.min.map((value, axis) => bounds.max[axis] - value);
-      const radius = Math.max(Math.hypot(...extent) / 2, 0.001);
+      const radius = geometry.fitRadius || Math.max(Math.hypot(...extent) / 2, 0.001);
       const scale = (Math.min(width, height) * 0.43 * zoom) / radius;
       const cosYaw = Math.cos(yaw);
       const sinYaw = Math.sin(yaw);
@@ -91,7 +132,10 @@
         screenY[vertex] = height / 2 - cameraY * scale;
       }
 
-      if (triangles.length) renderMesh(triangles, camera, screenX, screenY, progress);
+      if (triangles.length) renderMesh(
+        triangles, camera, screenX, screenY, progress, sweepProgress,
+        geometry.vertexNormals, yaw, pitch,
+      );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale);
       for (let index = 0; index < (geometry.lines || []).length; index += 2) {
         const a = geometry.lines[index], b = geometry.lines[index + 1];
@@ -188,27 +232,54 @@
       context.restore();
     }
 
-    function renderMesh(triangles, camera, screenX, screenY, progress) {
+    function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress,
+      vertexNormals, yaw, pitch) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
+      const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
+      const cosPitch = Math.cos(pitch), sinPitch = Math.sin(pitch);
+      const smooth = vertexNormals && (!transition || progress >= 1);
+      if (smooth) {
+        for (let vertex = 0; vertex < vertexLight.length; vertex += 1) {
+          const worldX = vertexNormals[vertex * 3], worldY = vertexNormals[vertex * 3 + 1];
+          const worldZ = vertexNormals[vertex * 3 + 2];
+          const rotatedX = worldX * cosYaw - worldY * sinYaw;
+          const rotatedDepth = worldX * sinYaw + worldY * cosYaw;
+          const normalY = worldZ * cosPitch - rotatedDepth * sinPitch;
+          const normalZ = worldZ * sinPitch + rotatedDepth * cosPitch;
+          vertexLight[vertex] = 0.34 + 0.66 * Math.abs(
+            rotatedX * light[0] + normalY * light[1] + normalZ * light[2],
+          );
+        }
+      }
+      let visibleCount = 0;
 
       for (let face = 0; face < faceTotal; face += 1) {
         const first = triangles[face * 3];
         const second = triangles[face * 3 + 1];
         const third = triangles[face * 3 + 2];
+        if (sweepProgress && progress < 1
+            && (sweepProgress[first] + sweepProgress[second] + sweepProgress[third]) / 3 > progress) continue;
         const a = first * 3;
         const b = second * 3;
         const c = third * 3;
-        const ax = camera[a], ay = camera[a + 1], az = camera[a + 2];
-        const bx = camera[b], by = camera[b + 1], bz = camera[b + 2];
-        const cx = camera[c], cy = camera[c + 1], cz = camera[c + 2];
-        const ux = bx - ax, uy = by - ay, uz = bz - az;
-        const vx = cx - ax, vy = cy - ay, vz = cz - az;
-        const nx = uy * vz - uz * vy;
-        const ny = uz * vx - ux * vz;
-        const nz = ux * vy - uy * vx;
-        const normalLength = Math.hypot(nx, ny, nz) || 1;
-        const brightness = 0.34 + 0.66 * Math.abs((nx * light[0] + ny * light[1] + nz * light[2]) / normalLength);
+        const az = camera[a + 2], bz = camera[b + 2], cz = camera[c + 2];
+        let brightness;
+        if (smooth) {
+          brightness = (vertexLight[first] + vertexLight[second] + vertexLight[third]) / 3;
+        } else {
+          const ax = camera[a], ay = camera[a + 1], bx = camera[b], by = camera[b + 1];
+          const cx = camera[c], cy = camera[c + 1];
+          const ux = bx - ax, uy = by - ay, uz = bz - az;
+          const vx = cx - ax, vy = cy - ay, vz = cz - az;
+          const nx = uy * vz - uz * vy;
+          const ny = uz * vx - ux * vz;
+          const nz = ux * vy - uy * vx;
+          const normalLength = Math.hypot(nx, ny, nz) || 1;
+          brightness = 0.34 + 0.66 * Math.abs(
+            (nx * light[0] + ny * light[1] + nz * light[2]) / normalLength,
+          );
+        }
         const offset = face * 8;
         faceRecords[offset] = screenX[first];
         faceRecords[offset + 1] = screenY[first];
@@ -218,11 +289,13 @@
         faceRecords[offset + 5] = screenY[third];
         faceRecords[offset + 6] = (az + bz + cz) / 3;
         faceRecords[offset + 7] = brightness;
-        faceOrder[face] = face;
+        faceOrder[visibleCount] = face;
+        visibleCount += 1;
       }
 
-      faceOrder.sort((left, right) => faceRecords[left * 8 + 6] - faceRecords[right * 8 + 6]);
-      for (const face of faceOrder) {
+      const visibleFaces = faceOrder.subarray(0, visibleCount);
+      visibleFaces.sort((left, right) => faceRecords[left * 8 + 6] - faceRecords[right * 8 + 6]);
+      for (const face of visibleFaces) {
         const offset = face * 8;
         const brightness = faceRecords[offset + 7];
         const first = triangles[face * 3];
@@ -271,7 +344,7 @@
       yaw -= (event.clientX - drag.x) * sensitivity;
       pitch = Math.max(-MAX_CAMERA_PITCH, Math.min(MAX_CAMERA_PITCH, pitch + (event.clientY - drag.y) * sensitivity));
       drag = { x: event.clientX, y: event.clientY };
-      render();
+      scheduleCameraRender();
     });
     const stopDrag = () => {
       drag = null;
@@ -288,7 +361,7 @@
     canvas.addEventListener("wheel", (event) => {
       event.preventDefault();
       zoom = Math.max(0.25, Math.min(5, zoom * Math.exp(-event.deltaY * 0.001)));
-      render();
+      scheduleCameraRender();
     }, { passive: false });
     new ResizeObserver(render).observe(canvas);
 
@@ -310,14 +383,24 @@
         ({ yaw, pitch, zoom } = value);
         render();
       },
-      load(value, { reset = true, transition: nextTransition = null } = {}) {
-        geometry = value;
+      load(value, { reset = true, transition: nextTransition = null, smoothShading = false } = {}) {
+        const orbitCenter = orbitCenterFor(value);
+        geometry = {
+          ...value,
+          orbitCenter,
+          fitRadius: orbitCenter ? fitRadiusFromBounds(value.bounds, orbitCenter) : null,
+          vertexNormals: smoothShading ? buildVertexNormals(value.positions, value.triangles || []) : null,
+        };
+        vertexLight = geometry.vertexNormals ? new Float32Array(geometry.vertexNormals.length / 3) : new Float32Array(0);
         transition = nextTransition ? {
           ...nextTransition,
           startedAt: performance.now(),
           durationMs: Math.max(1, nextTransition.durationMs || 500),
         } : null;
         transitionFrame = 0;
+        sweepProgress = transition?.type === "sweep" && transition.path?.length >= 2
+          ? buildSweepProgress(value.positions, transition.path, transition.plane)
+          : null;
         camera = new Float64Array(value.positions.length);
         screenX = new Float64Array(value.positions.length / 3);
         screenY = new Float64Array(value.positions.length / 3);
@@ -328,6 +411,66 @@
       },
       render,
     };
+
+    function buildSweepProgress(positions, path, plane) {
+      const worldPath = path.map((point) => plane === "XZ"
+        ? [point.x, 0, point.y] : [point.x, point.y, 0]);
+      const cumulative = [0];
+      for (let i = 1; i < worldPath.length; i += 1) {
+        cumulative.push(cumulative[i - 1] + Math.hypot(
+          worldPath[i][0] - worldPath[i - 1][0],
+          worldPath[i][1] - worldPath[i - 1][1],
+          worldPath[i][2] - worldPath[i - 1][2],
+        ));
+      }
+      const totalLength = cumulative.at(-1) || 1;
+      const perVertex = new Float32Array(positions.length / 3);
+      for (let vertex = 0; vertex < perVertex.length; vertex += 1) {
+        const px = positions[vertex * 3], py = positions[vertex * 3 + 1], pz = positions[vertex * 3 + 2];
+        let nearest = Infinity, nearestLength = 0;
+        for (let segment = 0; segment + 1 < worldPath.length; segment += 1) {
+          const a = worldPath[segment], b = worldPath[segment + 1];
+          const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+          const lengthSquared = dx * dx + dy * dy + dz * dz;
+          const t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy + (pz - a[2]) * dz) / lengthSquared));
+          const qx = a[0] + dx * t, qy = a[1] + dy * t, qz = a[2] + dz * t;
+          const distance = (px - qx) ** 2 + (py - qy) ** 2 + (pz - qz) ** 2;
+          if (distance < nearest) {
+            nearest = distance;
+            nearestLength = cumulative[segment] + Math.sqrt(lengthSquared) * t;
+          }
+        }
+        perVertex[vertex] = nearestLength / totalLength;
+      }
+      return perVertex;
+    }
+
+    function buildVertexNormals(positions, triangles) {
+      if (!triangles.length) return null;
+      const normals = new Float64Array(positions.length);
+      for (let face = 0; face < triangles.length; face += 3) {
+        const first = triangles[face] * 3, second = triangles[face + 1] * 3, third = triangles[face + 2] * 3;
+        const ux = positions[second] - positions[first];
+        const uy = positions[second + 1] - positions[first + 1];
+        const uz = positions[second + 2] - positions[first + 2];
+        const vx = positions[third] - positions[first];
+        const vy = positions[third + 1] - positions[first + 1];
+        const vz = positions[third + 2] - positions[first + 2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        for (const index of [first, second, third]) {
+          normals[index] += nx;
+          normals[index + 1] += ny;
+          normals[index + 2] += nz;
+        }
+      }
+      for (let index = 0; index < normals.length; index += 3) {
+        const length = Math.hypot(normals[index], normals[index + 1], normals[index + 2]) || 1;
+        normals[index] /= length;
+        normals[index + 1] /= length;
+        normals[index + 2] /= length;
+      }
+      return normals;
+    }
   }
 
   window.CadyxViewport = { createViewer };

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import math
+import threading
+from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterator
@@ -18,7 +22,7 @@ from .models import Document, OwnerType
 from .rendering import render_scene, render_scene_png
 from .scan import ScanProcessor
 from .workspace import ProjectWorkspace, utc_now
-from .sketches import closed_profile
+from .sketches import closed_profile, open_path
 
 
 class CadyxCore:
@@ -44,6 +48,10 @@ class CadyxCore:
         else:
             self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds, clock=lease_clock)
         self.events = EventBroker()
+        self._geometry_cache_guard = threading.RLock()
+        self._validated_document_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
+        self._document_validation_locks: dict[tuple[str, str], threading.Lock] = {}
+        self._scene_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
 
     @contextmanager
     def _project_guard(self, project_id: str) -> Iterator[None]:
@@ -62,49 +70,67 @@ class CadyxCore:
         result = []
         for project in self.workspace.list():
             project_id = project["id"]
-            with self._project_guard(project_id):
-                result.append({
-                    "project": self._summary(self.workspace.load(project_id)),
-                    "lock": self.leases.snapshot(project_id),
-                })
+            result.append({
+                "project": self._summary(project),
+                "lock": self.leases.snapshot_for_listing(project_id),
+            })
         return result
 
     def list_workspace(self) -> dict[str, Any]:
         return {"projects": self.list_projects(), "folders": self.workspace.list_folder_projects()}
 
     def inspect_project(self, project_id: str) -> dict[str, Any]:
-        with self._project_guard(project_id):
-            project = self.workspace.load(project_id)
-            document = Document.from_dict(project["document"])
-            self._validate_geometry(document)
-            return {
-                "project": self._summary(project),
-                "lock": self.leases.snapshot(project_id),
-                "document": document.to_dict(),
-                "history": copy.deepcopy(project["history"]),
-            }
+        # project.json is atomically replaced, so read-only viewers can safely
+        # inspect the last committed revision while an agent edits its next one.
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        self._validate_geometry_once(project_id, document)
+        return {
+            "project": self._summary(project),
+            "lock": self.leases.snapshot_for_listing(project_id),
+            "document": document.to_dict(),
+            "history": copy.deepcopy(project["history"]),
+        }
 
     def acquire_lease(self, project_id: str, owner_type: str, owner_id: str) -> dict[str, Any]:
         with self._project_guard(project_id):
             self.workspace.load(project_id)
             lease = self.leases.acquire(project_id, owner_type, owner_id)
             snapshot = self.leases.snapshot(project_id)
-            self.events.publish("project.lock.changed", project_id, snapshot)
+            if lease.owner_type is not OwnerType.AGENT:
+                self.events.publish("project.lock.changed", project_id, snapshot)
             return lease.as_dict()
 
     def render_project(self, project_id: str) -> dict[str, Any]:
-        with self._project_guard(project_id):
-            project = self.workspace.load(project_id)
-            document = Document.from_dict(project["document"])
-            self._validate_geometry(document)
-            return render_scene(document, self.kernel)
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        key = self._document_cache_key(project_id, document)
+        with self._geometry_cache_guard:
+            cached_scene = self._scene_cache.get(key)
+            if cached_scene is not None:
+                self._scene_cache.move_to_end(key)
+                return copy.deepcopy(cached_scene)
+        self._validate_geometry_once(project_id, document)
+        scene = render_scene(document, self.kernel)
+        with self._geometry_cache_guard:
+            self._scene_cache[key] = copy.deepcopy(scene)
+            self._scene_cache.move_to_end(key)
+            while len(self._scene_cache) > 8:
+                self._scene_cache.popitem(last=False)
+        return scene
 
     def render_project_png(self, project_id: str) -> bytes:
-        with self._project_guard(project_id):
-            project = self.workspace.load(project_id)
-            document = Document.from_dict(project["document"])
-            self._validate_geometry(document)
-            return render_scene_png(render_scene(document, self.kernel))
+        return render_scene_png(self.render_project(project_id))
+
+    def inspect_body_topology(self, project_id: str, body_id: str) -> dict[str, Any]:
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        body = next((item for item in document.objects
+                     if item.get("id") == body_id and item.get("type") == "body"), None)
+        if body is None:
+            raise ValidationError("Topology inspection needs an existing body_id.")
+        topology = self.kernel.topology(body["geometry"])
+        return {"body_id": body_id, **topology}
 
     def rotate_view(
         self, project_id: str, *, yaw_delta: float, pitch_delta: float = 0.0,
@@ -205,11 +231,12 @@ class CadyxCore:
             self._validate_geometry(document)
             lease = self.leases.release_expired(project_id)
             snapshot = self.leases.snapshot(project_id)
-            self.events.publish(
-                "project.lock.changed",
-                project_id,
-                {**snapshot, "recovered_owner_type": lease.owner_type.value, "recovered_owner_id": lease.owner_id},
-            )
+            if lease.owner_type is not OwnerType.AGENT:
+                self.events.publish(
+                    "project.lock.changed",
+                    project_id,
+                    {**snapshot, "recovered_owner_type": lease.owner_type.value, "recovered_owner_id": lease.owner_id},
+                )
             return {"recovered": True, "lock": snapshot}
 
     def stop_agent(self, project_id: str, lease_id: str) -> dict[str, Any]:
@@ -220,6 +247,9 @@ class CadyxCore:
             if lease is None or lease.lease_id != lease_id or lease.owner_type is not OwnerType.AGENT:
                 raise ConflictError("The supplied lease is not the current agent lease.", code="PROJECT_LOCKED")
             detail = self.inspect_project(project_id)
+            # Agent stop is a safety boundary: validate the saved snapshot here
+            # even when the read-only inspection cache has a matching revision.
+            self._validate_geometry(Document.from_dict(detail["document"]))
             self.leases.release_stopped_agent(project_id, lease_id)
             detail["lock"] = self.leases.snapshot(project_id)
             self.events.publish("project.lock.changed", project_id, detail["lock"])
@@ -235,6 +265,9 @@ class CadyxCore:
     def resume_agent(self, project_id: str, owner_id: str, expected_revision: int) -> dict[str, Any]:
         with self._project_guard(project_id):
             detail = self.inspect_project(project_id)
+            # Resuming grants a new editing lease, so recheck geometry at this
+            # explicit state transition rather than relying on viewer caching.
+            self._validate_geometry(Document.from_dict(detail["document"]))
             self._check_revision(Document.from_dict(detail["document"]), expected_revision)
             lease = self.leases.acquire(project_id, "agent", owner_id)
             self.leases.mark_resumed(project_id, lease.lease_id)
@@ -317,6 +350,7 @@ class CadyxCore:
                 activity["phase"] = "save_document"
                 self._publish_activity(project_id, activity)
                 self.workspace.save(next_project)
+                self._remember_geometry_validation(project_id, document)
             except Exception as exc:
                 activity.update({"state": "failed", "error": str(exc)})
                 self._publish_activity(project_id, activity)
@@ -362,7 +396,10 @@ class CadyxCore:
             "update_sketch_elements": "Меняет геометрию эскиза",
             "extrude_sketch": "Выдавливает профиль",
             "revolve_sketch": "Вращает профиль",
+            "sweep_sketch": "Проводит сечение по траектории",
+            "fillet_edges": "Скругляет рёбра",
             "replace_sketch_profile": "Перерисовывает профиль",
+            "replace_sketch_path": "Рисует траекторию",
             "fuse_bodies": "Объединяет тела",
             "set_parameter": "Меняет параметры модели",
             "import_scan": "Обрабатывает скан",
@@ -392,9 +429,22 @@ class CadyxCore:
 
     def _validate_geometry(self, document: Document) -> None:
         by_id = {item["id"]: item for item in document.objects}
+        consumed_bodies = {
+            source_id
+            for item in document.objects
+            if item.get("type") == "feature"
+            for source_id in ((item.get("base_body_id"), item.get("tool_body_id"))
+                              if item.get("operation") == "fuse_bodies"
+                              else (item.get("source_body_id"),)
+                              if item.get("operation") == "fillet_edges" else ())
+        }
         for item in document.objects:
             geometry = item.get("geometry")
-            if geometry is not None:
+            # Feature records duplicate their body's geometry, and consumed
+            # source bodies are embedded in the current body's geometry graph.
+            # Validate each live B-rep once instead of rebuilding every prefix
+            # of a long revolve/fuse/fillet chain on every read-only refresh.
+            if geometry is not None and item.get("type") == "body" and item["id"] not in consumed_bodies:
                 self.kernel.validate(geometry)
             if item.get("type") != "feature":
                 continue
@@ -408,10 +458,34 @@ class CadyxCore:
                 if feature_geometry != body.get("geometry"):
                     raise ValidationError("Boolean fuse feature geometry must match its body.")
                 if (not isinstance(feature_geometry, dict)
-                        or feature_geometry.get("kind") != "fused_profiles"
+                        or feature_geometry.get("kind") not in {"fused_profiles", "fused_solids"}
                         or feature_geometry.get("base") != base.get("geometry")
                         or feature_geometry.get("tool") != tool.get("geometry")):
                     raise ValidationError("Boolean fuse geometry is out of date with its source bodies.")
+                continue
+            if item.get("operation") == "fillet_edges":
+                body = by_id.get(item.get("body_id"))
+                source = by_id.get(item.get("source_body_id"))
+                feature_geometry = item.get("geometry")
+                if (body is None or source is None or feature_geometry != body.get("geometry")
+                        or not isinstance(feature_geometry, dict)
+                        or feature_geometry.get("kind") != "filleted_solid"
+                        or feature_geometry.get("base") != source.get("geometry")
+                        or feature_geometry.get("edge_indices") != item.get("edge_indices")
+                        or feature_geometry.get("radius") != item.get("parameters", {}).get("radius")):
+                    raise ValidationError("Fillet geometry is out of date with its source body and parameters.")
+                continue
+            if item.get("operation") == "sweep_sketch":
+                body = by_id.get(item.get("body_id"))
+                feature_geometry = item.get("geometry")
+                source_id = item.get("source_sketch_id")
+                if body is None or feature_geometry != body.get("geometry"):
+                    raise ValidationError("Sweep feature geometry must match its body.")
+                plane, path = open_path(document.objects, source_id)
+                if (feature_geometry.get("kind") != "swept_pipe" or feature_geometry.get("plane") != plane
+                        or feature_geometry.get("path") != path
+                        or feature_geometry.get("radius") != item.get("parameters", {}).get("radius")):
+                    raise ValidationError("Sweep feature geometry is out of date with its source sketch.")
                 continue
             if item.get("operation") not in {"extrude_sketch", "revolve_sketch"}:
                 continue
@@ -435,6 +509,40 @@ class CadyxCore:
                 raise ValidationError("Profile feature geometry is out of date with its parameters.")
             if feature_geometry.get("centered", False) != parameters.get("centered", False):
                 raise ValidationError("Profile feature centered-extrusion state is out of date.")
+
+    @staticmethod
+    def _document_cache_key(project_id: str, document: Document) -> tuple[str, str]:
+        payload = json.dumps(document.to_dict(), ensure_ascii=False, sort_keys=True,
+                             separators=(",", ":"))
+        return project_id, hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _remember_geometry_validation(self, project_id: str, document: Document) -> None:
+        key = self._document_cache_key(project_id, document)
+        with self._geometry_cache_guard:
+            self._validated_document_keys[key] = None
+            self._validated_document_keys.move_to_end(key)
+            while len(self._validated_document_keys) > 32:
+                self._validated_document_keys.popitem(last=False)
+
+    def _validate_geometry_once(self, project_id: str, document: Document) -> None:
+        key = self._document_cache_key(project_id, document)
+        with self._geometry_cache_guard:
+            if key in self._validated_document_keys:
+                self._validated_document_keys.move_to_end(key)
+                return
+            validation_lock = self._document_validation_locks.setdefault(key, threading.Lock())
+        try:
+            with validation_lock:
+                with self._geometry_cache_guard:
+                    if key in self._validated_document_keys:
+                        self._validated_document_keys.move_to_end(key)
+                        return
+                self._validate_geometry(document)
+                self._remember_geometry_validation(project_id, document)
+        finally:
+            with self._geometry_cache_guard:
+                if self._document_validation_locks.get(key) is validation_lock:
+                    self._document_validation_locks.pop(key, None)
 
     @staticmethod
     def _summary(project: dict[str, Any]) -> dict[str, Any]:

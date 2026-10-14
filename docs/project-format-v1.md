@@ -1,6 +1,6 @@
 # CADYX Project Format v1
 
-Every project lives at `projects/<project-id>/project.json`, where `project-id` is a UUID. The JSON document is UTF-8 and uses `format: "cadyx-project"` with `version: 1`.
+Every project lives at `projects/<project-name>/project.json`. The directory name is a filesystem-safe version of the display name, with a numeric suffix when a folder already exists. A local `.cadyx-project-id` marker keeps the stable UUID addressable even if `project.json` is damaged; the UUID remains the API and lease identity. Legacy `projects/<project-id>/` directories remain readable. The JSON document is UTF-8 and uses `format: "cadyx-project"` with `version: 1`.
 
 ```json
 {

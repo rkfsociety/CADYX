@@ -88,8 +88,8 @@ multi-contour profiles are not supported.
 
 The command stores an OCCT B-rep descriptor plus a feature that references its
 source sketch and operation parameter. Editing source points rebuilds the linked
-body in the same atomic command. `set_parameter` can change extrusion depth or
-revolution angle. Removing a sketch used by a solid feature is rejected. Profile
+body in the same atomic command. `set_parameter` can change extrusion depth,
+revolution angle, sweep radius, or fillet radius. Removing a sketch used by a solid feature is rejected. Profile
 constraints still check the supplied geometry and do not solve it. The OCCT
 adapter rebuilds and validates each saved solid and derives viewport triangles
 from the B-rep. These are solids, not triangle-mesh imports.
@@ -97,15 +97,47 @@ from the B-rep. These are solids, not triangle-mesh imports.
 `replace_sketch_profile` replaces the point/line loop of a selected sketch and
 atomically rebuilds its dependent profile features. It accepts `sketch_id` and
 3–4096 finite `{x, y}` points; sketches with circles or constraints are
-rejected. Editing a sketch also rebuilds downstream fuse features.
+rejected. Editing a sketch also rebuilds downstream derived solid features.
+
+`replace_sketch_path` replaces a point-and-line sketch with one open connected
+chain. It accepts `sketch_id` and 3–512 finite `{x, y}` points, creates one line
+between each adjacent pair, and animates the path while it is drawn. A path sketch
+cannot contain branches, loops, circles, or constraints.
+
+`sweep_sketch` accepts `sketch_id`, a positive circular section `radius`, and
+optional `name`. It sweeps a circle along the sketch's open line chain, fitting a
+C2 B-spline spine within the OCCT approximation tolerance. XY and XZ paths are
+supported; an XZ path is vertical in global Z. The resulting `swept_pipe` is a
+closed OCCT solid, remains linked to the source sketch, and rebuilds when path
+points or the radius change. The command transition progressively reveals the
+pipe along the path.
 
 `fuse_bodies` accepts `base_body_id`, `tool_body_id`, and optional `name` for two
-profile-based OCCT solids. The native OCCT Boolean operation must produce one
-connected valid solid. The resulting `fused_profiles` descriptor retains both
-source geometry descriptors and is rebuilt when a source sketch changes.
-Consumed source bodies remain in document history for editing but are hidden
-from the viewport and object tree; only the fused result is displayed. Meshes,
-boxes, and already-fused results are not accepted by this profile-fuse command.
+intersecting OCCT B-rep solids. The native Boolean operation must produce one
+connected valid solid. It supports profile solids, swept pipes, and prior
+fuse/fillet results; imported triangle meshes are not B-rep inputs. The resulting
+`fused_solids` descriptor retains both source geometry descriptors and rebuilds
+when either source changes. Legacy `fused_profiles` descriptors remain supported.
+
+`GET /api/v1/agent/projects/{project_id}/topology?body_id=...` inspects a body's
+current unique B-rep edges for downstream edge selection. Each edge has a
+traversal `index`, length, center of mass, and curve type. Indices are valid for
+that exact current topology and are not persistent names; inspect again after
+any upstream edit before selecting edges.
+
+`fillet_edges` accepts `body_id`, 1–128 distinct `edge_indices`, a positive
+`radius`, and optional `name`. It creates a new body with an OCCT rolling-edge
+fillet and can round the mug rim, base, or a fused handle junction.
+`set_parameter` can edit its radius. The `filleted_solid` descriptor retains the
+source B-rep, selected current edge indices, and radius. If an upstream edit
+changes topology or makes the requested radius impossible, the dependent rebuild
+fails atomically and leaves the saved model unchanged.
+
+Sweep sketches used by a feature and all inactive sketches are hidden from the
+user-facing tree and viewport. Fillet and fuse source bodies remain in document
+history for editing but are hidden from the viewport and object tree; only
+unconsumed results are displayed. Solid source-sketch edits rebuild downstream
+sweep, fillet, and fuse features in document order.
 
 ## Scan import and editable triangle meshes
 
@@ -189,8 +221,9 @@ PNG image without a browser from
 `GET /api/v1/agent/projects/{id}/viewport.png`; the regular viewport API remains
 available as JSON scene data. The command objects above create boxes and XY/XZ
 sketches, add sketch geometry and checked constraints, extrude or revolve closed
-profiles, change feature parameters or sketch elements, and remove unreferenced
-sketch objects. Every command uses the shared Command System, and the complete
+profiles, sweep circular sections along open sketches, fuse solid B-reps, fillet
+selected B-rep edges, change feature parameters or sketch elements, and remove
+unreferenced sketch objects. Every command uses the shared Command System, and the complete
 document is validated before the atomic save. Constraints check the supplied
 result but do not solve or move geometry. The browser exposes no
 project or model creation, editing, or deletion controls.

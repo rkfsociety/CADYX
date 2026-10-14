@@ -3,18 +3,32 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
+#include <BRepOffsetAPI_MakePipe.hxx>
+#include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
 #include <gp_Ax1.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Circ.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 #include <GProp_GProps.hxx>
+#include <GeomAPI_PointsToBSpline.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <GeomAbs_CurveType.hxx>
+#include <NCollection_Array1.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopExp.hxx>
+#include <NCollection_IndexedMap.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopLoc_Location.hxx>
@@ -26,6 +40,7 @@
 #include <cstring>
 #include <iomanip>
 #include <sstream>
+#include <iostream>
 #include <locale>
 #include <string>
 #include <stdexcept>
@@ -51,9 +66,27 @@ char* CopyResult(const std::string& value) {
   return result;
 }
 
-std::string ShapeJson(const TopoDS_Shape& shape, int mesh) {
+const char* CurveName(GeomAbs_CurveType type) {
+  switch (type) {
+    case GeomAbs_Line: return "line";
+    case GeomAbs_Circle: return "circle";
+    case GeomAbs_Ellipse: return "ellipse";
+    case GeomAbs_Hyperbola: return "hyperbola";
+    case GeomAbs_Parabola: return "parabola";
+    case GeomAbs_BezierCurve: return "bezier";
+    case GeomAbs_BSplineCurve: return "bspline";
+    case GeomAbs_OffsetCurve: return "offset";
+    case GeomAbs_OtherCurve: return "other";
+  }
+  return "other";
+}
+
+std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0) {
   if (shape.IsNull() || !BRepCheck_Analyzer(shape).IsValid())
     throw std::runtime_error("OCCT constructed an invalid solid.");
+  size_t solid_count = 0;
+  for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More(); explorer.Next()) ++solid_count;
+  if (solid_count != 1) throw std::runtime_error("OCCT geometry must contain exactly one closed solid.");
   GProp_GProps properties;
   BRepGProp::VolumeProperties(shape, properties);
   const double volume = properties.Mass();
@@ -64,7 +97,10 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh) {
   json.imbue(std::locale::classic());
   json << std::setprecision(17) << "{\"volume\":" << volume;
   if (mesh) {
-    BRepMesh_IncrementalMesh mesher(shape, 0.01, false, 0.5, false);
+    // This mesh is only for the live viewport; the editable B-rep remains exact.
+    // Keep the display approximation near one CSS pixel for a typical viewport;
+    // the exact editable B-rep remains unchanged.
+    BRepMesh_IncrementalMesh mesher(shape, 0.16, false, 0.5, false);
     if (!mesher.IsDone()) throw std::runtime_error("OCCT could not tessellate the solid.");
     std::vector<double> positions;
     std::vector<size_t> triangles;
@@ -95,9 +131,40 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh) {
     for (size_t i = 0; i < triangles.size(); ++i) json << (i ? "," : "") << triangles[i];
     json << "]";
   }
+  if (topology) {
+    json << ",\"edges\":[";
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> mapped_edges;
+    TopExp::MapShapes(shape, TopAbs_EDGE, mapped_edges);
+    for (int index = 0; index < mapped_edges.Extent(); ++index) {
+      if (index) json << ",";
+      const TopoDS_Edge edge = TopoDS::Edge(mapped_edges.FindKey(index + 1));
+      GProp_GProps edge_properties;
+      BRepGProp::LinearProperties(edge, edge_properties);
+      const gp_Pnt center = edge_properties.CentreOfMass();
+      BRepAdaptor_Curve curve(edge);
+      json << "{\"index\":" << index << ",\"length\":" << edge_properties.Mass()
+           << ",\"center\":[" << center.X() << "," << center.Y() << "," << center.Z()
+           << "],\"curve\":\"" << CurveName(curve.GetType()) << "\"}";
+    }
+    json << "]";
+  }
   json << "}";
   return json.str();
 }
+
+struct OperationNode {
+  int type;
+  int input_a;
+  int input_b;
+  int operation;
+  int plane;
+  int centered;
+  double amount;
+  size_t coordinate_offset;
+  size_t coordinate_count;
+  size_t edge_offset;
+  size_t edge_count;
+};
 
 TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
                               int operation, int plane, double amount, bool centered) {
@@ -162,7 +229,157 @@ TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
   if (!builder.IsDone()) throw std::runtime_error("OCCT could not revolve the sketch profile.");
   return builder.Shape();
 }
+
+TopoDS_Shape MakePipeShape(const double* coordinates, size_t point_count, int plane, double radius) {
+  if (!coordinates || point_count < 3 || point_count > 512)
+    throw std::runtime_error("A sweep path needs between 3 and 512 points.");
+  if ((plane != 0 && plane != 1) || !std::isfinite(radius) || radius <= 0)
+    throw std::runtime_error("A pipe needs a supported sketch plane and a positive radius.");
+  NCollection_Array1<gp_Pnt> points(1, static_cast<Standard_Integer>(point_count));
+  gp_Pnt previous;
+  for (size_t i = 0; i < point_count; ++i) {
+    const double x = coordinates[2 * i];
+    const double y = coordinates[2 * i + 1];
+    if (!std::isfinite(x) || !std::isfinite(y))
+      throw std::runtime_error("Sweep path coordinates must be finite.");
+    const gp_Pnt point = plane == 0 ? gp_Pnt(x, y, 0) : gp_Pnt(x, 0, y);
+    if (i && point.Distance(previous) <= 1e-7)
+      throw std::runtime_error("Sweep path points must have distinct consecutive endpoints.");
+    points.SetValue(static_cast<Standard_Integer>(i + 1), point);
+    previous = point;
+  }
+  GeomAPI_PointsToBSpline spline_builder(points, 3, 8, GeomAbs_C2, 1e-3);
+  if (!spline_builder.IsDone()) throw std::runtime_error("OCCT could not smooth the sweep path.");
+  const Handle(Geom_BSplineCurve) spine_curve = spline_builder.Curve();
+  BRepBuilderAPI_MakeEdge spine_edge(spine_curve);
+  BRepBuilderAPI_MakeWire spine_builder;
+  spine_builder.Add(spine_edge.Edge());
+  if (!spine_builder.IsDone()) throw std::runtime_error("OCCT could not construct the sweep spine.");
+
+  gp_Vec tangent(points.Value(1), points.Value(2));
+  if (tangent.Magnitude() <= 1e-7) throw std::runtime_error("Sweep path tangent is degenerate.");
+  tangent.Normalize();
+  BRepBuilderAPI_MakeEdge section_edge(gp_Circ(gp_Ax2(points.Value(1), gp_Dir(tangent)), radius));
+  BRepBuilderAPI_MakeWire section_builder;
+  section_builder.Add(section_edge.Edge());
+  if (!section_builder.IsDone()) throw std::runtime_error("OCCT could not construct the pipe section.");
+  BRepBuilderAPI_MakeFace section_face(section_builder.Wire());
+  if (!section_face.IsDone()) throw std::runtime_error("OCCT could not close the circular pipe section.");
+  BRepOffsetAPI_MakePipe pipe(spine_builder.Wire(), section_face.Face());
+  pipe.Build();
+  if (!pipe.IsDone()) throw std::runtime_error("OCCT could not sweep the circular section along the path.");
+  return pipe.Shape();
+}
+
+TopoDS_Shape EnsureOneSolid(const TopoDS_Shape& shape, const char* operation) {
+  size_t solids = 0;
+  for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More(); explorer.Next()) ++solids;
+  if (solids != 1) throw std::runtime_error(std::string(operation) + " must produce one connected solid.");
+  return shape;
+}
+
+TopoDS_Shape MakeFillet(const TopoDS_Shape& source, const int* edge_indices, size_t edge_count, double radius) {
+  if (!edge_indices || edge_count == 0 || edge_count > 128 || !std::isfinite(radius) || radius <= 0)
+    throw std::runtime_error("Fillet needs selected edges and a positive radius.");
+  EnsureOneSolid(source, "Fillet");
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> mapped_edges;
+  TopExp::MapShapes(source, TopAbs_EDGE, mapped_edges);
+  BRepFilletAPI_MakeFillet operation(source);
+  std::vector<int> selected;
+  for (size_t i = 0; i < edge_count; ++i) {
+    const int index = edge_indices[i];
+    if (index < 0 || index >= mapped_edges.Extent())
+      throw std::runtime_error("Fillet edge index is outside the current body topology.");
+    if (std::find(selected.begin(), selected.end(), index) != selected.end())
+      throw std::runtime_error("Fillet edge indices must be unique.");
+    selected.push_back(index);
+    operation.Add(radius, TopoDS::Edge(mapped_edges.FindKey(index + 1)));
+  }
+  operation.Build();
+  if (!operation.IsDone()) throw std::runtime_error("OCCT could not create the requested edge fillet.");
+  return EnsureOneSolid(operation.Shape(), "Fillet");
+}
+
+TopoDS_Shape MakeFuse(const TopoDS_Shape& base, const TopoDS_Shape& tool) {
+  BRepAlgoAPI_Fuse operation(base, tool);
+  operation.SetFuzzyValue(1e-7);
+  operation.Build();
+  if (!operation.IsDone()) {
+    std::ostringstream detail;
+    operation.DumpErrors(detail);
+    throw std::runtime_error("OCCT could not fuse the solids: " + detail.str());
+  }
+  return EnsureOneSolid(operation.Shape(), "Boolean fuse");
+}
+
+std::string BuildGraphJson(const OperationNode* nodes, size_t node_count,
+                           const double* coordinates, size_t coordinate_count,
+                           const int* edge_indices, size_t edge_count, int mesh, int topology) {
+  if (!nodes || node_count == 0 || node_count > 1024)
+    throw std::runtime_error("A geometry graph needs between 1 and 1024 operations.");
+  std::vector<TopoDS_Shape> shapes;
+  shapes.reserve(node_count);
+  for (size_t i = 0; i < node_count; ++i) {
+    const OperationNode& node = nodes[i];
+    if (node.coordinate_offset > coordinate_count || node.coordinate_count > coordinate_count - node.coordinate_offset
+        || node.edge_offset > edge_count || node.edge_count > edge_count - node.edge_offset)
+      throw std::runtime_error("Geometry graph operation references data outside its buffers.");
+    const double* points = node.coordinate_count ? coordinates + node.coordinate_offset : nullptr;
+    const int* edges = node.edge_count ? edge_indices + node.edge_offset : nullptr;
+    TopoDS_Shape shape;
+    switch (node.type) {
+      case 0:
+        if (node.coordinate_count % 2 != 0)
+          throw std::runtime_error("Profile graph coordinates must be paired x/y values.");
+        shape = MakeProfileShape(points, node.coordinate_count / 2, node.operation, node.plane,
+                                 node.amount, node.centered != 0);
+        break;
+      case 1:
+        if (node.coordinate_count % 2 != 0)
+          throw std::runtime_error("Sweep graph coordinates must be paired x/y values.");
+        shape = MakePipeShape(points, node.coordinate_count / 2, node.plane, node.amount);
+        break;
+      case 2:
+        if (node.input_a < 0 || node.input_b < 0
+            || static_cast<size_t>(node.input_a) >= i || static_cast<size_t>(node.input_b) >= i)
+          throw std::runtime_error("Boolean fuse graph references must point to earlier operations.");
+        shape = MakeFuse(shapes[node.input_a], shapes[node.input_b]);
+        break;
+      case 3:
+        if (node.input_a < 0 || static_cast<size_t>(node.input_a) >= i)
+          throw std::runtime_error("Fillet graph reference must point to an earlier operation.");
+        shape = MakeFillet(shapes[node.input_a], edges, node.edge_count, node.amount);
+        break;
+      case 4:
+        if (!points || node.coordinate_count != 3)
+          throw std::runtime_error("Box graph operation needs three dimensions.");
+        shape = BRepPrimAPI_MakeBox(points[0], points[1], points[2]).Shape();
+        break;
+      default:
+        throw std::runtime_error("Unsupported geometry graph operation.");
+    }
+    shapes.push_back(shape);
+  }
+  return ShapeJson(shapes.back(), mesh, topology);
+}
 }  // namespace
+
+API char* cadyx_graph(const OperationNode* nodes, size_t node_count,
+                      const double* coordinates, size_t coordinate_count,
+                      const int* edge_indices, size_t edge_count,
+                      int mesh, int topology, char* error, size_t capacity) noexcept {
+  try {
+    return CopyResult(BuildGraphJson(nodes, node_count, coordinates, coordinate_count,
+                                     edge_indices, edge_count, mesh, topology));
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString() ? exception.GetMessageString() : "OCCT graph operation failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown native kernel failure.");
+  }
+  return nullptr;
+}
 
 API char* cadyx_box(double width, double height, double depth, int mesh,
                     char* error, size_t capacity) noexcept {

@@ -2,12 +2,17 @@
 
 `GET /api/v1/projects/{id}/viewport` and
 `GET /api/v1/agent/projects/{id}/viewport` return identical JSON scenes.
-Core holds the existing project guard through load, validation and rendering,
-so each response reflects one committed revision. Observation requires no edit
+Core reads the atomically saved project snapshot, so each response reflects one
+committed revision. Observation requires no edit
 lease and does not alter `project.json`, command history or lease ownership.
-Missing projects use the existing 404 contract; invalid geometry uses 400 and
-busy projects use 409 (`PROJECT_BUSY`). The scene is derived, never persisted;
-no project/document migration is required.
+Read-only routes load the last atomically saved snapshot without waiting on an
+agent's edit lease, so the viewer can show the latest committed operation while
+the next command runs. Core caches validated geometry and rendered scenes by a
+hash of the full document content for the life of the host process. Repeated
+reads and page reloads reuse that scene; a document edit invalidates it, and
+callers receive copies so they cannot mutate the cache. Missing projects use
+the existing 404 contract; invalid geometry uses 400. The scene is derived,
+never persisted; no project/document migration is required.
 
 The matching `GET /api/v1/projects/{id}/viewport.png` and
 `GET /api/v1/agent/projects/{id}/viewport.png` endpoints return the same scene
@@ -23,7 +28,10 @@ empty), and `objects`. Each render object has its stable `object_id`, document
 (triples), `lines` (pairs), `points` (single indices). Empty arrays are explicit.
 Features, sketches and constraints have no independent visible geometry.
 Body triangles come from native OCCT tessellation, including face location
-transforms and outward winding. Supported saved solids include boxes, closed
+transforms and outward winding. Viewport-only tessellation uses an absolute
+linear deflection of 0.16 document units to keep camera orbit responsive; this
+is a display approximation and does not alter the exact editable B-rep or
+exports. Supported saved solids include boxes, closed
 profile extrusions and revolutions. XY sketch points/lines lie at Z=0; XZ
 sketches map their points/lines onto Y=0 with stored y becoming global Z.
 Circles use 64 closed segments, a display approximation rather than replacement
@@ -66,10 +74,18 @@ Agent API snapshot and is not rendered in the user interface.
 - `setCamera(camera)` validates finite values, pitch within +/-π/2 radians,
   zoom within 0.25–5 and the orthographic projection before updating.
 
+Camera drag and wheel events update camera state immediately and coalesce
+canvas rendering to one animation-frame callback. CAD body shading averages
+adjacent triangle normals at shared vertices so the lighter viewport mesh
+keeps a smooth surface appearance.
+
 Camera vertical is Z; yaw rotates around Z, pitch changes elevation.
 Unless a modeling request specifies another datum, new geometry starts at
-global Z=0. Drag right/left orbits horizontally; drag down increases elevation
-and drag up decreases it. Wheel zooms; double-click or **Вписать** restores the
+global Z=0. When a scene has a shared revolution axis, the camera orbits around
+that axis at the body's Z midpoint; an asymmetric handle therefore cannot shift
+the camera pivot away from the mug centerline. Fit size accounts for the full
+scene bounds relative to that pivot. Drag right/left orbits horizontally; drag
+down increases elevation and drag up decreases it. Wheel zooms; double-click or **Вписать** restores the
 fitted view. The orbit can reach the exact top view. A compact XYZ triad tracks
 camera orientation; revolved bodies show a dashed Z-axis line through their
 rotation axis. Camera stays local to the viewer, requires no document mutation

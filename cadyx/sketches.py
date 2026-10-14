@@ -176,3 +176,46 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
     if not math.isfinite(area) or abs(area) <= 1e-12:
         raise ValidationError("Profile area must be non-zero.")
     return plane, profile
+
+
+def open_path(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[dict[str, float]]]:
+    """Return the ordered vertices of one connected, non-branching open line chain."""
+    sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
+    if sketch is None:
+        raise ValidationError("A sweep operation needs an existing sketch.")
+    owned = [item for item in objects if item.get("sketch_id") == sketch_id]
+    lines = [item for item in owned if item.get("type") == "line"]
+    if not 2 <= len(lines) <= 511 or any(item.get("type") not in {"point", "line"} for item in owned):
+        raise ValidationError("A sweep path needs 3 to 512 points and no other sketch geometry.")
+
+    by_id = {item["id"]: item for item in objects}
+    adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for line in lines:
+        adjacency[line["start_id"]].append(line)
+        adjacency[line["end_id"]].append(line)
+    endpoints = [point_id for point_id, edges in adjacency.items() if len(edges) == 1]
+    if len(endpoints) != 2 or any(len(edges) not in {1, 2} for edges in adjacency.values()):
+        raise ValidationError("A sweep path must be one open line chain without branches or loops.")
+    point_ids = {item["id"] for item in owned if item.get("type") == "point"}
+    if set(adjacency) != point_ids:
+        raise ValidationError("Every point in a sweep sketch must belong to its open line chain.")
+
+    current_id = endpoints[0]
+    ordered_ids = [current_id]
+    used: set[str] = set()
+    while True:
+        next_lines = [line for line in adjacency[current_id] if line["id"] not in used]
+        if not next_lines:
+            break
+        if len(next_lines) != 1:
+            raise ValidationError("A sweep path must be one open line chain without branches or loops.")
+        line = next_lines[0]
+        used.add(line["id"])
+        current_id = line["end_id"] if line["start_id"] == current_id else line["start_id"]
+        ordered_ids.append(current_id)
+    if len(used) != len(lines) or len(ordered_ids) != len(lines) + 1:
+        raise ValidationError("A sweep path must be one connected open line chain.")
+    return sketch["plane"], [
+        {"x": number(by_id[point_id]["x"]), "y": number(by_id[point_id]["y"])}
+        for point_id in ordered_ids
+    ]

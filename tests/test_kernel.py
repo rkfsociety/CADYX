@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
@@ -35,6 +36,18 @@ class OCPKernelAdapterConformanceTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             self.kernel.validate(geometry)
+
+    def test_validate_caches_identical_descriptors_but_rechecks_changed_geometry(self) -> None:
+        geometry = self.kernel.create_box(width=17, height=23, depth=31)
+        with patch.object(self.kernel, "_validate_uncached", wraps=self.kernel._validate_uncached) as validate:
+            self.kernel.validate(geometry)
+            self.kernel.validate(dict(geometry, dimensions=dict(geometry["dimensions"])))
+            self.assertEqual(validate.call_count, 1)
+
+            changed = dict(geometry, volume=geometry["volume"] + 1)
+            with self.assertRaises(ValidationError):
+                self.kernel.validate(changed)
+            self.assertEqual(validate.call_count, 2)
 
     def test_validate_rejects_unknown_geometry_format(self) -> None:
         with self.assertRaises(ValidationError):

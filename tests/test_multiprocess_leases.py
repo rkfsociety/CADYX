@@ -181,7 +181,7 @@ class MultiprocessLeaseTests(unittest.TestCase):
 
     def test_invalid_saved_state_prevents_recovery(self):
         self.core.acquire_lease(self.project_id, "agent", "agent")
-        path = Path(self.root) / self.project_id / "project.json"
+        path = self.core.workspace._project_dir(self.project_id) / "project.json"
         saved = path.read_bytes()
         path.write_text("{}")
         self.assertEqual(self.call("recover_expired_lease", now=106), ("error", "VALIDATION_ERROR"))

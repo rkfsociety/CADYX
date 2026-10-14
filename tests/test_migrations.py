@@ -23,7 +23,7 @@ class MigrationTests(unittest.TestCase):
         self.lease = self.core.acquire_lease(self.id, "human", "test")["lease_id"]
         self.core.execute_command(self.id, self.lease,
                                   {"type": "create_box", "width": 2, "height": 3, "depth": 4})
-        self.path = Path(self.temp.name) / self.id / "project.json"
+        self.path = self.core.workspace._project_dir(self.id) / "project.json"
         self.legacy = json.loads(self.path.read_text())
         self.legacy["document"]["version"] = 1
         self.legacy["extension"] = {"source": "preserve"}

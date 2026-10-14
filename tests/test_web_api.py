@@ -5,8 +5,10 @@ import os
 import tempfile
 import struct
 import threading
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -46,7 +48,7 @@ class WebApiTests(unittest.TestCase):
             with self.subTest(owner=owner):
                 _, created = self.request("/api/v1/projects", {"name": "Legacy API"})
                 project_id = created["project"]["id"]
-                path = self.core.workspace.root / project_id / "project.json"
+                path = self.core.workspace._project_dir(project_id) / "project.json"
                 legacy = json.loads(path.read_text())
                 legacy["document"]["version"] = 1
                 path.write_text(json.dumps(legacy))
@@ -95,6 +97,43 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(activity["activities"][-1]["state"], "completed")
         status, activity = self.request(f"/api/v1/agent/projects/{project_id}/activity")
         self.assertEqual((status, activity["activities"][-1]["state"]), (200, "completed"))
+
+    def test_project_listing_and_saved_snapshot_reads_do_not_wait_for_an_edit_lock(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "Reload persistence"})
+        project_id = created["project"]["id"]
+        entered = threading.Event()
+        release = threading.Event()
+
+        def hold_project_guard() -> None:
+            with self.core.leases.guard(project_id):
+                entered.set()
+                release.wait(timeout=5)
+
+        holder = threading.Thread(target=hold_project_guard, daemon=True)
+        holder.start()
+        self.assertTrue(entered.wait(timeout=2))
+        try:
+            started = time.monotonic()
+            status, workspace = self.request("/api/v1/projects")
+            self.assertEqual(status, 200)
+            self.assertLess(time.monotonic() - started, 2)
+            entry = next(item for item in workspace["projects"] if item["project"]["id"] == project_id)
+            self.assertEqual(entry["project"]["name"], "Reload persistence")
+
+            status, detail = self.request(f"/api/v1/projects/{project_id}")
+            self.assertEqual(status, 200)
+            self.assertEqual(detail["document"]["revision"], 0)
+        finally:
+            release.set()
+            holder.join(timeout=2)
+
+    def test_empty_activity_snapshot_checks_project_without_geometry_validation(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "Empty activity"})
+        project_id = created["project"]["id"]
+        with patch.object(self.core, "inspect_project", side_effect=AssertionError("unexpected geometry validation")):
+            status, activity = self.request(f"/api/v1/projects/{project_id}/activity")
+        self.assertEqual(status, 200)
+        self.assertEqual(activity, {"activities": [], "revision": 0})
 
     def test_agent_api_does_not_accept_human_lease_for_command(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Lease boundary"})
@@ -195,6 +234,20 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(self.request("/api/v1/projects/invalid/viewport")[0], 404)
         with urlopen(self.base_url + "/assets/viewport.js", timeout=3) as response:
             self.assertIn(b"CadyxViewport", response.read())
+
+    def test_agent_can_inspect_stable_unique_brep_edges_for_fillets(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "B-rep topology"})
+        project_id = created["project"]["id"]
+        lease = self.core.acquire_lease(project_id, "agent", "topology-agent")
+        box = self.core.execute_command(project_id, lease["lease_id"], {
+            "type": "create_box", "width": 10, "height": 12, "depth": 14,
+        })["history_entry"]["result"]
+        status, topology = self.request(
+            f"/api/v1/agent/projects/{project_id}/topology?body_id={box['body_id']}"
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(len(topology["edges"]), 12)
+        self.assertEqual({edge["index"] for edge in topology["edges"]}, set(range(12)))
 
     def test_agent_api_serves_read_only_scene_image_without_browser(self) -> None:
         status, created = self.request("/api/v1/agent/projects", {"name": "Server image"})

@@ -161,6 +161,51 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertEqual(len(body["geometry"]["profile"]), 66)
         self.assertEqual(body["geometry"]["profile"], points)
 
+    def test_sweep_creates_editable_bspline_pipe_and_rebuilds_from_its_path(self) -> None:
+        sketch_id = self.command({"type": "create_sketch", "name": "Траектория ручки", "plane": "XZ"})["sketch_id"]
+        points = [(28, 20), (34, 20), (44, 23), (53, 31), (59, 40), (58, 49), (51, 57), (40, 60), (30, 59)]
+        self.command({"type": "replace_sketch_path", "sketch_id": sketch_id,
+                      "points": [{"x": x, "y": z} for x, z in points]})
+        document = self.core.inspect_project(self.project_id)["document"]
+        path_ids = [item["id"] for item in document["objects"]
+                    if item.get("type") == "point" and item.get("sketch_id") == sketch_id]
+        handle = self.command({"type": "sweep_sketch", "sketch_id": sketch_id,
+                               "name": "Трубчатая ручка", "radius": 3.5})
+        self.assertEqual(handle["geometry"]["kind"], "swept_pipe")
+        self.assertAlmostEqual(handle["geometry"]["path"][0]["x"], 28)
+        topology = self.core.inspect_body_topology(self.project_id, handle["body_id"])
+        self.assertGreater(topology["volume"], 0)
+        self.assertIn("bspline", {edge["curve"] for edge in topology["edges"]})
+
+        before = handle["geometry"]["volume"]
+        self.command({"type": "update_sketch_elements", "updates": [
+            {"object_id": path_ids[4], "changes": {"x": 61}},
+        ]})
+        rebuilt = self.core.inspect_project(self.project_id)["document"]
+        body = next(item for item in rebuilt["objects"] if item.get("id") == handle["body_id"])
+        feature = next(item for item in rebuilt["objects"] if item.get("id") == handle["feature_id"])
+        self.assertNotEqual(body["geometry"]["volume"], before)
+        self.assertEqual(body["geometry"], feature["geometry"])
+        self.assertEqual(Document.from_dict(rebuilt).to_dict(), rebuilt)
+
+    def test_fillet_uses_unique_topology_edges_and_hides_consumed_source(self) -> None:
+        source = self.command({"type": "create_box", "name": "Заготовка", "width": 10,
+                               "height": 12, "depth": 14})
+        topology = self.core.inspect_body_topology(self.project_id, source["body_id"])
+        self.assertEqual(len(topology["edges"]), 12)
+        result = self.command({"type": "fillet_edges", "body_id": source["body_id"],
+                               "edge_indices": [0], "radius": 1.0, "name": "Скруглённая заготовка"})
+        self.assertEqual(result["geometry"]["kind"], "filleted_solid")
+        self.assertLess(result["geometry"]["volume"], source["geometry"]["volume"])
+        visible = [item["object_id"] for item in self.core.render_project(self.project_id)["objects"]
+                   if item["type"] == "body"]
+        self.assertEqual(visible, [result["body_id"]])
+
+        before = result["geometry"]["volume"]
+        adjusted = self.command({"type": "set_parameter", "feature_id": result["feature_id"],
+                                 "name": "radius", "value": 1.5})
+        self.assertLess(adjusted["geometry"]["volume"], before)
+
 
 if __name__ == "__main__":
     unittest.main()

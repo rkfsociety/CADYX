@@ -10,9 +10,10 @@ let meshMoves = [];
 let drawnLabels = [];
 let currentPath = [];
 let animationTime = 0;
+let renderCalls = 0;
 const animationFrames = [];
 const context = {
-  clearRect() { drawnPoints = []; segments = 0; drawnLines = []; meshMoves = []; drawnLabels = []; currentPath = []; },
+  clearRect() { renderCalls++; drawnPoints = []; segments = 0; drawnLines = []; meshMoves = []; drawnLabels = []; currentPath = []; },
   fillRect(x, y) { drawnPoints.push([x, y]); },
   beginPath() { currentPath = []; }, moveTo(x, y) { currentPath.push([x, y]); },
   lineTo(x, y) { segments++; drawnLines.push([x, y]); currentPath.push([x, y]); },
@@ -43,21 +44,29 @@ assert.ok(drawnPoints[1][1] < drawnPoints[0][1], "Positive Z projects upward");
 assert.equal(segments, 4, "Sketch lines and the three coordinate axes render in the shared viewport");
 assert.deepEqual(drawnLabels.filter((label) => ["X", "Y", "Z"].includes(label)).sort(), ["X", "Y", "Z"]);
 const initial = viewer.getCamera();
+const initialRenderCalls = renderCalls;
 events.pointerdown({ clientX: 100, clientY: 100, pointerId: 1 });
 events.pointermove({ clientX: 100, clientY: 120 });
+events.pointermove({ clientX: 100, clientY: 130 });
 events.pointerup();
 const downward = viewer.getCamera();
 assert.equal(downward.yaw, initial.yaw);
 assert.ok(downward.pitch > initial.pitch, "Dragging downward increases elevation in Z-up coordinates");
-events.pointerdown({ clientX: 100, clientY: 120, pointerId: 1 });
+assert.equal(animationFrames.length, 1, "A burst of camera events is coalesced into one animation frame");
+animationFrames.shift()(animationTime);
+assert.equal(renderCalls, initialRenderCalls + 1, "A camera event burst triggers one render, not one render per input event");
+events.pointerdown({ clientX: 100, clientY: 130, pointerId: 1 });
 events.pointermove({ clientX: 100, clientY: 100 });
 events.pointerup();
+animationFrames.shift()(animationTime);
 assert.ok(Math.abs(viewer.getCamera().pitch - initial.pitch) < 1e-12, "Reverse vertical drag restores elevation");
 events.pointerdown({ clientX: 100, clientY: 100, pointerId: 1 });
 events.pointermove({ clientX: 100, clientY: 300 });
 events.pointerup();
+animationFrames.shift()(animationTime);
 assert.equal(viewer.getCamera().pitch, Math.PI / 2, "Dragging can reach the exact top view");
 events.wheel({ deltaY: -100, preventDefault() {} });
+animationFrames.shift()(animationTime);
 const zoomed = viewer.getCamera();
 assert.ok(zoomed.zoom > initial.zoom);
 viewer.load(geometry, { reset: false });
@@ -108,4 +117,14 @@ animationTime = 300;
 animationFrames.shift()(animationTime);
 assert.ok(Math.max(...meshMoves.map(([x]) => x)) - Math.min(...meshMoves.map(([x]) => x)) > 2,
   "The revolved profile reaches its final radius");
+const mugOrbit = {
+  positions: [0, 0, 5, 20, 0, 5], triangles: [],
+  bounds: { min: [0, 0, 0], max: [20, 2, 10] },
+  rotationAxes: [{ start: [0, 0, -1], end: [0, 0, 11] }],
+};
+viewer.load(mugOrbit, { reset: false });
+assert.deepEqual(drawnPoints[0], [300, 200], "The revolution axis stays at the camera orbit center despite an offset body bounding box");
+assert.ok(drawnPoints[1][0] < 600, "The full asymmetric model remains fitted around its revolution axis");
+viewer.setCamera({ yaw: 2.1, pitch: 0.7, zoom: 1, projection: "orthographic" });
+assert.deepEqual(drawnPoints[0], [300, 200], "Camera orbit keeps the revolution axis anchored at the viewport center");
 console.log("Viewport: Z-up, camera controls, sketch and revolve transitions, zoom, refresh and fit passed.");

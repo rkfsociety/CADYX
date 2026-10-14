@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import math
+from functools import lru_cache
 from typing import Any, Protocol
 
 from .errors import ValidationError
@@ -22,6 +24,16 @@ class GeometryKernel(Protocol):
     ) -> dict[str, Any]: ...
 
     def fuse_profiles(self, base: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]: ...
+
+    def create_swept_pipe(
+        self, path: list[dict[str, float]], *, plane: str, radius: float,
+    ) -> dict[str, Any]: ...
+
+    def create_fillet(
+        self, base: dict[str, Any], *, edge_indices: list[int], radius: float,
+    ) -> dict[str, Any]: ...
+
+    def topology(self, geometry: dict[str, Any]) -> dict[str, Any]: ...
 
     def validate(self, geometry: dict[str, Any]) -> None: ...
 
@@ -90,6 +102,18 @@ def _positive_amount(value: Any, name: str, *, maximum: float | None = None) -> 
     return amount
 
 
+def _positive_or_signed_coordinate(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValidationError("Pipe path coordinates must be finite numbers.")
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValidationError("Pipe path coordinates must be finite numbers.") from exc
+    if not math.isfinite(number):
+        raise ValidationError("Pipe path coordinates must be finite numbers.")
+    return number
+
+
 class OCCTKernelAdapter:
     """Build and validate box B-reps with Open CASCADE Technology."""
 
@@ -101,18 +125,7 @@ class OCCTKernelAdapter:
         self.validate(geometry)
         if geometry.get("kernel") == "cadyx-mesh-v1":
             return tessellate_mesh_geometry(geometry)
-        if geometry.get("kind") in {"extruded_profile", "revolved_profile"}:
-            operation = 0 if geometry["kind"] == "extruded_profile" else 1
-            amount = geometry["depth"] if operation == 0 else math.radians(geometry["angle_degrees"])
-            result = NativeKernel().profile(
-                geometry["profile"], operation=operation, plane=geometry["plane"],
-                amount=amount, centered=geometry.get("centered", False), mesh=True,
-            )
-            return {key: result[key] for key in ("positions", "triangles")}
-        if geometry.get("kind") == "fused_profiles":
-            result = NativeKernel().fuse_profiles(geometry["base"], geometry["tool"], mesh=True)
-            return {key: result[key] for key in ("positions", "triangles")}
-        result = NativeKernel().box(geometry["dimensions"], mesh=True)
+        result = NativeKernel().geometry_graph(geometry, mesh=True)
         return {key: result[key] for key in ("positions", "triangles")}
 
     def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]:
@@ -165,18 +178,70 @@ class OCCTKernelAdapter:
         return geometry
 
     def fuse_profiles(self, base: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]:
-        self._validate_profile_geometry(base)
-        self._validate_profile_geometry(tool)
-        result = NativeKernel().fuse_profiles(base, tool)
+        self.validate(base)
+        self.validate(tool)
+        kind = "fused_profiles" if base.get("kind") in {"extruded_profile", "revolved_profile"} \
+            and tool.get("kind") in {"extruded_profile", "revolved_profile"} else "fused_solids"
+        result = NativeKernel().geometry_graph({"kind": kind, "base": base, "tool": tool})
         return {
             "kernel": self.kernel_id,
-            "kind": "fused_profiles",
+            "kind": kind,
             "base": base,
             "tool": tool,
             "volume": result["volume"],
         }
 
+    def create_swept_pipe(
+        self, path: list[dict[str, float]], *, plane: str, radius: float,
+    ) -> dict[str, Any]:
+        if plane not in {"XY", "XZ"} or not isinstance(path, list) or not 3 <= len(path) <= 512:
+            raise ValidationError("A pipe path needs 3 to 512 points on an XY or XZ sketch.")
+        normalized: list[dict[str, float]] = []
+        for point in path:
+            if not isinstance(point, dict) or set(point) != {"x", "y"}:
+                raise ValidationError("Every pipe path point must contain x and y coordinates.")
+            values = {axis: _positive_or_signed_coordinate(point[axis]) for axis in ("x", "y")}
+            if normalized and math.hypot(values["x"] - normalized[-1]["x"],
+                                         values["y"] - normalized[-1]["y"]) <= 1e-7:
+                raise ValidationError("Pipe path points must have distinct consecutive endpoints.")
+            normalized.append(values)
+        radius = _positive_amount(radius, "radius")
+        geometry = {"kernel": self.kernel_id, "kind": "swept_pipe", "plane": plane,
+                    "path": normalized, "radius": radius}
+        geometry["volume"] = NativeKernel().geometry_graph(geometry)["volume"]
+        return geometry
+
+    def create_fillet(
+        self, base: dict[str, Any], *, edge_indices: list[int], radius: float,
+    ) -> dict[str, Any]:
+        self.validate(base)
+        if (not isinstance(edge_indices, list) or not 1 <= len(edge_indices) <= 128
+                or any(type(index) is not int or index < 0 for index in edge_indices)
+                or len(set(edge_indices)) != len(edge_indices)):
+            raise ValidationError("Fillet needs 1 to 128 distinct non-negative edge indices.")
+        radius = _positive_amount(radius, "radius")
+        geometry = {"kernel": self.kernel_id, "kind": "filleted_solid", "base": base,
+                    "edge_indices": list(edge_indices), "radius": radius}
+        geometry["volume"] = NativeKernel().geometry_graph(geometry)["volume"]
+        return geometry
+
+    def topology(self, geometry: dict[str, Any]) -> dict[str, Any]:
+        result = NativeKernel().geometry_graph(geometry, topology=True)
+        self._same_saved_volume(geometry, result["volume"])
+        return result
+
     def validate(self, geometry: dict[str, Any]) -> None:
+        try:
+            descriptor = json.dumps(geometry, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Geometry does not match a supported box format.") from exc
+        self._validate_cached(descriptor)
+
+    @lru_cache(maxsize=128)
+    def _validate_cached(self, descriptor: str) -> None:
+        self._validate_uncached(json.loads(descriptor))
+
+    def _validate_uncached(self, geometry: dict[str, Any]) -> None:
         if isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1":
             validate_mesh_geometry(geometry)
             return
@@ -190,6 +255,15 @@ class OCCTKernelAdapter:
             return
         if kernel_id == self.kernel_id and geometry.get("kind") == "fused_profiles":
             self._validate_fused_geometry(geometry)
+            return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "fused_solids":
+            self._validate_fused_geometry(geometry)
+            return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "swept_pipe":
+            self._validate_swept_pipe_geometry(geometry)
+            return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "filleted_solid":
+            self._validate_filleted_geometry(geometry)
             return
         if set(geometry) != {"kernel", "kind", "dimensions", "volume"} or geometry.get("kind") != "box":
             raise ValidationError("Geometry does not match a supported box format.")
@@ -260,16 +334,16 @@ class OCCTKernelAdapter:
         if not math.isclose(saved_volume, actual, rel_tol=1e-12, abs_tol=1e-12):
             raise ValidationError("Saved geometry volume does not match the Open CASCADE solid.")
 
-    @staticmethod
-    def _validate_fused_geometry(geometry: dict[str, Any]) -> None:
+    def _validate_fused_geometry(self, geometry: dict[str, Any]) -> None:
         if (set(geometry) != {"kernel", "kind", "base", "tool", "volume"}
-                or geometry.get("kernel") != OCCTKernelAdapter.kernel_id):
-            raise ValidationError("Fused profile geometry descriptor is invalid.")
+                or geometry.get("kernel") != self.kernel_id
+                or geometry.get("kind") not in {"fused_profiles", "fused_solids"}):
+            raise ValidationError("Fused solid geometry descriptor is invalid.")
         base, tool = geometry.get("base"), geometry.get("tool")
         if not isinstance(base, dict) or not isinstance(tool, dict):
-            raise ValidationError("Fused profile source geometries are invalid.")
-        OCCTKernelAdapter._validate_profile_geometry(base)
-        OCCTKernelAdapter._validate_profile_geometry(tool)
+            raise ValidationError("Fused solid source geometries are invalid.")
+        self.validate(base)
+        self.validate(tool)
         saved_volume = geometry.get("volume")
         if isinstance(saved_volume, bool) or not isinstance(saved_volume, (int, float)):
             raise ValidationError("Saved geometry volume is invalid.")
@@ -279,9 +353,43 @@ class OCCTKernelAdapter:
             raise ValidationError("Saved geometry volume is invalid.") from exc
         if not math.isfinite(saved_volume) or saved_volume <= 0:
             raise ValidationError("Saved geometry volume is invalid.")
-        actual = NativeKernel().fuse_profiles(base, tool)["volume"]
+        actual = NativeKernel().geometry_graph(geometry)["volume"]
         if not math.isclose(saved_volume, actual, rel_tol=1e-12, abs_tol=1e-12):
             raise ValidationError("Saved geometry volume does not match the Open CASCADE fused solid.")
+
+    def _validate_swept_pipe_geometry(self, geometry: dict[str, Any]) -> None:
+        if (set(geometry) != {"kernel", "kind", "plane", "path", "radius", "volume"}
+                or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "swept_pipe"):
+            raise ValidationError("Swept pipe geometry descriptor is invalid.")
+        rebuilt = self.create_swept_pipe(geometry.get("path"), plane=geometry.get("plane"),
+                                         radius=geometry.get("radius"))
+        self._same_saved_volume(geometry, rebuilt["volume"])
+
+    def _validate_filleted_geometry(self, geometry: dict[str, Any]) -> None:
+        if (set(geometry) != {"kernel", "kind", "base", "edge_indices", "radius", "volume"}
+                or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "filleted_solid"):
+            raise ValidationError("Filleted solid geometry descriptor is invalid.")
+        self.validate(geometry.get("base"))
+        if (not isinstance(geometry.get("edge_indices"), list)
+                or not 1 <= len(geometry["edge_indices"]) <= 128
+                or any(type(index) is not int or index < 0 for index in geometry["edge_indices"])
+                or len(set(geometry["edge_indices"])) != len(geometry["edge_indices"])):
+            raise ValidationError("Fillet edge indices are invalid.")
+        radius = _positive_amount(geometry.get("radius"), "radius")
+        actual = NativeKernel().geometry_graph(geometry)["volume"]
+        self._same_saved_volume(geometry, actual)
+
+    @staticmethod
+    def _same_saved_volume(geometry: dict[str, Any], actual: float) -> None:
+        saved = geometry.get("volume")
+        if isinstance(saved, bool) or not isinstance(saved, (int, float)):
+            raise ValidationError("Saved geometry volume is invalid.")
+        try:
+            saved = float(saved)
+        except OverflowError as exc:
+            raise ValidationError("Saved geometry volume is invalid.") from exc
+        if not math.isfinite(saved) or saved <= 0 or not math.isclose(saved, actual, rel_tol=1e-12, abs_tol=1e-12):
+            raise ValidationError("Saved geometry volume does not match the Open CASCADE solid.")
 
     @staticmethod
     def _box_volume(dimensions: dict[str, float]) -> float:

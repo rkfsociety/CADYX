@@ -1,9 +1,11 @@
 import math
 import unittest
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
+from cadyx.rendering import render_scene
 
 
 class RenderingTests(unittest.TestCase):
@@ -19,7 +21,7 @@ class RenderingTests(unittest.TestCase):
 
     def test_mesh_winding_volume_bounds_and_read_only_scene(self):
         body = self.command({"type": "create_box", "width": 2, "height": 3, "depth": 5})["body_id"]
-        path = self.core.workspace.root / self.project / "project.json"
+        path = self.core.workspace._project_dir(self.project) / "project.json"
         before = path.read_bytes()
         scene = self.core.render_project(self.project)
         self.assertEqual(path.read_bytes(), before)
@@ -34,6 +36,22 @@ class RenderingTests(unittest.TestCase):
             a, b, c = [vertices[i] for i in mesh["triangles"][index:index+3]]
             volume += (a[0]*(b[1]*c[2]-b[2]*c[1]) + a[1]*(b[2]*c[0]-b[0]*c[2]) + a[2]*(b[0]*c[1]-b[1]*c[0])) / 6
         self.assertAlmostEqual(volume, 30)
+
+    def test_viewport_scene_cache_reuses_same_revision_and_invalidates_after_edit(self):
+        result = self.command({"type": "create_box", "width": 2, "height": 3, "depth": 5})
+        first = self.core.render_project(self.project)
+        first["objects"][0]["positions"][0] = 999
+        with patch("cadyx.core.render_scene", side_effect=AssertionError("scene should be cached")):
+            repeated = self.core.render_project(self.project)
+        self.assertEqual(repeated["objects"][0]["positions"][0], 0,
+                         "Cached scenes are returned as isolated copies")
+
+        self.command({"type": "set_parameter", "feature_id": result["feature_id"],
+                      "name": "width", "value": 4})
+        with patch("cadyx.core.render_scene", wraps=render_scene) as render:
+            changed = self.core.render_project(self.project)
+        self.assertEqual(render.call_count, 1, "A document revision change rebuilds the scene")
+        self.assertEqual(changed["bounds"]["max"], [4, 3, 5])
 
     def test_empty_and_sketch_scene_and_parameter_refresh(self):
         self.assertIsNone(self.core.render_project(self.project)["bounds"])
@@ -58,7 +76,7 @@ class RenderingTests(unittest.TestCase):
                                "element_type": "point", "x": 1e308, "y": 0})["object_id"]
         self.command({"type": "add_sketch_element", "sketch_id": sketch, "element_type": "circle",
                       "center_id": center, "radius": 1e308})
-        path = self.core.workspace.root / self.project / "project.json"
+        path = self.core.workspace._project_dir(self.project) / "project.json"
         before = path.read_bytes()
         with self.assertRaises(ValidationError):
             self.core.render_project(self.project)

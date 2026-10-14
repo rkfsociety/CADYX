@@ -111,10 +111,18 @@ def make_request_handler(
                         parts[4], "Получает 3D-сцену", lambda: core.render_project(parts[4]),
                     ))
                     return
+                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "topology":
+                    project_id = parts[4]
+                    body_id = parse_qs(parsed.query).get("body_id", [None])[0]
+                    self._json(200, core.observe_agent_operation(
+                        project_id, "Изучает рёбра модели",
+                        lambda: core.inspect_body_topology(project_id, body_id),
+                    ))
+                    return
                 if len(parts) == 5 and parts[:3] == prefix and parts[4] == "activity":
                     activities, revision = core.events.activity_state_snapshot(parts[3])
                     if not activities:
-                        core.inspect_project(parts[3])
+                        core.workspace.load(parts[3])
                     self._json(200, {"activities": activities, "revision": revision})
                     return
                 if len(parts) == 4 and parts[:3] == prefix:
@@ -123,7 +131,7 @@ def make_request_handler(
                 if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "activity":
                     activities, revision = core.events.activity_state_snapshot(parts[4])
                     if not activities:
-                        core.inspect_project(parts[4])
+                        core.workspace.load(parts[4])
                     self._json(200, {"activities": activities, "revision": revision})
                     return
                 if len(parts) == 5 and parts[:4] == agent_prefix:

@@ -104,6 +104,21 @@ class Document:
                     typed_id(source_sketch_id, "sketch")
                     if by_id.get(source_sketch_id, {}).get("type") != "sketch":
                         raise ValidationError("Profile feature must reference an existing source sketch.")
+                elif item.get("operation") == "sweep_sketch":
+                    source_sketch_id = item.get("source_sketch_id")
+                    typed_id(source_sketch_id, "sketch")
+                    if by_id.get(source_sketch_id, {}).get("type") != "sketch":
+                        raise ValidationError("Sweep feature must reference an existing source sketch.")
+                elif item.get("operation") == "fillet_edges":
+                    source_body_id = item.get("source_body_id")
+                    typed_id(source_body_id, "body")
+                    if source_body_id == item["body_id"] or by_id.get(source_body_id, {}).get("type") != "body":
+                        raise ValidationError("Fillet feature must reference a different existing source body.")
+                    edges = item.get("edge_indices")
+                    if (not isinstance(edges, list) or not edges or len(edges) > 128
+                            or any(type(index) is not int or index < 0 for index in edges)
+                            or len(set(edges)) != len(edges)):
+                        raise ValidationError("Fillet feature edge indices are invalid.")
                 elif item.get("operation") == "fuse_bodies":
                     base_id, tool_id = item.get("base_body_id"), item.get("tool_body_id")
                     typed_id(base_id, "body")

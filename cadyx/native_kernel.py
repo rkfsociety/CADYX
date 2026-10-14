@@ -47,6 +47,22 @@ class NativeKernel:
                         ctypes.c_char_p, ctypes.c_size_t,
                     ]
                     library.cadyx_fuse_profiles.restype = ctypes.c_void_p
+                    class GraphNode(ctypes.Structure):
+                        _fields_ = [
+                            ("type", ctypes.c_int), ("input_a", ctypes.c_int), ("input_b", ctypes.c_int),
+                            ("operation", ctypes.c_int), ("plane", ctypes.c_int), ("centered", ctypes.c_int),
+                            ("amount", ctypes.c_double), ("coordinate_offset", ctypes.c_size_t),
+                            ("coordinate_count", ctypes.c_size_t), ("edge_offset", ctypes.c_size_t),
+                            ("edge_count", ctypes.c_size_t),
+                        ]
+                    self.__class__._graph_node = GraphNode
+                    library.cadyx_graph.argtypes = [
+                        ctypes.POINTER(GraphNode), ctypes.c_size_t,
+                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
+                        ctypes.POINTER(ctypes.c_int), ctypes.c_size_t,
+                        ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t,
+                    ]
+                    library.cadyx_graph.restype = ctypes.c_void_p
                     library.cadyx_free.argtypes = [ctypes.c_void_p]
                     library.cadyx_free.restype = None
                     library.cadyx_kernel_version.argtypes = []
@@ -114,6 +130,60 @@ class NativeKernel:
         error = ctypes.create_string_buffer(1024)
         result = self.library.cadyx_fuse_profiles(
             *left, *right, int(mesh), error, len(error),
+        )
+        if not result:
+            raise ValidationError(error.value.decode("utf-8", errors="replace"))
+        try:
+            return json.loads(ctypes.string_at(result))
+        finally:
+            self.library.cadyx_free(result)
+
+    def geometry_graph(self, geometry, *, mesh=False, topology=False):
+        nodes = []
+        coordinates = []
+        edge_indices = []
+
+        def append(value):
+            kind = value.get("kind")
+            node = {"input_a": -1, "input_b": -1, "operation": 0, "plane": 1,
+                    "centered": 0, "amount": 0.0, "edge_offset": len(edge_indices), "edge_count": 0}
+            if kind == "box":
+                dimensions = value["dimensions"]
+                node.update(type=4, coordinate_offset=len(coordinates), coordinate_count=3)
+                coordinates.extend(dimensions[key] for key in ("width", "height", "depth"))
+            elif kind in {"extruded_profile", "revolved_profile"}:
+                operation = int(kind == "revolved_profile")
+                amount = value["depth"] if operation == 0 else math.radians(value["angle_degrees"])
+                node.update(type=0, operation=operation, plane=int(value["plane"] == "XZ"),
+                            centered=int(value.get("centered", False)), amount=amount,
+                            coordinate_offset=len(coordinates), coordinate_count=len(value["profile"]) * 2)
+                coordinates.extend(coord for point in value["profile"] for coord in (point["x"], point["y"]))
+            elif kind == "swept_pipe":
+                node.update(type=1, plane=int(value["plane"] == "XZ"), amount=value["radius"],
+                            coordinate_offset=len(coordinates), coordinate_count=len(value["path"]) * 2)
+                coordinates.extend(coord for point in value["path"] for coord in (point["x"], point["y"]))
+            elif kind in {"fused_profiles", "fused_solids"}:
+                node.update(type=2, input_a=append(value["base"]), input_b=append(value["tool"]))
+            elif kind == "filleted_solid":
+                node.update(type=3, input_a=append(value["base"]), amount=value["radius"],
+                            edge_offset=len(edge_indices), edge_count=len(value["edge_indices"]))
+                edge_indices.extend(value["edge_indices"])
+            else:
+                raise ValidationError("Geometry graph contains an unsupported operation.")
+            nodes.append(node)
+            return len(nodes) - 1
+
+        append(geometry)
+        native_nodes = (self._graph_node * len(nodes))()
+        for index, node in enumerate(nodes):
+            for name, value in node.items():
+                setattr(native_nodes[index], name, value)
+        native_coordinates = (ctypes.c_double * len(coordinates))(*coordinates) if coordinates else None
+        native_edges = (ctypes.c_int * len(edge_indices))(*edge_indices) if edge_indices else None
+        error = ctypes.create_string_buffer(1024)
+        result = self.library.cadyx_graph(
+            native_nodes, len(nodes), native_coordinates, len(coordinates), native_edges, len(edge_indices),
+            int(mesh), int(topology), error, len(error),
         )
         if not result:
             raise ValidationError(error.value.decode("utf-8", errors="replace"))

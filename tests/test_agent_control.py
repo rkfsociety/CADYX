@@ -51,7 +51,7 @@ class AgentControlTests(unittest.TestCase):
         self.assertEqual(self.core.resume_agent(self.project, "agent", 1)["document"]["revision"], 1)
 
     def test_validation_failure_keeps_lease_and_stop_fence_across_hosts(self):
-        path = self.core.workspace.root / self.project / "project.json"
+        path = self.core.workspace._project_dir(self.project) / "project.json"
         original = path.read_bytes()
         path.write_text("{}")
         with self.assertRaises(ValidationError):

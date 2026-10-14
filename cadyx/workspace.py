@@ -18,6 +18,10 @@ from .models import Document, OwnerType
 from .migrations import PROJECT_VERSION, migrate_project
 
 _PROJECT_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_WINDOWS_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} | {
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
 
 
 def utc_now() -> str:
@@ -32,10 +36,13 @@ class ProjectWorkspace:
     def _project_dir(self, project_id: str) -> Path:
         if not isinstance(project_id, str) or not _PROJECT_ID.fullmatch(project_id):
             raise NotFoundError("Project was not found.")
-        path = (self.root / project_id).resolve()
-        if path.parent != self.root:
-            raise NotFoundError("Project was not found.")
-        return path
+        legacy_path = self.root / project_id
+        if legacy_path.is_dir() and not legacy_path.is_symlink():
+            return legacy_path.resolve()
+        for entry in self._project_directories():
+            if self._project_record_id(entry) == project_id:
+                return entry
+        raise NotFoundError("Project was not found.")
 
     def create(self, name: str) -> dict[str, Any]:
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
@@ -52,8 +59,7 @@ class ProjectWorkspace:
             "document": Document.create().to_dict(),
             "history": [],
         }
-        project_dir = self._project_dir(project_id)
-        project_dir.mkdir()
+        project_dir = self._create_project_directory(project["name"], project_id)
         self._write_atomic(project_dir / "project.json", project)
         return project
 
@@ -79,23 +85,34 @@ class ProjectWorkspace:
 
     def list(self) -> list[dict[str, Any]]:
         projects: list[dict[str, Any]] = []
-        for entry in self.root.iterdir():
-            if not entry.is_dir() or not _PROJECT_ID.fullmatch(entry.name):
-                continue
+        seen_ids: set[str] = set()
+        for entry in self._project_directories():
             project_file = entry / "project.json"
-            if not project_file.exists():
+            if project_file.is_symlink() or not project_file.is_file():
                 continue
-            projects.append(self.load(entry.name))
+            if _PROJECT_ID.fullmatch(entry.name):
+                project_id = entry.name
+            else:
+                project_id = self._project_record_id(entry)
+                if project_id is None:
+                    continue
+            if project_id in seen_ids:
+                raise ConflictError(
+                    f"More than one workspace folder contains project '{project_id}'.",
+                    code="DUPLICATE_PROJECT_ID",
+                )
+            seen_ids.add(project_id)
+            projects.append(self.load(project_id))
         projects.sort(key=lambda item: (item["name"].casefold(), item["id"]))
         return projects
 
     def list_folder_projects(self) -> list[str]:
         """Return direct workspace directories that do not contain a CADYX project record."""
         folders: list[str] = []
-        for entry in self.root.iterdir():
+        for entry in self._project_directories():
             if not entry.is_dir() or entry.is_symlink():
                 continue
-            if _PROJECT_ID.fullmatch(entry.name) and (entry / "project.json").is_file():
+            if self._is_project_directory(entry):
                 continue
             try:
                 if entry.resolve(strict=True).parent != self.root:
@@ -131,11 +148,9 @@ class ProjectWorkspace:
     def workspace_revision_token(self) -> str:
         """Return a cheap token for project records and selectable workspace folders."""
         entries: list[tuple[str, str, int, int]] = []
-        for entry in sorted(self.root.iterdir(), key=lambda item: item.name.casefold()):
+        for entry in sorted(self._project_directories(), key=lambda item: item.name.casefold()):
             try:
-                if entry.is_symlink() or not entry.is_dir():
-                    continue
-                if _PROJECT_ID.fullmatch(entry.name):
+                if self._is_project_directory(entry):
                     project_file = entry / "project.json"
                     if project_file.is_symlink() or not project_file.is_file():
                         entries.append((entry.name, "folder", 0, 0))
@@ -254,7 +269,77 @@ class ProjectWorkspace:
             raise NotFoundError("Project folder was not found.") from exc
         if resolved.parent != self.root:
             raise NotFoundError("Project folder was not found.")
+        if self._is_project_directory(resolved):
+            raise NotFoundError("Project folder was not found.")
         return resolved
+
+    def _project_directories(self) -> list[Path]:
+        directories: list[Path] = []
+        try:
+            entries = self.root.iterdir()
+            for entry in entries:
+                if entry.is_symlink() or not entry.is_dir():
+                    continue
+                try:
+                    resolved = entry.resolve(strict=True)
+                except OSError:
+                    continue
+                if resolved.parent == self.root:
+                    directories.append(resolved)
+        except OSError:
+            return directories
+        return directories
+
+    @staticmethod
+    def _project_record_id(directory: Path) -> str | None:
+        marker = directory / ".cadyx-project-id"
+        if not marker.is_symlink() and marker.is_file():
+            try:
+                project_id = marker.read_text(encoding="ascii").strip()
+            except OSError:
+                project_id = ""
+            if _PROJECT_ID.fullmatch(project_id):
+                return project_id
+        project_file = directory / "project.json"
+        if project_file.is_symlink() or not project_file.is_file():
+            return None
+        try:
+            with project_file.open("r", encoding="utf-8") as stream:
+                project = json.load(stream)
+        except (OSError, json.JSONDecodeError):
+            return None
+        project_id = project.get("id") if isinstance(project, dict) else None
+        if (not isinstance(project, dict) or project.get("format") != "cadyx-project"
+                or not isinstance(project_id, str) or not _PROJECT_ID.fullmatch(project_id)):
+            return None
+        return project_id
+
+    def _is_project_directory(self, directory: Path) -> bool:
+        return _PROJECT_ID.fullmatch(directory.name) is not None and (directory / "project.json").is_file() \
+            or self._project_record_id(directory) is not None
+
+    def _create_project_directory(self, name: str, project_id: str) -> Path:
+        base_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", name.strip())
+        base_name = re.sub(r"\s+", " ", base_name).strip(" .")[:80].rstrip(" .")
+        if not base_name:
+            base_name = "CADYX project"
+        if base_name.split(".", maxsplit=1)[0].upper() in _WINDOWS_RESERVED_NAMES:
+            base_name = f"_{base_name}"
+
+        for suffix in range(1, 10_000):
+            candidate = base_name if suffix == 1 else f"{base_name[:72].rstrip(' .')} ({suffix})"
+            directory = self.root / candidate
+            try:
+                directory.mkdir()
+                marker = directory / ".cadyx-project-id"
+                with marker.open("x", encoding="ascii", newline="\n") as stream:
+                    stream.write(f"{project_id}\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                return directory
+            except FileExistsError:
+                continue
+        raise ConflictError("A unique project folder name could not be allocated.", code="PROJECT_FOLDER_CONFLICT")
 
     @staticmethod
     def _is_single_path_segment(value: str) -> bool:
