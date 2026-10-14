@@ -67,9 +67,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .nav-copy small { color: var(--muted); font: 11px/1.35 var(--mono); }
 .sidebar-project { display: grid; gap: 4px; min-width: 0; margin: 8px 12px; padding: 12px 0; border-top: 1px solid var(--line-soft); }
 .sidebar-project strong { overflow: hidden; color: var(--muted); font: 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-footer { display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 8px 13px; border-top: 1px solid var(--line-soft); color: var(--muted); }
-.sidebar-mark { color: var(--accent); font-size: 29px; }
-.sidebar-footer strong { font: 11px var(--mono); }
 .project-main { min-width: 0; min-height: 0; }
 .primary-grid { display: grid; width: 100%; height: 100%; min-height: 0; grid-template-columns: minmax(0, 1fr) clamp(340px, 28.6vw, 500px); gap: 10px; }
 .primary-grid.folder-mode .model-panel { display: none; }
@@ -325,7 +322,7 @@ button.object-row.selected { border-color: #285448; background: #45e1ba0b; }
   .workspace { height: auto; min-height: calc(100dvh - 58px); overflow: visible; }
   .project-detail { height: auto; min-height: calc(100dvh - 58px); grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 8px; }
   .section-sidebar { grid-template-rows: auto auto; }
-  .sidebar-heading, .sidebar-project, .sidebar-footer { display: none; }
+  .sidebar-heading, .sidebar-project { display: none; }
   .workspace-navigation { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; overflow: visible; padding: 4px; }
   .nav-item { display: grid; min-height: 47px; grid-template-columns: 1fr; justify-items: center; gap: 3px; padding: 4px 2px; text-align: center; }
   .nav-index { display: none; }
