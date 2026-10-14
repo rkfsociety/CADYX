@@ -55,6 +55,7 @@ Multiple current hosts may share a workspace on the same local machine; see the 
 .\.runtime\python\python.exe -m compileall -q cadyx tests
 .\scripts\setup-runtime.ps1 -WithNode
 .\.runtime\node-v26.11.1-win-x64\node.exe tests/test_viewport.cjs
+.\.runtime\node-v26.11.1-win-x64\node.exe tests/test_ply_preview.cjs
 ```
 
 ## Architecture
@@ -91,3 +92,4 @@ provider-neutral messages, tool specifications and tool calls. The runtime
 offers project inspection, viewport inspection and revision-checked command
 execution, managing the agent lease for each run. No provider adapter is
 included. See the [Agent Runtime contract](.codex/docs/architecture.md#agent-runtime).
+

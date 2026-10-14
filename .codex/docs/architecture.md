@@ -142,3 +142,8 @@ The default host is `127.0.0.1`. Non-loopback binds require the host authenticat
 ## Foundation roadmap
 
 The development sequence, including authenticated LAN access and the prerequisites for Scan-to-CAD, is maintained in the [CADYX project roadmap](../roadmap.md). Inspect the current implementation before treating a milestone as unfinished or complete.
+
+
+### Scan buffer and PLY preview performance
+
+Packed scan geometry compression and decoding use buffer views to avoid intermediate full-payload byte copies; decoded arrays remain independently owned. Reusing a generated PLY hashes the existing file incrementally rather than loading it into memory. Browser PLY previews resolve coordinate readers once, skip unsampled polygon and unused list payloads by byte length, and verify that skipped payloads fit the input. Vertex data is checked before allocating its preview array. Sampling and triangulation remain unchanged; this preview is not a full validator of unsampled face indices. Regression coverage lives in `tests/test_ply_preview.cjs` and the portable scan tests.

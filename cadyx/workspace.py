@@ -236,7 +236,8 @@ class ProjectWorkspace:
                         "A non-file already occupies the generated scan output path.",
                         code="ARTIFACT_CONFLICT",
                     )
-                existing_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+                with target.open("rb") as existing_stream:
+                    existing_hash = hashlib.file_digest(existing_stream, "sha256").hexdigest()
                 if existing_hash != digest:
                     raise ConflictError(
                         "A different file already exists at the generated scan output path.",

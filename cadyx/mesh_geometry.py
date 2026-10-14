@@ -41,7 +41,7 @@ def geometry_from_native_buffer(buffer: bytes) -> tuple[dict[str, Any], dict[str
     if vertex_count > _MAX_VERTICES or triangle_count > _MAX_TRIANGLES:
         raise ValidationError("Native scan mesh exceeds the supported document size.")
 
-    packed = zlib.compress(buffer[_HEADER.size :], level=6)
+    packed = zlib.compress(memoryview(buffer)[_HEADER.size :], level=6)
     geometry = {
         "kernel": _MESH_KERNEL,
         "kind": _MESH_KIND,
@@ -101,9 +101,10 @@ def _decode_payload(geometry: dict[str, Any]) -> tuple[array, array]:
         raise ValidationError("Triangle mesh data size does not match its counts.")
 
     positions = array("f")
-    positions.frombytes(payload[: vertex_count * 12])
+    payload_view = memoryview(payload)
+    positions.frombytes(payload_view[: vertex_count * 12])
     triangles = array("I")
-    triangles.frombytes(payload[vertex_count * 12 :])
+    triangles.frombytes(payload_view[vertex_count * 12 :])
     if sys.byteorder != "little":
         positions.byteswap()
         triangles.byteswap()
@@ -156,3 +157,4 @@ def mesh_ply_bytes(geometry: dict[str, Any]) -> bytes:
         source_offset = offset * triangles.itemsize
         faces[face_offset + 1 : face_offset + 13] = triangle_bytes[source_offset : source_offset + 12]
     return header + positions.tobytes() + faces
+

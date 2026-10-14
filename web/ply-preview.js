@@ -62,7 +62,6 @@
     const data = new DataView(buffer);
     const { dataOffset, vertex, face } = parseHeader(bytes);
     if (vertex.count === 0) throw new Error("В PLY нет вершин для предпросмотра.");
-    const positions = new Float32Array(vertex.count * 3);
     const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     const offsets = { x: null, y: null, z: null };
     let vertexStride = 0;
@@ -76,12 +75,18 @@
     }
     if (Object.values(offsets).some((item) => item === null)) throw new Error("У вершин PLY должны быть координаты x, y, z.");
 
+    if (vertex.count > Math.floor((buffer.byteLength - dataOffset) / vertexStride)) {
+      throw new Error("Данные вершин PLY обрезаны.");
+    }
+    const positions = new Float32Array(vertex.count * 3);
+    const coordinateReaders = ["x", "y", "z"].map((key) => ({
+      offset: offsets[key].offset, read: scalarTypes[offsets[key].type].read,
+    }));
     let cursor = dataOffset;
     for (let index = 0; index < vertex.count; index += 1) {
       for (let axis = 0; axis < 3; axis += 1) {
-        const key = ["x", "y", "z"][axis];
-        const property = offsets[key];
-        const value = scalarTypes[property.type].read(data, cursor + property.offset);
+        const property = coordinateReaders[axis];
+        const value = property.read(data, cursor + property.offset);
         if (!Number.isFinite(value)) throw new Error("В PLY найдены некорректные координаты.");
         positions[index * 3 + axis] = value;
         bounds.min[axis] = Math.min(bounds.min[axis], value);
@@ -105,30 +110,38 @@
             const countReader = scalarTypes[property.countType];
             const itemReader = scalarTypes[property.itemType];
             if (!countReader || !itemReader) throw new Error("Неподдерживаемое свойство граней PLY.");
+            if (countReader.size > buffer.byteLength - cursor) throw new Error("Данные граней PLY обрезаны.");
             const itemCount = countReader.read(data, cursor);
             cursor += countReader.size;
             if (!Number.isSafeInteger(itemCount) || itemCount < 0 || itemCount > vertex.count + 1) {
               throw new Error("Некорректная грань в файле PLY.");
             }
+            const listBytes = itemCount * itemReader.size;
+            if (listBytes > buffer.byteLength - cursor) throw new Error("Данные граней PLY обрезаны.");
             const samplePolygon = property.name === "vertex_indices" && faceIndex % faceStep === 0;
+            if (!samplePolygon) {
+              cursor += listBytes;
+              continue;
+            }
             let first = null;
             let previous = null;
             for (let item = 0; item < itemCount; item += 1) {
               const index = itemReader.read(data, cursor);
-              if (samplePolygon) {
-                if (index < 0 || index >= vertex.count) throw new Error("Грань PLY ссылается на отсутствующую вершину.");
-                if (item === 0) first = previous = index;
-                else if (item === 1) previous = index;
-                else {
-                  triangles.push(first, previous, index);
-                  previous = index;
-                }
+              if (!Number.isSafeInteger(index) || index < 0 || index >= vertex.count) {
+                throw new Error("Грань PLY ссылается на отсутствующую вершину.");
+              }
+              if (item === 0) first = previous = index;
+              else if (item === 1) previous = index;
+              else {
+                triangles.push(first, previous, index);
+                previous = index;
               }
               cursor += itemReader.size;
             }
           } else {
             const scalar = scalarTypes[property.type];
             if (!scalar) throw new Error(`Неподдерживаемый тип PLY: ${property.type}.`);
+            if (scalar.size > buffer.byteLength - cursor) throw new Error("Данные граней PLY обрезаны.");
             cursor += scalar.size;
           }
         }
@@ -148,3 +161,4 @@
 
   window.CadyxPlyPreview = { parse: parsePly };
 })();
+
