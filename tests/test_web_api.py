@@ -53,7 +53,7 @@ class WebApiTests(unittest.TestCase):
                 before = path.read_bytes()
                 status, detail = self.request(f"{prefix}/{project_id}")
                 self.assertEqual(status, 200)
-                self.assertEqual(detail["document"]["version"], 2)
+                self.assertEqual(detail["document"]["version"], 3)
                 _, acquired = self.request(f"{prefix}/{project_id}/leases",
                                           {"owner_type": owner, "owner_id": "migration-test"})
                 lease = acquired["lease"]["lease_id"]
@@ -66,7 +66,7 @@ class WebApiTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 saved = json.loads(path.read_text())
                 self.assertEqual(saved["version"], 1)
-                self.assertEqual(saved["document"]["version"], 2)
+                self.assertEqual(saved["document"]["version"], 3)
                 self.assertEqual(saved["history"][0]["actor_type"], owner)
 
     def test_agent_and_web_api_share_core_locking(self) -> None:
@@ -272,6 +272,49 @@ class WebApiTests(unittest.TestCase):
                 self.assertEqual(before["history"], after["history"])
                 command({"type": "update_sketch_elements", "updates": [{"object_id": point, "changes": {"y": 2}} for point in points]})
                 self.assertEqual(self.core.inspect_project(project)["document"]["revision"], 6)
+
+    def test_agent_profile_operations_and_camera_orbit(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Mug API"})
+        project_id = created["project"]["id"]
+        base = f"/api/v1/agent/projects/{project_id}"
+        _, acquired = self.request(base + "/leases", {"owner_id": "mug-agent"})
+        lease_id = acquired["lease"]["lease_id"]
+
+        def command(value: dict) -> dict:
+            status, result = self.request(base + "/commands", {"lease_id": lease_id, "command": value})
+            self.assertEqual(status, 200, result)
+            return result["history_entry"]["result"]
+
+        sketch_id = command({"type": "create_sketch", "name": "Cup section", "plane": "XZ"})["sketch_id"]
+        values = [(0, 0), (10, 0), (10, 20), (0, 20)]
+        points = [command({"type": "add_sketch_element", "sketch_id": sketch_id,
+                           "element_type": "point", "x": x, "y": y})["object_id"]
+                  for x, y in values]
+        for index, point_id in enumerate(points):
+            command({"type": "add_sketch_element", "sketch_id": sketch_id,
+                     "element_type": "line", "start_id": point_id,
+                     "end_id": points[(index + 1) % len(points)]})
+        solid = command({"type": "revolve_sketch", "sketch_id": sketch_id,
+                         "angle_degrees": 360})
+        self.assertEqual(solid["geometry"]["kind"], "revolved_profile")
+        before_revision = self.core.inspect_project(project_id)["document"]["revision"]
+
+        subscriber_id, events = self.core.events.subscribe(project_id)
+        self.addCleanup(self.core.events.unsubscribe, subscriber_id)
+        status, orbit = self.request(base + "/viewport/camera", {
+            "yaw_delta": 1.2, "pitch_delta": 0.1, "zoom_factor": 1.1, "duration_ms": 700,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(orbit["camera"]["yaw_delta"], 1.2)
+        after_revision = self.core.inspect_project(project_id)["document"]["revision"]
+        self.assertEqual(after_revision, before_revision)
+        event_names = []
+        while not events.empty():
+            event_names.append(events.get_nowait().event)
+        self.assertIn("viewport.camera", event_names)
+        activity = self.core.events.activity_snapshot(project_id)[-1]
+        self.assertEqual((activity["kind"], activity["state"]), ("camera", "completed"))
+        self.assertEqual(activity["steps"][-1]["phase"], "animate_camera")
 
 
 if __name__ == "__main__":

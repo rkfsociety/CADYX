@@ -13,6 +13,14 @@ from .native_kernel import NativeKernel
 class GeometryKernel(Protocol):
     def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]: ...
 
+    def create_extruded_profile(
+        self, profile: list[dict[str, float]], *, plane: str, depth: float,
+    ) -> dict[str, Any]: ...
+
+    def create_revolved_profile(
+        self, profile: list[dict[str, float]], *, angle_degrees: float,
+    ) -> dict[str, Any]: ...
+
     def validate(self, geometry: dict[str, Any]) -> None: ...
 
     def tessellate(self, geometry: dict[str, Any]) -> dict[str, Any]: ...
@@ -34,6 +42,52 @@ def _box_dimensions(width: Any, height: Any, depth: Any) -> dict[str, float]:
     return normalized
 
 
+def _profile_values(profile: Any, plane: Any) -> tuple[list[dict[str, float]], int]:
+    if plane not in {"XY", "XZ"}:
+        raise ValidationError("Profile plane must be XY or XZ.")
+    if not isinstance(profile, list) or not 3 <= len(profile) <= 4096:
+        raise ValidationError("A profile needs between 3 and 4096 points.")
+    normalized = []
+    for point in profile:
+        if not isinstance(point, dict) or set(point) != {"x", "y"}:
+            raise ValidationError("Every profile point must contain x and y coordinates.")
+        values = {}
+        for name in ("x", "y"):
+            value = point[name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValidationError("Profile coordinates must be finite numbers.")
+            try:
+                value = float(value)
+            except OverflowError as exc:
+                raise ValidationError("Profile coordinates must be finite numbers.") from exc
+            if not math.isfinite(value):
+                raise ValidationError("Profile coordinates must be finite numbers.")
+            values[name] = value
+        normalized.append(values)
+    area = sum(
+        point["x"] * normalized[(index + 1) % len(normalized)]["y"]
+        - normalized[(index + 1) % len(normalized)]["x"] * point["y"]
+        for index, point in enumerate(normalized)
+    )
+    if not math.isfinite(area) or abs(area) <= 1e-12:
+        raise ValidationError("Profile area must be non-zero.")
+    plane_code = 0 if plane == "XY" else 1
+    return normalized, plane_code
+
+
+def _positive_amount(value: Any, name: str, *, maximum: float | None = None) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValidationError(f"{name} must be a number.")
+    try:
+        amount = float(value)
+    except OverflowError as exc:
+        raise ValidationError(f"{name} must be finite and positive.") from exc
+    if not math.isfinite(amount) or amount <= 0 or (maximum is not None and amount > maximum):
+        suffix = f" and no greater than {maximum:g}" if maximum is not None else ""
+        raise ValidationError(f"{name} must be finite, positive{suffix}.")
+    return amount
+
+
 class OCCTKernelAdapter:
     """Build and validate box B-reps with Open CASCADE Technology."""
 
@@ -45,6 +99,12 @@ class OCCTKernelAdapter:
         self.validate(geometry)
         if geometry.get("kernel") == "cadyx-mesh-v1":
             return tessellate_mesh_geometry(geometry)
+        if geometry.get("kind") in {"extruded_profile", "revolved_profile"}:
+            operation = 0 if geometry["kind"] == "extruded_profile" else 1
+            amount = geometry["depth"] if operation == 0 else math.radians(geometry["angle_degrees"])
+            result = NativeKernel().profile(geometry["profile"], operation=operation,
+                                            plane=geometry["plane"], amount=amount, mesh=True)
+            return {key: result[key] for key in ("positions", "triangles")}
         result = NativeKernel().box(geometry["dimensions"], mesh=True)
         return {key: result[key] for key in ("positions", "triangles")}
 
@@ -58,6 +118,41 @@ class OCCTKernelAdapter:
             "volume": volume,
         }
 
+    def create_extruded_profile(
+        self, profile: list[dict[str, float]], *, plane: str, depth: float,
+    ) -> dict[str, Any]:
+        return self._create_profile_geometry(profile, plane=plane, operation=0,
+                                             amount=_positive_amount(depth, "depth"))
+
+    def create_revolved_profile(
+        self, profile: list[dict[str, float]], *, angle_degrees: float,
+    ) -> dict[str, Any]:
+        angle = _positive_amount(angle_degrees, "angle_degrees", maximum=360.0)
+        return self._create_profile_geometry(profile, plane="XZ", operation=1,
+                                             amount=math.radians(angle), angle_degrees=angle)
+
+    @staticmethod
+    def _create_profile_geometry(
+        profile: list[dict[str, float]], *, plane: str, operation: int,
+        amount: float, angle_degrees: float | None = None,
+    ) -> dict[str, Any]:
+        normalized, _ = _profile_values(profile, plane)
+        amount = _positive_amount(amount, "operation amount")
+        result = NativeKernel().profile(normalized, operation=operation,
+                                        plane=plane, amount=amount)
+        geometry = {
+            "kernel": OCCTKernelAdapter.kernel_id,
+            "kind": "extruded_profile" if operation == 0 else "revolved_profile",
+            "plane": plane,
+            "profile": normalized,
+            "volume": result["volume"],
+        }
+        if operation == 0:
+            geometry["depth"] = amount
+        else:
+            geometry["angle_degrees"] = angle_degrees
+        return geometry
+
     def validate(self, geometry: dict[str, Any]) -> None:
         if isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1":
             validate_mesh_geometry(geometry)
@@ -67,6 +162,9 @@ class OCCTKernelAdapter:
         kernel_id = geometry.get("kernel")
         if not isinstance(kernel_id, str) or kernel_id not in self._accepted_kernel_ids:
             raise ValidationError("Geometry does not match a supported box format.")
+        if kernel_id == self.kernel_id and geometry.get("kind") in {"extruded_profile", "revolved_profile"}:
+            self._validate_profile_geometry(geometry)
+            return
         if set(geometry) != {"kernel", "kind", "dimensions", "volume"} or geometry.get("kind") != "box":
             raise ValidationError("Geometry does not match a supported box format.")
 
@@ -90,6 +188,36 @@ class OCCTKernelAdapter:
 
         actual_volume = self._box_volume(normalized)
         if not math.isclose(saved_volume, actual_volume, rel_tol=1e-12, abs_tol=1e-12):
+            raise ValidationError("Saved geometry volume does not match the Open CASCADE solid.")
+
+    @staticmethod
+    def _validate_profile_geometry(geometry: dict[str, Any]) -> None:
+        kind = geometry.get("kind")
+        expected_fields = {"kernel", "kind", "plane", "profile", "volume",
+                           "depth" if kind == "extruded_profile" else "angle_degrees"}
+        if set(geometry) != expected_fields or geometry.get("kernel") != OCCTKernelAdapter.kernel_id:
+            raise ValidationError("Profile geometry descriptor is invalid.")
+        profile, _ = _profile_values(geometry["profile"], geometry["plane"])
+        if kind == "extruded_profile":
+            if geometry["plane"] not in {"XY", "XZ"}:
+                raise ValidationError("Profile plane must be XY or XZ.")
+            operation, amount = 0, _positive_amount(geometry["depth"], "depth")
+        else:
+            if geometry["plane"] != "XZ":
+                raise ValidationError("Revolution requires an XZ profile.")
+            angle = _positive_amount(geometry["angle_degrees"], "angle_degrees", maximum=360.0)
+            operation, amount = 1, math.radians(angle)
+        saved_volume = geometry.get("volume")
+        if isinstance(saved_volume, bool) or not isinstance(saved_volume, (int, float)):
+            raise ValidationError("Saved geometry volume is invalid.")
+        try:
+            saved_volume = float(saved_volume)
+        except OverflowError as exc:
+            raise ValidationError("Saved geometry volume is invalid.") from exc
+        if not math.isfinite(saved_volume) or saved_volume <= 0:
+            raise ValidationError("Saved geometry volume is invalid.")
+        actual = NativeKernel().profile(profile, operation=operation, plane=geometry["plane"], amount=amount)["volume"]
+        if not math.isclose(saved_volume, actual, rel_tol=1e-12, abs_tol=1e-12):
             raise ValidationError("Saved geometry volume does not match the Open CASCADE solid.")
 
     @staticmethod
@@ -135,3 +263,9 @@ class PrimitiveKernelAdapter:
         )
         if geometry != expected:
             raise ValidationError("Saved geometry descriptor is inconsistent.")
+
+    def create_extruded_profile(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise ValidationError("The primitive demo kernel does not build extruded B-reps.")
+
+    def create_revolved_profile(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise ValidationError("The primitive demo kernel does not build revolved B-reps.")

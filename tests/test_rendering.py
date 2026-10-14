@@ -63,3 +63,11 @@ class RenderingTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.core.render_project(self.project)
         self.assertEqual(path.read_bytes(), before)
+
+    def test_xz_sketch_is_rendered_in_the_vertical_profile_plane(self):
+        sketch = self.command({"type": "create_sketch", "plane": "XZ", "name": "Section"})["sketch_id"]
+        point = self.command({"type": "add_sketch_element", "sketch_id": sketch,
+                              "element_type": "point", "x": 2, "y": 7})["object_id"]
+        scene = self.core.render_project(self.project)
+        rendered = next(item for item in scene["objects"] if item["object_id"] == point)
+        self.assertEqual(rendered["positions"], [2, 0, 7])

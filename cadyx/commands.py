@@ -12,6 +12,7 @@ from .kernel import GeometryKernel
 from .mesh_geometry import mesh_ply_bytes
 from .models import Document
 from .scan import DEFAULT_SCAN_PARAMETERS, ScanProcessor, normalize_scan_parameters
+from .sketches import closed_profile
 
 
 def _number(value: Any, name: str) -> float:
@@ -49,8 +50,10 @@ class CommandSystem:
         kind = command.get("type")
         if kind == "create_box":
             return self._create_box(document, command)
+        if kind in {"extrude_sketch", "revolve_sketch"}:
+            return self._create_profile_feature(document, command, kind, progress=progress)
         if kind == "set_parameter":
-            return self._set_parameter(document, command)
+            return self._set_parameter(document, command, progress=progress)
         if kind == "import_scan":
             return self._import_scan(document, command, progress=progress)
         if kind == "set_scan_parameter":
@@ -101,12 +104,33 @@ class CommandSystem:
                 if not isinstance(changes, dict) or not changes or not changes.keys() <= fields[item["type"]]:
                     raise ValidationError("Unsupported sketch element changes.")
                 item.update(changes)
+            changed_sketches = {
+                item["sketch_id"] for item in document.objects
+                if item.get("id") in seen and item.get("type") in {"point", "circle"}
+            }
+            for feature in document.objects:
+                if (feature.get("type") == "feature" and
+                        feature.get("source_sketch_id") in changed_sketches):
+                    if progress is not None:
+                        progress({"phase": "rebuild_features"})
+                    body = next((item for item in document.objects
+                                 if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+                    if body is None:
+                        raise ValidationError("Profile feature refers to a missing body.")
+                    geometry = self._profile_geometry(document, feature, feature["parameters"], progress=progress)
+                    body["geometry"] = geometry
+                    feature["geometry"] = geometry
             return {"object_ids": sorted(seen)}
         if kind == "remove_sketch_object":
             object_id = command.get("object_id")
             item = next((item for item in document.objects if item["id"] == object_id), None)
             if item is None or item["type"] not in {"sketch", "point", "line", "circle", "constraint"}:
                 raise NotFoundError("Sketch object was not found.")
+            if item["type"] == "sketch" and any(
+                feature.get("type") == "feature" and feature.get("source_sketch_id") == object_id
+                for feature in document.objects
+            ):
+                raise ValidationError("A sketch used by a solid feature cannot be removed.")
             document.objects.remove(item)
             return {"object_id": object_id}
         raise ValidationError(f"Unsupported command type: {kind!r}.")
@@ -276,17 +300,41 @@ class CommandSystem:
         ])
         return {"body_id": body_id, "feature_id": feature_id, "geometry": geometry}
 
-    def _set_parameter(self, document: Document, command: dict[str, Any]) -> dict[str, Any]:
+    def _set_parameter(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         feature_id = command.get("feature_id")
         parameter_name = command.get("name")
-        if parameter_name not in {"width", "height", "depth"}:
-            raise ValidationError("Only box width, height, and depth parameters are supported.")
         feature = next(
             (item for item in document.objects if item.get("id") == feature_id and item.get("type") == "feature"),
             None,
         )
         if feature is None or feature.get("operation") != "create_box":
-            raise NotFoundError("Editable box feature was not found.")
+            if feature is None:
+                raise NotFoundError("Editable feature was not found.")
+            if feature.get("operation") in {"extrude_sketch", "revolve_sketch"}:
+                expected = "depth" if feature["operation"] == "extrude_sketch" else "angle_degrees"
+                if parameter_name != expected:
+                    raise ValidationError(f"Only the {expected} parameter is supported for this feature.")
+                value = _number(command.get("value"), parameter_name)
+                parameters = dict(feature["parameters"])
+                parameters[parameter_name] = value
+                if progress is not None:
+                    progress({"phase": "prepare_profile"})
+                geometry = self._profile_geometry(document, feature, parameters, progress=progress)
+                body = next((item for item in document.objects
+                             if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+                if body is None:
+                    raise ValidationError("Profile feature refers to a missing body.")
+                feature["parameters"] = parameters
+                feature["geometry"] = geometry
+                body["geometry"] = geometry
+                return {"feature_id": feature_id, "parameter": parameter_name,
+                        "value": value, "geometry": geometry}
+            raise NotFoundError("Editable feature was not found.")
+        if parameter_name not in {"width", "height", "depth"}:
+            raise ValidationError("Only box width, height, and depth parameters are supported.")
         value = _number(command.get("value"), parameter_name)
         parameters = dict(feature["parameters"])
         parameters[parameter_name] = value
@@ -301,3 +349,65 @@ class CommandSystem:
             raise ValidationError("Box feature refers to a missing body.")
         body["geometry"] = geometry
         return {"feature_id": feature_id, "parameter": parameter_name, "value": value, "geometry": geometry}
+
+    def _create_profile_feature(
+        self, document: Document, command: dict[str, Any], operation: str, *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch_id = command.get("sketch_id")
+        name = command.get("name", "Extrusion" if operation == "extrude_sketch" else "Revolution")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Feature name must be a non-empty string of at most 120 characters.")
+        if progress is not None:
+            progress({"phase": "prepare_profile"})
+        plane, profile = closed_profile(document.objects, sketch_id)
+        parameters: dict[str, Any] = {"source_sketch_id": sketch_id}
+        if operation == "extrude_sketch":
+            parameters["depth"] = _number(command.get("depth"), "depth")
+        else:
+            if plane != "XZ":
+                raise ValidationError("Revolution requires a sketch on the XZ plane.")
+            angle = _number(command.get("angle_degrees", 360), "angle_degrees")
+            if angle > 360:
+                raise ValidationError("angle_degrees must be no greater than 360.")
+            parameters["angle_degrees"] = angle
+        if progress is not None:
+            progress({"phase": "kernel_extrusion" if operation == "extrude_sketch" else "kernel_revolution"})
+        geometry = self._profile_geometry(document, {
+            "operation": operation, "source_sketch_id": sketch_id,
+        }, parameters, profile=profile, plane=plane)
+        if progress is not None:
+            progress({"phase": "validate_result"})
+        body_id = f"body:{uuid4()}"
+        feature_id = f"feature:{uuid4()}"
+        document.objects.extend([
+            {"id": body_id, "type": "body", "name": name.strip(),
+             "feature_ids": [feature_id], "geometry": geometry},
+            {"id": feature_id, "type": "feature", "operation": operation,
+             "body_id": body_id, "source_sketch_id": sketch_id,
+             "parameters": {key: value for key, value in parameters.items() if key != "source_sketch_id"},
+             "geometry": geometry},
+        ])
+        return {"body_id": body_id, "feature_id": feature_id, "source_sketch_id": sketch_id,
+                "geometry": geometry}
+
+    def _profile_geometry(
+        self, document: Document, feature: dict[str, Any], parameters: dict[str, Any], *,
+        profile: list[dict[str, float]] | None = None, plane: str | None = None,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        source_sketch_id = feature.get("source_sketch_id") or parameters.get("source_sketch_id")
+        if profile is None or plane is None:
+            plane, profile = closed_profile(document.objects, source_sketch_id)
+        operation = feature.get("operation")
+        if operation == "extrude_sketch":
+            if progress is not None:
+                progress({"phase": "kernel_extrusion"})
+            return self.kernel.create_extruded_profile(profile, plane=plane, depth=parameters["depth"])
+        if operation == "revolve_sketch":
+            if progress is not None:
+                progress({"phase": "kernel_revolution"})
+            if plane != "XZ":
+                raise ValidationError("Revolution requires a sketch on the XZ plane.")
+            return self.kernel.create_revolved_profile(profile, angle_degrees=parameters["angle_degrees"])
+        raise ValidationError("Unsupported sketch feature operation.")

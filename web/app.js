@@ -21,6 +21,7 @@ const folderPreviewCanvas = $("#ply-preview-canvas");
 const folderPreviewPlaceholder = $("#folder-preview-placeholder");
 const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
 const modelViewer = window.CadyxViewport.createViewer($("#model-preview"));
+let cameraAnimationId = 0;
 let renderedSceneKey = null;
 let detailRequest = 0;
 $("#viewport-fit").addEventListener("click", () => modelViewer.fit());
@@ -31,6 +32,8 @@ let folders = [];
 let selectedProjectId = readSelectedProject();
 let selectedObjectId = null;
 let currentObjects = [];
+let activeSketchId = null;
+let pendingViewportTransition = null;
 let toastTimer;
 let refreshTimer;
 let activeFolderName = null;
@@ -42,48 +45,10 @@ let previewRequest = 0;
 let automaticUpdateSnapshot = null;
 let automaticUpdateInFlight = false;
 let automaticUpdatesUnavailable = false;
+let activityStatusTimer = 0;
+let activityStatusOperationId = null;
 const activitiesByProject = new Map();
 const activityRevisionsByProject = new Map();
-const activityPhaseLabels = {
-  starting: "Подготовка операции",
-  observe: "Чтение модели",
-  validate_source: "Проверка файла",
-  hash_source: "Фиксация источника",
-  prepare_parameters: "Подготовка параметров",
-  read_source: "Чтение скана",
-  mesh_cleanup: "Очистка сетки",
-  voxel_cleanup: "Упрощение облака",
-  outlier_filter: "Удаление шума",
-  estimate_normals: "Расчёт нормалей",
-  reconstruct_surface: "Восстановление поверхности",
-  simplify_mesh: "Сокращение полигонов",
-  serialize_mesh: "Подготовка сетки",
-  verify_source: "Проверка исходника",
-  validate_result: "Контроль результата",
-  write_output: "Запись PLY рядом",
-  validate_document: "Проверка модели",
-  save_document: "Сохранение проекта",
-};
-const meshActivityPhases = [
-  "validate_source", "hash_source", "prepare_parameters", "read_source", "mesh_cleanup", "simplify_mesh",
-  "serialize_mesh", "verify_source", "validate_result", "write_output", "validate_document", "save_document",
-];
-const cloudActivityPhases = [
-  "validate_source", "hash_source", "prepare_parameters", "read_source", "voxel_cleanup", "outlier_filter",
-  "estimate_normals", "reconstruct_surface", "simplify_mesh", "serialize_mesh",
-  "verify_source", "validate_result", "write_output", "validate_document", "save_document",
-];
-const genericActivityPhases = ["starting", "validate_document", "save_document"];
-const observationActivityPhases = ["starting", "observe"];
-const genericActivityLabels = {
-  starting: "Выполнение операции",
-  validate_document: "Проверка модели",
-  save_document: "Сохранение проекта",
-};
-const observationActivityLabels = {
-  starting: "Подготовка чтения",
-  observe: "Чтение модели",
-};
 const FOLDER_SELECTION_PREFIX = "folder:";
 const dockMenus = [...document.querySelectorAll(".dock-control")];
 dockMenus.forEach((menu) => menu.addEventListener("toggle", () => {
@@ -126,13 +91,6 @@ function getSelectedFolder() {
   if (!selectedProjectId?.startsWith(FOLDER_SELECTION_PREFIX)) return null;
   const name = selectedProjectId.slice(FOLDER_SELECTION_PREFIX.length);
   return folders.includes(name) ? name : null;
-}
-
-function indicateModelChanged(projectId) {
-  if (projectId !== selectedProjectId) return;
-  const preview = $("#model-preview");
-  preview.classList.remove("changed");
-  requestAnimationFrame(() => preview.classList.add("changed"));
 }
 
 function renderProjectList() {
@@ -200,6 +158,8 @@ function renderProjectList() {
 function selectProject(id) {
   selectedProjectId = id;
   selectedObjectId = null;
+  activeSketchId = null;
+  pendingViewportTransition = null;
   saveSelectedProject(id);
   renderProjectList();
   const folder = getSelectedFolder();
@@ -452,22 +412,87 @@ async function refreshDetail() {
   const scene = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/viewport`);
   if (projectId !== selectedProjectId || request !== detailRequest) return;
   if (scene.revision !== info.document.revision) { scheduleWorkspaceRefresh(); return; }
-  const key = `${projectId}:${scene.revision}`;
+  const objects = info.document.objects;
+  const objectsById = new Map(objects.map((item) => [item.id, item]));
+  const usedSketchIds = new Set(objects
+    .filter((item) => item.type === "feature" && item.source_sketch_id)
+    .map((item) => item.source_sketch_id));
+  const visibleSketchId = activeSketchId && !usedSketchIds.has(activeSketchId)
+    && objectsById.get(activeSketchId)?.type === "sketch" ? activeSketchId : null;
+  const key = `${projectId}:${scene.revision}:${visibleSketchId || "no-sketch"}`;
+  const visibleObjects = objects.filter((item) => {
+    if (item.type === "sketch") return item.id === visibleSketchId;
+    if (item.sketch_id) return item.sketch_id === visibleSketchId;
+    return true;
+  });
+  let transition = pendingViewportTransition?.projectId === projectId
+    ? { ...pendingViewportTransition } : null;
+  if (transition?.featureId) {
+    const feature = objectsById.get(transition.featureId);
+    transition.bodyId = feature?.body_id;
+  }
   if (renderedSceneKey !== key) {
-    const positions = [], triangles = [], lines = [], points = [];
+    const positions = [], bodyPositions = [], triangles = [], lines = [], points = [], rotationAxes = [];
+    let targetFound = false;
     for (const object of scene.objects) {
+      const source = objectsById.get(object.object_id);
+      if (source?.type !== "body" && source?.sketch_id !== visibleSketchId) continue;
       const offset = positions.length / 3;
-      for (const value of object.positions) positions.push(value);
+      const lineOffset = lines.length;
+      const pointOffset = points.length;
+      for (const value of object.positions) {
+        positions.push(value);
+        if (source?.type === "body") bodyPositions.push(value);
+      }
       for (const index of object.triangles) triangles.push(index + offset);
       for (const index of object.lines) lines.push(index + offset);
       for (const index of object.points) points.push(index + offset);
+      if (source?.type === "body" && source.geometry?.kind === "revolved_profile") {
+        let minZ = Infinity, maxZ = -Infinity;
+        for (let index = 2; index < object.positions.length; index += 3) {
+          minZ = Math.min(minZ, object.positions[index]);
+          maxZ = Math.max(maxZ, object.positions[index]);
+        }
+        const axisMargin = Math.max((maxZ - minZ) * 0.06, 0.5);
+        rotationAxes.push({ start: [0, 0, minZ - axisMargin], end: [0, 0, maxZ + axisMargin] });
+      }
+      if (transition?.bodyId === object.object_id) {
+        transition.vertexRange = [offset, offset + object.positions.length / 3];
+        targetFound = true;
+      } else if (transition?.type === "sketch-point" && transition.objectId === object.object_id && object.points.length) {
+        transition.pointIndex = pointOffset + object.points[0];
+        targetFound = true;
+      } else if (transition?.type === "sketch-lines"
+        && (transition.objectId === object.object_id || transition.allSketchLines && source?.sketch_id === transition.sketchId)
+        && object.lines.length) {
+        if (!transition.lineRange) transition.lineRange = [lineOffset, lineOffset + object.lines.length];
+        else transition.lineRange[1] += object.lines.length;
+        targetFound = true;
+      }
     }
-    if (scene.bounds) modelViewer.load({ positions, triangles, lines, points, bounds: scene.bounds },
-      { reset: !renderedSceneKey?.startsWith(`${projectId}:`) });
+    const boundsPositions = visibleSketchId && bodyPositions.length ? bodyPositions : positions;
+    const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+    for (let index = 0; index < boundsPositions.length; index += 3) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        bounds.min[axis] = Math.min(bounds.min[axis], boundsPositions[index + axis]);
+        bounds.max[axis] = Math.max(bounds.max[axis], boundsPositions[index + axis]);
+      }
+    }
+    if (!positions.length) {
+      bounds.min = [0, 0, 0];
+      bounds.max = [0, 0, 0];
+    }
+    if (!targetFound) transition = null;
+    modelViewer.load({ positions, triangles, lines, points, bounds, rotationAxes }, {
+      reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition,
+    });
+    if (pendingViewportTransition?.projectId === projectId) pendingViewportTransition = null;
     renderedSceneKey = key;
   }
-  $("#viewport-empty").hidden = scene.objects.length > 0;
-  $("#model-preview").hidden = scene.objects.length === 0;
+  const hasVisibleGeometry = visibleObjects.some((item) => item.type === "body")
+    || visibleSketchId !== null && visibleObjects.some((item) => item.sketch_id === visibleSketchId);
+  $("#viewport-empty").hidden = hasVisibleGeometry;
+  $("#model-preview").hidden = !hasVisibleGeometry;
   modelViewer.render();
 
   $("#folder-detail").hidden = true;
@@ -475,15 +500,14 @@ async function refreshDetail() {
   projectDetail.hidden = false;
   noSelection.hidden = true;
   $("#document-title").textContent = info.project.name;
-  const objects = info.document.objects;
-  if (selectedObjectId && !objects.some((item) => item.id === selectedObjectId)) selectedObjectId = null;
+  if (selectedObjectId && !visibleObjects.some((item) => item.id === selectedObjectId)) selectedObjectId = null;
   if (!selectedObjectId) {
-    const topLevel = objects.filter((item) => item.type === "body" || item.type === "sketch");
+    const topLevel = visibleObjects.filter((item) => item.type === "body" || item.type === "sketch");
     selectedObjectId = topLevel.at(-1)?.id || null;
   }
-  currentObjects = objects;
-  renderObjectTree(objects);
-  renderProperties(objects);
+  currentObjects = visibleObjects;
+  renderObjectTree(visibleObjects);
+  renderProperties(visibleObjects);
 }
 
 async function refreshActivitySnapshot(projectId) {
@@ -511,159 +535,29 @@ async function refreshActivitySnapshot(projectId) {
 
 function renderAgentActivity(value) {
   const activities = Array.isArray(value) ? value : value ? [value] : [];
-  const currentActivity = activities.slice().reverse().find((item) => item.state === "running") || activities.at(-1) || null;
-  const historyWrap = $("#activity-history-wrap");
-  const historyList = $("#activity-history");
-  historyList.replaceChildren();
-  historyWrap.hidden = activities.length === 0;
-  for (const item of activities.slice().reverse()) {
-    const row = document.createElement("li");
-    row.className = "activity-history-item";
-    row.dataset.state = item.state || "running";
-    const dot = document.createElement("span");
-    dot.className = "activity-history-dot";
-    dot.setAttribute("aria-hidden", "true");
-    const copy = document.createElement("span");
-    copy.className = "activity-history-copy";
-    const action = document.createElement("strong");
-    action.textContent = item.action || "Операция агента";
-    const file = item.source?.file;
-    const lastPhase = item.steps?.at(-1)?.phase;
-    const detail = document.createElement("small");
-    detail.textContent = file
-      ? `${file} → ${item.result?.artifact?.file || "сетка CADYX"}`
-      : activityPhaseLabels[lastPhase] || "Модель CADYX";
-    detail.title = detail.textContent;
-    const time = document.createElement("time");
-    time.className = "activity-history-time";
-    const updatedAt = Date.parse(item.updated_at || "");
-    time.textContent = Number.isFinite(updatedAt)
-      ? new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(updatedAt)
-      : "";
-    const phases = document.createElement("span");
-    phases.className = "activity-history-phases";
-    phases.setAttribute("aria-label", `${item.steps?.length || 0} этапов`);
-    for (const step of item.steps || []) {
-      const marker = document.createElement("span");
-      marker.className = "activity-history-phase";
-      marker.dataset.state = step.state;
-      marker.title = activityPhaseLabels[step.phase] || "Операция";
-      phases.append(marker);
-    }
-    row.title = (item.steps || []).map((step) => activityPhaseLabels[step.phase] || step.phase).join(" · ");
-    copy.append(action, detail);
-    row.append(dot, copy, time, phases);
-    historyList.append(row);
-  }
-
-  const activity = currentActivity;
+  const activity = activities.slice().reverse().find((item) => item.state === "running") || activities.at(-1) || null;
   const panel = $("#agent-activity");
   const title = $("#activity-title");
-  const stateBadge = $("#activity-state");
-  const route = $("#activity-route");
-  const result = $("#activity-result");
-  const parameters = $("#activity-parameters");
-  const list = $("#activity-steps");
-  const state = activity?.state || "idle";
+  const completedAt = Date.parse(activity?.updated_at || "");
+  const age = Number.isFinite(completedAt) ? Date.now() - completedAt : Infinity;
+  const recentCompletion = activity?.state === "completed" && age >= 0 && age < 2200;
+  const state = activity?.state === "running" || activity?.state === "failed"
+    ? activity.state : recentCompletion ? "completed" : "idle";
   panel.dataset.state = state;
-  list.replaceChildren();
-  parameters.replaceChildren();
-  result.hidden = true;
-  result.classList.remove("failed");
-
-  if (!activity) {
-    title.textContent = "Ожидание операции";
-    stateBadge.textContent = "Ожидание";
-    route.textContent = "CADYX готов к построению модели.";
-    return;
-  }
-
-  const scanOperation = ["import_scan", "set_scan_parameter"].includes(activity.command);
-  const phaseIds = scanOperation
-    ? activity.source_kind === "triangle_mesh" ? meshActivityPhases
-      : activity.source_kind === "point_cloud" ? cloudActivityPhases
-        : ["validate_source", "hash_source", "prepare_parameters", "read_source", "simplify_mesh", "serialize_mesh", "verify_source", "validate_result", "write_output", "validate_document", "save_document"]
-    : activity.kind === "observation" ? observationActivityPhases : genericActivityPhases;
-  const labels = scanOperation
-    ? activityPhaseLabels
-    : activity.kind === "observation" ? observationActivityLabels
-      : { ...genericActivityLabels, starting: activity.action || "Изменение модели" };
-  const phase = activity.phase || "starting";
-  const phaseIndex = phaseIds.indexOf(phase);
-  const currentLabel = labels[phase] || activity.action || "Операция";
-  title.textContent = state === "completed" ? `${activity.action} · готово`
-    : state === "failed" ? `${activity.action} · ошибка`
-      : `${activity.action} · ${currentLabel.toLocaleLowerCase("ru")}`;
-  stateBadge.textContent = state === "running" ? "В работе"
-    : state === "completed" ? "Завершено"
-      : state === "failed" ? "Ошибка"
-        : "Ожидание";
-
-  const source = activity.source;
-  const artifact = activity.result?.artifact;
-  if (source) {
-    const sourcePath = `projects/${source.folder}/${source.file}`;
-    const outputPath = artifact ? `projects/${artifact.folder}/${artifact.file}` : "редактируемая сетка CADYX";
-    route.textContent = `${sourcePath}  →  ${outputPath}`;
-    route.title = `${sourcePath}  →  ${outputPath}`;
-  } else {
-    route.textContent = "Изменения модели проходят через Core и сохраняются в проекте.";
-    route.title = route.textContent;
-  }
-
-  for (let index = 0; index < phaseIds.length; index++) {
-    const phaseId = phaseIds[index];
-    const item = document.createElement("li");
-    item.className = "activity-step";
-    let status = "pending";
-    if (state === "completed" || (phaseIndex >= 0 && index < phaseIndex)) status = "complete";
-    if (state === "running" && phaseId === phase) status = "active";
-    if (state === "failed" && phaseId === phase) status = "failed";
-    item.dataset.status = status;
-    const node = document.createElement("span");
-    node.className = "activity-step-node";
-    node.setAttribute("aria-hidden", "true");
-    node.textContent = status === "complete" ? "✓" : status === "active" ? "•" : status === "failed" ? "!" : "";
-    const label = document.createElement("span");
-    label.className = "activity-step-label";
-    label.textContent = labels[phaseId] || "Операция";
-    item.title = label.textContent;
-    item.append(node, label);
-    list.append(item);
-  }
-
-  if (scanOperation && activity.parameters) {
-    const parameterLabels = {
-      voxel_size: "Воксель",
-      target_triangles: "Треугольники",
-      outlier_neighbors: "Соседи",
-      outlier_std_ratio: "Порог шума",
-      poisson_depth: "Глубина Poisson",
-    };
-    for (const [key, value] of Object.entries(activity.parameters)) {
-      if (activity.source_kind === "triangle_mesh" && ["outlier_neighbors", "outlier_std_ratio", "poisson_depth"].includes(key)) continue;
-      const chip = document.createElement("span");
-      chip.className = "activity-parameter";
-      chip.textContent = `${parameterLabels[key] || key}: ${formatNumber(value)}`;
-      parameters.append(chip);
-    }
-  }
-
-  const stats = activity.result;
-  if (state === "failed" && activity.error) {
-    result.textContent = activity.error;
-    result.title = activity.error;
-    result.classList.add("failed");
-    result.hidden = false;
-  } else if (stats && (stats.output_triangles || artifact)) {
-    const meshStats = stats.output_triangles
-      ? `${formatNumber(stats.output_vertices)} вершин · ${formatNumber(stats.output_triangles)} треугольников`
-      : "Сетка сохранена";
-    result.textContent = artifact
-      ? `${meshStats} · ${formatFileSize(artifact.size)} · ${artifact.created ? "файл создан" : "файл уже существует"}`
-      : meshStats;
-    result.title = result.textContent;
-    result.hidden = false;
+  const action = activity?.action || "Работает";
+  title.textContent = state === "running" ? action
+    : state === "failed" ? `${action} · ошибка`
+      : recentCompletion ? `${action} · готово` : "Думает";
+  if (recentCompletion && activityStatusOperationId !== activity.operation_id) {
+    clearTimeout(activityStatusTimer);
+    activityStatusOperationId = activity.operation_id;
+    activityStatusTimer = setTimeout(() => {
+      if (selectedProjectId) renderAgentActivity(activitiesByProject.get(selectedProjectId) || []);
+    }, Math.max(1, 2200 - age));
+  } else if (!recentCompletion) {
+    clearTimeout(activityStatusTimer);
+    activityStatusTimer = 0;
+    activityStatusOperationId = null;
   }
 }
 
@@ -829,6 +723,36 @@ function selectObjectFromResult(projectId, result) {
   if (projectId === selectedProjectId && objectId) selectedObjectId = objectId;
 }
 
+function animateModelCamera(change) {
+  const start = modelViewer.getCamera();
+  const duration = change.duration_ms;
+  const target = {
+    yaw: start.yaw + change.yaw_delta,
+    pitch: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, start.pitch + change.pitch_delta)),
+    zoom: Math.max(0.25, Math.min(5, start.zoom * change.zoom_factor)),
+    projection: "orthographic",
+  };
+  const token = ++cameraAnimationId;
+  if (duration === 0) {
+    modelViewer.setCamera(target);
+    return;
+  }
+  const startedAt = performance.now();
+  const tick = (now) => {
+    if (token !== cameraAnimationId) return;
+    const ratio = Math.min(1, (now - startedAt) / duration);
+    const eased = ratio < 0.5 ? 2 * ratio * ratio : 1 - ((-2 * ratio + 2) ** 2) / 2;
+    modelViewer.setCamera({
+      yaw: start.yaw + (target.yaw - start.yaw) * eased,
+      pitch: start.pitch + (target.pitch - start.pitch) * eased,
+      zoom: start.zoom + (target.zoom - start.zoom) * eased,
+      projection: "orthographic",
+    });
+    if (ratio < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 function handleStreamEvent(type, event) {
   const projectId = event.project_id;
   if (!projectId) return;
@@ -852,16 +776,62 @@ function handleStreamEvent(type, event) {
       noSelection.hidden = true;
       $("#document-title").textContent = getProject(projectId)?.project.name || "CADYX · работа агента";
     }
-    if (data.state === "completed") indicateModelChanged(projectId);
   } else if (type === "command.completed") {
-    selectObjectFromResult(projectId, data.result || data.history_entry?.result);
-    indicateModelChanged(projectId);
+    const historyEntry = data.history_entry || data;
+    const command = historyEntry.command || data.command || {};
+    const result = historyEntry.result || data.result || {};
+    if (projectId === selectedProjectId) {
+      if (command.type === "create_sketch") {
+        activeSketchId = result.sketch_id || null;
+        pendingViewportTransition = null;
+      } else if (command.type === "add_sketch_element") {
+        activeSketchId = command.sketch_id || activeSketchId;
+        pendingViewportTransition = {
+          projectId, objectId: result.object_id,
+          type: command.element_type === "point" ? "sketch-point" : "sketch-lines",
+          durationMs: command.element_type === "circle" ? 700 : 460,
+        };
+      } else if (command.type === "add_sketch_constraint") {
+        activeSketchId = command.sketch_id || activeSketchId;
+        pendingViewportTransition = null;
+      } else if (command.type === "update_sketch_elements") {
+        const edited = command.updates?.[0]?.object_id;
+        const source = currentObjects.find((item) => item.id === edited);
+        activeSketchId = source?.sketch_id || activeSketchId;
+        pendingViewportTransition = activeSketchId ? {
+          projectId, sketchId: activeSketchId, allSketchLines: true,
+          type: "sketch-lines", durationMs: 700,
+        } : null;
+      } else if (command.type === "remove_sketch_object") {
+        if (command.object_id === activeSketchId) activeSketchId = null;
+        pendingViewportTransition = null;
+      } else if (["extrude_sketch", "revolve_sketch"].includes(command.type)) {
+        activeSketchId = null;
+        pendingViewportTransition = {
+          projectId, bodyId: result.body_id,
+          type: command.type === "extrude_sketch" ? "extrude" : "revolve",
+          plane: result.geometry?.plane || "XZ", durationMs: 1400,
+        };
+      } else if (command.type === "set_parameter" && result.geometry?.kind) {
+        const transitionType = result.geometry.kind === "revolved_profile" ? "revolve"
+          : result.geometry.kind === "extruded_profile" ? "extrude" : null;
+        pendingViewportTransition = transitionType ? {
+          projectId, featureId: result.feature_id, type: transitionType,
+          plane: result.geometry.plane || "XZ", durationMs: 1100,
+        } : null;
+      }
+    }
+    selectObjectFromResult(projectId, result);
     scheduleWorkspaceRefresh();
   } else if (type === "document.changed") {
     scheduleWorkspaceRefresh();
+  } else if (type === "viewport.camera") {
+    if (projectId === selectedProjectId) animateModelCamera(data);
   } else if (type === "project.created") {
     selectedProjectId = projectId;
     selectedObjectId = null;
+    activeSketchId = null;
+    pendingViewportTransition = null;
     saveSelectedProject(projectId);
     scheduleWorkspaceRefresh();
   } else if (type === "project.lock.changed") {
@@ -886,7 +856,7 @@ folderFileList.addEventListener("click", (event) => {
 });
 
 const stream = new EventSource("/api/v1/events");
-const eventTypes = ["project.created", "project.lock.changed", "agent.activity", "command.completed", "document.changed"];
+const eventTypes = ["project.created", "project.lock.changed", "agent.activity", "command.completed", "document.changed", "viewport.camera"];
 for (const type of eventTypes) {
   stream.addEventListener(type, (message) => {
     try { handleStreamEvent(type, JSON.parse(message.data)); }

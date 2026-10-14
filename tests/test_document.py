@@ -86,7 +86,7 @@ class SketchDocumentTests(unittest.TestCase):
         foreign = self.command(type="add_sketch_element", sketch_id=other,
                                element_type="point", x=0, y=1)["object_id"]
         for command in [
-            {"type": "create_sketch", "plane": "XZ"},
+            {"type": "create_sketch", "plane": "YZ"},
             {"type": "create_sketch", "name": ""},
             *[{"type": "add_sketch_element", "sketch_id": self.sketch, "element_type": "point", "x": x, "y": 0}
               for x in [True, "1", None, float("inf"), float("nan")]],
@@ -163,7 +163,7 @@ class SketchDocumentTests(unittest.TestCase):
         path.write_text(json.dumps(legacy))
         before = path.read_bytes()
         inspected = self.core.inspect_project(project)
-        self.assertEqual(inspected["document"]["version"], 2)
+        self.assertEqual(inspected["document"]["version"], 3)
         self.assertEqual(inspected["document"]["objects"], legacy["document"]["objects"])
         self.assertEqual(inspected["history"], legacy["history"])
         self.assertEqual(path.read_bytes(), before)
@@ -173,7 +173,7 @@ class SketchDocumentTests(unittest.TestCase):
         feature = box["history_entry"]["result"]["feature_id"]
         self.core.execute_command(project, lease, {"type": "set_parameter", "feature_id": feature, "name": "width", "value": 5})
         persisted = json.loads(path.read_text())
-        self.assertEqual(persisted["document"]["version"], 2)
+        self.assertEqual(persisted["document"]["version"], 3)
         self.assertEqual(persisted["history"][0], legacy["history"][0])
         self.assertEqual(persisted["document"]["objects"][1]["id"], feature)
 

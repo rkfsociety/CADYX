@@ -1,8 +1,9 @@
-"""Persisted XY sketches and constraint checking; this is not a solver."""
+"""Persisted XY/XZ sketches, closed-profile extraction, and constraint checking."""
 
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from typing import Any
 from uuid import UUID
 
@@ -54,8 +55,8 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
             continue
         typed_id(item["id"], kind)
         if kind == "sketch":
-            if item.get("plane") != "XY":
-                raise ValidationError("Only XY sketches are supported.")
+            if item.get("plane") not in {"XY", "XZ"}:
+                raise ValidationError("Only XY and XZ sketches are supported.")
             if not isinstance(item.get("name"), str) or not item["name"].strip() or len(item["name"]) > 120:
                 raise ValidationError("Sketch name must contain 1 to 120 characters.")
             continue
@@ -113,3 +114,65 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
             satisfied = close(targets[0]["radius"], value)
         if not satisfied:
             raise ValidationError(f"Sketch constraint {item['id']} is not satisfied.")
+
+
+def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[dict[str, float]]]:
+    """Return one closed line loop or one sampled circle from a sketch."""
+    sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
+    if sketch is None:
+        raise ValidationError("A profile operation needs an existing sketch.")
+    plane = sketch["plane"]
+    owned = [item for item in objects if item.get("sketch_id") == sketch_id]
+    lines = [item for item in owned if item.get("type") == "line"]
+    circles = [item for item in owned if item.get("type") == "circle"]
+
+    if not lines:
+        if len(circles) != 1:
+            raise ValidationError("A profile operation needs one closed line loop or one circle.")
+        by_id = {item["id"]: item for item in objects}
+        circle = circles[0]
+        center = by_id[circle["center_id"]]
+        radius = number(circle["radius"])
+        return plane, [
+            {"x": number(center["x"]) + radius * math.cos(math.tau * index / 128),
+             "y": number(center["y"]) + radius * math.sin(math.tau * index / 128)}
+            for index in range(128)
+        ]
+    if circles or len(lines) < 3 or len(lines) > 4096:
+        raise ValidationError("A profile operation needs one closed line loop with 3 to 4096 edges.")
+
+    by_id = {item["id"]: item for item in objects}
+    adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for line in lines:
+        adjacency[line["start_id"]].append(line)
+        adjacency[line["end_id"]].append(line)
+    if any(len(edges) != 2 for edges in adjacency.values()):
+        raise ValidationError("Profile lines must form one closed loop without branches.")
+
+    first = lines[0]
+    start_id = first["start_id"]
+    current_id = first["end_id"]
+    used = {first["id"]}
+    ordered_ids = [start_id]
+    while current_id != start_id:
+        if current_id in ordered_ids or len(used) >= len(lines):
+            raise ValidationError("Profile lines must form one closed loop without branches.")
+        ordered_ids.append(current_id)
+        next_lines = [line for line in adjacency[current_id] if line["id"] not in used]
+        if len(next_lines) != 1:
+            raise ValidationError("Profile lines must form one closed loop without branches.")
+        next_line = next_lines[0]
+        used.add(next_line["id"])
+        current_id = next_line["end_id"] if next_line["start_id"] == current_id else next_line["start_id"]
+    if len(used) != len(lines) or len(ordered_ids) != len(lines):
+        raise ValidationError("Profile lines must form exactly one closed loop.")
+    profile = [{"x": number(by_id[point_id]["x"]), "y": number(by_id[point_id]["y"])}
+               for point_id in ordered_ids]
+    area = sum(
+        point["x"] * profile[(index + 1) % len(profile)]["y"]
+        - profile[(index + 1) % len(profile)]["x"] * point["y"]
+        for index, point in enumerate(profile)
+    )
+    if not math.isfinite(area) or abs(area) <= 1e-12:
+        raise ValidationError("Profile area must be non-zero.")
+    return plane, profile

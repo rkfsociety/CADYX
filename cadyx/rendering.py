@@ -13,6 +13,11 @@ from .errors import ValidationError
 def render_scene(document: Document, kernel: GeometryKernel) -> dict:
     objects = []
     by_id = {item["id"]: item for item in document.objects}
+
+    def sketch_position(sketch_id: str, x: float, y: float) -> list[float]:
+        sketch = by_id[sketch_id]
+        return [x, 0, y] if sketch["plane"] == "XZ" else [x, y, 0]
+
     for item in document.objects:
         kind = item["type"]
         positions, triangles, lines, points = [], [], [], []
@@ -20,19 +25,21 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
             mesh = kernel.tessellate(item["geometry"])
             positions, triangles = mesh["positions"], mesh["triangles"]
         elif kind == "point":
-            positions = [item["x"], item["y"], 0]
+            positions = sketch_position(item["sketch_id"], item["x"], item["y"])
             points = [0]
         elif kind == "line":
             for key in ("start_id", "end_id"):
                 point = by_id[item[key]]
-                positions.extend([point["x"], point["y"], 0])
+                positions.extend(sketch_position(item["sketch_id"], point["x"], point["y"]))
             lines = [0, 1]
         elif kind == "circle":
             center = by_id[item["center_id"]]
             for index in range(64):
                 angle = math.tau * index / 64
-                positions.extend([center["x"] + item["radius"] * math.cos(angle),
-                                  center["y"] + item["radius"] * math.sin(angle), 0])
+                positions.extend(sketch_position(
+                    item["sketch_id"], center["x"] + item["radius"] * math.cos(angle),
+                    center["y"] + item["radius"] * math.sin(angle),
+                ))
                 lines.extend([index, (index + 1) % 64])
         else:
             continue

@@ -1,5 +1,6 @@
 (() => {
   const MAX_PREVIEW_POINTS = 24000;
+  const MAX_CAMERA_PITCH = Math.PI / 2;
   function createViewer(canvas) {
     const context = canvas.getContext("2d", { alpha: true });
     let geometry = null;
@@ -12,6 +13,8 @@
     let screenY = new Float64Array(0);
     let faceRecords = new Float64Array(0);
     let faceOrder = new Uint32Array(0);
+    let transition = null;
+    let transitionFrame = 0;
 
     function render() {
       const rect = canvas.getBoundingClientRect();
@@ -26,6 +29,20 @@
       context.clearRect(0, 0, width, height);
       if (!geometry) return;
 
+      let progress = 1;
+      if (transition) {
+        const elapsed = Math.max(0, performance.now() - transition.startedAt);
+        const ratio = Math.min(1, elapsed / transition.durationMs);
+        progress = ratio * ratio * (3 - 2 * ratio);
+        if (ratio >= 1) transition = null;
+        else if (!transitionFrame) {
+          transitionFrame = requestAnimationFrame(() => {
+            transitionFrame = 0;
+            render();
+          });
+        }
+      }
+
       const { positions, triangles, bounds } = geometry;
       const center = bounds.min.map((value, axis) => value / 2 + bounds.max[axis] / 2);
       const extent = bounds.min.map((value, axis) => bounds.max[axis] - value);
@@ -35,10 +52,33 @@
       const sinYaw = Math.sin(yaw);
       const cosPitch = Math.cos(pitch);
       const sinPitch = Math.sin(pitch);
+      const project = (worldX, worldY, worldZ) => {
+        const x = worldX - center[0];
+        const y = worldY - center[1];
+        const z = worldZ - center[2];
+        const rotatedX = x * cosYaw - y * sinYaw;
+        const rotatedDepth = x * sinYaw + y * cosYaw;
+        const cameraY = z * cosPitch - rotatedDepth * sinPitch;
+        return [width / 2 + rotatedX * scale, height / 2 - cameraY * scale];
+      };
       for (let index = 0; index < positions.length; index += 3) {
-        const x = positions[index] - center[0];
-        const y = positions[index + 1] - center[1];
-        const z = positions[index + 2] - center[2];
+        let worldX = positions[index];
+        let worldY = positions[index + 1];
+        let worldZ = positions[index + 2];
+        const vertex = index / 3;
+        if (transition?.vertexRange && vertex >= transition.vertexRange[0] && vertex < transition.vertexRange[1]) {
+          if (transition.type === "revolve") {
+            worldX *= progress;
+            worldY *= progress;
+          } else if (transition.type === "extrude") {
+            const axis = transition.plane === "XZ" ? 1 : 2;
+            if (axis === 1) worldY *= progress;
+            else worldZ *= progress;
+          }
+        }
+        const x = worldX - center[0];
+        const y = worldY - center[1];
+        const z = worldZ - center[2];
         // CAD model coordinates: XY is horizontal, Z is up.
         const rotatedX = x * cosYaw - y * sinYaw;
         const rotatedDepth = x * sinYaw + y * cosYaw;
@@ -47,29 +87,108 @@
         camera[index] = rotatedX;
         camera[index + 1] = cameraY;
         camera[index + 2] = cameraZ;
-        const vertex = index / 3;
         screenX[vertex] = width / 2 + rotatedX * scale;
         screenY[vertex] = height / 2 - cameraY * scale;
       }
 
-      if (triangles.length) renderMesh(triangles, camera, screenX, screenY);
+      if (triangles.length) renderMesh(triangles, camera, screenX, screenY, progress);
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale);
-      context.strokeStyle = "#8ed4ed";
-      context.lineWidth = 2;
       for (let index = 0; index < (geometry.lines || []).length; index += 2) {
         const a = geometry.lines[index], b = geometry.lines[index + 1];
+        let segmentProgress = 1;
+        if (transition?.lineRange && index >= transition.lineRange[0] && index < transition.lineRange[1]) {
+          const segment = (index - transition.lineRange[0]) / 2;
+          const segments = (transition.lineRange[1] - transition.lineRange[0]) / 2;
+          segmentProgress = Math.max(0, Math.min(1, progress * segments - segment));
+          if (segmentProgress <= 0) continue;
+        }
+        context.strokeStyle = segmentProgress < 1 ? "#b8f2ff" : "#8ed4ed";
+        context.globalAlpha = segmentProgress < 1 ? 0.72 + 0.28 * segmentProgress : 1;
+        context.lineWidth = segmentProgress < 1 ? 2.4 : 2;
         context.beginPath();
         context.moveTo(screenX[a], screenY[a]);
-        context.lineTo(screenX[b], screenY[b]);
+        context.lineTo(screenX[a] + (screenX[b] - screenX[a]) * segmentProgress,
+          screenY[a] + (screenY[b] - screenY[a]) * segmentProgress);
         context.stroke();
       }
+      context.globalAlpha = 1;
       context.fillStyle = "#c3ecff";
       for (const point of geometry.points || []) {
-        context.fillRect(screenX[point] - 2, screenY[point] - 2, 4, 4);
+        const forming = transition?.pointIndex === point;
+        const size = forming ? 4 * Math.max(0.05, progress) : 4;
+        context.globalAlpha = forming ? 0.2 + 0.8 * progress : 1;
+        context.fillRect(screenX[point] - size / 2, screenY[point] - size / 2, size, size);
+      }
+      context.globalAlpha = 1;
+      drawRotationAxes(geometry.rotationAxes || [], project, dpr);
+      drawCoordinateGizmo(width, height, dpr, cosYaw, sinYaw, cosPitch, sinPitch);
+    }
+
+    function drawRotationAxes(axes, project, dpr) {
+      for (const axis of axes) {
+        const start = project(...axis.start);
+        const end = project(...axis.end);
+        context.save();
+        context.strokeStyle = "#e9bd6e";
+        context.fillStyle = "#f0cf91";
+        context.globalAlpha = 0.9;
+        context.lineWidth = 1.4 * dpr;
+        context.setLineDash([5 * dpr, 4 * dpr]);
+        context.beginPath();
+        context.moveTo(...start);
+        context.lineTo(...end);
+        context.stroke();
+        context.setLineDash([]);
+        context.font = `600 ${10 * dpr}px Segoe UI, Arial, sans-serif`;
+        context.textBaseline = "middle";
+        context.fillText("Z · ось вращения", end[0] + 6 * dpr, end[1] - 2 * dpr);
+        context.restore();
       }
     }
 
-    function renderMesh(triangles, camera, screenX, screenY) {
+    function drawCoordinateGizmo(width, height, dpr, cosYaw, sinYaw, cosPitch, sinPitch) {
+      const left = 12 * dpr;
+      const top = height - 70 * dpr;
+      const originX = left + 31 * dpr;
+      const originY = top + 40 * dpr;
+      context.save();
+      context.globalAlpha = 0.94;
+      context.fillStyle = "rgba(17, 20, 23, 0.82)";
+      context.fillRect(left, top, 62 * dpr, 58 * dpr);
+      context.strokeStyle = "#30383e";
+      context.lineWidth = dpr;
+      context.strokeRect(left + 0.5 * dpr, top + 0.5 * dpr, 61 * dpr, 57 * dpr);
+      context.font = `600 ${10 * dpr}px Segoe UI, Arial, sans-serif`;
+      context.textBaseline = "middle";
+      const axes = [
+        { name: "X", color: "#ef827b", world: [1, 0, 0] },
+        { name: "Y", color: "#71d7bb", world: [0, 1, 0] },
+        { name: "Z", color: "#8ecbff", world: [0, 0, 1] },
+      ];
+      for (const axis of axes) {
+        const [x, y, z] = axis.world;
+        const screenX = x * cosYaw - y * sinYaw;
+        const screenY = -(z * cosPitch - (x * sinYaw + y * cosYaw) * sinPitch);
+        const magnitude = Math.hypot(screenX, screenY);
+        const directionX = magnitude > 0.08 ? screenX / magnitude : 0;
+        const directionY = magnitude > 0.08 ? screenY / magnitude : -1;
+        const length = (magnitude > 0.08 ? 20 : 5) * dpr;
+        const endX = originX + directionX * length;
+        const endY = originY + directionY * length;
+        context.strokeStyle = axis.color;
+        context.fillStyle = axis.color;
+        context.lineWidth = 2 * dpr;
+        context.beginPath();
+        context.moveTo(originX, originY);
+        context.lineTo(endX, endY);
+        context.stroke();
+        context.fillText(axis.name, endX + (directionX >= 0 ? 3 : -9) * dpr,
+          endY + (directionY >= 0 ? 7 : -4) * dpr);
+      }
+      context.restore();
+    }
+
+    function renderMesh(triangles, camera, screenX, screenY, progress) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
 
@@ -106,8 +225,20 @@
       for (const face of faceOrder) {
         const offset = face * 8;
         const brightness = faceRecords[offset + 7];
+        const first = triangles[face * 3];
+        const second = triangles[face * 3 + 1];
+        const third = triangles[face * 3 + 2];
         const green = Math.round(105 + brightness * 87);
-        context.fillStyle = `rgb(${Math.round(green * 0.69)}, ${green}, ${Math.round(green * 0.53)})`;
+        let red = Math.round(green * 0.69), blue = Math.round(green * 0.53), finalGreen = green;
+        const forming = transition?.vertexRange
+          && [first, second, third].every((vertex) => vertex >= transition.vertexRange[0] && vertex < transition.vertexRange[1]);
+        if (forming && progress < 1) {
+          const glow = (1 - progress) * 0.38;
+          red = Math.round(red + (112 - red) * glow);
+          finalGreen = Math.round(finalGreen + (218 - finalGreen) * glow);
+          blue = Math.round(blue + (236 - blue) * glow);
+        }
+        context.fillStyle = `rgb(${red}, ${finalGreen}, ${blue})`;
         context.beginPath();
         context.moveTo(faceRecords[offset], faceRecords[offset + 1]);
         context.lineTo(faceRecords[offset + 2], faceRecords[offset + 3]);
@@ -138,7 +269,7 @@
       if (!drag) return;
       const sensitivity = (Math.PI * 2) / Math.max(canvas.clientHeight, 1);
       yaw -= (event.clientX - drag.x) * sensitivity;
-      pitch = Math.max(-1.45, Math.min(1.45, pitch + (event.clientY - drag.y) * sensitivity));
+      pitch = Math.max(-MAX_CAMERA_PITCH, Math.min(MAX_CAMERA_PITCH, pitch + (event.clientY - drag.y) * sensitivity));
       drag = { x: event.clientX, y: event.clientY };
       render();
     });
@@ -172,15 +303,21 @@
       getCamera() { return { yaw, pitch, zoom, projection: "orthographic" }; },
       setCamera(value) {
         if (!value || ![value.yaw, value.pitch, value.zoom].every(Number.isFinite)
-            || Math.abs(value.pitch) > 1.45 || value.zoom < 0.25 || value.zoom > 5
+            || Math.abs(value.pitch) > MAX_CAMERA_PITCH || value.zoom < 0.25 || value.zoom > 5
             || value.projection !== "orthographic") {
           throw new Error("Invalid orthographic camera.");
         }
         ({ yaw, pitch, zoom } = value);
         render();
       },
-      load(value, { reset = true } = {}) {
+      load(value, { reset = true, transition: nextTransition = null } = {}) {
         geometry = value;
+        transition = nextTransition ? {
+          ...nextTransition,
+          startedAt: performance.now(),
+          durationMs: Math.max(1, nextTransition.durationMs || 500),
+        } : null;
+        transitionFrame = 0;
         camera = new Float64Array(value.positions.length);
         screenX = new Float64Array(value.positions.length / 3);
         screenY = new Float64Array(value.positions.length / 3);

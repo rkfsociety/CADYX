@@ -26,10 +26,11 @@ Agent stop fences and resumed-lease revision protection are stored separately
 in `.cadyx-agent.sqlite3`; they do not change the portable schema. See the
 [stop/resume contract](architecture.md#safe-agent-stop-and-resume).
 
-The project envelope remains version 1; the nested document now uses version 2.
-Legacy document v1 is explicitly upgraded in memory on read and persisted only
-with a successful command. See [Document Model v2](document-model-v2.md) for the
-sketch schema, constraint semantics and compatibility policy.
+The project envelope remains version 1; the nested document now uses version 3.
+Legacy document v1 and v2 snapshots are explicitly upgraded in memory on read
+and persisted only with a successful command. See [Document Model v3](document-model-v3.md)
+for the sketch schema, solid feature commands, constraint semantics and
+compatibility policy.
 
 Box geometry is stored as a JSON descriptor with its kernel id, dimensions, and measured volume. New descriptors use `occt-v1`; Open CASCADE reconstructs the B-rep from dimensions and checks its validity when creating or validating a project. Native kernel objects are not serialized. Existing `primitive-v1` box descriptors remain readable and are checked by rebuilding the corresponding Open CASCADE solid.
 
@@ -38,7 +39,7 @@ Box geometry is stored as a JSON descriptor with its kernel id, dimensions, and 
 `cadyx/migrations.py` owns current schema versions and explicit one-version
 steps. Project-envelope and document versions are independent: migrate the
 envelope first, then the nested document. The envelope is still v1 (no envelope
-step is needed); the supported document step is v1 to v2. New schema changes
+step is needed); the supported document steps are v1 to v2 and v2 to v3. New schema changes
 must add each required consecutive step instead of relabelling an unknown
 snapshot. Missing steps, unsupported versions (including future versions), and
 non-integer version tags are errors.

@@ -201,6 +201,21 @@ def make_request_handler(
                 self._json(201, result)
                 return
             project_id = parts[0]
+            if agent_api and len(parts) == 3 and parts[1:] == ["viewport", "camera"]:
+                if body is None:
+                    raise ValidationError("A JSON request body is required.")
+                allowed = {"yaw_delta", "pitch_delta", "zoom_factor", "duration_ms"}
+                if not body.keys() <= allowed or "yaw_delta" not in body:
+                    raise ValidationError("Camera requests need yaw_delta and only supported camera fields.")
+                result = core.rotate_view(
+                    project_id,
+                    yaw_delta=body["yaw_delta"],
+                    pitch_delta=body.get("pitch_delta", 0.0),
+                    zoom_factor=body.get("zoom_factor", 1.0),
+                    duration_ms=body.get("duration_ms", 1200),
+                )
+                self._json(200, {"camera": result})
+                return
             if agent_api and len(parts) == 2 and parts[1] in {"stop", "resume"}:
                 if body is None:
                     raise ValidationError("A JSON request body is required.")

@@ -10,7 +10,7 @@ from typing import Any, Callable
 from .errors import ValidationError
 
 PROJECT_VERSION = 1
-DOCUMENT_VERSION = 2
+DOCUMENT_VERSION = 3
 
 
 def _document_v1_to_v2(value: dict[str, Any]) -> None:
@@ -23,7 +23,17 @@ def _document_v1_to_v2(value: dict[str, Any]) -> None:
     value["version"] = 2
 
 
-_DOCUMENT_STEPS = {1: _document_v1_to_v2}
+def _document_v2_to_v3(value: dict[str, Any]) -> None:
+    objects = value.get("objects")
+    if not isinstance(objects, list):
+        raise ValidationError("Document objects must be a list.")
+    if any(not isinstance(item, dict) for item in objects):
+        raise ValidationError("Document objects must be objects.")
+    # v3 extends sketches to XZ and adds sketch-driven solid features.
+    value["version"] = 3
+
+
+_DOCUMENT_STEPS = {1: _document_v1_to_v2, 2: _document_v2_to_v3}
 _PROJECT_STEPS: dict[int, Callable[[dict[str, Any]], None]] = {}
 
 

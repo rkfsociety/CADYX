@@ -99,6 +99,11 @@ class Document:
                 body = by_id.get(item.get("body_id"))
                 if not body or body.get("type") != "body" or not isinstance(body.get("feature_ids", []), list) or item["id"] not in body.get("feature_ids", []):
                     raise ValidationError("Feature must reference a body that includes the feature id.")
+                if item.get("operation") in {"extrude_sketch", "revolve_sketch"}:
+                    source_sketch_id = item.get("source_sketch_id")
+                    typed_id(source_sketch_id, "sketch")
+                    if by_id.get(source_sketch_id, {}).get("type") != "sketch":
+                        raise ValidationError("Profile feature must reference an existing source sketch.")
         validate_sketches(self.objects)
 
 

@@ -31,7 +31,12 @@
 
 ## Shared rendering and viewport
 
-- **Decision:** Core produces a versioned read-only JSON scene under the existing project guard, with kernel-derived body triangles, stable object ids and sampled XY sketch primitives. Browser and Agent API expose identical scenes. One browser canvas renderer serves these scenes and PLY previews; camera state is client-local and Z-up. **Reason:** keep authoritative geometry in Core and remove browser box-specific geometry duplication without changing portable project data or requiring edit leases for observation. **Constraint:** orthographic preview, 64-segment circle sampling and sketch overlays; no viewport picking, visibility persistence, perspective or sketch solving. **Source:** [viewport contract](../docs/viewport-api.md), `cadyx/rendering.py`, `web/viewport.js`.
+- **Decision:** Core produces a versioned read-only JSON scene under the existing project guard, with kernel-derived body triangles, stable object ids and sampled XY/XZ sketch primitives. Browser and Agent API expose identical scenes. One browser canvas renderer serves these scenes and PLY previews; camera state is client-local and Z-up. **Reason:** keep authoritative geometry in Core and share the same view with agents without changing portable project data or requiring edit leases for observation. **Constraint:** orthographic preview, 64-segment circle sampling and sketch overlays; no viewport picking, visibility persistence, perspective or sketch solving. **Source:** [viewport contract](../docs/viewport-api.md), `cadyx/rendering.py`, `web/viewport.js`.
+- **Status:** active.
+
+## Sketch-driven solid features and camera observation
+
+- **Decision:** build simple closed sketch profiles as validated OCCT prism or revolution B-reps through the shared Command System; preserve their source sketch and operation parameters in the feature tree. Expose camera orbit as a transient Agent API/SSE event that animates only the open viewport and never changes the saved document. **Reason:** agents must create useful solids while users can watch each actual modeling and camera step in the browser. **Constraint:** one closed profile per feature; only XY/XZ sketches, XY/XZ extrusion, and full/partial revolution of an XZ profile about global Z. Camera state stays local to the browser. **Source:** `cadyx/commands.py`, `cadyx/native_kernel.py`, [Document Model v3](../docs/document-model-v3.md), and [viewport contract](../docs/viewport-api.md).
 - **Status:** active.
 
 ## Automatic browser synchronization
@@ -41,13 +46,13 @@
 
 ## Scan-to-CAD
 
-- **Decision:** use the current stable CPU Open3D C++ SDK through a project-built C ABI bridge for PLY cleanup, point-cloud surface reconstruction, and mesh simplification. Store the editable result as bounded, compressed `cadyx-mesh-v1` geometry in the document, and atomically publish a content-addressed PLY beside its unchanged source. Stream real operation phases to the visual activity panel. **Reason:** provide useful mesh and point-cloud reconstruction on modest hardware without binding the processing library to CADYX's Python ABI or replacing the source scan. **Constraint:** Windows x64 runtime currently pins Open3D 0.20.0, caps scan processing at four CPU threads and one hundred thousand downsampled points, and keeps live activity snapshots process-local. **Source:** `cadyx/scan.py`, `native/scan.cpp`, `cadyx/mesh_geometry.py`, [scan contract](../docs/document-model-v2.md#scan-import-and-editable-triangle-meshes), [runtime setup](../scripts/setup-runtime.ps1), and [Open3D releases](https://github.com/isl-org/Open3D/releases).
+- **Decision:** use the current stable CPU Open3D C++ SDK through a project-built C ABI bridge for PLY cleanup, point-cloud surface reconstruction, and mesh simplification. Store the editable result as bounded, compressed `cadyx-mesh-v1` geometry in the document, and atomically publish a content-addressed PLY beside its unchanged source. Stream real operation phases to the visual activity panel. **Reason:** provide useful mesh and point-cloud reconstruction on modest hardware without binding the processing library to CADYX's Python ABI or replacing the source scan. **Constraint:** Windows x64 runtime currently pins Open3D 0.20.0, caps scan processing at four CPU threads and one hundred thousand downsampled points, and keeps live activity snapshots process-local. **Source:** `cadyx/scan.py`, `native/scan.cpp`, `cadyx/mesh_geometry.py`, [scan contract](../docs/document-model-v3.md#scan-import-and-editable-triangle-meshes), [runtime setup](../scripts/setup-runtime.ps1), and [Open3D releases](https://github.com/isl-org/Open3D/releases).
 - **Status:** active.
 
-## Document Model v2
+## Document Models v2 and v3
 
-- **Decision:** represent XY sketches, points, lines, circles and constraints as document objects with stable typed UUID references. Membership has one source (`sketch_id`); constraints validate geometry with absolute tolerance 1e-7 instead of implying a solver. Batch coordinate updates use the existing atomic Core command path. **Reason:** add editable, persistent relationships with explicit invariant checks without introducing a separate mutation system. **Source:** `docs/document-model-v2.md`, `cadyx/sketches.py`, `cadyx/commands.py`.
-- **Decision:** explicitly upgrade document v1 to v2 in memory and save it only with the next successful command; keep project envelope v1. **Reason:** legacy bodies, features and history remain intact and read-only inspection does not rewrite user data. Older hosts reject v2; sequential migrations are now centralized in `cadyx/migrations.py`. **Source:** `cadyx/models.py`, `docs/document-model-v2.md`, `tests/test_document.py`.
+- **Decision:** represent XY/XZ sketches, points, lines, circles and constraints as document objects with stable typed UUID references. Membership has one source (`sketch_id`); constraints validate geometry with absolute tolerance 1e-7 instead of implying a solver. Batch coordinate updates use the existing atomic Core command path. **Reason:** add editable, persistent relationships with explicit invariant checks without introducing a separate mutation system. **Source:** `docs/document-model-v3.md`, `cadyx/sketches.py`, `cadyx/commands.py`.
+- **Decision:** migrate document v1 through v2 to v3 in memory and save it only with the next successful command; keep project envelope v1. **Reason:** legacy bodies, features and history remain intact and read-only inspection does not rewrite user data. Older hosts reject v3; sequential migrations are centralized in `cadyx/migrations.py`. **Source:** `cadyx/models.py`, `docs/document-model-v3.md`, `tests/test_document.py`.
 - **Status:** active.
 
 ## CAD workspace and API-first editing
@@ -62,7 +67,7 @@
 
 ## Project Format migrations
 
-- **Decision:** centralize independent project/document schema versions and consecutive migration steps in `cadyx/migrations.py`. Migrate copies on load, validate through the existing domain/workspace checks, and persist through the existing leased Core command and atomic save path. Keep envelope v1 and document v2 until an actual schema change requires another version. **Reason:** future schema evolution needs explicit transitions without rewriting user data on reads or introducing a second mutation path. **Source:** `docs/project-format-v1.md`, `cadyx/migrations.py`, `tests/test_migrations.py`.
+- **Decision:** centralize independent project/document schema versions and consecutive migration steps in `cadyx/migrations.py`. Migrate copies on load, validate through the existing domain/workspace checks, and persist through the existing leased Core command and atomic save path. Keep envelope v1 and document v3 current. **Reason:** future schema evolution needs explicit transitions without rewriting user data on reads or introducing a second mutation path. **Source:** `docs/project-format-v1.md`, `cadyx/migrations.py`, `tests/test_migrations.py`.
 - **Status:** active.
 
 ## Multi-process edit leases

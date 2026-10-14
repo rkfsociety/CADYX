@@ -78,22 +78,12 @@
         </section>
 
         <div id="project-detail" class="project-detail" hidden>
-          <section class="panel activity-panel" aria-labelledby="activity-title">
+          <section id="agent-activity" class="panel activity-panel" aria-labelledby="activity-title">
             <header class="activity-heading">
               <div class="activity-heading-copy">
-                <span id="activity-indicator" class="activity-indicator" aria-hidden="true"></span>
-                <div><p class="section-label">РАБОТА АГЕНТА</p><h2 id="activity-title">Ожидание операции</h2></div>
+                <div><p class="section-label">РАБОТА АГЕНТА</p><h2 id="activity-title">Думает</h2></div>
               </div>
-              <span id="activity-state" class="activity-state">Ожидание</span>
             </header>
-            <p id="activity-route" class="activity-route">CADYX готов к построению модели.</p>
-            <ol id="activity-steps" class="activity-steps" aria-label="Этапы текущей операции"></ol>
-            <div id="activity-parameters" class="activity-parameters" aria-label="Параметры обработки"></div>
-            <p id="activity-result" class="activity-result" hidden></p>
-            <div id="activity-history-wrap" class="activity-history-wrap" hidden>
-              <p class="activity-history-title">Последние действия агента</p>
-              <ol id="activity-history" class="activity-history" aria-label="Визуальная история действий агента"></ol>
-            </div>
           </section>
           <div class="primary-grid">
             <section class="panel model-panel" aria-labelledby="model-title">

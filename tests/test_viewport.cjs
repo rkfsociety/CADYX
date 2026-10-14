@@ -5,10 +5,19 @@ const path = require("node:path");
 const events = {};
 let drawnPoints = [];
 let segments = 0;
+let drawnLines = [];
+let meshMoves = [];
+let drawnLabels = [];
+let currentPath = [];
+let animationTime = 0;
+const animationFrames = [];
 const context = {
-  clearRect() { drawnPoints = []; segments = 0; },
+  clearRect() { drawnPoints = []; segments = 0; drawnLines = []; meshMoves = []; drawnLabels = []; currentPath = []; },
   fillRect(x, y) { drawnPoints.push([x, y]); },
-  beginPath() {}, moveTo() {}, lineTo() { segments++; }, closePath() {}, fill() {}, stroke() {},
+  beginPath() { currentPath = []; }, moveTo(x, y) { currentPath.push([x, y]); },
+  lineTo(x, y) { segments++; drawnLines.push([x, y]); currentPath.push([x, y]); },
+  closePath() {}, fill() { meshMoves.push(...currentPath); }, stroke() {}, strokeRect() {}, save() {}, restore() {}, setLineDash() {},
+  fillText(value) { drawnLabels.push(value); },
 };
 const canvas = {
   getContext() { return context; },
@@ -18,7 +27,11 @@ const canvas = {
   addEventListener(name, handler) { events[name] = handler; },
   setPointerCapture() {},
 };
-const sandbox = { window: {}, ResizeObserver: class { observe() {} } };
+const sandbox = {
+  window: {}, ResizeObserver: class { observe() {} },
+  performance: { now: () => animationTime },
+  requestAnimationFrame(callback) { animationFrames.push(callback); return animationFrames.length; },
+};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"), sandbox);
 const viewer = sandbox.window.CadyxViewport.createViewer(canvas);
 const geometry = {
@@ -27,7 +40,8 @@ const geometry = {
 };
 viewer.load(geometry);
 assert.ok(drawnPoints[1][1] < drawnPoints[0][1], "Positive Z projects upward");
-assert.equal(segments, 1, "Sketch lines render in the shared viewport");
+assert.equal(segments, 4, "Sketch lines and the three coordinate axes render in the shared viewport");
+assert.deepEqual(drawnLabels.filter((label) => ["X", "Y", "Z"].includes(label)).sort(), ["X", "Y", "Z"]);
 const initial = viewer.getCamera();
 events.pointerdown({ clientX: 100, clientY: 100, pointerId: 1 });
 events.pointermove({ clientX: 100, clientY: 120 });
@@ -39,11 +53,19 @@ events.pointerdown({ clientX: 100, clientY: 120, pointerId: 1 });
 events.pointermove({ clientX: 100, clientY: 100 });
 events.pointerup();
 assert.ok(Math.abs(viewer.getCamera().pitch - initial.pitch) < 1e-12, "Reverse vertical drag restores elevation");
+events.pointerdown({ clientX: 100, clientY: 100, pointerId: 1 });
+events.pointermove({ clientX: 100, clientY: 300 });
+events.pointerup();
+assert.equal(viewer.getCamera().pitch, Math.PI / 2, "Dragging can reach the exact top view");
 events.wheel({ deltaY: -100, preventDefault() {} });
 const zoomed = viewer.getCamera();
 assert.ok(zoomed.zoom > initial.zoom);
 viewer.load(geometry, { reset: false });
 assert.equal(viewer.getCamera().zoom, zoomed.zoom, "Document refresh preserves the camera");
+viewer.setCamera({ yaw: 0, pitch: Math.PI / 2, zoom: 1, projection: "orthographic" });
+assert.equal(viewer.getCamera().pitch, Math.PI / 2, "Camera can reach an exact top view");
+assert.ok(Math.abs(drawnPoints[1][1] - drawnPoints[0][1]) < 1e-9, "The vertical Z axis points into the camera from above");
+assert.throws(() => viewer.setCamera({ yaw: 0, pitch: Math.PI / 2 + 0.01, zoom: 1, projection: "orthographic" }));
 viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
 assert.equal(drawnPoints[1][0], drawnPoints[0][0], "Z stays vertical without horizontal rotation");
 assert.throws(() => viewer.setCamera({ yaw: NaN, pitch: 0, zoom: 1, projection: "orthographic" }));
@@ -52,4 +74,38 @@ assert.equal(viewer.getCamera().pitch, initial.pitch);
 assert.equal(viewer.getCamera().zoom, 1);
 viewer.load(geometry);
 assert.equal(viewer.getCamera().zoom, 1, "New scene resets the camera");
-console.log("Viewport: Z-up, vertical orbit, camera validation, zoom, refresh and fit passed.");
+viewer.load(geometry, { reset: false, transition: { type: "sketch-lines", lineRange: [0, 2], durationMs: 100 } });
+assert.equal(segments, 3, "A new sketch segment starts as an animated stroke while the coordinate triad remains visible");
+animationTime = 50;
+animationFrames.shift()(animationTime);
+assert.equal(segments, 4);
+const midpoint = drawnLines[0];
+const endpoint = [
+  (drawnPoints[1][0] + drawnPoints[0][0]) / 2 + 2,
+  (drawnPoints[1][1] + drawnPoints[0][1]) / 2 + 2,
+];
+assert.ok(Math.abs(midpoint[0] - endpoint[0]) < 1e-9 && Math.abs(midpoint[1] - endpoint[1]) < 1e-9,
+  "A sketch stroke reaches its midpoint with eased progress");
+animationTime = 100;
+animationFrames.shift()(animationTime);
+assert.ok(Math.abs(drawnLines[0][0] - (drawnPoints[1][0] + 2)) < 1e-9
+  && Math.abs(drawnLines[0][1] - (drawnPoints[1][1] + 2)) < 1e-9, "The sketch stroke finishes at its endpoint");
+const profileBody = {
+  positions: [1, 0, 0, 1, 0, 1, 0, 0, 1], triangles: [0, 1, 2], lines: [], points: [],
+  bounds: { min: [0, 0, 0], max: [1, 1, 1] },
+};
+animationTime = 200;
+viewer.load({ ...profileBody, rotationAxes: [{ start: [0, 0, 0], end: [0, 0, 1] }] }, { reset: false });
+assert.ok(drawnLabels.includes("Z · ось вращения"), "Revolved bodies label their global Z rotation axis");
+viewer.load(profileBody, { reset: false, transition: { type: "revolve", vertexRange: [0, 3], durationMs: 100 } });
+assert.ok(Math.max(...meshMoves.map(([x]) => x)) - Math.min(...meshMoves.map(([x]) => x)) < 1e-9,
+  "A revolved profile starts on its axis");
+animationTime = 250;
+animationFrames.shift()(animationTime);
+assert.ok(Math.max(...meshMoves.map(([x]) => x)) - Math.min(...meshMoves.map(([x]) => x)) > 1,
+  "A revolved profile grows smoothly away from its axis");
+animationTime = 300;
+animationFrames.shift()(animationTime);
+assert.ok(Math.max(...meshMoves.map(([x]) => x)) - Math.min(...meshMoves.map(([x]) => x)) > 2,
+  "The revolved profile reaches its final radius");
+console.log("Viewport: Z-up, camera controls, sketch and revolve transitions, zoom, refresh and fit passed.");

@@ -59,7 +59,7 @@ Multiple current hosts may share a workspace on the same local machine; see the 
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](docs/project-format-v1.md), [docs/document-model-v2.md](docs/document-model-v2.md), and [.codex/roadmap.md](.codex/roadmap.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, a durable per-project SQLite edit lease manager, a shared command system, and an Open CASCADE geometry-kernel adapter. Boxes are rebuilt from JSON-safe parameters; reconstructed scan meshes are stored as bounded, compressed, validated triangle arrays, so native objects are never stored in project files. The JSON APIs also support XY sketches with stable point/line/circle references and checked constraints; agents use the Agent API to create and edit them. The read-only browser displays all supported bodies and sketch elements through the shared [viewport contract](docs/viewport-api.md), and previews PLY files using the same renderer.
+See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](docs/project-format-v1.md), [docs/document-model-v3.md](docs/document-model-v3.md), and [.codex/roadmap.md](.codex/roadmap.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, a durable per-project SQLite edit lease manager, a shared command system, and an Open CASCADE geometry-kernel adapter. Boxes, sketch extrusions, and sketch revolutions are rebuilt from JSON-safe parameters; reconstructed scan meshes are stored as bounded, compressed, validated triangle arrays, so native objects are never stored in project files. The JSON APIs support XY/XZ sketches with stable point/line/circle references, checked constraints, and linked extrusion/revolution features. Agents use the Agent API to create and edit models. The read-only browser displays all supported bodies and sketch elements through the shared [viewport contract](docs/viewport-api.md), and previews PLY files using the same renderer.
 
 ## API starting points
 
@@ -72,7 +72,9 @@ See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](do
 - `POST /api/v1/projects/{id}/leases` with `owner_type` and `owner_id`
 - `POST /api/v1/projects/{id}/commands` with a human `lease_id` and a command
 - Agent equivalents under `/api/v1/agent/projects`
-- `import_scan` and `set_scan_parameter` commands for PLY-to-mesh reconstruction; see the [scan command contract](docs/document-model-v2.md#scan-import-and-editable-triangle-meshes)
+- `extrude_sketch` and `revolve_sketch` commands for OCCT profile solids; see the [feature contract](docs/document-model-v3.md#sketch-driven-solid-features)
+- `import_scan` and `set_scan_parameter` commands for PLY-to-mesh reconstruction; see the [scan command contract](docs/document-model-v3.md#scan-import-and-editable-triangle-meshes)
+- `POST /api/v1/agent/projects/{id}/viewport/camera` to animate the selected browser viewport from the Agent API; see the [viewport contract](docs/viewport-api.md)
 - `GET /api/v1/projects/{id}/activity` and its Agent API equivalent return the recent visual activity snapshots; `agent.activity` SSE events update them live
 - Agent `/stop` with `lease_id` and `/resume` with `owner_id` / `expected_revision`; resumed commands require `expected_revision`. See the [stop/resume contract](docs/architecture.md#safe-agent-stop-and-resume).
 - `/api/v1/updates` is polled automatically alongside SSE so project, workspace-file, activity, and UI-asset changes appear without a manual page refresh

@@ -1,11 +1,11 @@
-# Document Model v2
+# Document Model v3
 
 The project envelope remains `cadyx-project` version 1. New documents use version
-2. Reading a document v1 upgrades its version in memory without changing ids,
+3. Reading documents v1 or v2 upgrades their version in memory without changing ids,
 objects, revision, history or files. The next successful command atomically saves
 the upgraded document with its new history entry. Failed commands leave the file
 unchanged. Unknown versions are rejected. A v1 document supports only bodies and
-features. Older CADYX hosts cannot read document v2; this is a forward schema
+features. Older CADYX hosts cannot read document v3; this is a forward schema
 change, not a claim of backwards host compatibility. Sequential migration steps are defined in `cadyx/migrations.py`; see the
 [project migration contract](project-format-v1.md#migration-contract).
 
@@ -17,8 +17,8 @@ line, circle and constraint. Existing body/feature relationships remain intact.
 
 | Type | Persisted fields in addition to id/type | Meaning |
 | --- | --- | --- |
-| sketch | name, plane | Name of 1–120 characters; plane is `XY` |
-| point | sketch_id, x, y | Finite coordinates in the XY plane |
+| sketch | name, plane | Name of 1–120 characters; plane is `XY` or `XZ` |
+| point | sketch_id, x, y | Finite coordinates in the owning sketch plane |
 | line | sketch_id, start_id, end_id | References two points; length must exceed 1e-7 |
 | circle | sketch_id, center_id, radius | Point center and finite positive radius |
 | constraint | sketch_id, kind, references, value | Explicit invariant checked on every load and command |
@@ -26,8 +26,8 @@ line, circle and constraint. Existing body/feature relationships remain intact.
 Membership is defined by `sketch_id`, with no duplicated membership lists.
 Point/line/circle references must resolve to the appropriate object type in the
 same sketch. Editing coordinates preserves ids and references. There are no
-references to transient kernel topology. Sketches are independent of solid
-features in this stage; extrusion and sketch-to-body operations are future work.
+references to transient kernel topology. An `XZ` sketch maps stored `x,y`
+coordinates to global `X,Z`; `XY` retains its existing mapping.
 
 ## Constraint semantics
 
@@ -70,6 +70,26 @@ their returned ids; add a horizontal constraint referencing the line id. Changin
 only the second point's y to 1 is rejected without changing revision, history or
 saved bytes. Changing both y coordinates to 1 in one batch succeeds with all ids
 and references preserved.
+
+## Sketch-driven solid features
+
+`extrude_sketch` accepts `sketch_id`, positive `depth`, and optional `name`.
+It extrudes one closed line loop on `XY` along global Z or on `XZ` along global
+Y. `revolve_sketch` accepts `sketch_id`, optional `angle_degrees` (default 360,
+range greater than 0 through 360), and optional `name`. It revolves one closed
+profile on `XZ` about global Z. Revolution profiles must stay on one side of the
+axis and touch it so OCCT can form a solid. A sketch with one circle can be used
+as an extrusion profile; it is sampled into a 128-edge polygon. Profile line
+loops support 3–4096 edges. Each operation accepts one contour; holes and
+multi-contour profiles are not supported.
+
+The command stores an OCCT B-rep descriptor plus a feature that references its
+source sketch and operation parameter. Editing source points rebuilds the linked
+body in the same atomic command. `set_parameter` can change extrusion depth or
+revolution angle. Removing a sketch used by a solid feature is rejected. Profile
+constraints still check the supplied geometry and do not solve it. The OCCT
+adapter rebuilds and validates each saved solid and derives viewport triangles
+from the B-rep. These are solids, not triangle-mesh imports.
 
 ## Scan import and editable triangle meshes
 
@@ -131,8 +151,8 @@ The Core emits `agent.activity` SSE snapshots as the scan moves through source
 validation, mesh or point-cloud cleanup, reconstruction, validation, sidecar
 publication, and project save. Agent Runtime/API model inspections and
 viewport requests are recorded in the same activity stream. The read-only
-browser renders these actual events as a visual stage sequence and updates the
-model after commit; it does not show a raw command transcript.
+browser animates model changes and displays one compact action/result status;
+it does not show operation stages or a raw command transcript.
 `GET /api/v1/projects/{id}/activity` and the Agent API equivalent return the
 latest 128 in-process operation snapshots so an open or reloaded browser can
 resume displaying them. Activity state is process-local, like the SSE stream.
@@ -141,18 +161,20 @@ resume displaying them. Activity state is process-local, like the SSE stream.
 
 The browser is a read-only detail viewer. It shows the shared viewport full
 window by default; the model tree and properties are available in collapsed
-docks. The tree lists bodies and their features, plus sketches and their points,
-lines, circles and constraints. The viewport renders supported bodies and
-sketch geometry; view controls do not edit document state.
+docks. The tree lists bodies and their features, plus only the sketch currently
+being edited and its points, lines, circles and constraints. Inactive sketches
+and sketches consumed by solid features are hidden from the tree and viewport.
+The viewport renders supported bodies and smoothly animates active sketch and
+profile-feature changes; view controls do not edit document state.
 
 Agents create and edit models through the Agent API under an agent edit lease.
 Projects are also created through the Agent API. Agents can get a server-rendered
 PNG image without a browser from
 `GET /api/v1/agent/projects/{id}/viewport.png`; the regular viewport API remains
-available as JSON scene data. The command objects above create boxes and XY
-sketches, add sketch geometry and checked constraints, change box parameters or
-sketch elements, and remove unreferenced sketch objects. Every command uses the
-shared Command System, and the complete document is validated before the atomic
-save. Constraints check
-the supplied result but do not solve or move geometry. The browser exposes no
+available as JSON scene data. The command objects above create boxes and XY/XZ
+sketches, add sketch geometry and checked constraints, extrude or revolve closed
+profiles, change feature parameters or sketch elements, and remove unreferenced
+sketch objects. Every command uses the shared Command System, and the complete
+document is validated before the atomic save. Constraints check the supplied
+result but do not solve or move geometry. The browser exposes no
 project or model creation, editing, or deletion controls.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterator
@@ -17,6 +18,7 @@ from .models import Document, OwnerType
 from .rendering import render_scene, render_scene_png
 from .scan import ScanProcessor
 from .workspace import ProjectWorkspace, utc_now
+from .sketches import closed_profile
 
 
 class CadyxCore:
@@ -103,6 +105,50 @@ class CadyxCore:
             document = Document.from_dict(project["document"])
             self._validate_geometry(document)
             return render_scene_png(render_scene(document, self.kernel))
+
+    def rotate_view(
+        self, project_id: str, *, yaw_delta: float, pitch_delta: float = 0.0,
+        zoom_factor: float = 1.0, duration_ms: int = 1200,
+    ) -> dict[str, Any]:
+        """Publish an ephemeral camera orbit for the selected read-only viewport."""
+        activity = {
+            "operation_id": str(uuid4()), "kind": "camera",
+            "actor_type": OwnerType.AGENT.value, "action": "Поворачивает камеру",
+            "command": None, "source": None, "state": "running",
+            "phase": "starting", "steps": [], "result": None, "error": None,
+        }
+        self._publish_activity(project_id, activity)
+        try:
+            self.workspace.load(project_id)
+            for name, value, limit in (("yaw_delta", yaw_delta, math.tau),
+                                       ("pitch_delta", pitch_delta, 0.5),
+                                       ("zoom_factor", zoom_factor, 2.0)):
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValidationError(f"{name} must be a finite number.")
+                try:
+                    value = float(value)
+                except OverflowError as exc:
+                    raise ValidationError(f"{name} is outside the supported range.") from exc
+                if not math.isfinite(value) or abs(value) > limit:
+                    raise ValidationError(f"{name} is outside the supported range.")
+            if zoom_factor < 0.5:
+                raise ValidationError("zoom_factor must be at least 0.5.")
+            if type(duration_ms) is not int or not 0 <= duration_ms <= 5000:
+                raise ValidationError("duration_ms must be an integer from 0 to 5000.")
+            event = {
+                "yaw_delta": float(yaw_delta), "pitch_delta": float(pitch_delta),
+                "zoom_factor": float(zoom_factor), "duration_ms": duration_ms,
+            }
+            activity["phase"] = "animate_camera"
+            self._publish_activity(project_id, activity)
+            self.events.publish("viewport.camera", project_id, event)
+            activity.update({"state": "completed", "phase": "completed", "result": event})
+            self._publish_activity(project_id, activity)
+            return event
+        except Exception as exc:
+            activity.update({"state": "failed", "error": str(exc)})
+            self._publish_activity(project_id, activity)
+            raise
 
     def observe_agent_operation(
         self,
@@ -310,13 +356,15 @@ class CadyxCore:
     def _activity_action(command_name: Any) -> str:
         return {
             "create_box": "Строит модель",
+            "create_sketch": "Создаёт эскиз",
+            "add_sketch_element": "Рисует элемент эскиза",
+            "add_sketch_constraint": "Проверяет ограничение эскиза",
+            "update_sketch_elements": "Меняет геометрию эскиза",
+            "extrude_sketch": "Выдавливает профиль",
+            "revolve_sketch": "Вращает профиль",
             "set_parameter": "Меняет параметры модели",
             "import_scan": "Обрабатывает скан",
             "set_scan_parameter": "Пересобирает скан",
-            "create_sketch": "Создаёт эскиз",
-            "add_sketch_element": "Обновляет эскиз",
-            "add_sketch_constraint": "Задаёт ограничение эскиза",
-            "update_sketch_elements": "Обновляет геометрию эскиза",
             "remove_sketch_object": "Удаляет объект эскиза",
         }.get(command_name, "Выполняет операцию")
 
@@ -341,10 +389,31 @@ class CadyxCore:
         return None
 
     def _validate_geometry(self, document: Document) -> None:
+        by_id = {item["id"]: item for item in document.objects}
         for item in document.objects:
             geometry = item.get("geometry")
             if geometry is not None:
                 self.kernel.validate(geometry)
+            if item.get("type") != "feature" or item.get("operation") not in {"extrude_sketch", "revolve_sketch"}:
+                continue
+            feature_geometry = item.get("geometry")
+            body = by_id.get(item.get("body_id"))
+            source_id = item.get("source_sketch_id")
+            if body is None or feature_geometry != body.get("geometry"):
+                raise ValidationError("Profile feature geometry must match its body.")
+            plane, profile = closed_profile(document.objects, source_id)
+            operation = item["operation"]
+            parameters = item.get("parameters")
+            if not isinstance(feature_geometry, dict):
+                raise ValidationError("Profile feature geometry is missing.")
+            expected_kind = "extruded_profile" if operation == "extrude_sketch" else "revolved_profile"
+            if not isinstance(parameters, dict):
+                raise ValidationError("Profile feature parameters are invalid.")
+            if feature_geometry.get("kind") != expected_kind or feature_geometry.get("plane") != plane or feature_geometry.get("profile") != profile:
+                raise ValidationError("Profile feature geometry is out of date with its source sketch.")
+            parameter_name = "depth" if operation == "extrude_sketch" else "angle_degrees"
+            if feature_geometry.get(parameter_name) != parameters.get(parameter_name):
+                raise ValidationError("Profile feature geometry is out of date with its parameters.")
 
     @staticmethod
     def _summary(project: dict[str, Any]) -> dict[str, Any]:
