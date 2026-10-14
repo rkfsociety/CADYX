@@ -162,6 +162,10 @@ class NativeKernel:
                 node.update(type=1, plane=int(value["plane"] == "XZ"), amount=value["radius"],
                             coordinate_offset=len(coordinates), coordinate_count=len(value["path"]) * 2)
                 coordinates.extend(coord for point in value["path"] for coord in (point["x"], point["y"]))
+            elif kind == "metric_thread":
+                node.update(type=5, operation=1 if value["handedness"] == "right" else -1,
+                            amount=value["length"], coordinate_offset=len(coordinates), coordinate_count=2)
+                coordinates.extend((value["major_diameter"], value["pitch"]))
             elif kind in {"fused_profiles", "fused_solids"}:
                 node.update(type=2, input_a=append(value["base"]), input_b=append(value["tool"]))
             elif kind == "filleted_solid":

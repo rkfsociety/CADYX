@@ -418,6 +418,7 @@ class CadyxCore:
             "create_sketch": "Создаёт эскиз",
             "add_sketch_element": "Рисует элемент эскиза",
             "add_sketch_polyline": "Рисует ломаную",
+            "add_sketch_involute_gear": "Строит эвольвентный профиль",
             "add_sketch_rectangle": "Рисует прямоугольник",
             "add_sketch_circle": "Рисует окружность",
             "add_sketch_constraint": "Проверяет ограничение эскиза",
@@ -430,6 +431,7 @@ class CadyxCore:
             "replace_sketch_path": "Рисует траекторию",
             "fuse_bodies": "Объединяет тела",
             "set_parameter": "Меняет параметры модели",
+            "create_metric_thread": "Строит метрическую резьбу",
             "import_scan": "Обрабатывает скан",
             "set_scan_parameter": "Пересобирает скан",
             "remove_sketch_object": "Удаляет объект эскиза",
@@ -502,6 +504,18 @@ class CadyxCore:
                         or feature_geometry.get("edge_indices") != item.get("edge_indices")
                         or feature_geometry.get("radius") != item.get("parameters", {}).get("radius")):
                     raise ValidationError("Fillet geometry is out of date with its source body and parameters.")
+                continue
+            if item.get("operation") == "metric_thread":
+                body = by_id.get(item.get("body_id"))
+                geometry = item.get("geometry")
+                parameters = item.get("parameters")
+                if (body is None or body.get("type") != "body" or geometry != body.get("geometry")
+                        or not isinstance(geometry, dict) or geometry.get("kind") != "metric_thread"
+                        or not isinstance(parameters, dict)
+                        or set(parameters) != {"major_diameter", "pitch", "length", "handedness"}
+                        or any(geometry.get(name) != parameters.get(name)
+                               for name in ("major_diameter", "pitch", "length", "handedness"))):
+                    raise ValidationError("Metric thread geometry is out of date with its feature parameters.")
                 continue
             if item.get("operation") == "sweep_sketch":
                 body = by_id.get(item.get("body_id"))

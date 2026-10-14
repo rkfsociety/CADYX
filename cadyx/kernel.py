@@ -29,6 +29,10 @@ class GeometryKernel(Protocol):
         self, path: list[dict[str, float]], *, plane: str, radius: float,
     ) -> dict[str, Any]: ...
 
+    def create_metric_thread(
+        self, *, major_diameter: float, pitch: float, length: float, handedness: str = "right",
+    ) -> dict[str, Any]: ...
+
     def create_fillet(
         self, base: dict[str, Any], *, edge_indices: list[int], radius: float,
     ) -> dict[str, Any]: ...
@@ -213,6 +217,29 @@ class OCCTKernelAdapter:
         geometry["volume"] = NativeKernel().geometry_graph(geometry)["volume"]
         return geometry
 
+    def create_metric_thread(
+        self, *, major_diameter: float, pitch: float, length: float, handedness: str = "right",
+    ) -> dict[str, Any]:
+        major_diameter = _positive_amount(major_diameter, "major_diameter")
+        pitch = _positive_amount(pitch, "pitch")
+        length = _positive_amount(length, "length")
+        if length < pitch or length / pitch > 64:
+            raise ValidationError("Thread length must be at least one pitch and no more than 64 pitches.")
+        if major_diameter <= 1.226869 * pitch:
+            raise ValidationError("major_diameter must leave a positive ISO metric thread minor diameter.")
+        if not isinstance(handedness, str) or handedness not in {"right", "left"}:
+            raise ValidationError("handedness must be 'right' or 'left'.")
+        geometry = {
+            "kernel": self.kernel_id,
+            "kind": "metric_thread",
+            "major_diameter": major_diameter,
+            "pitch": pitch,
+            "length": length,
+            "handedness": handedness,
+        }
+        geometry["volume"] = NativeKernel().geometry_graph(geometry)["volume"]
+        return geometry
+
     def create_fillet(
         self, base: dict[str, Any], *, edge_indices: list[int], radius: float,
     ) -> dict[str, Any]:
@@ -263,6 +290,9 @@ class OCCTKernelAdapter:
             return
         if kernel_id == self.kernel_id and geometry.get("kind") == "swept_pipe":
             self._validate_swept_pipe_geometry(geometry)
+            return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "metric_thread":
+            self._validate_metric_thread_geometry(geometry)
             return
         if kernel_id == self.kernel_id and geometry.get("kind") == "filleted_solid":
             self._validate_filleted_geometry(geometry)
@@ -365,6 +395,18 @@ class OCCTKernelAdapter:
             raise ValidationError("Swept pipe geometry descriptor is invalid.")
         rebuilt = self.create_swept_pipe(geometry.get("path"), plane=geometry.get("plane"),
                                          radius=geometry.get("radius"))
+        self._same_saved_volume(geometry, rebuilt["volume"])
+
+    def _validate_metric_thread_geometry(self, geometry: dict[str, Any]) -> None:
+        if (set(geometry) != {"kernel", "kind", "major_diameter", "pitch", "length", "handedness", "volume"}
+                or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "metric_thread"):
+            raise ValidationError("Metric thread geometry descriptor is invalid.")
+        rebuilt = self.create_metric_thread(
+            major_diameter=geometry.get("major_diameter"),
+            pitch=geometry.get("pitch"),
+            length=geometry.get("length"),
+            handedness=geometry.get("handedness"),
+        )
         self._same_saved_volume(geometry, rebuilt["volume"])
 
     def _validate_filleted_geometry(self, geometry: dict[str, Any]) -> None:

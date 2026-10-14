@@ -34,8 +34,10 @@ transforms and outward winding. Viewport-only tessellation uses an absolute
 linear deflection of 0.16 document units to keep camera orbit responsive; this
 is a display approximation and does not alter the exact editable B-rep or
 exports. Editable OCCT solids include boxes, closed-profile extrusions and
-revolutions, swept pipes, Boolean fuses, and fillets. Imported scans remain
-validated `cadyx-mesh-v1` triangle meshes rather than B-reps. XY sketch points/lines lie at Z=0; XZ
+revolutions, swept pipes, Boolean fuses, fillets, and external metric threads.
+Generated involute spur gears render as ordinary XY sketch linework until
+extruded through the profile-feature command. Imported scans remain validated
+`cadyx-mesh-v1` triangle meshes rather than B-reps. XY sketch points/lines lie at Z=0; XZ
 sketches map their points/lines onto Y=0 with stored y becoming global Z.
 Circles use 64 closed segments, a display approximation rather than replacement
 CAD geometry. Coordinates retain document units without inventing a physical
@@ -56,7 +58,7 @@ from both the viewport and the user-facing object tree. A previously used
 sketch may reappear only while its profile is actively being edited, then is
 hidden when that edit finishes. Agent operation events animate each new sketch
 stroke and apply eased visual transitions to profile extrusions/revolutions,
-path sweeps, Boolean fuses, and edge fillets; consuming a sketch removes its
+metric-thread construction, path sweeps, Boolean fuses, and edge fillets; consuming a sketch removes its
 overlay as the solid feature appears. Sweep animation precomputes each mesh
 vertex's progress along its nearest path segment using a segment AABB hierarchy,
 so it avoids scanning the entire path for every vertex. Boolean fuse hides its consumed source

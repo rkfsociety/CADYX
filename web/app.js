@@ -879,7 +879,7 @@ function handleStreamEvent(type, event) {
           type: command.element_type === "point" ? "sketch-point" : "sketch-lines",
           durationMs: command.element_type === "circle" ? 700 : 460,
         };
-      } else if (["add_sketch_polyline", "add_sketch_rectangle"].includes(command.type)) {
+      } else if (["add_sketch_polyline", "add_sketch_rectangle", "add_sketch_involute_gear"].includes(command.type)) {
         activeSketchId = command.sketch_id || activeSketchId;
         pendingViewportTransition = activeSketchId ? {
           projectId, sketchId: activeSketchId, allSketchLines: true,
@@ -923,6 +923,9 @@ function handleStreamEvent(type, event) {
           type: command.type === "extrude_sketch" ? "extrude" : "revolve",
           plane: result.geometry?.plane || "XZ", durationMs: 1400,
         };
+      } else if (command.type === "create_metric_thread") {
+        activeSketchId = null;
+        pendingViewportTransition = { projectId, bodyId: result.body_id, type: "thread", durationMs: 1800 };
       } else if (command.type === "fuse_bodies") {
         activeSketchId = null;
         pendingViewportTransition = {
@@ -941,6 +944,7 @@ function handleStreamEvent(type, event) {
         const transitionType = result.geometry.kind === "revolved_profile" ? "revolve"
           : result.geometry.kind === "extruded_profile" ? "extrude"
           : result.geometry.kind === "swept_pipe" ? "sweep"
+          : result.geometry.kind === "metric_thread" ? "thread"
           : result.geometry.kind === "filleted_solid" ? "fillet"
           : ["fused_profiles", "fused_solids"].includes(result.geometry.kind) ? "fuse" : null;
         pendingViewportTransition = transitionType ? {

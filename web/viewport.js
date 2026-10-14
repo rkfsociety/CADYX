@@ -115,6 +115,8 @@
             const axis = transition.plane === "XZ" ? 1 : 2;
             if (axis === 1) worldY *= progress;
             else worldZ *= progress;
+          } else if (transition.type === "thread") {
+            worldZ *= progress;
           }
         }
         const x = worldX - center[0];

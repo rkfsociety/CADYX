@@ -1,5 +1,6 @@
 // Small Python-ABI-independent boundary; OCCT objects never leave this library.
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -8,6 +9,7 @@
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -312,6 +314,85 @@ TopoDS_Shape MakeFuse(const TopoDS_Shape& base, const TopoDS_Shape& tool) {
   return EnsureOneSolid(operation.Shape(), "Boolean fuse");
 }
 
+TopoDS_Shape MakeMetricThread(double major_diameter, double pitch, double length, int handedness) {
+  if (!std::isfinite(major_diameter) || !std::isfinite(pitch) || !std::isfinite(length)
+      || major_diameter <= 0 || pitch <= 0 || length < pitch || length / pitch > 64
+      || (handedness != -1 && handedness != 1))
+    throw std::runtime_error("Metric thread dimensions or handedness are outside the supported range.");
+
+  const double major_radius = major_diameter / 2.0;
+  const double thread_depth = (17.0 / 24.0) * (std::sqrt(3.0) / 2.0) * pitch;
+  const double minor_radius = major_radius - thread_depth;
+  if (!std::isfinite(minor_radius) || minor_radius <= 0)
+    throw std::runtime_error("Metric thread pitch leaves no positive minor diameter.");
+
+  // Overlap the swept ridge slightly with the core so the Boolean union has
+  // volumetric intersection instead of coincident root faces.
+  const double core_radius = minor_radius + pitch * 1e-5;
+  const double core_start = 0.0;
+  const double core_length = length;
+  BRepPrimAPI_MakeCylinder core_builder(
+      gp_Ax2(gp_Pnt(0, 0, core_start), gp_Dir(0, 0, 1)), core_radius, core_length);
+  core_builder.Build();
+  if (!core_builder.IsDone()) throw std::runtime_error("OCCT could not construct the metric thread core.");
+
+  // ISO metric external design profile: 60-degree flank, P/8 crest flat,
+  // h3 = 17H/24 = 0.613435P and R = sqrt(3)P/12 root rounds. The root rounds
+  // are built into each loft section so they remain stable along the helix.
+  const double root_half_width = 5.0 * pitch / 12.0;
+  const double crest_half_width = pitch / 16.0;
+  const double root_round = (std::sqrt(3.0) / 12.0) * pitch;
+  const double root_tangent = std::sqrt(3.0) * root_round;
+  const double root_tangent_radial = (std::sqrt(3.0) / 2.0) * root_tangent;
+  const size_t root_arc_segments = 8;
+  const double center_start = root_half_width;
+  const double center_span = length - 2.0 * root_half_width;
+  const double total_turns = center_span / pitch;
+  const size_t section_count = static_cast<size_t>(std::ceil(total_turns * 24.0));
+  if (section_count < 2 || section_count > 1600)
+    throw std::runtime_error("Metric thread loft exceeds the supported section count.");
+
+  const double pi = std::acos(-1.0);
+  BRepOffsetAPI_ThruSections loft(true, false);
+  for (size_t index = 0; index <= section_count; ++index) {
+    const double fraction = static_cast<double>(index) / static_cast<double>(section_count);
+    const double center_z = center_start + fraction * center_span;
+    const double theta = handedness * kFullTurn * center_z / pitch;
+    const double radial_x = std::cos(theta);
+    const double radial_y = std::sin(theta);
+    const auto point = [&](double radius, double z_offset) {
+      return gp_Pnt(radius * radial_x, radius * radial_y, center_z + z_offset);
+    };
+    BRepBuilderAPI_MakePolygon section;
+    section.Add(point(minor_radius + root_tangent_radial, -root_half_width + root_tangent / 2.0));
+    section.Add(point(major_radius, -crest_half_width));
+    section.Add(point(major_radius, crest_half_width));
+    section.Add(point(minor_radius + root_tangent_radial, root_half_width - root_tangent / 2.0));
+    const double right_center_offset = root_half_width - root_tangent;
+    for (size_t arc_step = 1; arc_step <= root_arc_segments; ++arc_step) {
+      const double fraction_arc = static_cast<double>(arc_step) / root_arc_segments;
+      const double angle = pi / 6.0 - (2.0 * pi / 3.0) * fraction_arc;
+      section.Add(point(minor_radius + root_round + root_round * std::sin(angle),
+                        right_center_offset + root_round * std::cos(angle)));
+    }
+    section.Add(point(minor_radius, -root_half_width + root_tangent));
+    const double left_center_offset = -root_half_width + root_tangent;
+    for (size_t arc_step = 1; arc_step < root_arc_segments; ++arc_step) {
+      const double fraction_arc = static_cast<double>(arc_step) / root_arc_segments;
+      const double angle = -pi / 2.0 - (2.0 * pi / 3.0) * fraction_arc;
+      section.Add(point(minor_radius + root_round + root_round * std::sin(angle),
+                        left_center_offset + root_round * std::cos(angle)));
+    }
+    section.Close();
+    if (!section.IsDone()) throw std::runtime_error("OCCT could not construct a metric thread section.");
+    loft.AddWire(section.Wire());
+  }
+  loft.Build();
+  if (!loft.IsDone()) throw std::runtime_error("OCCT could not loft the metric thread helix.");
+
+  return EnsureOneSolid(MakeFuse(core_builder.Shape(), loft.Shape()), "Metric thread");
+}
+
 std::string BuildGraphJson(const OperationNode* nodes, size_t node_count,
                            const double* coordinates, size_t coordinate_count,
                            const int* edge_indices, size_t edge_count, int mesh, int topology) {
@@ -354,6 +435,11 @@ std::string BuildGraphJson(const OperationNode* nodes, size_t node_count,
         if (!points || node.coordinate_count != 3)
           throw std::runtime_error("Box graph operation needs three dimensions.");
         shape = BRepPrimAPI_MakeBox(points[0], points[1], points[2]).Shape();
+        break;
+      case 5:
+        if (!points || node.coordinate_count != 2)
+          throw std::runtime_error("Metric thread graph operation needs a major diameter and pitch.");
+        shape = MakeMetricThread(points[0], points[1], node.amount, node.operation);
         break;
       default:
         throw std::runtime_error("Unsupported geometry graph operation.");

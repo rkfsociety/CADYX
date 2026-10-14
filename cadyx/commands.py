@@ -8,6 +8,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from .errors import NotFoundError, ValidationError
+from .engineering import involute_spur_gear_profile
 from .kernel import GeometryKernel
 from .mesh_geometry import mesh_ply_bytes
 from .models import Document
@@ -65,6 +66,8 @@ class CommandSystem:
         kind = command.get("type")
         if kind == "create_box":
             return self._create_box(document, command)
+        if kind == "create_metric_thread":
+            return self._create_metric_thread(document, command, progress=progress)
         if kind in {"extrude_sketch", "revolve_sketch"}:
             return self._create_profile_feature(document, command, kind, progress=progress)
         if kind == "fuse_bodies":
@@ -99,6 +102,8 @@ class CommandSystem:
             return {"object_id": object_id}
         if kind == "add_sketch_polyline":
             return self._add_sketch_polyline(document, command, progress=progress)
+        if kind == "add_sketch_involute_gear":
+            return self._add_sketch_involute_gear(document, command, progress=progress)
         if kind == "add_sketch_rectangle":
             return self._add_sketch_rectangle(document, command, progress=progress)
         if kind == "add_sketch_circle":
@@ -185,6 +190,34 @@ class CommandSystem:
         return self._append_sketch_polyline(
             document, sketch, points, closed=closed, operation="add_sketch_polyline", progress=progress,
         )
+
+    def _add_sketch_involute_gear(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        if sketch.get("plane") != "XY":
+            raise ValidationError("An involute spur gear profile needs an XY sketch.")
+        if any(item.get("sketch_id") == sketch["id"] for item in document.objects):
+            raise ValidationError("An involute spur gear needs an empty sketch.")
+        points, parameters = involute_spur_gear_profile(
+            module=command.get("module"),
+            tooth_count=command.get("tooth_count"),
+            pressure_angle_degrees=command.get("pressure_angle_degrees", 20.0),
+            center_x=command.get("center_x", 0.0),
+            center_y=command.get("center_y", 0.0),
+            rotation_degrees=command.get("rotation_degrees", 0.0),
+            backlash=command.get("backlash", 0.0),
+        )
+        result = self._append_sketch_polyline(
+            document, sketch, points, closed=True,
+            operation="add_sketch_involute_gear", progress=progress,
+        )
+        result["gear_parameters"] = parameters
+        return result
 
     def _add_sketch_rectangle(
         self,
@@ -456,6 +489,27 @@ class CommandSystem:
         if feature is None or feature.get("operation") != "create_box":
             if feature is None:
                 raise NotFoundError("Editable feature was not found.")
+            if feature.get("operation") == "metric_thread":
+                if parameter_name == "handedness":
+                    value = command.get("value")
+                    if not isinstance(value, str) or value not in {"right", "left"}:
+                        raise ValidationError("handedness must be 'right' or 'left'.")
+                elif parameter_name in {"major_diameter", "pitch", "length"}:
+                    value = _number(command.get("value"), parameter_name)
+                else:
+                    raise ValidationError("Only major_diameter, pitch, length, and handedness are editable for a thread.")
+                parameters = dict(feature["parameters"])
+                parameters[parameter_name] = value
+                if progress is not None:
+                    progress({"phase": "kernel_metric_thread"})
+                geometry = self.kernel.create_metric_thread(**parameters)
+                body = next((item for item in document.objects
+                             if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+                if body is None:
+                    raise ValidationError("Metric thread feature refers to a missing body.")
+                feature["parameters"], feature["geometry"], body["geometry"] = parameters, geometry, geometry
+                return {"feature_id": feature_id, "parameter": parameter_name,
+                        "value": value, "geometry": geometry}
             if feature.get("operation") in {"extrude_sketch", "revolve_sketch"}:
                 expected = "depth" if feature["operation"] == "extrude_sketch" else "angle_degrees"
                 if parameter_name == "centered" and feature["operation"] == "extrude_sketch":
@@ -526,6 +580,43 @@ class CommandSystem:
             raise ValidationError("Box feature refers to a missing body.")
         body["geometry"] = geometry
         return {"feature_id": feature_id, "parameter": parameter_name, "value": value, "geometry": geometry}
+
+    def _create_metric_thread(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        major_diameter = _number(command.get("major_diameter"), "major_diameter")
+        pitch = _number(command.get("pitch"), "pitch")
+        length = _number(command.get("length"), "length")
+        handedness = command.get("handedness", "right")
+        if not isinstance(handedness, str) or handedness not in {"right", "left"}:
+            raise ValidationError("handedness must be 'right' or 'left'.")
+        default_name = f"M{major_diameter:g}x{pitch:g} {handedness}-hand thread"
+        name = command.get("name", default_name)
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Feature name must be a non-empty string of at most 120 characters.")
+        parameters = {
+            "major_diameter": major_diameter,
+            "pitch": pitch,
+            "length": length,
+            "handedness": handedness,
+        }
+        if progress is not None:
+            progress({"phase": "prepare_metric_thread"})
+        if progress is not None:
+            progress({"phase": "kernel_metric_thread"})
+        geometry = self.kernel.create_metric_thread(**parameters)
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        document.objects.extend([
+            {"id": body_id, "type": "body", "name": name.strip(),
+             "feature_ids": [feature_id], "geometry": geometry},
+            {"id": feature_id, "type": "feature", "operation": "metric_thread",
+             "body_id": body_id, "parameters": parameters, "geometry": geometry},
+        ])
+        return {"body_id": body_id, "feature_id": feature_id, "geometry": geometry}
 
     def _create_profile_feature(
         self, document: Document, command: dict[str, Any], operation: str, *,

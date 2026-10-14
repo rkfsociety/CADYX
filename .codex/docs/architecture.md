@@ -122,7 +122,11 @@ This is an authentication boundary, not transport encryption. The built-in serve
 Document Model v3 supports XY/XZ sketches, point/line/circle primitives,
 atomic builders for polylines/polygons, rectangles, and circles, checked
 geometric/dimensional constraints, and linked OCCT extrusion, revolution, sweep,
-fuse, and fillet features.
+fuse, fillet, and external metric-thread features. The Command System also builds
+sampled involute spur-gear outlines from design parameters as ordinary XY sketch
+geometry; both operations use the existing Agent API and create no browser
+modeling controls. Their exact supported ranges and geometric approximations are
+documented in [Document Model v3](document-model-v3.md#engineering-profiles).
 Sketch references use stable typed
 UUIDs and are validated on load and after every command. Coordinate updates can
 be batched atomically; deletions cannot leave dangling references. Constraints

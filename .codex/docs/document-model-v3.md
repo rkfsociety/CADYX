@@ -82,6 +82,41 @@ only the second point's y to 1 is rejected without changing revision, history or
 saved bytes. Changing both y coordinates to 1 in one batch succeeds with all ids
 and references preserved.
 
+## Engineering profiles
+
+`add_sketch_involute_gear` accepts an empty `XY` `sketch_id`, positive `module`,
+integer `tooth_count` from 3 to 128, `pressure_angle_degrees` from 5 through 45
+(default 20), optional `center_x`/`center_y`, `rotation_degrees`, and non-negative
+`backlash` less than half the circular pitch. The minimum tooth count is checked
+against the rack-undercut limit for the selected pressure angle. It adds one
+closed polygon as ordinary sketch points and lines and returns the calculated
+pitch, base, tip and root radii in `gear_parameters`. It models an unshifted
+external spur gear: `d=mz`, `db=d cos(alpha)`, `da=m(z+2)`, `df=m(z-2.5)`.
+Mating gears use center distance `m(z1+z2)/2` and a half-tooth-pitch phase offset.
+The flanks are sampled from the involute curve at 12 roll intervals; the saved
+sketch is therefore a line-segment approximation, not an analytic curve or a
+linked parametric gear feature. Profile shift, internal gears, helical gears,
+and cutter-generated root fillets are not represented.
+
+`create_metric_thread` accepts positive `major_diameter`, `pitch`, and `length`
+(at least one pitch and at most 64 pitches), optional `handedness` (`right` by
+default, or `left`) and optional `name`. It creates a single-start external ISO
+metric 60-degree thread as one editable OCCT solid, trims it to Z=0 through the
+requested length, and saves a `metric_thread` geometry descriptor with a linked
+feature. For the basic external profile, the minor diameter is
+`d3 = d - 1.226869P`; the rounded root approximates `R = sqrt(3)P/12` with
+eight segments per section corner. `set_parameter`
+can change `major_diameter`, `pitch`, `length`, or `handedness`; each edit rebuilds
+the B-rep atomically. Internal threads, multiple starts, tolerance classes and
+thread run-outs are not modeled. CADYX documents do not assign physical units;
+module, diameter and pitch use the document's coordinate units.
+
+These additions use the existing document v3 object and feature contracts and
+do not require a schema migration. Gear geometry remains ordinary editable
+sketch geometry; thread parameters remain on its feature. Reference formulas:
+[ISO 724:2023](https://cdn.standards.iteh.ai/samples/85104/9815392ad8904c9aa23cf7727e7b1dde/ISO-724-2023.pdf),
+[spur gear geometry](https://technische-antriebselemente.de/en/tools/gear-geometry-calculator/).
+
 ## Sketch-driven solid features
 
 `extrude_sketch` accepts `sketch_id`, positive `depth`, optional `name`, and

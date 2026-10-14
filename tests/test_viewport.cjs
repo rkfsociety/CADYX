@@ -139,5 +139,21 @@ assert.equal(meshMoves.length, 3, "A long sweep path reveals only its first mesh
 animationTime = 400;
 animationFrames.shift()(animationTime);
 assert.equal(meshMoves.length, 6, "The sweep transition reveals the complete mesh when finished");
-console.log("Viewport: Z-up, camera controls, sketch, revolve and sweep transitions, zoom, refresh and fit passed.");
+const threadBody = {
+  positions: [0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1],
+  triangles: [0, 1, 2, 2, 1, 3], lines: [], points: [],
+  bounds: { min: [0, 0, 0], max: [1, 1, 1] },
+};
+animationTime = 450;
+viewer.load(threadBody, { reset: false, transition: { type: "thread", vertexRange: [0, 4], durationMs: 100 } });
+const threadStartHeight = Math.max(...meshMoves.map(([, y]) => y)) - Math.min(...meshMoves.map(([, y]) => y));
+animationTime = 500;
+animationFrames.shift()(animationTime);
+const threadMidHeight = Math.max(...meshMoves.map(([, y]) => y)) - Math.min(...meshMoves.map(([, y]) => y));
+animationTime = 550;
+animationFrames.shift()(animationTime);
+const threadEndHeight = Math.max(...meshMoves.map(([, y]) => y)) - Math.min(...meshMoves.map(([, y]) => y));
+assert.ok(threadMidHeight > threadStartHeight, "A metric thread grows along Z during its transition");
+assert.ok(threadEndHeight > threadMidHeight, "A metric thread transition reaches its full length");
+console.log("Viewport: Z-up, camera controls, sketch, revolve, sweep and thread transitions, zoom, refresh and fit passed.");
 
