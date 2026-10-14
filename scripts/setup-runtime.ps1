@@ -35,6 +35,23 @@ if (!(Test-Path (Join-Path $sdkRoot 'Library/include/opencascade/Standard_Versio
     & $pythonExe (Join-Path $PSScriptRoot 'extract-sdk.py') $sdkArchive $sdkRoot
     if ($LASTEXITCODE -ne 0) { throw 'OCCT SDK extraction failed.' }
 }
+$occtRuntimeLockPath = Join-Path $PSScriptRoot $versions.occt_runtime_lock
+$occtRuntimeLock = Get-Content -LiteralPath $occtRuntimeLockPath -Raw | ConvertFrom-Json
+if (!$occtRuntimeLock.packages -or $occtRuntimeLock.source -ne 'conda-forge win-64') {
+    throw "OCCT runtime dependency lock is missing or invalid: $occtRuntimeLockPath"
+}
+$occtRuntimeRoot = Join-Path $runtimeRoot 'occt-runtime'
+foreach ($package in $occtRuntimeLock.packages) {
+    $archive = Join-Path (Join-Path $runtimeRoot 'downloads') $package.filename
+    Get-VerifiedArchive $package.url $archive $package.sha256
+    & $pythonExe (Join-Path $PSScriptRoot 'extract-sdk.py') $archive $occtRuntimeRoot
+    if ($LASTEXITCODE -ne 0) { throw "OCCT runtime dependency extraction failed: $($package.name)" }
+}
+foreach ($requiredDll in @('FreeImage.dll', 'freetype.dll')) {
+    if (!(Test-Path -LiteralPath (Join-Path $occtRuntimeRoot "Library\bin\$requiredDll"))) {
+        throw "OCCT runtime dependency is missing $requiredDll after extraction."
+    }
+}
 $open3dArchive = Join-Path $runtimeRoot "downloads/$($versions.open3d.archive)"
 Get-VerifiedArchive $versions.open3d.url $open3dArchive $versions.open3d.sha256
 $open3dRoot = Join-Path $runtimeRoot $versions.open3d.directory
@@ -53,7 +70,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Native kernel compilation failed.' }
     python_version = $versions.python.version
     occt_version = $versions.occt.version
     open3d_version = $versions.open3d.version
-    dll_directories = @('occt-sdk/Library/bin', "$($versions.open3d.directory)/bin")
+    dll_directories = @('occt-runtime/Library/bin', 'occt-sdk/Library/bin', "$($versions.open3d.directory)/bin")
     bridge = 'build/Release/cadyx_kernel.dll'
     scan_bridge = 'build/Release/cadyx_scan.dll'
 } | ConvertTo-Json | Set-Content (Join-Path $runtimeRoot 'manifest.json') -Encoding utf8NoBOM

@@ -1,11 +1,13 @@
 """ctypes bridge to the project-built OCCT adapter, independent of Python's ABI."""
 
 import ctypes
+import base64
 import json
 import math
 import os
 from pathlib import Path
 from threading import Lock
+import zlib
 
 from .errors import ValidationError
 
@@ -60,9 +62,15 @@ class NativeKernel:
                         ctypes.POINTER(GraphNode), ctypes.c_size_t,
                         ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
                         ctypes.POINTER(ctypes.c_int), ctypes.c_size_t,
+                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
                         ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t,
                     ]
                     library.cadyx_graph.restype = ctypes.c_void_p
+                    library.cadyx_step_import.argtypes = [
+                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                        ctypes.c_char_p, ctypes.c_size_t,
+                    ]
+                    library.cadyx_step_import.restype = ctypes.c_void_p
                     library.cadyx_free.argtypes = [ctypes.c_void_p]
                     library.cadyx_free.restype = None
                     library.cadyx_kernel_version.argtypes = []
@@ -142,6 +150,7 @@ class NativeKernel:
         nodes = []
         coordinates = []
         edge_indices = []
+        brep_data = bytearray()
 
         def append(value):
             kind = value.get("kind")
@@ -172,6 +181,20 @@ class NativeKernel:
                 node.update(type=3, input_a=append(value["base"]), amount=value["radius"],
                             edge_offset=len(edge_indices), edge_count=len(value["edge_indices"]))
                 edge_indices.extend(value["edge_indices"])
+            elif kind == "imported_brep":
+                try:
+                    compressed = base64.b64decode(value["data"], validate=True)
+                    decoder = zlib.decompressobj()
+                    restored = decoder.decompress(compressed, 64 * 1024 * 1024 + 1)
+                    if (len(restored) > 64 * 1024 * 1024 or not decoder.eof
+                            or decoder.unused_data or decoder.unconsumed_tail):
+                        raise ValueError("invalid compressed B-rep payload")
+                except (KeyError, TypeError, ValueError, zlib.error) as exc:
+                    raise ValidationError("Imported B-rep data is invalid or exceeds the 64 MB limit.") from exc
+                if not restored or len(brep_data) + len(restored) > 64 * 1024 * 1024:
+                    raise ValidationError("Imported B-rep data is empty or exceeds the 64 MB limit.")
+                node.update(type=6, coordinate_offset=len(brep_data), coordinate_count=len(restored))
+                brep_data.extend(restored)
             else:
                 raise ValidationError("Geometry graph contains an unsupported operation.")
             nodes.append(node)
@@ -184,11 +207,25 @@ class NativeKernel:
                 setattr(native_nodes[index], name, value)
         native_coordinates = (ctypes.c_double * len(coordinates))(*coordinates) if coordinates else None
         native_edges = (ctypes.c_int * len(edge_indices))(*edge_indices) if edge_indices else None
+        native_brep_data = (ctypes.c_ubyte * len(brep_data)).from_buffer_copy(brep_data) if brep_data else None
         error = ctypes.create_string_buffer(1024)
         result = self.library.cadyx_graph(
             native_nodes, len(nodes), native_coordinates, len(coordinates), native_edges, len(edge_indices),
-            int(mesh), int(topology), error, len(error),
+            native_brep_data, len(brep_data), int(mesh), int(topology), error, len(error),
         )
+        if not result:
+            raise ValidationError(error.value.decode("utf-8", errors="replace"))
+        try:
+            return json.loads(ctypes.string_at(result))
+        finally:
+            self.library.cadyx_free(result)
+
+    def import_step(self, source):
+        if not isinstance(source, bytes) or not source or len(source) > 64 * 1024 * 1024:
+            raise ValidationError("STEP source is empty or exceeds the 64 MB limit.")
+        source_buffer = (ctypes.c_ubyte * len(source)).from_buffer_copy(source)
+        error = ctypes.create_string_buffer(1024)
+        result = self.library.cadyx_step_import(source_buffer, len(source), error, len(error))
         if not result:
             raise ValidationError(error.value.decode("utf-8", errors="replace"))
         try:

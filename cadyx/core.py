@@ -38,6 +38,7 @@ class CadyxCore:
         self.commands = CommandSystem(
             self.kernel,
             resolve_scan=self.workspace.resolve_folder_file,
+            resolve_project_file=self.workspace.resolve_project_file,
             scan_processor=scan_processor,
             publish_scan_output=self.workspace.publish_scan_output,
         )
@@ -353,7 +354,7 @@ class CadyxCore:
 
             try:
                 document = Document.from_dict(project["document"])
-                result = self.commands.execute(document, command, progress=report_progress)
+                result = self.commands.execute(document, command, progress=report_progress, project_id=project_id)
                 activity["result"] = copy.deepcopy(result)
                 activity["phase"] = "validate_document"
                 self._publish_activity(project_id, activity)
@@ -432,6 +433,7 @@ class CadyxCore:
             "fuse_bodies": "Объединяет тела",
             "set_parameter": "Меняет параметры модели",
             "create_metric_thread": "Строит метрическую резьбу",
+            "import_step": "Импортирует точную STEP-геометрию",
             "import_scan": "Обрабатывает скан",
             "set_scan_parameter": "Пересобирает скан",
             "remove_sketch_object": "Удаляет объект эскиза",
@@ -504,6 +506,33 @@ class CadyxCore:
                         or feature_geometry.get("edge_indices") != item.get("edge_indices")
                         or feature_geometry.get("radius") != item.get("parameters", {}).get("radius")):
                     raise ValidationError("Fillet geometry is out of date with its source body and parameters.")
+                continue
+            if item.get("operation") == "import_step":
+                body = by_id.get(item.get("body_id"))
+                geometry = body.get("geometry") if body is not None and body.get("type") == "body" else None
+                source_metrics = item.get("source_metrics")
+                if (not isinstance(geometry, dict) or geometry.get("kind") != "imported_brep"
+                        or not isinstance(source_metrics, dict)
+                        or set(source_metrics) != {
+                            "volume", "surface_area", "bounds", "topology", "brep_valid", "repaired",
+                        }):
+                    raise ValidationError("STEP import feature is missing its saved source geometry metrics.")
+                actual_metrics = self.kernel.metrics(geometry)
+                bounds_match = all(
+                    math.isclose(actual_metrics["bounds"][side][index], source_metrics["bounds"][side][index],
+                                 rel_tol=1e-12, abs_tol=1e-12)
+                    for side in ("min", "max") for index in range(3)
+                )
+                if (not bounds_match
+                        or actual_metrics.get("topology") != source_metrics.get("topology")
+                        or actual_metrics.get("brep_valid") != source_metrics.get("brep_valid")
+                        or not math.isclose(actual_metrics.get("volume", float("nan")),
+                                            source_metrics.get("volume", float("nan")),
+                                            rel_tol=1e-12, abs_tol=1e-12)
+                        or not math.isclose(actual_metrics.get("surface_area", float("nan")),
+                                            source_metrics.get("surface_area", float("nan")),
+                                            rel_tol=1e-12, abs_tol=1e-12)):
+                    raise ValidationError("STEP import B-rep does not match the geometry read from the source file.")
                 continue
             if item.get("operation") == "metric_thread":
                 body = by_id.get(item.get("body_id"))

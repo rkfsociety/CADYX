@@ -75,6 +75,11 @@ their respective human/agent edit leases. Results below appear inside
 - `remove_sketch_object`: `object_id`. No cascading deletion: a referenced object
   cannot be removed. Remove constraints, lines/circles, points, then the sketch
   as appropriate. Returns `object_id`.
+- `import_step`: `file` names a direct `.step` or `.stp` file in the current
+  CADYX project folder; optional `name` overrides the body name. It imports one
+  solid through OCCT, stores its editable B-rep in the document, and returns the
+  body/feature ids, source SHA-256 and byte length, and source geometry metrics.
+  The source file is preserved. Paths cannot leave the current project folder.
 
 Example: create a sketch; add points at (0, 0) and (3, 0); add a line referencing
 their returned ids; add a horizontal constraint referencing the line id. Changing
@@ -184,6 +189,25 @@ user-facing tree and viewport. Fillet and fuse source bodies remain in document
 history for editing but are hidden from the viewport and object tree; only
 unconsumed results are displayed. Solid source-sketch edits rebuild downstream
 sweep, fillet, and fuse features in document order.
+
+## STEP import and editable B-reps
+
+`import_step` reads a direct `.step` or `.stp` source file from the current
+project folder through OCCT's `STEPControl_Reader`. It accepts a single solid and
+stores an OCCT B-rep serialization in the body's `imported_brep` descriptor;
+viewport triangles are only a display tessellation. The project feature records
+the source filename, SHA-256, byte length, and source geometry metrics. The saved
+B-rep is self-contained and remains usable if the source file later moves. Source
+and serialized B-rep payloads are limited to 64 MiB each.
+
+The source metrics include volume, surface area, bounding coordinates, unique
+solid/face/edge/vertex counts, B-rep validity, and whether OCCT repaired the shape
+within a precision of 1e-7 and a maximum tolerance of 1e-5 model units. CADYX
+checks the B-rep serialization round trip against those measures. If OCCT cannot
+repair an imported solid, CADYX preserves the exact transferred shape and marks
+`brep_valid` false rather than changing it silently. Such a shape can still be
+displayed when OCCT can tessellate it, but Boolean and fillet operations require
+a valid B-rep and may reject it.
 
 ## Scan import and editable triangle meshes
 

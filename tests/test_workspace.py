@@ -50,6 +50,17 @@ class ProjectWorkspaceTests(unittest.TestCase):
         with self.assertRaises(NotFoundError):
             self.workspace.list_folder_files(project["id"])
 
+    def test_project_file_resolver_accepts_only_direct_regular_files(self) -> None:
+        project = self.workspace.create("STEP import")
+        project_directory = self.workspace._project_dir(project["id"])
+        source = project_directory / "part.stp"
+        source.write_bytes(b"step source")
+
+        self.assertEqual(self.workspace.resolve_project_file(project["id"], "part.stp"), source)
+        for file_name in ("../part.stp", "nested/part.stp", "project.json", ".cadyx-leases.sqlite3"):
+            with self.subTest(file_name=file_name), self.assertRaises(NotFoundError):
+                self.workspace.resolve_project_file(project["id"], file_name)
+
 
 if __name__ == "__main__":
     unittest.main()

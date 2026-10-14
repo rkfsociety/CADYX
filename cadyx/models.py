@@ -5,6 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import StrEnum
+import math
+import re
 from typing import Any
 
 from .errors import ValidationError
@@ -127,6 +129,44 @@ class Document:
                         raise ValidationError("Boolean fuse must reference two different source bodies.")
                     if any(by_id.get(source_id, {}).get("type") != "body" for source_id in (base_id, tool_id)):
                         raise ValidationError("Boolean fuse must reference existing source bodies.")
+                elif item.get("operation") == "import_step":
+                    source = item.get("source")
+                    if (not isinstance(source, dict)
+                            or not isinstance(source.get("file"), str)
+                            or source["file"] in {"", ".", "..", "project.json", ".cadyx-project-id"}
+                            or any(character in source["file"] for character in ("/", "\\", ":", "\x00"))
+                            or not source["file"].casefold().endswith((".step", ".stp"))
+                            or not isinstance(source.get("sha256"), str)
+                            or re.fullmatch(r"[0-9a-f]{64}", source["sha256"]) is None
+                            or type(source.get("size")) is not int or not 0 < source["size"] <= 64 * 1024 * 1024):
+                        raise ValidationError("STEP source metadata is invalid.")
+                    metrics = item.get("source_metrics")
+                    if (not isinstance(metrics, dict)
+                            or set(metrics) != {
+                                "volume", "surface_area", "bounds", "topology", "brep_valid", "repaired",
+                            }
+                            or type(metrics.get("brep_valid")) is not bool
+                            or type(metrics.get("repaired")) is not bool):
+                        raise ValidationError("STEP source geometry metrics are invalid.")
+                    for key in ("volume", "surface_area"):
+                        value = metrics.get(key)
+                        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                                or not math.isfinite(value) or value <= 0):
+                            raise ValidationError("STEP source geometry measures are invalid.")
+                    bounds = metrics.get("bounds")
+                    if (not isinstance(bounds, dict) or set(bounds) != {"min", "max"}
+                            or any(not isinstance(bounds.get(key), list) or len(bounds[key]) != 3
+                                   or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                                          or not math.isfinite(value) for value in bounds[key])
+                                   for key in ("min", "max"))):
+                        raise ValidationError("STEP source geometry bounds are invalid.")
+                    topology = metrics.get("topology")
+                    if (not isinstance(topology, dict)
+                            or set(topology) != {"solid_count", "face_count", "edge_count", "vertex_count"}
+                            or any(type(topology.get(key)) is not int or topology[key] < 0
+                                   for key in topology)
+                            or topology["solid_count"] != 1 or topology["face_count"] == 0):
+                        raise ValidationError("STEP source B-rep topology metrics are invalid.")
         validate_sketches(self.objects)
 
 

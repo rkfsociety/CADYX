@@ -44,6 +44,33 @@ class SketchDocumentTests(unittest.TestCase):
             self.command(**command)
         self.assertEqual(before, self.path.read_bytes())
 
+    def test_step_import_feature_validates_source_metadata_and_measurements(self):
+        document = Document.create()
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        document.objects.extend([
+            {"id": body_id, "type": "body", "name": "Imported", "feature_ids": [feature_id],
+             "geometry": {"kernel": "occt-v1", "kind": "imported_brep", "data": "eA==",
+                          "volume": 1, "brep_valid": False}},
+            {"id": feature_id, "type": "feature", "operation": "import_step", "body_id": body_id,
+             "source": {"file": "part.stp", "sha256": "a" * 64, "size": 12},
+             "source_metrics": {
+                 "volume": 1.0, "surface_area": 6.0,
+                 "bounds": {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]},
+                 "topology": {"solid_count": 1, "face_count": 6, "edge_count": 12, "vertex_count": 8},
+                 "brep_valid": False, "repaired": False,
+             }},
+        ])
+        document.validate()
+
+        for key, value in (("file", "../outside.stp"), ("file", "part.iges"),
+                           ("size", 64 * 1024 * 1024 + 1)):
+            with self.subTest(key=key, value=value):
+                corrupted = copy.deepcopy(document)
+                feature = next(item for item in corrupted.objects if item["id"] == feature_id)
+                feature["source"][key] = value
+                with self.assertRaises(ValidationError):
+                    corrupted.validate()
+
     def test_constraints_and_atomic_edit_preserve_relationships_on_reload(self):
         horizontal = self.constraint("horizontal", [self.line])
         self.constraint("distance", [self.a, self.b], 3)

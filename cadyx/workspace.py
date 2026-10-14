@@ -187,6 +187,24 @@ class ProjectWorkspace:
             raise NotFoundError("Project was not found.") from exc
         return f"{stat.st_mtime_ns}:{stat.st_size}"
 
+    def resolve_project_file(self, project_id: str, file_name: str) -> Path:
+        """Resolve one regular file directly inside a saved project directory."""
+        if (not self._is_single_path_segment(file_name)
+                or file_name in {"project.json", ".cadyx-project-id"}
+                or file_name.startswith(".cadyx-")):
+            raise NotFoundError("Project file was not found.")
+        directory = self._project_dir(project_id)
+        path = directory / file_name
+        if path.is_symlink() or not path.is_file():
+            raise NotFoundError("Project file was not found.")
+        try:
+            resolved = path.resolve(strict=True)
+        except OSError as exc:
+            raise NotFoundError("Project file was not found.") from exc
+        if resolved.parent != directory:
+            raise NotFoundError("Project file was not found.")
+        return resolved
+
     @staticmethod
     def _revision_token(value: Any) -> str:
         encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")

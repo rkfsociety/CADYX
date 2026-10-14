@@ -14,8 +14,12 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepGProp.hxx>
+#include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
@@ -36,6 +40,9 @@
 #include <TopLoc_Location.hxx>
 #include <Standard_Version.hxx>
 #include <Standard_Failure.hxx>
+#include <STEPControl_Reader.hxx>
+#include <IFSelect_ReturnStatus.hxx>
+#include <ShapeFix_Shape.hxx>
 #include <algorithm>
 #include <cstddef>
 #include <cmath>
@@ -46,6 +53,7 @@
 #include <locale>
 #include <string>
 #include <stdexcept>
+#include <cstdint>
 #include <vector>
 
 #define API extern "C" __declspec(dllexport)
@@ -83,8 +91,11 @@ const char* CurveName(GeomAbs_CurveType type) {
   return "other";
 }
 
-std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0) {
-  if (shape.IsNull() || !BRepCheck_Analyzer(shape).IsValid())
+std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
+                      bool allow_invalid_import = false) {
+  if (shape.IsNull()) throw std::runtime_error("OCCT returned a null shape.");
+  const bool brep_valid = BRepCheck_Analyzer(shape).IsValid();
+  if (!brep_valid && !allow_invalid_import)
     throw std::runtime_error("OCCT constructed an invalid solid.");
   size_t solid_count = 0;
   for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More(); explorer.Next()) ++solid_count;
@@ -94,10 +105,34 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0) {
   const double volume = properties.Mass();
   if (!std::isfinite(volume) || volume <= 0)
     throw std::runtime_error("OCCT returned an invalid volume.");
+  GProp_GProps surface_properties;
+  BRepGProp::SurfaceProperties(shape, surface_properties);
+  const double surface_area = surface_properties.Mass();
+  if (!std::isfinite(surface_area) || surface_area <= 0)
+    throw std::runtime_error("OCCT returned an invalid surface area.");
+  Bnd_Box bounds;
+  BRepBndLib::Add(shape, bounds);
+  double xmin, ymin, zmin, xmax, ymax, zmax;
+  bounds.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+  const auto count_shapes = [&](TopAbs_ShapeEnum type) {
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> mapped;
+    TopExp::MapShapes(shape, type, mapped);
+    return static_cast<size_t>(mapped.Extent());
+  };
+  const size_t face_count = count_shapes(TopAbs_FACE);
+  const size_t edge_count = count_shapes(TopAbs_EDGE);
+  const size_t vertex_count = count_shapes(TopAbs_VERTEX);
 
   std::ostringstream json;
   json.imbue(std::locale::classic());
-  json << std::setprecision(17) << "{\"volume\":" << volume;
+  json << std::setprecision(17) << "{\"volume\":" << volume
+       << ",\"brep_valid\":" << (brep_valid ? "true" : "false")
+       << ",\"surface_area\":" << surface_area
+       << ",\"bounds\":{\"min\":[" << xmin << "," << ymin << "," << zmin
+       << "],\"max\":[" << xmax << "," << ymax << "," << zmax << "]}"
+       << ",\"topology\":{\"solid_count\":" << solid_count
+       << ",\"face_count\":" << face_count << ",\"edge_count\":" << edge_count
+       << ",\"vertex_count\":" << vertex_count << "}";
   if (mesh) {
     // This mesh is only for the live viewport; the editable B-rep remains exact.
     // Keep the display approximation near one CSS pixel for a typical viewport;
@@ -167,6 +202,78 @@ struct OperationNode {
   size_t edge_offset;
   size_t edge_count;
 };
+
+std::string Base64Encode(const std::string& input) {
+  static constexpr char alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string output;
+  output.reserve((input.size() + 2) / 3 * 4);
+  for (size_t offset = 0; offset < input.size(); offset += 3) {
+    const uint32_t a = static_cast<unsigned char>(input[offset]);
+    const uint32_t b = offset + 1 < input.size()
+                           ? static_cast<unsigned char>(input[offset + 1]) : 0;
+    const uint32_t c = offset + 2 < input.size()
+                           ? static_cast<unsigned char>(input[offset + 2]) : 0;
+    const uint32_t value = (a << 16) | (b << 8) | c;
+    output.push_back(alphabet[(value >> 18) & 0x3f]);
+    output.push_back(alphabet[(value >> 12) & 0x3f]);
+    output.push_back(offset + 1 < input.size() ? alphabet[(value >> 6) & 0x3f] : '=');
+    output.push_back(offset + 2 < input.size() ? alphabet[value & 0x3f] : '=');
+  }
+  return output;
+}
+
+TopoDS_Shape ReadImportedBrep(const unsigned char* data, size_t size) {
+  if (!data || size == 0 || size > 64 * 1024 * 1024)
+    throw std::runtime_error("Imported B-rep data is empty or exceeds the 64 MB limit.");
+  const std::string serialized(reinterpret_cast<const char*>(data), size);
+  std::istringstream input(serialized);
+  TopoDS_Shape shape;
+  BRep_Builder builder;
+  BRepTools::Read(shape, input, builder);
+  if (shape.IsNull()) throw std::runtime_error("OCCT could not read the imported B-rep.");
+  return shape;
+}
+
+std::string ImportStepJson(const unsigned char* data, size_t size) {
+  if (!data || size == 0 || size > 64 * 1024 * 1024)
+    throw std::runtime_error("STEP source is empty or exceeds the 64 MB limit.");
+  const std::string content(reinterpret_cast<const char*>(data), size);
+  std::istringstream input(content);
+  STEPControl_Reader reader;
+  if (reader.ReadStream("CADYX STEP import", input) != IFSelect_RetDone)
+    throw std::runtime_error("OCCT could not read the STEP source.");
+  if (reader.NbRootsForTransfer() == 0 || reader.TransferRoots() == 0)
+    throw std::runtime_error("STEP source contains no transferable solid.");
+  TopoDS_Shape shape = reader.OneShape();
+  size_t solid_count = 0;
+  for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More(); explorer.Next()) ++solid_count;
+  if (solid_count != 1)
+    throw std::runtime_error("STEP import currently requires exactly one solid.");
+  bool repaired = false;
+  if (!shape.IsNull() && !BRepCheck_Analyzer(shape).IsValid()) {
+    ShapeFix_Shape repair(shape);
+    repair.SetPrecision(1e-7);
+    repair.SetMaxTolerance(1e-5);
+    repair.Perform();
+    const TopoDS_Shape fixed = repair.Shape();
+    if (!fixed.IsNull() && BRepCheck_Analyzer(fixed).IsValid()) {
+      shape = fixed;
+      repaired = true;
+    }
+  }
+  std::ostringstream brep;
+  BRepTools::Write(shape, brep, false, false, TopTools_FormatVersion_CURRENT);
+  if (!brep.good()) throw std::runtime_error("OCCT could not serialize the imported B-rep.");
+  const std::string serialized_brep = brep.str();
+  if (serialized_brep.empty() || serialized_brep.size() > 64 * 1024 * 1024)
+    throw std::runtime_error("Serialized imported B-rep is empty or exceeds the 64 MB limit.");
+  std::string json = ShapeJson(shape, 0, 0, true);
+  json.pop_back();
+  json += std::string(",\"repaired\":") + (repaired ? "true" : "false")
+      + ",\"brep_data\":\"" + Base64Encode(serialized_brep) + "\"}";
+  return json;
+}
 
 TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
                               int operation, int plane, double amount, bool centered) {
@@ -395,17 +502,27 @@ TopoDS_Shape MakeMetricThread(double major_diameter, double pitch, double length
 
 std::string BuildGraphJson(const OperationNode* nodes, size_t node_count,
                            const double* coordinates, size_t coordinate_count,
-                           const int* edge_indices, size_t edge_count, int mesh, int topology) {
+                           const int* edge_indices, size_t edge_count,
+                           const unsigned char* brep_data, size_t brep_size,
+                           int mesh, int topology) {
   if (!nodes || node_count == 0 || node_count > 1024)
     throw std::runtime_error("A geometry graph needs between 1 and 1024 operations.");
   std::vector<TopoDS_Shape> shapes;
   shapes.reserve(node_count);
   for (size_t i = 0; i < node_count; ++i) {
     const OperationNode& node = nodes[i];
-    if (node.coordinate_offset > coordinate_count || node.coordinate_count > coordinate_count - node.coordinate_offset
-        || node.edge_offset > edge_count || node.edge_count > edge_count - node.edge_offset)
-      throw std::runtime_error("Geometry graph operation references data outside its buffers.");
-    const double* points = node.coordinate_count ? coordinates + node.coordinate_offset : nullptr;
+    if (node.edge_offset > edge_count || node.edge_count > edge_count - node.edge_offset)
+      throw std::runtime_error("Geometry graph operation references data outside its edge buffer.");
+    if (node.type == 6) {
+      if (!brep_data || node.coordinate_count == 0
+          || node.coordinate_offset > brep_size || node.coordinate_count > brep_size - node.coordinate_offset)
+        throw std::runtime_error("Imported B-rep graph operation references data outside its buffer.");
+    } else if (node.coordinate_offset > coordinate_count
+        || node.coordinate_count > coordinate_count - node.coordinate_offset) {
+      throw std::runtime_error("Geometry graph operation references data outside its coordinate buffer.");
+    }
+    const double* points = node.type != 6 && node.coordinate_count
+                               ? coordinates + node.coordinate_offset : nullptr;
     const int* edges = node.edge_count ? edge_indices + node.edge_offset : nullptr;
     TopoDS_Shape shape;
     switch (node.type) {
@@ -441,28 +558,46 @@ std::string BuildGraphJson(const OperationNode* nodes, size_t node_count,
           throw std::runtime_error("Metric thread graph operation needs a major diameter and pitch.");
         shape = MakeMetricThread(points[0], points[1], node.amount, node.operation);
         break;
+      case 6:
+        shape = ReadImportedBrep(brep_data + node.coordinate_offset, node.coordinate_count);
+        break;
       default:
         throw std::runtime_error("Unsupported geometry graph operation.");
     }
     shapes.push_back(shape);
   }
-  return ShapeJson(shapes.back(), mesh, topology);
+  return ShapeJson(shapes.back(), mesh, topology, nodes[node_count - 1].type == 6);
 }
 }  // namespace
 
 API char* cadyx_graph(const OperationNode* nodes, size_t node_count,
                       const double* coordinates, size_t coordinate_count,
                       const int* edge_indices, size_t edge_count,
+                      const unsigned char* brep_data, size_t brep_size,
                       int mesh, int topology, char* error, size_t capacity) noexcept {
   try {
     return CopyResult(BuildGraphJson(nodes, node_count, coordinates, coordinate_count,
-                                     edge_indices, edge_count, mesh, topology));
+                                     edge_indices, edge_count, brep_data, brep_size, mesh, topology));
   } catch (const Standard_Failure& exception) {
     CopyError(error, capacity, exception.GetMessageString() ? exception.GetMessageString() : "OCCT graph operation failed.");
   } catch (const std::exception& exception) {
     CopyError(error, capacity, exception.what());
   } catch (...) {
     CopyError(error, capacity, "Unknown native kernel failure.");
+  }
+  return nullptr;
+}
+
+API char* cadyx_step_import(const unsigned char* data, size_t size,
+                            char* error, size_t capacity) noexcept {
+  try {
+    return CopyResult(ImportStepJson(data, size));
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString() ? exception.GetMessageString() : "OCCT STEP import failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown OCCT STEP import failure.");
   }
   return nullptr;
 }

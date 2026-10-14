@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import hashlib
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
@@ -46,11 +47,13 @@ class CommandSystem:
         kernel: GeometryKernel,
         *,
         resolve_scan: Callable[[str, str], Path] | None = None,
+        resolve_project_file: Callable[[str, str], Path] | None = None,
         scan_processor: ScanProcessor | None = None,
         publish_scan_output: Callable[[str, str, bytes], dict[str, Any]] | None = None,
     ) -> None:
         self.kernel = kernel
         self.resolve_scan = resolve_scan
+        self.resolve_project_file = resolve_project_file
         self.scan_processor = scan_processor if scan_processor is not None else ScanProcessor()
         self.publish_scan_output = publish_scan_output
 
@@ -60,6 +63,7 @@ class CommandSystem:
         command: dict[str, Any],
         *,
         progress: Callable[[dict[str, Any]], None] | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         if not isinstance(command, dict):
             raise ValidationError("command must be a JSON object.")
@@ -80,6 +84,8 @@ class CommandSystem:
             return self._set_parameter(document, command, progress=progress)
         if kind == "import_scan":
             return self._import_scan(document, command, progress=progress)
+        if kind == "import_step":
+            return self._import_step(document, command, project_id=project_id, progress=progress)
         if kind == "set_scan_parameter":
             return self._set_scan_parameter(document, command, progress=progress)
         if kind == "create_sketch":
@@ -383,6 +389,65 @@ class CommandSystem:
             "output_triangles": stats["output_triangles"],
             "parameters": parameters,
             "artifact": artifact,
+        }
+
+    def _import_step(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        project_id: str | None,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        if self.resolve_project_file is None or not isinstance(project_id, str):
+            raise ValidationError("STEP import requires a file in the current CADYX project.")
+        filename = command.get("file")
+        if not isinstance(filename, str) or Path(filename).suffix.casefold() not in {".step", ".stp"}:
+            raise ValidationError("STEP import requires a .step or .stp file in the current project.")
+        name = command.get("name", Path(filename).stem)
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("STEP model name must be a non-empty string of at most 120 characters.")
+        source_path = self.resolve_project_file(project_id, filename)
+        source_size = source_path.stat().st_size
+        if source_size > 64 * 1024 * 1024:
+            raise ValidationError("STEP source exceeds the 64 MB limit.")
+        if progress is not None:
+            progress({"phase": "read_step_source"})
+        source = source_path.read_bytes()
+        if not source or len(source) > 64 * 1024 * 1024:
+            raise ValidationError("STEP source is empty or exceeds the 64 MB limit.")
+        source_hash = hashlib.sha256(source).hexdigest()
+        if progress is not None:
+            progress({"phase": "transfer_step_geometry"})
+        geometry, metrics = self.kernel.create_imported_step(source)
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        source_record = {
+            "file": filename,
+            "sha256": source_hash,
+            "size": len(source),
+        }
+        document.objects.extend([
+            {
+                "id": body_id,
+                "type": "body",
+                "name": name.strip(),
+                "feature_ids": [feature_id],
+                "geometry": geometry,
+            },
+            {
+                "id": feature_id,
+                "type": "feature",
+                "operation": "import_step",
+                "body_id": body_id,
+                "source": source_record,
+                "source_metrics": metrics,
+            },
+        ])
+        return {
+            "body_id": body_id,
+            "feature_id": feature_id,
+            "source": source_record,
+            "metrics": metrics,
         }
 
     def _set_scan_parameter(

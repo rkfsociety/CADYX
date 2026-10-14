@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import base64
 import math
+import zlib
 from functools import lru_cache
 from typing import Any, Protocol
 
@@ -33,11 +35,15 @@ class GeometryKernel(Protocol):
         self, *, major_diameter: float, pitch: float, length: float, handedness: str = "right",
     ) -> dict[str, Any]: ...
 
+    def create_imported_step(self, source: bytes) -> tuple[dict[str, Any], dict[str, Any]]: ...
+
     def create_fillet(
         self, base: dict[str, Any], *, edge_indices: list[int], radius: float,
     ) -> dict[str, Any]: ...
 
     def topology(self, geometry: dict[str, Any]) -> dict[str, Any]: ...
+
+    def metrics(self, geometry: dict[str, Any]) -> dict[str, Any]: ...
 
     def validate(self, geometry: dict[str, Any]) -> None: ...
 
@@ -240,6 +246,36 @@ class OCCTKernelAdapter:
         geometry["volume"] = NativeKernel().geometry_graph(geometry)["volume"]
         return geometry
 
+    def create_imported_step(self, source: bytes) -> tuple[dict[str, Any], dict[str, Any]]:
+        imported = NativeKernel().import_step(source)
+        try:
+            brep = base64.b64decode(imported["brep_data"], validate=True)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValidationError("OCCT returned an invalid imported B-rep.") from exc
+        geometry = {
+            "kernel": self.kernel_id,
+            "kind": "imported_brep",
+            "data": base64.b64encode(zlib.compress(brep, level=9)).decode("ascii"),
+            "volume": imported["volume"],
+            "brep_valid": imported["brep_valid"],
+        }
+        metrics = {key: imported[key] for key in (
+            "volume", "surface_area", "bounds", "topology", "brep_valid", "repaired",
+        )}
+        roundtrip = NativeKernel().geometry_graph(geometry)
+        bounds_match = all(
+            math.isclose(a, b, rel_tol=1e-12, abs_tol=1e-12)
+            for side in ("min", "max")
+            for a, b in zip(roundtrip["bounds"][side], metrics["bounds"][side], strict=True)
+        )
+        if (roundtrip["topology"] != metrics["topology"]
+                or not bounds_match
+                or roundtrip["brep_valid"] != metrics["brep_valid"]
+                or not math.isclose(roundtrip["volume"], metrics["volume"], rel_tol=1e-12, abs_tol=1e-12)
+                or not math.isclose(roundtrip["surface_area"], metrics["surface_area"], rel_tol=1e-12, abs_tol=1e-12)):
+            raise ValidationError("Imported B-rep did not preserve the STEP model geometry.")
+        return geometry, metrics
+
     def create_fillet(
         self, base: dict[str, Any], *, edge_indices: list[int], radius: float,
     ) -> dict[str, Any]:
@@ -258,6 +294,13 @@ class OCCTKernelAdapter:
         result = NativeKernel().geometry_graph(geometry, topology=True)
         self._same_saved_volume(geometry, result["volume"])
         return result
+
+    def metrics(self, geometry: dict[str, Any]) -> dict[str, Any]:
+        result = NativeKernel().geometry_graph(geometry)
+        self._same_saved_volume(geometry, result["volume"])
+        return {key: result[key] for key in (
+            "volume", "surface_area", "bounds", "topology", "brep_valid",
+        )}
 
     def validate(self, geometry: dict[str, Any]) -> None:
         try:
@@ -293,6 +336,9 @@ class OCCTKernelAdapter:
             return
         if kernel_id == self.kernel_id and geometry.get("kind") == "metric_thread":
             self._validate_metric_thread_geometry(geometry)
+            return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "imported_brep":
+            self._validate_imported_brep_geometry(geometry)
             return
         if kernel_id == self.kernel_id and geometry.get("kind") == "filleted_solid":
             self._validate_filleted_geometry(geometry)
@@ -408,6 +454,18 @@ class OCCTKernelAdapter:
             handedness=geometry.get("handedness"),
         )
         self._same_saved_volume(geometry, rebuilt["volume"])
+
+    def _validate_imported_brep_geometry(self, geometry: dict[str, Any]) -> None:
+        if (set(geometry) != {"kernel", "kind", "data", "volume", "brep_valid"}
+                or geometry.get("kernel") != self.kernel_id
+                or geometry.get("kind") != "imported_brep"
+                or not isinstance(geometry.get("data"), str)
+                or type(geometry.get("brep_valid")) is not bool):
+            raise ValidationError("Imported B-rep geometry descriptor is invalid.")
+        actual = NativeKernel().geometry_graph(geometry)
+        self._same_saved_volume(geometry, actual["volume"])
+        if actual["brep_valid"] != geometry["brep_valid"]:
+            raise ValidationError("Imported B-rep validity flag does not match the Open CASCADE shape.")
 
     def _validate_filleted_geometry(self, geometry: dict[str, Any]) -> None:
         if (set(geometry) != {"kernel", "kind", "base", "edge_indices", "radius", "volume"}

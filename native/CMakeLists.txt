@@ -15,7 +15,7 @@ target_compile_features(cadyx_kernel PRIVATE cxx_std_17)
 target_include_directories(cadyx_kernel PRIVATE "${OCCT_ROOT}/Library/include/opencascade")
 target_link_directories(cadyx_kernel PRIVATE "${OCCT_ROOT}/Library/lib")
 target_link_libraries(cadyx_kernel PRIVATE TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep
-  TKGeomAlgo TKTopAlgo TKPrim TKBO TKBool TKMesh TKOffset TKFillet)
+  TKGeomAlgo TKTopAlgo TKPrim TKBO TKBool TKMesh TKOffset TKFillet TKShHealing TKDESTEP TKXSBase)
 
 find_package(Open3D CONFIG REQUIRED PATHS "${OPEN3D_ROOT}/CMake" NO_DEFAULT_PATH)
 add_library(cadyx_scan SHARED scan.cpp)
