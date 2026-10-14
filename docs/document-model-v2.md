@@ -71,6 +71,72 @@ only the second point's y to 1 is rejected without changing revision, history or
 saved bytes. Changing both y coordinates to 1 in one batch succeeds with all ids
 and references preserved.
 
+## Scan import and editable triangle meshes
+
+`import_scan` reads one direct PLY file from a workspace folder, preserves the
+source, and creates a body with a `cadyx-mesh-v1` triangle mesh plus a
+`reconstruct_scan` feature. The command is submitted through the existing Web or
+Agent command endpoint under that project's edit lease:
+
+```json
+{
+  "type": "import_scan",
+  "folder": "kobras1backcover",
+  "file": "Merge_02_pc.ply",
+  "name": "Scanned cover",
+  "parameters": {
+    "voxel_size": 0.75,
+    "target_triangles": 30000,
+    "outlier_neighbors": 20,
+    "outlier_std_ratio": 2.0,
+    "poisson_depth": 8
+  }
+}
+```
+
+`folder` and `file` must resolve to a direct regular `.ply` file in the project
+workspace; traversal and symlinks are rejected. The command stores the source
+relative path and SHA-256 in the feature. Changing a processing parameter
+re-reads the source and rejects a changed file. The PLY remains read-only; the
+reconstructed mesh is self-contained in `project.json`, so it still opens if the
+source is later unavailable. CADYX also writes the processed mesh as a binary
+little-endian PLY beside the source. Its name is content-addressed
+(`{source-stem}.cadyx-{mesh-sha256-prefix}.ply`), and the feature stores that
+relative output location, hash, and size. Publication is atomic and never
+replaces an existing file: a byte-identical output is reused, while a conflict
+fails the command. Temporary files are hidden from workspace listings.
+
+Both PLY triangle meshes and point clouds are supported. Meshes are cleaned and
+simplified; point clouds are voxel-downsampled, filtered for statistical
+outliers, given consistently oriented normals, and reconstructed with screened
+Poisson. Output is an editable triangle mesh, not an OCCT B-rep. The packed
+float32 vertices and uint32 triangle indices are compressed, bounded, and
+checksum-validated by `GeometryKernel`; command history stores only ids,
+parameters, and counts, not a second mesh copy.
+
+The defaults are `voxel_size=0.75` in the source's coordinate units,
+`target_triangles=30000`, `outlier_neighbors=20`, `outlier_std_ratio=2.0`, and
+`poisson_depth=8`. `voxel_size` and `target_triangles` apply to both input kinds;
+the outlier and Poisson settings apply to point clouds. `set_scan_parameter`
+accepts `feature_id`, `name`, and `value` to rebuild from the unchanged source.
+Editable parameters are bounded: voxel size 0.00001–10000, target triangles
+100–100000, outlier neighbors 4–128, outlier standard ratio 0.1–5, and Poisson
+depth 5–9. The CPU processor caps itself at four threads and downsamples point
+clouds to at most 100,000 points; input PLYs are limited to 512 MiB, 2 million
+vertices, and 5 million faces. The processor is the hash-pinned CPU Open3D
+0.20.0 SDK behind a native C ABI bridge, so it does not depend on CADYX's Python
+ABI. See [runtime setup](../README.md#run-locally).
+
+The Core emits `agent.activity` SSE snapshots as the scan moves through source
+validation, mesh or point-cloud cleanup, reconstruction, validation, sidecar
+publication, and project save. Agent Runtime/API model inspections and
+viewport requests are recorded in the same activity stream. The read-only
+browser renders these actual events as a visual stage sequence and updates the
+model after commit; it does not show a raw command transcript.
+`GET /api/v1/projects/{id}/activity` and the Agent API equivalent return the
+latest 128 in-process operation snapshots so an open or reloaded browser can
+resume displaying them. Activity state is process-local, like the SSE stream.
+
 ## Browser inspection and Agent API editing
 
 The browser is a read-only detail viewer. It shows the shared viewport full

@@ -6,6 +6,7 @@ import math
 from typing import Any, Protocol
 
 from .errors import ValidationError
+from .mesh_geometry import tessellate_mesh_geometry, validate_mesh_geometry
 from .native_kernel import NativeKernel
 
 
@@ -42,6 +43,8 @@ class OCCTKernelAdapter:
     def tessellate(self, geometry: dict[str, Any]) -> dict[str, Any]:
         """Return kernel-derived triangles in model coordinates, without native objects."""
         self.validate(geometry)
+        if geometry.get("kernel") == "cadyx-mesh-v1":
+            return tessellate_mesh_geometry(geometry)
         result = NativeKernel().box(geometry["dimensions"], mesh=True)
         return {key: result[key] for key in ("positions", "triangles")}
 
@@ -56,6 +59,9 @@ class OCCTKernelAdapter:
         }
 
     def validate(self, geometry: dict[str, Any]) -> None:
+        if isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1":
+            validate_mesh_geometry(geometry)
+            return
         if not isinstance(geometry, dict):
             raise ValidationError("Geometry does not match a supported box format.")
         kernel_id = geometry.get("kernel")

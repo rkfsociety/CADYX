@@ -1,10 +1,10 @@
 # CADYX
 
-CADYX is an AI-first CAD foundation prototype. Agents create projects and modify models through the Agent API and shared Core Command System; a per-project edit lease prevents concurrent writes. The provider-neutral in-process Agent Runtime can orchestrate a provider adapter and project tools without adding a provider dependency. The browser is a read-only, full-window detail viewer with collapsed model and property docks. Agents can fetch a server-rendered PNG snapshot through the Agent API without using a browser.
+CADYX is an AI-first CAD foundation prototype. Agents create projects and modify models through the Agent API and shared Core Command System; a per-project edit lease prevents concurrent writes. The provider-neutral in-process Agent Runtime can orchestrate a provider adapter and project tools without adding a provider dependency. The browser is a read-only, full-window detail viewer with collapsed model and property docks, plus a visual panel of the agent's current/completed operation stages and model result. Agents can fetch a server-rendered PNG snapshot through the Agent API without using a browser.
 
 ## Run locally
 
-The verified Windows x64 runtime uses Python 3.15.0 and OCCT 8.0.1. Setup downloads hash-checked runtime/SDK archives into the ignored `.runtime/` directory and builds the small native kernel bridge with installed CMake and MSVC C++ Build Tools (run setup in PowerShell 7+). Python production code needs no pip packages. Review `scripts/runtime-versions.json` against the newest stable upstream releases when choosing versions; do not downgrade dependencies to work around compatibility.
+The verified Windows x64 runtime uses Python 3.15.0, OCCT 8.0.1, and the CPU build of Open3D 0.20.0. Setup downloads hash-checked runtime/SDK archives into the ignored `.runtime/` directory and builds native geometry and scan bridges with installed CMake and MSVC C++ Build Tools (run setup in PowerShell 7+). Python production code needs no pip packages. Open3D handles PLY scan cleanup, point-cloud surface reconstruction, and mesh simplification on CPU; the defaults cap processing at four threads and 100,000 downsampled points. Review `scripts/runtime-versions.json` against the newest stable upstream releases when choosing versions; do not downgrade dependencies to work around compatibility.
 
 ```powershell
 .\scripts\setup-runtime.ps1
@@ -59,7 +59,7 @@ Multiple current hosts may share a workspace on the same local machine; see the 
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](docs/project-format-v1.md), [docs/document-model-v2.md](docs/document-model-v2.md), and [.codex/roadmap.md](.codex/roadmap.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, a durable per-project SQLite edit lease manager, a shared command system, and an Open CASCADE geometry-kernel adapter. Geometry is rebuilt from JSON-safe parameters when validated; native kernel objects are not stored in project files. The JSON APIs also support XY sketches with stable point/line/circle references and checked constraints; agents use the Agent API to create and edit them. The read-only browser displays all supported bodies and sketch elements through the shared [viewport contract](docs/viewport-api.md), and previews PLY files using the same renderer.
+See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](docs/project-format-v1.md), [docs/document-model-v2.md](docs/document-model-v2.md), and [.codex/roadmap.md](.codex/roadmap.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, a durable per-project SQLite edit lease manager, a shared command system, and an Open CASCADE geometry-kernel adapter. Boxes are rebuilt from JSON-safe parameters; reconstructed scan meshes are stored as bounded, compressed, validated triangle arrays, so native objects are never stored in project files. The JSON APIs also support XY sketches with stable point/line/circle references and checked constraints; agents use the Agent API to create and edit them. The read-only browser displays all supported bodies and sketch elements through the shared [viewport contract](docs/viewport-api.md), and previews PLY files using the same renderer.
 
 ## API starting points
 
@@ -72,6 +72,8 @@ See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](do
 - `POST /api/v1/projects/{id}/leases` with `owner_type` and `owner_id`
 - `POST /api/v1/projects/{id}/commands` with a human `lease_id` and a command
 - Agent equivalents under `/api/v1/agent/projects`
+- `import_scan` and `set_scan_parameter` commands for PLY-to-mesh reconstruction; see the [scan command contract](docs/document-model-v2.md#scan-import-and-editable-triangle-meshes)
+- `GET /api/v1/projects/{id}/activity` and its Agent API equivalent return the recent visual activity snapshots; `agent.activity` SSE events update them live
 - Agent `/stop` with `lease_id` and `/resume` with `owner_id` / `expected_revision`; resumed commands require `expected_revision`. See the [stop/resume contract](docs/architecture.md#safe-agent-stop-and-resume).
 - `GET /api/v1/events` for the SSE update channel
 

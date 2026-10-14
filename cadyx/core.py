@@ -6,6 +6,7 @@ import copy
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterator
+from uuid import uuid4
 
 from .commands import CommandSystem
 from .errors import ConflictError, ValidationError
@@ -14,6 +15,7 @@ from .kernel import GeometryKernel, OCCTKernelAdapter
 from .lease import EditLeaseManager
 from .models import Document, OwnerType
 from .rendering import render_scene, render_scene_png
+from .scan import ScanProcessor
 from .workspace import ProjectWorkspace, utc_now
 
 
@@ -23,12 +25,18 @@ class CadyxCore:
         projects_dir: str,
         *,
         kernel: GeometryKernel | None = None,
+        scan_processor: ScanProcessor | None = None,
         lease_timeout_seconds: float = 60.0,
         lease_clock: Callable[[], float] | None = None,
     ) -> None:
         self.workspace = ProjectWorkspace(projects_dir)
         self.kernel = kernel if kernel is not None else OCCTKernelAdapter()
-        self.commands = CommandSystem(self.kernel)
+        self.commands = CommandSystem(
+            self.kernel,
+            resolve_scan=self.workspace.resolve_folder_file,
+            scan_processor=scan_processor,
+            publish_scan_output=self.workspace.publish_scan_output,
+        )
         if lease_clock is None:
             self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds)
         else:
@@ -95,6 +103,40 @@ class CadyxCore:
             document = Document.from_dict(project["document"])
             self._validate_geometry(document)
             return render_scene_png(render_scene(document, self.kernel))
+
+    def observe_agent_operation(
+        self,
+        project_id: str,
+        action: str,
+        operation: Callable[[], Any],
+    ) -> Any:
+        """Expose an agent's read-only model inspection as a visual activity."""
+        self.workspace.load(project_id)
+        activity = {
+            "operation_id": str(uuid4()),
+            "kind": "observation",
+            "actor_type": OwnerType.AGENT.value,
+            "action": action,
+            "command": None,
+            "source": None,
+            "state": "running",
+            "phase": "starting",
+            "steps": [],
+            "result": None,
+            "error": None,
+        }
+        self._publish_activity(project_id, activity)
+        activity["phase"] = "observe"
+        self._publish_activity(project_id, activity)
+        try:
+            result = operation()
+        except Exception as exc:
+            activity.update({"state": "failed", "error": str(exc)})
+            self._publish_activity(project_id, activity)
+            raise
+        activity.update({"state": "completed", "phase": "completed"})
+        self._publish_activity(project_id, activity)
+        return result
 
     def heartbeat(self, project_id: str, lease_id: str) -> dict[str, Any]:
         with self._project_guard(project_id):
@@ -178,10 +220,39 @@ class CadyxCore:
             elif expected_revision is not None:
                 self._check_revision(Document.from_dict(project["document"]), expected_revision)
             command_name = command.get("type") if isinstance(command, dict) else None
-            self.events.publish("command.started", project_id, {"command": command_name, "actor_id": lease.owner_id})
+            operation_id = str(uuid4())
+            source = self._scan_source(command, project["document"])
+            activity = {
+                "operation_id": operation_id,
+                "actor_type": lease.owner_type.value,
+                "actor_id": lease.owner_id,
+                "action": self._activity_action(command_name),
+                "command": command_name,
+                "source": source,
+                "state": "running",
+                "phase": "starting",
+                "steps": [],
+                "result": None,
+                "error": None,
+            }
+            self._publish_activity(project_id, activity)
+            self.events.publish("command.started", project_id, {
+                "command": command_name,
+                "actor_id": lease.owner_id,
+                "actor_type": lease.owner_type.value,
+                "operation_id": operation_id,
+            })
+
+            def report_progress(update: dict[str, Any]) -> None:
+                activity.update(update)
+                self._publish_activity(project_id, activity)
+
             try:
                 document = Document.from_dict(project["document"])
-                result = self.commands.execute(document, command)
+                result = self.commands.execute(document, command, progress=report_progress)
+                activity["result"] = copy.deepcopy(result)
+                activity["phase"] = "validate_document"
+                self._publish_activity(project_id, activity)
                 document.revision += 1
                 document.validate()
                 self._validate_geometry(document)
@@ -197,8 +268,12 @@ class CadyxCore:
                 next_project["document"] = document.to_dict()
                 next_project["history"].append(history_entry)
                 next_project["modified_at"] = utc_now()
+                activity["phase"] = "save_document"
+                self._publish_activity(project_id, activity)
                 self.workspace.save(next_project)
             except Exception as exc:
+                activity.update({"state": "failed", "error": str(exc)})
+                self._publish_activity(project_id, activity)
                 self.events.publish(
                     "command.failed",
                     project_id,
@@ -206,9 +281,64 @@ class CadyxCore:
                 )
                 raise
 
+            activity.update({"state": "completed", "phase": "completed", "result": copy.deepcopy(result)})
+            self._publish_activity(project_id, activity)
             self.events.publish("document.changed", project_id, {"revision": document.revision})
             self.events.publish("command.completed", project_id, history_entry)
             return {"document": document.to_dict(), "history_entry": history_entry}
+
+    def _publish_activity(self, project_id: str, activity: dict[str, Any]) -> None:
+        steps = activity.setdefault("steps", [])
+        phase = activity.get("phase")
+        state = activity.get("state")
+        if state == "completed":
+            for step in steps:
+                step["state"] = "completed"
+        elif isinstance(phase, str) and phase != "completed":
+            if steps and steps[-1]["phase"] == phase:
+                steps[-1]["state"] = "failed" if state == "failed" else "active"
+            else:
+                if steps:
+                    steps[-1]["state"] = "completed"
+                steps.append({"phase": phase, "state": "failed" if state == "failed" else "active"})
+        elif state == "failed" and steps:
+            steps[-1]["state"] = "failed"
+        activity["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self.events.publish("agent.activity", project_id, copy.deepcopy(activity))
+
+    @staticmethod
+    def _activity_action(command_name: Any) -> str:
+        return {
+            "create_box": "Строит модель",
+            "set_parameter": "Меняет параметры модели",
+            "import_scan": "Обрабатывает скан",
+            "set_scan_parameter": "Пересобирает скан",
+            "create_sketch": "Создаёт эскиз",
+            "add_sketch_element": "Обновляет эскиз",
+            "add_sketch_constraint": "Задаёт ограничение эскиза",
+            "update_sketch_elements": "Обновляет геометрию эскиза",
+            "remove_sketch_object": "Удаляет объект эскиза",
+        }.get(command_name, "Выполняет операцию")
+
+    @staticmethod
+    def _scan_source(command: Any, saved_document: Any) -> dict[str, str] | None:
+        if not isinstance(command, dict):
+            return None
+        if command.get("type") == "import_scan":
+            folder, filename = command.get("folder"), command.get("file")
+        elif command.get("type") == "set_scan_parameter":
+            feature_id = command.get("feature_id")
+            objects = saved_document.get("objects", []) if isinstance(saved_document, dict) else []
+            feature = next((item for item in objects if isinstance(item, dict) and
+                            item.get("id") == feature_id and item.get("operation") == "reconstruct_scan"), None)
+            source = feature.get("source") if feature else None
+            folder = source.get("folder") if isinstance(source, dict) else None
+            filename = source.get("file") if isinstance(source, dict) else None
+        else:
+            return None
+        if isinstance(folder, str) and isinstance(filename, str):
+            return {"folder": folder, "file": filename}
+        return None
 
     def _validate_geometry(self, document: Document) -> None:
         for item in document.objects:

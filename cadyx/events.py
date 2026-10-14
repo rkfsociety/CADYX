@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import queue
 import threading
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ class EventBroker:
         self._next_id = 1
         self._subscribers: dict[int, tuple[queue.Queue[ProjectEvent], str | None]] = {}
         self._next_subscriber_id = 1
+        self._activities: dict[str, list[dict[str, Any]]] = {}
 
     def publish(self, event: str, project_id: str | None, data: dict[str, Any]) -> ProjectEvent:
         with self._lock:
@@ -45,6 +47,17 @@ class EventBroker:
                 occurred_at=datetime.now(timezone.utc).isoformat(),
             )
             self._next_id += 1
+            if event == "agent.activity" and project_id is not None:
+                activities = self._activities.setdefault(project_id, [])
+                operation_id = data.get("operation_id")
+                existing = next((index for index, activity in enumerate(activities)
+                                 if activity.get("operation_id") == operation_id), None)
+                snapshot = copy.deepcopy(data)
+                if existing is None:
+                    activities.append(snapshot)
+                else:
+                    activities[existing] = snapshot
+                del activities[:-128]
             for subscriber, filter_project in self._subscribers.values():
                 if filter_project is not None and filter_project != project_id:
                     continue
@@ -55,6 +68,10 @@ class EventBroker:
                         pass
                 subscriber.put_nowait(item)
             return item
+
+    def activity_snapshot(self, project_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            return copy.deepcopy(self._activities.get(project_id, []))
 
     def subscribe(self, project_id: str | None = None) -> tuple[int, queue.Queue[ProjectEvent]]:
         subscriber: queue.Queue[ProjectEvent] = queue.Queue(maxsize=self._capacity)

@@ -11,6 +11,13 @@
     "url": "https://api.anaconda.org/download/conda-forge/occt/8.0.1/win-64/occt-8.0.1-novtk_h6bfc850_101.conda",
     "sha256": "a87336f2f318be46188479ad593b8b0c3129b7f2e25f5e7fd97ec0c7efc2f4eb"
   },
+  "open3d": {
+    "version": "0.20.0",
+    "directory": "open3d-devel-windows-amd64-0.20.0",
+    "archive": "open3d-devel-windows-amd64-0.20.0.zip",
+    "url": "https://github.com/isl-org/Open3D/releases/download/v0.20.0/open3d-devel-windows-amd64-0.20.0.zip",
+    "sha256": "ae2843b64da4d82e0cabf82462a9fda12921ea5be9a9d593f14a7a21a44a97fe"
+  },
   "node": {
     "version": "26.11.1"
   }

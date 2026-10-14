@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import mimetypes
 import os
 import re
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .errors import NotFoundError, ValidationError
+from .errors import ConflictError, NotFoundError, ValidationError
 from .models import Document, OwnerType
 from .migrations import PROJECT_VERSION, migrate_project
 
@@ -109,7 +110,7 @@ class ProjectWorkspace:
         folder = self._workspace_folder_path(folder_name)
         files: list[dict[str, Any]] = []
         for entry in folder.iterdir():
-            if entry.is_symlink() or not entry.is_file():
+            if entry.name.startswith(".cadyx-tmp-") or entry.is_symlink() or not entry.is_file():
                 continue
             try:
                 resolved = entry.resolve(strict=True)
@@ -130,6 +131,8 @@ class ProjectWorkspace:
         folder = self._workspace_folder_path(folder_name)
         if not self._is_single_path_segment(file_name):
             raise NotFoundError("Project file was not found.")
+        if file_name.startswith(".cadyx-tmp-"):
+            raise NotFoundError("Project file was not found.")
         path = folder / file_name
         if path.is_symlink() or not path.is_file():
             raise NotFoundError("Project file was not found.")
@@ -140,6 +143,58 @@ class ProjectWorkspace:
         if resolved.parent != folder:
             raise NotFoundError("Project file was not found.")
         return resolved
+
+    def publish_scan_output(self, folder_name: str, source_filename: str, content: bytes) -> dict[str, Any]:
+        """Create a content-addressed PLY sidecar beside its source without overwriting files."""
+        folder = self._workspace_folder_path(folder_name)
+        if not self._is_single_path_segment(source_filename) or not isinstance(content, bytes) or not content:
+            raise ValidationError("A source filename and non-empty scan output are required.")
+        digest = hashlib.sha256(content).hexdigest()
+        stem = Path(source_filename).stem[:100].rstrip(" .") or "scan"
+        filename = f"{stem}.cadyx-{digest[:12]}.ply"
+        target = folder / filename
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", prefix=".cadyx-tmp-", suffix=".part", dir=folder, delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            try:
+                os.link(temporary, target)
+                created = True
+            except FileExistsError:
+                if target.is_symlink() or not target.is_file():
+                    raise ConflictError(
+                        "A non-file already occupies the generated scan output path.",
+                        code="ARTIFACT_CONFLICT",
+                    )
+                existing_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+                if existing_hash != digest:
+                    raise ConflictError(
+                        "A different file already exists at the generated scan output path.",
+                        code="ARTIFACT_CONFLICT",
+                    )
+                created = False
+        except ConflictError:
+            raise
+        except OSError as exc:
+            raise ValidationError(f"Processed scan output could not be saved: {exc}.") from exc
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except FileNotFoundError:
+                    pass
+        return {
+            "folder": folder_name,
+            "file": filename,
+            "sha256": digest,
+            "size": len(content),
+            "created": created,
+        }
 
     def _workspace_folder_path(self, folder_name: str) -> Path:
         if not self._is_single_path_segment(folder_name):

@@ -89,6 +89,12 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(json.loads(tool_messages[1].content)["revision"], 0)
         command_result = json.loads(tool_messages[2].content)
         self.assertEqual(command_result["document"]["revision"], 1)
+        activities = self.core.events.activity_snapshot(self.project_id)
+        actions = [activity["action"] for activity in activities]
+        self.assertGreaterEqual(actions.count("Изучает модель"), 2)
+        self.assertIn("Получает 3D-сцену", actions)
+        self.assertIn("Строит модель", actions)
+        self.assertTrue(all(activity["state"] == "completed" for activity in activities))
 
     def test_domain_errors_are_returned_to_provider_and_leave_project_unchanged(self) -> None:
         provider = ScriptedProvider([

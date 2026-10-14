@@ -4,8 +4,10 @@
 - Work directly on `main`. Do not create feature, staging, temporary, or work branches unless the user explicitly changes this policy. CADYX should normally have exactly one branch: `main`. If an accidental branch is created, fast-forward/merge its work into `main` and remove the extra branch.
 - When choosing or updating any dependency/runtime/tool version, use the newest stable release and verify it from its official source. Do not choose an older compatible release as a workaround: the user explicitly requires adapting or building the kernel when necessary. Never bypass dependency checks to claim compatibility. Reviewed versions and reproducible local setup live in `scripts/runtime-versions.json` and `scripts/setup-runtime.ps1`.
 
-- Keep CADYX AI-first: the Core owns authoritative project state, and both agents and the browser use its Command System for document mutations.
-- Keep the browser a clean working interface: no promotional slogans or banners, and show live visual model changes instead of an agent command feed. Use the event stream to update the model and status.
+- Keep CADYX AI-first: Codex is expected to be the primary model-building user. The Core owns authoritative project state, and agents use its Command System for document mutations.
+- Make agent work fully observable in the browser through visual state: show the current and completed processing stages, source/output files, model changes, and failures. Use real events from the operation; do not show a raw text command or transcript feed.
+- Project-local MCP servers, skills, plugins, or similar agent tooling may be created when they materially improve Codex's ability to build models. This is authorized by the user; do not add them proactively, only when a concrete task needs them.
+- Keep generated scan-processing outputs in the same workspace folder as their source scans. Preserve imported sources and never replace them.
 - Manage the Windows host through `scripts/manage-host-task.ps1` from PowerShell (for example, `-Action Restart`); use the browser only to observe the host, never to control its lifecycle.
 - Every document mutation must hold the project's current edit lease. AI and human must never edit the same project concurrently.
 - Treat `projects/` as user workspace data. Do not overwrite or delete imported CAD files, scans, meshes, images, measurements, or references during routine work.

@@ -156,7 +156,9 @@ class AgentRuntime:
         if not isinstance(system_prompt, str):
             raise ValueError("system_prompt must be a string")
 
-        current = self.core.inspect_project(project_id)
+        current = self.core.observe_agent_operation(
+            project_id, "Изучает модель", lambda: self.core.inspect_project(project_id),
+        )
         revision = current["document"]["revision"]
         resumed = self.core.resume_agent(project_id, self.owner_id, revision)
         lease_id = resumed["lease"]["lease_id"]
@@ -210,11 +212,15 @@ class AgentRuntime:
 
         def inspect_project(arguments: Mapping[str, Any]) -> dict[str, Any]:
             no_arguments(arguments)
-            return self.core.inspect_project(project_id)
+            return self.core.observe_agent_operation(
+                project_id, "Изучает модель", lambda: self.core.inspect_project(project_id),
+            )
 
         def get_viewport(arguments: Mapping[str, Any]) -> dict[str, Any]:
             no_arguments(arguments)
-            return self.core.render_project(project_id)
+            return self.core.observe_agent_operation(
+                project_id, "Получает 3D-сцену", lambda: self.core.render_project(project_id),
+            )
 
         def execute_command(arguments: Mapping[str, Any]) -> dict[str, Any]:
             command = arguments.get("command")

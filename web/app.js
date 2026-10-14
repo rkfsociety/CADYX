@@ -34,6 +34,47 @@ let folderFiles = [];
 let selectedFolderFileName = null;
 let folderListRequest = 0;
 let previewRequest = 0;
+const activitiesByProject = new Map();
+const activityPhaseLabels = {
+  starting: "Подготовка операции",
+  observe: "Чтение модели",
+  validate_source: "Проверка файла",
+  hash_source: "Фиксация источника",
+  prepare_parameters: "Подготовка параметров",
+  read_source: "Чтение скана",
+  mesh_cleanup: "Очистка сетки",
+  voxel_cleanup: "Упрощение облака",
+  outlier_filter: "Удаление шума",
+  estimate_normals: "Расчёт нормалей",
+  reconstruct_surface: "Восстановление поверхности",
+  simplify_mesh: "Сокращение полигонов",
+  serialize_mesh: "Подготовка сетки",
+  verify_source: "Проверка исходника",
+  validate_result: "Контроль результата",
+  write_output: "Запись PLY рядом",
+  validate_document: "Проверка модели",
+  save_document: "Сохранение проекта",
+};
+const meshActivityPhases = [
+  "validate_source", "hash_source", "prepare_parameters", "read_source", "mesh_cleanup", "simplify_mesh",
+  "serialize_mesh", "verify_source", "validate_result", "write_output", "validate_document", "save_document",
+];
+const cloudActivityPhases = [
+  "validate_source", "hash_source", "prepare_parameters", "read_source", "voxel_cleanup", "outlier_filter",
+  "estimate_normals", "reconstruct_surface", "simplify_mesh", "serialize_mesh",
+  "verify_source", "validate_result", "write_output", "validate_document", "save_document",
+];
+const genericActivityPhases = ["starting", "validate_document", "save_document"];
+const observationActivityPhases = ["starting", "observe"];
+const genericActivityLabels = {
+  starting: "Выполнение операции",
+  validate_document: "Проверка модели",
+  save_document: "Сохранение проекта",
+};
+const observationActivityLabels = {
+  starting: "Подготовка чтения",
+  observe: "Чтение модели",
+};
 const FOLDER_SELECTION_PREFIX = "folder:";
 
 function readSelectedProject() {
@@ -317,6 +358,20 @@ async function refreshDetail() {
   const projectId = selectedProjectId;
   if (!projectId) return;
   const request = ++detailRequest;
+  const activityResponse = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/activity`);
+  if (projectId !== selectedProjectId || request !== detailRequest) return;
+  const activities = activityResponse.activities || [];
+  activitiesByProject.set(projectId, activities);
+  const activity = activities.slice().reverse().find((item) => item.state === "running") || activities.at(-1) || null;
+  renderAgentActivity(activities);
+  if (activity?.state === "running") {
+    $("#folder-detail").hidden = true;
+    projectDetail.hidden = false;
+    noSelection.hidden = true;
+    const selected = getProject(projectId);
+    $("#document-title").textContent = selected?.project.name || "CADYX · работа агента";
+    return;
+  }
   const info = await api(`/api/v1/projects/${encodeURIComponent(projectId)}`);
   const scene = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/viewport`);
   if (projectId !== selectedProjectId || request !== detailRequest) return;
@@ -353,6 +408,164 @@ async function refreshDetail() {
   currentObjects = objects;
   renderObjectTree(objects);
   renderProperties(objects);
+}
+
+function renderAgentActivity(value) {
+  const activities = Array.isArray(value) ? value : value ? [value] : [];
+  const currentActivity = activities.slice().reverse().find((item) => item.state === "running") || activities.at(-1) || null;
+  const historyWrap = $("#activity-history-wrap");
+  const historyList = $("#activity-history");
+  historyList.replaceChildren();
+  historyWrap.hidden = activities.length === 0;
+  for (const item of activities.slice().reverse()) {
+    const row = document.createElement("li");
+    row.className = "activity-history-item";
+    row.dataset.state = item.state || "running";
+    const dot = document.createElement("span");
+    dot.className = "activity-history-dot";
+    dot.setAttribute("aria-hidden", "true");
+    const copy = document.createElement("span");
+    copy.className = "activity-history-copy";
+    const action = document.createElement("strong");
+    action.textContent = item.action || "Операция агента";
+    const file = item.source?.file;
+    const lastPhase = item.steps?.at(-1)?.phase;
+    const detail = document.createElement("small");
+    detail.textContent = file
+      ? `${file} → ${item.result?.artifact?.file || "сетка CADYX"}`
+      : activityPhaseLabels[lastPhase] || "Модель CADYX";
+    detail.title = detail.textContent;
+    const time = document.createElement("time");
+    time.className = "activity-history-time";
+    const updatedAt = Date.parse(item.updated_at || "");
+    time.textContent = Number.isFinite(updatedAt)
+      ? new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(updatedAt)
+      : "";
+    const phases = document.createElement("span");
+    phases.className = "activity-history-phases";
+    phases.setAttribute("aria-label", `${item.steps?.length || 0} этапов`);
+    for (const step of item.steps || []) {
+      const marker = document.createElement("span");
+      marker.className = "activity-history-phase";
+      marker.dataset.state = step.state;
+      marker.title = activityPhaseLabels[step.phase] || "Операция";
+      phases.append(marker);
+    }
+    row.title = (item.steps || []).map((step) => activityPhaseLabels[step.phase] || step.phase).join(" · ");
+    copy.append(action, detail);
+    row.append(dot, copy, time, phases);
+    historyList.append(row);
+  }
+
+  const activity = currentActivity;
+  const panel = $("#agent-activity");
+  const title = $("#activity-title");
+  const stateBadge = $("#activity-state");
+  const route = $("#activity-route");
+  const result = $("#activity-result");
+  const parameters = $("#activity-parameters");
+  const list = $("#activity-steps");
+  const state = activity?.state || "idle";
+  panel.dataset.state = state;
+  list.replaceChildren();
+  parameters.replaceChildren();
+  result.hidden = true;
+  result.classList.remove("failed");
+
+  if (!activity) {
+    title.textContent = "Ожидание операции";
+    stateBadge.textContent = "Ожидание";
+    route.textContent = "CADYX готов к построению модели.";
+    return;
+  }
+
+  const scanOperation = ["import_scan", "set_scan_parameter"].includes(activity.command);
+  const phaseIds = scanOperation
+    ? activity.source_kind === "triangle_mesh" ? meshActivityPhases
+      : activity.source_kind === "point_cloud" ? cloudActivityPhases
+        : ["validate_source", "hash_source", "prepare_parameters", "read_source", "simplify_mesh", "serialize_mesh", "verify_source", "validate_result", "write_output", "validate_document", "save_document"]
+    : activity.kind === "observation" ? observationActivityPhases : genericActivityPhases;
+  const labels = scanOperation
+    ? activityPhaseLabels
+    : activity.kind === "observation" ? observationActivityLabels
+      : { ...genericActivityLabels, starting: activity.action || "Изменение модели" };
+  const phase = activity.phase || "starting";
+  const phaseIndex = phaseIds.indexOf(phase);
+  const currentLabel = labels[phase] || activity.action || "Операция";
+  title.textContent = state === "completed" ? `${activity.action} · готово`
+    : state === "failed" ? `${activity.action} · ошибка`
+      : `${activity.action} · ${currentLabel.toLocaleLowerCase("ru")}`;
+  stateBadge.textContent = state === "running" ? "В работе"
+    : state === "completed" ? "Завершено"
+      : state === "failed" ? "Ошибка"
+        : "Ожидание";
+
+  const source = activity.source;
+  const artifact = activity.result?.artifact;
+  if (source) {
+    const sourcePath = `projects/${source.folder}/${source.file}`;
+    const outputPath = artifact ? `projects/${artifact.folder}/${artifact.file}` : "редактируемая сетка CADYX";
+    route.textContent = `${sourcePath}  →  ${outputPath}`;
+    route.title = `${sourcePath}  →  ${outputPath}`;
+  } else {
+    route.textContent = "Изменения модели проходят через Core и сохраняются в проекте.";
+    route.title = route.textContent;
+  }
+
+  for (let index = 0; index < phaseIds.length; index++) {
+    const phaseId = phaseIds[index];
+    const item = document.createElement("li");
+    item.className = "activity-step";
+    let status = "pending";
+    if (state === "completed" || (phaseIndex >= 0 && index < phaseIndex)) status = "complete";
+    if (state === "running" && phaseId === phase) status = "active";
+    if (state === "failed" && phaseId === phase) status = "failed";
+    item.dataset.status = status;
+    const node = document.createElement("span");
+    node.className = "activity-step-node";
+    node.setAttribute("aria-hidden", "true");
+    node.textContent = status === "complete" ? "✓" : status === "active" ? "•" : status === "failed" ? "!" : "";
+    const label = document.createElement("span");
+    label.className = "activity-step-label";
+    label.textContent = labels[phaseId] || "Операция";
+    item.title = label.textContent;
+    item.append(node, label);
+    list.append(item);
+  }
+
+  if (scanOperation && activity.parameters) {
+    const parameterLabels = {
+      voxel_size: "Воксель",
+      target_triangles: "Треугольники",
+      outlier_neighbors: "Соседи",
+      outlier_std_ratio: "Порог шума",
+      poisson_depth: "Глубина Poisson",
+    };
+    for (const [key, value] of Object.entries(activity.parameters)) {
+      if (activity.source_kind === "triangle_mesh" && ["outlier_neighbors", "outlier_std_ratio", "poisson_depth"].includes(key)) continue;
+      const chip = document.createElement("span");
+      chip.className = "activity-parameter";
+      chip.textContent = `${parameterLabels[key] || key}: ${formatNumber(value)}`;
+      parameters.append(chip);
+    }
+  }
+
+  const stats = activity.result;
+  if (state === "failed" && activity.error) {
+    result.textContent = activity.error;
+    result.title = activity.error;
+    result.classList.add("failed");
+    result.hidden = false;
+  } else if (stats && (stats.output_triangles || artifact)) {
+    const meshStats = stats.output_triangles
+      ? `${formatNumber(stats.output_vertices)} вершин · ${formatNumber(stats.output_triangles)} треугольников`
+      : "Сетка сохранена";
+    result.textContent = artifact
+      ? `${meshStats} · ${formatFileSize(artifact.size)} · ${artifact.created ? "файл создан" : "файл уже существует"}`
+      : meshStats;
+    result.title = result.textContent;
+    result.hidden = false;
+  }
 }
 
 function objectTypeLabel(item) {
@@ -522,12 +735,25 @@ function handleStreamEvent(type, event) {
   if (!projectId) return;
   const data = event.data || {};
 
-  if (type === "command.completed") {
-    selectObjectFromResult(projectId, data.result);
+  if (type === "agent.activity") {
+    const activities = activitiesByProject.get(projectId) || [];
+    const existing = activities.findIndex((item) => item.operation_id === data.operation_id);
+    if (existing < 0) activities.push(data);
+    else activities[existing] = data;
+    if (activities.length > 128) activities.splice(0, activities.length - 128);
+    activitiesByProject.set(projectId, activities);
+    if (projectId === selectedProjectId) renderAgentActivity(activities);
+    if (projectId === selectedProjectId && data.state === "running") {
+      $("#folder-detail").hidden = true;
+      projectDetail.hidden = false;
+      noSelection.hidden = true;
+      $("#document-title").textContent = getProject(projectId)?.project.name || "CADYX · работа агента";
+    }
+    if (data.state === "completed") indicateModelChanged(projectId);
+  } else if (type === "command.completed") {
+    selectObjectFromResult(projectId, data.result || data.history_entry?.result);
     indicateModelChanged(projectId);
     scheduleWorkspaceRefresh();
-  } else if (type === "command.failed") {
-    if (projectId === selectedProjectId) notify("Не удалось обновить деталь", true);
   } else if (type === "document.changed") {
     scheduleWorkspaceRefresh();
   } else if (type === "project.created") {
@@ -557,7 +783,7 @@ folderFileList.addEventListener("click", (event) => {
 });
 
 const stream = new EventSource("/api/v1/events");
-const eventTypes = ["project.created", "project.lock.changed", "command.completed", "command.failed", "document.changed"];
+const eventTypes = ["project.created", "project.lock.changed", "agent.activity", "command.completed", "document.changed"];
 for (const type of eventTypes) {
   stream.addEventListener(type, (message) => {
     try { handleStreamEvent(type, JSON.parse(message.data)); }

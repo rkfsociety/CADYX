@@ -87,6 +87,12 @@ class WebApiTests(unittest.TestCase):
         status, detail = self.request(f"/api/v1/agent/projects/{project_id}")
         self.assertEqual(status, 200)
         self.assertEqual(detail["document"]["revision"], 1)
+        status, activity = self.request(f"/api/v1/projects/{project_id}/activity")
+        self.assertEqual(status, 200)
+        self.assertEqual(activity["activities"][-1]["actor_type"], "agent")
+        self.assertEqual(activity["activities"][-1]["state"], "completed")
+        status, activity = self.request(f"/api/v1/agent/projects/{project_id}/activity")
+        self.assertEqual((status, activity["activities"][-1]["state"]), (200, "completed"))
 
     def test_agent_api_does_not_accept_human_lease_for_command(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Lease boundary"})

@@ -69,19 +69,37 @@ def make_request_handler(
                     self._png(200, core.render_project_png(parts[3]))
                     return
                 if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "viewport.png":
-                    self._png(200, core.render_project_png(parts[4]))
+                    self._png(200, core.observe_agent_operation(
+                        parts[4], "Получает изображение модели", lambda: core.render_project_png(parts[4]),
+                    ))
                     return
                 if len(parts) == 5 and parts[:3] == prefix and parts[4] == "viewport":
                     self._json(200, core.render_project(parts[3]))
                     return
                 if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "viewport":
-                    self._json(200, core.render_project(parts[4]))
+                    self._json(200, core.observe_agent_operation(
+                        parts[4], "Получает 3D-сцену", lambda: core.render_project(parts[4]),
+                    ))
+                    return
+                if len(parts) == 5 and parts[:3] == prefix and parts[4] == "activity":
+                    activities = core.events.activity_snapshot(parts[3])
+                    if not activities:
+                        core.inspect_project(parts[3])
+                    self._json(200, {"activities": activities})
                     return
                 if len(parts) == 4 and parts[:3] == prefix:
                     self._json(200, core.inspect_project(parts[3]))
                     return
+                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "activity":
+                    activities = core.events.activity_snapshot(parts[4])
+                    if not activities:
+                        core.inspect_project(parts[4])
+                    self._json(200, {"activities": activities})
+                    return
                 if len(parts) == 5 and parts[:4] == agent_prefix:
-                    self._json(200, core.inspect_project(parts[4]))
+                    self._json(200, core.observe_agent_operation(
+                        parts[4], "Изучает модель", lambda: core.inspect_project(parts[4]),
+                    ))
                     return
                 if parsed.path == "/":
                     self._static("index.html", "text/html; charset=utf-8")

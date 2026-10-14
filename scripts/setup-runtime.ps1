@@ -35,17 +35,29 @@ if (!(Test-Path (Join-Path $sdkRoot 'Library/include/opencascade/Standard_Versio
     & $pythonExe (Join-Path $PSScriptRoot 'extract-sdk.py') $sdkArchive $sdkRoot
     if ($LASTEXITCODE -ne 0) { throw 'OCCT SDK extraction failed.' }
 }
-& cmake -S (Join-Path $projectRoot 'native') -B (Join-Path $runtimeRoot 'build') "-DOCCT_ROOT=$sdkRoot"
+$open3dArchive = Join-Path $runtimeRoot "downloads/$($versions.open3d.archive)"
+Get-VerifiedArchive $versions.open3d.url $open3dArchive $versions.open3d.sha256
+$open3dRoot = Join-Path $runtimeRoot $versions.open3d.directory
+if (!(Test-Path (Join-Path $open3dRoot 'CMake/Open3DConfig.cmake'))) {
+    Expand-Archive -LiteralPath $open3dArchive -DestinationPath $runtimeRoot -Force
+}
+if (!(Test-Path (Join-Path $open3dRoot 'CMake/Open3DConfig.cmake'))) {
+    throw 'Open3D SDK extraction failed.'
+}
+& cmake -S (Join-Path $projectRoot 'native') -B (Join-Path $runtimeRoot 'build') `
+    "-DOCCT_ROOT=$sdkRoot" "-DOPEN3D_ROOT=$open3dRoot"
 if ($LASTEXITCODE -ne 0) { throw 'Native kernel configuration failed.' }
 & cmake --build (Join-Path $runtimeRoot 'build') --config Release --parallel 2
 if ($LASTEXITCODE -ne 0) { throw 'Native kernel compilation failed.' }
 @{
     python_version = $versions.python.version
     occt_version = $versions.occt.version
-    dll_directories = @('occt-sdk/Library/bin')
+    open3d_version = $versions.open3d.version
+    dll_directories = @('occt-sdk/Library/bin', "$($versions.open3d.directory)/bin")
     bridge = 'build/Release/cadyx_kernel.dll'
+    scan_bridge = 'build/Release/cadyx_scan.dll'
 } | ConvertTo-Json | Set-Content (Join-Path $runtimeRoot 'manifest.json') -Encoding utf8NoBOM
-& $pythonExe -c 'import sys; from cadyx.native_kernel import NativeKernel; from cadyx.kernel import OCCTKernelAdapter; assert NativeKernel().version == sys.argv[1], "OCCT version mismatch"; print("OCCT", NativeKernel().version); print(OCCTKernelAdapter().create_box(width=2,height=3,depth=5))' $versions.occt.version
+& $pythonExe -c 'import sys; from cadyx.native_kernel import NativeKernel; from cadyx.native_scan import NativeScan; from cadyx.kernel import OCCTKernelAdapter; assert NativeKernel().version == sys.argv[1], "OCCT version mismatch"; assert NativeScan().version == sys.argv[2], "Open3D version mismatch"; print("OCCT", NativeKernel().version, "Open3D", NativeScan().version); print(OCCTKernelAdapter().create_box(width=2,height=3,depth=5))' $versions.occt.version $versions.open3d.version
 if ($LASTEXITCODE -ne 0) { throw 'Native kernel runtime check failed.' }
 
 if ($WithNode) {
