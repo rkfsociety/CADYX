@@ -1,7 +1,8 @@
 (() => {
   const MAX_PREVIEW_POINTS = 24000;
   const MAX_CAMERA_PITCH = Math.PI / 2;
-  function createViewer(canvas) {
+  const featureEdgesCache = new WeakMap();
+  function createViewer(canvas, { showViewCube = false, showCoordinateGizmo = true, showRotationAxes = true, wireframe = false } = {}) {
     const context = canvas.getContext("2d", { alpha: true });
     let geometry = null;
     let yaw = 0.68;
@@ -55,6 +56,48 @@
         }
       }
       return Math.max(radius, 0.001);
+    }
+
+    function buildFeatureEdges(positions, triangles) {
+      const vertexCount = positions.length / 3;
+      const edges = new Map();
+      const creaseCosine = Math.cos(Math.PI / 18);
+      const addEdge = (start, end, normalX, normalY, normalZ) => {
+        const low = Math.min(start, end), high = Math.max(start, end);
+        const key = low * vertexCount + high;
+        const edge = edges.get(key);
+        if (!edge) {
+          edges.set(key, { start: low, end: high, normalX, normalY, normalZ, count: 1, crease: false });
+          return;
+        }
+        const cosine = edge.normalX * normalX + edge.normalY * normalY + edge.normalZ * normalZ;
+        if (cosine < creaseCosine) edge.crease = true;
+        edge.count += 1;
+      };
+      for (let face = 0; face + 2 < triangles.length; face += 3) {
+        const a = triangles[face], b = triangles[face + 1], c = triangles[face + 2];
+        const ai = a * 3, bi = b * 3, ci = c * 3;
+        const ux = positions[bi] - positions[ai];
+        const uy = positions[bi + 1] - positions[ai + 1];
+        const uz = positions[bi + 2] - positions[ai + 2];
+        const vx = positions[ci] - positions[ai];
+        const vy = positions[ci + 1] - positions[ai + 1];
+        const vz = positions[ci + 2] - positions[ai + 2];
+        const nx = uy * vz - uz * vy;
+        const ny = uz * vx - ux * vz;
+        const nz = ux * vy - uy * vx;
+        const length = Math.hypot(nx, ny, nz);
+        if (!length) continue;
+        const normalX = nx / length, normalY = ny / length, normalZ = nz / length;
+        addEdge(a, b, normalX, normalY, normalZ);
+        addEdge(b, c, normalX, normalY, normalZ);
+        addEdge(c, a, normalX, normalY, normalZ);
+      }
+      const featureEdges = [];
+      for (const edge of edges.values()) {
+        if (edge.count === 1 || edge.crease) featureEdges.push(edge.start, edge.end);
+      }
+      return Uint32Array.from(featureEdges);
     }
 
     function render() {
@@ -136,7 +179,7 @@
 
       if (triangles.length) renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress,
-        geometry.vertexNormals, yaw, pitch,
+        geometry.vertexNormals, yaw, pitch, geometry.featureEdges, wireframe, dpr,
       );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale);
       for (let index = 0; index < (geometry.lines || []).length; index += 2) {
@@ -166,8 +209,9 @@
         context.fillRect(screenX[point] - size / 2, screenY[point] - size / 2, size, size);
       }
       context.globalAlpha = 1;
-      drawRotationAxes(geometry.rotationAxes || [], project, dpr);
-      drawCoordinateGizmo(width, height, dpr, cosYaw, sinYaw, cosPitch, sinPitch);
+      if (showRotationAxes) drawRotationAxes(geometry.rotationAxes || [], project, dpr);
+      if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cosYaw, sinYaw, cosPitch, sinPitch);
+      if (showViewCube) drawViewCube(width, dpr, yaw, pitch);
     }
 
     function drawRotationAxes(axes, project, dpr) {
@@ -234,8 +278,62 @@
       context.restore();
     }
 
+    function drawViewCube(width, dpr, viewYaw, viewPitch) {
+      const centerX = width - 38 * dpr;
+      const centerY = 42 * dpr;
+      const halfSize = 16 * dpr;
+      const cosViewYaw = Math.cos(viewYaw), sinViewYaw = Math.sin(viewYaw);
+      const cosViewPitch = Math.cos(viewPitch), sinViewPitch = Math.sin(viewPitch);
+      const transform = ([x, y, z]) => {
+        const rotatedX = x * cosViewYaw - y * sinViewYaw;
+        const rotatedDepth = x * sinViewYaw + y * cosViewYaw;
+        const cameraY = z * cosViewPitch - rotatedDepth * sinViewPitch;
+        const cameraZ = z * sinViewPitch + rotatedDepth * cosViewPitch;
+        return { x: centerX + rotatedX * halfSize, y: centerY - cameraY * halfSize, depth: cameraZ };
+      };
+      const faces = [
+        { label: "X", normal: [1, 0, 0], points: [[1, -1, -1], [1, 1, -1], [1, 1, 1], [1, -1, 1]] },
+        { label: "Y", normal: [0, 1, 0], points: [[-1, 1, -1], [1, 1, -1], [1, 1, 1], [-1, 1, 1]] },
+        { label: "Z", normal: [0, 0, 1], points: [[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]] },
+        { label: "X", normal: [-1, 0, 0], points: [[-1, 1, -1], [-1, -1, -1], [-1, -1, 1], [-1, 1, 1]] },
+        { label: "Y", normal: [0, -1, 0], points: [[1, -1, -1], [-1, -1, -1], [-1, -1, 1], [1, -1, 1]] },
+        { label: "Z", normal: [0, 0, -1], points: [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1]] },
+      ];
+      const visibleFaces = faces.map((face) => ({
+        ...face,
+        transformedNormal: transform(face.normal),
+        transformedPoints: face.points.map(transform),
+      })).filter((face) => face.transformedNormal.depth > 0.02);
+      visibleFaces.sort((left, right) => {
+        const leftDepth = left.transformedPoints.reduce((total, point) => total + point.depth, 0);
+        const rightDepth = right.transformedPoints.reduce((total, point) => total + point.depth, 0);
+        return leftDepth - rightDepth;
+      });
+      context.save();
+      context.lineWidth = dpr;
+      context.font = `600 ${9 * dpr}px monospace`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      for (const face of visibleFaces) {
+        const [first, ...rest] = face.transformedPoints;
+        context.beginPath();
+        context.moveTo(first.x, first.y);
+        for (const point of rest) context.lineTo(point.x, point.y);
+        context.closePath();
+        context.fillStyle = "rgba(11, 19, 22, 0.91)";
+        context.strokeStyle = "#70878d";
+        context.fill();
+        context.stroke();
+        const labelX = face.transformedPoints.reduce((total, point) => total + point.x, 0) / 4;
+        const labelY = face.transformedPoints.reduce((total, point) => total + point.y, 0) / 4;
+        context.fillStyle = "#c6d4d8";
+        context.fillText(face.label, labelX, labelY);
+      }
+      context.restore();
+    }
+
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress,
-      vertexNormals, yaw, pitch) {
+      vertexNormals, yaw, pitch, featureEdges, showWireframe, dpr) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
       const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
@@ -321,6 +419,24 @@
         context.closePath();
         context.fill();
       }
+      if (showWireframe && featureEdges?.length) {
+        context.save();
+        context.strokeStyle = "#69d9c4";
+        context.globalAlpha = 0.46;
+        context.lineWidth = Math.max(0.65, 0.72 * dpr);
+        const edgesPerPath = 3500;
+        for (let start = 0; start < featureEdges.length; start += edgesPerPath * 2) {
+          context.beginPath();
+          const end = Math.min(featureEdges.length, start + edgesPerPath * 2);
+          for (let index = start; index < end; index += 2) {
+            const a = featureEdges[index], b = featureEdges[index + 1];
+            context.moveTo(screenX[a], screenY[a]);
+            context.lineTo(screenX[b], screenY[b]);
+          }
+          context.stroke();
+        }
+        context.restore();
+      }
     }
 
     function renderPoints(pointCount, camera, screenX, screenY, scale) {
@@ -385,12 +501,23 @@
         ({ yaw, pitch, zoom } = value);
         render();
       },
+      setWireframe(value) {
+        wireframe = Boolean(value);
+        render();
+      },
       load(value, { reset = true, transition: nextTransition = null, smoothShading = false } = {}) {
         const orbitCenter = orbitCenterFor(value);
+        const sourceTriangles = value.triangles || [];
+        let featureEdges = featureEdgesCache.get(sourceTriangles);
+        if (!featureEdges) {
+          featureEdges = buildFeatureEdges(value.positions, sourceTriangles);
+          featureEdgesCache.set(sourceTriangles, featureEdges);
+        }
         geometry = {
           ...value,
           orbitCenter,
           fitRadius: orbitCenter ? fitRadiusFromBounds(value.bounds, orbitCenter) : null,
+          featureEdges,
           vertexNormals: smoothShading ? buildVertexNormals(value.positions, value.triangles || []) : null,
         };
         vertexLight = geometry.vertexNormals ? new Float32Array(geometry.vertexNormals.length / 3) : new Float32Array(0);

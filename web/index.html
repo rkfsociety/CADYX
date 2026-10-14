@@ -142,8 +142,28 @@
               <section class="panel model-panel" aria-labelledby="model-title">
                 <div class="panel-heading viewport-heading">
                   <div><h2 id="model-title">CAD VIEWPORT</h2><span class="viewport-mode">ORTHOGRAPHIC</span></div>
-                  <div class="model-toolbar">
-                    <button id="viewport-fit" class="button" type="button">FIT VIEW</button>
+                  <div class="model-toolbar" aria-label="Инструменты CAD viewport">
+                    <div id="viewport-camera-presets" class="viewport-camera-presets" role="group" aria-label="Стандартные ракурсы">
+                      <button class="viewport-icon-button" type="button" data-camera-preset="isometric" aria-label="Изометрический вид" title="Изометрический вид" aria-pressed="true">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 8 4.5v9.3l-8 4.6-8-4.6V7.3l8-4.5Z M4.2 7.4 12 12l7.8-4.6M12 12v9"/></svg>
+                      </button>
+                      <button class="viewport-icon-button" type="button" data-camera-preset="front" aria-label="Вид спереди" title="Вид спереди" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h14v15H5z M8 7.5h8v9H8z"/></svg>
+                      </button>
+                      <button class="viewport-icon-button" type="button" data-camera-preset="right" aria-label="Вид справа" title="Вид справа" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 4.5 12 2v13L7 17.5v-13Z M7 4.5 4 6v13l3-1.5M19 6.5l-3 1.7v12.1"/></svg>
+                      </button>
+                      <button class="viewport-icon-button" type="button" data-camera-preset="top" aria-label="Вид сверху" title="Вид сверху" aria-pressed="false">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Z M3 8v8l9 5 9-5V8M12 13v8"/></svg>
+                      </button>
+                    </div>
+                    <span class="viewport-toolbar-divider" aria-hidden="true"></span>
+                    <button id="viewport-wireframe" class="button viewport-mode-button" type="button" aria-label="Скрыть рёбра сетки" title="Скрыть рёбра сетки" aria-pressed="true">
+                      <span class="viewport-mode-icon" aria-hidden="true">▧</span><span id="viewport-mode-label" class="toolbar-label">SHADED + WIREFRAME</span>
+                    </button>
+                    <button id="viewport-fit" class="button viewport-fit-button" type="button" aria-label="Вписать модель в viewport" title="Вписать модель в viewport">
+                      <span class="viewport-mode-icon" aria-hidden="true">⌖</span><span class="toolbar-label">FIT VIEW</span>
+                    </button>
                   </div>
                 </div>
                 <div class="viewport" id="viewport">

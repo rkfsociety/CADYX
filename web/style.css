@@ -97,6 +97,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .button { min-height: 27px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 3px; background: #111b1e; color: var(--muted); font: 9px var(--mono); letter-spacing: .04em; cursor: pointer; transition: background .12s ease, border-color .12s ease, color .12s ease; }
 .button:hover:not(:disabled) { border-color: #347767; background: #13251f; color: var(--accent); }
 .button:disabled { opacity: .43; cursor: not-allowed; }
+.model-toolbar { flex: 0 0 auto; }
+.viewport-camera-presets { display: flex; align-items: center; gap: 3px; }
+.viewport-icon-button { display: grid; place-items: center; width: 29px; height: 29px; padding: 5px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; }
+.viewport-icon-button:hover, .viewport-icon-button[aria-pressed="true"] { border-color: #2d5a50; background: #10211e; color: var(--accent); }
+.viewport-icon-button svg { display: block; width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
+.viewport-toolbar-divider { width: 1px; height: 24px; margin: 0 2px; background: var(--line); }
+.viewport-mode-button, .viewport-fit-button { display: inline-flex; align-items: center; gap: 6px; min-height: 29px; padding: 4px 8px; white-space: nowrap; }
+.viewport-mode-button[aria-pressed="true"] { border-color: #2d5a50; color: #b7d7cf; }
+.viewport-mode-icon { color: var(--accent); font-size: 13px; line-height: 1; }
+.toolbar-label { font-size: 8px; }
 .viewport { position: relative; display: grid; min-height: 0; place-items: center; overflow: hidden; background-color: #0b1114; background-image: linear-gradient(#26323852 1px, transparent 1px), linear-gradient(90deg, #26323852 1px, transparent 1px); background-size: 27px 27px; }
 .viewport::after { position: absolute; inset: 0; border-bottom: 1px solid #30383e44; content: ""; pointer-events: none; }
 .model-preview { width: 100%; height: 100%; min-height: 0; overflow: visible; }
@@ -322,6 +332,19 @@ button.object-row.selected { border-color: #285448; background: #45e1ba0b; }
   .project-detail { padding: 6px; }
   .orthographic-views { gap: 4px; padding: 6px; }
   .workflow-summary { grid-template-columns: 58px minmax(0, 1fr) auto; }
+}
+
+@media (max-width: 560px) {
+  .viewport-heading { gap: 4px; padding: 0 7px; }
+  .viewport-heading > div:first-child { gap: 6px; }
+  .viewport-mode { display: none; }
+  .model-toolbar { gap: 1px; }
+  .viewport-camera-presets { gap: 0; }
+  .viewport-icon-button { width: 25px; height: 27px; padding: 4px; }
+  .viewport-icon-button svg { width: 15px; height: 15px; }
+  .viewport-toolbar-divider { margin: 0 1px; }
+  .viewport-mode-button, .viewport-fit-button { gap: 0; padding: 4px 5px; }
+  .toolbar-label { display: none; }
 }
 
 @media (max-height: 640px) and (min-width: 761px) {

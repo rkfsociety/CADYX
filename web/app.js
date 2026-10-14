@@ -21,21 +21,54 @@ const folderFileList = $("#folder-file-list");
 const folderPreviewCanvas = $("#ply-preview-canvas");
 const folderPreviewPlaceholder = $("#folder-preview-placeholder");
 const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
-const modelViewer = window.CadyxViewport.createViewer($("#model-preview"));
+const modelViewer = window.CadyxViewport.createViewer($("#model-preview"), { showViewCube: true, wireframe: true });
 const orthographicViewers = [
-  { viewer: window.CadyxViewport.createViewer($("#ortho-front")), camera: { yaw: 0, pitch: 0 } },
-  { viewer: window.CadyxViewport.createViewer($("#ortho-right")), camera: { yaw: Math.PI / 2, pitch: 0 } },
-  { viewer: window.CadyxViewport.createViewer($("#ortho-top")), camera: { yaw: 0, pitch: Math.PI / 2 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true }), camera: { yaw: 0, pitch: 0 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true }), camera: { yaw: Math.PI / 2, pitch: 0 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-top"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true }), camera: { yaw: 0, pitch: Math.PI / 2 } },
 ];
 orthographicViewers.forEach((view) => {
   view.viewer.setCamera({ ...view.camera, zoom: 1, projection: "orthographic" });
+});
+const cameraPresetButtons = [...document.querySelectorAll("[data-camera-preset]")];
+const cameraPresets = {
+  isometric: { yaw: 0.68, pitch: 0.38 },
+  front: { yaw: 0, pitch: 0 },
+  right: { yaw: Math.PI / 2, pitch: 0 },
+  top: { yaw: 0, pitch: Math.PI / 2 },
+};
+function setCameraPresetState(selectedPreset) {
+  cameraPresetButtons.forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.cameraPreset === selectedPreset));
+  });
+}
+$("#viewport-camera-presets").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-camera-preset]");
+  const preset = button?.dataset.cameraPreset;
+  if (!preset || !cameraPresets[preset]) return;
+  modelViewer.setCamera({ ...cameraPresets[preset], zoom: modelViewer.getCamera().zoom, projection: "orthographic" });
+  setCameraPresetState(preset);
+});
+$("#model-preview").addEventListener("pointerdown", () => setCameraPresetState(null));
+$("#model-preview").addEventListener("wheel", () => setCameraPresetState(null), { passive: true });
+$("#viewport-wireframe").addEventListener("click", (event) => {
+  const button = event.currentTarget;
+  const enabled = button.getAttribute("aria-pressed") !== "true";
+  modelViewer.setWireframe(enabled);
+  button.setAttribute("aria-pressed", String(enabled));
+  button.setAttribute("aria-label", enabled ? "Скрыть рёбра сетки" : "Показать рёбра сетки");
+  button.title = enabled ? "Скрыть рёбра сетки" : "Показать рёбра сетки";
+  $("#viewport-mode-label").textContent = enabled ? "SHADED + WIREFRAME" : "SHADED";
 });
 let cameraAnimationId = 0;
 let renderedSceneKey = null;
 let detailRequest = 0;
 let detailedProjectId = null;
 let detailedProjectModifiedAt = null;
-$("#viewport-fit").addEventListener("click", () => modelViewer.fit());
+$("#viewport-fit").addEventListener("click", () => {
+  modelViewer.fit();
+  setCameraPresetState("isometric");
+});
 const toast = $("#toast");
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const integerFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
@@ -1073,6 +1106,7 @@ function selectObjectFromResult(projectId, result) {
 }
 
 function animateModelCamera(change) {
+  setCameraPresetState(null);
   const start = modelViewer.getCamera();
   const duration = change.duration_ms;
   const target = {
