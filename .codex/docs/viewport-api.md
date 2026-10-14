@@ -123,3 +123,7 @@ sketch rendering, parameter refresh and read-only persistence;
 `tests/test_viewport.cjs` checks Z-up projection, top view, coordinate axes,
 vertical drag, zoom, camera validation, fit and camera preservation. See
 [run/check commands](../../README.md).
+
+## Source comparison
+
+GET /api/v1/agent/projects/{id}/comparison (also available under the read-only projects API) returns an aligned source/result mesh overlay and original, modified and delta volumes. Optional original_body_id and modified_body_id select an ancestor and descendant; defaults use the first and last saved body. Rigid transforms along the source chain are applied to the reference mesh. The panel automatically displays available comparisons: cyan reference wireframe and green result. This is a tessellated overlay, not a Boolean added/removed-material analysis. Independent assemblies return available=false by default. No project document is modified.

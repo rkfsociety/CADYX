@@ -473,6 +473,38 @@ async function refreshDetail() {
   const scene = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/viewport`);
   if (projectId !== selectedProjectId || request !== detailRequest) return;
   if (scene.revision !== info.document.revision) { scheduleWorkspaceRefresh(); return; }
+  const comparison = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/comparison`);
+  if (projectId !== selectedProjectId || request !== detailRequest) return;
+  if (comparison.revision !== scene.revision) { scheduleWorkspaceRefresh(); return; }
+  $("#comparison-panel").hidden = !comparison.available;
+  if (comparison.available) {
+    const original = comparison.original, modified = comparison.modified;
+    const positions = [...modified.positions, ...original.positions];
+    const offset = modified.positions.length / 3;
+    const lines = [];
+    const edges = new Set();
+    for (let i = 0; i < original.triangles.length; i += 3) {
+      const triangle = original.triangles.slice(i, i + 3);
+      for (let j = 0; j < 3; j++) {
+        const a = triangle[j], b = triangle[(j + 1) % 3];
+        const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+        if (!edges.has(key)) { edges.add(key); lines.push(a + offset, b + offset); }
+      }
+    }
+    const canvas = $("#comparison-preview");
+    canvas.comparisonViewer ||= window.CadyxViewport.createViewer(canvas);
+    const comparisonKey = `${projectId}:${comparison.revision}`;
+    if (canvas.comparisonKey !== comparisonKey) {
+      const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+      for (let i = 0; i < positions.length; i++) {
+        bounds.min[i % 3] = Math.min(bounds.min[i % 3], positions[i]);
+        bounds.max[i % 3] = Math.max(bounds.max[i % 3], positions[i]);
+      }
+      canvas.comparisonViewer.load({ positions, triangles: modified.triangles, lines, points: [], bounds }, { reset: true });
+      canvas.comparisonKey = comparisonKey;
+    }
+    $("#comparison-metrics").textContent = `Объём: ${formatNumber(comparison.original_volume)} → ${formatNumber(comparison.modified_volume)} мм³ · Δ ${formatNumber(comparison.volume_delta)} мм³`;
+  }
   detailedProjectId = projectId;
   detailedProjectModifiedAt = info.project.modified_at;
   const objects = info.document.objects;

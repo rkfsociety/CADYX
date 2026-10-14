@@ -101,6 +101,58 @@ class CadyxCore:
                 self.events.publish("project.lock.changed", project_id, snapshot)
             return lease.as_dict()
 
+    def compare_bodies(self, project_id: str, original_id=None, modified_id=None) -> dict:
+        explicit_selection = original_id is not None or modified_id is not None
+        document = Document.from_dict(self.workspace.load(project_id)["document"])
+        bodies = {item["id"]: item for item in document.objects if item.get("type") == "body"}
+        if len(bodies) < 2:
+            return {"revision": document.revision, "available": False}
+        original_id = original_id or next(iter(bodies))
+        modified_id = modified_id or next(reversed(bodies))
+        if original_id not in bodies or modified_id not in bodies or original_id == modified_id:
+            raise ValidationError("Comparison requires two different existing bodies.")
+        features = {item["body_id"]: item for item in document.objects
+                    if item.get("type") == "feature" and item.get("source_body_id")}
+        chain, current, visited = [], modified_id, set()
+        while current != original_id:
+            if current in visited or current not in features:
+                if not explicit_selection:
+                    return {"revision": document.revision, "available": False}
+                raise ValidationError("Comparison requires a source-body ancestry chain.")
+            visited.add(current)
+            feature = features[current]
+            chain.append(feature)
+            current = feature["source_body_id"]
+        original = self.kernel.tessellate(bodies[original_id]["geometry"])
+        positions = list(original["positions"])
+        for feature in reversed(chain):
+            if feature["operation"] != "transform_imported_brep":
+                continue
+            parameters = feature["parameters"]
+            axis = parameters["rotation_axis"]
+            length = math.hypot(*axis)
+            a, b, c = [value / length for value in axis]
+            angle = math.radians(parameters["angle_degrees"])
+            cosine, sine = math.cos(angle), math.sin(angle)
+            translation = parameters["translation"]
+            for offset in range(0, len(positions), 3):
+                x, y, z = positions[offset:offset + 3]
+                dot = a*x + b*y + c*z
+                cross = [b*z-c*y, c*x-a*z, a*y-b*x]
+                positions[offset:offset + 3] = [
+                    value*cosine + cross[index]*sine + axis_value*dot*(1-cosine) + translation[index]
+                    for index, (value, axis_value) in enumerate(zip((x,y,z), (a,b,c)))
+                ]
+        modified = self.kernel.tessellate(bodies[modified_id]["geometry"])
+        original_volume = bodies[original_id]["geometry"]["volume"]
+        modified_volume = bodies[modified_id]["geometry"]["volume"]
+        return {"available": True, "revision": document.revision,
+                "original_body_id": original_id, "modified_body_id": modified_id,
+                "original_volume": original_volume, "modified_volume": modified_volume,
+                "volume_delta": modified_volume-original_volume,
+                "mode": "aligned_overlay",
+                "original": {**original, "positions": positions}, "modified": modified}
+
     def render_project(self, project_id: str) -> dict[str, Any]:
         _, scene = self._scene_for_project(project_id)
         return self._clone_scene(scene)

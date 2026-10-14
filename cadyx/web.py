@@ -109,6 +109,13 @@ def make_request_handler(
                     return
                 prefix = ["api", "v1", "projects"]
                 agent_prefix = ["api", "v1", "agent", "projects"]
+                comparison_prefix = agent_prefix if parts[:4] == agent_prefix else prefix
+                if len(parts) == len(comparison_prefix) + 2 and parts[:len(comparison_prefix)] == comparison_prefix and parts[-1] == "comparison":
+                    query = parse_qs(parsed.query)
+                    self._json(200, core.compare_bodies(parts[-2],
+                        query.get("original_body_id", [None])[0],
+                        query.get("modified_body_id", [None])[0]))
+                    return
                 if len(parts) == 5 and parts[:3] == prefix and parts[4] == "viewport.png":
                     self._png(200, core.render_project_png(parts[3]))
                     return

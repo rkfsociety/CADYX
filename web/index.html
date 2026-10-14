@@ -85,6 +85,11 @@
               </div>
             </header>
           </section>
+          <section id="comparison-panel" class="panel" hidden>
+            <div class="panel-heading"><h2>Сравнение с оригиналом</h2><span id="comparison-metrics"></span></div>
+            <p>Голубые линии — оригинал · зелёная поверхность — результат. Поворот и перенос оригинала согласованы с результатом.</p>
+            <canvas id="comparison-preview" class="ply-preview-canvas" style="width:100%;height:420px" aria-label="Совмещённые оригинал и изменённая модель"></canvas>
+          </section>
           <div class="primary-grid">
             <section class="panel model-panel" aria-labelledby="model-title">
               <div class="panel-heading">
