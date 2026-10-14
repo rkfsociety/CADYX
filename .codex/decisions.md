@@ -2,7 +2,12 @@
 
 ## Safe agent stop and resume
 
-- **Decision:** persist per-token stop fences in a separate SQLite runtime sidecar, independently of the full-command lease transaction. Validate saved document/geometry under the existing project guard before freeing an agent lease. Resume under that guard with a revision comparison and a new token; require expected revisions for its commands. **Reason:** a stop request must block queued commands while an atomic command still holds the lease database; revisions prevent replaying a committed command after a lost response and detect intervening human edits. **Constraint:** current cooperating hosts only; legacy lease acquisition remains compatible and does not require revision arguments. No Agent Runtime or portable schema change. **Source:** `cadyx/core.py`, `cadyx/lease.py`, [API contract](../docs/architecture.md#safe-agent-stop-and-resume).
+- **Decision:** persist per-token stop fences in a separate SQLite runtime sidecar, independently of the full-command lease transaction. Validate saved document/geometry under the existing project guard before freeing an agent lease. Resume under that guard with a revision comparison and a new token; require expected revisions for its commands. **Reason:** a stop request must block queued commands while an atomic command still holds the lease database; revisions prevent replaying a committed command after a lost response and detect intervening human edits. **Constraint:** current cooperating hosts only; legacy lease acquisition remains compatible and does not require revision arguments. This mechanism adds no portable schema change or provider-specific runtime dependency. **Source:** `cadyx/core.py`, `cadyx/lease.py`, [API contract](../docs/architecture.md#safe-agent-stop-and-resume).
+- **Status:** active.
+
+## Provider-neutral Agent Runtime
+
+- **Decision:** keep provider adapters behind the `AgentProvider` completion protocol; let the in-process Agent Runtime own bounded tool orchestration and use the existing Core lease, revision and Command System paths. **Reason:** CADYX can support different providers without importing a provider SDK into Core or creating another document mutation path. **Constraint:** one existing project per run; inspection, viewport and command tools only; no bundled provider adapter or HTTP runtime endpoint. **Source:** `cadyx/agent_runtime.py`, [runtime contract](../docs/architecture.md#agent-runtime).
 - **Status:** active.
 
 ## Foundation pass — 2026-10-14

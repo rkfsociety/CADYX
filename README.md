@@ -1,6 +1,6 @@
 # CADYX
 
-CADYX is an AI-first CAD foundation prototype. Agents create projects and modify models through the Agent API and shared Core Command System; a per-project edit lease prevents concurrent writes. The browser is a read-only, full-window detail viewer with collapsed model and property docks. Agents can fetch a server-rendered PNG snapshot through the Agent API without using a browser.
+CADYX is an AI-first CAD foundation prototype. Agents create projects and modify models through the Agent API and shared Core Command System; a per-project edit lease prevents concurrent writes. The provider-neutral in-process Agent Runtime can orchestrate a provider adapter and project tools without adding a provider dependency. The browser is a read-only, full-window detail viewer with collapsed model and property docks. Agents can fetch a server-rendered PNG snapshot through the Agent API without using a browser.
 
 ## Run locally
 
@@ -62,3 +62,12 @@ See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](do
 - `GET /api/v1/events` for the SSE update channel
 
 The API is versioned and provider-neutral. See the architecture guide for current limits and the next implementation stages.
+
+## Agent Runtime
+
+`cadyx.AgentRuntime` accepts an implementation of the `AgentProvider` protocol.
+Provider adapters translate native model requests and responses to CADYX's
+provider-neutral messages, tool specifications and tool calls. The runtime
+offers project inspection, viewport inspection and revision-checked command
+execution, managing the agent lease for each run. No provider adapter is
+included. See the [Agent Runtime contract](docs/architecture.md#agent-runtime).

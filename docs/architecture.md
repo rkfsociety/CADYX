@@ -5,13 +5,14 @@
 CADYX is AI-first: agents use a versioned API and the shared Core command system. The browser is a read-only, full-window detail viewer; project creation and document writes go through the Agent API. Model and property docks start collapsed. The browser does not call a geometry kernel or own CAD state.
 
 ```text
-AI provider (future) -> Agent API -> CADYX Core -> Command System -> Document
-Browser ----------------> Web API -> CADYX Core -> Project Workspace
-                                      |            Geometry Kernel adapter
-                                      +-> event broker -> SSE -> Browser
+Provider adapter (future) -> Agent Runtime -> CADYX Core -> Command System -> Document
+External agent -----------------------> Agent API -> CADYX Core -> Project Workspace
+Browser --------------------------------> Web API -> CADYX Core -> Project Workspace
+                                                      |            Geometry Kernel adapter
+                                                      +-> event broker -> SSE -> Browser
 ```
 
-The local prototype uses Python standard-library modules for the Core and HTTP server, with plain browser HTML/CSS/JavaScript. The current Windows x64 runtime uses Python 3.15 and native OCCT 8.0.1 through a project-built C ABI bridge (`native/`, `cadyx/native_kernel.py`), independent of Python extension ABIs. It replaces the former cadquery-ocp/VTK dependency to permit the newest stable Python without bypassing dependency checks. The browser consumes Core-generated meshes and XY sketch primitives using the same Z-up orthographic canvas viewport as folder PLY previews. PLY rendering samples large inputs to keep the browser responsive. The project stream synchronizes snapshots; the UI does not expose an agent command feed. External agents still use the Agent API; no embedded Agent Runtime exists. See [viewport API](viewport-api.md) and [setup](../README.md).
+The local prototype uses Python standard-library modules for the Core, Agent Runtime and HTTP server, with plain browser HTML/CSS/JavaScript. The current Windows x64 runtime uses Python 3.15 and native OCCT 8.0.1 through a project-built C ABI bridge (`native/`, `cadyx/native_kernel.py`), independent of Python extension ABIs. It replaces the former cadquery-ocp/VTK dependency to permit the newest stable Python without bypassing dependency checks. The browser consumes Core-generated meshes and XY sketch primitives using the same Z-up orthographic canvas viewport as folder PLY previews. PLY rendering samples large inputs to keep the browser responsive. The project stream synchronizes snapshots; the UI does not expose an agent command feed. External agents can continue to use the Agent API directly. See [Agent Runtime](#agent-runtime), [viewport API](viewport-api.md) and [setup](../README.md).
 
 
 ## Core and storage
@@ -73,8 +74,32 @@ its presence. New agents should use `/resume` for guarded work.
 The control sidecar records only token fences and revision-protection flags;
 new resumed leases prune previous tokens. It does not change the portable project
 or document schema, so no format migration is needed. Preserve both SQLite
-sidecars while hosts run. Agent Runtime, provider integration and UI stop controls
-are outside this API milestone.
+sidecars while hosts run. UI stop controls remain outside this API milestone.
+
+## Agent Runtime
+
+`cadyx.agent_runtime.AgentRuntime` runs a provider-neutral completion and tool
+loop for one existing project. A provider adapter implements the small
+`AgentProvider.complete(messages, tools)` protocol and translates its native
+request/response format to CADYX's `AgentMessage`, `AgentToolSpec` and
+`AgentResponse` values. CADYX has no provider SDK dependency or provider-specific
+configuration in Core.
+
+The runtime exposes three tools to the provider: inspect the current project,
+read its viewport scene, and execute one Command System command. Each run
+compares the inspected revision while acquiring a fresh agent lease, checks
+that revision for every command, refreshes the lease heartbeat while the
+provider is working, and uses the validated stop path to release the lease on
+success or failure. Provider tool rounds and total calls are bounded. Tool
+validation and conflict errors are returned as structured tool results so the
+provider can respond; unexpected provider/runtime failures end the run and
+still attempt validated lease cleanup.
+
+The runtime is an in-process Python API exported as `cadyx.AgentRuntime`; it is
+not a provider integration, HTTP endpoint or background service. Projects are
+created through the existing Core or Agent API before a runtime run. See the
+[Agent Runtime module](../cadyx/agent_runtime.py) and
+[focused tests](../tests/test_agent_runtime.py).
 
 ## Commands and geometry
 
