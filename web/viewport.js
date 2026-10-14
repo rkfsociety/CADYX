@@ -136,7 +136,7 @@
 
       if (triangles.length) renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress,
-        geometry.vertexNormals, yaw, pitch,
+        geometry.vertexNormals, geometry.faceNormals, yaw, pitch,
       );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale);
       for (let index = 0; index < (geometry.lines || []).length; index += 2) {
@@ -235,7 +235,7 @@
     }
 
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress,
-      vertexNormals, yaw, pitch) {
+      vertexNormals, faceNormals, yaw, pitch) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
       const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
@@ -269,6 +269,17 @@
         let brightness;
         if (smooth) {
           brightness = (vertexLight[first] + vertexLight[second] + vertexLight[third]) / 3;
+        } else if (faceNormals && !transition) {
+          const normal = face * 3;
+          const worldX = faceNormals[normal], worldY = faceNormals[normal + 1];
+          const worldZ = faceNormals[normal + 2];
+          const rotatedX = worldX * cosYaw - worldY * sinYaw;
+          const rotatedDepth = worldX * sinYaw + worldY * cosYaw;
+          const normalY = worldZ * cosPitch - rotatedDepth * sinPitch;
+          const normalZ = worldZ * sinPitch + rotatedDepth * cosPitch;
+          brightness = 0.34 + 0.66 * Math.abs(
+            rotatedX * light[0] + normalY * light[1] + normalZ * light[2],
+          );
         } else {
           const ax = camera[a], ay = camera[a + 1], bx = camera[b], by = camera[b + 1];
           const cx = camera[c], cy = camera[c + 1];
@@ -305,8 +316,11 @@
         const third = triangles[face * 3 + 2];
         const green = Math.round(105 + brightness * 87);
         let red = Math.round(green * 0.69), blue = Math.round(green * 0.53), finalGreen = green;
-        const forming = transition?.vertexRange
-          && [first, second, third].every((vertex) => vertex >= transition.vertexRange[0] && vertex < transition.vertexRange[1]);
+        const vertexRange = transition?.vertexRange;
+        const forming = vertexRange
+          && first >= vertexRange[0] && first < vertexRange[1]
+          && second >= vertexRange[0] && second < vertexRange[1]
+          && third >= vertexRange[0] && third < vertexRange[1];
         if (forming && progress < 1) {
           const glow = (1 - progress) * 0.38;
           red = Math.round(red + (112 - red) * glow);
@@ -392,6 +406,7 @@
           orbitCenter,
           fitRadius: orbitCenter ? fitRadiusFromBounds(value.bounds, orbitCenter) : null,
           vertexNormals: smoothShading ? buildVertexNormals(value.positions, value.triangles || []) : null,
+          faceNormals: smoothShading ? null : buildFaceNormals(value.positions, value.triangles || []),
         };
         vertexLight = geometry.vertexNormals ? new Float32Array(geometry.vertexNormals.length / 3) : new Float32Array(0);
         transition = nextTransition ? {
@@ -547,6 +562,26 @@
         normals[index] /= length;
         normals[index + 1] /= length;
         normals[index + 2] /= length;
+      }
+      return normals;
+    }
+
+    function buildFaceNormals(positions, triangles) {
+      if (!triangles.length) return null;
+      const normals = new Float64Array(triangles.length);
+      for (let face = 0; face < triangles.length; face += 3) {
+        const first = triangles[face] * 3, second = triangles[face + 1] * 3, third = triangles[face + 2] * 3;
+        const ux = positions[second] - positions[first];
+        const uy = positions[second + 1] - positions[first + 1];
+        const uz = positions[second + 2] - positions[first + 2];
+        const vx = positions[third] - positions[first];
+        const vy = positions[third + 1] - positions[first + 1];
+        const vz = positions[third + 2] - positions[first + 2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const length = Math.hypot(nx, ny, nz) || 1;
+        normals[face] = nx / length;
+        normals[face + 1] = ny / length;
+        normals[face + 2] = nz / length;
       }
       return normals;
     }
