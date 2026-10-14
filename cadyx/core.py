@@ -52,6 +52,7 @@ class CadyxCore:
         self._validated_document_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
         self._document_validation_locks: dict[tuple[str, str], threading.Lock] = {}
         self._scene_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
+        self._png_cache: OrderedDict[tuple[str, str], bytes] = OrderedDict()
 
     @contextmanager
     def _project_guard(self, project_id: str) -> Iterator[None]:
@@ -102,6 +103,10 @@ class CadyxCore:
             return lease.as_dict()
 
     def render_project(self, project_id: str) -> dict[str, Any]:
+        _, scene = self._scene_for_project(project_id)
+        return self._clone_scene(scene)
+
+    def _scene_for_project(self, project_id: str) -> tuple[tuple[str, str], dict[str, Any]]:
         project = self.workspace.load(project_id)
         document = Document.from_dict(project["document"])
         key = self._document_cache_key(project_id, document)
@@ -109,18 +114,39 @@ class CadyxCore:
             cached_scene = self._scene_cache.get(key)
             if cached_scene is not None:
                 self._scene_cache.move_to_end(key)
-                return copy.deepcopy(cached_scene)
+                return key, cached_scene
         self._validate_geometry_once(project_id, document)
         scene = render_scene(document, self.kernel)
         with self._geometry_cache_guard:
-            self._scene_cache[key] = copy.deepcopy(scene)
-            self._scene_cache.move_to_end(key)
-            while len(self._scene_cache) > 8:
-                self._scene_cache.popitem(last=False)
-        return scene
+            cached_scene = self._scene_cache.get(key)
+            if cached_scene is None:
+                self._scene_cache[key] = scene
+                self._scene_cache.move_to_end(key)
+                while len(self._scene_cache) > 8:
+                    self._scene_cache.popitem(last=False)
+                cached_scene = scene
+            else:
+                self._scene_cache.move_to_end(key)
+        return key, cached_scene
 
     def render_project_png(self, project_id: str) -> bytes:
-        return render_scene_png(self.render_project(project_id))
+        key, scene = self._scene_for_project(project_id)
+        with self._geometry_cache_guard:
+            cached_png = self._png_cache.get(key)
+            if cached_png is not None:
+                self._png_cache.move_to_end(key)
+                return cached_png
+        encoded = render_scene_png(scene)
+        with self._geometry_cache_guard:
+            cached_png = self._png_cache.get(key)
+            if cached_png is not None:
+                self._png_cache.move_to_end(key)
+                return cached_png
+            self._png_cache[key] = encoded
+            self._png_cache.move_to_end(key)
+            while len(self._png_cache) > 8:
+                self._png_cache.popitem(last=False)
+        return encoded
 
     def inspect_body_topology(self, project_id: str, body_id: str) -> dict[str, Any]:
         project = self.workspace.load(project_id)
@@ -509,6 +535,23 @@ class CadyxCore:
                 raise ValidationError("Profile feature geometry is out of date with its parameters.")
             if feature_geometry.get("centered", False) != parameters.get("centered", False):
                 raise ValidationError("Profile feature centered-extrusion state is out of date.")
+
+    @staticmethod
+    def _clone_scene(scene: dict[str, Any]) -> dict[str, Any]:
+        clone = scene.copy()
+        bounds = scene.get("bounds")
+        clone["bounds"] = None if bounds is None else {
+            "min": list(bounds["min"]),
+            "max": list(bounds["max"]),
+        }
+        objects = []
+        for item in scene.get("objects", []):
+            copied = item.copy()
+            for field in ("positions", "triangles", "lines", "points"):
+                copied[field] = list(item[field])
+            objects.append(copied)
+        clone["objects"] = objects
+        return clone
 
     @staticmethod
     def _document_cache_key(project_id: str, document: Document) -> tuple[str, str]:
