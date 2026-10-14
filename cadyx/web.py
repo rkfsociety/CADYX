@@ -7,6 +7,7 @@ import json
 import mimetypes
 import os
 import queue
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -20,16 +21,29 @@ from .models import OwnerType
 _MAX_BODY_BYTES = 1_000_000
 _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 _UI_ASSETS = ("index.html", "app.js", "style.css", "viewport.js", "ply-preview.js", "favicon.svg")
+_UI_ASSET_VERSION_LOCK = threading.Lock()
+_UI_ASSET_VERSION_CACHE: tuple[tuple[tuple[str, int, int], ...], str] | None = None
 
 
 def _ui_asset_version() -> str:
-    digest = hashlib.sha256()
-    for filename in _UI_ASSETS:
-        digest.update(filename.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update((_WEB_ROOT / filename).read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
+    global _UI_ASSET_VERSION_CACHE
+    with _UI_ASSET_VERSION_LOCK:
+        signature = tuple(
+            (filename, stat.st_mtime_ns, stat.st_size)
+            for filename in _UI_ASSETS
+            for stat in [(_WEB_ROOT / filename).stat()]
+        )
+        if _UI_ASSET_VERSION_CACHE is not None and _UI_ASSET_VERSION_CACHE[0] == signature:
+            return _UI_ASSET_VERSION_CACHE[1]
+        digest = hashlib.sha256()
+        for filename in _UI_ASSETS:
+            digest.update(filename.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update((_WEB_ROOT / filename).read_bytes())
+            digest.update(b"\0")
+        version = digest.hexdigest()
+        _UI_ASSET_VERSION_CACHE = (signature, version)
+        return version
 
 
 class CadyxHTTPServer(ThreadingHTTPServer):
