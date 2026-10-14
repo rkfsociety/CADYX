@@ -85,6 +85,10 @@ const observationActivityLabels = {
   observe: "Чтение модели",
 };
 const FOLDER_SELECTION_PREFIX = "folder:";
+const dockMenus = [...document.querySelectorAll(".dock-control")];
+dockMenus.forEach((menu) => menu.addEventListener("toggle", () => {
+  if (menu.open) dockMenus.forEach((other) => { if (other !== menu) other.open = false; });
+}));
 
 function readSelectedProject() {
   try { return localStorage.getItem("cadyx.selected-project"); }
@@ -214,8 +218,6 @@ function showFolderDetail(name) {
   noSelection.hidden = true;
   $("#folder-detail").hidden = false;
   $("#document-title").textContent = name;
-  $("#folder-detail-name").textContent = name;
-  $("#folder-detail-path").textContent = `projects/${name}`;
   if (folderChanged) {
     folderFiles = [];
     folderFilesSignature = null;
