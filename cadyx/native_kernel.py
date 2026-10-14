@@ -71,6 +71,26 @@ class NativeKernel:
                         ctypes.c_char_p, ctypes.c_size_t,
                     ]
                     library.cadyx_step_import.restype = ctypes.c_void_p
+                    library.cadyx_brep_export.argtypes = [
+                        ctypes.POINTER(GraphNode), ctypes.c_size_t,
+                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
+                        ctypes.POINTER(ctypes.c_int), ctypes.c_size_t,
+                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                        ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_void_p),
+                        ctypes.c_char_p, ctypes.c_size_t,
+                    ]
+                    library.cadyx_brep_export.restype = ctypes.c_void_p
+                    library.cadyx_step_export.argtypes = [
+                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                        ctypes.POINTER(ctypes.c_size_t), ctypes.c_char_p, ctypes.c_size_t,
+                    ]
+                    library.cadyx_step_export.restype = ctypes.c_void_p
+                    library.cadyx_stl_export.argtypes = [
+                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_double, ctypes.c_double,
+                        ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_void_p),
+                        ctypes.c_char_p, ctypes.c_size_t,
+                    ]
+                    library.cadyx_stl_export.restype = ctypes.c_void_p
                     library.cadyx_modify_imported_brep.argtypes = [
                         ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_int,
                         ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
@@ -153,6 +173,12 @@ class NativeKernel:
             self.library.cadyx_free(result)
 
     def geometry_graph(self, geometry, *, mesh=False, topology=False):
+        return self._geometry_graph(geometry, mesh=mesh, topology=topology)
+
+    def export_geometry(self, geometry):
+        return self._geometry_graph(geometry, export=True)
+
+    def _geometry_graph(self, geometry, *, mesh=False, topology=False, export=False):
         nodes = []
         coordinates = []
         edge_indices = []
@@ -215,12 +241,30 @@ class NativeKernel:
         native_edges = (ctypes.c_int * len(edge_indices))(*edge_indices) if edge_indices else None
         native_brep_data = (ctypes.c_ubyte * len(brep_data)).from_buffer_copy(brep_data) if brep_data else None
         error = ctypes.create_string_buffer(1024)
-        result = self.library.cadyx_graph(
-            native_nodes, len(nodes), native_coordinates, len(coordinates), native_edges, len(edge_indices),
-            native_brep_data, len(brep_data), int(mesh), int(topology), error, len(error),
-        )
+        if export:
+            output_size = ctypes.c_size_t()
+            metrics_json = ctypes.c_void_p()
+            result = self.library.cadyx_brep_export(
+                native_nodes, len(nodes), native_coordinates, len(coordinates), native_edges, len(edge_indices),
+                native_brep_data, len(brep_data), ctypes.byref(output_size), ctypes.byref(metrics_json),
+                error, len(error),
+            )
+        else:
+            result = self.library.cadyx_graph(
+                native_nodes, len(nodes), native_coordinates, len(coordinates), native_edges, len(edge_indices),
+                native_brep_data, len(brep_data), int(mesh), int(topology), error, len(error),
+            )
         if not result:
             raise ValidationError(error.value.decode("utf-8", errors="replace"))
+        if export:
+            try:
+                return bytes(ctypes.string_at(result, output_size.value)), json.loads(
+                    ctypes.string_at(metrics_json).decode("utf-8"),
+                )
+            finally:
+                self.library.cadyx_free(result)
+                if metrics_json:
+                    self.library.cadyx_free(metrics_json)
         try:
             return json.loads(ctypes.string_at(result))
         finally:
@@ -238,6 +282,45 @@ class NativeKernel:
             return json.loads(ctypes.string_at(result))
         finally:
             self.library.cadyx_free(result)
+
+    @staticmethod
+    def _export_brep_buffer(brep):
+        if not isinstance(brep, bytes) or not brep or len(brep) > 64 * 1024 * 1024:
+            raise ValidationError("B-rep data is empty or exceeds the 64 MB limit.")
+        return (ctypes.c_ubyte * len(brep)).from_buffer_copy(brep)
+
+    def export_step_brep(self, brep):
+        source = self._export_brep_buffer(brep)
+        output_size = ctypes.c_size_t()
+        error = ctypes.create_string_buffer(1024)
+        result = self.library.cadyx_step_export(
+            source, len(brep), ctypes.byref(output_size), error, len(error),
+        )
+        if not result:
+            raise ValidationError(error.value.decode("utf-8", errors="replace"))
+        try:
+            return bytes(ctypes.string_at(result, output_size.value))
+        finally:
+            self.library.cadyx_free(result)
+
+    def export_stl_brep(self, brep, *, linear_deflection, angular_deflection):
+        source = self._export_brep_buffer(brep)
+        output_size = ctypes.c_size_t()
+        metrics_json = ctypes.c_void_p()
+        error = ctypes.create_string_buffer(1024)
+        result = self.library.cadyx_stl_export(
+            source, len(brep), linear_deflection, angular_deflection,
+            ctypes.byref(output_size), ctypes.byref(metrics_json), error, len(error),
+        )
+        if not result:
+            raise ValidationError(error.value.decode("utf-8", errors="replace"))
+        try:
+            return (bytes(ctypes.string_at(result, output_size.value)),
+                    json.loads(ctypes.string_at(metrics_json).decode("utf-8")))
+        finally:
+            self.library.cadyx_free(result)
+            if metrics_json:
+                self.library.cadyx_free(metrics_json)
 
     def modify_imported_brep(self, geometry, *, operation, parameters):
         if operation not in {"resize_thread_x", "rigid_transform"}:

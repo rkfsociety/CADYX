@@ -9,6 +9,7 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
@@ -19,6 +20,7 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
@@ -45,16 +47,21 @@
 #include <NCollection_IndexedMap.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopLoc_Location.hxx>
 #include <Standard_Version.hxx>
 #include <Standard_Failure.hxx>
 #include <STEPControl_Reader.hxx>
+#include <STEPControl_Writer.hxx>
+#include <STEPControl_StepModelType.hxx>
+#include <StlAPI_Writer.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <ShapeFix_Shape.hxx>
 #include <ShapeFix_Wire.hxx>
 #include <ShapeFix_Solid.hxx>
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cmath>
 #include <cstring>
@@ -62,6 +69,7 @@
 #include <sstream>
 #include <iostream>
 #include <locale>
+#include <memory>
 #include <string>
 #include <stdexcept>
 #include <cstdint>
@@ -73,6 +81,8 @@ API void cadyx_free(char* value) noexcept { delete[] value; }
 
 namespace {
 constexpr double kFullTurn = 6.28318530717958647692;
+constexpr size_t kStlDeviationSampleLimit = 64;
+constexpr size_t kMaxDeliveryBytes = 64 * 1024 * 1024;
 
 void CopyError(char* error, size_t capacity, const char* message) {
   if (!error || !capacity) return;
@@ -84,6 +94,13 @@ void CopyError(char* error, size_t capacity, const char* message) {
 char* CopyResult(const std::string& value) {
   char* result = new char[value.size() + 1];
   std::memcpy(result, value.c_str(), value.size() + 1);
+  return result;
+}
+
+char* CopyBytes(const std::string& value) {
+  if (value.empty()) throw std::runtime_error("OCCT returned an empty export.");
+  char* result = new char[value.size()];
+  std::memcpy(result, value.data(), value.size());
   return result;
 }
 
@@ -457,6 +474,98 @@ std::string ImportStepJson(const unsigned char* data, size_t size) {
   return json;
 }
 
+std::string ExportStepBytes(const unsigned char* data, size_t size) {
+  const TopoDS_Shape shape = ReadImportedBrep(data, size);
+  ShapeJson(shape, 0);
+  STEPControl_Writer writer;
+  if (writer.Transfer(shape, STEPControl_AsIs) != IFSelect_RetDone)
+    throw std::runtime_error("OCCT could not transfer the B-rep to STEP.");
+  std::ostringstream output;
+  if (writer.WriteStream(output) != IFSelect_RetDone || !output.good())
+    throw std::runtime_error("OCCT could not write the STEP export.");
+  const std::string step = output.str();
+  if (step.empty() || step.size() > kMaxDeliveryBytes)
+    throw std::runtime_error("STEP output is empty or exceeds the 64 MB delivery limit.");
+  return step;
+}
+
+struct StlExportResult {
+  std::string data;
+  std::string metrics;
+};
+
+StlExportResult ExportStl(const unsigned char* data, size_t size,
+                          double linear_deflection, double angular_deflection) {
+  if (!std::isfinite(linear_deflection) || linear_deflection < 0.001
+      || !std::isfinite(angular_deflection) || angular_deflection < 0.01
+      || angular_deflection > 1.0)
+    throw std::runtime_error("STL deflection parameters are outside the supported range.");
+  const TopoDS_Shape shape = ReadImportedBrep(data, size);
+  ShapeJson(shape, 0);
+
+  BRepMesh_IncrementalMesh mesher(shape, linear_deflection, false, angular_deflection, true);
+  if (!mesher.IsDone()) throw std::runtime_error("OCCT could not mesh the B-rep for STL export.");
+  StlAPI_Writer writer;
+  writer.ASCIIMode() = false;
+  std::ostringstream output(std::ios::out | std::ios::binary);
+  if (!writer.Write(shape, output) || !output.good())
+    throw std::runtime_error("OCCT could not write the STL export.");
+  const std::string stl = output.str();
+  if (stl.size() > kMaxDeliveryBytes)
+    throw std::runtime_error("STL output exceeds the 64 MB delivery limit.");
+  if (stl.size() < 84) throw std::runtime_error("OCCT returned a truncated binary STL export.");
+  uint32_t triangle_count = 0;
+  std::memcpy(&triangle_count, stl.data() + 80, sizeof(triangle_count));
+  if (triangle_count == 0 || stl.size() != 84 + static_cast<size_t>(triangle_count) * 50)
+    throw std::runtime_error("OCCT returned an invalid binary STL export.");
+
+  TopoDS_Compound surface;
+  BRep_Builder builder;
+  builder.MakeCompound(surface);
+  for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next())
+    builder.Add(surface, explorer.Current());
+
+  const size_t sample_count = std::min<size_t>(triangle_count, kStlDeviationSampleLimit);
+  double max_deviation = 0.0;
+  double squared_deviation_sum = 0.0;
+  for (size_t sample = 0; sample < sample_count; ++sample) {
+    const size_t triangle = sample * static_cast<size_t>(triangle_count) / sample_count;
+    const char* vertices = stl.data() + 84 + triangle * 50 + 12;
+    std::array<gp_Pnt, 3> points;
+    for (size_t vertex = 0; vertex < 3; ++vertex) {
+      float coordinates[3]{};
+      std::memcpy(coordinates, vertices + vertex * 12, sizeof(coordinates));
+      if (!std::isfinite(coordinates[0]) || !std::isfinite(coordinates[1])
+          || !std::isfinite(coordinates[2]))
+        throw std::runtime_error("OCCT returned a non-finite STL vertex.");
+      points[vertex].SetCoord(coordinates[0], coordinates[1], coordinates[2]);
+    }
+    const gp_Pnt centroid((points[0].X() + points[1].X() + points[2].X()) / 3.0,
+                          (points[0].Y() + points[1].Y() + points[2].Y()) / 3.0,
+                          (points[0].Z() + points[1].Z() + points[2].Z()) / 3.0);
+    const TopoDS_Shape vertex = BRepBuilderAPI_MakeVertex(centroid).Shape();
+    BRepExtrema_DistShapeShape distance(vertex, surface, 1e-7);
+    if (!distance.IsDone()) distance.Perform();
+    if (!distance.IsDone()) throw std::runtime_error("OCCT could not measure STL surface deviation.");
+    const double deviation = distance.Value();
+    if (!std::isfinite(deviation))
+      throw std::runtime_error("OCCT returned a non-finite STL surface deviation.");
+    max_deviation = std::max(max_deviation, deviation);
+    squared_deviation_sum += deviation * deviation;
+  }
+
+  std::ostringstream metrics;
+  metrics.imbue(std::locale::classic());
+  metrics << std::setprecision(17)
+          << "{\"format\":\"binary_stl\",\"triangle_count\":" << triangle_count
+          << ",\"linear_deflection\":" << linear_deflection
+          << ",\"angular_deflection\":" << angular_deflection
+          << ",\"surface_deviation_sample\":{\"method\":\"evenly sampled triangle centroids to exact B-rep faces\",\"sample_count\":"
+          << sample_count << ",\"max\":" << max_deviation
+          << ",\"rms\":" << std::sqrt(squared_deviation_sum / sample_count) << "}}";
+  return {stl, metrics.str()};
+}
+
 TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
                               int operation, int plane, double amount, bool centered) {
   if (!coordinates || point_count < 3 || point_count > 4096)
@@ -682,11 +791,11 @@ TopoDS_Shape MakeMetricThread(double major_diameter, double pitch, double length
   return EnsureOneSolid(MakeFuse(core_builder.Shape(), loft.Shape()), "Metric thread");
 }
 
-std::string BuildGraphJson(const OperationNode* nodes, size_t node_count,
-                           const double* coordinates, size_t coordinate_count,
-                           const int* edge_indices, size_t edge_count,
-                           const unsigned char* brep_data, size_t brep_size,
-                           int mesh, int topology) {
+TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
+                             const double* coordinates, size_t coordinate_count,
+                             const int* edge_indices, size_t edge_count,
+                             const unsigned char* brep_data, size_t brep_size,
+                             bool& allow_invalid_import) {
   if (!nodes || node_count == 0 || node_count > 1024)
     throw std::runtime_error("A geometry graph needs between 1 and 1024 operations.");
   std::vector<TopoDS_Shape> shapes;
@@ -748,7 +857,43 @@ std::string BuildGraphJson(const OperationNode* nodes, size_t node_count,
     }
     shapes.push_back(shape);
   }
-  return ShapeJson(shapes.back(), mesh, topology, nodes[node_count - 1].type == 6);
+  allow_invalid_import = nodes[node_count - 1].type == 6;
+  return shapes.back();
+}
+
+std::string BuildGraphJson(const OperationNode* nodes, size_t node_count,
+                           const double* coordinates, size_t coordinate_count,
+                           const int* edge_indices, size_t edge_count,
+                           const unsigned char* brep_data, size_t brep_size,
+                           int mesh, int topology) {
+  bool allow_invalid_import = false;
+  const TopoDS_Shape shape = BuildGraphShape(nodes, node_count, coordinates, coordinate_count,
+      edge_indices, edge_count, brep_data, brep_size, allow_invalid_import);
+  return ShapeJson(shape, mesh, topology, allow_invalid_import);
+}
+
+struct GeometryExportResult {
+  std::string brep;
+  std::string metrics;
+};
+
+GeometryExportResult SerializeGraphForExport(const OperationNode* nodes, size_t node_count,
+                                              const double* coordinates, size_t coordinate_count,
+                                              const int* edge_indices, size_t edge_count,
+                                              const unsigned char* brep_data, size_t brep_size) {
+  bool allow_invalid_import = false;
+  const TopoDS_Shape shape = BuildGraphShape(nodes, node_count, coordinates, coordinate_count,
+      edge_indices, edge_count, brep_data, brep_size, allow_invalid_import);
+  if (allow_invalid_import && !BRepCheck_Analyzer(shape).IsValid())
+    throw std::runtime_error("Invalid imported B-reps cannot be exported.");
+  const std::string metrics = ShapeJson(shape, 0, 0, false);
+  std::ostringstream output;
+  BRepTools::Write(shape, output, false, false, TopTools_FormatVersion_CURRENT);
+  if (!output.good()) throw std::runtime_error("OCCT could not serialize the B-rep for export.");
+  const std::string serialized = output.str();
+  if (serialized.empty() || serialized.size() > 64 * 1024 * 1024)
+    throw std::runtime_error("Serialized B-rep is empty or exceeds the 64 MB limit.");
+  return {serialized, metrics};
 }
 }  // namespace
 
@@ -770,6 +915,36 @@ API char* cadyx_graph(const OperationNode* nodes, size_t node_count,
   return nullptr;
 }
 
+API char* cadyx_brep_export(const OperationNode* nodes, size_t node_count,
+                            const double* coordinates, size_t coordinate_count,
+                            const int* edge_indices, size_t edge_count,
+                            const unsigned char* brep_data, size_t brep_size,
+                            size_t* output_size, char** metrics_json,
+                            char* error, size_t capacity) noexcept {
+  if (output_size) *output_size = 0;
+  if (metrics_json) *metrics_json = nullptr;
+  try {
+    if (!output_size || !metrics_json)
+      throw std::runtime_error("B-rep export needs output-size and metrics pointers.");
+    const GeometryExportResult output = SerializeGraphForExport(
+        nodes, node_count, coordinates, coordinate_count, edge_indices, edge_count,
+        brep_data, brep_size);
+    std::unique_ptr<char[]> result(CopyBytes(output.brep));
+    std::unique_ptr<char[]> metrics(CopyResult(output.metrics));
+    *output_size = output.brep.size();
+    *metrics_json = metrics.release();
+    return result.release();
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString()
+        ? exception.GetMessageString() : "OCCT B-rep export failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown OCCT B-rep export failure.");
+  }
+  return nullptr;
+}
+
 API char* cadyx_step_import(const unsigned char* data, size_t size,
                             char* error, size_t capacity) noexcept {
   try {
@@ -780,6 +955,51 @@ API char* cadyx_step_import(const unsigned char* data, size_t size,
     CopyError(error, capacity, exception.what());
   } catch (...) {
     CopyError(error, capacity, "Unknown OCCT STEP import failure.");
+  }
+  return nullptr;
+}
+
+API char* cadyx_step_export(const unsigned char* data, size_t size, size_t* output_size,
+                            char* error, size_t capacity) noexcept {
+  if (output_size) *output_size = 0;
+  try {
+    if (!output_size) throw std::runtime_error("STEP export needs an output-size pointer.");
+    const std::string output = ExportStepBytes(data, size);
+    *output_size = output.size();
+    return CopyBytes(output);
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString()
+        ? exception.GetMessageString() : "OCCT STEP export failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown OCCT STEP export failure.");
+  }
+  return nullptr;
+}
+
+API char* cadyx_stl_export(const unsigned char* data, size_t size,
+                           double linear_deflection, double angular_deflection,
+                           size_t* output_size, char** metrics_json,
+                           char* error, size_t capacity) noexcept {
+  if (output_size) *output_size = 0;
+  if (metrics_json) *metrics_json = nullptr;
+  try {
+    if (!output_size || !metrics_json)
+      throw std::runtime_error("STL export needs output-size and metrics pointers.");
+    const StlExportResult output = ExportStl(data, size, linear_deflection, angular_deflection);
+    std::unique_ptr<char[]> result(CopyBytes(output.data));
+    std::unique_ptr<char[]> metrics(CopyResult(output.metrics));
+    *output_size = output.data.size();
+    *metrics_json = metrics.release();
+    return result.release();
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString()
+        ? exception.GetMessageString() : "OCCT STL export failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown OCCT STL export failure.");
   }
   return nullptr;
 }

@@ -41,6 +41,7 @@ class CadyxCore:
             resolve_project_file=self.workspace.resolve_project_file,
             scan_processor=scan_processor,
             publish_scan_output=self.workspace.publish_scan_output,
+            publish_cad_delivery=self.workspace.publish_cad_delivery,
         )
         if lease_clock is None:
             self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds)
@@ -371,16 +372,18 @@ class CadyxCore:
                     code="PROJECT_LOCKED",
                 )
             project = self.workspace.load(project_id)
+            if command_name == "export_brep" and expected_revision is None:
+                raise ValidationError("export_brep requires expected_revision to bind files to a saved document revision.")
             if lease.owner_type is OwnerType.AGENT:
                 revision_required = self.leases.check_agent_command(project_id, lease.lease_id)
                 if revision_required or expected_revision is not None:
                     self._check_revision(Document.from_dict(project["document"]), expected_revision)
             elif expected_revision is not None:
                 self._check_revision(Document.from_dict(project["document"]), expected_revision)
-            if command_name == "resize_imported_thread":
-                # OCCT's Boolean stitching of imported NURBS can outlast the
+            if command_name in {"resize_imported_thread", "export_brep"}:
+                # OCCT operations on complex imported NURBS can outlast the
                 # normal lease window; the project transaction prevents
-                # concurrent heartbeats, so grant this command a wider expiry.
+                # concurrent heartbeats, so grant them a wider expiry.
                 self.leases.extend_timeout(project_id, lease.lease_id, 300.0)
             operation_id = str(uuid4())
             source = self._scan_source(command, project["document"])
@@ -493,6 +496,7 @@ class CadyxCore:
             "resize_imported_thread": "Увеличивает диаметр резьбы",
             "transform_imported_brep": "Выравнивает импортированную модель",
             "import_step": "Импортирует точную STEP-геометрию",
+            "export_brep": "Проверяет и экспортирует CAD-модель",
             "import_scan": "Обрабатывает скан",
             "set_scan_parameter": "Пересобирает скан",
             "remove_sketch_object": "Удаляет объект эскиза",

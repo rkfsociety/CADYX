@@ -37,6 +37,11 @@ class GeometryKernel(Protocol):
 
     def create_imported_step(self, source: bytes) -> tuple[dict[str, Any], dict[str, Any]]: ...
 
+    def export_delivery(
+        self, geometry: dict[str, Any], *, include_stl: bool,
+        linear_deflection: float, angular_deflection: float,
+    ) -> dict[str, Any]: ...
+
     def modify_imported_brep(
         self, base: dict[str, Any], *, operation: str, parameters: list[float],
     ) -> dict[str, Any]: ...
@@ -279,6 +284,36 @@ class OCCTKernelAdapter:
                 or not math.isclose(roundtrip["surface_area"], metrics["surface_area"], rel_tol=1e-12, abs_tol=1e-12)):
             raise ValidationError("Imported B-rep did not preserve the STEP model geometry.")
         return geometry, metrics
+
+    def export_delivery(
+        self,
+        geometry: dict[str, Any],
+        *,
+        include_stl: bool,
+        linear_deflection: float = 0.1,
+        angular_deflection: float = 0.5,
+    ) -> dict[str, Any]:
+        if type(include_stl) is not bool:
+            raise ValidationError("stl must be a boolean.")
+        linear_deflection = _positive_amount(linear_deflection, "linear_deflection")
+        angular_deflection = _positive_amount(angular_deflection, "angular_deflection", maximum=1.0)
+        if linear_deflection < 0.001 or angular_deflection < 0.01:
+            raise ValidationError("STL deflections must be at least 0.001 linear and 0.01 radians.")
+        self.validate(geometry)
+        native = NativeKernel()
+        brep, source_metrics = native.export_geometry(geometry)
+        result: dict[str, Any] = {
+            "step": native.export_step_brep(brep),
+            "stl": None,
+            "metrics": source_metrics,
+            "stl_metrics": None,
+            "kernel_version": native.version,
+        }
+        if include_stl:
+            result["stl"], result["stl_metrics"] = native.export_stl_brep(
+                brep, linear_deflection=linear_deflection, angular_deflection=angular_deflection,
+            )
+        return result
 
     def modify_imported_brep(
         self, base: dict[str, Any], *, operation: str, parameters: list[float],

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import math
 import hashlib
+import json
+import re
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
 from .errors import NotFoundError, ValidationError
+from .delivery import compare_step_metrics, geometry_sha256, verify_binary_stl
 from .engineering import involute_spur_gear_profile
 from .kernel import GeometryKernel
 from .mesh_geometry import mesh_ply_bytes
@@ -50,12 +53,14 @@ class CommandSystem:
         resolve_project_file: Callable[[str, str], Path] | None = None,
         scan_processor: ScanProcessor | None = None,
         publish_scan_output: Callable[[str, str, bytes], dict[str, Any]] | None = None,
+        publish_cad_delivery: Callable[[str, dict[str, bytes]], list[dict[str, Any]]] | None = None,
     ) -> None:
         self.kernel = kernel
         self.resolve_scan = resolve_scan
         self.resolve_project_file = resolve_project_file
         self.scan_processor = scan_processor if scan_processor is not None else ScanProcessor()
         self.publish_scan_output = publish_scan_output
+        self.publish_cad_delivery = publish_cad_delivery
 
     def execute(
         self,
@@ -86,6 +91,8 @@ class CommandSystem:
             return self._import_scan(document, command, progress=progress)
         if kind == "import_step":
             return self._import_step(document, command, project_id=project_id, progress=progress)
+        if kind == "export_brep":
+            return self._export_brep(document, command, project_id=project_id, progress=progress)
         if kind == "resize_imported_thread":
             return self._resize_imported_thread(document, command, progress=progress)
         if kind == "transform_imported_brep":
@@ -452,6 +459,119 @@ class CommandSystem:
             "feature_id": feature_id,
             "source": source_record,
             "metrics": metrics,
+        }
+
+    def _export_brep(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        project_id: str | None,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        if self.publish_cad_delivery is None or not isinstance(project_id, str):
+            raise ValidationError("CAD delivery export requires a project artifact writer.")
+        allowed = {"type", "body_id", "include_stl", "linear_deflection", "angular_deflection"}
+        if not command.keys() <= allowed:
+            raise ValidationError("CAD delivery export contains unsupported fields.")
+        body_id = command.get("body_id")
+        body = next((item for item in document.objects
+                     if item.get("id") == body_id and item.get("type") == "body"), None)
+        if body is None:
+            raise NotFoundError("CAD delivery export needs an existing body_id.")
+        geometry = body.get("geometry")
+        if not isinstance(geometry, dict) or geometry.get("kernel") == "cadyx-mesh-v1":
+            raise ValidationError("CAD delivery export requires an OCCT B-rep body, not a triangle mesh.")
+        include_stl = command.get("include_stl", False)
+        if type(include_stl) is not bool:
+            raise ValidationError("include_stl must be a boolean.")
+        if include_stl:
+            linear_deflection = _number(command.get("linear_deflection", 0.1), "linear_deflection")
+            angular_deflection = _number(command.get("angular_deflection", 0.5), "angular_deflection")
+            if linear_deflection < 0.001 or not 0.01 <= angular_deflection <= 1.0:
+                raise ValidationError("STL deflections must be at least 0.001 linear and from 0.01 to 1.0 radians.")
+        else:
+            if "linear_deflection" in command or "angular_deflection" in command:
+                raise ValidationError("STL deflections can only be supplied when include_stl is true.")
+            linear_deflection, angular_deflection = 0.1, 0.5
+        exporter = getattr(self.kernel, "export_delivery", None)
+        importer = getattr(self.kernel, "create_imported_step", None)
+        if not callable(exporter) or not callable(importer):
+            raise ValidationError("The configured geometry kernel does not support validated CAD delivery.")
+
+        source_revision = document.revision
+        geometry_hash = geometry_sha256(geometry)
+        if progress is not None:
+            progress({"phase": "validate_source_brep"})
+            progress({"phase": "serialize_and_export"})
+        exported = exporter(
+            geometry, include_stl=include_stl, linear_deflection=linear_deflection,
+            angular_deflection=angular_deflection,
+        )
+        step_data = exported.get("step") if isinstance(exported, dict) else None
+        source_metrics = exported.get("metrics") if isinstance(exported, dict) else None
+        if not isinstance(step_data, bytes) or not step_data or len(step_data) > 64 * 1024 * 1024:
+            raise ValidationError("STEP output is empty or exceeds the existing 64 MB round-trip limit.")
+        if not isinstance(source_metrics, dict):
+            raise ValidationError("Geometry kernel did not return source B-rep metrics.")
+        if progress is not None:
+            progress({"phase": "verify_step_round_trip"})
+        _, imported_metrics = importer(step_data)
+        step_check = compare_step_metrics(source_metrics, imported_metrics)
+
+        stl_data = exported.get("stl")
+        stl_check = None
+        if include_stl:
+            if progress is not None:
+                progress({"phase": "verify_stl_mesh"})
+            native_stl_metrics = exported.get("stl_metrics")
+            if not isinstance(stl_data, bytes) or not isinstance(native_stl_metrics, dict):
+                raise ValidationError("Geometry kernel did not return the requested STL and verification metrics.")
+            stl_check = verify_binary_stl(
+                stl_data, source_volume=source_metrics.get("volume"), native_metrics=native_stl_metrics,
+            )
+
+        safe_name = re.sub(r"[^\w.-]+", "-", body.get("name", "body"), flags=re.UNICODE).strip(" .-_")
+        safe_name = re.sub(r"-+", "-", safe_name)[:56].rstrip(" .-_") or "body"
+        prefix = f"{safe_name}-r{source_revision:06d}-{geometry_hash[:12]}"
+        step_hash = hashlib.sha256(step_data).hexdigest()
+        step_record = {"file": f"{prefix}-{step_hash[:16]}.step", "sha256": step_hash, "size": len(step_data)}
+        files: dict[str, bytes] = {step_record["file"]: step_data}
+        stl_record = None
+        if include_stl and stl_data is not None:
+            stl_hash = hashlib.sha256(stl_data).hexdigest()
+            stl_record = {"file": f"{prefix}-{stl_hash[:16]}.stl", "sha256": stl_hash, "size": len(stl_data)}
+            files[stl_record["file"]] = stl_data
+        manifest = {
+            "format": "cadyx-cad-delivery",
+            "version": 1,
+            "source": {
+                "document_revision": source_revision,
+                "body_id": body_id,
+                "body_name": body["name"],
+                "geometry_sha256": geometry_hash,
+                "kernel": geometry.get("kernel"),
+            },
+            "kernel": {"name": "Open CASCADE Technology", "version": exported.get("kernel_version")},
+            "outputs": {"step": step_record, "stl": stl_record},
+            "verification": {"step_round_trip": step_check, "stl": stl_check},
+        }
+        manifest_data = (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n").encode("utf-8")
+        manifest_hash = hashlib.sha256(manifest_data).hexdigest()
+        manifest_name = f"{prefix}-{manifest_hash[:16]}.cad-delivery.json"
+        files[manifest_name] = manifest_data
+        if progress is not None:
+            progress({"phase": "publish_cad_delivery"})
+        published = self.publish_cad_delivery(project_id, files)
+        published_by_name = {item["file"]: item for item in published}
+        return {
+            "source_revision": source_revision,
+            "body_id": body_id,
+            "geometry_sha256": geometry_hash,
+            "manifest": published_by_name[manifest_name],
+            "step": published_by_name[step_record["file"]],
+            "stl": published_by_name[stl_record["file"]] if stl_record else None,
+            "verification": manifest["verification"],
         }
 
     def _set_scan_parameter(

@@ -280,6 +280,94 @@ class ProjectWorkspace:
             "created": created,
         }
 
+    def publish_cad_delivery(self, project_id: str, files: dict[str, bytes]) -> list[dict[str, Any]]:
+        """Atomically publish CAD files without replacing any existing project file."""
+        if not isinstance(files, dict) or not files:
+            raise ValidationError("CAD delivery needs at least one artifact file.")
+        directory = self._project_dir(project_id)
+        contents: list[tuple[str, bytes, str]] = []
+        for filename, content in files.items():
+            if (not self._is_single_path_segment(filename)
+                    or filename in {"project.json", ".cadyx-project-id"}
+                    or filename.startswith((".cadyx-", ".cadyx-tmp-"))
+                    or Path(filename).suffix.casefold() not in {".step", ".stl", ".json"}
+                    or (filename.casefold().endswith(".json") and not filename.casefold().endswith(".cad-delivery.json"))
+                    or not isinstance(content, bytes) or not content):
+                raise ValidationError("CAD delivery contains an invalid artifact filename or empty payload.")
+            contents.append((filename, content, hashlib.sha256(content).hexdigest()))
+        contents.sort(key=lambda item: item[0].casefold().endswith(".cad-delivery.json"))
+
+        temporary_by_name: dict[str, Path] = {}
+        published: list[dict[str, Any]] = []
+        created_paths: list[tuple[Path, Path]] = []
+
+        def matching_existing(target: Path, digest: str) -> bool:
+            if target.is_symlink() or not target.is_file():
+                return False
+            try:
+                with target.open("rb") as stream:
+                    return hashlib.file_digest(stream, "sha256").hexdigest() == digest
+            except OSError:
+                return False
+
+        try:
+            for filename, content, _ in contents:
+                with tempfile.NamedTemporaryFile(
+                    mode="wb", prefix=".cadyx-tmp-", suffix=".part", dir=directory, delete=False,
+                ) as stream:
+                    temporary = Path(stream.name)
+                    stream.write(content)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                temporary_by_name[filename] = temporary
+
+            for filename, content, digest in contents:
+                target = directory / filename
+                if target.exists() or target.is_symlink():
+                    if not matching_existing(target, digest):
+                        raise ConflictError(
+                            f"A different file already exists at CAD delivery path '{filename}'.",
+                            code="ARTIFACT_CONFLICT",
+                        )
+                    created = False
+                else:
+                    temporary = temporary_by_name[filename]
+                    try:
+                        os.link(temporary, target)
+                        created_paths.append((target, temporary))
+                        created = True
+                    except FileExistsError:
+                        if not matching_existing(target, digest):
+                            raise ConflictError(
+                                f"A different file already exists at CAD delivery path '{filename}'.",
+                                code="ARTIFACT_CONFLICT",
+                            )
+                        created = False
+                published.append({"file": filename, "sha256": digest, "size": len(content), "created": created})
+        except ConflictError:
+            for target, temporary in reversed(created_paths):
+                try:
+                    if target.exists() and os.path.samefile(target, temporary):
+                        target.unlink()
+                except OSError:
+                    pass
+            raise
+        except OSError as exc:
+            for target, temporary in reversed(created_paths):
+                try:
+                    if target.exists() and os.path.samefile(target, temporary):
+                        target.unlink()
+                except OSError:
+                    pass
+            raise ValidationError(f"CAD delivery artifacts could not be saved: {exc}.") from exc
+        finally:
+            for temporary in temporary_by_name.values():
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        return published
+
     def _workspace_folder_path(self, folder_name: str) -> Path:
         if not self._is_single_path_segment(folder_name):
             raise NotFoundError("Project folder was not found.")

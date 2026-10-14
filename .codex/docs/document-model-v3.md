@@ -224,6 +224,59 @@ It rotates about the global origin, applies the translation, and saves the resul
 as another editable imported B-rep feature. Rigid transforms preserve the
 source volume and topology; consumed source bodies remain in history.
 
+## Verified CAD delivery
+
+`export_brep` runs through the existing leased command endpoint and accepts one
+existing valid, closed, single-solid OCCT B-rep body. Triangle meshes and
+invalid imported B-reps are rejected. `expected_revision` is required in the
+request envelope so every artifact is bound to the exact saved model state:
+
+```json
+{
+  "lease_id": "...",
+  "expected_revision": 12,
+  "command": {
+    "type": "export_brep",
+    "body_id": "body:...",
+    "include_stl": true,
+    "linear_deflection": 0.1,
+    "angular_deflection": 0.5
+  }
+}
+```
+
+STEP is always written as an analytic OCCT STEP model and is re-imported before
+publication. The round-trip must contain one valid solid and preserve source
+volume within relative/absolute tolerances of 1e-8/1e-7 model units and all six
+bounds within 1e-6. STEP files larger than 64 MiB are rejected because they
+cannot pass the existing STEP import limit.
+
+When `include_stl` is true, CADYX writes a binary STL with OCCT linear and
+angular deflections. Defaults are 0.1 model units and 0.5 radians; supported
+ranges are at least 0.001 model units and 0.01–1.0 radians. STL output is also
+limited to 64 MiB. Before publication, CADYX checks that the serialized STL is
+watertight and consistently oriented, computes its signed mesh volume and
+relative error against the exact B-rep, and samples up to 64 evenly spaced
+triangle centroids against the exact B-rep faces. The manifest labels this
+one-sided surface deviation as sampled; it is not an exhaustive geometric
+proof. STEP remains the exact authoritative output, and neither output proves
+physical fit, strength, or printability.
+
+STEP, optional STL, and `*.cad-delivery.json` manifest are written directly into
+the current project folder. Names include a sanitized body name, source
+revision, geometry identity, and output content hash. Each file is atomically
+created without replacing existing files; an identical existing artifact is
+reused and a name collision with different content fails the command. All
+exports and checks complete before publication, and the manifest is published
+last. The manifest records the source body/revision and canonical geometry
+SHA-256, OCCT version, file names/hashes/sizes, source and re-imported STEP
+metrics, tolerances, and optional STL checks and measurements.
+
+The export command is recorded in project history and advances the command
+revision, while its manifest's `source.document_revision` remains the revision
+whose body was exported. Outputs can be listed and downloaded through the
+existing project file APIs.
+
 ## Scan import and editable triangle meshes
 
 `import_scan` reads one direct PLY file from a workspace folder, preserves the

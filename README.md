@@ -75,6 +75,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - Agent equivalents under `/api/v1/agent/projects`
 - `extrude_sketch`, `revolve_sketch`, `sweep_sketch`, `fuse_bodies`, and `fillet_edges` commands for editable OCCT solids; see the [feature contract](.codex/docs/document-model-v3.md#sketch-driven-solid-features)
 - `import_step` to preserve a single-solid STEP model as an OCCT B-rep; see the [STEP import contract](.codex/docs/document-model-v3.md#step-import-and-editable-b-reps)
+- `export_brep` to validate and atomically publish a revision-bound STEP file, optional STL, and verification manifest; see the [CAD delivery contract](.codex/docs/document-model-v3.md#verified-cad-delivery)
 - `resize_imported_thread` and `transform_imported_brep` to modify and align imported OCCT B-reps; see the [imported B-rep feature contract](.codex/docs/document-model-v3.md#step-import-and-editable-b-reps)
 - `GET /api/v1/agent/projects/{id}/topology?body_id=...` to inspect current B-rep edges before selecting fillets; edge indices must be refreshed after upstream edits
 - `import_scan` and `set_scan_parameter` commands for PLY-to-mesh reconstruction; see the [scan command contract](.codex/docs/document-model-v3.md#scan-import-and-editable-triangle-meshes)
