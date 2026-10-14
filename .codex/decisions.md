@@ -35,6 +35,11 @@
 - **Decision:** keep the browser read-only and make the detail fill the window; model and property docks start collapsed. Agents create projects and modify document objects through the Agent API and shared Command System, and can fetch a PNG scene image directly from the server. **Reason:** project/model management belongs to the API-driven agent workflow, while the user view should keep attention on the current detail. **Constraint:** dock navigation and camera controls affect only inspection; Web API human writes remain available to API clients. **Source:** `web/index.html`, `web/app.js`, `cadyx/rendering.py`, [architecture](../docs/architecture.md), [viewport contract](../docs/viewport-api.md).
 - **Status:** active.
 
+## Persistent Windows host
+
+- **Decision:** run the local host as a hidden Task Scheduler task when the current Windows account signs in, bound to loopback port 8888. Launch `pythonw.exe` as the tracked task process, capture its output to local logs, and restart it after failures so it remains independent of terminal/Codex lifetime. **Reason:** registering a pre-logon startup task was denied without elevation; an interactive logon task gives the requested Codex-independent lifetime without changing machine-wide permissions. **Constraint:** the Windows account must remain signed in; local checkout and `.runtime` paths must remain in place; rerun the installer after moving the checkout or rebuilding the runtime. **Source:** `scripts/manage-host-task.ps1`, `scripts/run-host-background.py`, [host lifecycle](../README.md#keep-the-windows-host-running).
+- **Status:** active.
+
 ## Project Format migrations
 
 - **Decision:** centralize independent project/document schema versions and consecutive migration steps in `cadyx/migrations.py`. Migrate copies on load, validate through the existing domain/workspace checks, and persist through the existing leased Core command and atomic save path. Keep envelope v1 and document v2 until an actual schema change requires another version. **Reason:** future schema evolution needs explicit transitions without rewriting user data on reads or introducing a second mutation path. **Source:** `docs/project-format-v1.md`, `cadyx/migrations.py`, `tests/test_migrations.py`.
