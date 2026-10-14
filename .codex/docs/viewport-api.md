@@ -51,28 +51,67 @@ every five seconds, so changes made by another cooperating host appear
 automatically. Changed HTML, CSS, or JavaScript assets trigger a page reload;
 the selected project is restored. Returning to a hidden tab or reconnecting also
 triggers a sync. The browser keeps the read-only model viewport dominant, with
-section navigation on the left and a live inspection column on the right. That
-column shows the single-line agent status, body/vertex/face counts,
-document-unit bounds and visible feature/sketch-element counts derived from the
-current scene, plus front, right and top projections of the same validated
-viewport geometry. Model navigation/project
-browsing and properties remain in collapsed read-only docks. Body geometry
-renders with only the currently edited sketch. Inactive sketches, their
-points/lines, and sketches already referenced by a solid feature are omitted
-from both the viewport and the user-facing object tree. A previously used
-sketch may reappear only while its profile is actively being edited, then is
-hidden when that edit finishes. Agent operation events animate each new sketch
-stroke and apply eased visual transitions to profile extrusions/revolutions,
-metric-thread construction, path sweeps, Boolean fuses, and edge fillets; consuming a sketch removes its
-overlay as the solid feature appears. Sweep animation precomputes each mesh
-vertex's progress along its nearest path segment using a segment AABB hierarchy,
-so it avoids scanning the entire path for every vertex. Boolean fuse hides its consumed source
-bodies and eases the newly connected B-rep into the scene. Sketch lines and points
-overlay solid shading only while that sketch is active (no hidden-line removal
-or viewport picking). The activity card contains the fixed `РАБОТА АГЕНТА`
-label and one status line; it shows the current action, a short completion or
-failure result, or `Думает` when idle. Detailed operation history remains in the
-Agent API snapshot and is not rendered in the user interface.
+section navigation on the left and an inspection column on the right. The
+column shows current agent status, an agent-reported workflow plan and
+progress/ETA estimate, the reported task queue, and front/right/top projections
+of the same validated viewport geometry. Scene geometry metrics remain in the
+viewport footer. Model navigation/project browsing and properties remain in
+collapsed read-only docks. Body geometry renders with only the currently edited
+sketch. Inactive sketches, their points/lines, and sketches already referenced
+by a solid feature are omitted from both the viewport and the user-facing object
+tree. A previously used sketch may reappear only while its profile is actively
+being edited, then is hidden when that edit finishes. Agent operation events
+animate each new sketch stroke and apply eased visual transitions to profile
+extrusions/revolutions, metric-thread construction, path sweeps, Boolean fuses,
+and edge fillets; consuming a sketch removes its overlay as the solid feature
+appears. Sweep animation precomputes each mesh vertex's progress along its
+nearest path segment using a segment AABB hierarchy, so it avoids scanning the
+entire path for every vertex. Boolean fuse hides its consumed source bodies and
+eases the newly connected B-rep into the scene. Sketch lines and points overlay
+solid shading only while that sketch is active (no hidden-line removal or
+viewport picking). The agent card shows the current action/result or idle state;
+detailed operation history remains available in the Agent API and is not
+rendered as a transcript.
+
+## Agent dashboard reports
+
+`GET /api/v1/projects/{id}/dashboard` (also available under
+`/api/v1/agent/projects/{id}/dashboard`) returns the latest process-local
+dashboard snapshot:
+
+```json
+{
+  "workflow": {
+    "title": "CAD design",
+    "progress_percent": 68,
+    "eta_seconds": 252,
+    "phases": [
+      {"id": "concept", "title": "Concept Development", "state": "completed"},
+      {"id": "design", "title": "Design Refinement", "state": "in_progress"}
+    ]
+  },
+  "tasks": [
+    {"id": "042", "title": "Update mounting features", "state": "running"}
+  ],
+  "revision": 1,
+  "updated_at": "2026-10-14T12:00:00+00:00"
+}
+```
+
+Agents replace the current report with
+`POST /api/v1/agent/projects/{id}/dashboard`, using `workflow: null` when no
+plan is available and `tasks: []` when the queue is empty. A workflow contains
+1–24 ordered phases (`pending`, `in_progress`, `completed`, or `failed`), an
+agent-reported progress estimate from 0 to 100, and an optional ETA in seconds.
+The queue accepts at most 100 tasks with `running`, `pending`, `completed`, or
+`failed` state. `revision` and `updated_at` are assigned by Core. Reports do not
+edit the CAD document or require an edit lease. External agent integrations
+publish workflow and queue updates through this Agent API endpoint. Core
+publishes each snapshot as `agent.dashboard` over SSE; `/api/v1/updates` includes
+`dashboard_revision` so the browser can recover missed events. Dashboard state
+is process-local and is cleared when the host restarts. Hardware telemetry is
+not currently reported, so the UI does not display invented CPU/GPU/memory
+values.
 
 `window.CadyxViewport.createViewer(canvas)` is shared with PLY preview and returns:
 

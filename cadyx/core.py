@@ -80,6 +80,91 @@ class CadyxCore:
     def list_workspace(self) -> dict[str, Any]:
         return {"projects": self.list_projects(), "folders": self.workspace.list_folder_projects()}
 
+    def agent_dashboard_snapshot(self, project_id: str) -> dict[str, Any]:
+        self.workspace.load(project_id)
+        return self.events.agent_dashboard_snapshot(project_id)
+
+    def report_agent_dashboard(self, project_id: str, report: dict[str, Any]) -> dict[str, Any]:
+        """Publish an agent-reported workflow estimate and task queue."""
+        self.workspace.load(project_id)
+        if not isinstance(report, dict) or set(report) != {"workflow", "tasks"}:
+            raise ValidationError("Dashboard reports must contain workflow and tasks only.")
+
+        workflow = report["workflow"]
+        normalized_workflow = None
+        if workflow is not None:
+            if not isinstance(workflow, dict) or set(workflow) != {
+                "title", "progress_percent", "eta_seconds", "phases",
+            }:
+                raise ValidationError("workflow must contain title, progress_percent, eta_seconds and phases.")
+            title = workflow["title"]
+            progress = workflow["progress_percent"]
+            eta = workflow["eta_seconds"]
+            phases = workflow["phases"]
+            if not isinstance(title, str) or not title.strip() or len(title.strip()) > 120:
+                raise ValidationError("workflow.title must be non-empty text up to 120 characters.")
+            if isinstance(progress, bool) or not isinstance(progress, (int, float)):
+                raise ValidationError("workflow.progress_percent must be a finite number from 0 to 100.")
+            try:
+                progress = float(progress)
+            except (OverflowError, ValueError) as exc:
+                raise ValidationError("workflow.progress_percent must be a finite number from 0 to 100.") from exc
+            if not math.isfinite(progress) or not 0 <= progress <= 100:
+                raise ValidationError("workflow.progress_percent must be a finite number from 0 to 100.")
+            if eta is not None and (type(eta) is not int or not 0 <= eta <= 31_536_000):
+                raise ValidationError("workflow.eta_seconds must be null or an integer from 0 to 31536000.")
+            if not isinstance(phases, list) or not phases or len(phases) > 24:
+                raise ValidationError("workflow.phases must contain between 1 and 24 phases.")
+            normalized_phases = []
+            phase_ids = set()
+            for phase in phases:
+                if not isinstance(phase, dict) or set(phase) != {"id", "title", "state"}:
+                    raise ValidationError("Each workflow phase must contain id, title and state.")
+                phase_id, phase_title, phase_state = phase["id"], phase["title"], phase["state"]
+                if not isinstance(phase_id, str) or not phase_id.strip() or len(phase_id.strip()) > 80:
+                    raise ValidationError("Workflow phase ids must be non-empty text up to 80 characters.")
+                phase_id = phase_id.strip()
+                if phase_id in phase_ids:
+                    raise ValidationError("Workflow phase ids must be unique.")
+                phase_ids.add(phase_id)
+                if not isinstance(phase_title, str) or not phase_title.strip() or len(phase_title.strip()) > 120:
+                    raise ValidationError("Workflow phase titles must be non-empty text up to 120 characters.")
+                if not isinstance(phase_state, str) or phase_state not in {"pending", "in_progress", "completed", "failed"}:
+                    raise ValidationError("Workflow phase state is not supported.")
+                normalized_phases.append({"id": phase_id, "title": phase_title.strip(), "state": phase_state})
+            normalized_workflow = {
+                "title": title.strip(),
+                "progress_percent": float(progress),
+                "eta_seconds": eta,
+                "phases": normalized_phases,
+            }
+
+        tasks = report["tasks"]
+        if not isinstance(tasks, list) or len(tasks) > 100:
+            raise ValidationError("tasks must be an array of at most 100 items.")
+        normalized_tasks = []
+        task_ids = set()
+        for task in tasks:
+            if not isinstance(task, dict) or set(task) != {"id", "title", "state"}:
+                raise ValidationError("Each task must contain id, title and state.")
+            task_id, task_title, task_state = task["id"], task["title"], task["state"]
+            if not isinstance(task_id, str) or not task_id.strip() or len(task_id.strip()) > 80:
+                raise ValidationError("Task ids must be non-empty text up to 80 characters.")
+            task_id = task_id.strip()
+            if task_id in task_ids:
+                raise ValidationError("Task ids must be unique.")
+            task_ids.add(task_id)
+            if not isinstance(task_title, str) or not task_title.strip() or len(task_title.strip()) > 180:
+                raise ValidationError("Task titles must be non-empty text up to 180 characters.")
+            if not isinstance(task_state, str) or task_state not in {"running", "pending", "completed", "failed"}:
+                raise ValidationError("Task state is not supported.")
+            normalized_tasks.append({"id": task_id, "title": task_title.strip(), "state": task_state})
+
+        return self.events.publish_agent_dashboard(project_id, {
+            "workflow": normalized_workflow,
+            "tasks": normalized_tasks,
+        })
+
     def inspect_project(self, project_id: str) -> dict[str, Any]:
         # project.json is atomically replaced, so read-only viewers can safely
         # inspect the last committed revision while an agent edits its next one.

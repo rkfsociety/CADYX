@@ -78,11 +78,13 @@ def make_request_handler(
                         "workspace_revision": core.workspace.workspace_revision_token(),
                         "project_revision": None,
                         "activity_revision": None,
+                        "dashboard_revision": None,
                         "folder_revision": None,
                     }
                     if project_id:
                         snapshot["project_revision"] = core.workspace.project_revision_token(project_id)
                         snapshot["activity_revision"] = core.events.activity_revision(project_id)
+                        snapshot["dashboard_revision"] = core.events.agent_dashboard_revision(project_id)
                     if folder_name:
                         snapshot["folder_revision"] = core.workspace.folder_revision_token(folder_name)
                     self._json(200, snapshot)
@@ -110,6 +112,12 @@ def make_request_handler(
                 prefix = ["api", "v1", "projects"]
                 agent_prefix = ["api", "v1", "agent", "projects"]
                 comparison_prefix = agent_prefix if parts[:4] == agent_prefix else prefix
+                if len(parts) == 5 and parts[:3] == prefix and parts[4] == "dashboard":
+                    self._json(200, core.agent_dashboard_snapshot(parts[3]))
+                    return
+                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "dashboard":
+                    self._json(200, core.agent_dashboard_snapshot(parts[4]))
+                    return
                 if len(parts) == len(comparison_prefix) + 2 and parts[:len(comparison_prefix)] == comparison_prefix and parts[-1] == "comparison":
                     query = parse_qs(parsed.query)
                     self._json(200, core.compare_bodies(parts[-2],
@@ -230,6 +238,11 @@ def make_request_handler(
                 self._json(201, result)
                 return
             project_id = parts[0]
+            if agent_api and len(parts) == 2 and parts[1] == "dashboard":
+                if body is None:
+                    raise ValidationError("A JSON request body is required.")
+                self._json(200, core.report_agent_dashboard(project_id, body))
+                return
             if agent_api and len(parts) == 3 and parts[1:] == ["viewport", "camera"]:
                 if body is None:
                     raise ValidationError("A JSON request body is required.")

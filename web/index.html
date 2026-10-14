@@ -16,14 +16,22 @@
         </a>
         <div class="brand-description" aria-hidden="true">
           <strong>AI-DRIVEN CAD WORKFLOW</strong>
-          <span>REAL-TIME MODEL OBSERVATION</span>
+          <span>REAL-TIME VISUALIZATION</span>
+        </div>
+      </div>
+      <div class="topbar-sync">
+        <span id="api-light" class="project-light" aria-hidden="true"></span>
+        <div class="topbar-project-copy">
+          <span id="api-status-label" class="topbar-label">API CONNECTING</span>
+          <strong id="api-sync-time" class="document-title">—</strong>
         </div>
       </div>
       <div class="topbar-project">
         <span id="project-light" class="project-light" aria-hidden="true"></span>
         <div class="topbar-project-copy">
-          <span id="document-kind" class="topbar-label">ACTIVE PROJECT</span>
+          <span id="document-kind" class="topbar-label">PROJECT</span>
           <strong id="document-title" class="document-title">Выберите проект</strong>
+          <small id="project-short-id" class="project-short-id">—</small>
         </div>
       </div>
       <div class="topbar-end">
@@ -109,11 +117,14 @@
               <button id="analysis-nav" class="nav-item" type="button" data-workspace-view="analysis" disabled>
                 <span class="nav-index">03</span><span class="nav-copy"><strong>ANALYSIS</strong><small>Source comparison</small></span>
               </button>
+              <button class="nav-item" type="button" disabled title="Manufacturing output is not available yet">
+                <span class="nav-index">04</span><span class="nav-copy"><strong>MANUFACTURING</strong><small>Toolpaths and output</small></span>
+              </button>
               <button class="nav-item" type="button" data-workspace-view="files">
-                <span class="nav-index">04</span><span class="nav-copy"><strong>FILES</strong><small>Projects and files</small></span>
+                <span class="nav-index">05</span><span class="nav-copy"><strong>FILES</strong><small>Projects and files</small></span>
               </button>
               <button class="nav-item" type="button" data-workspace-view="activity">
-                <span class="nav-index">05</span><span class="nav-copy"><strong>ACTIVITY</strong><small>Current agent status</small></span>
+                <span class="nav-index">06</span><span class="nav-copy"><strong>ACTIVITY</strong><small>Current agent status</small></span>
               </button>
             </nav>
             <div class="sidebar-project">
@@ -144,6 +155,7 @@
                   </div>
                 </div>
                 <footer class="viewport-footer" aria-label="Сводка модели">
+                  <span>MODEL <strong id="viewport-model-name">—</strong></span>
                   <span>OBJECTS <strong id="viewport-object-count">0</strong></span>
                   <span>VERTICES <strong id="viewport-vertex-count">0</strong></span>
                   <span>FACES <strong id="viewport-face-count">0</strong></span>
@@ -153,39 +165,39 @@
 
               <aside class="inspector-column" aria-label="Состояние и виды модели">
                 <section id="agent-activity" class="panel activity-panel" aria-labelledby="activity-title" tabindex="-1">
-                  <header class="activity-heading">
-                    <div class="activity-heading-copy">
-                      <p class="section-label">РАБОТА АГЕНТА</p>
-                      <h2 id="activity-title">Думает</h2>
-                    </div>
+                  <header class="panel-heading agent-panel-heading">
+                    <h2>AI AGENT</h2>
+                    <span id="agent-state" class="agent-state" data-state="idle">IDLE</span>
                   </header>
-                </section>
-                <section class="panel scene-panel" aria-labelledby="scene-title">
-                  <div class="panel-heading"><h2 id="scene-title">SCENE METRICS</h2><span class="panel-note">LIVE</span></div>
-                  <div class="scene-metrics">
-                    <div><strong id="scene-body-count">0</strong><span>BODIES</span></div>
-                    <div><strong id="scene-vertex-count">0</strong><span>VERTICES</span></div>
-                    <div><strong id="scene-face-count">0</strong><span>FACES</span></div>
+                  <div class="agent-details">
+                    <span class="agent-orbit" aria-hidden="true"><i></i></span>
+                    <div class="activity-heading-copy">
+                      <strong id="activity-title">Думает</strong>
+                      <small id="agent-runtime-label">CADYX AGENT · provider-neutral runtime</small>
+                    </div>
+                    <span id="agent-telemetry" class="agent-telemetry" hidden></span>
                   </div>
                 </section>
-                <section class="panel envelope-panel" aria-labelledby="envelope-title">
-                  <div class="panel-heading"><h2 id="envelope-title">MODEL BOUNDS</h2><span class="panel-note">DOCUMENT UNITS</span></div>
-                  <div class="envelope-list">
-                    <div><span>X</span><span class="extent-track"><i id="extent-x-bar"></i></span><strong id="extent-x">0</strong></div>
-                    <div><span>Y</span><span class="extent-track"><i id="extent-y-bar"></i></span><strong id="extent-y">0</strong></div>
-                    <div><span>Z</span><span class="extent-track"><i id="extent-z-bar"></i></span><strong id="extent-z">0</strong></div>
+                <section id="workflow-panel" class="panel workflow-panel" aria-labelledby="workflow-title">
+                  <div class="panel-heading"><h2 id="workflow-title">WORKFLOW PROGRESS</h2><span id="workflow-name" class="panel-note">NO PLAN REPORTED</span></div>
+                  <div class="workflow-summary">
+                    <strong id="workflow-percent" class="workflow-percent">—</strong>
+                    <div id="workflow-progress" class="workflow-progress" role="progressbar" aria-label="Оценка прогресса workflow" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-available="false"><i id="workflow-progress-bar"></i></div>
+                    <span id="workflow-eta" class="workflow-eta">ETA —</span>
                   </div>
+                  <ol id="workflow-phases" class="workflow-phases"></ol>
+                  <p id="workflow-empty" class="dashboard-empty">Агент пока не передал план.</p>
                 </section>
-                <section class="panel breakdown-panel" aria-labelledby="breakdown-title">
-                  <div class="panel-heading"><h2 id="breakdown-title">GEOMETRY BREAKDOWN</h2><span class="panel-note">VISIBLE</span></div>
-                  <div class="breakdown-list">
-                    <div><span class="breakdown-index">01</span><span>Features</span><strong id="scene-feature-count">0</strong></div>
-                    <div><span class="breakdown-index">02</span><span>Sketch elements</span><strong id="scene-sketch-entity-count">0</strong></div>
-                    <div><span class="breakdown-index">03</span><span>Visible objects</span><strong id="scene-object-count">0</strong></div>
+                <section id="task-queue-panel" class="panel task-queue-panel" aria-labelledby="task-queue-title">
+                  <div class="panel-heading">
+                    <h2 id="task-queue-title">TASK QUEUE</h2>
+                    <span class="task-queue-counts"><strong id="task-running-count">0</strong> RUNNING <strong id="task-pending-count">0</strong> PENDING</span>
                   </div>
+                  <ol id="task-queue" class="task-queue"></ol>
+                  <p id="task-queue-empty" class="dashboard-empty">Очередь задач пока пуста.</p>
                 </section>
                 <section class="panel orthographic-panel" aria-labelledby="orthographic-title">
-                  <div class="panel-heading"><h2 id="orthographic-title">ORTHOGRAPHIC VIEWS</h2><span class="panel-note">XYZ</span></div>
+                  <div class="panel-heading"><h2 id="orthographic-title">ORTHOGRAPHIC VIEWS</h2><span class="panel-note">SAME MODEL</span></div>
                   <div class="orthographic-views">
                     <figure class="ortho-view"><canvas id="ortho-front" class="ortho-canvas" aria-label="Вид модели спереди"></canvas><figcaption>FRONT</figcaption></figure>
                     <figure class="ortho-view"><canvas id="ortho-right" class="ortho-canvas" aria-label="Вид модели справа"></canvas><figcaption>RIGHT</figcaption></figure>

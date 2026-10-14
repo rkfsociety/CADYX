@@ -1,6 +1,6 @@
 # CADYX
 
-CADYX is an AI-first CAD foundation prototype. Agents create projects and modify models through the Agent API and shared Core Command System; a per-project edit lease prevents concurrent writes. The provider-neutral in-process Agent Runtime can orchestrate a provider adapter and project tools without adding a provider dependency. The browser is a read-only, full-window detail viewer with collapsed model and property docks and a single-line agent action/result status. Agents can fetch a server-rendered PNG snapshot through the Agent API without using a browser.
+CADYX is an AI-first CAD foundation prototype. Agents create projects and modify models through the Agent API and shared Core Command System; a per-project edit lease prevents concurrent writes. The provider-neutral in-process Agent Runtime can orchestrate a provider adapter and project tools without adding a provider dependency. The browser is a read-only, full-window detail viewer with a dominant CAD viewport, live agent status, agent-reported workflow progress and task queue, and front/right/top projections. Agents can fetch a server-rendered PNG snapshot through the Agent API without using a browser.
 
 ## Run locally
 
@@ -67,6 +67,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - `GET /api/v1/health` for minimal unauthenticated readiness
 - `GET /api/v1/projects` and `GET /api/v1/agent/projects` (CADYX project records plus `folders` for immediate project directories); agent project creation uses `POST /api/v1/agent/projects`
 - `GET /api/v1/projects/{id}`
+- `GET /api/v1/projects/{id}/dashboard` reads the agent workflow/task snapshot; `POST /api/v1/agent/projects/{id}/dashboard` replaces it with agent-reported progress, ETA and task states
 - `GET /api/v1/projects/{id}/viewport` and its Agent API equivalent return the same read-only render scene
 - `GET /api/v1/agent/projects/{id}/viewport.png` returns a server-rendered detail image without opening a browser
 - `GET /api/v1/workspace/folders/{folder}/files` and `GET /api/v1/workspace/folders/{folder}/files/{name}` for safe in-folder file preview
@@ -81,8 +82,9 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - `import_scan` and `set_scan_parameter` commands for PLY-to-mesh reconstruction; see the [scan command contract](.codex/docs/document-model-v3.md#scan-import-and-editable-triangle-meshes)
 - `POST /api/v1/agent/projects/{id}/viewport/camera` to animate the selected browser viewport from the Agent API; see the [viewport contract](.codex/docs/viewport-api.md)
 - `GET /api/v1/projects/{id}/activity` and its Agent API equivalent return the recent visual activity snapshots; `agent.activity` SSE events update them live
+- Dashboard reports are process-local, emit `agent.dashboard` SSE events, and are polled through the `dashboard_revision` in `/api/v1/updates`. Progress and ETA are estimates supplied by the agent; hardware telemetry is not currently available.
 - Agent `/stop` with `lease_id` and `/resume` with `owner_id` / `expected_revision`; resumed commands require `expected_revision`. See the [stop/resume contract](.codex/docs/architecture.md#safe-agent-stop-and-resume).
-- `/api/v1/updates` is polled automatically alongside SSE so project, workspace-file, activity, and UI-asset changes appear without a manual page refresh
+- `/api/v1/updates` is polled automatically alongside SSE so project, workspace-file, activity, dashboard, and UI-asset changes appear without a manual page refresh
 - `GET /api/v1/events` for the SSE update channel
 
 The API is versioned and provider-neutral. When host authentication is configured, every endpoint above except `/api/v1/health` requires valid credentials. See the architecture guide for the exact boundary and current limits.
@@ -94,5 +96,6 @@ Provider adapters translate native model requests and responses to CADYX's
 provider-neutral messages, tool specifications and tool calls. The runtime
 offers project inspection, viewport inspection and revision-checked command
 execution, managing the agent lease for each run. No provider adapter is
-included. See the [Agent Runtime contract](.codex/docs/architecture.md#agent-runtime).
+included. External integrations report workflow and queue state through the
+Agent API. See the [Agent Runtime contract](.codex/docs/architecture.md#agent-runtime).
 

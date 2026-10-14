@@ -64,6 +64,9 @@ let activityStatusTimer = 0;
 let activityStatusOperationId = null;
 const activitiesByProject = new Map();
 const activityRevisionsByProject = new Map();
+const agentLocksByProject = new Map();
+const dashboardsByProject = new Map();
+const dashboardRevisionsByProject = new Map();
 const FOLDER_SELECTION_PREFIX = "folder:";
 const dockMenus = [...document.querySelectorAll(".dock-control")];
 dockMenus.forEach((menu) => menu.addEventListener("toggle", () => {
@@ -114,7 +117,102 @@ function formatNumber(value) {
   return Number.isFinite(Number(value)) ? numberFormat.format(Number(value)) : "—";
 }
 
-function renderSceneMetrics(scene, objectsById, visibleSketchId, visibleDocumentObjects) {
+function setApiConnectionStatus(online) {
+  $("#api-light").classList.toggle("active", online);
+  $("#api-status-label").textContent = online ? "API ONLINE" : "API OFFLINE";
+  if (online) {
+    $("#api-sync-time").textContent = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    }).format(new Date());
+  }
+}
+
+function formatEta(seconds) {
+  if (!Number.isInteger(seconds) || seconds < 0) return "ETA —";
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    return `ETA ${hours}h ${minutes % 60}m`;
+  }
+  return minutes ? `ETA ${minutes}m ${remainingSeconds}s` : `ETA ${remainingSeconds}s`;
+}
+
+const phaseStateLabel = (state) => ({
+  completed: "COMPLETED", in_progress: "IN PROGRESS", pending: "PENDING", failed: "FAILED",
+})[state] || "PENDING";
+const taskStateLabel = (state) => ({
+  running: "RUNNING", pending: "PENDING", completed: "COMPLETED", failed: "FAILED",
+})[state] || "PENDING";
+
+function renderAgentDashboard(dashboard) {
+  const workflow = dashboard?.workflow;
+  const workflowPanel = $("#workflow-panel");
+  const phaseList = $("#workflow-phases");
+  workflowPanel.dataset.available = String(Boolean(workflow));
+  phaseList.replaceChildren();
+  $("#workflow-empty").hidden = Boolean(workflow);
+  if (workflow) {
+    const progress = Math.max(0, Math.min(100, Number(workflow.progress_percent) || 0));
+    $("#workflow-name").textContent = workflow.title;
+    $("#workflow-percent").textContent = `${Math.round(progress)}%`;
+    $("#workflow-progress").dataset.available = "true";
+    $("#workflow-progress").setAttribute("aria-valuenow", String(progress));
+    $("#workflow-progress-bar").style.width = `${progress}%`;
+    $("#workflow-eta").textContent = formatEta(workflow.eta_seconds);
+    workflow.phases.forEach((phase, index) => {
+      const row = document.createElement("li");
+      row.dataset.state = phase.state;
+      const marker = document.createElement("span");
+      marker.className = "phase-marker";
+      marker.textContent = String(index + 1);
+      const title = document.createElement("span");
+      title.className = "phase-title";
+      title.textContent = phase.title;
+      title.title = phase.title;
+      const state = document.createElement("span");
+      state.className = "phase-state";
+      state.textContent = phaseStateLabel(phase.state);
+      row.append(marker, title, state);
+      phaseList.append(row);
+    });
+  } else {
+    $("#workflow-name").textContent = "NO PLAN REPORTED";
+    $("#workflow-percent").textContent = "—";
+    $("#workflow-progress").dataset.available = "false";
+    $("#workflow-progress").setAttribute("aria-valuenow", "0");
+    $("#workflow-progress-bar").style.width = "0%";
+    $("#workflow-eta").textContent = "ETA —";
+  }
+
+  const tasks = dashboard?.tasks || [];
+  const queuePanel = $("#task-queue-panel");
+  const queue = $("#task-queue");
+  queuePanel.dataset.hasTasks = String(tasks.length > 0);
+  queue.replaceChildren();
+  $("#task-queue-empty").hidden = tasks.length > 0;
+  $("#task-running-count").textContent = String(tasks.filter((task) => task.state === "running").length);
+  $("#task-pending-count").textContent = String(tasks.filter((task) => task.state === "pending").length);
+  for (const task of tasks) {
+    const row = document.createElement("li");
+    row.dataset.state = task.state;
+    const id = document.createElement("span");
+    id.className = "task-id";
+    id.textContent = task.id;
+    id.title = task.id;
+    const title = document.createElement("span");
+    title.className = "task-title";
+    title.textContent = task.title;
+    title.title = task.title;
+    const state = document.createElement("span");
+    state.className = "task-state";
+    state.textContent = taskStateLabel(task.state);
+    row.append(id, title, state);
+    queue.append(row);
+  }
+}
+
+function renderSceneMetrics(scene, objectsById, visibleSketchId) {
   const bodyMeshes = scene.objects.filter((item) => objectsById.get(item.object_id)?.type === "body");
   const visibleObjects = scene.objects.filter((item) => {
     const source = objectsById.get(item.object_id);
@@ -122,35 +220,9 @@ function renderSceneMetrics(scene, objectsById, visibleSketchId, visibleDocument
   });
   const vertexCount = bodyMeshes.reduce((total, item) => total + item.positions.length / 3, 0);
   const faceCount = bodyMeshes.reduce((total, item) => total + item.triangles.length / 3, 0);
-  const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
-  for (const item of bodyMeshes) {
-    for (let index = 0; index < item.positions.length; index += 3) {
-      for (let axis = 0; axis < 3; axis += 1) {
-        const value = item.positions[index + axis];
-        bounds.min[axis] = Math.min(bounds.min[axis], value);
-        bounds.max[axis] = Math.max(bounds.max[axis], value);
-      }
-    }
-  }
-  const extents = bodyMeshes.length
-    ? bounds.min.map((value, axis) => bounds.max[axis] - value)
-    : [0, 0, 0];
-  const bodyCountText = integerFormat.format(bodyMeshes.length);
   const vertexCountText = integerFormat.format(vertexCount);
   const faceCountText = integerFormat.format(faceCount);
-  $("#scene-body-count").textContent = bodyCountText;
-  $("#scene-vertex-count").textContent = vertexCountText;
-  $("#scene-face-count").textContent = faceCountText;
-  const maxExtent = Math.max(...extents, 0);
-  ["x", "y", "z"].forEach((axis, index) => {
-    $(`#extent-${axis}`).textContent = formatNumber(extents[index]);
-    $(`#extent-${axis}-bar`).style.width = maxExtent > 0 ? `${extents[index] / maxExtent * 100}%` : "0%";
-  });
-  $("#scene-feature-count").textContent = integerFormat.format(visibleDocumentObjects.filter((item) => item.type === "feature").length);
-  $("#scene-sketch-entity-count").textContent = integerFormat.format(
-    visibleDocumentObjects.filter((item) => ["point", "line", "circle", "constraint"].includes(item.type)).length,
-  );
-  $("#scene-object-count").textContent = integerFormat.format(visibleDocumentObjects.length);
+  $("#viewport-model-name").textContent = getProject(selectedProjectId)?.project.name || "—";
   $("#viewport-object-count").textContent = integerFormat.format(visibleObjects.length);
   $("#viewport-vertex-count").textContent = vertexCountText;
   $("#viewport-face-count").textContent = faceCountText;
@@ -169,9 +241,10 @@ function showProjectLoading(name) {
   noSelection.hidden = true;
   $("#object-panel").hidden = true;
   $("#document-title").textContent = name;
-  $("#document-kind").textContent = "ACTIVE PROJECT";
+  $("#document-kind").textContent = "PROJECT";
   $("#project-light").classList.add("active");
   $("#sidebar-project-name").textContent = name;
+  $("#project-short-id").textContent = selectedProjectId?.slice(0, 8).toUpperCase() || "—";
   $("#document-revision").textContent = "—";
   $("#viewport-revision").textContent = "—";
   $("#comparison-panel").hidden = true;
@@ -280,6 +353,7 @@ function showFolderDetail(name) {
   $("#folder-detail").hidden = false;
   $("#document-title").textContent = name;
   $("#document-kind").textContent = "WORKSPACE FOLDER";
+  $("#project-short-id").textContent = "SOURCE FILES";
   $("#project-light").classList.remove("active");
   $("#document-revision").textContent = "—";
   if (folderChanged) {
@@ -466,6 +540,7 @@ async function refreshWorkspacePass() {
     noSelection.hidden = false;
     $("#document-title").textContent = "CADYX";
     $("#document-kind").textContent = "NO PROJECT SELECTED";
+    $("#project-short-id").textContent = "—";
     $("#project-light").classList.remove("active");
     $("#document-revision").textContent = "—";
   }
@@ -498,6 +573,7 @@ async function checkAutomaticUpdates() {
     if (folder) query.set("folder", folder);
     else if (selectionAtRequest) query.set("project_id", selectionAtRequest);
     const current = await api(`/api/v1/updates?${query.toString()}`, { cache: "no-store" });
+    setApiConnectionStatus(true);
     if (selectionAtRequest !== selectedProjectId) return;
     const previous = automaticUpdateSnapshot;
     automaticUpdateSnapshot = current;
@@ -512,6 +588,11 @@ async function checkAutomaticUpdates() {
       activitiesByProject.delete(selectedProjectId);
       activityRevisionsByProject.delete(selectedProjectId);
     }
+    if (current.dashboard_revision !== null && previous.dashboard_revision !== null &&
+        current.dashboard_revision < previous.dashboard_revision && selectedProjectId) {
+      dashboardsByProject.delete(selectedProjectId);
+      dashboardRevisionsByProject.delete(selectedProjectId);
+    }
     if (current.ui_version !== previous.ui_version) {
       window.location.reload();
       return;
@@ -522,13 +603,19 @@ async function checkAutomaticUpdates() {
     const workspaceChanged = current.workspace_revision !== previous.workspace_revision;
     const projectChanged = current.project_revision !== previous.project_revision;
     const activityChanged = current.activity_revision !== previous.activity_revision;
+    const dashboardChanged = current.dashboard_revision !== previous.dashboard_revision;
     if (workspaceChanged || projectChanged) {
       scheduleWorkspaceRefresh();
     } else if (activityChanged && selectedProjectId && !folder) {
       refreshActivitySnapshot(selectedProjectId)
         .catch((error) => notify(`Не удалось обновить состояние агента: ${error.message}`, true));
     }
+    if (dashboardChanged && selectedProjectId && !folder) {
+      refreshAgentDashboardSnapshot(selectedProjectId)
+        .catch((error) => notify(`Не удалось обновить очередь агента: ${error.message}`, true));
+    }
   } catch (error) {
+    setApiConnectionStatus(false);
     if (error.status === 404) {
       scheduleWorkspaceRefresh();
       return;
@@ -555,10 +642,25 @@ async function refreshDetail() {
     const selected = getProject(projectId);
     $("#document-title").textContent = selected?.project.name || "CADYX · работа агента";
   }
-  const info = await api(`/api/v1/projects/${encodeURIComponent(projectId)}`);
-  const scene = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/viewport`);
+  const encodedProjectId = encodeURIComponent(projectId);
+  const [info, scene, dashboard] = await Promise.all([
+    api(`/api/v1/projects/${encodedProjectId}`),
+    api(`/api/v1/projects/${encodedProjectId}/viewport`),
+    api(`/api/v1/projects/${encodedProjectId}/dashboard`),
+  ]);
   if (projectId !== selectedProjectId || request !== detailRequest) return;
   if (scene.revision !== info.document.revision) { scheduleWorkspaceRefresh(); return; }
+  agentLocksByProject.set(projectId, info.lock);
+  renderAgentActivity(activitiesByProject.get(projectId) || [], info.lock);
+  const dashboardRevision = Number.isInteger(dashboard.revision) ? dashboard.revision : 0;
+  const knownDashboardRevision = dashboardRevisionsByProject.get(projectId);
+  if (knownDashboardRevision === undefined || dashboardRevision >= knownDashboardRevision) {
+    dashboardRevisionsByProject.set(projectId, dashboardRevision);
+    dashboardsByProject.set(projectId, dashboard);
+    renderAgentDashboard(dashboard);
+  } else {
+    renderAgentDashboard(dashboardsByProject.get(projectId));
+  }
   const comparison = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/comparison`);
   if (projectId !== selectedProjectId || request !== detailRequest) return;
   if (comparison.revision !== scene.revision) { scheduleWorkspaceRefresh(); return; }
@@ -594,6 +696,7 @@ async function refreshDetail() {
   }
   detailedProjectId = projectId;
   detailedProjectModifiedAt = info.project.modified_at;
+  $("#project-short-id").textContent = projectId.slice(0, 8).toUpperCase();
   const objects = info.document.objects;
   const objectsById = new Map(objects.map((item) => [item.id, item]));
   const visibleSketchId = activeSketchId
@@ -680,7 +783,7 @@ async function refreshDetail() {
   $("#viewport-empty").hidden = hasVisibleGeometry;
   $("#model-preview").hidden = !hasVisibleGeometry;
   modelViewer.render();
-  renderSceneMetrics(scene, objectsById, visibleSketchId, visibleObjects);
+  renderSceneMetrics(scene, objectsById, visibleSketchId);
   $("#sidebar-project-name").textContent = info.project.name;
 
   $("#folder-detail").hidden = true;
@@ -710,7 +813,7 @@ async function refreshActivitySnapshot(projectId) {
   const activities = response.activities || [];
   activityRevisionsByProject.set(projectId, revision);
   activitiesByProject.set(projectId, activities);
-  renderAgentActivity(activities);
+  renderAgentActivity(activities, agentLocksByProject.get(projectId));
   const current = activities.slice().reverse().find((item) => item.state === "running") || activities.at(-1) || null;
   if (current?.state === "running") {
     $("#folder-detail").hidden = true;
@@ -721,26 +824,52 @@ async function refreshActivitySnapshot(projectId) {
   return current;
 }
 
-function renderAgentActivity(value) {
+async function refreshAgentDashboardSnapshot(projectId) {
+  const dashboard = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/dashboard`);
+  if (projectId !== selectedProjectId) return null;
+  const revision = Number.isInteger(dashboard.revision) ? dashboard.revision : 0;
+  const knownRevision = dashboardRevisionsByProject.get(projectId);
+  if (knownRevision !== undefined && revision < knownRevision) {
+    renderAgentDashboard(dashboardsByProject.get(projectId));
+    return dashboardsByProject.get(projectId) || null;
+  }
+  dashboardRevisionsByProject.set(projectId, revision);
+  dashboardsByProject.set(projectId, dashboard);
+  renderAgentDashboard(dashboard);
+  return dashboard;
+}
+
+function renderAgentActivity(value, lock = null) {
   const activities = Array.isArray(value) ? value : value ? [value] : [];
-  const activity = activities.slice().reverse().find((item) => item.state === "running") || activities.at(-1) || null;
+  const runningActivity = activities.slice().reverse().find((item) => item.state === "running") || null;
+  const activity = runningActivity || activities.at(-1) || null;
+  const agentLeaseActive = lock?.state === "AI_LOCKED" && lock.lease?.owner_type === "agent"
+    && !lock.recovery_required;
   const panel = $("#agent-activity");
   const title = $("#activity-title");
   const completedAt = Date.parse(activity?.updated_at || "");
   const age = Number.isFinite(completedAt) ? Date.now() - completedAt : Infinity;
-  const recentCompletion = activity?.state === "completed" && age >= 0 && age < 2200;
-  const state = activity?.state === "running" || activity?.state === "failed"
-    ? activity.state : recentCompletion ? "completed" : "idle";
+  const recentCompletion = !agentLeaseActive && activity?.state === "completed" && age >= 0 && age < 2200;
+  const state = runningActivity || agentLeaseActive ? "running"
+    : activity?.state === "failed" ? "failed" : recentCompletion ? "completed" : "idle";
   panel.dataset.state = state;
-  const action = activity?.action || "Работает";
+  const agentState = $("#agent-state");
+  agentState.dataset.state = state;
+  agentState.textContent = state === "running" ? "ACTIVE"
+    : state === "failed" ? "ERROR" : state === "completed" ? "COMPLETED" : "IDLE";
+  const action = runningActivity?.action || (agentLeaseActive ? "Обрабатывает CAD workflow" : activity?.action) || "Работает";
   title.textContent = state === "running" ? action
     : state === "failed" ? `${action} · ошибка`
       : recentCompletion ? `${action} · готово` : "Думает";
+  $("#agent-runtime-label").textContent = state === "running"
+    ? "CADYX AGENT · executing workflow" : "CADYX AGENT · provider-neutral runtime";
   if (recentCompletion && activityStatusOperationId !== activity.operation_id) {
     clearTimeout(activityStatusTimer);
     activityStatusOperationId = activity.operation_id;
     activityStatusTimer = setTimeout(() => {
-      if (selectedProjectId) renderAgentActivity(activitiesByProject.get(selectedProjectId) || []);
+      if (selectedProjectId) renderAgentActivity(
+        activitiesByProject.get(selectedProjectId) || [], agentLocksByProject.get(selectedProjectId),
+      );
     }, Math.max(1, 2200 - age));
   } else if (!recentCompletion) {
     clearTimeout(activityStatusTimer);
@@ -989,13 +1118,20 @@ function handleStreamEvent(type, event) {
     else activities[existing] = data;
     if (activities.length > 128) activities.splice(0, activities.length - 128);
     activitiesByProject.set(projectId, activities);
-    if (projectId === selectedProjectId) renderAgentActivity(activities);
+    if (projectId === selectedProjectId) renderAgentActivity(activities, agentLocksByProject.get(projectId));
     if (projectId === selectedProjectId && data.state === "running") {
       $("#folder-detail").hidden = true;
       projectDetail.hidden = false;
       noSelection.hidden = true;
       $("#document-title").textContent = getProject(projectId)?.project.name || "CADYX · работа агента";
     }
+  } else if (type === "agent.dashboard") {
+    const incomingRevision = Number.isInteger(data.revision) ? data.revision : null;
+    const knownRevision = dashboardRevisionsByProject.get(projectId);
+    if (incomingRevision !== null && knownRevision !== undefined && incomingRevision < knownRevision) return;
+    if (incomingRevision !== null) dashboardRevisionsByProject.set(projectId, incomingRevision);
+    dashboardsByProject.set(projectId, data);
+    if (projectId === selectedProjectId) renderAgentDashboard(data);
   } else if (type === "command.completed") {
     const historyEntry = data.history_entry || data;
     const command = historyEntry.command || data.command || {};
@@ -1103,8 +1239,10 @@ function handleStreamEvent(type, event) {
     saveSelectedProject(projectId);
     scheduleWorkspaceRefresh();
   } else if (type === "project.lock.changed") {
-    // Lease changes do not alter the document or viewport. Re-rendering the
-    // kernel scene here can contend with the agent's next modeling command.
+    agentLocksByProject.set(projectId, data);
+    if (projectId === selectedProjectId) {
+      renderAgentActivity(activitiesByProject.get(projectId) || [], data);
+    }
   }
 }
 
@@ -1125,7 +1263,7 @@ folderFileList.addEventListener("click", (event) => {
 });
 
 const stream = new EventSource("/api/v1/events");
-const eventTypes = ["project.created", "project.lock.changed", "agent.activity", "command.completed", "document.changed", "viewport.camera"];
+const eventTypes = ["project.created", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera"];
 for (const type of eventTypes) {
   stream.addEventListener(type, (message) => {
     try { handleStreamEvent(type, JSON.parse(message.data)); }
