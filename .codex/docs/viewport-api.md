@@ -144,26 +144,33 @@ browser show the intended workflow before geometry changes begin.
   regular loads and PLY previews remain static unless a transition is supplied.
 - `render()` redraws after resize/visibility changes.
 - `fit()` resets orientation and zoom to fit all scene bounds.
-- `getCamera()` returns `{yaw, pitch, zoom, projection: "orthographic"}`.
-- `setCamera(camera)` validates finite values, pitch within +/-π/2 radians,
-  zoom within 0.25–5 and the orthographic projection before updating.
+- `getCamera()` returns `{orientation, zoom, projection: "orthographic"}`;
+  `orientation` is a row-major 3×3 camera rotation matrix.
+- `setCamera(camera)` accepts that orientation matrix or the legacy `{yaw, pitch}`
+  form, along with zoom within 0.25–5 and the orthographic projection. Pitch is
+  not clamped, so legacy callers can select orientations beyond either pole.
+- `orbitBy(yawDelta, pitchDelta, zoomFactor = 1)` applies relative camera
+  rotations and zoom without changing the document.
 
 Camera drag and wheel events update camera state immediately and coalesce
 canvas rendering to one animation-frame callback. CAD body shading averages
 adjacent triangle normals at shared vertices so the lighter viewport mesh
 keeps a smooth surface appearance.
 
-Camera vertical is Z; yaw rotates around Z, pitch changes elevation.
+Camera orientation maps world XYZ into camera `[right, depth, up]` coordinates.
+Dragging uses a virtual trackball, allowing unrestricted rotation around all
+three axes, including complete turns and roll. The camera triad and view cube
+follow the complete orientation. Wheel zooms; double-click or **Вписать**
+restores the fitted isometric view. API camera events apply incremental yaw and
+pitch rotations without clamping the accumulated pitch.
 Unless a modeling request specifies another datum, new geometry starts at
 global Z=0. When a scene has a shared revolution axis, the camera orbits around
 that axis at the body's Z midpoint; an asymmetric handle therefore cannot shift
 the camera pivot away from the mug centerline. Fit size accounts for the full
-scene bounds relative to that pivot. Drag right/left orbits horizontally; drag
-down increases elevation and drag up decreases it. Wheel zooms; double-click or **Вписать** restores the
-fitted view. The orbit can reach the exact top view. A compact XYZ triad tracks
-camera orientation; revolved bodies show a dashed Z-axis line through their
-rotation axis. Camera stays local to the viewer, requires no document mutation
-and is retained across revisions of the same project. New projects/files reset it.
+scene bounds relative to that pivot. A compact XYZ triad tracks camera
+orientation; revolved bodies show a dashed Z-axis line through their rotation
+axis. Camera stays local to the viewer, requires no document mutation and is
+retained across revisions of the same project. New projects/files reset it.
 
 Agents can animate a camera change without synthesizing browser input by posting
 to `POST /api/v1/agent/projects/{id}/viewport/camera`:
@@ -187,8 +194,9 @@ document. Events are not replayed after an SSE reconnect.
 Validation: `tests/test_rendering.py` checks kernel mesh winding/volume/bounds,
 sketch rendering, parameter refresh and read-only persistence;
 `tests/test_web_api.py` checks both endpoints and unchanged inspection state;
-`tests/test_viewport.cjs` checks Z-up projection, top view, coordinate axes,
-vertical drag, zoom, camera validation, fit and camera preservation. See
+`tests/test_viewport.cjs` checks Z-up projection, trackball turns, camera
+orientation, top view, coordinate axes, zoom, validation, fit and camera
+preservation. See
 [run/check commands](../../README.md).
 
 ## Source comparison

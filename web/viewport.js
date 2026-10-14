@@ -1,7 +1,85 @@
 (() => {
   const MAX_PREVIEW_POINTS = 24000;
-  const MAX_CAMERA_PITCH = Math.PI / 2;
   const meshEdgesCache = new WeakMap();
+  const multiplyMatrices = (left, right) => [
+    left[0] * right[0] + left[1] * right[3] + left[2] * right[6],
+    left[0] * right[1] + left[1] * right[4] + left[2] * right[7],
+    left[0] * right[2] + left[1] * right[5] + left[2] * right[8],
+    left[3] * right[0] + left[4] * right[3] + left[5] * right[6],
+    left[3] * right[1] + left[4] * right[4] + left[5] * right[7],
+    left[3] * right[2] + left[4] * right[5] + left[5] * right[8],
+    left[6] * right[0] + left[7] * right[3] + left[8] * right[6],
+    left[6] * right[1] + left[7] * right[4] + left[8] * right[7],
+    left[6] * right[2] + left[7] * right[5] + left[8] * right[8],
+  ];
+  const rotationX = (angle) => {
+    const cosine = Math.cos(angle), sine = Math.sin(angle);
+    return [1, 0, 0, 0, cosine, -sine, 0, sine, cosine];
+  };
+  const rotationZ = (angle) => {
+    const cosine = Math.cos(angle), sine = Math.sin(angle);
+    return [cosine, -sine, 0, sine, cosine, 0, 0, 0, 1];
+  };
+  function cameraMatrixFromYawPitch(yaw, pitch) {
+    return multiplyMatrices(rotationX(-pitch), rotationZ(yaw));
+  }
+  function rotationBetween(from, to) {
+    let axis = [
+      from[1] * to[2] - from[2] * to[1],
+      from[2] * to[0] - from[0] * to[2],
+      from[0] * to[1] - from[1] * to[0],
+    ];
+    const cosine = Math.max(-1, Math.min(1,
+      from[0] * to[0] + from[1] * to[1] + from[2] * to[2]));
+    let sine = Math.hypot(...axis);
+    if (sine < 1e-10) {
+      if (cosine > 0) return [1, 0, 0, 0, 1, 0, 0, 0, 1];
+      axis = Math.abs(from[0]) < 0.8
+        ? [0, from[2], -from[1]] : [-from[2], 0, from[0]];
+      sine = Math.hypot(...axis);
+    }
+    axis = axis.map((value) => value / sine);
+    const angleSine = cosine < -0.999999 ? 0 : sine;
+    const angleCosine = cosine < -0.999999 ? -1 : cosine;
+    const [x, y, z] = axis;
+    const complement = 1 - angleCosine;
+    return [
+      angleCosine + complement * x * x,
+      complement * x * y - angleSine * z,
+      complement * x * z + angleSine * y,
+      complement * y * x + angleSine * z,
+      angleCosine + complement * y * y,
+      complement * y * z - angleSine * x,
+      complement * z * x - angleSine * y,
+      complement * z * y + angleSine * x,
+      angleCosine + complement * z * z,
+    ];
+  }
+  function trackballPoint(clientX, clientY, rect) {
+    const radius = Math.max(1, Math.min(rect.width, rect.height) / 2);
+    const x = (clientX - rect.left - rect.width / 2) / radius;
+    const up = (rect.top + rect.height / 2 - clientY) / radius;
+    const distance = Math.hypot(x, up);
+    if (distance < 1e-10) return [0, 1, 0];
+    const angle = Math.PI * distance;
+    const radial = Math.sin(angle) / distance;
+    return [x * radial, Math.cos(angle), up * radial];
+  }
+  function isRotationMatrix(matrix) {
+    if (!matrix || matrix.length !== 9 || !Array.from(matrix).every(Number.isFinite)) return false;
+    for (let row = 0; row < 3; row += 1) {
+      for (let other = row; other < 3; other += 1) {
+        const dot = matrix[row * 3] * matrix[other * 3]
+          + matrix[row * 3 + 1] * matrix[other * 3 + 1]
+          + matrix[row * 3 + 2] * matrix[other * 3 + 2];
+        if (Math.abs(dot - (row === other ? 1 : 0)) > 1e-5) return false;
+      }
+    }
+    const determinant = matrix[0] * (matrix[4] * matrix[8] - matrix[5] * matrix[7])
+      - matrix[1] * (matrix[3] * matrix[8] - matrix[5] * matrix[6])
+      + matrix[2] * (matrix[3] * matrix[7] - matrix[4] * matrix[6]);
+    return Math.abs(determinant - 1) <= 1e-5;
+  }
   function createViewer(canvas, {
     showViewCube = false,
     showCoordinateGizmo = true,
@@ -13,8 +91,7 @@
   } = {}) {
     const context = canvas.getContext("2d", { alpha: true });
     let geometry = null;
-    let yaw = 0.68;
-    let pitch = 0.38;
+    let cameraOrientation = cameraMatrixFromYawPitch(0.68, 0.38);
     let zoom = 1;
     let drag = null;
     let camera = new Float64Array(0);
@@ -153,18 +230,13 @@
       const extent = bounds.min.map((value, axis) => bounds.max[axis] - value);
       const radius = geometry.fitRadius || Math.max(Math.hypot(...extent) / 2, 0.001);
       const scale = (Math.min(width, height) * 0.43 * zoom) / radius;
-      const cosYaw = Math.cos(yaw);
-      const sinYaw = Math.sin(yaw);
-      const cosPitch = Math.cos(pitch);
-      const sinPitch = Math.sin(pitch);
       const project = (worldX, worldY, worldZ) => {
         const x = worldX - center[0];
         const y = worldY - center[1];
         const z = worldZ - center[2];
-        const rotatedX = x * cosYaw - y * sinYaw;
-        const rotatedDepth = x * sinYaw + y * cosYaw;
-        const cameraY = z * cosPitch - rotatedDepth * sinPitch;
-        return [width / 2 + rotatedX * scale, height / 2 - cameraY * scale];
+        const right = cameraOrientation[0] * x + cameraOrientation[1] * y + cameraOrientation[2] * z;
+        const up = cameraOrientation[6] * x + cameraOrientation[7] * y + cameraOrientation[8] * z;
+        return [width / 2 + right * scale, height / 2 - up * scale];
       };
       for (let index = 0; index < positions.length; index += 3) {
         let worldX = positions[index];
@@ -186,21 +258,19 @@
         const x = worldX - center[0];
         const y = worldY - center[1];
         const z = worldZ - center[2];
-        // CAD model coordinates: XY is horizontal, Z is up.
-        const rotatedX = x * cosYaw - y * sinYaw;
-        const rotatedDepth = x * sinYaw + y * cosYaw;
-        const cameraY = z * cosPitch - rotatedDepth * sinPitch;
-        const cameraZ = z * sinPitch + rotatedDepth * cosPitch;
-        camera[index] = rotatedX;
-        camera[index + 1] = cameraY;
-        camera[index + 2] = cameraZ;
-        screenX[vertex] = width / 2 + rotatedX * scale;
-        screenY[vertex] = height / 2 - cameraY * scale;
+        const right = cameraOrientation[0] * x + cameraOrientation[1] * y + cameraOrientation[2] * z;
+        const depth = cameraOrientation[3] * x + cameraOrientation[4] * y + cameraOrientation[5] * z;
+        const up = cameraOrientation[6] * x + cameraOrientation[7] * y + cameraOrientation[8] * z;
+        camera[index] = right;
+        camera[index + 1] = up;
+        camera[index + 2] = depth;
+        screenX[vertex] = width / 2 + right * scale;
+        screenY[vertex] = height / 2 - up * scale;
       }
 
       if (triangles.length) renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress,
-        geometry.vertexNormals, yaw, pitch, geometry.featureEdges,
+        geometry.vertexNormals, cameraOrientation, geometry.featureEdges,
         geometry.silhouetteCandidates, wireframe, shaded,
         wireframeColor, wireframeOpacity, dpr,
       );
@@ -233,8 +303,8 @@
       }
       context.globalAlpha = 1;
       if (showRotationAxes) drawRotationAxes(geometry.rotationAxes || [], project, dpr);
-      if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cosYaw, sinYaw, cosPitch, sinPitch);
-      if (showViewCube) drawViewCube(width, dpr, yaw, pitch);
+      if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cameraOrientation);
+      if (showViewCube) drawViewCube(width, dpr, cameraOrientation);
     }
 
     function drawRotationAxes(axes, project, dpr) {
@@ -259,7 +329,7 @@
       }
     }
 
-    function drawCoordinateGizmo(width, height, dpr, cosYaw, sinYaw, cosPitch, sinPitch) {
+    function drawCoordinateGizmo(width, height, dpr, orientation) {
       const left = 12 * dpr;
       const top = height - 70 * dpr;
       const originX = left + 31 * dpr;
@@ -280,8 +350,8 @@
       ];
       for (const axis of axes) {
         const [x, y, z] = axis.world;
-        const screenX = x * cosYaw - y * sinYaw;
-        const screenY = -(z * cosPitch - (x * sinYaw + y * cosYaw) * sinPitch);
+        const screenX = orientation[0] * x + orientation[1] * y + orientation[2] * z;
+        const screenY = -(orientation[6] * x + orientation[7] * y + orientation[8] * z);
         const magnitude = Math.hypot(screenX, screenY);
         const directionX = magnitude > 0.08 ? screenX / magnitude : 0;
         const directionY = magnitude > 0.08 ? screenY / magnitude : -1;
@@ -301,18 +371,15 @@
       context.restore();
     }
 
-    function drawViewCube(width, dpr, viewYaw, viewPitch) {
+    function drawViewCube(width, dpr, orientation) {
       const centerX = width - 38 * dpr;
       const centerY = 42 * dpr;
       const halfSize = 16 * dpr;
-      const cosViewYaw = Math.cos(viewYaw), sinViewYaw = Math.sin(viewYaw);
-      const cosViewPitch = Math.cos(viewPitch), sinViewPitch = Math.sin(viewPitch);
       const transform = ([x, y, z]) => {
-        const rotatedX = x * cosViewYaw - y * sinViewYaw;
-        const rotatedDepth = x * sinViewYaw + y * cosViewYaw;
-        const cameraY = z * cosViewPitch - rotatedDepth * sinViewPitch;
-        const cameraZ = z * sinViewPitch + rotatedDepth * cosViewPitch;
-        return { x: centerX + rotatedX * halfSize, y: centerY - cameraY * halfSize, depth: cameraZ };
+        const right = orientation[0] * x + orientation[1] * y + orientation[2] * z;
+        const depth = orientation[3] * x + orientation[4] * y + orientation[5] * z;
+        const up = orientation[6] * x + orientation[7] * y + orientation[8] * z;
+        return { x: centerX + right * halfSize, y: centerY - up * halfSize, depth };
       };
       const faces = [
         { label: "X", normal: [1, 0, 0], points: [[1, -1, -1], [1, 1, -1], [1, 1, 1], [1, -1, 1]] },
@@ -356,23 +423,20 @@
     }
 
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress,
-      vertexNormals, yaw, pitch, featureEdges, silhouetteCandidates, showWireframe, shaded,
+      vertexNormals, orientation, featureEdges, silhouetteCandidates, showWireframe, shaded,
       wireframeColor, wireframeOpacity, dpr) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
-      const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
-      const cosPitch = Math.cos(pitch), sinPitch = Math.sin(pitch);
       const smooth = vertexNormals && (!transition || progress >= 1);
       if (smooth) {
         for (let vertex = 0; vertex < vertexLight.length; vertex += 1) {
           const worldX = vertexNormals[vertex * 3], worldY = vertexNormals[vertex * 3 + 1];
           const worldZ = vertexNormals[vertex * 3 + 2];
-          const rotatedX = worldX * cosYaw - worldY * sinYaw;
-          const rotatedDepth = worldX * sinYaw + worldY * cosYaw;
-          const normalY = worldZ * cosPitch - rotatedDepth * sinPitch;
-          const normalZ = worldZ * sinPitch + rotatedDepth * cosPitch;
+          const right = orientation[0] * worldX + orientation[1] * worldY + orientation[2] * worldZ;
+          const depth = orientation[3] * worldX + orientation[4] * worldY + orientation[5] * worldZ;
+          const up = orientation[6] * worldX + orientation[7] * worldY + orientation[8] * worldZ;
           vertexLight[vertex] = 0.34 + 0.66 * Math.abs(
-            rotatedX * light[0] + normalY * light[1] + normalZ * light[2],
+            right * light[0] + up * light[1] + depth * light[2],
           );
         }
       }
@@ -504,16 +568,15 @@
     }
 
     canvas.addEventListener("pointerdown", (event) => {
-      drag = { x: event.clientX, y: event.clientY };
+      drag = { point: trackballPoint(event.clientX, event.clientY, canvas.getBoundingClientRect()) };
       canvas.setPointerCapture(event.pointerId);
       canvas.classList.add("dragging");
     });
     canvas.addEventListener("pointermove", (event) => {
       if (!drag) return;
-      const sensitivity = (Math.PI * 2) / Math.max(canvas.clientHeight, 1);
-      yaw -= (event.clientX - drag.x) * sensitivity;
-      pitch = Math.max(-MAX_CAMERA_PITCH, Math.min(MAX_CAMERA_PITCH, pitch + (event.clientY - drag.y) * sensitivity));
-      drag = { x: event.clientX, y: event.clientY };
+      const nextPoint = trackballPoint(event.clientX, event.clientY, canvas.getBoundingClientRect());
+      cameraOrientation = multiplyMatrices(rotationBetween(drag.point, nextPoint), cameraOrientation);
+      drag = { point: nextPoint };
       scheduleCameraRender();
     });
     const stopDrag = () => {
@@ -523,9 +586,7 @@
     canvas.addEventListener("pointerup", stopDrag);
     canvas.addEventListener("pointercancel", stopDrag);
     canvas.addEventListener("dblclick", () => {
-      yaw = 0.68;
-      pitch = 0.38;
-      zoom = 1;
+      resetView();
       render();
     });
     canvas.addEventListener("wheel", (event) => {
@@ -536,21 +597,37 @@
     new ResizeObserver(render).observe(canvas);
 
     function resetView() {
-      yaw = 0.68;
-      pitch = 0.38;
+      cameraOrientation = cameraMatrixFromYawPitch(0.68, 0.38);
       zoom = 1;
     }
 
     return {
       fit() { resetView(); render(); },
-      getCamera() { return { yaw, pitch, zoom, projection: "orthographic" }; },
+      getCamera() { return { orientation: cameraOrientation.slice(), zoom, projection: "orthographic" }; },
       setCamera(value) {
-        if (!value || ![value.yaw, value.pitch, value.zoom].every(Number.isFinite)
-            || Math.abs(value.pitch) > MAX_CAMERA_PITCH || value.zoom < 0.25 || value.zoom > 5
+        if (!value || !Number.isFinite(value.zoom) || value.zoom < 0.25 || value.zoom > 5
             || value.projection !== "orthographic") {
           throw new Error("Invalid orthographic camera.");
         }
-        ({ yaw, pitch, zoom } = value);
+        if (value.orientation !== undefined) {
+          if (!isRotationMatrix(value.orientation)) throw new Error("Invalid orthographic camera.");
+          cameraOrientation = Array.from(value.orientation);
+        } else {
+          if (![value.yaw, value.pitch].every(Number.isFinite)) throw new Error("Invalid orthographic camera.");
+          cameraOrientation = cameraMatrixFromYawPitch(value.yaw, value.pitch);
+        }
+        zoom = value.zoom;
+        render();
+      },
+      orbitBy(yawDelta, pitchDelta, zoomFactor = 1) {
+        if (![yawDelta, pitchDelta, zoomFactor].every(Number.isFinite) || zoomFactor <= 0) {
+          throw new Error("Invalid orthographic camera change.");
+        }
+        cameraOrientation = multiplyMatrices(
+          rotationX(-pitchDelta),
+          multiplyMatrices(cameraOrientation, rotationZ(yawDelta)),
+        );
+        zoom = Math.max(0.25, Math.min(5, zoom * zoomFactor));
         render();
       },
       setWireframe(value) {

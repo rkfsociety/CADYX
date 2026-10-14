@@ -23,8 +23,7 @@ const context = {
 };
 const canvas = {
   getContext() { return context; },
-  getBoundingClientRect() { return { width: 600, height: 400 }; },
-  clientHeight: 400,
+  getBoundingClientRect() { return { left: 0, top: 0, width: 600, height: 400 }; },
   classList: { add() {}, remove() {} },
   addEventListener(name, handler) { events[name] = handler; },
   setPointerCapture() {},
@@ -45,27 +44,48 @@ assert.ok(drawnPoints[1][1] < drawnPoints[0][1], "Positive Z projects upward");
 assert.equal(segments, 4, "Sketch lines and the three coordinate axes render in the shared viewport");
 assert.deepEqual(drawnLabels.filter((label) => ["X", "Y", "Z"].includes(label)).sort(), ["X", "Y", "Z"]);
 const initial = viewer.getCamera();
+const isRotationMatrix = (matrix) => {
+  for (let row = 0; row < 3; row += 1) {
+    for (let other = 0; other < 3; other += 1) {
+      const dot = matrix[row * 3] * matrix[other * 3]
+        + matrix[row * 3 + 1] * matrix[other * 3 + 1]
+        + matrix[row * 3 + 2] * matrix[other * 3 + 2];
+      if (Math.abs(dot - (row === other ? 1 : 0)) > 1e-8) return false;
+    }
+  }
+  return true;
+};
 const initialRenderCalls = renderCalls;
-events.pointerdown({ clientX: 100, clientY: 100, pointerId: 1 });
-events.pointermove({ clientX: 100, clientY: 120 });
-events.pointermove({ clientX: 100, clientY: 130 });
+events.pointerdown({ clientX: 300, clientY: 200, pointerId: 1 });
+events.pointermove({ clientX: 300, clientY: 220 });
+events.pointermove({ clientX: 300, clientY: 230 });
 events.pointerup();
 const downward = viewer.getCamera();
-assert.equal(downward.yaw, initial.yaw);
-assert.ok(downward.pitch > initial.pitch, "Dragging downward increases elevation in Z-up coordinates");
+assert.notDeepEqual(downward.orientation, initial.orientation, "Dragging rotates the camera");
+assert.ok(isRotationMatrix(downward.orientation), "Drag keeps the full camera orientation orthonormal");
 assert.equal(animationFrames.length, 1, "A burst of camera events is coalesced into one animation frame");
 animationFrames.shift()(animationTime);
 assert.equal(renderCalls, initialRenderCalls + 1, "A camera event burst triggers one render, not one render per input event");
-events.pointerdown({ clientX: 100, clientY: 130, pointerId: 1 });
-events.pointermove({ clientX: 100, clientY: 100 });
+events.pointerdown({ clientX: 300, clientY: 230, pointerId: 1 });
+events.pointermove({ clientX: 300, clientY: 220 });
+events.pointermove({ clientX: 300, clientY: 200 });
 events.pointerup();
 animationFrames.shift()(animationTime);
-assert.ok(Math.abs(viewer.getCamera().pitch - initial.pitch) < 1e-12, "Reverse vertical drag restores elevation");
-events.pointerdown({ clientX: 100, clientY: 100, pointerId: 1 });
-events.pointermove({ clientX: 100, clientY: 300 });
+assert.ok(viewer.getCamera().orientation.every((value, index) => Math.abs(value - initial.orientation[index]) < 1e-12),
+  "Reverse drag restores the full camera orientation");
+viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
+events.pointerdown({ clientX: 300, clientY: 200, pointerId: 1 });
+for (let y = 210; y <= 400; y += 10) events.pointermove({ clientX: 300, clientY: y });
 events.pointerup();
 animationFrames.shift()(animationTime);
-assert.equal(viewer.getCamera().pitch, Math.PI / 2, "Dragging can reach the exact top view");
+assert.ok(viewer.getCamera().orientation[8] < -0.999,
+  "Trackball drag passes through the former pitch limit and turns the camera upside down");
+events.pointerdown({ clientX: 300, clientY: 400, pointerId: 1 });
+for (let y = 410; y <= 600; y += 10) events.pointermove({ clientX: 300, clientY: y });
+events.pointerup();
+animationFrames.shift()(animationTime);
+assert.ok(viewer.getCamera().orientation.every((value, index) => Math.abs(value - [1, 0, 0, 0, 1, 0, 0, 0, 1][index]) < 1e-10),
+  "A continued drag can complete a full camera revolution");
 events.wheel({ deltaY: -100, preventDefault() {} });
 animationFrames.shift()(animationTime);
 const zoomed = viewer.getCamera();
@@ -73,14 +93,20 @@ assert.ok(zoomed.zoom > initial.zoom);
 viewer.load(geometry, { reset: false });
 assert.equal(viewer.getCamera().zoom, zoomed.zoom, "Document refresh preserves the camera");
 viewer.setCamera({ yaw: 0, pitch: Math.PI / 2, zoom: 1, projection: "orthographic" });
-assert.equal(viewer.getCamera().pitch, Math.PI / 2, "Camera can reach an exact top view");
+assert.ok(Math.abs(viewer.getCamera().orientation[8]) < 1e-12, "Camera can reach an exact top view");
 assert.ok(Math.abs(drawnPoints[1][1] - drawnPoints[0][1]) < 1e-9, "The vertical Z axis points into the camera from above");
-assert.throws(() => viewer.setCamera({ yaw: 0, pitch: Math.PI / 2 + 0.01, zoom: 1, projection: "orthographic" }));
+viewer.setCamera({ yaw: 0, pitch: Math.PI * 1.5, zoom: 1, projection: "orthographic" });
+assert.ok(isRotationMatrix(viewer.getCamera().orientation), "Camera accepts orientations beyond the former pitch limit");
 viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
 assert.equal(drawnPoints[1][0], drawnPoints[0][0], "Z stays vertical without horizontal rotation");
 assert.throws(() => viewer.setCamera({ yaw: NaN, pitch: 0, zoom: 1, projection: "orthographic" }));
+viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
+viewer.orbitBy(0, Math.PI / 2, 1);
+viewer.orbitBy(0, Math.PI / 2, 1);
+assert.ok(viewer.getCamera().orientation[8] < -0.999, "API camera orbits can accumulate beyond ninety degrees");
+assert.throws(() => viewer.setCamera({ orientation: [1, 0, 0, 0, 1, 0, 0, 0, -1], zoom: 1, projection: "orthographic" }));
 viewer.fit();
-assert.equal(viewer.getCamera().pitch, initial.pitch);
+assert.ok(viewer.getCamera().orientation.every((value, index) => Math.abs(value - initial.orientation[index]) < 1e-12));
 assert.equal(viewer.getCamera().zoom, 1);
 viewer.load(geometry);
 assert.equal(viewer.getCamera().zoom, 1, "New scene resets the camera");

@@ -1190,30 +1190,22 @@ function selectObjectFromResult(projectId, result) {
 
 function animateModelCamera(change) {
   setCameraPresetState(null);
-  const start = modelViewer.getCamera();
   const duration = change.duration_ms;
-  const target = {
-    yaw: start.yaw + change.yaw_delta,
-    pitch: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, start.pitch + change.pitch_delta)),
-    zoom: Math.max(0.25, Math.min(5, start.zoom * change.zoom_factor)),
-    projection: "orthographic",
-  };
+  const zoomFactor = Number.isFinite(change.zoom_factor) ? change.zoom_factor : 1;
   const token = ++cameraAnimationId;
   if (duration === 0) {
-    modelViewer.setCamera(target);
+    modelViewer.orbitBy(change.yaw_delta, change.pitch_delta, zoomFactor);
     return;
   }
   const startedAt = performance.now();
+  let previousEased = 0;
   const tick = (now) => {
     if (token !== cameraAnimationId) return;
     const ratio = Math.min(1, (now - startedAt) / duration);
     const eased = ratio < 0.5 ? 2 * ratio * ratio : 1 - ((-2 * ratio + 2) ** 2) / 2;
-    modelViewer.setCamera({
-      yaw: start.yaw + (target.yaw - start.yaw) * eased,
-      pitch: start.pitch + (target.pitch - start.pitch) * eased,
-      zoom: start.zoom + (target.zoom - start.zoom) * eased,
-      projection: "orthographic",
-    });
+    const step = eased - previousEased;
+    modelViewer.orbitBy(change.yaw_delta * step, change.pitch_delta * step, zoomFactor ** step);
+    previousEased = eased;
     if (ratio < 1) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
