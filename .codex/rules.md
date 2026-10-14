@@ -1,5 +1,6 @@
 # CADYX Codex rules
 
+- Before any substantive work on CADYX—analysis, planning, code or documentation changes, reviews, recommendations, or commits—refresh project context from the current target branch/revision. Re-read `.codex/rules.md` and `.codex/memory.md`, inspect the files relevant to the task, and verify recent repository state/changes as needed. Treat prior-chat/model memory as potentially stale and never rely on it when the current repository state can be checked.
 - When choosing or updating any dependency/runtime/tool version, use the newest stable release and verify it from its official source. Do not choose an older compatible release as a workaround: the user explicitly requires adapting or building the kernel when necessary. Never bypass dependency checks to claim compatibility. Reviewed versions and reproducible local setup live in `scripts/runtime-versions.json` and `scripts/setup-runtime.ps1`.
 
 - Keep CADYX AI-first: the Core owns authoritative project state, and both agents and the browser use its Command System for document mutations.
