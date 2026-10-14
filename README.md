@@ -25,7 +25,13 @@ To keep the host independent of a terminal or Codex session, register its Window
 
 The task starts when the current Windows account signs in, runs separately from terminals and Codex, binds only to `127.0.0.1:8888`, and asks Task Scheduler to restart it after a failure. It launches `pythonw.exe` directly, so no console window appears and Task Scheduler tracks the host process. Standard output and errors are captured in `%LOCALAPPDATA%\CADYX\host.stdout.log` and `host.stderr.log`, with previous logs rotated on startup. The host uses this checkout's `projects/` workspace.
 
-Use `-Action Status`, `-Action Restart`, `-Action Stop`, or `-Action Uninstall` to manage it. After moving the checkout or rebuilding its local runtime, run `-Action Install` again to refresh the registered paths and restart the host.
+Agents and operators can restart the host without browser interaction by running this PowerShell command from the repository root:
+
+```powershell
+.\scripts\manage-host-task.ps1 -Action Restart
+```
+
+Use `-Action Status`, `-Action Stop`, or `-Action Uninstall` to manage the task. After moving the checkout or rebuilding its local runtime, run `-Action Install` again to refresh the registered paths and restart the host.
 
 Multiple current hosts may share a workspace on the same local machine; see the [lease contract](docs/architecture.md#edit-leases). SSE updates remain local to each host. The project workspace is `projects/`. Runtime project data is ignored by Git; keep source CAD files and scans backed up as user data.
 
