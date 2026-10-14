@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import struct
 import threading
@@ -11,6 +12,7 @@ from urllib.request import Request, urlopen
 
 from cadyx.core import CadyxCore
 from cadyx.web import CadyxHTTPServer, make_request_handler
+import cadyx.web as web_module
 
 
 class WebApiTests(unittest.TestCase):
@@ -126,6 +128,56 @@ class WebApiTests(unittest.TestCase):
         with urlopen(self.base_url + "/", timeout=3) as response:
             self.assertEqual(response.status, 200)
             self.assertIn(b"CADYX", response.read())
+
+    def test_automatic_update_snapshot_tracks_project_activity_and_folder_files(self) -> None:
+        status, initial = self.request("/api/v1/updates")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(initial["ui_version"]), 64)
+
+        _, created = self.request("/api/v1/projects", {"name": "Automatic updates"})
+        project_id = created["project"]["id"]
+        status, with_project = self.request("/api/v1/updates")
+        self.assertEqual(status, 200)
+        self.assertNotEqual(initial["workspace_revision"], with_project["workspace_revision"])
+
+        lease = self.core.acquire_lease(project_id, "agent", "updates-test")
+        self.core.execute_command(project_id, lease["lease_id"], {
+            "type": "create_box", "width": 1, "height": 1, "depth": 1,
+        })
+        status, after_command = self.request(f"/api/v1/updates?project_id={project_id}")
+        self.assertEqual(status, 200)
+        self.assertGreater(after_command["activity_revision"], 0)
+        self.assertIsNotNone(after_command["project_revision"])
+
+        folder = self.core.workspace.root / "live-scans"
+        folder.mkdir()
+        source = folder / "source.ply"
+        source.write_bytes(b"first")
+        status, before_file_change = self.request("/api/v1/updates?folder=live-scans")
+        self.assertEqual(status, 200)
+        previous_mtime = source.stat().st_mtime_ns
+        source.write_bytes(b"other")
+        os.utime(source, ns=(previous_mtime + 2_000_000_000, previous_mtime + 2_000_000_000))
+        status, after_file_change = self.request("/api/v1/updates?folder=live-scans")
+        self.assertEqual(status, 200)
+        self.assertNotEqual(before_file_change["folder_revision"], after_file_change["folder_revision"])
+
+    def test_automatic_update_snapshot_detects_visual_asset_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for filename in web_module._UI_ASSETS:
+                (root / filename).write_text(filename, encoding="utf-8")
+            previous_root = web_module._WEB_ROOT
+            web_module._WEB_ROOT = root
+            try:
+                status, before = self.request("/api/v1/updates")
+                self.assertEqual(status, 200)
+                (root / "style.css").write_text("updated stylesheet", encoding="utf-8")
+                status, after = self.request("/api/v1/updates")
+                self.assertEqual(status, 200)
+                self.assertNotEqual(before["ui_version"], after["ui_version"])
+            finally:
+                web_module._WEB_ROOT = previous_root
 
     def test_shared_viewport_api_is_read_only_and_identical(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Viewport"})

@@ -31,10 +31,15 @@ units without inventing a physical unit convention.
 
 The browser checks inspection and scene revisions before presenting a snapshot;
 if a command commits between requests, it refreshes again. SSE refreshes the
-scene after agent/human commands. The browser shows the detail full-window by
-default; model navigation and properties remain in collapsed read-only docks.
-All visible bodies and sketch elements render together. Sketch lines and points
-overlay solid shading (no hidden-line removal or viewport picking).
+scene immediately after local agent/human commands. A lightweight update
+snapshot also checks workspace, project, file, activity, and UI asset versions
+every five seconds, so changes made by another cooperating host appear
+automatically. Changed HTML, CSS, or JavaScript assets trigger a page reload;
+the selected project is restored. Returning to a hidden tab or reconnecting also
+triggers a sync. The browser shows the detail full-window by default; model
+navigation and properties remain in collapsed read-only docks. All visible
+bodies and sketch elements render together. Sketch lines and points overlay
+solid shading (no hidden-line removal or viewport picking).
 
 `window.CadyxViewport.createViewer(canvas)` is shared with PLY preview and returns:
 

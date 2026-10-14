@@ -36,9 +36,14 @@ class EventBroker:
         self._subscribers: dict[int, tuple[queue.Queue[ProjectEvent], str | None]] = {}
         self._next_subscriber_id = 1
         self._activities: dict[str, list[dict[str, Any]]] = {}
+        self._activity_revisions: dict[str, int] = {}
 
     def publish(self, event: str, project_id: str | None, data: dict[str, Any]) -> ProjectEvent:
         with self._lock:
+            if event == "agent.activity" and project_id is not None:
+                revision = self._activity_revisions.get(project_id, 0) + 1
+                self._activity_revisions[project_id] = revision
+                data = {**data, "revision": revision}
             item = ProjectEvent(
                 id=self._next_id,
                 event=event,
@@ -70,8 +75,18 @@ class EventBroker:
             return item
 
     def activity_snapshot(self, project_id: str) -> list[dict[str, Any]]:
+        return self.activity_state_snapshot(project_id)[0]
+
+    def activity_state_snapshot(self, project_id: str) -> tuple[list[dict[str, Any]], int]:
         with self._lock:
-            return copy.deepcopy(self._activities.get(project_id, []))
+            return (
+                copy.deepcopy(self._activities.get(project_id, [])),
+                self._activity_revisions.get(project_id, 0),
+            )
+
+    def activity_revision(self, project_id: str) -> int:
+        with self._lock:
+            return self._activity_revisions.get(project_id, 0)
 
     def subscribe(self, project_id: str | None = None) -> tuple[int, queue.Queue[ProjectEvent]]:
         subscriber: queue.Queue[ProjectEvent] = queue.Queue(maxsize=self._capacity)

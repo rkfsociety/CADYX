@@ -4,7 +4,11 @@ const api = (path, options = {}) => fetch(path, {
 }).then(async (response) => {
   const contentType = response.headers.get("content-type") || "";
   const value = contentType.includes("application/json") ? await response.json() : {};
-  if (!response.ok) throw new Error(value.message || value.error || "Ошибка запроса");
+  if (!response.ok) {
+    const error = new Error(value.message || value.error || "Ошибка запроса");
+    error.status = response.status;
+    throw error;
+  }
   return value;
 });
 
@@ -31,10 +35,15 @@ let toastTimer;
 let refreshTimer;
 let activeFolderName = null;
 let folderFiles = [];
+let folderFilesSignature = null;
 let selectedFolderFileName = null;
 let folderListRequest = 0;
 let previewRequest = 0;
+let automaticUpdateSnapshot = null;
+let automaticUpdateInFlight = false;
+let automaticUpdatesUnavailable = false;
 const activitiesByProject = new Map();
+const activityRevisionsByProject = new Map();
 const activityPhaseLabels = {
   starting: "Подготовка операции",
   observe: "Чтение модели",
@@ -209,6 +218,7 @@ function showFolderDetail(name) {
   $("#folder-detail-path").textContent = `projects/${name}`;
   if (folderChanged) {
     folderFiles = [];
+    folderFilesSignature = null;
     selectedFolderFileName = null;
     folderFileList.replaceChildren();
     $("#folder-file-count").textContent = "0";
@@ -240,12 +250,25 @@ async function loadFolderFiles(name) {
   const request = ++folderListRequest;
   const response = await api(`/api/v1/workspace/folders/${encodeURIComponent(name)}/files`);
   if (request !== folderListRequest || activeFolderName !== name) return;
+  const previousSelection = folderFiles.find((file) => file.name === selectedFolderFileName);
+  const signature = JSON.stringify(response.files.map((file) => [file.name, file.size, file.modified_at_ns]));
+  if (signature === folderFilesSignature) return;
+  folderFilesSignature = signature;
   folderFiles = response.files;
   $("#folder-file-count").textContent = String(folderFiles.length);
   renderFolderFiles();
+  const selected = folderFiles.find((file) => file.name === selectedFolderFileName);
+  if (selected) {
+    if (!previousSelection || previousSelection.size !== selected.size ||
+        previousSelection.modified_at_ns !== selected.modified_at_ns) {
+      previewFolderFile(name, selected);
+    }
+    return;
+  }
   const firstPreview = folderFiles.find((file) => file.name.toLowerCase().endsWith(".ply")) || folderFiles[0];
   if (firstPreview) previewFolderFile(name, firstPreview);
   else {
+    selectedFolderFileName = null;
     $("#folder-preview-title").textContent = "Файлов нет";
     $("#folder-preview-info").textContent = "";
     folderPreviewPlaceholder.hidden = false;
@@ -354,16 +377,67 @@ function scheduleWorkspaceRefresh() {
   }, 60);
 }
 
+async function checkAutomaticUpdates() {
+  if (document.visibilityState === "hidden" || automaticUpdateInFlight) return;
+  automaticUpdateInFlight = true;
+  try {
+    const selectionAtRequest = selectedProjectId;
+    const query = new URLSearchParams();
+    const folder = selectionAtRequest?.startsWith(FOLDER_SELECTION_PREFIX)
+      ? selectionAtRequest.slice(FOLDER_SELECTION_PREFIX.length) : null;
+    if (folder) query.set("folder", folder);
+    else if (selectionAtRequest) query.set("project_id", selectionAtRequest);
+    const current = await api(`/api/v1/updates?${query.toString()}`, { cache: "no-store" });
+    if (selectionAtRequest !== selectedProjectId) return;
+    const previous = automaticUpdateSnapshot;
+    automaticUpdateSnapshot = current;
+    if (automaticUpdatesUnavailable) {
+      automaticUpdatesUnavailable = false;
+      notify("Связь восстановлена, синхронизирую панель.");
+      scheduleWorkspaceRefresh();
+    }
+    if (!previous) return;
+    if (current.activity_revision !== null && previous.activity_revision !== null &&
+        current.activity_revision < previous.activity_revision && selectedProjectId) {
+      activitiesByProject.delete(selectedProjectId);
+      activityRevisionsByProject.delete(selectedProjectId);
+    }
+    if (current.ui_version !== previous.ui_version) {
+      window.location.reload();
+      return;
+    }
+    if (current.folder_revision !== previous.folder_revision && folder) {
+      loadFolderFiles(folder).catch((error) => notify(`Не удалось обновить список файлов: ${error.message}`, true));
+    }
+    const workspaceChanged = current.workspace_revision !== previous.workspace_revision;
+    const projectChanged = current.project_revision !== previous.project_revision;
+    const activityChanged = current.activity_revision !== previous.activity_revision;
+    if (workspaceChanged || projectChanged) {
+      scheduleWorkspaceRefresh();
+    } else if (activityChanged && selectedProjectId && !folder) {
+      refreshActivitySnapshot(selectedProjectId)
+        .catch((error) => notify(`Не удалось обновить состояние агента: ${error.message}`, true));
+    }
+  } catch (error) {
+    if (error.status === 404) {
+      scheduleWorkspaceRefresh();
+      return;
+    }
+    if (!automaticUpdatesUnavailable) {
+      notify("Автоматическая синхронизация временно недоступна.", true);
+    }
+    automaticUpdatesUnavailable = true;
+  } finally {
+    automaticUpdateInFlight = false;
+  }
+}
+
 async function refreshDetail() {
   const projectId = selectedProjectId;
   if (!projectId) return;
   const request = ++detailRequest;
-  const activityResponse = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/activity`);
+  const activity = await refreshActivitySnapshot(projectId);
   if (projectId !== selectedProjectId || request !== detailRequest) return;
-  const activities = activityResponse.activities || [];
-  activitiesByProject.set(projectId, activities);
-  const activity = activities.slice().reverse().find((item) => item.state === "running") || activities.at(-1) || null;
-  renderAgentActivity(activities);
   if (activity?.state === "running") {
     $("#folder-detail").hidden = true;
     projectDetail.hidden = false;
@@ -408,6 +482,29 @@ async function refreshDetail() {
   currentObjects = objects;
   renderObjectTree(objects);
   renderProperties(objects);
+}
+
+async function refreshActivitySnapshot(projectId) {
+  const response = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/activity`);
+  if (projectId !== selectedProjectId) return null;
+  const revision = Number.isInteger(response.revision) ? response.revision : 0;
+  const knownRevision = activityRevisionsByProject.get(projectId);
+  if (knownRevision !== undefined && revision < knownRevision) {
+    const cached = activitiesByProject.get(projectId) || [];
+    return cached.slice().reverse().find((item) => item.state === "running") || cached.at(-1) || null;
+  }
+  const activities = response.activities || [];
+  activityRevisionsByProject.set(projectId, revision);
+  activitiesByProject.set(projectId, activities);
+  renderAgentActivity(activities);
+  const current = activities.slice().reverse().find((item) => item.state === "running") || activities.at(-1) || null;
+  if (current?.state === "running") {
+    $("#folder-detail").hidden = true;
+    projectDetail.hidden = false;
+    noSelection.hidden = true;
+    $("#document-title").textContent = getProject(projectId)?.project.name || "CADYX · работа агента";
+  }
+  return current;
 }
 
 function renderAgentActivity(value) {
@@ -736,6 +833,10 @@ function handleStreamEvent(type, event) {
   const data = event.data || {};
 
   if (type === "agent.activity") {
+    const incomingRevision = Number.isInteger(data.revision) ? data.revision : null;
+    const knownRevision = activityRevisionsByProject.get(projectId);
+    if (incomingRevision !== null && knownRevision !== undefined && incomingRevision < knownRevision) return;
+    if (incomingRevision !== null) activityRevisionsByProject.set(projectId, incomingRevision);
     const activities = activitiesByProject.get(projectId) || [];
     const existing = activities.findIndex((item) => item.operation_id === data.operation_id);
     if (existing < 0) activities.push(data);
@@ -791,7 +892,25 @@ for (const type of eventTypes) {
   });
 }
 
-stream.addEventListener("open", scheduleWorkspaceRefresh);
+stream.addEventListener("open", () => {
+  activitiesByProject.clear();
+  activityRevisionsByProject.clear();
+  checkAutomaticUpdates();
+  scheduleWorkspaceRefresh();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    checkAutomaticUpdates();
+    scheduleWorkspaceRefresh();
+  }
+});
+window.addEventListener("online", () => {
+  checkAutomaticUpdates();
+  scheduleWorkspaceRefresh();
+});
+window.addEventListener("pageshow", checkAutomaticUpdates);
+setInterval(checkAutomaticUpdates, 5000);
+checkAutomaticUpdates();
 refreshWorkspace().catch((error) => {
   notify(error.message, true);
 });

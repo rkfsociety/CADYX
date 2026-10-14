@@ -75,6 +75,7 @@ See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](do
 - `import_scan` and `set_scan_parameter` commands for PLY-to-mesh reconstruction; see the [scan command contract](docs/document-model-v2.md#scan-import-and-editable-triangle-meshes)
 - `GET /api/v1/projects/{id}/activity` and its Agent API equivalent return the recent visual activity snapshots; `agent.activity` SSE events update them live
 - Agent `/stop` with `lease_id` and `/resume` with `owner_id` / `expected_revision`; resumed commands require `expected_revision`. See the [stop/resume contract](docs/architecture.md#safe-agent-stop-and-resume).
+- `/api/v1/updates` is polled automatically alongside SSE so project, workspace-file, activity, and UI-asset changes appear without a manual page refresh
 - `GET /api/v1/events` for the SSE update channel
 
 The API is versioned and provider-neutral. When host authentication is configured, every endpoint above except `/api/v1/health` requires valid credentials. See the architecture guide for the exact boundary and current limits.

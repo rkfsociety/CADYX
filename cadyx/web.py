@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 import os
@@ -18,6 +19,17 @@ from .models import OwnerType
 
 _MAX_BODY_BYTES = 1_000_000
 _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
+_UI_ASSETS = ("index.html", "app.js", "style.css", "viewport.js", "ply-preview.js", "favicon.svg")
+
+
+def _ui_asset_version() -> str:
+    digest = hashlib.sha256()
+    for filename in _UI_ASSETS:
+        digest.update(filename.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update((_WEB_ROOT / filename).read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 class CadyxHTTPServer(ThreadingHTTPServer):
@@ -42,6 +54,24 @@ def make_request_handler(
                     return
                 if parsed.path == "/api/v1/events":
                     self._stream_events(parse_qs(parsed.query).get("project_id", [None])[0])
+                    return
+                if parsed.path == "/api/v1/updates":
+                    query = parse_qs(parsed.query)
+                    project_id = query.get("project_id", [None])[0]
+                    folder_name = query.get("folder", [None])[0]
+                    snapshot: dict[str, Any] = {
+                        "ui_version": _ui_asset_version(),
+                        "workspace_revision": core.workspace.workspace_revision_token(),
+                        "project_revision": None,
+                        "activity_revision": None,
+                        "folder_revision": None,
+                    }
+                    if project_id:
+                        snapshot["project_revision"] = core.workspace.project_revision_token(project_id)
+                        snapshot["activity_revision"] = core.events.activity_revision(project_id)
+                    if folder_name:
+                        snapshot["folder_revision"] = core.workspace.folder_revision_token(folder_name)
+                    self._json(200, snapshot)
                     return
                 if parsed.path == "/api/v1/projects":
                     self._json(200, core.list_workspace())
@@ -82,19 +112,19 @@ def make_request_handler(
                     ))
                     return
                 if len(parts) == 5 and parts[:3] == prefix and parts[4] == "activity":
-                    activities = core.events.activity_snapshot(parts[3])
+                    activities, revision = core.events.activity_state_snapshot(parts[3])
                     if not activities:
                         core.inspect_project(parts[3])
-                    self._json(200, {"activities": activities})
+                    self._json(200, {"activities": activities, "revision": revision})
                     return
                 if len(parts) == 4 and parts[:3] == prefix:
                     self._json(200, core.inspect_project(parts[3]))
                     return
                 if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "activity":
-                    activities = core.events.activity_snapshot(parts[4])
+                    activities, revision = core.events.activity_state_snapshot(parts[4])
                     if not activities:
                         core.inspect_project(parts[4])
-                    self._json(200, {"activities": activities})
+                    self._json(200, {"activities": activities, "revision": revision})
                     return
                 if len(parts) == 5 and parts[:4] == agent_prefix:
                     self._json(200, core.observe_agent_operation(

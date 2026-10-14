@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import mimetypes
 import os
 import re
@@ -122,10 +122,56 @@ class ProjectWorkspace:
             files.append({
                 "name": entry.name,
                 "size": stat.st_size,
+                "modified_at_ns": str(stat.st_mtime_ns),
                 "media_type": mimetypes.guess_type(entry.name)[0] or "application/octet-stream",
             })
         files.sort(key=lambda item: item["name"].casefold())
         return files
+
+    def workspace_revision_token(self) -> str:
+        """Return a cheap token for project records and selectable workspace folders."""
+        entries: list[tuple[str, str, int, int]] = []
+        for entry in sorted(self.root.iterdir(), key=lambda item: item.name.casefold()):
+            try:
+                if entry.is_symlink() or not entry.is_dir():
+                    continue
+                if _PROJECT_ID.fullmatch(entry.name):
+                    project_file = entry / "project.json"
+                    if project_file.is_symlink() or not project_file.is_file():
+                        entries.append((entry.name, "folder", 0, 0))
+                        continue
+                    stat = project_file.stat()
+                    entries.append((entry.name, "project", stat.st_mtime_ns, stat.st_size))
+                else:
+                    entries.append((entry.name, "folder", 0, 0))
+            except OSError:
+                # A concurrent workspace change is picked up on the next poll.
+                continue
+        return self._revision_token(entries)
+
+    def folder_revision_token(self, folder_name: str) -> str:
+        """Return a token for the visible metadata of direct files in one folder."""
+        files = self.list_folder_files(folder_name)
+        return self._revision_token([
+            (item["name"], item["size"], item["modified_at_ns"])
+            for item in files
+        ])
+
+    def project_revision_token(self, project_id: str) -> str:
+        """Return a stat-only token for one saved project document."""
+        project_file = self._project_dir(project_id) / "project.json"
+        if project_file.is_symlink() or not project_file.is_file():
+            raise NotFoundError("Project was not found.")
+        try:
+            stat = project_file.stat()
+        except OSError as exc:
+            raise NotFoundError("Project was not found.") from exc
+        return f"{stat.st_mtime_ns}:{stat.st_size}"
+
+    @staticmethod
+    def _revision_token(value: Any) -> str:
+        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     def resolve_folder_file(self, folder_name: str, file_name: str) -> Path:
         folder = self._workspace_folder_path(folder_name)
