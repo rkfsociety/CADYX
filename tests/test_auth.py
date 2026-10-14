@@ -17,6 +17,7 @@ from cadyx.auth import (
     validate_bind_auth,
 )
 from cadyx.core import CadyxCore
+from cadyx.kernel import PrimitiveKernelAdapter
 from cadyx.web import CadyxHTTPServer, make_request_handler
 
 _TOKEN = "0123456789abcdef0123456789abcdef"
@@ -64,7 +65,10 @@ class AuthenticatedWebApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary_directory.cleanup)
-        self.core = CadyxCore(str(Path(self.temporary_directory.name) / "projects"))
+        self.core = CadyxCore(
+            str(Path(self.temporary_directory.name) / "projects"),
+            kernel=PrimitiveKernelAdapter(),
+        )
         self.server = CadyxHTTPServer(
             ("127.0.0.1", 0),
             make_request_handler(self.core, auth_token=_TOKEN),
