@@ -85,6 +85,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .sidebar-footer small { color: var(--dim); font: 9px/1.3 var(--mono); letter-spacing: .06em; }
 .project-main { min-width: 0; min-height: 0; }
 .primary-grid { display: grid; width: 100%; height: 100%; min-height: 0; grid-template-columns: minmax(0, 1fr) clamp(340px, 28.6vw, 500px); gap: 10px; }
+.primary-grid.folder-mode .model-panel { display: none; }
+.primary-grid.folder-mode .folder-detail { grid-column: 1; grid-row: 1; }
+.primary-grid.folder-mode .inspector-column { grid-column: 2; grid-row: 1; grid-template-rows: minmax(0, 1fr); }
+.primary-grid.folder-mode .inspector-column > :not(#folder-inspector) { display: none; }
 .panel { min-width: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
 .model-panel { display: grid; width: 100%; height: 100%; min-height: 0; grid-template-rows: 46px minmax(0, 1fr) 38px; overflow: hidden; }
 .panel-heading { display: flex; min-width: 0; min-height: 38px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 10px; border-bottom: 1px solid var(--line-soft); }
@@ -222,7 +226,7 @@ button.object-row.selected { border-color: #285448; background: #45e1ba0b; }
 .object-copy strong { overflow: hidden; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .object-copy small { overflow: hidden; color: var(--dim); font: 9px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .panel-empty { margin: 0; padding: 14px; color: var(--dim); font-size: 10px; }
-.folder-detail { display: grid; height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr); max-width: 1700px; margin: 0 auto; }
+.folder-detail { display: grid; width: 100%; height: 100%; min-width: 0; min-height: 0; grid-template-rows: minmax(0, 1fr); }
 .folder-files-panel { display: grid; min-height: 0; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
 .folder-files-layout { display: grid; height: 100%; min-height: 0; grid-template-columns: minmax(210px, 270px) minmax(0, 1fr); }
 .folder-file-list { display: grid; align-content: start; gap: 4px; min-height: 0; max-height: 650px; overflow-y: auto; padding: 8px; border-right: 1px solid var(--line-soft); }
@@ -244,6 +248,17 @@ button.object-row.selected { border-color: #285448; background: #45e1ba0b; }
 .folder-files-panel > .panel-heading { min-height: 42px; }
 .panel-index { color: var(--dim); font: 9px var(--mono); }
 .subtle-count { color: var(--dim); font: 9px var(--mono); }
+.folder-inspector { display: grid; grid-template-rows: 38px minmax(0, 1fr); overflow: hidden; }
+.folder-inspector-content { display: grid; align-content: start; gap: 18px; padding: 14px; }
+.folder-inspector-stat { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font: 10px var(--mono); }
+.folder-inspector-stat strong { color: var(--accent); font: 18px var(--mono); }
+.folder-inspector-file { display: grid; gap: 8px; min-width: 0; }
+.folder-inspector-file > span { color: var(--dim); font: 9px var(--mono); letter-spacing: .06em; }
+.folder-inspector-file > strong { overflow-wrap: anywhere; color: var(--text); font: 11px/1.4 var(--mono); }
+.folder-inspector-file dl { display: grid; gap: 6px; margin: 2px 0 0; }
+.folder-inspector-file dl > div { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font: 9px var(--mono); }
+.folder-inspector-file dt { color: var(--dim); }
+.folder-inspector-file dd { margin: 0; color: var(--text); text-align: right; }
 .dock-popover-left > .project-browser { grid-row: 1; }
 .dock-popover-left > .object-panel { display: grid; grid-row: 2; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; overflow: hidden; }
 .properties-panel { min-width: 0; }
@@ -311,6 +326,9 @@ button.object-row.selected { border-color: #285448; background: #45e1ba0b; }
   .nav-copy small { display: none; }
   .project-main { min-height: 0; }
   .primary-grid { height: auto; grid-template-columns: minmax(0, 1fr); }
+  .primary-grid.folder-mode { grid-template-columns: minmax(0, 1fr); }
+  .primary-grid.folder-mode .folder-detail { grid-column: 1; grid-row: 1; }
+  .primary-grid.folder-mode .inspector-column { grid-column: 1; grid-row: 2; grid-template-rows: minmax(170px, auto); }
   .model-panel { height: min(72dvh, 640px); min-height: 390px; }
   .inspector-column { grid-template-rows: 112px minmax(215px, auto) minmax(155px, auto) minmax(190px, 240px); overflow: visible; }
   .comparison-panel { max-height: 220px; }

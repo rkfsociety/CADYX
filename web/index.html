@@ -78,29 +78,6 @@
           <p>Здесь появится созданная деталь.</p>
         </section>
 
-        <section id="folder-detail" class="folder-detail" hidden>
-          <section class="panel folder-files-panel" aria-labelledby="folder-files-title">
-            <div class="panel-heading">
-              <div><span class="panel-index">01</span><h2 id="folder-files-title">Файлы проекта</h2></div>
-              <span id="folder-file-count" class="subtle-count">0</span>
-            </div>
-            <div class="folder-files-layout">
-              <nav id="folder-file-list" class="folder-file-list" aria-label="Файлы проекта"></nav>
-              <div class="folder-preview-area">
-                <div class="folder-preview-heading">
-                  <strong id="folder-preview-title">Предпросмотр</strong>
-                  <small id="folder-preview-info">Выберите файл проекта</small>
-                </div>
-                <div class="folder-preview-stage">
-                  <canvas id="ply-preview-canvas" class="ply-preview-canvas" aria-label="3D-предпросмотр файла PLY" hidden></canvas>
-                  <p id="folder-preview-placeholder" class="folder-preview-placeholder">Здесь появится предпросмотр файла</p>
-                </div>
-                <p class="folder-preview-hint">Перетаскивайте для поворота · колесо для масштаба · двойной щелчок сбрасывает ракурс.</p>
-              </div>
-            </div>
-          </section>
-        </section>
-
         <div id="project-detail" class="project-detail" hidden>
           <aside class="section-sidebar">
             <div class="sidebar-heading">
@@ -138,7 +115,7 @@
           </aside>
 
           <div class="project-main">
-            <div class="primary-grid">
+            <div id="primary-grid" class="primary-grid">
               <section class="panel model-panel" aria-labelledby="model-title">
                 <div class="panel-heading viewport-heading">
                   <div><h2 id="model-title">3D-МОДЕЛЬ</h2><span class="viewport-mode">ОРТОГОНАЛЬНАЯ ПРОЕКЦИЯ</span></div>
@@ -183,6 +160,29 @@
                 </footer>
               </section>
 
+              <section id="folder-detail" class="folder-detail" hidden>
+                <section class="panel folder-files-panel" aria-labelledby="folder-files-title">
+                  <div class="panel-heading">
+                    <div><span class="panel-index">01</span><h2 id="folder-files-title">Файлы проекта</h2></div>
+                    <span id="folder-file-count" class="subtle-count">0</span>
+                  </div>
+                  <div class="folder-files-layout">
+                    <nav id="folder-file-list" class="folder-file-list" aria-label="Файлы проекта"></nav>
+                    <div class="folder-preview-area">
+                      <div class="folder-preview-heading">
+                        <strong id="folder-preview-title">Предпросмотр</strong>
+                        <small id="folder-preview-info">Выберите файл проекта</small>
+                      </div>
+                      <div class="folder-preview-stage">
+                        <canvas id="ply-preview-canvas" class="ply-preview-canvas" aria-label="3D-предпросмотр файла PLY" hidden></canvas>
+                        <p id="folder-preview-placeholder" class="folder-preview-placeholder">Здесь появится предпросмотр файла</p>
+                      </div>
+                      <p class="folder-preview-hint">Перетаскивайте для поворота · колесо для масштаба · двойной щелчок сбрасывает ракурс.</p>
+                    </div>
+                  </div>
+                </section>
+              </section>
+
               <aside class="inspector-column" aria-label="Состояние и виды модели">
                 <section id="agent-activity" class="panel activity-panel" aria-labelledby="activity-title" tabindex="-1">
                   <header class="panel-heading agent-panel-heading">
@@ -222,6 +222,26 @@
                     <figure class="ortho-view"><canvas id="ortho-front" class="ortho-canvas" aria-label="Вид модели спереди"></canvas><figcaption>СПЕРЕДИ</figcaption></figure>
                     <figure class="ortho-view"><canvas id="ortho-right" class="ortho-canvas" aria-label="Вид модели справа"></canvas><figcaption>СПРАВА</figcaption></figure>
                     <figure class="ortho-view"><canvas id="ortho-top" class="ortho-canvas" aria-label="Вид модели сверху"></canvas><figcaption>СВЕРХУ</figcaption></figure>
+                  </div>
+                </section>
+                <section id="folder-inspector" class="panel folder-inspector" aria-labelledby="folder-inspector-title" hidden>
+                  <div class="panel-heading">
+                    <h2 id="folder-inspector-title">СОДЕРЖИМОЕ ПАПКИ</h2>
+                    <span id="folder-inspector-count" class="panel-note">0 ФАЙЛОВ</span>
+                  </div>
+                  <div class="folder-inspector-content">
+                    <div class="folder-inspector-stat">
+                      <span>3D-МОДЕЛЕЙ</span>
+                      <strong id="folder-model-file-count">0</strong>
+                    </div>
+                    <div class="folder-inspector-file">
+                      <span>ВЫБРАННЫЙ ФАЙЛ</span>
+                      <strong id="folder-inspector-file-name">Не выбран</strong>
+                      <dl>
+                        <div><dt>ТИП</dt><dd id="folder-inspector-file-type">—</dd></div>
+                        <div><dt>РАЗМЕР</dt><dd id="folder-inspector-file-size">—</dd></div>
+                      </dl>
+                    </div>
                   </div>
                 </section>
                 <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" hidden tabindex="-1">

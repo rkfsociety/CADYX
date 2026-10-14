@@ -137,6 +137,9 @@ const agentLocksByProject = new Map();
 const dashboardsByProject = new Map();
 const dashboardRevisionsByProject = new Map();
 const FOLDER_SELECTION_PREFIX = "folder:";
+const primaryGrid = $("#primary-grid");
+const folderDetail = $("#folder-detail");
+const folderInspector = $("#folder-inspector");
 const dockMenus = [...document.querySelectorAll(".dock-control")];
 dockMenus.forEach((menu) => menu.addEventListener("toggle", () => {
   if (menu.open) dockMenus.forEach((other) => { if (other !== menu) other.open = false; });
@@ -144,23 +147,32 @@ dockMenus.forEach((menu) => menu.addEventListener("toggle", () => {
 $("#workspace-navigation").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-workspace-view]");
   if (!button || button.disabled) return;
-  document.querySelectorAll(".nav-item").forEach((item) => {
-    if (item === button) item.setAttribute("aria-current", "page");
-    else item.removeAttribute("aria-current");
-  });
   const view = button.dataset.workspaceView;
+  setWorkspaceNavigation(view);
   if (view === "overview") {
     dockMenus.forEach((menu) => { menu.open = false; });
     $("#viewport-fit").focus({ preventScroll: true });
   } else if (view === "geometry" || view === "files") {
-    dockMenus[0].open = true;
-    (view === "geometry" ? $("#object-tree") : projectList).focus({ preventScroll: true });
+    if (view === "files" && getSelectedFolder()) {
+      dockMenus.forEach((menu) => { menu.open = false; });
+      folderFileList.focus({ preventScroll: true });
+    } else {
+      dockMenus[0].open = true;
+      (view === "geometry" ? $("#object-tree") : projectList).focus({ preventScroll: true });
+    }
   } else if (view === "analysis") {
     $("#comparison-panel").focus({ preventScroll: true });
   } else if (view === "activity") {
     $("#agent-activity").focus({ preventScroll: true });
   }
 });
+
+function setWorkspaceNavigation(view) {
+  document.querySelectorAll(".nav-item[data-workspace-view]").forEach((item) => {
+    if (item.dataset.workspaceView === view) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
+}
 
 function readSelectedProject() {
   try { return localStorage.getItem("cadyx.selected-project"); }
@@ -305,10 +317,13 @@ function getProject(id) {
 
 function showProjectLoading(name) {
   activeFolderName = null;
-  $("#folder-detail").hidden = true;
+  folderDetail.hidden = true;
+  folderInspector.hidden = true;
+  primaryGrid.classList.remove("folder-mode");
   projectDetail.hidden = false;
   noSelection.hidden = true;
   $("#object-panel").hidden = true;
+  setWorkspaceNavigation("overview");
   $("#document-title").textContent = name;
   $("#document-kind").textContent = "ПРОЕКТ";
   $("#project-light").classList.add("active");
@@ -416,21 +431,28 @@ function selectProject(id) {
 function showFolderDetail(name) {
   const folderChanged = activeFolderName !== name;
   activeFolderName = name;
-  projectDetail.hidden = true;
+  projectDetail.hidden = false;
+  primaryGrid.classList.add("folder-mode");
+  folderDetail.hidden = false;
+  folderInspector.hidden = false;
   $("#object-panel").hidden = true;
   noSelection.hidden = true;
-  $("#folder-detail").hidden = false;
+  setWorkspaceNavigation("files");
   $("#document-title").textContent = name;
   $("#document-kind").textContent = "ПАПКА";
   $("#project-short-id").textContent = "ФАЙЛЫ ПАПКИ";
+  $("#sidebar-project-name").textContent = name;
   $("#project-light").classList.remove("active");
   $("#document-revision").textContent = "—";
   if (folderChanged) {
     folderFiles = [];
     folderFilesSignature = null;
     selectedFolderFileName = null;
+    updateFolderInspector();
     folderFileList.replaceChildren();
     $("#folder-file-count").textContent = "0";
+    $("#folder-inspector-count").textContent = "ФАЙЛОВ: 0";
+    $("#folder-model-file-count").textContent = "0";
     folderPreviewCanvas.hidden = true;
     folderPreviewPlaceholder.hidden = false;
     folderPreviewPlaceholder.textContent = "Загружаю список файлов…";
@@ -465,6 +487,7 @@ async function loadFolderFiles(name) {
   folderFilesSignature = signature;
   folderFiles = response.files;
   $("#folder-file-count").textContent = String(folderFiles.length);
+  updateFolderInspector();
   renderFolderFiles();
   const selected = folderFiles.find((file) => file.name === selectedFolderFileName);
   if (selected) {
@@ -478,6 +501,7 @@ async function loadFolderFiles(name) {
   if (firstPreview) previewFolderFile(name, firstPreview);
   else {
     selectedFolderFileName = null;
+    updateFolderInspector();
     $("#folder-preview-title").textContent = "Файлов нет";
     $("#folder-preview-info").textContent = "";
     folderPreviewPlaceholder.hidden = false;
@@ -503,8 +527,20 @@ function renderFolderFiles() {
   }
 }
 
+function updateFolderInspector(file = folderFiles.find((item) => item.name === selectedFolderFileName) || null) {
+  $("#folder-inspector-count").textContent = `ФАЙЛОВ: ${folderFiles.length}`;
+  $("#folder-model-file-count").textContent = String(
+    folderFiles.filter((item) => item.name.toLowerCase().endsWith(".ply")).length,
+  );
+  $("#folder-inspector-file-name").textContent = file?.name || "Не выбран";
+  $("#folder-inspector-file-size").textContent = file ? formatFileSize(file.size) : "—";
+  const extension = file?.name.match(/\.([^.]+)$/)?.[1];
+  $("#folder-inspector-file-type").textContent = extension ? extension.toUpperCase() : "—";
+}
+
 async function previewFolderFile(folderName, file) {
   selectedFolderFileName = file.name;
+  updateFolderInspector(file);
   renderFolderFiles();
   const request = ++previewRequest;
   $("#folder-preview-title").textContent = file.name;
