@@ -49,7 +49,7 @@
       }
     }
 
-    if (format !== "binary_little_endian") throw new Error("Предпросмотр поддерживает двоичный PLY с порядком байтов от младшего к старшему.");
+    if (format !== "binary_little_endian") throw new Error("Предпросмотр поддерживает только двоичные PLY-файлы с порядком байтов от младшего к старшему.");
     const vertex = elements[0];
     const face = elements[1]?.name === "face" ? elements[1] : null;
     if (!vertex || vertex.name !== "vertex") throw new Error("В PLY не найдены вершины.");

@@ -82,16 +82,16 @@ dashboard snapshot:
 ```json
 {
   "workflow": {
-    "title": "CAD design",
+    "title": "Проектирование детали",
     "progress_percent": 68,
     "eta_seconds": 252,
     "phases": [
-      {"id": "concept", "title": "Concept Development", "state": "completed"},
-      {"id": "design", "title": "Design Refinement", "state": "in_progress"}
+      {"id": "concept", "title": "Подготовка модели", "state": "completed"},
+      {"id": "design", "title": "Уточнение конструкции", "state": "in_progress"}
     ]
   },
   "tasks": [
-    {"id": "042", "title": "Update mounting features", "state": "running"}
+    {"id": "042", "title": "Уточнение крепёжных элементов", "state": "running"}
   ],
   "revision": 1,
   "updated_at": "2026-10-14T12:00:00+00:00"
@@ -112,10 +112,10 @@ publishes each snapshot as `agent.dashboard` over SSE; `/api/v1/updates` include
 is process-local and is cleared when the host restarts. Hardware telemetry is
 not currently reported, so the UI does not display invented CPU/GPU/memory
 values.
-Workflow titles, phase names, and task titles are shown as received; send them
-in Russian to keep the localized browser interface consistent. Project names,
-object names, and file names remain as entered by the user or supplied by their
-source files.
+Workflow titles, phase names, task titles, and `agent.activity.action` values
+are shown as received; send them in Russian to keep the localized browser
+interface consistent. Project names, object names, and file names remain as
+entered by the user or supplied by their source files.
 
 For a modeling request, the agent should inspect the project and references,
 then publish a concrete ordered plan before its first model command. Use

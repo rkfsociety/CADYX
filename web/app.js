@@ -94,7 +94,7 @@ $("#viewport-wireframe").addEventListener("click", (event) => {
   button.setAttribute("aria-pressed", String(enabled));
   button.setAttribute("aria-label", enabled ? "Скрыть рёбра сетки" : "Показать рёбра сетки");
   button.title = enabled ? "Скрыть рёбра сетки" : "Показать рёбра сетки";
-  $("#viewport-mode-label").textContent = enabled ? "ЗАЛИВКА + РЁБРА" : "ЗАЛИВКА";
+  $("#viewport-mode-label").textContent = enabled ? "ЗАТЕНЕНИЕ + РЁБРА" : "ЗАТЕНЕНИЕ";
 });
 let cameraAnimationId = 0;
 let renderedSceneKey = null;
@@ -188,7 +188,7 @@ function formatNumber(value) {
 
 function setApiConnectionStatus(online) {
   $("#api-light").classList.toggle("active", online);
-  $("#api-status-label").textContent = online ? "API НА СВЯЗИ" : "НЕТ СВЯЗИ С API";
+  $("#api-status-label").textContent = online ? "СЕРВЕР НА СВЯЗИ" : "НЕТ СВЯЗИ С СЕРВЕРОМ";
   if (online) {
     $("#api-sync-time").textContent = new Intl.DateTimeFormat("ru-RU", {
       hour: "2-digit", minute: "2-digit", second: "2-digit",
@@ -246,7 +246,7 @@ function renderAgentDashboard(dashboard) {
       phaseList.append(row);
     });
   } else {
-    $("#workflow-name").textContent = "ПЛАН НЕ ПЕРЕДАН";
+    $("#workflow-name").textContent = "ПЛАНА ПОКА НЕТ";
     $("#workflow-percent").textContent = "—";
     $("#workflow-progress").dataset.available = "false";
     $("#workflow-progress").setAttribute("aria-valuenow", "0");
@@ -421,8 +421,8 @@ function showFolderDetail(name) {
   noSelection.hidden = true;
   $("#folder-detail").hidden = false;
   $("#document-title").textContent = name;
-  $("#document-kind").textContent = "ПАПКА РАБОЧЕЙ ОБЛАСТИ";
-  $("#project-short-id").textContent = "ФАЙЛЫ ИСТОЧНИКА";
+  $("#document-kind").textContent = "ПАПКА";
+  $("#project-short-id").textContent = "ФАЙЛЫ ПАПКИ";
   $("#project-light").classList.remove("active");
   $("#document-revision").textContent = "—";
   if (folderChanged) {
@@ -517,7 +517,7 @@ async function previewFolderFile(folderName, file) {
     return;
   }
 
-  folderPreviewPlaceholder.textContent = "Загружаю 3D модель…";
+  folderPreviewPlaceholder.textContent = "Загружаю 3D-модель…";
   try {
     const url = `/api/v1/workspace/folders/${encodeURIComponent(folderName)}/files/${encodeURIComponent(file.name)}`;
     let response;
@@ -931,12 +931,10 @@ function renderAgentActivity(value, lock = null) {
   agentState.dataset.state = state;
   agentState.textContent = state === "running" ? "РАБОТАЕТ"
     : state === "failed" ? "ОШИБКА" : state === "completed" ? "ЗАВЕРШЕНО" : "ОЖИДАЕТ";
-  const action = runningActivity?.action || (agentLeaseActive ? "Выполняет задачу CAD" : activity?.action) || "Работает";
+  const action = runningActivity?.action || (agentLeaseActive ? "Выполняет команду" : activity?.action) || "Работает";
   title.textContent = state === "running" ? action
     : state === "failed" ? `${action} · ошибка`
-      : recentCompletion ? `${action} · готово` : "Ожидает задачу";
-  $("#agent-runtime-label").textContent = state === "running"
-    ? "АГЕНТ CADYX · выполняет задачу" : "АГЕНТ CADYX · среда общего назначения";
+      : recentCompletion ? `${action} · готово` : "Ждёт задачу";
   if (recentCompletion && activityStatusOperationId !== activity.operation_id) {
     clearTimeout(activityStatusTimer);
     activityStatusOperationId = activity.operation_id;
@@ -979,9 +977,9 @@ const geometryTypeLabels = {
   revolved_profile: "Тело вращения",
   fused_profiles: "Объединённое тело",
   fused_solids: "Объединённое тело",
-  swept_pipe: "Сечение по траектории",
+  swept_pipe: "Труба по траектории",
   metric_thread: "Метрическая резьба",
-  imported_brep: "Импортированная B-rep-геометрия",
+  imported_brep: "Импортированная граничная модель",
   filleted_solid: "Тело со скруглениями",
   "cadyx-mesh-v1": "Треугольная сетка",
 };
@@ -995,7 +993,7 @@ const featureOperationLabels = {
   fuse_bodies: "Объединение тел",
   resize_imported_thread: "Изменение диаметра резьбы",
   transform_imported_brep: "Преобразование импортированной модели",
-  sweep_sketch: "Выдавливание по траектории",
+  sweep_sketch: "Протяжка профиля по траектории",
   fillet_edges: "Скругление рёбер",
 };
 const parameterLabels = {

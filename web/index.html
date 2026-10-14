@@ -15,14 +15,14 @@
           <span>CADYX</span>
         </a>
         <div class="brand-description" aria-hidden="true">
-          <strong>ПРОЕКТИРОВАНИЕ CAD С ПОМОЩЬЮ ИИ</strong>
+          <strong>ПРОЕКТИРОВАНИЕ В САПР С ПОМОЩЬЮ ИИ</strong>
           <span>ВИЗУАЛИЗАЦИЯ В РЕАЛЬНОМ ВРЕМЕНИ</span>
         </div>
       </div>
       <div class="topbar-sync">
         <span id="api-light" class="project-light" aria-hidden="true"></span>
         <div class="topbar-project-copy">
-          <span id="api-status-label" class="topbar-label">СВЯЗЬ С API…</span>
+          <span id="api-status-label" class="topbar-label">СВЯЗЬ С СЕРВЕРОМ…</span>
           <strong id="api-sync-time" class="document-title">—</strong>
         </div>
       </div>
@@ -92,7 +92,7 @@
                   <small id="folder-preview-info">Выберите файл проекта</small>
                 </div>
                 <div class="folder-preview-stage">
-                  <canvas id="ply-preview-canvas" class="ply-preview-canvas" aria-label="3D предпросмотр файла PLY" hidden></canvas>
+                  <canvas id="ply-preview-canvas" class="ply-preview-canvas" aria-label="3D-предпросмотр файла PLY" hidden></canvas>
                   <p id="folder-preview-placeholder" class="folder-preview-placeholder">Здесь появится предпросмотр файла</p>
                 </div>
                 <p class="folder-preview-hint">Перетаскивайте для поворота · колесо для масштаба · двойной щелчок сбрасывает ракурс.</p>
@@ -115,10 +115,10 @@
                 <span class="nav-index">02</span><span class="nav-copy"><strong>ГЕОМЕТРИЯ</strong><small>Объекты модели</small></span>
               </button>
               <button id="analysis-nav" class="nav-item" type="button" data-workspace-view="analysis" disabled>
-                <span class="nav-index">03</span><span class="nav-copy"><strong>АНАЛИЗ</strong><small>Сравнение с исходником</small></span>
+                <span class="nav-index">03</span><span class="nav-copy"><strong>АНАЛИЗ</strong><small>Сравнение с оригиналом</small></span>
               </button>
               <button class="nav-item" type="button" disabled title="Производственные данные пока недоступны">
-                <span class="nav-index">04</span><span class="nav-copy"><strong>ПРОИЗВОДСТВО</strong><small>Траектории и выпуск</small></span>
+                <span class="nav-index">04</span><span class="nav-copy"><strong>ПРОИЗВОДСТВО</strong><small>Подготовка производства</small></span>
               </button>
               <button class="nav-item" type="button" data-workspace-view="files">
                 <span class="nav-index">05</span><span class="nav-copy"><strong>ФАЙЛЫ</strong><small>Проекты и документы</small></span>
@@ -141,8 +141,8 @@
             <div class="primary-grid">
               <section class="panel model-panel" aria-labelledby="model-title">
                 <div class="panel-heading viewport-heading">
-                  <div><h2 id="model-title">3D-ВИД CAD</h2><span class="viewport-mode">ОРТОГОНАЛЬНАЯ ПРОЕКЦИЯ</span></div>
-                  <div class="model-toolbar" aria-label="Инструменты просмотра CAD-модели">
+                  <div><h2 id="model-title">3D-МОДЕЛЬ</h2><span class="viewport-mode">ОРТОГОНАЛЬНАЯ ПРОЕКЦИЯ</span></div>
+                  <div class="model-toolbar" aria-label="Инструменты просмотра 3D-модели">
                     <div id="viewport-camera-presets" class="viewport-camera-presets" role="group" aria-label="Стандартные ракурсы">
                       <button class="viewport-icon-button" type="button" data-camera-preset="isometric" aria-label="Изометрический вид" title="Изометрический вид" aria-pressed="true">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 8 4.5v9.3l-8 4.6-8-4.6V7.3l8-4.5Z M4.2 7.4 12 12l7.8-4.6M12 12v9"/></svg>
@@ -159,7 +159,7 @@
                     </div>
                     <span class="viewport-toolbar-divider" aria-hidden="true"></span>
                     <button id="viewport-wireframe" class="button viewport-mode-button" type="button" aria-label="Скрыть рёбра сетки" title="Скрыть рёбра сетки" aria-pressed="true">
-                      <span class="viewport-mode-icon" aria-hidden="true">▧</span><span id="viewport-mode-label" class="toolbar-label">ЗАЛИВКА + РЁБРА</span>
+                      <span class="viewport-mode-icon" aria-hidden="true">▧</span><span id="viewport-mode-label" class="toolbar-label">ЗАТЕНЕНИЕ + РЁБРА</span>
                     </button>
                     <button id="viewport-fit" class="button viewport-fit-button" type="button" aria-label="Вписать модель в область просмотра" title="Вписать модель в область просмотра">
                       <span class="viewport-mode-icon" aria-hidden="true">⌖</span><span class="toolbar-label">ВПИСАТЬ МОДЕЛЬ</span>
@@ -167,7 +167,7 @@
                   </div>
                 </div>
                 <div class="viewport" id="viewport">
-                  <canvas id="model-preview" class="model-preview ply-preview-canvas" aria-label="3D модель и эскизы" hidden></canvas>
+                  <canvas id="model-preview" class="model-preview ply-preview-canvas" aria-label="3D-модель и эскизы" hidden></canvas>
                   <div id="viewport-empty" class="viewport-empty">
                     <span class="empty-cube" aria-hidden="true">⬡</span>
                     <p>Модель ещё не построена</p>
@@ -193,20 +193,20 @@
                     <span class="agent-orbit" aria-hidden="true"><i></i></span>
                     <div class="activity-heading-copy">
                       <strong id="activity-title">Думает</strong>
-                      <small id="agent-runtime-label">АГЕНТ CADYX · среда общего назначения</small>
+                      <small id="agent-runtime-label">АГЕНТ CADYX</small>
                     </div>
                     <span id="agent-telemetry" class="agent-telemetry" hidden></span>
                   </div>
                 </section>
                 <section id="workflow-panel" class="panel workflow-panel" aria-labelledby="workflow-title">
-                  <div class="panel-heading"><h2 id="workflow-title">ХОД РАБОТ</h2><span id="workflow-name" class="panel-note">ПЛАН НЕ ПЕРЕДАН</span></div>
+                  <div class="panel-heading"><h2 id="workflow-title">ПРОГРЕСС</h2><span id="workflow-name" class="panel-note">ПЛАНА ПОКА НЕТ</span></div>
                   <div class="workflow-summary">
                     <strong id="workflow-percent" class="workflow-percent">—</strong>
-                    <div id="workflow-progress" class="workflow-progress" role="progressbar" aria-label="Оценка хода работ" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-available="false"><i id="workflow-progress-bar"></i></div>
+                    <div id="workflow-progress" class="workflow-progress" role="progressbar" aria-label="Прогресс выполнения" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-available="false"><i id="workflow-progress-bar"></i></div>
                     <span id="workflow-eta" class="workflow-eta">ОСТАЛОСЬ —</span>
                   </div>
                   <ol id="workflow-phases" class="workflow-phases"></ol>
-                  <p id="workflow-empty" class="dashboard-empty">Агент пока не передал план.</p>
+                  <p id="workflow-empty" class="dashboard-empty">План появится перед началом моделирования.</p>
                 </section>
                 <section id="task-queue-panel" class="panel task-queue-panel" aria-labelledby="task-queue-title">
                   <div class="panel-heading">
@@ -217,7 +217,7 @@
                   <p id="task-queue-empty" class="dashboard-empty">Очередь задач пока пуста.</p>
                 </section>
                 <section class="panel orthographic-panel" aria-labelledby="orthographic-title">
-                  <div class="panel-heading"><h2 id="orthographic-title">ОРТОГОНАЛЬНЫЕ ПРОЕКЦИИ</h2><span class="panel-note">ОДНА МОДЕЛЬ</span></div>
+                  <div class="panel-heading"><h2 id="orthographic-title">ОРТОГОНАЛЬНЫЕ ВИДЫ</h2><span class="panel-note">ОДНА МОДЕЛЬ</span></div>
                   <div class="orthographic-views">
                     <figure class="ortho-view"><canvas id="ortho-front" class="ortho-canvas" aria-label="Вид модели спереди"></canvas><figcaption>СПЕРЕДИ</figcaption></figure>
                     <figure class="ortho-view"><canvas id="ortho-right" class="ortho-canvas" aria-label="Вид модели справа"></canvas><figcaption>СПРАВА</figcaption></figure>
@@ -225,7 +225,7 @@
                   </div>
                 </section>
                 <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" hidden tabindex="-1">
-                  <div class="panel-heading"><h2 id="comparison-title">СРАВНЕНИЕ С ИСХОДНИКОМ</h2><span id="comparison-metrics" class="panel-note"></span></div>
+                  <div class="panel-heading"><h2 id="comparison-title">СРАВНЕНИЕ С ОРИГИНАЛОМ</h2><span id="comparison-metrics" class="panel-note"></span></div>
                   <p>Оригинал показан контуром · результат — поверхностью.</p>
                   <canvas id="comparison-preview" class="comparison-preview" aria-label="Совмещённые оригинал и изменённая модель"></canvas>
                 </section>
