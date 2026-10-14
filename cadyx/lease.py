@@ -250,6 +250,22 @@ class EditLeaseManager:
             )
             return updated
 
+    def extend_timeout(self, project_id: str, lease_id: str, minimum_seconds: float) -> EditLease:
+        if not math.isfinite(minimum_seconds) or minimum_seconds <= 0:
+            raise ValidationError("Lease timeout extension must be finite and positive.")
+        with self.guard(project_id):
+            lease = self.require(project_id, lease_id)
+            row = self._local.connections[project_id].execute(
+                "SELECT timeout_seconds FROM lease WHERE singleton = 1"
+            ).fetchone()
+            if row is None:
+                raise LeaseRequiredError("Project has no active edit lease.")
+            if row[0] < minimum_seconds:
+                self._local.connections[project_id].execute(
+                    "UPDATE lease SET timeout_seconds = ? WHERE singleton = 1", (minimum_seconds,)
+                )
+            return lease
+
     def release(self, project_id: str, lease_id: str) -> EditLease:
         with self.guard(project_id):
             lease = self.require(project_id, lease_id)

@@ -311,6 +311,7 @@ class CadyxCore:
         expected_revision: int | None = None,
     ) -> dict[str, Any]:
         with self._project_guard(project_id):
+            command_name = command.get("type") if isinstance(command, dict) else None
             lease = self.leases.require(project_id, lease_id)
             if expected_owner_type is not None and lease.owner_type is not expected_owner_type:
                 raise ConflictError(
@@ -324,7 +325,11 @@ class CadyxCore:
                     self._check_revision(Document.from_dict(project["document"]), expected_revision)
             elif expected_revision is not None:
                 self._check_revision(Document.from_dict(project["document"]), expected_revision)
-            command_name = command.get("type") if isinstance(command, dict) else None
+            if command_name == "resize_imported_thread":
+                # OCCT's Boolean stitching of imported NURBS can outlast the
+                # normal lease window; the project transaction prevents
+                # concurrent heartbeats, so grant this command a wider expiry.
+                self.leases.extend_timeout(project_id, lease.lease_id, 300.0)
             operation_id = str(uuid4())
             source = self._scan_source(command, project["document"])
             activity = {
@@ -433,6 +438,8 @@ class CadyxCore:
             "fuse_bodies": "Объединяет тела",
             "set_parameter": "Меняет параметры модели",
             "create_metric_thread": "Строит метрическую резьбу",
+            "resize_imported_thread": "Увеличивает диаметр резьбы",
+            "transform_imported_brep": "Выравнивает импортированную модель",
             "import_step": "Импортирует точную STEP-геометрию",
             "import_scan": "Обрабатывает скан",
             "set_scan_parameter": "Пересобирает скан",
@@ -468,7 +475,9 @@ class CadyxCore:
             for source_id in ((item.get("base_body_id"), item.get("tool_body_id"))
                               if item.get("operation") == "fuse_bodies"
                               else (item.get("source_body_id"),)
-                              if item.get("operation") == "fillet_edges" else ())
+                              if item.get("operation") in {
+                                  "fillet_edges", "resize_imported_thread", "transform_imported_brep",
+                              } else ())
         }
         for item in document.objects:
             geometry = item.get("geometry")
@@ -506,6 +515,49 @@ class CadyxCore:
                         or feature_geometry.get("edge_indices") != item.get("edge_indices")
                         or feature_geometry.get("radius") != item.get("parameters", {}).get("radius")):
                     raise ValidationError("Fillet geometry is out of date with its source body and parameters.")
+                continue
+            if item.get("operation") in {"resize_imported_thread", "transform_imported_brep"}:
+                body = by_id.get(item.get("body_id"))
+                source = by_id.get(item.get("source_body_id"))
+                feature_geometry = item.get("geometry")
+                parameters = item.get("parameters")
+                operation = item.get("operation")
+                expected_parameters = (
+                    {"x_start", "x_end", "axis_origin_y", "axis_origin_z", "major_diameter", "diameter_delta"}
+                    if operation == "resize_imported_thread"
+                    else {"rotation_axis", "angle_degrees", "translation"}
+                )
+                if (body is None or body.get("type") != "body"
+                        or source is None or source.get("type") != "body"
+                        or feature_geometry != body.get("geometry")
+                        or not isinstance(feature_geometry, dict)
+                        or feature_geometry.get("kind") != "imported_brep"
+                        or feature_geometry.get("brep_valid") is not True
+                        or not isinstance(parameters, dict) or set(parameters) != expected_parameters):
+                    raise ValidationError("Imported B-rep feature is out of date or invalid.")
+                if operation == "resize_imported_thread":
+                    dimensions = [parameters[key] for key in (
+                        "x_start", "x_end", "axis_origin_y", "axis_origin_z",
+                        "major_diameter", "diameter_delta",
+                    )]
+                    if (any(isinstance(value, bool) or not isinstance(value, (int, float))
+                            or not math.isfinite(value) for value in dimensions)
+                            or parameters["x_end"] <= parameters["x_start"]
+                            or parameters["major_diameter"] <= 0 or parameters["diameter_delta"] <= 0):
+                        raise ValidationError("Imported thread feature parameters are invalid.")
+                else:
+                    axis, angle, translation = (
+                        parameters.get("rotation_axis"), parameters.get("angle_degrees"),
+                        parameters.get("translation"),
+                    )
+                    if (not isinstance(axis, list) or len(axis) != 3
+                            or not isinstance(translation, list) or len(translation) != 3
+                            or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                                   or not math.isfinite(value) for value in [*axis, *translation])
+                            or isinstance(angle, bool) or not isinstance(angle, (int, float))
+                            or not math.isfinite(angle) or abs(angle) > 360
+                            or math.hypot(*axis) <= 1e-12):
+                        raise ValidationError("Imported B-rep transform parameters are invalid.")
                 continue
             if item.get("operation") == "import_step":
                 body = by_id.get(item.get("body_id"))

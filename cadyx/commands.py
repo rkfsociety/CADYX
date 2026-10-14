@@ -86,6 +86,10 @@ class CommandSystem:
             return self._import_scan(document, command, progress=progress)
         if kind == "import_step":
             return self._import_step(document, command, project_id=project_id, progress=progress)
+        if kind == "resize_imported_thread":
+            return self._resize_imported_thread(document, command, progress=progress)
+        if kind == "transform_imported_brep":
+            return self._transform_imported_brep(document, command, progress=progress)
         if kind == "set_scan_parameter":
             return self._set_scan_parameter(document, command, progress=progress)
         if kind == "create_sketch":
@@ -957,9 +961,110 @@ class CommandSystem:
                 continue
             if feature.get("operation") == "fuse_bodies":
                 consumed.update((feature.get("base_body_id"), feature.get("tool_body_id")))
-            elif feature.get("operation") == "fillet_edges":
+            elif feature.get("operation") in {
+                "fillet_edges", "resize_imported_thread", "transform_imported_brep",
+            }:
                 consumed.add(feature.get("source_body_id"))
         return consumed - {None}
+
+    def _resize_imported_thread(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        source_id = command.get("body_id")
+        source = next((item for item in document.objects
+                       if item.get("id") == source_id and item.get("type") == "body"), None)
+        if source is None:
+            raise NotFoundError("Imported thread source body was not found.")
+        if source_id in self._consumed_body_ids(document):
+            raise ValidationError("A consumed solid body cannot be modified again.")
+        if not isinstance(source.get("geometry"), dict) or source["geometry"].get("kind") != "imported_brep":
+            raise ValidationError("Thread resizing requires an imported OCCT B-rep body.")
+        x_start = _finite_number(command.get("x_start"), "x_start")
+        x_end = _finite_number(command.get("x_end"), "x_end")
+        if x_end <= x_start:
+            raise ValidationError("Thread resize x_end must be greater than x_start.")
+        axis_y = _finite_number(command.get("axis_origin_y", 0.0), "axis_origin_y")
+        axis_z = _finite_number(command.get("axis_origin_z", 0.0), "axis_origin_z")
+        major_diameter = _number(command.get("major_diameter"), "major_diameter")
+        diameter_delta = _number(command.get("diameter_delta"), "diameter_delta")
+        parameters = {
+            "x_start": x_start,
+            "x_end": x_end,
+            "axis_origin_y": axis_y,
+            "axis_origin_z": axis_z,
+            "major_diameter": major_diameter,
+            "diameter_delta": diameter_delta,
+        }
+        name = command.get("name", f"Резьба +{diameter_delta:g} мм · {source.get('name', 'Тело')}")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Thread feature name must be a non-empty string of at most 120 characters.")
+        if progress is not None:
+            progress({"phase": "kernel_thread_resize"})
+        geometry = self.kernel.modify_imported_brep(
+            source["geometry"], operation="resize_thread_x",
+            parameters=[x_start, x_end, axis_y, axis_z, major_diameter / 2.0, diameter_delta],
+        )
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        document.objects.extend([
+            {"id": body_id, "type": "body", "name": name.strip(),
+             "feature_ids": [feature_id], "geometry": geometry},
+            {"id": feature_id, "type": "feature", "operation": "resize_imported_thread",
+             "body_id": body_id, "source_body_id": source_id,
+             "parameters": parameters, "geometry": geometry},
+        ])
+        return {"body_id": body_id, "feature_id": feature_id, "source_body_id": source_id,
+                "parameters": parameters, "geometry": geometry}
+
+    def _transform_imported_brep(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        source_id = command.get("body_id")
+        source = next((item for item in document.objects
+                       if item.get("id") == source_id and item.get("type") == "body"), None)
+        if source is None:
+            raise NotFoundError("Imported B-rep source body was not found.")
+        if source_id in self._consumed_body_ids(document):
+            raise ValidationError("A consumed solid body cannot be transformed again.")
+        if not isinstance(source.get("geometry"), dict) or source["geometry"].get("kind") != "imported_brep":
+            raise ValidationError("Rigid transformation requires an imported OCCT B-rep body.")
+        rotation_axis = command.get("rotation_axis")
+        translation = command.get("translation")
+        if (not isinstance(rotation_axis, list) or len(rotation_axis) != 3
+                or not isinstance(translation, list) or len(translation) != 3):
+            raise ValidationError("Rigid transformation needs three rotation-axis and translation coordinates.")
+        axis = [_finite_number(value, "rotation_axis coordinate") for value in rotation_axis]
+        vector = [_finite_number(value, "translation coordinate") for value in translation]
+        if math.hypot(*axis[:2], axis[2]) <= 1e-12:
+            raise ValidationError("Rigid transformation rotation_axis cannot be zero.")
+        angle_degrees = _finite_number(command.get("angle_degrees"), "angle_degrees")
+        if abs(angle_degrees) > 360:
+            raise ValidationError("Rigid transformation angle_degrees must be between -360 and 360.")
+        name = command.get("name", f"Выравнивание · {source.get('name', 'Тело')}")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Transform feature name must be a non-empty string of at most 120 characters.")
+        parameters = {
+            "rotation_axis": axis,
+            "angle_degrees": angle_degrees,
+            "translation": vector,
+        }
+        if progress is not None:
+            progress({"phase": "kernel_transform_brep"})
+        geometry = self.kernel.modify_imported_brep(
+            source["geometry"], operation="rigid_transform",
+            parameters=[*axis, math.radians(angle_degrees), *vector],
+        )
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        document.objects.extend([
+            {"id": body_id, "type": "body", "name": name.strip(),
+             "feature_ids": [feature_id], "geometry": geometry},
+            {"id": feature_id, "type": "feature", "operation": "transform_imported_brep",
+             "body_id": body_id, "source_body_id": source_id,
+             "parameters": parameters, "geometry": geometry},
+        ])
+        return {"body_id": body_id, "feature_id": feature_id, "source_body_id": source_id,
+                "parameters": parameters, "geometry": geometry}
 
     def _sweep_sketch(
         self, document: Document, command: dict[str, Any], *,

@@ -20,7 +20,9 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         for source_id in ((item.get("base_body_id"), item.get("tool_body_id"))
                           if item.get("operation") == "fuse_bodies"
                           else (item.get("source_body_id"),)
-                          if item.get("operation") == "fillet_edges" else ())
+                          if item.get("operation") in {
+                              "fillet_edges", "resize_imported_thread", "transform_imported_brep",
+                          } else ())
     }
     bounds_min = [math.inf, math.inf, math.inf]
     bounds_max = [-math.inf, -math.inf, -math.inf]

@@ -37,6 +37,10 @@ class GeometryKernel(Protocol):
 
     def create_imported_step(self, source: bytes) -> tuple[dict[str, Any], dict[str, Any]]: ...
 
+    def modify_imported_brep(
+        self, base: dict[str, Any], *, operation: str, parameters: list[float],
+    ) -> dict[str, Any]: ...
+
     def create_fillet(
         self, base: dict[str, Any], *, edge_indices: list[int], radius: float,
     ) -> dict[str, Any]: ...
@@ -275,6 +279,29 @@ class OCCTKernelAdapter:
                 or not math.isclose(roundtrip["surface_area"], metrics["surface_area"], rel_tol=1e-12, abs_tol=1e-12)):
             raise ValidationError("Imported B-rep did not preserve the STEP model geometry.")
         return geometry, metrics
+
+    def modify_imported_brep(
+        self, base: dict[str, Any], *, operation: str, parameters: list[float],
+    ) -> dict[str, Any]:
+        if not isinstance(base, dict) or base.get("kind") != "imported_brep":
+            raise ValidationError("Only imported OCCT B-reps can be modified.")
+        modified = NativeKernel().modify_imported_brep(
+            base, operation=operation, parameters=parameters,
+        )
+        try:
+            brep = base64.b64decode(modified["brep_data"], validate=True)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValidationError("OCCT returned an invalid modified B-rep.") from exc
+        if (not brep or len(brep) > 64 * 1024 * 1024
+                or modified.get("brep_valid") is not True):
+            raise ValidationError("OCCT returned an invalid or oversized modified B-rep.")
+        return {
+            "kernel": self.kernel_id,
+            "kind": "imported_brep",
+            "data": base64.b64encode(zlib.compress(brep, level=9)).decode("ascii"),
+            "volume": modified["volume"],
+            "brep_valid": True,
+        }
 
     def create_fillet(
         self, base: dict[str, Any], *, edge_indices: list[int], radius: float,

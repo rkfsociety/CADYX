@@ -2,22 +2,29 @@
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepAlgoAPI_Common.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
+#include <BRepTools_ReShape.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
 #include <gp_Ax1.hxx>
@@ -26,6 +33,8 @@
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
+#include <gp_GTrsf.hxx>
+#include <gp_Trsf.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAPI_PointsToBSpline.hxx>
 #include <Geom_BSplineCurve.hxx>
@@ -43,6 +52,8 @@
 #include <STEPControl_Reader.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <ShapeFix_Shape.hxx>
+#include <ShapeFix_Wire.hxx>
+#include <ShapeFix_Solid.hxx>
 #include <algorithm>
 #include <cstddef>
 #include <cmath>
@@ -233,6 +244,177 @@ TopoDS_Shape ReadImportedBrep(const unsigned char* data, size_t size) {
   BRepTools::Read(shape, input, builder);
   if (shape.IsNull()) throw std::runtime_error("OCCT could not read the imported B-rep.");
   return shape;
+}
+
+double ShapeVolume(const TopoDS_Shape& shape) {
+  GProp_GProps properties;
+  BRepGProp::VolumeProperties(shape, properties);
+  return properties.Mass();
+}
+
+TopoDS_Shape EnsureOneSolid(const TopoDS_Shape& shape, const char* operation);
+
+TopoDS_Shape RepairImportedBrep(const TopoDS_Shape& source) {
+  if (BRepCheck_Analyzer(source).IsValid()) return source;
+  const double original_volume = ShapeVolume(source);
+  Handle(BRepTools_ReShape) reshape = new BRepTools_ReShape();
+  BRepCheck_Analyzer source_check(source);
+  for (TopExp_Explorer explorer(source, TopAbs_FACE); explorer.More(); explorer.Next()) {
+    const TopoDS_Face face = TopoDS::Face(explorer.Current());
+    if (source_check.IsValid(face)) continue;
+    BRepAdaptor_Surface surface(face, true);
+    if (surface.GetType() != GeomAbs_Plane)
+      throw std::runtime_error("Invalid imported B-rep has a non-planar face that cannot be repaired safely.");
+    TopoDS_Wire wire;
+    for (TopExp_Explorer wire_explorer(face, TopAbs_WIRE); wire_explorer.More(); wire_explorer.Next()) {
+      wire = TopoDS::Wire(wire_explorer.Current());
+      break;
+    }
+    if (wire.IsNull()) throw std::runtime_error("Invalid planar face has no wire to repair.");
+    ShapeFix_Wire wire_fix(wire, face, 0.001);
+    wire_fix.SetMaxTolerance(0.01);
+    wire_fix.ModifyTopologyMode() = true;
+    wire_fix.ModifyGeometryMode() = true;
+    wire_fix.FixSelfIntersectionMode() = 1;
+    wire_fix.FixSelfIntersectingEdgeMode() = 1;
+    wire_fix.FixIntersectingEdgesMode() = 1;
+    wire_fix.FixNonAdjacentIntersectingEdgesMode() = 1;
+    if (!wire_fix.Perform()) throw std::runtime_error("Self-intersecting imported face wire could not be repaired.");
+    BRepBuilderAPI_MakeFace face_builder(surface.Plane(), wire_fix.Wire(), true);
+    if (!face_builder.IsDone()) throw std::runtime_error("OCCT could not rebuild a repaired planar face.");
+    TopoDS_Face replacement = face_builder.Face();
+    replacement.Orientation(face.Orientation());
+    if (!BRepCheck_Analyzer(replacement).IsValid())
+      throw std::runtime_error("Rebuilt imported planar face is still invalid.");
+    reshape->Replace(face, replacement);
+  }
+
+  const TopoDS_Shape replaced_faces = reshape->Apply(source);
+  BRepBuilderAPI_Sewing sewing(1e-5, true, true, true, false);
+  for (TopExp_Explorer explorer(replaced_faces, TopAbs_FACE); explorer.More(); explorer.Next())
+    sewing.Add(explorer.Current());
+  sewing.Perform();
+  const TopoDS_Shape sewed = sewing.SewedShape();
+  size_t shell_count = 0;
+  for (TopExp_Explorer explorer(sewed, TopAbs_SHELL); explorer.More(); explorer.Next()) ++shell_count;
+  if (shell_count != 1 || sewing.NbFreeEdges() != 0 || sewing.NbMultipleEdges() != 0)
+    throw std::runtime_error("Repaired imported faces did not form one closed manifold shell.");
+  const TopoDS_Shell shell = TopoDS::Shell(sewed);
+  if (!BRep_Tool::IsClosed(shell))
+    throw std::runtime_error("Repaired imported shell is not closed.");
+  BRepBuilderAPI_MakeSolid solid_builder(shell);
+  if (!solid_builder.IsDone()) throw std::runtime_error("OCCT could not rebuild the imported solid.");
+  ShapeFix_Solid solid_fix(solid_builder.Solid());
+  solid_fix.SetPrecision(1e-7);
+  solid_fix.SetMaxTolerance(1e-5);
+  solid_fix.Perform();
+  const TopoDS_Shape repaired = solid_fix.Solid();
+  if (!BRepCheck_Analyzer(repaired).IsValid())
+    throw std::runtime_error("Repaired imported B-rep remains invalid.");
+  const double repaired_volume = ShapeVolume(repaired);
+  if (!std::isfinite(original_volume) || original_volume <= 0
+      || std::abs(repaired_volume - original_volume) > std::max(1e-6, original_volume * 1e-6))
+    throw std::runtime_error("B-rep repair changed the source volume beyond its tolerance.");
+  return repaired;
+}
+
+TopoDS_Shape ResizeImportedThreadX(const TopoDS_Shape& source, const double* parameters) {
+  const double x_start = parameters[0];
+  const double x_end = parameters[1];
+  const double axis_y = parameters[2];
+  const double axis_z = parameters[3];
+  const double major_radius = parameters[4];
+  const double diameter_delta = parameters[5];
+  if (!std::isfinite(x_start) || !std::isfinite(x_end) || !std::isfinite(axis_y)
+      || !std::isfinite(axis_z) || !std::isfinite(major_radius)
+      || !std::isfinite(diameter_delta) || x_end <= x_start || major_radius <= 0
+      || diameter_delta <= 0 || diameter_delta >= major_radius * 2)
+    throw std::runtime_error("Imported thread resize parameters are outside the supported range.");
+
+  Bnd_Box source_bounds;
+  BRepBndLib::Add(source, source_bounds);
+  double xmin, ymin, zmin, xmax, ymax, zmax;
+  source_bounds.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+  if (x_start <= xmin + 1e-6 || x_end >= xmax - 1e-6)
+    throw std::runtime_error("Thread resize interval must lie inside the imported body bounds.");
+  const double radial_extent = std::max({std::abs(ymin - axis_y), std::abs(ymax - axis_y),
+                                         std::abs(zmin - axis_z), std::abs(zmax - axis_z)});
+  const double margin = radial_extent * 2.0 + 1.0;
+  BRepPrimAPI_MakeBox clip_box(
+      gp_Pnt(x_start, axis_y - margin, axis_z - margin),
+      x_end - x_start, margin * 2.0, margin * 2.0);
+  BRepAlgoAPI_Common slice_operation(source, clip_box.Shape());
+  slice_operation.SetFuzzyValue(1e-5);
+  slice_operation.SetRunParallel(true);
+  slice_operation.Build();
+  if (!slice_operation.IsDone()) throw std::runtime_error("OCCT could not isolate the imported thread region.");
+  const TopoDS_Shape slice = EnsureOneSolid(slice_operation.Shape(), "Thread slice");
+  if (!BRepCheck_Analyzer(slice).IsValid())
+    throw std::runtime_error("Isolated imported thread region is invalid.");
+
+  const double scale = (major_radius + diameter_delta / 2.0) / major_radius;
+  gp_GTrsf radial_transform;
+  radial_transform.SetValue(1, 1, 1.0);
+  radial_transform.SetValue(2, 2, scale);
+  radial_transform.SetValue(2, 4, axis_y * (1.0 - scale));
+  radial_transform.SetValue(3, 3, scale);
+  radial_transform.SetValue(3, 4, axis_z * (1.0 - scale));
+  BRepBuilderAPI_GTransform resize_operation(slice, radial_transform, true);
+  if (!resize_operation.IsDone()) throw std::runtime_error("OCCT could not scale the imported thread profile.");
+  const TopoDS_Shape resized_slice = EnsureOneSolid(resize_operation.Shape(), "Resized thread slice");
+  if (!BRepCheck_Analyzer(resized_slice).IsValid())
+    throw std::runtime_error("Radially scaled imported thread region is invalid.");
+
+  BRepAlgoAPI_Fuse stitch_operation(source, resized_slice);
+  stitch_operation.SetFuzzyValue(1e-5);
+  stitch_operation.SetRunParallel(true);
+  stitch_operation.Build();
+  if (!stitch_operation.IsDone())
+    throw std::runtime_error("OCCT could not stitch the resized thread back into the imported body.");
+  const TopoDS_Shape result = EnsureOneSolid(stitch_operation.Shape(), "Resized imported thread");
+  if (!BRepCheck_Analyzer(result).IsValid())
+    throw std::runtime_error("Stitched imported thread has invalid or self-intersecting B-rep topology.");
+  if (ShapeVolume(result) <= ShapeVolume(source))
+    throw std::runtime_error("Resized imported thread did not add material to the outside diameter.");
+  return result;
+}
+
+TopoDS_Shape TransformImportedBrep(const TopoDS_Shape& source, const double* parameters) {
+  const double axis_x = parameters[0];
+  const double axis_y = parameters[1];
+  const double axis_z = parameters[2];
+  const double angle = parameters[3];
+  const double translate_x = parameters[4];
+  const double translate_y = parameters[5];
+  const double translate_z = parameters[6];
+  if (!std::isfinite(axis_x) || !std::isfinite(axis_y) || !std::isfinite(axis_z)
+      || !std::isfinite(angle) || !std::isfinite(translate_x)
+      || !std::isfinite(translate_y) || !std::isfinite(translate_z)
+      || gp_Vec(axis_x, axis_y, axis_z).SquareMagnitude() <= 1e-24)
+    throw std::runtime_error("Imported B-rep transform parameters are invalid.");
+  gp_Trsf transform;
+  transform.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(axis_x, axis_y, axis_z)), angle);
+  transform.SetTranslationPart(gp_Vec(translate_x, translate_y, translate_z));
+  BRepBuilderAPI_Transform operation(source, transform, true);
+  if (!operation.IsDone()) throw std::runtime_error("OCCT could not align the imported B-rep.");
+  const TopoDS_Shape result = operation.Shape();
+  if (!BRepCheck_Analyzer(result).IsValid())
+    throw std::runtime_error("Aligned imported B-rep is invalid.");
+  return result;
+}
+
+std::string ModifiedBrepJson(const TopoDS_Shape& shape, bool repaired) {
+  std::ostringstream brep;
+  BRepTools::Write(shape, brep, false, false, TopTools_FormatVersion_CURRENT);
+  if (!brep.good()) throw std::runtime_error("OCCT could not serialize the modified B-rep.");
+  const std::string serialized = brep.str();
+  if (serialized.empty() || serialized.size() > 64 * 1024 * 1024)
+    throw std::runtime_error("Modified B-rep is empty or exceeds the 64 MB limit.");
+  std::string json = ShapeJson(shape, 0);
+  json.pop_back();
+  json += std::string(",\"repaired\":") + (repaired ? "true" : "false")
+      + ",\"brep_data\":\"" + Base64Encode(serialized) + "\"}";
+  return json;
 }
 
 std::string ImportStepJson(const unsigned char* data, size_t size) {
@@ -598,6 +780,35 @@ API char* cadyx_step_import(const unsigned char* data, size_t size,
     CopyError(error, capacity, exception.what());
   } catch (...) {
     CopyError(error, capacity, "Unknown OCCT STEP import failure.");
+  }
+  return nullptr;
+}
+
+API char* cadyx_modify_imported_brep(const unsigned char* data, size_t size, int operation,
+                                    const double* parameters, size_t parameter_count,
+                                    char* error, size_t capacity) noexcept {
+  try {
+    const size_t expected_count = operation == 1 ? 6 : operation == 2 ? 7 : 0;
+    if (expected_count == 0 || parameter_count != expected_count || !parameters)
+      throw std::runtime_error("Imported B-rep modification needs supported parameters.");
+    const TopoDS_Shape source = ReadImportedBrep(data, size);
+    TopoDS_Shape result;
+    bool repaired = false;
+    if (operation == 1) {
+      repaired = !BRepCheck_Analyzer(source).IsValid();
+      const TopoDS_Shape valid_source = RepairImportedBrep(source);
+      result = ResizeImportedThreadX(valid_source, parameters);
+    } else {
+      result = TransformImportedBrep(source, parameters);
+    }
+    return CopyResult(ModifiedBrepJson(result, repaired));
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString()
+        ? exception.GetMessageString() : "OCCT imported B-rep modification failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown native B-rep modification failure.");
   }
   return nullptr;
 }

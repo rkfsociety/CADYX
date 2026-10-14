@@ -209,6 +209,21 @@ repair an imported solid, CADYX preserves the exact transferred shape and marks
 displayed when OCCT can tessellate it, but Boolean and fillet operations require
 a valid B-rep and may reject it.
 
+`resize_imported_thread` accepts an imported `body_id`, the `x_start` and `x_end`
+of a threaded interval, its `major_diameter`, a positive `diameter_delta`, and
+optional `axis_origin_y` / `axis_origin_z` coordinates for a thread whose axis
+is parallel to global X. The selected interval must contain only the thread.
+When needed, OCCT repairs self-intersecting wires on invalid planar faces, then
+cuts and radially scales the interval about the specified axis before fusing it
+back into the source. The result must be one valid closed solid; the source body
+is retained in feature history and hidden from the viewport.
+
+`transform_imported_brep` accepts an imported B-rep `body_id`, a three-component
+`rotation_axis`, an `angle_degrees` value, and a three-component `translation`.
+It rotates about the global origin, applies the translation, and saves the result
+as another editable imported B-rep feature. Rigid transforms preserve the
+source volume and topology; consumed source bodies remain in history.
+
 ## Scan import and editable triangle meshes
 
 `import_scan` reads one direct PLY file from a workspace folder, preserves the

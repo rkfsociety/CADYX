@@ -121,6 +121,13 @@ class Document:
                             or any(type(index) is not int or index < 0 for index in edges)
                             or len(set(edges)) != len(edges)):
                         raise ValidationError("Fillet feature edge indices are invalid.")
+                elif item.get("operation") in {"resize_imported_thread", "transform_imported_brep"}:
+                    source_body_id = item.get("source_body_id")
+                    typed_id(source_body_id, "body")
+                    if source_body_id == item["body_id"] or by_id.get(source_body_id, {}).get("type") != "body":
+                        raise ValidationError("Imported B-rep feature must reference a different existing source body.")
+                    if not isinstance(item.get("parameters"), dict):
+                        raise ValidationError("Imported B-rep feature parameters are missing.")
                 elif item.get("operation") == "fuse_bodies":
                     base_id, tool_id = item.get("base_body_id"), item.get("tool_body_id")
                     typed_id(base_id, "body")

@@ -634,7 +634,14 @@ function constraintLabel(kind) {
 
 function objectSummary(item, objects = currentObjects) {
   if (item.type === "body") return dimensionsText(item.geometry?.dimensions);
-  if (item.type === "feature") return `${({ fuse_bodies: "Объединение тел", sweep_sketch: "Трубчатое выдавливание", fillet_edges: "Скругление рёбер" })[item.operation] || item.operation || "Операция"} · ${dimensionsText(item.parameters)}`;
+  if (item.type === "feature") {
+    const operation = item.operation;
+    const parameters = item.parameters || {};
+    const label = ({ fuse_bodies: "Объединение тел", sweep_sketch: "Трубчатое выдавливание", fillet_edges: "Скругление рёбер", resize_imported_thread: "Увеличение диаметра резьбы", transform_imported_brep: "Выравнивание модели" })[operation] || operation || "Операция";
+    if (operation === "resize_imported_thread") return `${formatNumber(parameters.major_diameter)} → ${formatNumber(parameters.major_diameter + parameters.diameter_delta)} мм`;
+    if (operation === "transform_imported_brep") return `${formatNumber(parameters.angle_degrees)}° · ${parameters.translation?.map(formatNumber).join(", ") || ""} мм`;
+    return `${label} · ${dimensionsText(parameters)}`;
+  }
   if (item.type === "sketch") return `${item.plane} · ${objects.filter((child) => child.sketch_id === item.id).length} объектов`;
   if (item.type === "point") return `(${formatNumber(item.x)}, ${formatNumber(item.y)})`;
   if (item.type === "line") {
@@ -692,7 +699,7 @@ function renderObjectTree(objects) {
   const consumedBodies = new Set(objects
     .filter((item) => item.type === "feature")
     .flatMap((item) => item.operation === "fuse_bodies" ? [item.base_body_id, item.tool_body_id]
-      : item.operation === "fillet_edges" ? [item.source_body_id] : []));
+      : ["fillet_edges", "resize_imported_thread", "transform_imported_brep"].includes(item.operation) ? [item.source_body_id] : []));
   const sketches = objects.filter((item) => item.type === "sketch");
   for (const body of bodies) {
     if (consumedBodies.has(body.id)) continue;
@@ -746,10 +753,10 @@ function propertyRows(item, objects) {
     ["Объём", formatNumber(item.geometry?.volume)], ["Операций", String(item.feature_ids?.length || 0)],
   ];
   if (item.type === "feature") return [
-    ["Тип", item.operation], ["Тело", referenceText(item.body_id, objects)],
+    ["Тип", ({ resize_imported_thread: "Увеличение диаметра резьбы", transform_imported_brep: "Выравнивание модели" })[item.operation] || item.operation], ["Тело", referenceText(item.body_id, objects)],
     ...Object.entries(item.parameters || {}).map(([key, value]) => [
-      key === "centered" ? "Симметричное выдавливание" : key,
-      typeof value === "boolean" ? value ? "Да" : "Нет" : formatNumber(value),
+      ({ x_start: "Начало участка по оси X", x_end: "Конец участка по оси X", major_diameter: "Исходный диаметр резьбы", diameter_delta: "Увеличение диаметра", axis_origin_y: "Центр оси Y", axis_origin_z: "Центр оси Z", rotation_axis: "Ось поворота", angle_degrees: "Угол поворота", translation: "Смещение XYZ" })[key] || (key === "centered" ? "Симметричное выдавливание" : key),
+      typeof value === "boolean" ? value ? "Да" : "Нет" : Array.isArray(value) ? value.map(formatNumber).join(", ") : formatNumber(value),
     ]),
     ...(item.operation === "fuse_bodies" ? [
       ["Основание", referenceText(item.base_body_id, objects)],
@@ -940,6 +947,9 @@ function handleStreamEvent(type, event) {
       } else if (command.type === "fillet_edges") {
         activeSketchId = null;
         pendingViewportTransition = { projectId, bodyId: result.body_id, type: "fillet", durationMs: 1500 };
+      } else if (["resize_imported_thread", "transform_imported_brep"].includes(command.type)) {
+        activeSketchId = null;
+        pendingViewportTransition = { projectId, bodyId: result.body_id, type: "brep", durationMs: 1500 };
       } else if (command.type === "set_parameter" && result.geometry?.kind) {
         const transitionType = result.geometry.kind === "revolved_profile" ? "revolve"
           : result.geometry.kind === "extruded_profile" ? "extrude"

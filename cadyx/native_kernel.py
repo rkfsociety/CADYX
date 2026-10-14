@@ -71,6 +71,12 @@ class NativeKernel:
                         ctypes.c_char_p, ctypes.c_size_t,
                     ]
                     library.cadyx_step_import.restype = ctypes.c_void_p
+                    library.cadyx_modify_imported_brep.argtypes = [
+                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_int,
+                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
+                        ctypes.c_char_p, ctypes.c_size_t,
+                    ]
+                    library.cadyx_modify_imported_brep.restype = ctypes.c_void_p
                     library.cadyx_free.argtypes = [ctypes.c_void_p]
                     library.cadyx_free.restype = None
                     library.cadyx_kernel_version.argtypes = []
@@ -226,6 +232,41 @@ class NativeKernel:
         source_buffer = (ctypes.c_ubyte * len(source)).from_buffer_copy(source)
         error = ctypes.create_string_buffer(1024)
         result = self.library.cadyx_step_import(source_buffer, len(source), error, len(error))
+        if not result:
+            raise ValidationError(error.value.decode("utf-8", errors="replace"))
+        try:
+            return json.loads(ctypes.string_at(result))
+        finally:
+            self.library.cadyx_free(result)
+
+    def modify_imported_brep(self, geometry, *, operation, parameters):
+        if operation not in {"resize_thread_x", "rigid_transform"}:
+            raise ValidationError("Unsupported imported B-rep modification.")
+        if not isinstance(geometry, dict) or geometry.get("kind") != "imported_brep":
+            raise ValidationError("Only imported OCCT B-reps can be modified.")
+        try:
+            compressed = base64.b64decode(geometry["data"], validate=True)
+            decoder = zlib.decompressobj()
+            brep = decoder.decompress(compressed, 64 * 1024 * 1024 + 1)
+            if (len(brep) > 64 * 1024 * 1024 or not decoder.eof
+                    or decoder.unused_data or decoder.unconsumed_tail):
+                raise ValueError("invalid compressed B-rep payload")
+        except (KeyError, TypeError, ValueError, zlib.error) as exc:
+            raise ValidationError("Imported B-rep data is invalid or exceeds the 64 MB limit.") from exc
+        expected_count = 6 if operation == "resize_thread_x" else 7
+        if (not isinstance(parameters, (list, tuple)) or len(parameters) != expected_count
+                or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                       or not math.isfinite(value) for value in parameters)):
+            raise ValidationError("Imported B-rep modification parameters are invalid.")
+        if not brep:
+            raise ValidationError("Imported B-rep data is empty.")
+        data_buffer = (ctypes.c_ubyte * len(brep)).from_buffer_copy(brep)
+        parameter_buffer = (ctypes.c_double * len(parameters))(*(float(value) for value in parameters))
+        operation_code = 1 if operation == "resize_thread_x" else 2
+        error = ctypes.create_string_buffer(1024)
+        result = self.library.cadyx_modify_imported_brep(
+            data_buffer, len(brep), operation_code, parameter_buffer, len(parameters), error, len(error),
+        )
         if not result:
             raise ValidationError(error.value.decode("utf-8", errors="replace"))
         try:
