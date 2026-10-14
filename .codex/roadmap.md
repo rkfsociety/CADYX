@@ -1,6 +1,6 @@
 # CADYX project roadmap
 
-This is the current development sequence. The milestones are goals, not claims that the corresponding capabilities are entirely absent; inspect the implementation before starting work or changing a milestone's status. Stages 1–7 are complete; later stages remain proposed.
+This is the current development sequence. The milestones are goals, not claims that the corresponding capabilities are entirely absent; inspect the implementation before starting work or changing a milestone's status. Stages 1–10 are complete; stage 11 remains proposed.
 
 ## Stages
 
@@ -13,14 +13,14 @@ This is the current development sequence. The milestones are goals, not claims t
 7. **Complete — Shared rendering and viewport API:** identical read-only scene endpoints for browser/agents, native OCCT tessellation of supported bodies, XY sketch points/lines/circles, stable object ids and scene bounds/revision. A shared Z-up orthographic canvas viewport renders CAD scenes and PLY with orbit, zoom, fit and client camera API; document refresh retains the camera. The latest stable Python/OCCT runtime uses a native C ABI bridge. No editor, picking or new solid operations are included. Evidence: [`cadyx/rendering.py`](../cadyx/rendering.py), [`native/`](../native/), [`web/viewport.js`](../web/viewport.js), [`tests/test_rendering.py`](../tests/test_rendering.py), [`tests/test_viewport.cjs`](../tests/test_viewport.cjs), and [viewport contract](../docs/viewport-api.md).
 8. **Complete — CAD model inspection and API-first authoring:** use a read-only, full-window detail view with collapsed model and property docks. Agents create projects and edit bodies, sketches, geometry and constraints through the existing Agent API and Core command system, and retrieve server-rendered PNG snapshots directly through `viewport.png`. SSE updates the observation view after committed changes, without a manual page refresh. The browser provides observation only. Evidence: [`web/index.html`](../web/index.html), [`web/app.js`](../web/app.js), [`web/style.css`](../web/style.css), [`cadyx/rendering.py`](../cadyx/rendering.py), [`tests/test_web_api.py`](../tests/test_web_api.py), [Agent API contract](../docs/document-model-v2.md#browser-inspection-and-agent-api-editing), and [viewport contract](../docs/viewport-api.md).
 9. **Complete — Provider-neutral Agent Runtime:** add an in-process runtime with a provider adapter protocol, bounded tool loop, project inspection and viewport tools, and revision-protected Command System execution under managed agent leases. Core remains provider-independent and no provider SDK or adapter is bundled. Evidence: [`cadyx/agent_runtime.py`](../cadyx/agent_runtime.py), [`tests/test_agent_runtime.py`](../tests/test_agent_runtime.py), and [runtime contract](../docs/architecture.md#agent-runtime).
-10. **Authentication before LAN access:** implement and verify authentication before supporting access from other machines.
+10. **Complete — Authentication before LAN access:** reject unauthenticated non-loopback binds; protect the browser, API, workspace files, viewport and SSE with a configured token; keep only minimal health status public. Tokens come from one validated runtime source, and the default persistent host remains loopback-only. Evidence: [`cadyx/auth.py`](../cadyx/auth.py), [`cadyx/__main__.py`](../cadyx/__main__.py), [`cadyx/web.py`](../cadyx/web.py), [`tests/test_auth.py`](../tests/test_auth.py), and [authentication contract](../docs/architecture.md#http-authentication-and-lan-bind-gate).
 11. **Scan-to-CAD:** build scan preprocessing and editable reconstruction after the geometry foundation is established.
 
 ## Sequencing gates
 
 - Plan format migrations alongside any change that evolves persisted project or document data.
 - Multiple current host processes may share a workspace on one local machine after stage 5; older hosts, direct writers and network filesystems do not participate in the lease contract.
-- Do not expose the host on a LAN until stage 9 is complete.
+- Do not expose the host on a LAN until stage 10 is complete.
 - Start Scan-to-CAD only when the geometry kernel and Document Model foundations from stages 1 and 3 are adequate for editable reconstruction.
 
 Before marking a stage complete, verify its result against the current code and relevant checks, then update this roadmap. Architecture details and current implementation constraints remain in [the architecture guide](../docs/architecture.md); durable technical decisions belong in [decisions](decisions.md).
