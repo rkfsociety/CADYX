@@ -14,12 +14,14 @@ class GeometryKernel(Protocol):
     def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]: ...
 
     def create_extruded_profile(
-        self, profile: list[dict[str, float]], *, plane: str, depth: float,
+        self, profile: list[dict[str, float]], *, plane: str, depth: float, centered: bool = False,
     ) -> dict[str, Any]: ...
 
     def create_revolved_profile(
         self, profile: list[dict[str, float]], *, angle_degrees: float,
     ) -> dict[str, Any]: ...
+
+    def fuse_profiles(self, base: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]: ...
 
     def validate(self, geometry: dict[str, Any]) -> None: ...
 
@@ -102,8 +104,13 @@ class OCCTKernelAdapter:
         if geometry.get("kind") in {"extruded_profile", "revolved_profile"}:
             operation = 0 if geometry["kind"] == "extruded_profile" else 1
             amount = geometry["depth"] if operation == 0 else math.radians(geometry["angle_degrees"])
-            result = NativeKernel().profile(geometry["profile"], operation=operation,
-                                            plane=geometry["plane"], amount=amount, mesh=True)
+            result = NativeKernel().profile(
+                geometry["profile"], operation=operation, plane=geometry["plane"],
+                amount=amount, centered=geometry.get("centered", False), mesh=True,
+            )
+            return {key: result[key] for key in ("positions", "triangles")}
+        if geometry.get("kind") == "fused_profiles":
+            result = NativeKernel().fuse_profiles(geometry["base"], geometry["tool"], mesh=True)
             return {key: result[key] for key in ("positions", "triangles")}
         result = NativeKernel().box(geometry["dimensions"], mesh=True)
         return {key: result[key] for key in ("positions", "triangles")}
@@ -119,10 +126,12 @@ class OCCTKernelAdapter:
         }
 
     def create_extruded_profile(
-        self, profile: list[dict[str, float]], *, plane: str, depth: float,
+        self, profile: list[dict[str, float]], *, plane: str, depth: float, centered: bool = False,
     ) -> dict[str, Any]:
+        if type(centered) is not bool:
+            raise ValidationError("centered must be a boolean.")
         return self._create_profile_geometry(profile, plane=plane, operation=0,
-                                             amount=_positive_amount(depth, "depth"))
+                                             amount=_positive_amount(depth, "depth"), centered=centered)
 
     def create_revolved_profile(
         self, profile: list[dict[str, float]], *, angle_degrees: float,
@@ -134,12 +143,12 @@ class OCCTKernelAdapter:
     @staticmethod
     def _create_profile_geometry(
         profile: list[dict[str, float]], *, plane: str, operation: int,
-        amount: float, angle_degrees: float | None = None,
+        amount: float, angle_degrees: float | None = None, centered: bool = False,
     ) -> dict[str, Any]:
         normalized, _ = _profile_values(profile, plane)
         amount = _positive_amount(amount, "operation amount")
         result = NativeKernel().profile(normalized, operation=operation,
-                                        plane=plane, amount=amount)
+                                        plane=plane, amount=amount, centered=centered)
         geometry = {
             "kernel": OCCTKernelAdapter.kernel_id,
             "kind": "extruded_profile" if operation == 0 else "revolved_profile",
@@ -149,9 +158,23 @@ class OCCTKernelAdapter:
         }
         if operation == 0:
             geometry["depth"] = amount
+            if centered:
+                geometry["centered"] = True
         else:
             geometry["angle_degrees"] = angle_degrees
         return geometry
+
+    def fuse_profiles(self, base: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]:
+        self._validate_profile_geometry(base)
+        self._validate_profile_geometry(tool)
+        result = NativeKernel().fuse_profiles(base, tool)
+        return {
+            "kernel": self.kernel_id,
+            "kind": "fused_profiles",
+            "base": base,
+            "tool": tool,
+            "volume": result["volume"],
+        }
 
     def validate(self, geometry: dict[str, Any]) -> None:
         if isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1":
@@ -164,6 +187,9 @@ class OCCTKernelAdapter:
             raise ValidationError("Geometry does not match a supported box format.")
         if kernel_id == self.kernel_id and geometry.get("kind") in {"extruded_profile", "revolved_profile"}:
             self._validate_profile_geometry(geometry)
+            return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "fused_profiles":
+            self._validate_fused_geometry(geometry)
             return
         if set(geometry) != {"kernel", "kind", "dimensions", "volume"} or geometry.get("kind") != "box":
             raise ValidationError("Geometry does not match a supported box format.")
@@ -192,21 +218,33 @@ class OCCTKernelAdapter:
 
     @staticmethod
     def _validate_profile_geometry(geometry: dict[str, Any]) -> None:
+        if not isinstance(geometry, dict):
+            raise ValidationError("Profile geometry descriptor is invalid.")
         kind = geometry.get("kind")
-        expected_fields = {"kernel", "kind", "plane", "profile", "volume",
-                           "depth" if kind == "extruded_profile" else "angle_degrees"}
+        if kind not in {"extruded_profile", "revolved_profile"}:
+            raise ValidationError("Profile geometry descriptor is invalid.")
+        amount_field = "depth" if kind == "extruded_profile" else "angle_degrees"
+        expected_fields = {"kernel", "kind", "plane", "profile", "volume", amount_field}
+        if kind == "extruded_profile" and "centered" in geometry:
+            expected_fields.add("centered")
         if set(geometry) != expected_fields or geometry.get("kernel") != OCCTKernelAdapter.kernel_id:
             raise ValidationError("Profile geometry descriptor is invalid.")
         profile, _ = _profile_values(geometry["profile"], geometry["plane"])
         if kind == "extruded_profile":
             if geometry["plane"] not in {"XY", "XZ"}:
                 raise ValidationError("Profile plane must be XY or XZ.")
+            centered = geometry.get("centered", False)
+            if type(centered) is not bool:
+                raise ValidationError("centered must be a boolean.")
             operation, amount = 0, _positive_amount(geometry["depth"], "depth")
         else:
             if geometry["plane"] != "XZ":
                 raise ValidationError("Revolution requires an XZ profile.")
+            if "centered" in geometry:
+                raise ValidationError("Revolution profiles cannot be centered.")
             angle = _positive_amount(geometry["angle_degrees"], "angle_degrees", maximum=360.0)
             operation, amount = 1, math.radians(angle)
+            centered = False
         saved_volume = geometry.get("volume")
         if isinstance(saved_volume, bool) or not isinstance(saved_volume, (int, float)):
             raise ValidationError("Saved geometry volume is invalid.")
@@ -216,9 +254,34 @@ class OCCTKernelAdapter:
             raise ValidationError("Saved geometry volume is invalid.") from exc
         if not math.isfinite(saved_volume) or saved_volume <= 0:
             raise ValidationError("Saved geometry volume is invalid.")
-        actual = NativeKernel().profile(profile, operation=operation, plane=geometry["plane"], amount=amount)["volume"]
+        actual = NativeKernel().profile(
+            profile, operation=operation, plane=geometry["plane"], amount=amount, centered=centered,
+        )["volume"]
         if not math.isclose(saved_volume, actual, rel_tol=1e-12, abs_tol=1e-12):
             raise ValidationError("Saved geometry volume does not match the Open CASCADE solid.")
+
+    @staticmethod
+    def _validate_fused_geometry(geometry: dict[str, Any]) -> None:
+        if (set(geometry) != {"kernel", "kind", "base", "tool", "volume"}
+                or geometry.get("kernel") != OCCTKernelAdapter.kernel_id):
+            raise ValidationError("Fused profile geometry descriptor is invalid.")
+        base, tool = geometry.get("base"), geometry.get("tool")
+        if not isinstance(base, dict) or not isinstance(tool, dict):
+            raise ValidationError("Fused profile source geometries are invalid.")
+        OCCTKernelAdapter._validate_profile_geometry(base)
+        OCCTKernelAdapter._validate_profile_geometry(tool)
+        saved_volume = geometry.get("volume")
+        if isinstance(saved_volume, bool) or not isinstance(saved_volume, (int, float)):
+            raise ValidationError("Saved geometry volume is invalid.")
+        try:
+            saved_volume = float(saved_volume)
+        except OverflowError as exc:
+            raise ValidationError("Saved geometry volume is invalid.") from exc
+        if not math.isfinite(saved_volume) or saved_volume <= 0:
+            raise ValidationError("Saved geometry volume is invalid.")
+        actual = NativeKernel().fuse_profiles(base, tool)["volume"]
+        if not math.isclose(saved_volume, actual, rel_tol=1e-12, abs_tol=1e-12):
+            raise ValidationError("Saved geometry volume does not match the Open CASCADE fused solid.")
 
     @staticmethod
     def _box_volume(dimensions: dict[str, float]) -> float:
@@ -266,6 +329,9 @@ class PrimitiveKernelAdapter:
 
     def create_extruded_profile(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not build extruded B-reps.")
+
+    def fuse_profiles(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise ValidationError("The primitive demo kernel does not fuse B-rep solids.")
 
     def create_revolved_profile(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not build revolved B-reps.")

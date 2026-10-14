@@ -104,6 +104,14 @@ class Document:
                     typed_id(source_sketch_id, "sketch")
                     if by_id.get(source_sketch_id, {}).get("type") != "sketch":
                         raise ValidationError("Profile feature must reference an existing source sketch.")
+                elif item.get("operation") == "fuse_bodies":
+                    base_id, tool_id = item.get("base_body_id"), item.get("tool_body_id")
+                    typed_id(base_id, "body")
+                    typed_id(tool_id, "body")
+                    if base_id == tool_id or item["body_id"] in {base_id, tool_id}:
+                        raise ValidationError("Boolean fuse must reference two different source bodies.")
+                    if any(by_id.get(source_id, {}).get("type") != "body" for source_id in (base_id, tool_id)):
+                        raise ValidationError("Boolean fuse must reference existing source bodies.")
         validate_sketches(self.objects)
 
 

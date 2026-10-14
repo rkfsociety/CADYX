@@ -52,6 +52,8 @@ class CommandSystem:
             return self._create_box(document, command)
         if kind in {"extrude_sketch", "revolve_sketch"}:
             return self._create_profile_feature(document, command, kind, progress=progress)
+        if kind == "fuse_bodies":
+            return self._fuse_bodies(document, command, progress=progress)
         if kind == "set_parameter":
             return self._set_parameter(document, command, progress=progress)
         if kind == "import_scan":
@@ -108,19 +110,10 @@ class CommandSystem:
                 item["sketch_id"] for item in document.objects
                 if item.get("id") in seen and item.get("type") in {"point", "circle"}
             }
-            for feature in document.objects:
-                if (feature.get("type") == "feature" and
-                        feature.get("source_sketch_id") in changed_sketches):
-                    if progress is not None:
-                        progress({"phase": "rebuild_features"})
-                    body = next((item for item in document.objects
-                                 if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
-                    if body is None:
-                        raise ValidationError("Profile feature refers to a missing body.")
-                    geometry = self._profile_geometry(document, feature, feature["parameters"], progress=progress)
-                    body["geometry"] = geometry
-                    feature["geometry"] = geometry
+            self._rebuild_changed_features(document, changed_sketches, progress=progress)
             return {"object_ids": sorted(seen)}
+        if kind == "replace_sketch_profile":
+            return self._replace_sketch_profile(document, command, progress=progress)
         if kind == "remove_sketch_object":
             object_id = command.get("object_id")
             item = next((item for item in document.objects if item["id"] == object_id), None)
@@ -315,9 +308,14 @@ class CommandSystem:
                 raise NotFoundError("Editable feature was not found.")
             if feature.get("operation") in {"extrude_sketch", "revolve_sketch"}:
                 expected = "depth" if feature["operation"] == "extrude_sketch" else "angle_degrees"
-                if parameter_name != expected:
-                    raise ValidationError(f"Only the {expected} parameter is supported for this feature.")
-                value = _number(command.get("value"), parameter_name)
+                if parameter_name == "centered" and feature["operation"] == "extrude_sketch":
+                    value = command.get("value")
+                    if type(value) is not bool:
+                        raise ValidationError("centered must be a boolean.")
+                elif parameter_name == expected:
+                    value = _number(command.get("value"), parameter_name)
+                else:
+                    raise ValidationError(f"Only the {expected} and centered parameters are supported for this feature.")
                 parameters = dict(feature["parameters"])
                 parameters[parameter_name] = value
                 if progress is not None:
@@ -330,6 +328,7 @@ class CommandSystem:
                 feature["parameters"] = parameters
                 feature["geometry"] = geometry
                 body["geometry"] = geometry
+                self._rebuild_fusions(document, {body["id"]}, progress=progress)
                 return {"feature_id": feature_id, "parameter": parameter_name,
                         "value": value, "geometry": geometry}
             raise NotFoundError("Editable feature was not found.")
@@ -364,6 +363,11 @@ class CommandSystem:
         parameters: dict[str, Any] = {"source_sketch_id": sketch_id}
         if operation == "extrude_sketch":
             parameters["depth"] = _number(command.get("depth"), "depth")
+            centered = command.get("centered", False)
+            if type(centered) is not bool:
+                raise ValidationError("centered must be a boolean.")
+            if centered:
+                parameters["centered"] = True
         else:
             if plane != "XZ":
                 raise ValidationError("Revolution requires a sketch on the XZ plane.")
@@ -403,7 +407,10 @@ class CommandSystem:
         if operation == "extrude_sketch":
             if progress is not None:
                 progress({"phase": "kernel_extrusion"})
-            return self.kernel.create_extruded_profile(profile, plane=plane, depth=parameters["depth"])
+            return self.kernel.create_extruded_profile(
+                profile, plane=plane, depth=parameters["depth"],
+                centered=parameters.get("centered", False),
+            )
         if operation == "revolve_sketch":
             if progress is not None:
                 progress({"phase": "kernel_revolution"})
@@ -411,3 +418,135 @@ class CommandSystem:
                 raise ValidationError("Revolution requires a sketch on the XZ plane.")
             return self.kernel.create_revolved_profile(profile, angle_degrees=parameters["angle_degrees"])
         raise ValidationError("Unsupported sketch feature operation.")
+
+    def _replace_sketch_profile(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch_id = command.get("sketch_id")
+        sketch = next((item for item in document.objects
+                       if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
+        if sketch is None:
+            raise NotFoundError("Sketch was not found.")
+        coordinates = command.get("points")
+        if not isinstance(coordinates, list) or not 3 <= len(coordinates) <= 4096:
+            raise ValidationError("A replacement profile needs between 3 and 4096 points.")
+        points: list[tuple[float, float]] = []
+        for point in coordinates:
+            if not isinstance(point, dict) or set(point) != {"x", "y"}:
+                raise ValidationError("Every replacement profile point needs x and y coordinates.")
+            values = []
+            for axis in ("x", "y"):
+                value = point[axis]
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValidationError("Replacement profile coordinates must be finite numbers.")
+                value = float(value)
+                if not math.isfinite(value):
+                    raise ValidationError("Replacement profile coordinates must be finite numbers.")
+                values.append(value)
+            points.append((values[0], values[1]))
+        owned = [item for item in document.objects if item.get("sketch_id") == sketch_id]
+        if any(item.get("type") not in {"point", "line"} for item in owned):
+            raise ValidationError("Only a line-loop sketch without circles or constraints can be replaced.")
+        if progress is not None:
+            progress({"phase": "replace_sketch_profile"})
+        document.objects = [item for item in document.objects if item.get("sketch_id") != sketch_id]
+        point_ids = [f"point:{uuid4()}" for _ in points]
+        line_ids = [f"line:{uuid4()}" for _ in points]
+        sketch_index = document.objects.index(sketch)
+        elements = [
+            {"id": point_id, "type": "point", "sketch_id": sketch_id, "x": x, "y": y}
+            for point_id, (x, y) in zip(point_ids, points, strict=True)
+        ]
+        elements.extend(
+            {"id": line_id, "type": "line", "sketch_id": sketch_id,
+             "start_id": point_ids[index], "end_id": point_ids[(index + 1) % len(points)]}
+            for index, line_id in enumerate(line_ids)
+        )
+        document.objects[sketch_index + 1:sketch_index + 1] = elements
+        self._rebuild_changed_features(document, {sketch_id}, progress=progress)
+        return {"sketch_id": sketch_id, "point_ids": point_ids, "line_ids": line_ids}
+
+    def _rebuild_changed_features(
+        self, document: Document, changed_sketches: set[str], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
+        by_id = {item["id"]: item for item in document.objects}
+        changed_bodies: set[str] = set()
+        features = [item for item in document.objects if item.get("type") == "feature"]
+        for feature in features:
+            if (feature.get("operation") not in {"extrude_sketch", "revolve_sketch"}
+                    or feature.get("source_sketch_id") not in changed_sketches):
+                continue
+            if progress is not None:
+                progress({"phase": "rebuild_features"})
+            body = by_id.get(feature.get("body_id"))
+            if body is None or body.get("type") != "body":
+                raise ValidationError("Profile feature refers to a missing body.")
+            geometry = self._profile_geometry(document, feature, feature["parameters"], progress=progress)
+            body["geometry"] = geometry
+            feature["geometry"] = geometry
+            changed_bodies.add(body["id"])
+        self._rebuild_fusions(document, changed_bodies, progress=progress)
+
+    def _rebuild_fusions(
+        self, document: Document, changed_bodies: set[str], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
+        if not changed_bodies:
+            return
+        by_id = {item["id"]: item for item in document.objects}
+        rebuilt_bodies = set(changed_bodies)
+        features = [item for item in document.objects if item.get("type") == "feature"]
+        for feature in features:
+            if feature.get("operation") != "fuse_bodies":
+                continue
+            sources = {feature.get("base_body_id"), feature.get("tool_body_id")}
+            if not sources & rebuilt_bodies:
+                continue
+            base, tool = by_id.get(feature.get("base_body_id")), by_id.get(feature.get("tool_body_id"))
+            body = by_id.get(feature.get("body_id"))
+            if any(item is None or item.get("type") != "body" for item in (base, tool, body)):
+                raise ValidationError("Boolean fuse feature refers to a missing body.")
+            if progress is not None:
+                progress({"phase": "kernel_boolean_fuse"})
+            geometry = self.kernel.fuse_profiles(base["geometry"], tool["geometry"])
+            body["geometry"] = geometry
+            feature["geometry"] = geometry
+            rebuilt_bodies.add(body["id"])
+
+    def _fuse_bodies(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        base_id, tool_id = command.get("base_body_id"), command.get("tool_body_id")
+        if not isinstance(base_id, str) or not isinstance(tool_id, str) or base_id == tool_id:
+            raise ValidationError("fuse_bodies needs two different body IDs.")
+        by_id = {item["id"]: item for item in document.objects}
+        base, tool = by_id.get(base_id), by_id.get(tool_id)
+        if any(item is None or item.get("type") != "body" for item in (base, tool)):
+            raise NotFoundError("One of the bodies to fuse was not found.")
+        consumed = {
+            source_id
+            for feature in document.objects
+            if feature.get("type") == "feature" and feature.get("operation") == "fuse_bodies"
+            for source_id in (feature.get("base_body_id"), feature.get("tool_body_id"))
+        }
+        if base_id in consumed or tool_id in consumed:
+            raise ValidationError("A body already consumed by a fuse feature cannot be fused again.")
+        name = command.get("name", "Объединённая модель")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Fused body name must be a non-empty string of at most 120 characters.")
+        if progress is not None:
+            progress({"phase": "kernel_boolean_fuse"})
+        geometry = self.kernel.fuse_profiles(base.get("geometry"), tool.get("geometry"))
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        document.objects.extend([
+            {"id": body_id, "type": "body", "name": name.strip(),
+             "feature_ids": [feature_id], "geometry": geometry},
+            {"id": feature_id, "type": "feature", "operation": "fuse_bodies",
+             "body_id": body_id, "base_body_id": base_id, "tool_body_id": tool_id,
+             "parameters": {}, "geometry": geometry},
+        ])
+        return {"body_id": body_id, "feature_id": feature_id,
+                "base_body_id": base_id, "tool_body_id": tool_id, "geometry": geometry}

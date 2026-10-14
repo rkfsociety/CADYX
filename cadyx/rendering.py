@@ -13,6 +13,12 @@ from .errors import ValidationError
 def render_scene(document: Document, kernel: GeometryKernel) -> dict:
     objects = []
     by_id = {item["id"]: item for item in document.objects}
+    consumed_bodies = {
+        source_id
+        for item in document.objects
+        if item.get("type") == "feature" and item.get("operation") == "fuse_bodies"
+        for source_id in (item.get("base_body_id"), item.get("tool_body_id"))
+    }
 
     def sketch_position(sketch_id: str, x: float, y: float) -> list[float]:
         sketch = by_id[sketch_id]
@@ -20,6 +26,8 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
 
     for item in document.objects:
         kind = item["type"]
+        if kind == "body" and item["id"] in consumed_bodies:
+            continue
         positions, triangles, lines, points = [], [], [], []
         if kind == "body" and item.get("geometry") is not None:
             mesh = kernel.tessellate(item["geometry"])

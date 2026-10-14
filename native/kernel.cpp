@@ -1,5 +1,6 @@
 // Small Python-ABI-independent boundary; OCCT objects never leave this library.
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
@@ -99,13 +100,15 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh) {
 }
 
 TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
-                              int operation, int plane, double amount) {
+                              int operation, int plane, double amount, bool centered) {
   if (!coordinates || point_count < 3 || point_count > 4096)
     throw std::runtime_error("A profile needs between 3 and 4096 points.");
   if ((operation != 0 && operation != 1) || (plane != 0 && plane != 1))
     throw std::runtime_error("Unsupported profile operation or sketch plane.");
   if (!std::isfinite(amount) || amount <= 0)
     throw std::runtime_error("Operation amount must be finite and positive.");
+  if (centered && operation != 0)
+    throw std::runtime_error("Only profile extrusions can be centered.");
   if (operation == 1 && (plane != 1 || amount > kFullTurn + 1e-9))
     throw std::runtime_error("Revolution requires an XZ profile and an angle up to 360 degrees.");
 
@@ -124,7 +127,9 @@ TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
       throw std::runtime_error("Profile edges must have distinct endpoints.");
     twice_area += x * next_y - next_x * y;
     if (std::abs(x) <= 1e-7) touches_axis = true;
-    polygon.Add(plane == 0 ? gp_Pnt(x, y, 0.0) : gp_Pnt(x, 0.0, y));
+    polygon.Add(plane == 0
+      ? gp_Pnt(x, y, centered ? -amount / 2.0 : 0.0)
+      : gp_Pnt(x, centered ? -amount / 2.0 : 0.0, y));
   }
   if (!std::isfinite(twice_area) || std::abs(twice_area) <= 1e-12)
     throw std::runtime_error("Profile area must be non-zero.");
@@ -180,12 +185,42 @@ API char* cadyx_box(double width, double height, double depth, int mesh,
 }
 
 API char* cadyx_profile(const double* coordinates, size_t point_count, int operation,
-                       int plane, double amount, int mesh,
+                       int plane, double amount, int centered, int mesh,
                        char* error, size_t capacity) noexcept {
   try {
-    return CopyResult(ShapeJson(MakeProfileShape(coordinates, point_count, operation, plane, amount), mesh));
+    return CopyResult(ShapeJson(MakeProfileShape(coordinates, point_count, operation, plane,
+                                                 amount, centered != 0), mesh));
   } catch (const Standard_Failure& exception) {
     CopyError(error, capacity, exception.GetMessageString() ? exception.GetMessageString() : "OCCT operation failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown native kernel failure.");
+  }
+  return nullptr;
+}
+
+API char* cadyx_fuse_profiles(
+    const double* base_coordinates, size_t base_point_count, int base_operation,
+    int base_plane, double base_amount, int base_centered,
+    const double* tool_coordinates, size_t tool_point_count, int tool_operation,
+    int tool_plane, double tool_amount, int tool_centered, int mesh,
+    char* error, size_t capacity) noexcept {
+  try {
+    const TopoDS_Shape base = MakeProfileShape(base_coordinates, base_point_count,
+        base_operation, base_plane, base_amount, base_centered != 0);
+    const TopoDS_Shape tool = MakeProfileShape(tool_coordinates, tool_point_count,
+        tool_operation, tool_plane, tool_amount, tool_centered != 0);
+    BRepAlgoAPI_Fuse operation(base, tool);
+    operation.Build();
+    if (!operation.IsDone()) throw std::runtime_error("OCCT could not fuse the profile bodies.");
+    const TopoDS_Shape fused = operation.Shape();
+    size_t solids = 0;
+    for (TopExp_Explorer explorer(fused, TopAbs_SOLID); explorer.More(); explorer.Next()) ++solids;
+    if (solids != 1) throw std::runtime_error("Boolean fuse must produce one connected solid.");
+    return CopyResult(ShapeJson(fused, mesh));
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString() ? exception.GetMessageString() : "OCCT fuse failed.");
   } catch (const std::exception& exception) {
     CopyError(error, capacity, exception.what());
   } catch (...) {

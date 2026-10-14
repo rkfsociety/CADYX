@@ -73,9 +73,12 @@ and references preserved.
 
 ## Sketch-driven solid features
 
-`extrude_sketch` accepts `sketch_id`, positive `depth`, and optional `name`.
-It extrudes one closed line loop on `XY` along global Z or on `XZ` along global
-Y. `revolve_sketch` accepts `sketch_id`, optional `angle_degrees` (default 360,
+`extrude_sketch` accepts `sketch_id`, positive `depth`, optional `name`, and
+optional boolean `centered`. A centered extrusion spans equally on both sides
+of its sketch plane. Otherwise it starts at the plane and extends along the
+positive plane normal. It extrudes one closed line loop on `XY` along global Z
+or on `XZ` along global Y. `revolve_sketch` accepts `sketch_id`, optional
+`angle_degrees` (default 360,
 range greater than 0 through 360), and optional `name`. It revolves one closed
 profile on `XZ` about global Z. Revolution profiles must stay on one side of the
 axis and touch it so OCCT can form a solid. A sketch with one circle can be used
@@ -90,6 +93,19 @@ revolution angle. Removing a sketch used by a solid feature is rejected. Profile
 constraints still check the supplied geometry and do not solve it. The OCCT
 adapter rebuilds and validates each saved solid and derives viewport triangles
 from the B-rep. These are solids, not triangle-mesh imports.
+
+`replace_sketch_profile` replaces the point/line loop of a selected sketch and
+atomically rebuilds its dependent profile features. It accepts `sketch_id` and
+3–4096 finite `{x, y}` points; sketches with circles or constraints are
+rejected. Editing a sketch also rebuilds downstream fuse features.
+
+`fuse_bodies` accepts `base_body_id`, `tool_body_id`, and optional `name` for two
+profile-based OCCT solids. The native OCCT Boolean operation must produce one
+connected valid solid. The resulting `fused_profiles` descriptor retains both
+source geometry descriptors and is rebuilt when a source sketch changes.
+Consumed source bodies remain in document history for editing but are hidden
+from the viewport and object tree; only the fused result is displayed. Meshes,
+boxes, and already-fused results are not accepted by this profile-fuse command.
 
 ## Scan import and editable triangle meshes
 

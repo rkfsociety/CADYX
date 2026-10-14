@@ -362,6 +362,8 @@ class CadyxCore:
             "update_sketch_elements": "Меняет геометрию эскиза",
             "extrude_sketch": "Выдавливает профиль",
             "revolve_sketch": "Вращает профиль",
+            "replace_sketch_profile": "Перерисовывает профиль",
+            "fuse_bodies": "Объединяет тела",
             "set_parameter": "Меняет параметры модели",
             "import_scan": "Обрабатывает скан",
             "set_scan_parameter": "Пересобирает скан",
@@ -394,7 +396,24 @@ class CadyxCore:
             geometry = item.get("geometry")
             if geometry is not None:
                 self.kernel.validate(geometry)
-            if item.get("type") != "feature" or item.get("operation") not in {"extrude_sketch", "revolve_sketch"}:
+            if item.get("type") != "feature":
+                continue
+            if item.get("operation") == "fuse_bodies":
+                feature_geometry = item.get("geometry")
+                body = by_id.get(item.get("body_id"))
+                base = by_id.get(item.get("base_body_id"))
+                tool = by_id.get(item.get("tool_body_id"))
+                if any(value is None or value.get("type") != "body" for value in (body, base, tool)):
+                    raise ValidationError("Boolean fuse feature refers to a missing body.")
+                if feature_geometry != body.get("geometry"):
+                    raise ValidationError("Boolean fuse feature geometry must match its body.")
+                if (not isinstance(feature_geometry, dict)
+                        or feature_geometry.get("kind") != "fused_profiles"
+                        or feature_geometry.get("base") != base.get("geometry")
+                        or feature_geometry.get("tool") != tool.get("geometry")):
+                    raise ValidationError("Boolean fuse geometry is out of date with its source bodies.")
+                continue
+            if item.get("operation") not in {"extrude_sketch", "revolve_sketch"}:
                 continue
             feature_geometry = item.get("geometry")
             body = by_id.get(item.get("body_id"))
@@ -414,6 +433,8 @@ class CadyxCore:
             parameter_name = "depth" if operation == "extrude_sketch" else "angle_degrees"
             if feature_geometry.get(parameter_name) != parameters.get(parameter_name):
                 raise ValidationError("Profile feature geometry is out of date with its parameters.")
+            if feature_geometry.get("centered", False) != parameters.get("centered", False):
+                raise ValidationError("Profile feature centered-extrusion state is out of date.")
 
     @staticmethod
     def _summary(project: dict[str, Any]) -> dict[str, Any]:

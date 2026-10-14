@@ -46,6 +46,31 @@ class OCPKernelAdapterConformanceTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.kernel.create_box(width=1e-12, height=2, depth=3)
 
+    def test_centered_extrusion_is_symmetric_about_the_sketch_plane(self) -> None:
+        geometry = self.kernel.create_extruded_profile(
+            [{"x": 2, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 8}, {"x": 2, "y": 8}],
+            plane="XZ", depth=10, centered=True,
+        )
+
+        positions = self.kernel.tessellate(geometry)["positions"]
+        y_coordinates = positions[1::3]
+        self.assertAlmostEqual(min(y_coordinates), -5)
+        self.assertAlmostEqual(max(y_coordinates), 5)
+        self.assertTrue(geometry["centered"])
+
+    def test_profile_fuse_requires_one_connected_solid(self) -> None:
+        base = self.kernel.create_extruded_profile(
+            [{"x": 1, "y": 0}, {"x": 3, "y": 0}, {"x": 3, "y": 2}, {"x": 1, "y": 2}],
+            plane="XZ", depth=2, centered=True,
+        )
+        separated = self.kernel.create_extruded_profile(
+            [{"x": 10, "y": 0}, {"x": 12, "y": 0}, {"x": 12, "y": 2}, {"x": 10, "y": 2}],
+            plane="XZ", depth=2, centered=True,
+        )
+
+        with self.assertRaisesRegex(ValidationError, "one connected solid"):
+            self.kernel.fuse_profiles(base, separated)
+
     def test_tessellation_accepts_legacy_descriptor(self) -> None:
         legacy = PrimitiveKernelAdapter().create_box(width=2, height=3, depth=5)
         mesh = self.kernel.tessellate(legacy)

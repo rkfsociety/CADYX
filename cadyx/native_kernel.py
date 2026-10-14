@@ -2,6 +2,7 @@
 
 import ctypes
 import json
+import math
 import os
 from pathlib import Path
 from threading import Lock
@@ -34,10 +35,18 @@ class NativeKernel:
                     library.cadyx_box.restype = ctypes.c_void_p
                     library.cadyx_profile.argtypes = [
                         ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_int,
-                        ctypes.c_int, ctypes.c_double, ctypes.c_int,
+                        ctypes.c_int, ctypes.c_double, ctypes.c_int, ctypes.c_int,
                         ctypes.c_char_p, ctypes.c_size_t,
                     ]
                     library.cadyx_profile.restype = ctypes.c_void_p
+                    library.cadyx_fuse_profiles.argtypes = [
+                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_int,
+                        ctypes.c_int, ctypes.c_double, ctypes.c_int,
+                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_int,
+                        ctypes.c_int, ctypes.c_double, ctypes.c_int, ctypes.c_int,
+                        ctypes.c_char_p, ctypes.c_size_t,
+                    ]
+                    library.cadyx_fuse_profiles.restype = ctypes.c_void_p
                     library.cadyx_free.argtypes = [ctypes.c_void_p]
                     library.cadyx_free.restype = None
                     library.cadyx_kernel_version.argtypes = []
@@ -67,7 +76,7 @@ class NativeKernel:
         finally:
             self.library.cadyx_free(result)
 
-    def profile(self, points, *, operation, plane, amount, mesh=False):
+    def profile(self, points, *, operation, plane, amount, centered=False, mesh=False):
         if operation not in {0, 1} or plane not in {"XY", "XZ"}:
             raise ValidationError("Unsupported profile operation or sketch plane.")
         coordinates = (ctypes.c_double * (2 * len(points)))(
@@ -76,7 +85,35 @@ class NativeKernel:
         error = ctypes.create_string_buffer(1024)
         result = self.library.cadyx_profile(
             coordinates, len(points), operation, 0 if plane == "XY" else 1,
-            amount, int(mesh), error, len(error),
+            amount, int(centered), int(mesh), error, len(error),
+        )
+        if not result:
+            raise ValidationError(error.value.decode("utf-8", errors="replace"))
+        try:
+            return json.loads(ctypes.string_at(result))
+        finally:
+            self.library.cadyx_free(result)
+
+    def fuse_profiles(self, base, tool, *, mesh=False):
+        def arguments(geometry):
+            kind = geometry.get("kind")
+            if kind not in {"extruded_profile", "revolved_profile"}:
+                raise ValidationError("Boolean fuse currently accepts profile-based OCCT solids.")
+            operation = 0 if kind == "extruded_profile" else 1
+            plane = geometry["plane"]
+            amount = geometry["depth"] if operation == 0 else math.radians(geometry["angle_degrees"])
+            centered = geometry.get("centered", False)
+            coordinate_array = ctypes.c_double * (2 * len(geometry["profile"]))
+            coordinates = coordinate_array(
+                *(coordinate for point in geometry["profile"] for coordinate in (point["x"], point["y"]))
+            )
+            return coordinates, len(geometry["profile"]), operation, 0 if plane == "XY" else 1, amount, int(centered)
+
+        left = arguments(base)
+        right = arguments(tool)
+        error = ctypes.create_string_buffer(1024)
+        result = self.library.cadyx_fuse_profiles(
+            *left, *right, int(mesh), error, len(error),
         )
         if not result:
             raise ValidationError(error.value.decode("utf-8", errors="replace"))

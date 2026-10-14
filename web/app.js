@@ -414,10 +414,7 @@ async function refreshDetail() {
   if (scene.revision !== info.document.revision) { scheduleWorkspaceRefresh(); return; }
   const objects = info.document.objects;
   const objectsById = new Map(objects.map((item) => [item.id, item]));
-  const usedSketchIds = new Set(objects
-    .filter((item) => item.type === "feature" && item.source_sketch_id)
-    .map((item) => item.source_sketch_id));
-  const visibleSketchId = activeSketchId && !usedSketchIds.has(activeSketchId)
+  const visibleSketchId = activeSketchId
     && objectsById.get(activeSketchId)?.type === "sketch" ? activeSketchId : null;
   const key = `${projectId}:${scene.revision}:${visibleSketchId || "no-sketch"}`;
   const visibleObjects = objects.filter((item) => {
@@ -447,7 +444,7 @@ async function refreshDetail() {
       for (const index of object.triangles) triangles.push(index + offset);
       for (const index of object.lines) lines.push(index + offset);
       for (const index of object.points) points.push(index + offset);
-      if (source?.type === "body" && source.geometry?.kind === "revolved_profile") {
+      if (source?.type === "body" && containsRevolvedProfile(source.geometry)) {
         let minZ = Infinity, maxZ = -Infinity;
         for (let index = 2; index < object.positions.length; index += 3) {
           minZ = Math.min(minZ, object.positions[index]);
@@ -571,7 +568,7 @@ function constraintLabel(kind) {
 
 function objectSummary(item, objects = currentObjects) {
   if (item.type === "body") return dimensionsText(item.geometry?.dimensions);
-  if (item.type === "feature") return `${item.operation || "Операция"} · ${dimensionsText(item.parameters)}`;
+  if (item.type === "feature") return `${({ fuse_bodies: "Объединение тел" })[item.operation] || item.operation || "Операция"} · ${dimensionsText(item.parameters)}`;
   if (item.type === "sketch") return `${item.plane} · ${objects.filter((child) => child.sketch_id === item.id).length} объектов`;
   if (item.type === "point") return `(${formatNumber(item.x)}, ${formatNumber(item.y)})`;
   if (item.type === "line") {
@@ -583,6 +580,12 @@ function objectSummary(item, objects = currentObjects) {
   if (item.type === "circle") return `R ${formatNumber(item.radius)}`;
   if (item.type === "constraint") return constraintLabel(item.kind);
   return "";
+}
+
+function containsRevolvedProfile(geometry) {
+  return geometry?.kind === "revolved_profile"
+    || geometry?.kind === "fused_profiles"
+      && (containsRevolvedProfile(geometry.base) || containsRevolvedProfile(geometry.tool));
 }
 
 function renderObjectTree(objects) {
@@ -619,8 +622,12 @@ function renderObjectTree(objects) {
   };
 
   const bodies = objects.filter((item) => item.type === "body");
+  const consumedBodies = new Set(objects
+    .filter((item) => item.type === "feature" && item.operation === "fuse_bodies")
+    .flatMap((item) => [item.base_body_id, item.tool_body_id]));
   const sketches = objects.filter((item) => item.type === "sketch");
   for (const body of bodies) {
+    if (consumedBodies.has(body.id)) continue;
     const group = document.createElement("div");
     group.className = "object-group";
     appendRow(group, body);
@@ -671,7 +678,14 @@ function propertyRows(item, objects) {
   ];
   if (item.type === "feature") return [
     ["Тип", item.operation], ["Тело", referenceText(item.body_id, objects)],
-    ...Object.entries(item.parameters || {}).map(([key, value]) => [key, formatNumber(value)]),
+    ...Object.entries(item.parameters || {}).map(([key, value]) => [
+      key === "centered" ? "Симметричное выдавливание" : key,
+      typeof value === "boolean" ? value ? "Да" : "Нет" : formatNumber(value),
+    ]),
+    ...(item.operation === "fuse_bodies" ? [
+      ["Основание", referenceText(item.base_body_id, objects)],
+      ["Объединяемое тело", referenceText(item.tool_body_id, objects)],
+    ] : []),
   ];
   if (item.type === "sketch") return [
     ["Имя", item.name], ["Плоскость", item.plane],
@@ -802,6 +816,12 @@ function handleStreamEvent(type, event) {
           projectId, sketchId: activeSketchId, allSketchLines: true,
           type: "sketch-lines", durationMs: 700,
         } : null;
+      } else if (command.type === "replace_sketch_profile") {
+        activeSketchId = command.sketch_id || null;
+        pendingViewportTransition = activeSketchId ? {
+          projectId, sketchId: activeSketchId, allSketchLines: true,
+          type: "sketch-lines", durationMs: 1600,
+        } : null;
       } else if (command.type === "remove_sketch_object") {
         if (command.object_id === activeSketchId) activeSketchId = null;
         pendingViewportTransition = null;
@@ -812,6 +832,11 @@ function handleStreamEvent(type, event) {
           type: command.type === "extrude_sketch" ? "extrude" : "revolve",
           plane: result.geometry?.plane || "XZ", durationMs: 1400,
         };
+      } else if (command.type === "fuse_bodies") {
+        activeSketchId = null;
+        pendingViewportTransition = {
+          projectId, bodyId: result.body_id, type: "fuse", durationMs: 1200,
+        };
       } else if (command.type === "set_parameter" && result.geometry?.kind) {
         const transitionType = result.geometry.kind === "revolved_profile" ? "revolve"
           : result.geometry.kind === "extruded_profile" ? "extrude" : null;
@@ -819,6 +844,7 @@ function handleStreamEvent(type, event) {
           projectId, featureId: result.feature_id, type: transitionType,
           plane: result.geometry.plane || "XZ", durationMs: 1100,
         } : null;
+        activeSketchId = null;
       }
     }
     selectObjectFromResult(projectId, result);
