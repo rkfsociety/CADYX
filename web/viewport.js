@@ -270,7 +270,7 @@
 
       if (triangles.length) renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress,
-        geometry.vertexNormals, cameraOrientation, geometry.featureEdges,
+        geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.silhouetteCandidates, wireframe, shaded,
         wireframeColor, wireframeOpacity, dpr,
       );
@@ -423,7 +423,7 @@
     }
 
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress,
-      vertexNormals, orientation, featureEdges, silhouetteCandidates, showWireframe, shaded,
+      vertexNormals, orientation, faceNormals, featureEdges, silhouetteCandidates, showWireframe, shaded,
       wireframeColor, wireframeOpacity, dpr) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
@@ -455,6 +455,16 @@
         let brightness;
         if (smooth) {
           brightness = (vertexLight[first] + vertexLight[second] + vertexLight[third]) / 3;
+        } else if (faceNormals && !transition) {
+          const normal = face * 3;
+          const worldX = faceNormals[normal], worldY = faceNormals[normal + 1];
+          const worldZ = faceNormals[normal + 2];
+          const right = orientation[0] * worldX + orientation[1] * worldY + orientation[2] * worldZ;
+          const depth = orientation[3] * worldX + orientation[4] * worldY + orientation[5] * worldZ;
+          const up = orientation[6] * worldX + orientation[7] * worldY + orientation[8] * worldZ;
+          brightness = 0.34 + 0.66 * Math.abs(
+            right * light[0] + up * light[1] + depth * light[2],
+          );
         } else {
           const ax = camera[a], ay = camera[a + 1], bx = camera[b], by = camera[b + 1];
           const cx = camera[c], cy = camera[c + 1];
@@ -492,8 +502,11 @@
           const third = triangles[face * 3 + 2];
           const steel = Math.round(78 + brightness * 85);
           let red = Math.round(steel * 0.94), blue = Math.round(steel * 1.08), finalGreen = steel;
-          const forming = transition?.vertexRange
-            && [first, second, third].every((vertex) => vertex >= transition.vertexRange[0] && vertex < transition.vertexRange[1]);
+          const vertexRange = transition?.vertexRange;
+          const forming = vertexRange
+            && first >= vertexRange[0] && first < vertexRange[1]
+            && second >= vertexRange[0] && second < vertexRange[1]
+            && third >= vertexRange[0] && third < vertexRange[1];
           if (forming && progress < 1) {
             const glow = (1 - progress) * 0.38;
             red = Math.round(red + (112 - red) * glow);
@@ -649,6 +662,7 @@
           fitRadius: fitRadiusFromPositions(value.positions, fitCenter),
           ...meshEdges,
           vertexNormals: smoothShading ? buildVertexNormals(value.positions, value.triangles || []) : null,
+          faceNormals: smoothShading ? null : buildFaceNormals(value.positions, value.triangles || []),
         };
         vertexLight = geometry.vertexNormals ? new Float32Array(geometry.vertexNormals.length / 3) : new Float32Array(0);
         transition = nextTransition ? {
@@ -804,6 +818,26 @@
         normals[index] /= length;
         normals[index + 1] /= length;
         normals[index + 2] /= length;
+      }
+      return normals;
+    }
+
+    function buildFaceNormals(positions, triangles) {
+      if (!triangles.length) return null;
+      const normals = new Float64Array(triangles.length);
+      for (let face = 0; face < triangles.length; face += 3) {
+        const first = triangles[face] * 3, second = triangles[face + 1] * 3, third = triangles[face + 2] * 3;
+        const ux = positions[second] - positions[first];
+        const uy = positions[second + 1] - positions[first + 1];
+        const uz = positions[second + 2] - positions[first + 2];
+        const vx = positions[third] - positions[first];
+        const vy = positions[third + 1] - positions[first + 1];
+        const vz = positions[third + 2] - positions[first + 2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const length = Math.hypot(nx, ny, nz) || 1;
+        normals[face] = nx / length;
+        normals[face + 1] = ny / length;
+        normals[face + 2] = nz / length;
       }
       return normals;
     }
