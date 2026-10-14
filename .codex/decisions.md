@@ -62,7 +62,7 @@
 
 ## CAD workspace and API-first editing
 
-- **Decision:** keep the browser read-only and make the detail fill the window; model and property docks start collapsed. Agents create projects and modify document objects through the Agent API and shared Command System, and can fetch a PNG scene image directly from the server. **Reason:** project/model management belongs to the API-driven agent workflow, while the user view should keep attention on the current detail. **Constraint:** dock navigation and camera controls affect only inspection; Web API human writes remain available to API clients. **Source:** `web/index.html`, `web/app.js`, `cadyx/rendering.py`, [architecture](docs/architecture.md), [viewport contract](docs/viewport-api.md).
+- **Decision:** keep the browser read-only and center the detail workspace on a dominant viewport, with left section navigation and a right column for the single-line agent status, live scene metrics and orthographic projections. Model and property docks start collapsed. Agents create projects and modify document objects through the Agent API and shared Command System, and can fetch a PNG scene image directly from the server. **Reason:** project/model management belongs to the API-driven agent workflow, while the user view should keep attention on the current detail and make its geometry observable. **Constraint:** navigation, projections and camera controls affect only inspection; Web API human writes remain available to API clients. **Source:** `web/index.html`, `web/app.js`, `cadyx/rendering.py`, [architecture](docs/architecture.md), [viewport contract](docs/viewport-api.md).
 - **Status:** active.
 
 ## Persistent Windows host

@@ -303,8 +303,8 @@
         const first = triangles[face * 3];
         const second = triangles[face * 3 + 1];
         const third = triangles[face * 3 + 2];
-        const green = Math.round(105 + brightness * 87);
-        let red = Math.round(green * 0.69), blue = Math.round(green * 0.53), finalGreen = green;
+        const steel = Math.round(78 + brightness * 85);
+        let red = Math.round(steel * 0.94), blue = Math.round(steel * 1.08), finalGreen = steel;
         const forming = transition?.vertexRange
           && [first, second, third].every((vertex) => vertex >= transition.vertexRange[0] && vertex < transition.vertexRange[1]);
         if (forming && progress < 1) {

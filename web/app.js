@@ -22,6 +22,14 @@ const folderPreviewCanvas = $("#ply-preview-canvas");
 const folderPreviewPlaceholder = $("#folder-preview-placeholder");
 const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
 const modelViewer = window.CadyxViewport.createViewer($("#model-preview"));
+const orthographicViewers = [
+  { viewer: window.CadyxViewport.createViewer($("#ortho-front")), camera: { yaw: 0, pitch: 0 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-right")), camera: { yaw: Math.PI / 2, pitch: 0 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-top")), camera: { yaw: 0, pitch: Math.PI / 2 } },
+];
+orthographicViewers.forEach((view) => {
+  view.viewer.setCamera({ ...view.camera, zoom: 1, projection: "orthographic" });
+});
 let cameraAnimationId = 0;
 let renderedSceneKey = null;
 let detailRequest = 0;
@@ -30,6 +38,7 @@ let detailedProjectModifiedAt = null;
 $("#viewport-fit").addEventListener("click", () => modelViewer.fit());
 const toast = $("#toast");
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
+const integerFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 let projects = [];
 let folders = [];
 let selectedProjectId = readSelectedProject();
@@ -60,6 +69,26 @@ const dockMenus = [...document.querySelectorAll(".dock-control")];
 dockMenus.forEach((menu) => menu.addEventListener("toggle", () => {
   if (menu.open) dockMenus.forEach((other) => { if (other !== menu) other.open = false; });
 }));
+$("#workspace-navigation").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-workspace-view]");
+  if (!button || button.disabled) return;
+  document.querySelectorAll(".nav-item").forEach((item) => {
+    if (item === button) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
+  const view = button.dataset.workspaceView;
+  if (view === "overview") {
+    dockMenus.forEach((menu) => { menu.open = false; });
+    $("#viewport-fit").focus({ preventScroll: true });
+  } else if (view === "geometry" || view === "files") {
+    dockMenus[0].open = true;
+    (view === "geometry" ? $("#object-tree") : projectList).focus({ preventScroll: true });
+  } else if (view === "analysis") {
+    $("#comparison-panel").focus({ preventScroll: true });
+  } else if (view === "activity") {
+    $("#agent-activity").focus({ preventScroll: true });
+  }
+});
 
 function readSelectedProject() {
   try { return localStorage.getItem("cadyx.selected-project"); }
@@ -85,6 +114,50 @@ function formatNumber(value) {
   return Number.isFinite(Number(value)) ? numberFormat.format(Number(value)) : "—";
 }
 
+function renderSceneMetrics(scene, objectsById, visibleSketchId, visibleDocumentObjects) {
+  const bodyMeshes = scene.objects.filter((item) => objectsById.get(item.object_id)?.type === "body");
+  const visibleObjects = scene.objects.filter((item) => {
+    const source = objectsById.get(item.object_id);
+    return source?.type === "body" || source?.sketch_id === visibleSketchId;
+  });
+  const vertexCount = bodyMeshes.reduce((total, item) => total + item.positions.length / 3, 0);
+  const faceCount = bodyMeshes.reduce((total, item) => total + item.triangles.length / 3, 0);
+  const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+  for (const item of bodyMeshes) {
+    for (let index = 0; index < item.positions.length; index += 3) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        const value = item.positions[index + axis];
+        bounds.min[axis] = Math.min(bounds.min[axis], value);
+        bounds.max[axis] = Math.max(bounds.max[axis], value);
+      }
+    }
+  }
+  const extents = bodyMeshes.length
+    ? bounds.min.map((value, axis) => bounds.max[axis] - value)
+    : [0, 0, 0];
+  const bodyCountText = integerFormat.format(bodyMeshes.length);
+  const vertexCountText = integerFormat.format(vertexCount);
+  const faceCountText = integerFormat.format(faceCount);
+  $("#scene-body-count").textContent = bodyCountText;
+  $("#scene-vertex-count").textContent = vertexCountText;
+  $("#scene-face-count").textContent = faceCountText;
+  const maxExtent = Math.max(...extents, 0);
+  ["x", "y", "z"].forEach((axis, index) => {
+    $(`#extent-${axis}`).textContent = formatNumber(extents[index]);
+    $(`#extent-${axis}-bar`).style.width = maxExtent > 0 ? `${extents[index] / maxExtent * 100}%` : "0%";
+  });
+  $("#scene-feature-count").textContent = integerFormat.format(visibleDocumentObjects.filter((item) => item.type === "feature").length);
+  $("#scene-sketch-entity-count").textContent = integerFormat.format(
+    visibleDocumentObjects.filter((item) => ["point", "line", "circle", "constraint"].includes(item.type)).length,
+  );
+  $("#scene-object-count").textContent = integerFormat.format(visibleDocumentObjects.length);
+  $("#viewport-object-count").textContent = integerFormat.format(visibleObjects.length);
+  $("#viewport-vertex-count").textContent = vertexCountText;
+  $("#viewport-face-count").textContent = faceCountText;
+  $("#document-revision").textContent = integerFormat.format(scene.revision);
+  $("#viewport-revision").textContent = integerFormat.format(scene.revision);
+}
+
 function getProject(id) {
   return projects.find((item) => item.project.id === id);
 }
@@ -96,6 +169,13 @@ function showProjectLoading(name) {
   noSelection.hidden = true;
   $("#object-panel").hidden = true;
   $("#document-title").textContent = name;
+  $("#document-kind").textContent = "ACTIVE PROJECT";
+  $("#project-light").classList.add("active");
+  $("#sidebar-project-name").textContent = name;
+  $("#document-revision").textContent = "—";
+  $("#viewport-revision").textContent = "—";
+  $("#comparison-panel").hidden = true;
+  $("#analysis-nav").disabled = true;
   if (!renderedSceneKey?.startsWith(`${selectedProjectId}:`)) {
     $("#model-preview").hidden = true;
     $("#viewport-empty").hidden = false;
@@ -199,6 +279,9 @@ function showFolderDetail(name) {
   noSelection.hidden = true;
   $("#folder-detail").hidden = false;
   $("#document-title").textContent = name;
+  $("#document-kind").textContent = "WORKSPACE FOLDER";
+  $("#project-light").classList.remove("active");
+  $("#document-revision").textContent = "—";
   if (folderChanged) {
     folderFiles = [];
     folderFilesSignature = null;
@@ -382,6 +465,9 @@ async function refreshWorkspacePass() {
     $("#folder-detail").hidden = true;
     noSelection.hidden = false;
     $("#document-title").textContent = "CADYX";
+    $("#document-kind").textContent = "NO PROJECT SELECTED";
+    $("#project-light").classList.remove("active");
+    $("#document-revision").textContent = "—";
   }
 }
 
@@ -477,6 +563,7 @@ async function refreshDetail() {
   if (projectId !== selectedProjectId || request !== detailRequest) return;
   if (comparison.revision !== scene.revision) { scheduleWorkspaceRefresh(); return; }
   $("#comparison-panel").hidden = !comparison.available;
+  $("#analysis-nav").disabled = !comparison.available;
   if (comparison.available) {
     const original = comparison.original, modified = comparison.modified;
     const positions = [...modified.positions, ...original.positions];
@@ -575,9 +662,13 @@ async function refreshDetail() {
       bounds.max = [0, 0, 0];
     }
     if (!targetFound) transition = null;
-    modelViewer.load({ positions, triangles, lines, points, bounds, rotationAxes }, {
+    const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes };
+    modelViewer.load(viewportGeometry, {
       reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition, smoothShading: true,
     });
+    for (const view of orthographicViewers) {
+      view.viewer.load(viewportGeometry, { reset: false });
+    }
     if (pendingViewportTransition?.projectId === projectId) pendingViewportTransition = null;
     renderedSceneKey = key;
   }
@@ -589,6 +680,8 @@ async function refreshDetail() {
   $("#viewport-empty").hidden = hasVisibleGeometry;
   $("#model-preview").hidden = !hasVisibleGeometry;
   modelViewer.render();
+  renderSceneMetrics(scene, objectsById, visibleSketchId, visibleObjects);
+  $("#sidebar-project-name").textContent = info.project.name;
 
   $("#folder-detail").hidden = true;
   $("#object-panel").hidden = false;

@@ -50,8 +50,13 @@ snapshot also checks workspace, project, file, activity, and UI asset versions
 every five seconds, so changes made by another cooperating host appear
 automatically. Changed HTML, CSS, or JavaScript assets trigger a page reload;
 the selected project is restored. Returning to a hidden tab or reconnecting also
-triggers a sync. The browser shows the detail full-window by default; model
-navigation and properties remain in collapsed read-only docks. Body geometry
+triggers a sync. The browser keeps the read-only model viewport dominant, with
+section navigation on the left and a live inspection column on the right. That
+column shows the single-line agent status, body/vertex/face counts,
+document-unit bounds and visible feature/sketch-element counts derived from the
+current scene, plus front, right and top projections of the same validated
+viewport geometry. Model navigation/project
+browsing and properties remain in collapsed read-only docks. Body geometry
 renders with only the currently edited sketch. Inactive sketches, their
 points/lines, and sketches already referenced by a solid feature are omitted
 from both the viewport and the user-facing object tree. A previously used

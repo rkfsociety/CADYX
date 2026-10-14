@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#15191d">
+    <meta name="theme-color" content="#0b1114">
     <title>CADYX — Проекты</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/assets/style.css">
@@ -12,9 +12,21 @@
     <header class="topbar">
       <div class="topbar-start">
         <a class="brand" href="/" aria-label="CADYX — проекты">
-          <span class="brand-mark" aria-hidden="true">C</span>
           <span>CADYX</span>
         </a>
+        <div class="brand-description" aria-hidden="true">
+          <strong>AI-DRIVEN CAD WORKFLOW</strong>
+          <span>REAL-TIME MODEL OBSERVATION</span>
+        </div>
+      </div>
+      <div class="topbar-project">
+        <span id="project-light" class="project-light" aria-hidden="true"></span>
+        <div class="topbar-project-copy">
+          <span id="document-kind" class="topbar-label">ACTIVE PROJECT</span>
+          <strong id="document-title" class="document-title">Выберите проект</strong>
+        </div>
+      </div>
+      <div class="topbar-end">
         <nav class="dock-controls" aria-label="Свернутые панели">
           <details class="dock-control">
             <summary aria-label="Обозреватель модели" title="Обозреватель модели"><span aria-hidden="true">▤</span></summary>
@@ -23,12 +35,12 @@
                 <div class="sidebar-heading">
                   <div><p class="section-label">ОБЗОР</p><h2>Проекты</h2></div>
                 </div>
-                <div id="project-list" class="project-list" aria-live="polite"></div>
+                <div id="project-list" class="project-list" aria-live="polite" tabindex="-1"></div>
                 <p id="empty-projects" class="empty-note" hidden>Проектов пока нет.</p>
               </section>
               <section id="object-panel" class="panel object-panel" aria-labelledby="objects-title" hidden>
                 <div class="panel-heading"><div><h2 id="objects-title">Дерево модели</h2></div></div>
-                <div id="object-tree" class="object-tree"></div>
+                <div id="object-tree" class="object-tree" tabindex="-1"></div>
                 <p id="objects-empty" class="panel-empty">В этой модели пока нет объектов.</p>
               </section>
             </div>
@@ -42,8 +54,12 @@
             </section>
           </details>
         </nav>
+        <div class="header-revision">
+          <span class="topbar-label">REVISION</span>
+          <strong id="document-revision">—</strong>
+        </div>
+        <span class="readonly-badge">READ ONLY</span>
       </div>
-      <strong id="document-title" class="document-title">Выберите проект</strong>
     </header>
 
     <div class="app-shell">
@@ -78,35 +94,111 @@
         </section>
 
         <div id="project-detail" class="project-detail" hidden>
-          <section id="agent-activity" class="panel activity-panel" aria-labelledby="activity-title">
-            <header class="activity-heading">
-              <div class="activity-heading-copy">
-                <div><p class="section-label">РАБОТА АГЕНТА</p><h2 id="activity-title">Думает</h2></div>
-              </div>
-            </header>
-          </section>
-          <section id="comparison-panel" class="panel" hidden>
-            <div class="panel-heading"><h2>Сравнение с оригиналом</h2><span id="comparison-metrics"></span></div>
-            <p>Голубые линии — оригинал · зелёная поверхность — результат. Поворот и перенос оригинала согласованы с результатом.</p>
-            <canvas id="comparison-preview" class="ply-preview-canvas" style="width:100%;height:420px" aria-label="Совмещённые оригинал и изменённая модель"></canvas>
-          </section>
-          <div class="primary-grid">
-            <section class="panel model-panel" aria-labelledby="model-title">
-              <div class="panel-heading">
-                <div><h2 id="model-title">Деталь</h2></div>
-                <div class="model-toolbar">
-                  <button id="viewport-fit" class="button" type="button">Вписать</button>
+          <aside class="section-sidebar">
+            <div class="sidebar-heading">
+              <p class="section-label">WORKSPACE</p>
+              <h2>Navigation</h2>
+            </div>
+            <nav id="workspace-navigation" class="workspace-navigation" aria-label="Рабочая область">
+              <button class="nav-item" type="button" data-workspace-view="overview" aria-current="page">
+                <span class="nav-index">01</span><span class="nav-copy"><strong>OVERVIEW</strong><small>Project and live view</small></span>
+              </button>
+              <button class="nav-item" type="button" data-workspace-view="geometry">
+                <span class="nav-index">02</span><span class="nav-copy"><strong>GEOMETRY</strong><small>Model objects</small></span>
+              </button>
+              <button id="analysis-nav" class="nav-item" type="button" data-workspace-view="analysis" disabled>
+                <span class="nav-index">03</span><span class="nav-copy"><strong>ANALYSIS</strong><small>Source comparison</small></span>
+              </button>
+              <button class="nav-item" type="button" data-workspace-view="files">
+                <span class="nav-index">04</span><span class="nav-copy"><strong>FILES</strong><small>Projects and files</small></span>
+              </button>
+              <button class="nav-item" type="button" data-workspace-view="activity">
+                <span class="nav-index">05</span><span class="nav-copy"><strong>ACTIVITY</strong><small>Current agent status</small></span>
+              </button>
+            </nav>
+            <div class="sidebar-project">
+              <span class="section-label">SELECTED PROJECT</span>
+              <strong id="sidebar-project-name">—</strong>
+            </div>
+            <div class="sidebar-footer">
+              <span class="sidebar-mark" aria-hidden="true">◇</span>
+              <span><strong>CADYX</strong><small>AUTONOMOUS<br>ENGINEERING</small></span>
+            </div>
+          </aside>
+
+          <div class="project-main">
+            <div class="primary-grid">
+              <section class="panel model-panel" aria-labelledby="model-title">
+                <div class="panel-heading viewport-heading">
+                  <div><h2 id="model-title">CAD VIEWPORT</h2><span class="viewport-mode">ORTHOGRAPHIC</span></div>
+                  <div class="model-toolbar">
+                    <button id="viewport-fit" class="button" type="button">FIT VIEW</button>
+                  </div>
                 </div>
-              </div>
-              <div class="viewport" id="viewport">
-                <canvas id="model-preview" class="model-preview ply-preview-canvas" aria-label="3D модель и эскизы" hidden></canvas>
-                <div id="viewport-empty" class="viewport-empty">
-                  <span class="empty-cube" aria-hidden="true">⬡</span>
-                  <p>Модель ещё не построена</p>
-                  <small>Здесь появится созданная деталь</small>
+                <div class="viewport" id="viewport">
+                  <canvas id="model-preview" class="model-preview ply-preview-canvas" aria-label="3D модель и эскизы" hidden></canvas>
+                  <div id="viewport-empty" class="viewport-empty">
+                    <span class="empty-cube" aria-hidden="true">⬡</span>
+                    <p>Модель ещё не построена</p>
+                    <small>Здесь появится созданная деталь</small>
+                  </div>
                 </div>
-              </div>
-            </section>
+                <footer class="viewport-footer" aria-label="Сводка модели">
+                  <span>OBJECTS <strong id="viewport-object-count">0</strong></span>
+                  <span>VERTICES <strong id="viewport-vertex-count">0</strong></span>
+                  <span>FACES <strong id="viewport-face-count">0</strong></span>
+                  <span>REV <strong id="viewport-revision">—</strong></span>
+                </footer>
+              </section>
+
+              <aside class="inspector-column" aria-label="Состояние и виды модели">
+                <section id="agent-activity" class="panel activity-panel" aria-labelledby="activity-title" tabindex="-1">
+                  <header class="activity-heading">
+                    <div class="activity-heading-copy">
+                      <p class="section-label">РАБОТА АГЕНТА</p>
+                      <h2 id="activity-title">Думает</h2>
+                    </div>
+                  </header>
+                </section>
+                <section class="panel scene-panel" aria-labelledby="scene-title">
+                  <div class="panel-heading"><h2 id="scene-title">SCENE METRICS</h2><span class="panel-note">LIVE</span></div>
+                  <div class="scene-metrics">
+                    <div><strong id="scene-body-count">0</strong><span>BODIES</span></div>
+                    <div><strong id="scene-vertex-count">0</strong><span>VERTICES</span></div>
+                    <div><strong id="scene-face-count">0</strong><span>FACES</span></div>
+                  </div>
+                </section>
+                <section class="panel envelope-panel" aria-labelledby="envelope-title">
+                  <div class="panel-heading"><h2 id="envelope-title">MODEL BOUNDS</h2><span class="panel-note">DOCUMENT UNITS</span></div>
+                  <div class="envelope-list">
+                    <div><span>X</span><span class="extent-track"><i id="extent-x-bar"></i></span><strong id="extent-x">0</strong></div>
+                    <div><span>Y</span><span class="extent-track"><i id="extent-y-bar"></i></span><strong id="extent-y">0</strong></div>
+                    <div><span>Z</span><span class="extent-track"><i id="extent-z-bar"></i></span><strong id="extent-z">0</strong></div>
+                  </div>
+                </section>
+                <section class="panel breakdown-panel" aria-labelledby="breakdown-title">
+                  <div class="panel-heading"><h2 id="breakdown-title">GEOMETRY BREAKDOWN</h2><span class="panel-note">VISIBLE</span></div>
+                  <div class="breakdown-list">
+                    <div><span class="breakdown-index">01</span><span>Features</span><strong id="scene-feature-count">0</strong></div>
+                    <div><span class="breakdown-index">02</span><span>Sketch elements</span><strong id="scene-sketch-entity-count">0</strong></div>
+                    <div><span class="breakdown-index">03</span><span>Visible objects</span><strong id="scene-object-count">0</strong></div>
+                  </div>
+                </section>
+                <section class="panel orthographic-panel" aria-labelledby="orthographic-title">
+                  <div class="panel-heading"><h2 id="orthographic-title">ORTHOGRAPHIC VIEWS</h2><span class="panel-note">XYZ</span></div>
+                  <div class="orthographic-views">
+                    <figure class="ortho-view"><canvas id="ortho-front" class="ortho-canvas" aria-label="Вид модели спереди"></canvas><figcaption>FRONT</figcaption></figure>
+                    <figure class="ortho-view"><canvas id="ortho-right" class="ortho-canvas" aria-label="Вид модели справа"></canvas><figcaption>RIGHT</figcaption></figure>
+                    <figure class="ortho-view"><canvas id="ortho-top" class="ortho-canvas" aria-label="Вид модели сверху"></canvas><figcaption>TOP</figcaption></figure>
+                  </div>
+                </section>
+                <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" hidden tabindex="-1">
+                  <div class="panel-heading"><h2 id="comparison-title">SOURCE COMPARISON</h2><span id="comparison-metrics" class="panel-note"></span></div>
+                  <p>Оригинал показан контуром · результат — поверхностью.</p>
+                  <canvas id="comparison-preview" class="comparison-preview" aria-label="Совмещённые оригинал и изменённая модель"></canvas>
+                </section>
+              </aside>
+            </div>
           </div>
         </div>
       </main>
