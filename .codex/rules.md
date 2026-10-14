@@ -1,6 +1,7 @@
 # CADYX Codex rules
 
 - Before any substantive work on CADYX—analysis, planning, code or documentation changes, reviews, recommendations, or commits—refresh project context from the current target branch/revision. Re-read `.codex/rules.md` and `.codex/memory.md`, inspect the files relevant to the task, and verify recent repository state/changes as needed. Treat prior-chat/model memory as potentially stale and never rely on it when the current repository state can be checked.
+- Work directly on `main`. Do not create feature, staging, temporary, or work branches unless the user explicitly changes this policy. CADYX should normally have exactly one branch: `main`. If an accidental branch is created, fast-forward/merge its work into `main` and remove the extra branch.
 - When choosing or updating any dependency/runtime/tool version, use the newest stable release and verify it from its official source. Do not choose an older compatible release as a workaround: the user explicitly requires adapting or building the kernel when necessary. Never bypass dependency checks to claim compatibility. Reviewed versions and reproducible local setup live in `scripts/runtime-versions.json` and `scripts/setup-runtime.ps1`.
 
 - Keep CADYX AI-first: the Core owns authoritative project state, and both agents and the browser use its Command System for document mutations.
@@ -11,4 +12,4 @@
 - Keep geometry-kernel-specific APIs behind the `GeometryKernel` boundary; do not represent the demo primitive adapter as a production CAD kernel.
 - Prefer existing mechanisms and avoid dependencies with only marginal benefit. Standing user authorization: add a mature third-party dependency when it provides a concrete improvement to performance, correctness, maintainability, or UX; no separate approval is needed for each such dependency. Keep the choice scoped, record why it helps, and update dependency manifests/lockfiles as required.
 - Before every commit, review `.codex/memory.md` against the confirmed current project state: add useful durable facts, update changed facts, and remove stale ones. Keep canonical details in project documentation or code instead of duplicating them in memory.
-- Before pushing, fetch the target remote branch and compare it with local `HEAD`. If the remote has advanced, pull and merge those commits locally, resolve and verify the merge, then push. Do not push while the local branch is behind its remote.
+- Before pushing, fetch `main` and compare it with local `HEAD`. If remote `main` has advanced, pull and merge those commits locally, resolve and verify the merge, then push. Do not push while local `main` is behind its remote.
