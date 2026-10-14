@@ -1,17 +1,53 @@
-const api = (path, options = {}) => fetch(path, {
-  ...options,
-  headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-}).then(async (response) => {
+const apiErrorLabels = {
+  CADYX_ERROR: "Внутренняя ошибка CADYX.",
+  VALIDATION_ERROR: "Параметры запроса не прошли проверку.",
+  NOT_FOUND: "Проект, файл или объект не найден.",
+  CONFLICT: "Не удалось применить изменение из-за конфликта состояния.",
+  EDIT_LOCK_REQUIRED: "Для изменения проекта требуется блокировка редактирования.",
+  PROJECT_BUSY: "Проект занят другой операцией. Повторите попытку позже.",
+  REVISION_CONFLICT: "Проект изменился. Обновите данные и повторите действие.",
+  AGENT_STOPPING: "Агент завершает работу и не принимает новые команды.",
+  PROJECT_LOCKED: "Проект заблокирован другой операцией.",
+  LEASE_EXPIRED: "Срок блокировки проекта истёк.",
+  LEASE_RECOVERY_REQUIRED: "Для продолжения требуется восстановить блокировку.",
+  LEASE_NOT_EXPIRED: "Блокировка проекта ещё активна.",
+  DUPLICATE_PROJECT_ID: "Проект с таким идентификатором уже существует.",
+  PROJECT_FOLDER_CONFLICT: "Не удалось подобрать имя папки для проекта.",
+  ARTIFACT_CONFLICT: "Файл результата с таким именем уже существует.",
+};
+
+function apiErrorMessage(value, status) {
+  if (apiErrorLabels[value?.error]) return apiErrorLabels[value.error];
+  if (status >= 500) return "Сервер CADYX не смог выполнить запрос.";
+  if (status === 404) return "Запрошенные данные не найдены.";
+  return "Запрос отклонён. Проверьте данные и повторите попытку.";
+}
+
+const api = async (path, options = {}) => {
+  let response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw new Error("Нет связи с сервером CADYX.", { cause: error });
+    throw error;
+  }
   const contentType = response.headers.get("content-type") || "";
-  const value = contentType.includes("application/json") ? await response.json() : {};
+  let value = {};
+  if (contentType.includes("application/json")) {
+    try { value = await response.json(); }
+    catch (error) { throw new Error("Сервер CADYX вернул некорректный ответ.", { cause: error }); }
+  }
   if (!response.ok) {
-    const error = new Error(value.message || value.error || "Ошибка запроса");
+    const error = new Error(apiErrorMessage(value, response.status));
     error.status = response.status;
     error.code = value.error;
     throw error;
   }
   return value;
-});
+};
 
 const $ = (selector) => document.querySelector(selector);
 const projectList = $("#project-list");
@@ -58,7 +94,7 @@ $("#viewport-wireframe").addEventListener("click", (event) => {
   button.setAttribute("aria-pressed", String(enabled));
   button.setAttribute("aria-label", enabled ? "Скрыть рёбра сетки" : "Показать рёбра сетки");
   button.title = enabled ? "Скрыть рёбра сетки" : "Показать рёбра сетки";
-  $("#viewport-mode-label").textContent = enabled ? "SHADED + WIREFRAME" : "SHADED";
+  $("#viewport-mode-label").textContent = enabled ? "ЗАЛИВКА + РЁБРА" : "ЗАЛИВКА";
 });
 let cameraAnimationId = 0;
 let renderedSceneKey = null;
@@ -152,31 +188,31 @@ function formatNumber(value) {
 
 function setApiConnectionStatus(online) {
   $("#api-light").classList.toggle("active", online);
-  $("#api-status-label").textContent = online ? "API ONLINE" : "API OFFLINE";
+  $("#api-status-label").textContent = online ? "API НА СВЯЗИ" : "НЕТ СВЯЗИ С API";
   if (online) {
-    $("#api-sync-time").textContent = new Intl.DateTimeFormat("en-GB", {
+    $("#api-sync-time").textContent = new Intl.DateTimeFormat("ru-RU", {
       hour: "2-digit", minute: "2-digit", second: "2-digit",
     }).format(new Date());
   }
 }
 
 function formatEta(seconds) {
-  if (!Number.isInteger(seconds) || seconds < 0) return "ETA —";
+  if (!Number.isInteger(seconds) || seconds < 0) return "ОСТАЛОСЬ —";
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   if (minutes >= 60) {
     const hours = Math.floor(minutes / 60);
-    return `ETA ${hours}h ${minutes % 60}m`;
+    return `ОСТАЛОСЬ ${hours} ч ${minutes % 60} мин`;
   }
-  return minutes ? `ETA ${minutes}m ${remainingSeconds}s` : `ETA ${remainingSeconds}s`;
+  return minutes ? `ОСТАЛОСЬ ${minutes} мин ${remainingSeconds} с` : `ОСТАЛОСЬ ${remainingSeconds} с`;
 }
 
 const phaseStateLabel = (state) => ({
-  completed: "COMPLETED", in_progress: "IN PROGRESS", pending: "PENDING", failed: "FAILED",
-})[state] || "PENDING";
+  completed: "ЗАВЕРШЕНО", in_progress: "В РАБОТЕ", pending: "ОЖИДАЕТ", failed: "ОШИБКА",
+})[state] || "НЕИЗВЕСТНО";
 const taskStateLabel = (state) => ({
-  running: "RUNNING", pending: "PENDING", completed: "COMPLETED", failed: "FAILED",
-})[state] || "PENDING";
+  running: "В РАБОТЕ", pending: "ОЖИДАЕТ", completed: "ЗАВЕРШЕНО", failed: "ОШИБКА",
+})[state] || "НЕИЗВЕСТНО";
 
 function renderAgentDashboard(dashboard) {
   const workflow = dashboard?.workflow;
@@ -210,12 +246,12 @@ function renderAgentDashboard(dashboard) {
       phaseList.append(row);
     });
   } else {
-    $("#workflow-name").textContent = "NO PLAN REPORTED";
+    $("#workflow-name").textContent = "ПЛАН НЕ ПЕРЕДАН";
     $("#workflow-percent").textContent = "—";
     $("#workflow-progress").dataset.available = "false";
     $("#workflow-progress").setAttribute("aria-valuenow", "0");
     $("#workflow-progress-bar").style.width = "0%";
-    $("#workflow-eta").textContent = "ETA —";
+    $("#workflow-eta").textContent = "ОСТАЛОСЬ —";
   }
 
   const tasks = dashboard?.tasks || [];
@@ -274,7 +310,7 @@ function showProjectLoading(name) {
   noSelection.hidden = true;
   $("#object-panel").hidden = true;
   $("#document-title").textContent = name;
-  $("#document-kind").textContent = "PROJECT";
+  $("#document-kind").textContent = "ПРОЕКТ";
   $("#project-light").classList.add("active");
   $("#sidebar-project-name").textContent = name;
   $("#project-short-id").textContent = selectedProjectId?.slice(0, 8).toUpperCase() || "—";
@@ -385,8 +421,8 @@ function showFolderDetail(name) {
   noSelection.hidden = true;
   $("#folder-detail").hidden = false;
   $("#document-title").textContent = name;
-  $("#document-kind").textContent = "WORKSPACE FOLDER";
-  $("#project-short-id").textContent = "SOURCE FILES";
+  $("#document-kind").textContent = "ПАПКА РАБОЧЕЙ ОБЛАСТИ";
+  $("#project-short-id").textContent = "ФАЙЛЫ ИСТОЧНИКА";
   $("#project-light").classList.remove("active");
   $("#document-revision").textContent = "—";
   if (folderChanged) {
@@ -484,10 +520,15 @@ async function previewFolderFile(folderName, file) {
   folderPreviewPlaceholder.textContent = "Загружаю 3D модель…";
   try {
     const url = `/api/v1/workspace/folders/${encodeURIComponent(folderName)}/files/${encodeURIComponent(file.name)}`;
-    const response = await fetch(url);
+    let response;
+    try { response = await fetch(url); }
+    catch (error) {
+      if (error instanceof TypeError) throw new Error("Нет связи с сервером CADYX.", { cause: error });
+      throw error;
+    }
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || "Не удалось загрузить файл.");
+      throw new Error(apiErrorMessage(error, response.status));
     }
     const geometry = window.CadyxPlyPreview.parse(await response.arrayBuffer());
     if (request !== previewRequest || activeFolderName !== folderName) return;
@@ -572,7 +613,7 @@ async function refreshWorkspacePass() {
     $("#folder-detail").hidden = true;
     noSelection.hidden = false;
     $("#document-title").textContent = "CADYX";
-    $("#document-kind").textContent = "NO PROJECT SELECTED";
+    $("#document-kind").textContent = "ПРОЕКТ НЕ ВЫБРАН";
     $("#project-short-id").textContent = "—";
     $("#project-light").classList.remove("active");
     $("#document-revision").textContent = "—";
@@ -888,14 +929,14 @@ function renderAgentActivity(value, lock = null) {
   panel.dataset.state = state;
   const agentState = $("#agent-state");
   agentState.dataset.state = state;
-  agentState.textContent = state === "running" ? "ACTIVE"
-    : state === "failed" ? "ERROR" : state === "completed" ? "COMPLETED" : "IDLE";
-  const action = runningActivity?.action || (agentLeaseActive ? "Обрабатывает CAD workflow" : activity?.action) || "Работает";
+  agentState.textContent = state === "running" ? "РАБОТАЕТ"
+    : state === "failed" ? "ОШИБКА" : state === "completed" ? "ЗАВЕРШЕНО" : "ОЖИДАЕТ";
+  const action = runningActivity?.action || (agentLeaseActive ? "Выполняет задачу CAD" : activity?.action) || "Работает";
   title.textContent = state === "running" ? action
     : state === "failed" ? `${action} · ошибка`
       : recentCompletion ? `${action} · готово` : "Ожидает задачу";
   $("#agent-runtime-label").textContent = state === "running"
-    ? "CADYX AGENT · executing workflow" : "CADYX AGENT · provider-neutral runtime";
+    ? "АГЕНТ CADYX · выполняет задачу" : "АГЕНТ CADYX · среда общего назначения";
   if (recentCompletion && activityStatusOperationId !== activity.operation_id) {
     clearTimeout(activityStatusTimer);
     activityStatusOperationId = activity.operation_id;
@@ -916,7 +957,83 @@ function objectTypeLabel(item) {
 }
 
 function constraintLabel(kind) {
-  return ({ horizontal: "Горизонтальность", vertical: "Вертикальность", coincident: "Совпадение", distance: "Расстояние", radius: "Радиус" })[kind] || kind || "Ограничение";
+  return ({ horizontal: "Горизонтальность", vertical: "Вертикальность", coincident: "Совпадение", distance: "Расстояние", radius: "Радиус" })[kind] || "Ограничение";
+}
+
+function displayObjectName(name) {
+  const commonNames = {
+    Box: "Параллелепипед",
+    Sketch: "Эскиз",
+    Extrusion: "Выдавливание",
+    Revolution: "Вращение",
+  };
+  if (commonNames[name]) return commonNames[name];
+  const thread = /^M([\d.]+)x([\d.]+) (right|left)-hand thread$/i.exec(name || "");
+  if (thread) return `Резьба M${thread[1]}×${thread[2]} (${thread[3].toLowerCase() === "right" ? "правая" : "левая"})`;
+  return name;
+}
+
+const geometryTypeLabels = {
+  box: "Параллелепипед",
+  extruded_profile: "Выдавленный профиль",
+  revolved_profile: "Тело вращения",
+  fused_profiles: "Объединённое тело",
+  fused_solids: "Объединённое тело",
+  swept_pipe: "Сечение по траектории",
+  metric_thread: "Метрическая резьба",
+  imported_brep: "Импортированная B-rep-геометрия",
+  filleted_solid: "Тело со скруглениями",
+  "cadyx-mesh-v1": "Треугольная сетка",
+};
+const featureOperationLabels = {
+  create_box: "Построение параллелепипеда",
+  metric_thread: "Построение метрической резьбы",
+  reconstruct_scan: "Восстановление модели по скану",
+  import_step: "Импорт STEP-модели",
+  extrude_sketch: "Выдавливание профиля",
+  revolve_sketch: "Вращение профиля",
+  fuse_bodies: "Объединение тел",
+  resize_imported_thread: "Изменение диаметра резьбы",
+  transform_imported_brep: "Преобразование импортированной модели",
+  sweep_sketch: "Выдавливание по траектории",
+  fillet_edges: "Скругление рёбер",
+};
+const parameterLabels = {
+  depth: "Глубина выдавливания",
+  centered: "Симметричное выдавливание",
+  angle_degrees: "Угол поворота",
+  radius: "Радиус",
+  major_diameter: "Наружный диаметр резьбы",
+  pitch: "Шаг резьбы",
+  length: "Длина резьбы",
+  handedness: "Направление резьбы",
+  x_start: "Начало участка по оси X",
+  x_end: "Конец участка по оси X",
+  diameter_delta: "Изменение диаметра",
+  axis_origin_y: "Центр оси Y",
+  axis_origin_z: "Центр оси Z",
+  rotation_axis: "Ось поворота",
+  translation: "Смещение XYZ",
+  voxel_size: "Размер вокселя",
+  target_triangles: "Целевое число треугольников",
+  outlier_neighbors: "Число соседних точек",
+  outlier_std_ratio: "Порог фильтрации выбросов",
+  poisson_depth: "Глубина реконструкции",
+};
+
+function geometryTypeLabel(kind) {
+  return geometryTypeLabels[kind] || "Геометрия";
+}
+
+function featureOperationLabel(operation) {
+  return featureOperationLabels[operation] || "Другая операция";
+}
+
+function formatParameterValue(key, value) {
+  if (typeof value === "boolean") return value ? "Да" : "Нет";
+  if (Array.isArray(value)) return value.map(formatNumber).join(", ");
+  if (key === "handedness") return ({ right: "Правая", left: "Левая" })[value] || "Не задано";
+  return formatNumber(value);
 }
 
 function objectSummary(item, objects = currentObjects) {
@@ -924,7 +1041,7 @@ function objectSummary(item, objects = currentObjects) {
   if (item.type === "feature") {
     const operation = item.operation;
     const parameters = item.parameters || {};
-    const label = ({ fuse_bodies: "Объединение тел", sweep_sketch: "Трубчатое выдавливание", fillet_edges: "Скругление рёбер", resize_imported_thread: "Увеличение диаметра резьбы", transform_imported_brep: "Выравнивание модели" })[operation] || operation || "Операция";
+    const label = featureOperationLabels[operation] || "Операция";
     if (operation === "resize_imported_thread") return `${formatNumber(parameters.major_diameter)} → ${formatNumber(parameters.major_diameter + parameters.diameter_delta)} мм`;
     if (operation === "transform_imported_brep") return `${formatNumber(parameters.angle_degrees)}° · ${parameters.translation?.map(formatNumber).join(", ") || ""} мм`;
     return `${label} · ${dimensionsText(parameters)}`;
@@ -968,7 +1085,7 @@ function renderObjectTree(objects) {
     const copy = document.createElement("span");
     copy.className = "object-copy";
     const name = document.createElement("strong");
-    name.textContent = item.name || (item.type === "feature" ? "Построение коробки" : objectTypeLabel(item));
+    name.textContent = displayObjectName(item.name) || (item.type === "feature" ? "Построение параллелепипеда" : objectTypeLabel(item));
     const detail = document.createElement("small");
     detail.textContent = objectSummary(item, objects);
     copy.append(name, detail);
@@ -1026,24 +1143,24 @@ function dimensionsText(dimensions) {
 function referenceText(id, objects) {
   const target = objects.find((item) => item.id === id);
   if (!target) return "Объект не найден";
-  if (target.name) return target.name;
+  if (target.name) return displayObjectName(target.name);
   const summary = objectSummary(target, objects);
   return summary ? `${objectTypeLabel(target)} · ${summary}` : objectTypeLabel(target);
 }
 
 function propertyRows(item, objects) {
   if (item.type === "body") return [
-    ["Имя", item.name || "Тело"], ["Геометрия", item.geometry?.kind || "—"],
+    ["Имя", displayObjectName(item.name) || "Тело"], ["Геометрия", geometryTypeLabel(item.geometry?.kind)],
     ["Ширина", formatNumber(item.geometry?.dimensions?.width)],
     ["Высота", formatNumber(item.geometry?.dimensions?.height)],
     ["Глубина", formatNumber(item.geometry?.dimensions?.depth)],
     ["Объём", formatNumber(item.geometry?.volume)], ["Операций", String(item.feature_ids?.length || 0)],
   ];
   if (item.type === "feature") return [
-    ["Тип", ({ resize_imported_thread: "Увеличение диаметра резьбы", transform_imported_brep: "Выравнивание модели" })[item.operation] || item.operation], ["Тело", referenceText(item.body_id, objects)],
+    ["Тип", featureOperationLabel(item.operation)], ["Тело", referenceText(item.body_id, objects)],
     ...Object.entries(item.parameters || {}).map(([key, value]) => [
-      ({ x_start: "Начало участка по оси X", x_end: "Конец участка по оси X", major_diameter: "Исходный диаметр резьбы", diameter_delta: "Увеличение диаметра", axis_origin_y: "Центр оси Y", axis_origin_z: "Центр оси Z", rotation_axis: "Ось поворота", angle_degrees: "Угол поворота", translation: "Смещение XYZ" })[key] || (key === "centered" ? "Симметричное выдавливание" : key),
-      typeof value === "boolean" ? value ? "Да" : "Нет" : Array.isArray(value) ? value.map(formatNumber).join(", ") : formatNumber(value),
+      parameterLabels[key] || "Параметр",
+      formatParameterValue(key, value),
     ]),
     ...(item.operation === "fuse_bodies" ? [
       ["Основание", referenceText(item.base_body_id, objects)],
@@ -1056,7 +1173,7 @@ function propertyRows(item, objects) {
     ] : []),
   ];
   if (item.type === "sketch") return [
-    ["Имя", item.name], ["Плоскость", item.plane],
+    ["Имя", displayObjectName(item.name)], ["Плоскость", item.plane],
     ["Объектов", String(objects.filter((child) => child.sketch_id === item.id).length)],
   ];
   if (item.type === "point") return [

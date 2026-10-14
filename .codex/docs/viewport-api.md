@@ -112,6 +112,10 @@ publishes each snapshot as `agent.dashboard` over SSE; `/api/v1/updates` include
 is process-local and is cleared when the host restarts. Hardware telemetry is
 not currently reported, so the UI does not display invented CPU/GPU/memory
 values.
+Workflow titles, phase names, and task titles are shown as received; send them
+in Russian to keep the localized browser interface consistent. Project names,
+object names, and file names remain as entered by the user or supplied by their
+source files.
 
 For a modeling request, the agent should inspect the project and references,
 then publish a concrete ordered plan before its first model command. Use
