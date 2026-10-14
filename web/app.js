@@ -963,7 +963,7 @@ async function refreshDetail() {
   if (selectedObjectId && !visibleObjects.some((item) => item.id === selectedObjectId)) selectedObjectId = null;
   if (!selectedObjectId) {
     const topLevel = visibleObjects.filter((item) => item.type === "body" || item.type === "sketch");
-    selectedObjectId = topLevel.at(-1)?.id || null;
+    selectedObjectId = topLevel[topLevel.length - 1]?.id || null;
   }
   currentObjects = visibleObjects;
   renderObjectTree(visibleObjects);
@@ -976,13 +976,13 @@ async function refreshActivitySnapshot(projectId) {
   const knownRevision = activityRevisionsByProject.get(projectId);
   if (knownRevision !== undefined && revision < knownRevision) {
     const cached = activitiesByProject.get(projectId) || [];
-    return cached.slice().reverse().find((item) => item.state === "running") || cached.at(-1) || null;
+    return cached.slice().reverse().find((item) => item.state === "running") || cached[cached.length - 1] || null;
   }
   const activities = response.activities || [];
   activityRevisionsByProject.set(projectId, revision);
   activitiesByProject.set(projectId, activities);
   renderAgentActivity(activities, agentLocksByProject.get(projectId));
-  const current = activities.slice().reverse().find((item) => item.state === "running") || activities.at(-1) || null;
+  const current = activities.slice().reverse().find((item) => item.state === "running") || activities[activities.length - 1] || null;
   if (current?.state === "running") {
     $("#folder-detail").hidden = true;
     projectDetail.hidden = false;
@@ -1010,7 +1010,7 @@ async function refreshAgentDashboardSnapshot(projectId) {
 function renderAgentActivity(value, lock = null) {
   const activities = Array.isArray(value) ? value : value ? [value] : [];
   const runningActivity = activities.slice().reverse().find((item) => item.state === "running") || null;
-  const activity = runningActivity || activities.at(-1) || null;
+  const activity = runningActivity || activities[activities.length - 1] || null;
   const agentLeaseActive = lock?.state === "AI_LOCKED" && lock.lease?.owner_type === "agent"
     && !lock.recovery_required;
   const panel = $("#agent-activity");
