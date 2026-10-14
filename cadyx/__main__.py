@@ -6,6 +6,7 @@ import argparse
 import os
 from pathlib import Path
 
+from .auth import AuthenticationConfigError, load_auth_token, validate_bind_auth
 from .core import CadyxCore
 from .web import CadyxHTTPServer, make_request_handler
 
@@ -18,11 +19,27 @@ def main() -> None:
         "--projects-dir",
         default=os.environ.get("CADYX_PROJECTS_DIR", str(Path.cwd() / "projects")),
     )
+    parser.add_argument(
+        "--auth-token-file",
+        default=os.environ.get("CADYX_AUTH_TOKEN_FILE"),
+        help="Read the HTTP authentication token from a UTF-8 file.",
+    )
     arguments = parser.parse_args()
+
+    try:
+        auth_token = load_auth_token(os.environ.get("CADYX_AUTH_TOKEN"), arguments.auth_token_file)
+        validate_bind_auth(arguments.host, auth_token)
+    except AuthenticationConfigError as exc:
+        parser.error(str(exc))
+
     core = CadyxCore(arguments.projects_dir)
-    server = CadyxHTTPServer((arguments.host, arguments.port), make_request_handler(core))
+    server = CadyxHTTPServer(
+        (arguments.host, arguments.port),
+        make_request_handler(core, auth_token=auth_token),
+    )
     print(f"CADYX listening at http://{arguments.host}:{server.server_port}")
     print(f"Project workspace: {core.workspace.root}")
+    print(f"HTTP authentication: {'required' if auth_token else 'disabled (loopback only)'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
