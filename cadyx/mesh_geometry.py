@@ -112,7 +112,9 @@ def _decode_payload(geometry: dict[str, Any]) -> tuple[array, array]:
     if not all(math.isfinite(value) for value in positions):
         raise ValidationError("Triangle mesh contains a non-finite vertex.")
     for offset in range(0, len(triangles), 3):
-        first, second, third = triangles[offset : offset + 3]
+        first = triangles[offset]
+        second = triangles[offset + 1]
+        third = triangles[offset + 2]
         if (first >= vertex_count or second >= vertex_count or third >= vertex_count or
                 first == second or second == third or first == third):
             raise ValidationError("Triangle mesh contains an invalid face index.")
@@ -146,8 +148,11 @@ def mesh_ply_bytes(geometry: dict[str, Any]) -> bytes:
         "property list uchar uint vertex_indices\n"
         "end_header\n"
     ).encode("ascii")
-    faces = bytearray()
-    for offset in range(0, len(triangles), 3):
-        faces.append(3)
-        faces.extend(triangles[offset : offset + 3].tobytes())
+    faces = bytearray(geometry["triangle_count"] * 13)
+    triangle_bytes = memoryview(triangles).cast("B")
+    for face_index, offset in enumerate(range(0, len(triangles), 3)):
+        face_offset = face_index * 13
+        faces[face_offset] = 3
+        source_offset = offset * triangles.itemsize
+        faces[face_offset + 1 : face_offset + 13] = triangle_bytes[source_offset : source_offset + 12]
     return header + positions.tobytes() + faces

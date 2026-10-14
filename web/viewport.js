@@ -530,11 +530,15 @@
         const vy = positions[third + 1] - positions[first + 1];
         const vz = positions[third + 2] - positions[first + 2];
         const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-        for (const index of [first, second, third]) {
-          normals[index] += nx;
-          normals[index + 1] += ny;
-          normals[index + 2] += nz;
-        }
+        normals[first] += nx;
+        normals[first + 1] += ny;
+        normals[first + 2] += nz;
+        normals[second] += nx;
+        normals[second + 1] += ny;
+        normals[second + 2] += nz;
+        normals[third] += nx;
+        normals[third + 1] += ny;
+        normals[third + 2] += nz;
       }
       for (let index = 0; index < normals.length; index += 3) {
         const length = Math.hypot(normals[index], normals[index + 1], normals[index + 2]) || 1;

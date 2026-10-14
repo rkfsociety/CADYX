@@ -122,9 +122,11 @@ class OCCTKernelAdapter:
 
     def tessellate(self, geometry: dict[str, Any]) -> dict[str, Any]:
         """Return kernel-derived triangles in model coordinates, without native objects."""
-        self.validate(geometry)
-        if geometry.get("kernel") == "cadyx-mesh-v1":
+        # Mesh tessellation already verifies the compressed payload while decoding it.
+        # Avoid serializing and validating a large scan mesh a second time here.
+        if isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1":
             return tessellate_mesh_geometry(geometry)
+        self.validate(geometry)
         result = NativeKernel().geometry_graph(geometry, mesh=True)
         return {key: result[key] for key in ("positions", "triangles")}
 

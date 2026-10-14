@@ -91,13 +91,10 @@ def render_scene_png(scene: dict) -> bytes:
     has_projected = False
 
     for item in scene["objects"]:
-        world_vertices = []
         projected_vertices = []
         positions = item["positions"]
         for index in range(0, len(positions), 3):
             x, y, z = positions[index], positions[index + 1], positions[index + 2]
-            xyz = (x, y, z)
-            world_vertices.append(xyz)
             point = (
                 right[0] * x + right[1] * y + right[2] * z,
                 up[0] * x + up[1] * y + up[2] * z,
@@ -113,7 +110,7 @@ def render_scene_png(scene: dict) -> bytes:
                 min_y = point[1]
             if point[1] > max_y:
                 max_y = point[1]
-        projected_objects.append((item, world_vertices, projected_vertices))
+        projected_objects.append((item, positions, projected_vertices))
 
     if has_projected:
         scale = min((width - 2 * margin) / max(max_x - min_x, 1e-9),
@@ -126,10 +123,12 @@ def render_scene_png(scene: dict) -> bytes:
         return (width / 2 + (point[0] - center_x) * scale,
                 height / 2 - (point[1] - center_y) * scale, point[2])
 
-    screen_objects = [
-        (item, world_vertices, [screen(point) for point in projected_vertices])
-        for item, world_vertices, projected_vertices in projected_objects
-    ]
+    # Reuse the per-object projection lists for screen coordinates. Keeping
+    # separate world, projected, and screen tuple arrays multiplies peak memory
+    # for dense scan meshes.
+    for _, _, projected_vertices in projected_objects:
+        for index, point in enumerate(projected_vertices):
+            projected_vertices[index] = screen(point)
 
     pixels = bytearray(bytes((20, 25, 28)) * (width * height))
     grid_color = bytes((39, 47, 52))
@@ -175,20 +174,26 @@ def render_scene_png(scene: dict) -> bytes:
     light = tuple(value / light_length for value in light)
     base_color = (142, 185, 94)
 
-    for item, world_vertices, screen_vertices in screen_objects:
+    for item, positions, screen_vertices in projected_objects:
         if item["type"] != "body":
             continue
         indices = item["triangles"]
         for offset in range(0, len(indices), 3):
             i0, i1, i2 = indices[offset], indices[offset + 1], indices[offset + 2]
-            a, b, c = world_vertices[i0], world_vertices[i1], world_vertices[i2]
-            ab = tuple(b[axis] - a[axis] for axis in range(3))
-            ac = tuple(c[axis] - a[axis] for axis in range(3))
-            normal = (ab[1] * ac[2] - ab[2] * ac[1],
-                      ab[2] * ac[0] - ab[0] * ac[2],
-                      ab[0] * ac[1] - ab[1] * ac[0])
-            normal_length = math.sqrt(sum(value * value for value in normal)) or 1
-            diffuse = max(0, sum((normal[axis] / normal_length) * light[axis] for axis in range(3)))
+            a, b, c = i0 * 3, i1 * 3, i2 * 3
+            ab_x = positions[b] - positions[a]
+            ab_y = positions[b + 1] - positions[a + 1]
+            ab_z = positions[b + 2] - positions[a + 2]
+            ac_x = positions[c] - positions[a]
+            ac_y = positions[c + 1] - positions[a + 1]
+            ac_z = positions[c + 2] - positions[a + 2]
+            normal_x = ab_y * ac_z - ab_z * ac_y
+            normal_y = ab_z * ac_x - ab_x * ac_z
+            normal_z = ab_x * ac_y - ab_y * ac_x
+            normal_length = math.sqrt(normal_x * normal_x + normal_y * normal_y + normal_z * normal_z) or 1
+            diffuse = max(0, (normal_x / normal_length) * light[0]
+                         + (normal_y / normal_length) * light[1]
+                         + (normal_z / normal_length) * light[2])
             shade = 0.48 + 0.52 * diffuse
             color = bytes(round(channel * shade) for channel in base_color)
             points = (screen_vertices[i0], screen_vertices[i1], screen_vertices[i2])
@@ -230,7 +235,7 @@ def render_scene_png(scene: dict) -> bytes:
 
     line_color = bytes((167, 216, 115))
     point_color = bytes((245, 202, 114))
-    for item, _, screen_vertices in screen_objects:
+    for item, _, screen_vertices in projected_objects:
         for index in range(0, len(item["lines"]), 2):
             start = screen_vertices[item["lines"][index]]
             end = screen_vertices[item["lines"][index + 1]]
