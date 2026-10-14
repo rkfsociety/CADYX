@@ -50,7 +50,6 @@ const api = async (path, options = {}) => {
 };
 
 const $ = (selector) => document.querySelector(selector);
-const projectList = $("#project-list");
 const projectDetail = $("#project-detail");
 const noSelection = $("#no-selection");
 const folderFileList = $("#folder-file-list");
@@ -329,6 +328,8 @@ function showProjectLoading(name) {
   $("#objects-empty").textContent = "Загружаю дерево модели…";
   $("#objects-empty").hidden = false;
   setWorkspaceNavigation("overview");
+  renderAgentActivity([], null);
+  renderAgentDashboard(null);
   $("#document-title").textContent = name;
   $("#document-kind").textContent = "ПРОЕКТ";
   $("#project-light").classList.add("active");
@@ -351,88 +352,33 @@ function folderSelectionId(name) {
   return `${FOLDER_SELECTION_PREFIX}${name}`;
 }
 
+function workspaceSelectionId(selection) {
+  if (selection?.type === "project" && typeof selection.project_id === "string") return selection.project_id;
+  if (selection?.type === "folder" && typeof selection.folder_name === "string") {
+    return folderSelectionId(selection.folder_name);
+  }
+  return null;
+}
+
+function workspaceSelectionExists(id) {
+  if (projects.some((item) => item.project.id === id)) return true;
+  return id?.startsWith(FOLDER_SELECTION_PREFIX)
+    && folders.includes(id.slice(FOLDER_SELECTION_PREFIX.length));
+}
+
+async function readAgentWorkspaceSelection() {
+  try {
+    return await api("/api/v1/agent/workspace/selection");
+  } catch (error) {
+    if (error.status === 404) return { selection: null };
+    throw error;
+  }
+}
+
 function getSelectedFolder() {
   if (!selectedProjectId?.startsWith(FOLDER_SELECTION_PREFIX)) return null;
   const name = selectedProjectId.slice(FOLDER_SELECTION_PREFIX.length);
   return folders.includes(name) ? name : null;
-}
-
-function renderProjectList() {
-  const entries = [
-    ...projects.map((item) => ({ kind: "project", name: item.project.name, item })),
-    ...folders.map((name) => ({ kind: "folder", name })),
-  ].sort((left, right) => left.name.localeCompare(right.name, "ru", { sensitivity: "base" }));
-  $("#empty-projects").hidden = entries.length > 0;
-  projectList.replaceChildren();
-
-  for (const entry of entries) {
-    if (entry.kind === "folder") {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "project-item project-folder";
-      row.classList.toggle("selected", selectedProjectId === folderSelectionId(entry.name));
-      row.dataset.folderName = entry.name;
-      row.setAttribute("aria-current", selectedProjectId === folderSelectionId(entry.name) ? "page" : "false");
-      const marker = document.createElement("span");
-      marker.className = "project-marker";
-      marker.setAttribute("aria-hidden", "true");
-      const copy = document.createElement("span");
-      copy.className = "project-copy";
-      const name = document.createElement("strong");
-      name.className = "project-name";
-      name.textContent = entry.name;
-      copy.append(name);
-      const arrow = document.createElement("span");
-      arrow.className = "project-arrow";
-      arrow.setAttribute("aria-hidden", "true");
-      arrow.textContent = "›";
-      row.append(marker, copy, arrow);
-      projectList.append(row);
-      continue;
-    }
-
-    const item = entry.item;
-    const project = item.project;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `project-item${project.id === selectedProjectId ? " selected" : ""}`;
-    button.dataset.projectId = project.id;
-    button.setAttribute("aria-current", project.id === selectedProjectId ? "page" : "false");
-
-    const marker = document.createElement("span");
-    marker.className = "project-marker";
-    marker.setAttribute("aria-hidden", "true");
-
-    const copy = document.createElement("span");
-    copy.className = "project-copy";
-    const name = document.createElement("strong");
-    name.className = "project-name";
-    name.textContent = project.name;
-    copy.append(name);
-
-    const arrow = document.createElement("span");
-    arrow.className = "project-arrow";
-    arrow.setAttribute("aria-hidden", "true");
-    arrow.textContent = "›";
-    button.append(marker, copy, arrow);
-    projectList.append(button);
-  }
-}
-
-function selectProject(id) {
-  selectedProjectId = id;
-  selectedObjectId = null;
-  activeSketchId = null;
-  pendingViewportTransition = null;
-  saveSelectedProject(id);
-  renderProjectList();
-  const folder = getSelectedFolder();
-  if (folder) {
-    showFolderDetail(folder);
-    return;
-  }
-  showProjectLoading(getProject(id)?.project.name || "Загружаю проект…");
-  refreshDetail().catch(handleRefreshError);
 }
 
 function showFolderDetail(name) {
@@ -444,10 +390,12 @@ function showFolderDetail(name) {
   folderInspector.hidden = false;
   $("#object-panel").hidden = true;
   noSelection.hidden = true;
-  setWorkspaceNavigation("files");
+  setWorkspaceNavigation("overview");
+  renderAgentActivity([], null);
+  renderAgentDashboard(null);
   $("#document-title").textContent = name;
   $("#document-kind").textContent = "ПАПКА";
-  $("#project-short-id").textContent = "ФАЙЛЫ ПАПКИ";
+  $("#project-short-id").textContent = "РАБОЧАЯ ПАПКА";
   $("#sidebar-project-name").textContent = name;
   $("#project-light").classList.remove("active");
   $("#document-revision").textContent = "—";
@@ -617,26 +565,30 @@ async function refreshWorkspace() {
 }
 
 async function refreshWorkspacePass() {
-  const response = await api("/api/v1/projects");
+  const [response, selectionResponse] = await Promise.all([
+    api("/api/v1/projects"), readAgentWorkspaceSelection(),
+  ]);
   projects = response.projects;
   folders = response.folders || [];
 
-  const selectionExists = projects.some((item) => item.project.id === selectedProjectId);
-  if (!selectionExists) {
-    const saved = readSelectedProject();
-    selectedProjectId = projects.some((item) => item.project.id === saved)
-      ? saved
-      : projects[0]?.project.id || null;
+  const apiSelection = workspaceSelectionId(selectionResponse.selection);
+  const savedSelection = readSelectedProject();
+  const requestedSelection = [apiSelection, savedSelection, selectedProjectId]
+    .find((id) => id && workspaceSelectionExists(id));
+  selectedProjectId = requestedSelection || projects[0]?.project.id || null;
+  if (selectedProjectId !== savedSelection) {
     selectedObjectId = null;
     saveSelectedProject(selectedProjectId);
   }
 
-  renderProjectList();
   const selectedFolder = getSelectedFolder();
   if (selectedFolder) showFolderDetail(selectedFolder);
   else if (selectedProjectId && getProject(selectedProjectId)) {
     const selected = getProject(selectedProjectId).project;
-    if (!renderedSceneKey?.startsWith(`${selectedProjectId}:`)) showProjectLoading(selected.name);
+    if (primaryGrid.classList.contains("folder-mode") || detailedProjectId !== selectedProjectId
+        || !renderedSceneKey?.startsWith(`${selectedProjectId}:`)) {
+      showProjectLoading(selected.name);
+    }
     const modifiedAt = selected.modified_at;
     if (detailedProjectId !== selectedProjectId || detailedProjectModifiedAt !== modifiedAt || !renderedSceneKey) {
       await refreshDetail();
@@ -1292,6 +1244,17 @@ function animateModelCamera(change) {
 
 function handleStreamEvent(type, event) {
   const projectId = event.project_id;
+  if (type === "workspace.selection.changed") {
+    const selectedId = workspaceSelectionId(event.data || {});
+    if (!selectedId) return;
+    selectedProjectId = selectedId;
+    selectedObjectId = null;
+    activeSketchId = null;
+    pendingViewportTransition = null;
+    saveSelectedProject(selectedId);
+    scheduleWorkspaceRefresh();
+    return;
+  }
   if (!projectId) return;
   const data = event.data || {};
 
@@ -1434,16 +1397,6 @@ function handleStreamEvent(type, event) {
   }
 }
 
-projectList.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-project-id]");
-  if (button) {
-    selectProject(button.dataset.projectId);
-    return;
-  }
-  const folder = event.target.closest("button[data-folder-name]");
-  if (folder) selectProject(folderSelectionId(folder.dataset.folderName));
-});
-
 folderFileList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-file-name]");
   const file = folderFiles.find((item) => item.name === button?.dataset.fileName);
@@ -1451,7 +1404,7 @@ folderFileList.addEventListener("click", (event) => {
 });
 
 const stream = new EventSource("/api/v1/events");
-const eventTypes = ["project.created", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera"];
+const eventTypes = ["project.created", "workspace.selection.changed", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera"];
 for (const type of eventTypes) {
   stream.addEventListener(type, (message) => {
     try { handleStreamEvent(type, JSON.parse(message.data)); }

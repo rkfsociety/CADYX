@@ -89,6 +89,9 @@ def make_request_handler(
                         snapshot["folder_revision"] = core.workspace.folder_revision_token(folder_name)
                     self._json(200, snapshot)
                     return
+                if parsed.path == "/api/v1/agent/workspace/selection":
+                    self._json(200, {"selection": core.workspace_selection_snapshot()})
+                    return
                 if parsed.path == "/api/v1/projects":
                     self._json(200, core.list_workspace())
                     return
@@ -197,6 +200,12 @@ def make_request_handler(
                     return
                 body = self._read_json()
                 parts = parsed.path.strip("/").split("/")
+                if parts == ["api", "v1", "agent", "workspace", "selection"]:
+                    if body is None:
+                        raise ValidationError("A JSON request body is required.")
+                    selection = core.select_workspace_resource(body)
+                    self._json(200, {"selection": selection})
+                    return
                 if parts[:3] == ["api", "v1", "projects"]:
                     self._route_project(parts[3:], body, agent_api=False)
                     return

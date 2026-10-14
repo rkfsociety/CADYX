@@ -32,18 +32,6 @@
       </div>
       <div class="topbar-end">
         <nav class="dock-controls" aria-label="Дополнительные панели">
-          <details class="dock-control" hidden>
-            <summary aria-label="Обозреватель модели" title="Обозреватель модели"><span aria-hidden="true">▤</span></summary>
-            <div class="dock-popover dock-popover-left">
-              <section class="project-browser" aria-label="Проекты">
-                <div class="sidebar-heading">
-                  <div><p class="section-label">ОБЗОР</p><h2>Проекты</h2></div>
-                </div>
-                <div id="project-list" class="project-list" aria-live="polite" tabindex="-1"></div>
-                <p id="empty-projects" class="empty-note" hidden>Проектов пока нет.</p>
-              </section>
-            </div>
-          </details>
           <details class="dock-control">
             <summary aria-label="Свойства" title="Свойства"><span aria-hidden="true">▧</span></summary>
             <section id="properties-panel" class="panel properties-panel dock-popover dock-popover-properties" aria-labelledby="properties-title">
@@ -93,7 +81,7 @@
               </button>
             </nav>
             <div class="sidebar-project">
-              <span class="section-label">ВЫБРАННЫЙ ПРОЕКТ</span>
+              <span class="section-label">АКТИВНЫЙ РЕСУРС</span>
               <strong id="sidebar-project-name">—</strong>
             </div>
             <div class="sidebar-footer">
@@ -151,11 +139,11 @@
               <section id="folder-detail" class="folder-detail" hidden>
                 <section class="panel folder-files-panel" aria-labelledby="folder-files-title">
                   <div class="panel-heading">
-                    <div><span class="panel-index">01</span><h2 id="folder-files-title">Файлы проекта</h2></div>
+                    <div><span class="panel-index">01</span><h2 id="folder-files-title">Содержимое папки</h2></div>
                     <span id="folder-file-count" class="subtle-count">0</span>
                   </div>
                   <div class="folder-files-layout">
-                    <nav id="folder-file-list" class="folder-file-list" aria-label="Файлы проекта"></nav>
+                    <nav id="folder-file-list" class="folder-file-list" aria-label="Файлы папки"></nav>
                     <div class="folder-preview-area">
                       <div class="folder-preview-heading">
                         <strong id="folder-preview-title">Предпросмотр</strong>

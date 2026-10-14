@@ -12,7 +12,7 @@ from typing import Any, Callable, Iterator
 from uuid import uuid4
 
 from .commands import CommandSystem
-from .errors import ConflictError, ValidationError
+from .errors import ConflictError, NotFoundError, ValidationError
 from .events import EventBroker
 from .kernel import GeometryKernel, OCCTKernelAdapter
 from .lease import EditLeaseManager
@@ -48,6 +48,8 @@ class CadyxCore:
         else:
             self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds, clock=lease_clock)
         self.events = EventBroker()
+        self._workspace_selection_guard = threading.RLock()
+        self._workspace_selection: dict[str, str] | None = None
         self._geometry_cache_guard = threading.RLock()
         self._validated_document_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
         self._document_validation_locks: dict[tuple[str, str], threading.Lock] = {}
@@ -63,7 +65,9 @@ class CadyxCore:
         project = self.workspace.create(name)
         summary = self._summary(project)
         lock = self.leases.snapshot(project["id"])
-        self.events.publish("project.created", project["id"], summary)
+        with self._workspace_selection_guard:
+            self._workspace_selection = {"type": "project", "project_id": project["id"]}
+            self.events.publish("project.created", project["id"], summary)
         self.events.publish("project.lock.changed", project["id"], lock)
         return {"project": summary, "lock": lock}
 
@@ -79,6 +83,40 @@ class CadyxCore:
 
     def list_workspace(self) -> dict[str, Any]:
         return {"projects": self.list_projects(), "folders": self.workspace.list_folder_projects()}
+
+    def workspace_selection_snapshot(self) -> dict[str, str] | None:
+        with self._workspace_selection_guard:
+            return copy.deepcopy(self._workspace_selection)
+
+    def select_workspace_resource(self, selection: dict[str, Any]) -> dict[str, str]:
+        if not isinstance(selection, dict) or not isinstance(selection.get("type"), str):
+            raise ValidationError("A workspace selection needs a resource type.")
+
+        resource_type = selection["type"]
+        if resource_type == "project":
+            if set(selection) != {"type", "project_id"}:
+                raise ValidationError("Project selection needs only type and project_id.")
+            project_id = selection["project_id"]
+            if not isinstance(project_id, str) or not project_id.strip():
+                raise ValidationError("project_id must be non-empty text.")
+            self.workspace.load(project_id)
+            selected = {"type": "project", "project_id": project_id}
+        elif resource_type == "folder":
+            if set(selection) != {"type", "folder_name"}:
+                raise ValidationError("Folder selection needs only type and folder_name.")
+            folder_name = selection["folder_name"]
+            if not isinstance(folder_name, str) or not folder_name.strip():
+                raise ValidationError("folder_name must be non-empty text.")
+            if folder_name not in self.workspace.list_folder_projects():
+                raise NotFoundError("Workspace folder was not found.")
+            selected = {"type": "folder", "folder_name": folder_name}
+        else:
+            raise ValidationError("Workspace selection type must be project or folder.")
+
+        with self._workspace_selection_guard:
+            self._workspace_selection = copy.deepcopy(selected)
+            self.events.publish("workspace.selection.changed", None, selected)
+        return selected
 
     def agent_dashboard_snapshot(self, project_id: str) -> dict[str, Any]:
         self.workspace.load(project_id)

@@ -163,6 +163,84 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status, 409)
         self.assertEqual(error["error"], "PROJECT_LOCKED")
 
+    def test_agent_workspace_selection_accepts_projects_and_folders(self) -> None:
+        status, initial = self.request("/api/v1/agent/workspace/selection")
+        self.assertEqual(status, 200)
+        self.assertIsNone(initial["selection"])
+
+        _, created = self.request("/api/v1/agent/projects", {"name": "Selectable project"})
+        project_id = created["project"]["id"]
+        self.assertEqual(
+            self.core.workspace_selection_snapshot(),
+            {"type": "project", "project_id": project_id},
+        )
+        status, selected_project = self.request(
+            "/api/v1/agent/workspace/selection",
+            {"type": "project", "project_id": project_id},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(selected_project["selection"], {"type": "project", "project_id": project_id})
+
+        folder_name = "selectable-folder"
+        (self.core.workspace.root / folder_name).mkdir()
+        subscriber_id, events = self.core.events.subscribe()
+        try:
+            status, selected_folder = self.request(
+                "/api/v1/agent/workspace/selection",
+                {"type": "folder", "folder_name": folder_name},
+            )
+            self.assertEqual(status, 200)
+            expected = {"type": "folder", "folder_name": folder_name}
+            self.assertEqual(selected_folder["selection"], expected)
+            self.assertEqual(self.core.workspace_selection_snapshot(), expected)
+            status, snapshot = self.request("/api/v1/agent/workspace/selection")
+            self.assertEqual((status, snapshot["selection"]), (200, expected))
+            event = events.get(timeout=1)
+            self.assertEqual((event.event, event.project_id, event.data),
+                             ("workspace.selection.changed", None, expected))
+
+            status, missing = self.request(
+                "/api/v1/agent/workspace/selection",
+                {"type": "folder", "folder_name": "missing-folder"},
+            )
+            self.assertEqual((status, missing["error"]), (404, "NOT_FOUND"))
+            self.assertEqual(self.core.workspace_selection_snapshot(), expected)
+        finally:
+            self.core.events.unsubscribe(subscriber_id)
+
+    def test_agent_dashboard_snapshot_contains_the_reported_russian_plan(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Dashboard plan"})
+        project_id = created["project"]["id"]
+        report = {
+            "workflow": {
+                "title": "Модель крепления",
+                "progress_percent": 0,
+                "eta_seconds": 420,
+                "phases": [
+                    {"id": "inspect", "title": "Проверка исходных данных", "state": "pending"},
+                    {"id": "geometry", "title": "Построение геометрии", "state": "pending"},
+                ],
+            },
+            "tasks": [],
+        }
+        subscriber_id, events = self.core.events.subscribe()
+        try:
+            status, published = self.request(f"/api/v1/agent/projects/{project_id}/dashboard", report)
+            self.assertEqual(status, 200)
+            self.assertEqual(published["workflow"]["title"], report["workflow"]["title"])
+            self.assertEqual(published["workflow"]["phases"], report["workflow"]["phases"])
+            self.assertEqual(published["tasks"], [])
+            self.assertEqual(published["revision"], 1)
+
+            status, snapshot = self.request(f"/api/v1/agent/projects/{project_id}/dashboard")
+            self.assertEqual(status, 200)
+            self.assertEqual(snapshot, published)
+            event = events.get(timeout=1)
+            self.assertEqual((event.event, event.project_id, event.data),
+                             ("agent.dashboard", project_id, published))
+        finally:
+            self.core.events.unsubscribe(subscriber_id)
+
     def test_web_assets_are_served(self) -> None:
         with urlopen(self.base_url + "/", timeout=3) as response:
             self.assertEqual(response.status, 200)
