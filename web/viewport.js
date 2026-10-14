@@ -1,7 +1,7 @@
 (() => {
   const MAX_PREVIEW_POINTS = 24000;
   const MAX_CAMERA_PITCH = Math.PI / 2;
-  const featureEdgesCache = new WeakMap();
+  const meshEdgesCache = new WeakMap();
   function createViewer(canvas, {
     showViewCube = false,
     showCoordinateGizmo = true,
@@ -22,6 +22,7 @@
     let screenY = new Float64Array(0);
     let faceRecords = new Float64Array(0);
     let faceOrder = new Uint32Array(0);
+    let faceFacing = new Int8Array(0);
     let vertexLight = new Float32Array(0);
     let transition = null;
     let transitionFrame = 0;
@@ -70,17 +71,21 @@
       const vertexCount = positions.length / 3;
       const edges = new Map();
       const creaseCosine = Math.cos(Math.PI / 18);
-      const addEdge = (start, end, normalX, normalY, normalZ) => {
+      const addEdge = (start, end, normalX, normalY, normalZ, faceIndex) => {
         const low = Math.min(start, end), high = Math.max(start, end);
         const key = low * vertexCount + high;
         const edge = edges.get(key);
         if (!edge) {
-          edges.set(key, { start: low, end: high, normalX, normalY, normalZ, count: 1, crease: false });
+          edges.set(key, {
+            start: low, end: high, normalX, normalY, normalZ,
+            firstFace: faceIndex, secondFace: -1, count: 1, crease: false,
+          });
           return;
         }
         const cosine = edge.normalX * normalX + edge.normalY * normalY + edge.normalZ * normalZ;
         if (cosine < creaseCosine) edge.crease = true;
         edge.count += 1;
+        if (edge.count === 2) edge.secondFace = faceIndex;
       };
       for (let face = 0; face + 2 < triangles.length; face += 3) {
         const a = triangles[face], b = triangles[face + 1], c = triangles[face + 2];
@@ -97,15 +102,23 @@
         const length = Math.hypot(nx, ny, nz);
         if (!length) continue;
         const normalX = nx / length, normalY = ny / length, normalZ = nz / length;
-        addEdge(a, b, normalX, normalY, normalZ);
-        addEdge(b, c, normalX, normalY, normalZ);
-        addEdge(c, a, normalX, normalY, normalZ);
+        const faceIndex = face / 3;
+        addEdge(a, b, normalX, normalY, normalZ, faceIndex);
+        addEdge(b, c, normalX, normalY, normalZ, faceIndex);
+        addEdge(c, a, normalX, normalY, normalZ, faceIndex);
       }
       const featureEdges = [];
+      const silhouetteCandidates = [];
       for (const edge of edges.values()) {
         if (edge.count === 1 || edge.crease) featureEdges.push(edge.start, edge.end);
+        else if (edge.count === 2) {
+          silhouetteCandidates.push(edge.start, edge.end, edge.firstFace, edge.secondFace);
+        }
       }
-      return Uint32Array.from(featureEdges);
+      return {
+        featureEdges: Uint32Array.from(featureEdges),
+        silhouetteCandidates: Uint32Array.from(silhouetteCandidates),
+      };
     }
 
     function render() {
@@ -187,7 +200,8 @@
 
       if (triangles.length) renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress,
-        geometry.vertexNormals, yaw, pitch, geometry.featureEdges, wireframe, shaded,
+        geometry.vertexNormals, yaw, pitch, geometry.featureEdges,
+        geometry.silhouetteCandidates, wireframe, shaded,
         wireframeColor, wireframeOpacity, dpr,
       );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale);
@@ -342,7 +356,8 @@
     }
 
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress,
-      vertexNormals, yaw, pitch, featureEdges, showWireframe, shaded, wireframeColor, wireframeOpacity, dpr) {
+      vertexNormals, yaw, pitch, featureEdges, silhouetteCandidates, showWireframe, shaded,
+      wireframeColor, wireframeOpacity, dpr) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
       const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
@@ -448,6 +463,32 @@
         }
         context.restore();
       }
+      if (showWireframe && silhouetteCandidates?.length) {
+        if (faceFacing.length < faceTotal) faceFacing = new Int8Array(faceTotal);
+        for (let face = 0; face < faceTotal; face += 1) {
+          const first = triangles[face * 3] * 3;
+          const second = triangles[face * 3 + 1] * 3;
+          const third = triangles[face * 3 + 2] * 3;
+          const projectedArea = (camera[second] - camera[first]) * (camera[third + 1] - camera[first + 1])
+            - (camera[second + 1] - camera[first + 1]) * (camera[third] - camera[first]);
+          faceFacing[face] = Math.abs(projectedArea) <= 1e-10 ? 0 : Math.sign(projectedArea);
+        }
+        context.save();
+        context.strokeStyle = wireframeColor;
+        context.globalAlpha = wireframeOpacity;
+        context.lineWidth = Math.max(0.65, 0.72 * dpr);
+        context.beginPath();
+        for (let index = 0; index < silhouetteCandidates.length; index += 4) {
+          const firstFace = faceFacing[silhouetteCandidates[index + 2]];
+          const secondFace = faceFacing[silhouetteCandidates[index + 3]];
+          if (firstFace === secondFace || firstFace === 0 && secondFace === 0) continue;
+          const start = silhouetteCandidates[index], end = silhouetteCandidates[index + 1];
+          context.moveTo(screenX[start], screenY[start]);
+          context.lineTo(screenX[end], screenY[end]);
+        }
+        context.stroke();
+        context.restore();
+      }
     }
 
     function renderPoints(pointCount, camera, screenX, screenY, scale) {
@@ -520,16 +561,16 @@
         const orbitCenter = orbitCenterFor(value);
         const fitCenter = orbitCenter || value.bounds.min.map((min, axis) => min / 2 + value.bounds.max[axis] / 2);
         const sourceTriangles = value.triangles || [];
-        let featureEdges = featureEdgesCache.get(sourceTriangles);
-        if (!featureEdges) {
-          featureEdges = buildFeatureEdges(value.positions, sourceTriangles);
-          featureEdgesCache.set(sourceTriangles, featureEdges);
+        let meshEdges = meshEdgesCache.get(sourceTriangles);
+        if (!meshEdges) {
+          meshEdges = buildFeatureEdges(value.positions, sourceTriangles);
+          meshEdgesCache.set(sourceTriangles, meshEdges);
         }
         geometry = {
           ...value,
           orbitCenter,
           fitRadius: fitRadiusFromPositions(value.positions, fitCenter),
-          featureEdges,
+          ...meshEdges,
           vertexNormals: smoothShading ? buildVertexNormals(value.positions, value.triangles || []) : null,
         };
         vertexLight = geometry.vertexNormals ? new Float32Array(geometry.vertexNormals.length / 3) : new Float32Array(0);

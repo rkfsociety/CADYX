@@ -9,15 +9,16 @@ let drawnLines = [];
 let meshMoves = [];
 let drawnLabels = [];
 let currentPath = [];
+let strokedPaths = [];
 let animationTime = 0;
 let renderCalls = 0;
 const animationFrames = [];
 const context = {
-  clearRect() { renderCalls++; drawnPoints = []; segments = 0; drawnLines = []; meshMoves = []; drawnLabels = []; currentPath = []; },
+  clearRect() { renderCalls++; drawnPoints = []; segments = 0; drawnLines = []; meshMoves = []; drawnLabels = []; currentPath = []; strokedPaths = []; },
   fillRect(x, y) { drawnPoints.push([x, y]); },
   beginPath() { currentPath = []; }, moveTo(x, y) { currentPath.push([x, y]); },
   lineTo(x, y) { segments++; drawnLines.push([x, y]); currentPath.push([x, y]); },
-  closePath() {}, fill() { meshMoves.push(...currentPath); }, stroke() {}, strokeRect() {}, save() {}, restore() {}, setLineDash() {},
+  closePath() {}, fill() { meshMoves.push(...currentPath); }, stroke() { strokedPaths.push(currentPath.slice()); }, strokeRect() {}, save() {}, restore() {}, setLineDash() {},
   fillText(value) { drawnLabels.push(value); },
 };
 const canvas = {
@@ -127,6 +128,47 @@ assert.deepEqual(drawnPoints[0], [300, 200], "The revolution axis stays at the c
 assert.ok(drawnPoints[1][0] < 600, "The full asymmetric model remains fitted around its revolution axis");
 viewer.setCamera({ yaw: 2.1, pitch: 0.7, zoom: 1, projection: "orthographic" });
 assert.deepEqual(drawnPoints[0], [300, 200], "Camera orbit keeps the revolution axis anchored at the viewport center");
+const cylinderSegments = 64;
+const cylinderPositions = [];
+const cylinderTriangles = [];
+for (const z of [0, 40]) {
+  for (let index = 0; index < cylinderSegments; index += 1) {
+    const angle = index * Math.PI * 2 / cylinderSegments;
+    cylinderPositions.push(20 * Math.cos(angle), 20 * Math.sin(angle), z);
+  }
+}
+for (let index = 0; index < cylinderSegments; index += 1) {
+  const next = (index + 1) % cylinderSegments;
+  const lower = index, lowerNext = next, upper = index + cylinderSegments, upperNext = next + cylinderSegments;
+  cylinderTriangles.push(lower, lowerNext, upperNext, lower, upperNext, upper);
+}
+const cylinderViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, wireframe: true, shaded: false,
+});
+cylinderViewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
+cylinderViewer.load({
+  positions: cylinderPositions, triangles: cylinderTriangles, lines: [], points: [],
+  bounds: { min: [-20, -20, 0], max: [20, 20, 40] },
+});
+const verticalContourXs = new Set();
+for (const path of strokedPaths) {
+  for (let index = 0; index + 1 < path.length; index += 2) {
+    const [startX, startY] = path[index], [endX, endY] = path[index + 1];
+    if (Math.abs(startX - endX) < 1e-8 && Math.abs(startY - endY) > 20) verticalContourXs.add(Math.round(startX));
+  }
+}
+assert.ok(verticalContourXs.has(178) && verticalContourXs.has(422),
+  "Front orthographic view draws both smooth vertical cylinder silhouettes");
+cylinderViewer.setCamera({ yaw: Math.PI / 2, pitch: 0, zoom: 1, projection: "orthographic" });
+const sideContourXs = new Set();
+for (const path of strokedPaths) {
+  for (let index = 0; index + 1 < path.length; index += 2) {
+    const [startX, startY] = path[index], [endX, endY] = path[index + 1];
+    if (Math.abs(startX - endX) < 1e-8 && Math.abs(startY - endY) > 20) sideContourXs.add(Math.round(startX));
+  }
+}
+assert.ok(sideContourXs.has(178) && sideContourXs.has(422),
+  "Side orthographic view draws both smooth vertical cylinder silhouettes");
 const sweepPath = Array.from({ length: 512 }, (_, index) => ({ x: index / 511, y: 0 }));
 viewer.load({
   positions: [0, 0, 0, 0.5, 0, 1, 0.5, 0, 0, 1, 0, 1],

@@ -54,7 +54,9 @@ triggers a sync. The browser keeps the read-only model viewport dominant, with
 section navigation on the left and an inspection column on the right. The
 column shows current agent status, an agent-reported workflow plan and
 progress/ETA estimate, the reported task queue, and front/right/top projections
-of the same validated viewport geometry. Scene geometry metrics remain in the
+of the same validated viewport geometry. Orthographic wireframes include
+view-dependent silhouette edges so smooth revolved walls remain outlined in
+front and side views. Scene geometry metrics remain in the
 viewport footer. Model navigation/project browsing and properties remain in
 collapsed read-only docks. Body geometry renders with only the currently edited
 sketch. Inactive sketches, their points/lines, and sketches already referenced
