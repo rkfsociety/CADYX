@@ -61,6 +61,22 @@ class ProjectWorkspaceTests(unittest.TestCase):
             with self.subTest(file_name=file_name), self.assertRaises(NotFoundError):
                 self.workspace.resolve_project_file(project["id"], file_name)
 
+    def test_project_file_listing_hides_internal_and_nested_files(self) -> None:
+        project = self.workspace.create("Project files")
+        project_directory = self.workspace._project_dir(project["id"])
+        visible = project_directory / "part.stp"
+        visible.write_bytes(b"step source")
+        (project_directory / ".cadyx-private.sqlite3").write_bytes(b"internal")
+        nested = project_directory / "nested"
+        nested.mkdir()
+        (nested / "hidden.txt").write_text("nested", encoding="utf-8")
+
+        files = self.workspace.list_project_files(project["id"])
+
+        self.assertEqual([item["name"] for item in files], ["part.stp"])
+        self.assertEqual(files[0]["size"], len(b"step source"))
+        self.assertIn("media_type", files[0])
+
 
 if __name__ == "__main__":
     unittest.main()

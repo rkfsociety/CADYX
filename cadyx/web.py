@@ -77,12 +77,14 @@ def make_request_handler(
                         "ui_version": _ui_asset_version(),
                         "workspace_revision": core.workspace.workspace_revision_token(),
                         "project_revision": None,
+                        "project_lock": None,
                         "activity_revision": None,
                         "dashboard_revision": None,
                         "folder_revision": None,
                     }
                     if project_id:
                         snapshot["project_revision"] = core.workspace.project_revision_token(project_id)
+                        snapshot["project_lock"] = core.leases.snapshot_for_listing(project_id)
                         snapshot["activity_revision"] = core.events.activity_revision(project_id)
                         snapshot["dashboard_revision"] = core.events.agent_dashboard_revision(project_id)
                     if folder_name:
@@ -114,6 +116,14 @@ def make_request_handler(
                     return
                 prefix = ["api", "v1", "projects"]
                 agent_prefix = ["api", "v1", "agent", "projects"]
+                if len(parts) in {5, 6} and parts[:3] == prefix and parts[4] == "files":
+                    project_id = parts[3]
+                    if len(parts) == 5:
+                        self._json(200, {"files": core.workspace.list_project_files(project_id)})
+                    else:
+                        file_name = unquote(parts[5])
+                        self._binary_file(core.workspace.resolve_project_file(project_id, file_name))
+                    return
                 comparison_prefix = agent_prefix if parts[:4] == agent_prefix else prefix
                 if len(parts) == 5 and parts[:3] == prefix and parts[4] == "dashboard":
                     self._json(200, core.agent_dashboard_snapshot(parts[3]))

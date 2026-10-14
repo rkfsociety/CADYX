@@ -152,6 +152,29 @@ class ProjectWorkspace:
         files.sort(key=lambda item: item["name"].casefold())
         return files
 
+    def list_project_files(self, project_id: str) -> list[dict[str, Any]]:
+        directory = self._project_dir(project_id)
+        files: list[dict[str, Any]] = []
+        for entry in directory.iterdir():
+            if (entry.name == "project.json" or entry.name.startswith(".cadyx-")
+                    or entry.is_symlink() or not entry.is_file()):
+                continue
+            try:
+                resolved = entry.resolve(strict=True)
+                if resolved.parent != directory:
+                    continue
+                stat = resolved.stat()
+            except OSError:
+                continue
+            files.append({
+                "name": entry.name,
+                "size": stat.st_size,
+                "modified_at_ns": str(stat.st_mtime_ns),
+                "media_type": mimetypes.guess_type(entry.name)[0] or "application/octet-stream",
+            })
+        files.sort(key=lambda item: item["name"].casefold())
+        return files
+
     def workspace_revision_token(self) -> str:
         """Return a cheap token for project records and selectable workspace folders."""
         entries: list[tuple[str, str, int, int]] = []

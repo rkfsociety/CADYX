@@ -58,7 +58,14 @@ of the same validated viewport geometry. Orthographic wireframes include
 view-dependent silhouette edges so smooth revolved walls remain outlined in
 front and side views. Scene geometry metrics remain in the
 viewport footer. Object selection remains available in the Geometry view; object
-properties are not shown in a separate panel. Body geometry renders with only
+properties are not shown in a separate panel. Files is navigation item 06 and
+lists direct user files in the active project through `GET /api/v1/projects/{id}/files`;
+selected files are served from the corresponding `/files/{name}` route. The tab
+is enabled only when `GET /api/v1/updates?project_id={id}` reports
+`project_lock.state: FREE` and the activity snapshot has no running operation.
+Unknown or busy lock/activity state disables the tab. Lock changes arrive over
+SSE and are also polled for cooperating hosts. The file view never changes the
+active project. Body geometry renders with only
 the currently edited sketch. Inactive sketches, their points/lines, and sketches
 already referenced by a solid feature are omitted from both the viewport and the
 user-facing object tree. A previously used sketch may reappear only while its profile is actively

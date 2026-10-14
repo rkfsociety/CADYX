@@ -122,12 +122,14 @@ let workspaceRefreshRetryDelayMs = 250;
 let activeFolderName = null;
 let folderFiles = [];
 let folderFilesSignature = null;
+let fileListContextKey = null;
 let selectedFolderFileName = null;
 let folderListRequest = 0;
 let previewRequest = 0;
 let automaticUpdateSnapshot = null;
 let automaticUpdateInFlight = false;
 let automaticUpdatesUnavailable = false;
+let filesAvailabilityConnected = false;
 let activityStatusTimer = 0;
 let activityStatusOperationId = null;
 const activitiesByProject = new Map();
@@ -139,6 +141,27 @@ const FOLDER_SELECTION_PREFIX = "folder:";
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
 const folderInspector = $("#folder-inspector");
+function canOpenFilesView(projectId = selectedProjectId) {
+  if (!projectId || getSelectedFolder()) return false;
+  const lock = agentLocksByProject.get(projectId);
+  const activityKnown = activityRevisionsByProject.has(projectId);
+  const agentIsActive = (activitiesByProject.get(projectId) || []).some((item) => item.state === "running");
+  return filesAvailabilityConnected && activityKnown && lock?.state === "FREE"
+    && !lock.recovery_required && !agentIsActive;
+}
+
+function lockAvailabilityKey(lock) {
+  return JSON.stringify([lock?.state || null, Boolean(lock?.recovery_required)]);
+}
+
+function updateFilesNavigation() {
+  const button = $("#files-nav");
+  const available = canOpenFilesView();
+  button.disabled = !available;
+  button.title = available ? "" : "Доступно, когда агент освободит панель и завершит текущую работу";
+  if (!available && primaryGrid.dataset.view === "files") setWorkspaceNavigation("overview");
+}
+
 $("#workspace-navigation").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-workspace-view]");
   if (!button || button.disabled) return;
@@ -154,13 +177,20 @@ $("#workspace-navigation").addEventListener("click", (event) => {
     $("#manufacturing-panel").focus({ preventScroll: true });
   } else if (view === "activity") {
     $("#agent-activity").focus({ preventScroll: true });
+  } else if (view === "files") {
+    const projectId = selectedProjectId;
+    $("#folder-files-title").textContent = "Файлы проекта";
+    folderInspector.hidden = true;
+    loadProjectFiles(projectId).catch((error) => showProjectFilesLoadError(projectId, error));
+    folderFileList.focus({ preventScroll: true });
   }
 });
 
 function setWorkspaceNavigation(view) {
-  const views = new Set(["overview", "geometry", "analysis", "manufacturing", "activity"]);
-  const activeView = views.has(view) ? view : "overview";
+  const views = new Set(["overview", "geometry", "analysis", "manufacturing", "activity", "files"]);
+  const activeView = views.has(view) && (view !== "files" || canOpenFilesView()) ? view : "overview";
   primaryGrid.dataset.view = activeView;
+  folderDetail.hidden = !getSelectedFolder() && activeView !== "files";
   $("#comparison-panel").hidden = activeView !== "analysis";
   $("#manufacturing-panel").hidden = activeView !== "manufacturing";
   $("#object-panel").hidden = activeView !== "geometry" || !selectedProjectId || Boolean(getSelectedFolder());
@@ -377,7 +407,8 @@ function getSelectedFolder() {
 }
 
 function showFolderDetail(name) {
-  const folderChanged = activeFolderName !== name;
+  const fileContextKey = `folder:${name}`;
+  const folderChanged = fileListContextKey !== fileContextKey;
   activeFolderName = name;
   projectDetail.hidden = false;
   primaryGrid.classList.add("folder-mode");
@@ -394,20 +425,9 @@ function showFolderDetail(name) {
   $("#sidebar-project-name").textContent = name;
   $("#project-light").classList.remove("active");
   $("#document-revision").textContent = "—";
+  $("#folder-files-title").textContent = "Содержимое папки";
   if (folderChanged) {
-    folderFiles = [];
-    folderFilesSignature = null;
-    selectedFolderFileName = null;
-    updateFolderInspector();
-    folderFileList.replaceChildren();
-    $("#folder-file-count").textContent = "0";
-    $("#folder-inspector-count").textContent = "ФАЙЛОВ: 0";
-    $("#folder-model-file-count").textContent = "0";
-    folderPreviewCanvas.hidden = true;
-    folderPreviewPlaceholder.hidden = false;
-    folderPreviewPlaceholder.textContent = "Загружаю список файлов…";
-    $("#folder-preview-title").textContent = "Предпросмотр";
-    $("#folder-preview-info").textContent = "";
+    resetFileList(fileContextKey);
     loadFolderFiles(name).catch((error) => showFolderLoadError(name, error));
   }
 }
@@ -418,19 +438,68 @@ function formatFileSize(size) {
   return `${numberFormat.format(size / (1024 * 1024))} МБ`;
 }
 
+function resetFileList(contextKey) {
+  fileListContextKey = contextKey;
+  folderFiles = [];
+  folderFilesSignature = null;
+  selectedFolderFileName = null;
+  folderListRequest++;
+  previewRequest++;
+  updateFolderInspector();
+  folderFileList.replaceChildren();
+  $("#folder-file-count").textContent = "0";
+  folderPreviewCanvas.hidden = true;
+  folderPreviewPlaceholder.hidden = false;
+  folderPreviewPlaceholder.textContent = "Загружаю список файлов…";
+  $("#folder-preview-title").textContent = "Предпросмотр";
+  $("#folder-preview-info").textContent = "";
+}
+
+function fileContextPath(context) {
+  return context.type === "folder"
+    ? `/api/v1/workspace/folders/${encodeURIComponent(context.name)}/files`
+    : `/api/v1/projects/${encodeURIComponent(context.id)}/files`;
+}
+
+function isCurrentFileContext(context) {
+  if (context.type === "folder") {
+    return activeFolderName === context.name && getSelectedFolder() === context.name;
+  }
+  return selectedProjectId === context.id && primaryGrid.dataset.view === "files" && canOpenFilesView(context.id);
+}
+
 function showFolderLoadError(name, error) {
-  if (activeFolderName !== name) return;
+  showFileLoadError({ type: "folder", name }, error);
+}
+
+function showProjectFilesLoadError(projectId, error) {
+  showFileLoadError({ type: "project", id: projectId }, error);
+}
+
+function showFileLoadError(context, error) {
+  if (!isCurrentFileContext(context)) return;
   folderFileList.replaceChildren();
   folderPreviewPlaceholder.hidden = false;
   folderPreviewPlaceholder.textContent = error.message;
-  $("#folder-preview-title").textContent = "Не удалось открыть папку";
+  $("#folder-preview-title").textContent = context.type === "folder"
+    ? "Не удалось открыть папку" : "Не удалось открыть файлы проекта";
   $("#folder-preview-info").textContent = "";
 }
 
 async function loadFolderFiles(name) {
+  return loadFiles({ type: "folder", name });
+}
+
+async function loadProjectFiles(projectId) {
+  return loadFiles({ type: "project", id: projectId });
+}
+
+async function loadFiles(context) {
+  const contextKey = context.type === "folder" ? `folder:${context.name}` : `project:${context.id}`;
+  if (fileListContextKey !== contextKey) resetFileList(contextKey);
   const request = ++folderListRequest;
-  const response = await api(`/api/v1/workspace/folders/${encodeURIComponent(name)}/files`);
-  if (request !== folderListRequest || activeFolderName !== name) return;
+  const response = await api(fileContextPath(context));
+  if (request !== folderListRequest || !isCurrentFileContext(context)) return;
   const previousSelection = folderFiles.find((file) => file.name === selectedFolderFileName);
   const signature = JSON.stringify(response.files.map((file) => [file.name, file.size, file.modified_at_ns]));
   if (signature === folderFilesSignature) return;
@@ -443,19 +512,20 @@ async function loadFolderFiles(name) {
   if (selected) {
     if (!previousSelection || previousSelection.size !== selected.size ||
         previousSelection.modified_at_ns !== selected.modified_at_ns) {
-      previewFolderFile(name, selected);
+      previewResourceFile(context, selected);
     }
     return;
   }
   const firstPreview = folderFiles.find((file) => file.name.toLowerCase().endsWith(".ply")) || folderFiles[0];
-  if (firstPreview) previewFolderFile(name, firstPreview);
+  if (firstPreview) previewResourceFile(context, firstPreview);
   else {
     selectedFolderFileName = null;
     updateFolderInspector();
     $("#folder-preview-title").textContent = "Файлов нет";
     $("#folder-preview-info").textContent = "";
     folderPreviewPlaceholder.hidden = false;
-    folderPreviewPlaceholder.textContent = "В этой папке пока нет файлов.";
+    folderPreviewPlaceholder.textContent = context.type === "folder"
+      ? "В этой папке пока нет файлов." : "В этом проекте пока нет файлов.";
   }
 }
 
@@ -489,6 +559,15 @@ function updateFolderInspector(file = folderFiles.find((item) => item.name === s
 }
 
 async function previewFolderFile(folderName, file) {
+  return previewResourceFile({ type: "folder", name: folderName }, file);
+}
+
+async function previewProjectFile(projectId, file) {
+  return previewResourceFile({ type: "project", id: projectId }, file);
+}
+
+async function previewResourceFile(context, file) {
+  if (!isCurrentFileContext(context)) return;
   selectedFolderFileName = file.name;
   updateFolderInspector(file);
   renderFolderFiles();
@@ -505,7 +584,8 @@ async function previewFolderFile(folderName, file) {
 
   folderPreviewPlaceholder.textContent = "Загружаю 3D-модель…";
   try {
-    const url = `/api/v1/workspace/folders/${encodeURIComponent(folderName)}/files/${encodeURIComponent(file.name)}`;
+    const basePath = fileContextPath(context);
+    const url = `${basePath}/${encodeURIComponent(file.name)}`;
     let response;
     try { response = await fetch(url); }
     catch (error) {
@@ -517,7 +597,7 @@ async function previewFolderFile(folderName, file) {
       throw new Error(apiErrorMessage(error, response.status));
     }
     const geometry = window.CadyxPlyPreview.parse(await response.arrayBuffer());
-    if (request !== previewRequest || activeFolderName !== folderName) return;
+    if (request !== previewRequest || !isCurrentFileContext(context)) return;
     plyViewer.load(geometry);
     folderPreviewCanvas.hidden = false;
     folderPreviewPlaceholder.hidden = true;
@@ -525,7 +605,7 @@ async function previewFolderFile(folderName, file) {
       ? `${formatNumber(geometry.vertexCount)} вершин · ${formatNumber(geometry.faceCount)} граней · в сцене ${formatNumber(geometry.previewFaceCount)}`
       : `${formatNumber(geometry.vertexCount)} точек · отображается до 24 000`;
   } catch (error) {
-    if (request !== previewRequest || activeFolderName !== folderName) return;
+    if (request !== previewRequest || !isCurrentFileContext(context)) return;
     folderPreviewPlaceholder.hidden = false;
     folderPreviewPlaceholder.textContent = error.message;
     $("#folder-preview-info").textContent = "";
@@ -568,13 +648,22 @@ async function refreshWorkspacePass() {
 
   const apiSelection = workspaceSelectionId(selectionResponse.selection);
   const savedSelection = readSelectedProject();
+  const previousSelection = selectedProjectId;
   const requestedSelection = [apiSelection, savedSelection, selectedProjectId]
     .find((id) => id && workspaceSelectionExists(id));
   selectedProjectId = requestedSelection || projects[0]?.project.id || null;
+  const selectionChanged = selectedProjectId !== previousSelection;
   if (selectedProjectId !== savedSelection) {
     selectedObjectId = null;
     saveSelectedProject(selectedProjectId);
   }
+  if (selectionChanged && selectedProjectId && !getSelectedFolder()) {
+    const selected = getProject(selectedProjectId);
+    if (selected?.lock) agentLocksByProject.set(selectedProjectId, selected.lock);
+    activitiesByProject.delete(selectedProjectId);
+    activityRevisionsByProject.delete(selectedProjectId);
+  }
+  if (selectionChanged) updateFilesNavigation();
 
   const selectedFolder = getSelectedFolder();
   if (selectedFolder) showFolderDetail(selectedFolder);
@@ -587,6 +676,8 @@ async function refreshWorkspacePass() {
     const modifiedAt = selected.modified_at;
     if (detailedProjectId !== selectedProjectId || detailedProjectModifiedAt !== modifiedAt || !renderedSceneKey) {
       await refreshDetail();
+    } else if (selectionChanged) {
+      await refreshActivitySnapshot(selectedProjectId);
     }
   }
   else {
@@ -633,16 +724,30 @@ async function checkAutomaticUpdates() {
     if (selectionAtRequest !== selectedProjectId) return;
     const previous = automaticUpdateSnapshot;
     automaticUpdateSnapshot = current;
+    if (current.project_lock && Number.isInteger(current.activity_revision)) {
+      filesAvailabilityConnected = true;
+    }
     if (automaticUpdatesUnavailable) {
       automaticUpdatesUnavailable = false;
       notify("Связь восстановлена, синхронизирую панель.");
       scheduleWorkspaceRefresh();
     }
-    if (!previous) return;
+    if (current.project_lock && selectedProjectId && !folder) {
+      const previousLock = agentLocksByProject.get(selectedProjectId);
+      agentLocksByProject.set(selectedProjectId, current.project_lock);
+      if (lockAvailabilityKey(current.project_lock) !== lockAvailabilityKey(previousLock)) {
+        renderAgentActivity(activitiesByProject.get(selectedProjectId) || [], current.project_lock);
+      }
+    }
+    if (!previous) {
+      updateFilesNavigation();
+      return;
+    }
     if (current.activity_revision !== null && previous.activity_revision !== null &&
         current.activity_revision < previous.activity_revision && selectedProjectId) {
       activitiesByProject.delete(selectedProjectId);
       activityRevisionsByProject.delete(selectedProjectId);
+      updateFilesNavigation();
     }
     if (current.dashboard_revision !== null && previous.dashboard_revision !== null &&
         current.dashboard_revision < previous.dashboard_revision && selectedProjectId) {
@@ -663,6 +768,8 @@ async function checkAutomaticUpdates() {
     if (workspaceChanged || projectChanged) {
       scheduleWorkspaceRefresh();
     } else if (activityChanged && selectedProjectId && !folder) {
+      activityRevisionsByProject.delete(selectedProjectId);
+      updateFilesNavigation();
       refreshActivitySnapshot(selectedProjectId)
         .catch((error) => notify(`Не удалось обновить состояние агента: ${error.message}`, true));
     }
@@ -670,8 +777,11 @@ async function checkAutomaticUpdates() {
       refreshAgentDashboardSnapshot(selectedProjectId)
         .catch((error) => notify(`Не удалось обновить очередь агента: ${error.message}`, true));
     }
+    updateFilesNavigation();
   } catch (error) {
     setApiConnectionStatus(false);
+    filesAvailabilityConnected = false;
+    updateFilesNavigation();
     if (error.status === 404) {
       scheduleWorkspaceRefresh();
       return;
@@ -932,6 +1042,7 @@ function renderAgentActivity(value, lock = null) {
     activityStatusTimer = 0;
     activityStatusOperationId = null;
   }
+  updateFilesNavigation();
 }
 
 function objectTypeLabel(item) {
@@ -1117,7 +1228,12 @@ function handleStreamEvent(type, event) {
     selectedObjectId = null;
     activeSketchId = null;
     pendingViewportTransition = null;
+    agentLocksByProject.delete(selectedId);
+    activitiesByProject.delete(selectedId);
+    activityRevisionsByProject.delete(selectedId);
+    filesAvailabilityConnected = false;
     saveSelectedProject(selectedId);
+    updateFilesNavigation();
     scheduleWorkspaceRefresh();
     return;
   }
@@ -1253,7 +1369,12 @@ function handleStreamEvent(type, event) {
     selectedObjectId = null;
     activeSketchId = null;
     pendingViewportTransition = null;
+    agentLocksByProject.delete(projectId);
+    activitiesByProject.delete(projectId);
+    activityRevisionsByProject.delete(projectId);
+    filesAvailabilityConnected = false;
     saveSelectedProject(projectId);
+    updateFilesNavigation();
     scheduleWorkspaceRefresh();
   } else if (type === "project.lock.changed") {
     agentLocksByProject.set(projectId, data);
@@ -1266,7 +1387,10 @@ function handleStreamEvent(type, event) {
 folderFileList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-file-name]");
   const file = folderFiles.find((item) => item.name === button?.dataset.fileName);
-  if (button && file && activeFolderName) previewFolderFile(activeFolderName, file);
+  if (!button || !file) return;
+  const folderName = getSelectedFolder();
+  if (folderName) previewFolderFile(folderName, file);
+  else if (primaryGrid.dataset.view === "files" && canOpenFilesView()) previewProjectFile(selectedProjectId, file);
 });
 
 const stream = new EventSource("/api/v1/events");

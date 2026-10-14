@@ -221,8 +221,7 @@ class CadyxCore:
             self.workspace.load(project_id)
             lease = self.leases.acquire(project_id, owner_type, owner_id)
             snapshot = self.leases.snapshot(project_id)
-            if lease.owner_type is not OwnerType.AGENT:
-                self.events.publish("project.lock.changed", project_id, snapshot)
+            self.events.publish("project.lock.changed", project_id, snapshot)
             return lease.as_dict()
 
     def compare_bodies(self, project_id: str, original_id=None, modified_id=None) -> dict:

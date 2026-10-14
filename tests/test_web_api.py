@@ -98,6 +98,42 @@ class WebApiTests(unittest.TestCase):
         status, activity = self.request(f"/api/v1/agent/projects/{project_id}/activity")
         self.assertEqual((status, activity["activities"][-1]["state"]), (200, "completed"))
 
+    def test_agent_lease_acquire_and_release_publish_lock_events(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "Lock event"})
+        project_id = created["project"]["id"]
+        subscriber_id, events = self.core.events.subscribe(project_id)
+        lease = None
+        try:
+            lease = self.core.acquire_lease(project_id, "agent", "lock-event-test")
+            acquired = events.get(timeout=1)
+            self.assertEqual((acquired.event, acquired.data["state"]), ("project.lock.changed", "AI_LOCKED"))
+            self.core.release_lease(project_id, lease["lease_id"])
+            released = events.get(timeout=1)
+            self.assertEqual((released.event, released.data["state"]), ("project.lock.changed", "FREE"))
+            lease = None
+        finally:
+            if lease is not None:
+                self.core.release_lease(project_id, lease["lease_id"])
+            self.core.events.unsubscribe(subscriber_id)
+
+    def test_project_file_api_lists_and_serves_only_direct_user_files(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "Files API"})
+        project_id = created["project"]["id"]
+        directory = self.core.workspace._project_dir(project_id)
+        source = directory / "part.stp"
+        source.write_bytes(b"STEP fixture")
+        (directory / ".cadyx-private.sqlite3").write_bytes(b"internal")
+        nested = directory / "nested"
+        nested.mkdir()
+        (nested / "hidden.stp").write_bytes(b"nested")
+
+        status, listing = self.request(f"/api/v1/projects/{project_id}/files")
+        self.assertEqual(status, 200)
+        self.assertEqual([item["name"] for item in listing["files"]], ["part.stp"])
+        with urlopen(self.base_url + f"/api/v1/projects/{project_id}/files/part.stp", timeout=3) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.read(), b"STEP fixture")
+
     def test_project_listing_and_saved_snapshot_reads_do_not_wait_for_an_edit_lock(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Reload persistence"})
         project_id = created["project"]["id"]
@@ -257,6 +293,10 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertNotEqual(initial["workspace_revision"], with_project["workspace_revision"])
 
+        status, with_free_lock = self.request(f"/api/v1/updates?project_id={project_id}")
+        self.assertEqual(status, 200)
+        self.assertEqual(with_free_lock["project_lock"]["state"], "FREE")
+
         lease = self.core.acquire_lease(project_id, "agent", "updates-test")
         self.core.execute_command(project_id, lease["lease_id"], {
             "type": "create_box", "width": 1, "height": 1, "depth": 1,
@@ -265,6 +305,13 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertGreater(after_command["activity_revision"], 0)
         self.assertIsNotNone(after_command["project_revision"])
+        self.assertEqual(after_command["project_lock"]["state"], "AI_LOCKED")
+        self.core.release_lease(project_id, lease["lease_id"])
+        status, after_release = self.request(f"/api/v1/updates?project_id={project_id}")
+        self.assertEqual(status, 200)
+        self.assertEqual(after_release["project_lock"]["state"], "FREE")
+        self.assertEqual(after_release["project_revision"], after_command["project_revision"])
+        self.assertEqual(after_release["activity_revision"], after_command["activity_revision"])
 
         folder = self.core.workspace.root / "live-scans"
         folder.mkdir()
