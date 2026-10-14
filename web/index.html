@@ -35,8 +35,8 @@
         </div>
       </div>
       <div class="topbar-end">
-        <nav class="dock-controls" aria-label="Свернутые панели">
-          <details class="dock-control">
+        <nav class="dock-controls" aria-label="Дополнительные панели">
+          <details class="dock-control" hidden>
             <summary aria-label="Обозреватель модели" title="Обозреватель модели"><span aria-hidden="true">▤</span></summary>
             <div class="dock-popover dock-popover-left">
               <section class="project-browser" aria-label="Проекты">
@@ -45,11 +45,6 @@
                 </div>
                 <div id="project-list" class="project-list" aria-live="polite" tabindex="-1"></div>
                 <p id="empty-projects" class="empty-note" hidden>Проектов пока нет.</p>
-              </section>
-              <section id="object-panel" class="panel object-panel" aria-labelledby="objects-title" hidden>
-                <div class="panel-heading"><div><h2 id="objects-title">Дерево модели</h2></div></div>
-                <div id="object-tree" class="object-tree" tabindex="-1"></div>
-                <p id="objects-empty" class="panel-empty">В этой модели пока нет объектов.</p>
               </section>
             </div>
           </details>
@@ -91,17 +86,14 @@
               <button class="nav-item" type="button" data-workspace-view="geometry">
                 <span class="nav-index">02</span><span class="nav-copy"><strong>ГЕОМЕТРИЯ</strong><small>Объекты модели</small></span>
               </button>
-              <button id="analysis-nav" class="nav-item" type="button" data-workspace-view="analysis" disabled>
+              <button id="analysis-nav" class="nav-item" type="button" data-workspace-view="analysis">
                 <span class="nav-index">03</span><span class="nav-copy"><strong>АНАЛИЗ</strong><small>Сравнение с оригиналом</small></span>
               </button>
-              <button class="nav-item" type="button" disabled title="Производственные данные пока недоступны">
+              <button class="nav-item" type="button" data-workspace-view="manufacturing">
                 <span class="nav-index">04</span><span class="nav-copy"><strong>ПРОИЗВОДСТВО</strong><small>Подготовка производства</small></span>
               </button>
-              <button class="nav-item" type="button" data-workspace-view="files">
-                <span class="nav-index">05</span><span class="nav-copy"><strong>ФАЙЛЫ</strong><small>Проекты и документы</small></span>
-              </button>
               <button class="nav-item" type="button" data-workspace-view="activity">
-                <span class="nav-index">06</span><span class="nav-copy"><strong>АКТИВНОСТЬ</strong><small>Состояние агента</small></span>
+                <span class="nav-index">05</span><span class="nav-copy"><strong>АКТИВНОСТЬ</strong><small>Состояние агента</small></span>
               </button>
             </nav>
             <div class="sidebar-project">
@@ -115,7 +107,7 @@
           </aside>
 
           <div class="project-main">
-            <div id="primary-grid" class="primary-grid">
+            <div id="primary-grid" class="primary-grid" data-view="overview">
               <section class="panel model-panel" aria-labelledby="model-title">
                 <div class="panel-heading viewport-heading">
                   <div><h2 id="model-title">3D-МОДЕЛЬ</h2><span class="viewport-mode">ОРТОГОНАЛЬНАЯ ПРОЕКЦИЯ</span></div>
@@ -198,6 +190,11 @@
                     <span id="agent-telemetry" class="agent-telemetry" hidden></span>
                   </div>
                 </section>
+                <section id="object-panel" class="panel object-panel" aria-labelledby="objects-title" hidden>
+                  <div class="panel-heading"><div><h2 id="objects-title">Дерево модели</h2></div></div>
+                  <div id="object-tree" class="object-tree" tabindex="-1"></div>
+                  <p id="objects-empty" class="panel-empty">В этой модели пока нет объектов.</p>
+                </section>
                 <section id="workflow-panel" class="panel workflow-panel" aria-labelledby="workflow-title">
                   <div class="panel-heading"><h2 id="workflow-title">ПРОГРЕСС</h2><span id="workflow-name" class="panel-note">ПЛАНА ПОКА НЕТ</span></div>
                   <div class="workflow-summary">
@@ -244,12 +241,21 @@
                     </div>
                   </div>
                 </section>
-                <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" hidden tabindex="-1">
-                  <div class="panel-heading"><h2 id="comparison-title">СРАВНЕНИЕ С ОРИГИНАЛОМ</h2><span id="comparison-metrics" class="panel-note"></span></div>
-                  <p>Оригинал показан контуром · результат — поверхностью.</p>
-                  <canvas id="comparison-preview" class="comparison-preview" aria-label="Совмещённые оригинал и изменённая модель"></canvas>
-                </section>
               </aside>
+              <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" tabindex="-1">
+                <div class="panel-heading"><h2 id="comparison-title">СРАВНЕНИЕ С ОРИГИНАЛОМ</h2><span id="comparison-metrics" class="panel-note"></span></div>
+                <p id="comparison-description" class="comparison-description" hidden>Оригинал показан контуром · результат — поверхностью.</p>
+                <p id="comparison-empty" class="comparison-empty">Для этого проекта пока нет данных сравнения.</p>
+                <canvas id="comparison-preview" class="comparison-preview" aria-label="Совмещённые оригинал и изменённая модель" hidden></canvas>
+              </section>
+              <section id="manufacturing-panel" class="panel manufacturing-panel" aria-labelledby="manufacturing-title" hidden>
+                <div class="panel-heading"><h2 id="manufacturing-title">ПОДГОТОВКА ПРОИЗВОДСТВА</h2></div>
+                <div class="manufacturing-empty">
+                  <span class="empty-cube" aria-hidden="true">⌁</span>
+                  <p>Данные для производства пока не подготовлены.</p>
+                  <small>Для этого проекта пока нет траекторий инструмента или плана обработки.</small>
+                </div>
+              </section>
             </div>
           </div>
         </div>

@@ -149,27 +149,29 @@ $("#workspace-navigation").addEventListener("click", (event) => {
   if (!button || button.disabled) return;
   const view = button.dataset.workspaceView;
   setWorkspaceNavigation(view);
+  dockMenus.forEach((menu) => { menu.open = false; });
   if (view === "overview") {
-    dockMenus.forEach((menu) => { menu.open = false; });
     $("#viewport-fit").focus({ preventScroll: true });
-  } else if (view === "geometry" || view === "files") {
-    if (view === "files" && getSelectedFolder()) {
-      dockMenus.forEach((menu) => { menu.open = false; });
-      folderFileList.focus({ preventScroll: true });
-    } else {
-      dockMenus[0].open = true;
-      (view === "geometry" ? $("#object-tree") : projectList).focus({ preventScroll: true });
-    }
+  } else if (view === "geometry") {
+    $("#object-tree").focus({ preventScroll: true });
   } else if (view === "analysis") {
     $("#comparison-panel").focus({ preventScroll: true });
+  } else if (view === "manufacturing") {
+    $("#manufacturing-panel").focus({ preventScroll: true });
   } else if (view === "activity") {
     $("#agent-activity").focus({ preventScroll: true });
   }
 });
 
 function setWorkspaceNavigation(view) {
+  const views = new Set(["overview", "geometry", "analysis", "manufacturing", "activity"]);
+  const activeView = views.has(view) ? view : "overview";
+  primaryGrid.dataset.view = activeView;
+  $("#comparison-panel").hidden = activeView !== "analysis";
+  $("#manufacturing-panel").hidden = activeView !== "manufacturing";
+  $("#object-panel").hidden = activeView !== "geometry" || !selectedProjectId || Boolean(getSelectedFolder());
   document.querySelectorAll(".nav-item[data-workspace-view]").forEach((item) => {
-    if (item.dataset.workspaceView === view) item.setAttribute("aria-current", "page");
+    if (item.dataset.workspaceView === activeView) item.setAttribute("aria-current", "page");
     else item.removeAttribute("aria-current");
   });
 }
@@ -323,6 +325,9 @@ function showProjectLoading(name) {
   projectDetail.hidden = false;
   noSelection.hidden = true;
   $("#object-panel").hidden = true;
+  $("#object-tree").replaceChildren();
+  $("#objects-empty").textContent = "Загружаю дерево модели…";
+  $("#objects-empty").hidden = false;
   setWorkspaceNavigation("overview");
   $("#document-title").textContent = name;
   $("#document-kind").textContent = "ПРОЕКТ";
@@ -331,8 +336,10 @@ function showProjectLoading(name) {
   $("#project-short-id").textContent = selectedProjectId?.slice(0, 8).toUpperCase() || "—";
   $("#document-revision").textContent = "—";
   $("#viewport-revision").textContent = "—";
-  $("#comparison-panel").hidden = true;
-  $("#analysis-nav").disabled = true;
+  $("#comparison-description").hidden = true;
+  $("#comparison-empty").hidden = false;
+  $("#comparison-preview").hidden = true;
+  $("#comparison-panel").dataset.available = "false";
   if (!renderedSceneKey?.startsWith(`${selectedProjectId}:`)) {
     $("#model-preview").hidden = true;
     $("#viewport-empty").hidden = false;
@@ -614,20 +621,12 @@ async function refreshWorkspacePass() {
   projects = response.projects;
   folders = response.folders || [];
 
-  const selectionExists = projects.some((item) => item.project.id === selectedProjectId)
-    || folders.includes(selectedProjectId?.startsWith(FOLDER_SELECTION_PREFIX)
-      ? selectedProjectId.slice(FOLDER_SELECTION_PREFIX.length)
-      : "");
+  const selectionExists = projects.some((item) => item.project.id === selectedProjectId);
   if (!selectionExists) {
     const saved = readSelectedProject();
-    const savedFolder = saved?.startsWith(FOLDER_SELECTION_PREFIX)
-      ? saved.slice(FOLDER_SELECTION_PREFIX.length)
-      : null;
     selectedProjectId = projects.some((item) => item.project.id === saved)
       ? saved
-      : savedFolder && folders.includes(savedFolder)
-        ? saved
-        : projects[0]?.project.id || (folders[0] ? folderSelectionId(folders[0]) : null);
+      : projects[0]?.project.id || null;
     selectedObjectId = null;
     saveSelectedProject(selectedProjectId);
   }
@@ -774,8 +773,11 @@ async function refreshDetail() {
   const comparison = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/comparison`);
   if (projectId !== selectedProjectId || request !== detailRequest) return;
   if (comparison.revision !== scene.revision) { scheduleWorkspaceRefresh(); return; }
-  $("#comparison-panel").hidden = !comparison.available;
-  $("#analysis-nav").disabled = !comparison.available;
+  $("#comparison-description").hidden = !comparison.available;
+  $("#comparison-empty").hidden = comparison.available;
+  $("#comparison-empty").textContent = "Для этого проекта пока нет данных сравнения.";
+  $("#comparison-preview").hidden = !comparison.available;
+  $("#comparison-panel").dataset.available = String(comparison.available);
   if (comparison.available) {
     const original = comparison.original, modified = comparison.modified;
     const positions = [...modified.positions, ...original.positions];
@@ -1103,6 +1105,7 @@ function containsRevolvedProfile(geometry) {
 function renderObjectTree(objects) {
   const root = $("#object-tree");
   root.replaceChildren();
+  $("#objects-empty").textContent = objects.length ? "" : "В этой модели пока нет объектов.";
   $("#objects-empty").hidden = objects.length > 0;
 
   const appendRow = (parent, item, nested = false) => {
