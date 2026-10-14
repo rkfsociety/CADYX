@@ -105,6 +105,18 @@ created through the existing Core or Agent API before a runtime run. See the
 
 The initial command registry supports `create_box` and `set_parameter` for box dimensions. Object ids use typed UUIDs such as `body:<uuid>` and `feature:<uuid>`. The `GeometryKernel` protocol isolates CADYX Core from a specific kernel. The default `OCCTKernelAdapter` creates box B-reps with Open CASCADE, checks topology with `BRepCheck_Analyzer`, and gets volume from kernel mass properties. Project files store JSON-safe dimensions and measured volume; the kernel shape is regenerated and checked instead of serializing a native object. The adapter continues to validate existing `primitive-v1` descriptors. `PrimitiveKernelAdapter` remains available for demos and does not create B-rep geometry.
 
+## HTTP authentication and LAN bind gate
+
+The CLI host keeps `127.0.0.1` as its default bind address. Loopback mode is backward-compatible and can run without HTTP authentication. Before constructing the server, `cadyx.auth.validate_bind_auth` rejects any host that is not explicitly loopback unless a valid authentication token has been loaded. Hostnames that cannot be proven loopback are treated as non-loopback and therefore require authentication. This makes an accidental `--host 0.0.0.0` or LAN-address bind fail closed.
+
+A token is supplied through exactly one runtime source: `CADYX_AUTH_TOKEN`, or a UTF-8 token file selected with `--auth-token-file` / `CADYX_AUTH_TOKEN_FILE`. Tokens must contain at least 32 characters and no whitespace. They are not stored in `project.json`, lease databases, command history or any portable schema, so enabling authentication needs no project-format migration. The CLI deliberately does not accept a raw token argument, avoiding routine exposure through command-line process listings.
+
+When a token is configured, `cadyx.web` authenticates every application request before route handling. The browser UI and static assets, Web API, Agent API, workspace-file previews/downloads, viewport JSON/PNG, lease and command routes, and the SSE stream all share the same gate. `GET /api/v1/health` is the only public endpoint and returns only readiness status/API version. Rejected requests receive HTTP 401 and the connection is closed before any unread POST body can be reused as another HTTP/1.1 request.
+
+Agent and API clients use `Authorization: Bearer <token>`. Browser navigation uses standard HTTP Basic authentication with username `cadyx` and the same token as the password; the browser then reuses the same-origin HTTP credentials for its fetches and event stream. Credential comparison uses `secrets.compare_digest`. The token is not accepted in a URL or query parameter.
+
+This is an authentication boundary, not transport encryption. The built-in server remains plain HTTP. Non-loopback operation is therefore limited to a trusted private LAN unless a TLS-terminating reverse proxy or trusted VPN protects the transport. Direct Internet exposure of the built-in HTTP listener is outside the supported security boundary. The persistent Windows task remains loopback-only by default.
+
 ## APIs and events
 
 Document Model v2 adds independent XY sketches, points, lines, circles and
@@ -122,8 +134,8 @@ fetch a server-rendered PNG snapshot through the Agent API without a browser.
 
 The HTTP API uses JSON under `/api/v1`. The Agent API is under `/api/v1/agent`; it shares Core operations and requires an agent lease for commands. Agents create projects through `/api/v1/agent/projects` and edit supported bodies and sketches through `/api/v1/agent/projects/{id}/commands`, using the existing Command System and agent lease. Both Agent API and web API expose `GET .../viewport` for a JSON scene and `GET .../viewport.png` for a server-rendered image; image retrieval is read-only and requires no browser or edit lease. Both `GET /api/v1/projects` and `GET /api/v1/agent/projects` return persisted CADYX projects in `projects` and immediate project-directory names in `folders`. `GET /api/v1/workspace/folders/{folder}/files` lists direct regular files; the corresponding `/files/{name}` route serves an individual file for browser preview. Folder entries are available for discovery and preview; project inspection, leases, and CADYX document commands continue to apply to persisted CADYX project records. The browser reads `/api/v1/projects` snapshots and viewport scenes; it does not issue project or model writes. The HTTP Web command route remains available to human API clients. Its only default visible content is the detail; model and property docks start collapsed. Project updates are broadcast in-process over server-sent events at `/api/v1/events`; event history is not replayed after reconnect, so clients refresh project state through the API.
 
-The default host is `127.0.0.1`. No authentication or LAN deployment hardening is implemented in this foundation pass.
+The default host is `127.0.0.1`. Non-loopback binds require the host authentication gate described above; the built-in server still relies on a trusted LAN or external TLS/VPN for transport confidentiality.
 
 ## Foundation roadmap
 
-The proposed development sequence, including the authentication gate for LAN access and the dependencies for multi-process hosting and Scan-to-CAD, is maintained in the [CADYX project roadmap](../.codex/roadmap.md). Inspect the current implementation before treating a proposed milestone as unfinished or complete.
+The development sequence, including authenticated LAN access and the prerequisites for Scan-to-CAD, is maintained in the [CADYX project roadmap](../.codex/roadmap.md). Inspect the current implementation before treating a milestone as unfinished or complete.
