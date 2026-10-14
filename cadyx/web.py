@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from .auth import authorization_matches
 from .core import CadyxCore
 from .errors import CadyxError, NotFoundError, ValidationError
 from .models import OwnerType
@@ -24,18 +25,23 @@ class CadyxHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 
-def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
+def make_request_handler(
+    core: CadyxCore,
+    auth_token: str | None = None,
+) -> type[BaseHTTPRequestHandler]:
     class CadyxRequestHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler method name
             parsed = urlsplit(self.path)
             try:
-                if parsed.path == "/api/v1/events":
-                    self._stream_events(parse_qs(parsed.query).get("project_id", [None])[0])
-                    return
                 if parsed.path == "/api/v1/health":
                     self._json(200, {"status": "ok", "api_version": 1})
+                    return
+                if not self._require_auth():
+                    return
+                if parsed.path == "/api/v1/events":
+                    self._stream_events(parse_qs(parsed.query).get("project_id", [None])[0])
                     return
                 if parsed.path == "/api/v1/projects":
                     self._json(200, core.list_workspace())
@@ -102,6 +108,8 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler method name
             parsed = urlsplit(self.path)
             try:
+                if not self._require_auth():
+                    return
                 body = self._read_json()
                 parts = parsed.path.strip("/").split("/")
                 if parts[:3] == ["api", "v1", "projects"]:
@@ -115,6 +123,22 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
                 self._json(exc.http_status, exc.as_dict())
             except (json.JSONDecodeError, UnicodeDecodeError):
                 self._json(400, {"error": "INVALID_JSON", "message": "Request body must be valid UTF-8 JSON."})
+
+        def _require_auth(self) -> bool:
+            if authorization_matches(self.headers.get("Authorization"), auth_token):
+                return True
+            self._json(
+                401,
+                {
+                    "error": "AUTHENTICATION_REQUIRED",
+                    "message": "Valid CADYX authentication credentials are required.",
+                },
+                extra_headers=(
+                    ("WWW-Authenticate", 'Basic realm="CADYX", charset="UTF-8"'),
+                    ("WWW-Authenticate", 'Bearer realm="CADYX"'),
+                ),
+            )
+            return False
 
         def _route_project(self, parts: list[str], body: dict[str, Any] | None, *, agent_api: bool) -> None:
             if not parts:
@@ -180,12 +204,20 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
                 raise ValidationError("Request JSON must be an object.")
             return value
 
-        def _json(self, status: int, value: dict[str, Any]) -> None:
+        def _json(
+            self,
+            status: int,
+            value: dict[str, Any],
+            *,
+            extra_headers: tuple[tuple[str, str], ...] = (),
+        ) -> None:
             encoded = json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(encoded)))
             self.send_header("Cache-Control", "no-store")
+            for name, header_value in extra_headers:
+                self.send_header(name, header_value)
             self.end_headers()
             self.wfile.write(encoded)
 
