@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import struct
 import threading
 import unittest
 from pathlib import Path
@@ -136,6 +137,36 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(self.request("/api/v1/projects/invalid/viewport")[0], 404)
         with urlopen(self.base_url + "/assets/viewport.js", timeout=3) as response:
             self.assertIn(b"CadyxViewport", response.read())
+
+    def test_agent_api_serves_read_only_scene_image_without_browser(self) -> None:
+        status, created = self.request("/api/v1/agent/projects", {"name": "Server image"})
+        self.assertEqual(status, 201)
+        project_id = created["project"]["id"]
+        status, acquired = self.request(
+            f"/api/v1/agent/projects/{project_id}/leases",
+            {"owner_id": "image-test-agent"},
+        )
+        self.assertEqual(status, 201)
+        status, _ = self.request(
+            f"/api/v1/agent/projects/{project_id}/commands",
+            {"lease_id": acquired["lease"]["lease_id"],
+             "command": {"type": "create_box", "width": 2, "height": 3, "depth": 5}},
+        )
+        self.assertEqual(status, 200)
+        before = self.core.inspect_project(project_id)
+
+        responses = []
+        for prefix in ("/api/v1/projects", "/api/v1/agent/projects"):
+            with urlopen(f"{self.base_url}{prefix}/{project_id}/viewport.png", timeout=3) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.headers.get_content_type(), "image/png")
+                image = response.read()
+            self.assertEqual(image[:8], b"\x89PNG\r\n\x1a\n")
+            self.assertEqual(struct.unpack(">II", image[16:24]), (960, 720))
+            responses.append(image)
+
+        self.assertEqual(responses[0], responses[1])
+        self.assertEqual(before, self.core.inspect_project(project_id))
 
     def test_agent_stop_resume_revision_contract(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Stop API"})

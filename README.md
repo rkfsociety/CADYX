@@ -1,6 +1,6 @@
 # CADYX
 
-CADYX is an AI-first CAD foundation prototype. An AI agent and a human use the same Core and Command System; a per-project edit lease ensures only one of them can mutate the document at a time. The browser is an observer and API client, while the Core owns project state.
+CADYX is an AI-first CAD foundation prototype. Agents create projects and modify models through the Agent API and shared Core Command System; a per-project edit lease prevents concurrent writes. The browser is a read-only, full-window detail viewer with collapsed model and property docks. Agents can fetch a server-rendered PNG snapshot through the Agent API without using a browser.
 
 ## Run locally
 
@@ -13,7 +13,7 @@ The verified Windows x64 runtime uses Python 3.15.0 and OCCT 8.0.1. Setup downlo
 
 Run setup again after moving the checkout (the embedded Python import path is local to it). Stop running hosts before rebuilding the native DLL. This setup targets Windows x64; other platforms need their own OCCT SDK and bridge build. CMake and MSVC are build prerequisites, not downloaded by the setup script.
 
-Open <http://127.0.0.1:8888>. To use another port or workspace, pass `--port` / `--projects-dir`, or set `CADYX_PORT`, `CADYX_HOST`, and `CADYX_PROJECTS_DIR`. The default host is loopback. Binding to a LAN interface is available with `--host`, but this prototype has no authentication.
+Open <http://127.0.0.1:8888>. Port `8888` is the default; to use another port or workspace, pass `--port` / `--projects-dir`, or set `CADYX_PORT`, `CADYX_HOST`, and `CADYX_PROJECTS_DIR`. The default host is loopback. Binding to a LAN interface is available with `--host`, but this prototype has no authentication.
 
 Multiple current hosts may share a workspace on the same local machine; see the [lease contract](docs/architecture.md#edit-leases). SSE updates remain local to each host. The project workspace is `projects/`. Runtime project data is ignored by Git; keep source CAD files and scans backed up as user data.
 
@@ -28,13 +28,14 @@ Multiple current hosts may share a workspace on the same local machine; see the 
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](docs/project-format-v1.md), [docs/document-model-v2.md](docs/document-model-v2.md), and [.codex/roadmap.md](.codex/roadmap.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, a durable per-project SQLite edit lease manager, a shared command system, and an Open CASCADE geometry-kernel adapter. Geometry is rebuilt from JSON-safe parameters when validated; native kernel objects are not stored in project files. The JSON APIs also support XY sketches with stable point/line/circle references and checked constraints; the browser displays all supported bodies and sketch elements through the shared [viewport contract](docs/viewport-api.md), and previews PLY files using the same renderer.
+See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](docs/project-format-v1.md), [docs/document-model-v2.md](docs/document-model-v2.md), and [.codex/roadmap.md](.codex/roadmap.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, a durable per-project SQLite edit lease manager, a shared command system, and an Open CASCADE geometry-kernel adapter. Geometry is rebuilt from JSON-safe parameters when validated; native kernel objects are not stored in project files. The JSON APIs also support XY sketches with stable point/line/circle references and checked constraints; agents use the Agent API to create and edit them. The read-only browser displays all supported bodies and sketch elements through the shared [viewport contract](docs/viewport-api.md), and previews PLY files using the same renderer.
 
 ## API starting points
 
-- `GET /api/v1/projects` and `GET /api/v1/agent/projects` (CADYX project records plus `folders` for immediate project directories); `POST /api/v1/projects` creates a CADYX project record
+- `GET /api/v1/projects` and `GET /api/v1/agent/projects` (CADYX project records plus `folders` for immediate project directories); agent project creation uses `POST /api/v1/agent/projects`
 - `GET /api/v1/projects/{id}`
 - `GET /api/v1/projects/{id}/viewport` and its Agent API equivalent return the same read-only render scene
+- `GET /api/v1/agent/projects/{id}/viewport.png` returns a server-rendered detail image without opening a browser
 - `GET /api/v1/workspace/folders/{folder}/files` and `GET /api/v1/workspace/folders/{folder}/files/{name}` for safe in-folder file preview
 - `POST /api/v1/projects/{id}/leases` with `owner_type` and `owner_id`
 - `POST /api/v1/projects/{id}/commands` with a human `lease_id` and a command

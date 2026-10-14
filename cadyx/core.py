@@ -13,7 +13,7 @@ from .events import EventBroker
 from .kernel import GeometryKernel, OCCTKernelAdapter
 from .lease import EditLeaseManager
 from .models import Document, OwnerType
-from .rendering import render_scene
+from .rendering import render_scene, render_scene_png
 from .workspace import ProjectWorkspace, utc_now
 
 
@@ -88,6 +88,13 @@ class CadyxCore:
             document = Document.from_dict(project["document"])
             self._validate_geometry(document)
             return render_scene(document, self.kernel)
+
+    def render_project_png(self, project_id: str) -> bytes:
+        with self._project_guard(project_id):
+            project = self.workspace.load(project_id)
+            document = Document.from_dict(project["document"])
+            self._validate_geometry(document)
+            return render_scene_png(render_scene(document, self.kernel))
 
     def heartbeat(self, project_id: str, lease_id: str) -> dict[str, Any]:
         with self._project_guard(project_id):

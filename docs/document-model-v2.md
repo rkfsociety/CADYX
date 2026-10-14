@@ -71,5 +71,22 @@ only the second point's y to 1 is rejected without changing revision, history or
 saved bytes. Changing both y coordinates to 1 in one batch succeeds with all ids
 and references preserved.
 
-The browser remains a box preview and observer. No sketch editor or renderer is
-included in this stage. Sketch creation, inspection and edits use the JSON APIs.
+## Browser inspection and Agent API editing
+
+The browser is a read-only detail viewer. It shows the shared viewport full
+window by default; the model tree and properties are available in collapsed
+docks. The tree lists bodies and their features, plus sketches and their points,
+lines, circles and constraints. The viewport renders supported bodies and
+sketch geometry; view controls do not edit document state.
+
+Agents create and edit models through the Agent API under an agent edit lease.
+Projects are also created through the Agent API. Agents can get a server-rendered
+PNG image without a browser from
+`GET /api/v1/agent/projects/{id}/viewport.png`; the regular viewport API remains
+available as JSON scene data. The command objects above create boxes and XY
+sketches, add sketch geometry and checked constraints, change box parameters or
+sketch elements, and remove unreferenced sketch objects. Every command uses the
+shared Command System, and the complete document is validated before the atomic
+save. Constraints check
+the supplied result but do not solve or move geometry. The browser exposes no
+project or model creation, editing, or deletion controls.

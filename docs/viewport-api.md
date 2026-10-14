@@ -9,6 +9,13 @@ Missing projects use the existing 404 contract; invalid geometry uses 400 and
 busy projects use 409 (`PROJECT_BUSY`). The scene is derived, never persisted;
 no project/document migration is required.
 
+The matching `GET /api/v1/projects/{id}/viewport.png` and
+`GET /api/v1/agent/projects/{id}/viewport.png` endpoints return the same scene
+as a server-rendered `image/png` isometric snapshot. The server derives it
+from the same validated scene data, so an agent can fetch a view of its model
+directly through HTTP without opening the browser. The response is read-only,
+is 960×720 pixels, and needs no edit lease or extra runtime dependency.
+
 The response has `version: 1`, document `revision`, `coordinate_system: "XYZ"`,
 `projection: "orthographic"`, `bounds` (`min`/`max` XYZ triples, or null when
 empty), and `objects`. Each render object has its stable `object_id`, document
@@ -24,9 +31,10 @@ units without inventing a physical unit convention.
 
 The browser checks inspection and scene revisions before presenting a snapshot;
 if a command commits between requests, it refreshes again. SSE refreshes the
-scene after agent/human commands. All visible bodies and sketch elements render
-together; selecting a body still controls its properties panel. Sketch lines and
-points overlay solid shading (no hidden-line removal or picking).
+scene after agent/human commands. The browser shows the detail full-window by
+default; model navigation and properties remain in collapsed read-only docks.
+All visible bodies and sketch elements render together. Sketch lines and points
+overlay solid shading (no hidden-line removal or viewport picking).
 
 `window.CadyxViewport.createViewer(canvas)` is shared with PLY preview and returns:
 

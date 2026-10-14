@@ -21,13 +21,18 @@
 
 ## Shared rendering and viewport
 
-- **Decision:** Core produces a versioned read-only JSON scene under the existing project guard, with kernel-derived body triangles, stable object ids and sampled XY sketch primitives. Browser and Agent API expose identical scenes. One browser canvas renderer serves these scenes and PLY previews; camera state is client-local and Z-up. **Reason:** keep authoritative geometry in Core and remove browser box-specific geometry duplication without changing portable project data or requiring edit leases for observation. **Constraint:** orthographic preview, 64-segment circle sampling and sketch overlays; no selection picking, visibility persistence, perspective or sketch editor. **Source:** [viewport contract](../docs/viewport-api.md), `cadyx/rendering.py`, `web/viewport.js`.
+- **Decision:** Core produces a versioned read-only JSON scene under the existing project guard, with kernel-derived body triangles, stable object ids and sampled XY sketch primitives. Browser and Agent API expose identical scenes. One browser canvas renderer serves these scenes and PLY previews; camera state is client-local and Z-up. **Reason:** keep authoritative geometry in Core and remove browser box-specific geometry duplication without changing portable project data or requiring edit leases for observation. **Constraint:** orthographic preview, 64-segment circle sampling and sketch overlays; no viewport picking, visibility persistence, perspective or sketch solving. **Source:** [viewport contract](../docs/viewport-api.md), `cadyx/rendering.py`, `web/viewport.js`.
 - **Status:** active.
 
 ## Document Model v2
 
 - **Decision:** represent XY sketches, points, lines, circles and constraints as document objects with stable typed UUID references. Membership has one source (`sketch_id`); constraints validate geometry with absolute tolerance 1e-7 instead of implying a solver. Batch coordinate updates use the existing atomic Core command path. **Reason:** add editable, persistent relationships with explicit invariant checks without introducing a separate mutation system. **Source:** `docs/document-model-v2.md`, `cadyx/sketches.py`, `cadyx/commands.py`.
 - **Decision:** explicitly upgrade document v1 to v2 in memory and save it only with the next successful command; keep project envelope v1. **Reason:** legacy bodies, features and history remain intact and read-only inspection does not rewrite user data. Older hosts reject v2; sequential migrations are now centralized in `cadyx/migrations.py`. **Source:** `cadyx/models.py`, `docs/document-model-v2.md`, `tests/test_document.py`.
+- **Status:** active.
+
+## CAD workspace and API-first editing
+
+- **Decision:** keep the browser read-only and make the detail fill the window; model and property docks start collapsed. Agents create projects and modify document objects through the Agent API and shared Command System, and can fetch a PNG scene image directly from the server. **Reason:** project/model management belongs to the API-driven agent workflow, while the user view should keep attention on the current detail. **Constraint:** dock navigation and camera controls affect only inspection; Web API human writes remain available to API clients. **Source:** `web/index.html`, `web/app.js`, `cadyx/rendering.py`, [architecture](../docs/architecture.md), [viewport contract](../docs/viewport-api.md).
 - **Status:** active.
 
 ## Project Format migrations

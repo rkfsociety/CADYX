@@ -22,16 +22,10 @@ let detailRequest = 0;
 $("#viewport-fit").addEventListener("click", () => modelViewer.fit());
 const toast = $("#toast");
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
-const dateFormat = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-const heldLeases = new Map();
-const activeAgents = new Map();
-const modelStates = new Map();
-const modelStateTimers = new Map();
-const documentRevisions = new Map();
 let projects = [];
 let folders = [];
 let selectedProjectId = readSelectedProject();
-let selectedBodyId = null;
+let selectedObjectId = null;
 let currentObjects = [];
 let toastTimer;
 let refreshTimer;
@@ -66,11 +60,6 @@ function formatNumber(value) {
   return Number.isFinite(Number(value)) ? numberFormat.format(Number(value)) : "—";
 }
 
-function formatDate(value) {
-  const date = value ? new Date(value) : null;
-  return date && Number.isFinite(date.getTime()) ? dateFormat.format(date) : "—";
-}
-
 function getProject(id) {
   return projects.find((item) => item.project.id === id);
 }
@@ -85,73 +74,11 @@ function getSelectedFolder() {
   return folders.includes(name) ? name : null;
 }
 
-function stateLabel(state) {
-  if (state === "FREE") return "Свободен";
-  if (state === "AI_LOCKED") return "Агент";
-  if (state === "HUMAN_LOCKED") return "Пользователь";
-  if (state === "SYSTEM_LOCKED") return "Система";
-  return state;
-}
-
-function lockLabel(lock) {
-  if (lock.recovery_required) return "ТРЕБУЕТСЯ ПРОВЕРКА";
-  return ({
-    FREE: "ДОСТУП СВОБОДЕН",
-    AI_LOCKED: "ДОСТУП У АГЕНТА",
-    HUMAN_LOCKED: "ДОСТУП У ПОЛЬЗОВАТЕЛЯ",
-    SYSTEM_LOCKED: "СИСТЕМНАЯ БЛОКИРОВКА",
-  })[lock.state] || lock.state;
-}
-
-function lockClass(lock) {
-  const owner = lock.lease?.owner_type;
-  const variant = owner === "agent" ? "agent" : owner === "human" ? "human" : owner === "system" ? "system" : "free";
-  return `lock-badge ${variant}${lock.recovery_required ? " expired" : ""}`;
-}
-
-function setConnection(state) {
-  const label = ({
-    connecting: "Подключение",
-    connected: "События подключены",
-    reconnecting: "Переподключение",
-    offline: "События недоступны",
-  })[state] || state;
-  const indicator = $("#connection-status");
-  indicator.dataset.state = state;
-  $("#connection-label").textContent = label;
-}
-
-function setModelState(projectId, state, label) {
-  clearTimeout(modelStateTimers.get(projectId));
-  const timestamp = new Date().toISOString();
-  modelStates.set(projectId, { state, label, timestamp });
-
-  if (projectId === selectedProjectId) {
-    const root = $("#model-live-state");
-    root.dataset.state = state;
-    $("#model-live-label").textContent = label;
-    const preview = $("#model-preview");
-    preview.classList.remove("changed");
-    if (state === "updated") requestAnimationFrame(() => {
-      if (projectId === selectedProjectId && modelStates.get(projectId)?.timestamp === timestamp) {
-        preview.classList.add("changed");
-      }
-    });
-  }
-
-  if (state === "updated") {
-    modelStateTimers.set(projectId, setTimeout(() => {
-      const current = modelStates.get(projectId);
-      if (current?.timestamp !== timestamp) return;
-      modelStateTimers.delete(projectId);
-      modelStates.set(projectId, { state: "idle", label: "Актуальная модель", timestamp });
-      if (projectId === selectedProjectId) {
-        $("#model-live-state").dataset.state = "idle";
-        $("#model-live-label").textContent = "Актуальная модель";
-        $("#model-preview").classList.remove("changed");
-      }
-    }, 2400));
-  }
+function indicateModelChanged(projectId) {
+  if (projectId !== selectedProjectId) return;
+  const preview = $("#model-preview");
+  preview.classList.remove("changed");
+  requestAnimationFrame(() => preview.classList.add("changed"));
 }
 
 function renderProjectList() {
@@ -159,7 +86,6 @@ function renderProjectList() {
     ...projects.map((item) => ({ kind: "project", name: item.project.name, item })),
     ...folders.map((name) => ({ kind: "folder", name })),
   ].sort((left, right) => left.name.localeCompare(right.name, "ru", { sensitivity: "base" }));
-  $("#project-count").textContent = String(entries.length);
   $("#empty-projects").hidden = entries.length > 0;
   projectList.replaceChildren();
 
@@ -179,9 +105,7 @@ function renderProjectList() {
       const name = document.createElement("strong");
       name.className = "project-name";
       name.textContent = entry.name;
-      const detail = document.createElement("small");
-      detail.textContent = "Папка проекта";
-      copy.append(name, detail);
+      copy.append(name);
       const arrow = document.createElement("span");
       arrow.className = "project-arrow";
       arrow.setAttribute("aria-hidden", "true");
@@ -201,7 +125,6 @@ function renderProjectList() {
 
     const marker = document.createElement("span");
     marker.className = "project-marker";
-    marker.dataset.state = item.lock.state;
     marker.setAttribute("aria-hidden", "true");
 
     const copy = document.createElement("span");
@@ -209,9 +132,7 @@ function renderProjectList() {
     const name = document.createElement("strong");
     name.className = "project-name";
     name.textContent = project.name;
-    const detail = document.createElement("small");
-    detail.textContent = `${stateLabel(item.lock.state)} · изм. ${formatDate(project.modified_at)}`;
-    copy.append(name, detail);
+    copy.append(name);
 
     const arrow = document.createElement("span");
     arrow.className = "project-arrow";
@@ -224,7 +145,7 @@ function renderProjectList() {
 
 function selectProject(id) {
   selectedProjectId = id;
-  selectedBodyId = null;
+  selectedObjectId = null;
   saveSelectedProject(id);
   renderProjectList();
   const folder = getSelectedFolder();
@@ -239,9 +160,10 @@ function showFolderDetail(name) {
   const folderChanged = activeFolderName !== name;
   activeFolderName = name;
   projectDetail.hidden = true;
+  $("#object-panel").hidden = true;
   noSelection.hidden = true;
   $("#folder-detail").hidden = false;
-  $("#topbar-project-name").textContent = name;
+  $("#document-title").textContent = name;
   $("#folder-detail-name").textContent = name;
   $("#folder-detail-path").textContent = `projects/${name}`;
   if (folderChanged) {
@@ -365,7 +287,7 @@ async function refreshWorkspace() {
       : savedFolder && folders.includes(savedFolder)
         ? saved
         : projects[0]?.project.id || (folders[0] ? folderSelectionId(folders[0]) : null);
-    selectedBodyId = null;
+    selectedObjectId = null;
     saveSelectedProject(selectedProjectId);
   }
 
@@ -375,9 +297,10 @@ async function refreshWorkspace() {
   else if (selectedProjectId && getProject(selectedProjectId)) await refreshDetail();
   else {
     projectDetail.hidden = true;
+    $("#object-panel").hidden = true;
     $("#folder-detail").hidden = true;
     noSelection.hidden = false;
-    $("#topbar-project-name").textContent = "Не выбран";
+    $("#document-title").textContent = "CADYX";
   }
 }
 
@@ -385,7 +308,6 @@ function scheduleWorkspaceRefresh() {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
     refreshWorkspace().catch((error) => {
-      setConnection("offline");
       notify(error.message, true);
     });
   }, 60);
@@ -415,124 +337,108 @@ async function refreshDetail() {
   }
   $("#viewport-empty").hidden = scene.objects.length > 0;
   $("#model-preview").hidden = scene.objects.length === 0;
-  $("#viewport-label").textContent = `${scene.objects.length} объектов`;
   modelViewer.render();
 
   $("#folder-detail").hidden = true;
+  $("#object-panel").hidden = false;
   projectDetail.hidden = false;
   noSelection.hidden = true;
-  $("#topbar-project-name").textContent = info.project.name;
-  $("#detail-name").textContent = info.project.name;
-  $("#detail-id").textContent = info.project.id;
-
-  const lock = info.lock;
-  const badge = $("#lock-badge");
-  badge.textContent = lockLabel(lock);
-  badge.className = lockClass(lock);
-  updateAgentState(projectId, lock);
-  updateManualControls(projectId, lock);
-
-  const previousRevision = documentRevisions.get(projectId);
+  $("#document-title").textContent = info.project.name;
   const objects = info.document.objects;
-  const bodies = objects.filter((item) => item.type === "body");
-  const features = objects.filter((item) => item.type === "feature");
-  if (selectedBodyId && !bodies.some((item) => item.id === selectedBodyId)) selectedBodyId = null;
-  if (!selectedBodyId && bodies.length) selectedBodyId = bodies[bodies.length - 1].id;
-  if (previousRevision === undefined || info.document.revision !== previousRevision) {
-    documentRevisions.set(projectId, info.document.revision);
-    if (!modelStates.has(projectId)) {
-      const label = info.document.revision ? "Актуальная версия" : "Без изменений";
-      modelStates.set(projectId, { state: "idle", label, timestamp: null });
-    }
+  if (selectedObjectId && !objects.some((item) => item.id === selectedObjectId)) selectedObjectId = null;
+  if (!selectedObjectId) {
+    const topLevel = objects.filter((item) => item.type === "body" || item.type === "sketch");
+    selectedObjectId = topLevel.at(-1)?.id || null;
   }
-
   currentObjects = objects;
-  $("#document-revision").textContent = String(info.document.revision);
-  $("#object-count").textContent = `${bodies.length} / ${features.length}`;
-  $("#last-modified").textContent = info.project.modified_at
-    ? `Изменено ${formatDate(info.project.modified_at)}`
-    : "Изменений пока нет";
+  renderObjectTree(objects);
+  renderProperties(objects);
+}
 
-  const visualState = modelStates.get(projectId);
-  if (visualState) {
-    $("#model-live-state").dataset.state = visualState.state;
-    $("#model-live-label").textContent = visualState.label;
+function objectTypeLabel(item) {
+  return ({ body: "Тело", feature: "Операция", sketch: "Эскиз", point: "Точка", line: "Отрезок", circle: "Окружность", constraint: "Ограничение" })[item?.type] || "Объект";
+}
+
+function constraintLabel(kind) {
+  return ({ horizontal: "Горизонтальность", vertical: "Вертикальность", coincident: "Совпадение", distance: "Расстояние", radius: "Радиус" })[kind] || kind || "Ограничение";
+}
+
+function objectSummary(item, objects = currentObjects) {
+  if (item.type === "body") return dimensionsText(item.geometry?.dimensions);
+  if (item.type === "feature") return `${item.operation || "Операция"} · ${dimensionsText(item.parameters)}`;
+  if (item.type === "sketch") return `${item.plane} · ${objects.filter((child) => child.sketch_id === item.id).length} объектов`;
+  if (item.type === "point") return `(${formatNumber(item.x)}, ${formatNumber(item.y)})`;
+  if (item.type === "line") {
+    const start = objects.find((child) => child.id === item.start_id);
+    const end = objects.find((child) => child.id === item.end_id);
+    const pointLabel = (point) => point ? `(${formatNumber(point.x)}, ${formatNumber(point.y)})` : "?";
+    return `${pointLabel(start)} → ${pointLabel(end)}`;
   }
-  renderViewport(bodies);
-  renderObjectTree(bodies);
-  renderProperties(bodies);
+  if (item.type === "circle") return `R ${formatNumber(item.radius)}`;
+  if (item.type === "constraint") return constraintLabel(item.kind);
+  return "";
 }
 
-function updateAgentState(projectId, lock) {
-  const active = lock.lease;
-  const running = activeAgents.get(projectId);
-  const status = $("#agent-state");
-  const detail = $("#current-agent");
-
-  if (running) {
-    status.textContent = "Вносит изменения";
-    detail.textContent = running;
-  } else if (active?.owner_type === "agent") {
-    status.textContent = "Доступ у агента";
-    detail.textContent = active.owner_id;
-  } else if (active?.owner_type === "human") {
-    status.textContent = "Пауза для агента";
-    detail.textContent = `Проект редактирует пользователь · ${active.owner_id}`;
-  } else {
-    status.textContent = "Ожидание";
-    detail.textContent = "Состояние синхронизируется в реальном времени";
-  }
-}
-
-function updateManualControls(projectId, lock) {
-  const held = heldLeases.get(projectId);
-  const available = !lock.lease && !lock.recovery_required;
-  $("#acquire-human").disabled = !available;
-  $("#acquire-human").hidden = Boolean(held);
-  $("#release-lease").hidden = !held;
-  $("#create-box-form").hidden = held?.ownerType !== "human";
-}
-
-function renderViewport(bodies) {
-  const body = bodies.find((item) => item.id === selectedBodyId) || bodies[bodies.length - 1];
-  $("#viewport-meta").hidden = !body;
-  if (!body) return;
-  selectedBodyId = body.id;
-  $("#selected-object-name").textContent = body.name || "Тело";
-  $("#selected-object-dimensions").textContent = dimensionsText(body.geometry?.dimensions);
-  $("#selected-object-volume").textContent = `V ${formatNumber(body.geometry?.volume)}`;
-}
-
-function renderObjectTree(bodies) {
+function renderObjectTree(objects) {
   const root = $("#object-tree");
   root.replaceChildren();
-  $("#tree-count").textContent = String(bodies.length);
-  $("#objects-empty").hidden = bodies.length > 0;
+  $("#objects-empty").hidden = objects.length > 0;
 
-  for (const body of bodies) {
+  const appendRow = (parent, item, nested = false) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `object-row${body.id === selectedBodyId ? " selected" : ""}`;
-    button.setAttribute("aria-pressed", String(body.id === selectedBodyId));
+    button.className = `object-row${nested ? " nested" : ""}${item.id === selectedObjectId ? " selected" : ""}`;
+    button.dataset.objectId = item.id;
+    button.title = item.id;
+    button.setAttribute("aria-pressed", String(item.id === selectedObjectId));
     const marker = document.createElement("span");
     marker.className = "object-symbol";
     marker.setAttribute("aria-hidden", "true");
-    marker.textContent = "▰";
+    marker.textContent = ({ body: "▰", feature: "↳", sketch: "⌗", point: "·", line: "／", circle: "○", constraint: "⊙" })[item.type] || "•";
     const copy = document.createElement("span");
     copy.className = "object-copy";
     const name = document.createElement("strong");
-    name.textContent = body.name || "Тело";
+    name.textContent = item.name || (item.type === "feature" ? "Построение коробки" : objectTypeLabel(item));
     const detail = document.createElement("small");
-    detail.textContent = dimensionsText(body.geometry?.dimensions);
+    detail.textContent = objectSummary(item, objects);
     copy.append(name, detail);
     button.append(marker, copy);
     button.addEventListener("click", () => {
-      selectedBodyId = body.id;
-      renderViewport([body, ...currentObjects.filter((item) => item.type === "body" && item.id !== body.id)]);
-      renderObjectTree(currentObjects.filter((item) => item.type === "body"));
-      renderProperties([body]);
+      selectedObjectId = item.id;
+      renderViewport(currentObjects);
+      renderObjectTree(currentObjects);
+      renderProperties(currentObjects);
     });
-    root.append(button);
+    parent.append(button);
+  };
+
+  const bodies = objects.filter((item) => item.type === "body");
+  const sketches = objects.filter((item) => item.type === "sketch");
+  for (const body of bodies) {
+    const group = document.createElement("div");
+    group.className = "object-group";
+    appendRow(group, body);
+    const children = objects.filter((item) => item.type === "feature" && item.body_id === body.id);
+    if (children.length) {
+      const nested = document.createElement("div");
+      nested.className = "object-children";
+      for (const child of children) appendRow(nested, child, true);
+      group.append(nested);
+    }
+    root.append(group);
+  }
+  for (const sketch of sketches) {
+    const group = document.createElement("div");
+    group.className = "object-group";
+    appendRow(group, sketch);
+    const children = objects.filter((item) => item.sketch_id === sketch.id);
+    if (children.length) {
+      const nested = document.createElement("div");
+      nested.className = "object-children";
+      for (const child of children) appendRow(nested, child, true);
+      group.append(nested);
+    }
+    root.append(group);
   }
 }
 
@@ -541,29 +447,74 @@ function dimensionsText(dimensions) {
   return `${formatNumber(dimensions.width)} × ${formatNumber(dimensions.height)} × ${formatNumber(dimensions.depth)}`;
 }
 
-function renderProperties(bodies) {
-  const body = bodies.find((item) => item.id === selectedBodyId) || bodies[bodies.length - 1];
-  if (!body?.geometry?.dimensions) {
+function referenceText(id, objects) {
+  const target = objects.find((item) => item.id === id);
+  if (!target) return "Объект не найден";
+  if (target.name) return target.name;
+  const summary = objectSummary(target, objects);
+  return summary ? `${objectTypeLabel(target)} · ${summary}` : objectTypeLabel(target);
+}
+
+function propertyRows(item, objects) {
+  if (item.type === "body") return [
+    ["Имя", item.name || "Тело"], ["Геометрия", item.geometry?.kind || "—"],
+    ["Ширина", formatNumber(item.geometry?.dimensions?.width)],
+    ["Высота", formatNumber(item.geometry?.dimensions?.height)],
+    ["Глубина", formatNumber(item.geometry?.dimensions?.depth)],
+    ["Объём", formatNumber(item.geometry?.volume)], ["Операций", String(item.feature_ids?.length || 0)],
+  ];
+  if (item.type === "feature") return [
+    ["Тип", item.operation], ["Тело", referenceText(item.body_id, objects)],
+    ...Object.entries(item.parameters || {}).map(([key, value]) => [key, formatNumber(value)]),
+  ];
+  if (item.type === "sketch") return [
+    ["Имя", item.name], ["Плоскость", item.plane],
+    ["Объектов", String(objects.filter((child) => child.sketch_id === item.id).length)],
+  ];
+  if (item.type === "point") return [
+    ["Эскиз", referenceText(item.sketch_id, objects)], ["X", formatNumber(item.x)], ["Y", formatNumber(item.y)],
+  ];
+  if (item.type === "line") return [
+    ["Эскиз", referenceText(item.sketch_id, objects)], ["Начало", referenceText(item.start_id, objects)],
+    ["Конец", referenceText(item.end_id, objects)],
+  ];
+  if (item.type === "circle") return [
+    ["Эскиз", referenceText(item.sketch_id, objects)], ["Центр", referenceText(item.center_id, objects)],
+    ["Радиус", formatNumber(item.radius)],
+  ];
+  return [
+    ["Эскиз", referenceText(item.sketch_id, objects)], ["Тип", constraintLabel(item.kind)],
+    ["Ссылки", (item.references || []).map((id) => referenceText(id, objects)).join("; ") || "—"],
+    ...(item.value === undefined ? [] : [["Значение", formatNumber(item.value)]]),
+  ];
+}
+
+function renderProperties(objects) {
+  const item = objects.find((object) => object.id === selectedObjectId);
+  if (!item) {
     $("#properties-empty").hidden = false;
     $("#properties-list").hidden = true;
     return;
   }
-  const dimensions = body.geometry.dimensions;
   $("#properties-empty").hidden = true;
   $("#properties-list").hidden = false;
-  $("#property-name").textContent = body.name || "Тело";
-  $("#property-width").textContent = formatNumber(dimensions.width);
-  $("#property-height").textContent = formatNumber(dimensions.height);
-  $("#property-depth").textContent = formatNumber(dimensions.depth);
-  $("#property-volume").textContent = formatNumber(body.geometry.volume);
+  const list = $("#properties-list");
+  list.replaceChildren();
+  for (const [name, value] of propertyRows(item, objects)) {
+    const row = document.createElement("div");
+    const term = document.createElement("dt");
+    term.textContent = name;
+    const description = document.createElement("dd");
+    description.textContent = String(value ?? "—");
+    description.title = String(value ?? "");
+    row.append(term, description);
+    list.append(row);
+  }
 }
 
-function selectBodyFromResult(projectId, result) {
-  let bodyId = result?.body_id;
-  if (!bodyId && result?.feature_id) {
-    bodyId = currentObjects.find((item) => item.id === result.feature_id)?.body_id;
-  }
-  if (projectId === selectedProjectId && bodyId) selectedBodyId = bodyId;
+function selectObjectFromResult(projectId, result) {
+  const objectId = result?.body_id || result?.sketch_id || result?.object_id || result?.constraint_id || result?.feature_id;
+  if (projectId === selectedProjectId && objectId) selectedObjectId = objectId;
 }
 
 function handleStreamEvent(type, event) {
@@ -571,59 +522,23 @@ function handleStreamEvent(type, event) {
   if (!projectId) return;
   const data = event.data || {};
 
-  if (type === "command.started") {
-    activeAgents.set(projectId, data.actor_id || "Агент");
-    setModelState(projectId, "working", "Агент вносит изменения");
-  } else if (type === "command.completed") {
-    activeAgents.delete(projectId);
-    selectBodyFromResult(projectId, data.result);
-    setModelState(projectId, "updated", "Модель обновлена");
+  if (type === "command.completed") {
+    selectObjectFromResult(projectId, data.result);
+    indicateModelChanged(projectId);
     scheduleWorkspaceRefresh();
   } else if (type === "command.failed") {
-    activeAgents.delete(projectId);
-    setModelState(projectId, "failed", "Не удалось обновить модель");
+    if (projectId === selectedProjectId) notify("Не удалось обновить деталь", true);
   } else if (type === "document.changed") {
     scheduleWorkspaceRefresh();
-  } else if (type === "project.lock.changed" || type === "project.created") {
+  } else if (type === "project.created") {
+    selectedProjectId = projectId;
+    selectedObjectId = null;
+    saveSelectedProject(projectId);
+    scheduleWorkspaceRefresh();
+  } else if (type === "project.lock.changed") {
     scheduleWorkspaceRefresh();
   }
-
-  if (type === "project.lock.changed" && data.lease?.owner_type === "agent") {
-    activeAgents.set(projectId, data.lease.owner_id);
-  } else if (type === "project.lock.changed" && !data.lease) {
-    activeAgents.delete(projectId);
-  }
-
-  if (projectId === selectedProjectId) {
-    const project = getProject(projectId);
-    if (project) updateAgentState(projectId, project.lock);
-  }
 }
-
-function withSelected(action) {
-  if (!selectedProjectId) return;
-  return action(selectedProjectId).catch((error) => notify(error.message, true));
-}
-
-$("#create-project-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const input = event.currentTarget.elements.name;
-  const button = event.currentTarget.querySelector("button");
-  button.disabled = true;
-  try {
-    const response = await api("/api/v1/projects", { method: "POST", body: JSON.stringify({ name: input.value }) });
-    input.value = "";
-    selectedProjectId = response.project.id;
-    selectedBodyId = null;
-    saveSelectedProject(selectedProjectId);
-    await refreshWorkspace();
-    notify("Проект создан");
-  } catch (error) {
-    notify(error.message, true);
-  } finally {
-    button.disabled = false;
-  }
-});
 
 projectList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-project-id]");
@@ -641,97 +556,16 @@ folderFileList.addEventListener("click", (event) => {
   if (button && file && activeFolderName) previewFolderFile(activeFolderName, file);
 });
 
-$("#acquire-human").addEventListener("click", () => withSelected(async (id) => {
-  const response = await api(`/api/v1/projects/${encodeURIComponent(id)}/leases`, {
-    method: "POST",
-    body: JSON.stringify({ owner_type: "human", owner_id: "web-user" }),
-  });
-  heldLeases.set(id, { leaseId: response.lease.lease_id, ownerType: "human" });
-  await refreshWorkspace();
-  notify("Доступ получен");
-}));
-
-$("#release-lease").addEventListener("click", () => withSelected(async (id) => {
-  const held = heldLeases.get(id);
-  if (!held) return;
-  await api(`/api/v1/projects/${encodeURIComponent(id)}/leases/${encodeURIComponent(held.leaseId)}/release`, {
-    method: "POST",
-    body: "{}",
-  });
-  heldLeases.delete(id);
-  await refreshWorkspace();
-  notify("Доступ освобождён");
-}));
-
-$("#create-box-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!selectedProjectId) return;
-  const id = selectedProjectId;
-  const form = new FormData(event.currentTarget);
-  const held = heldLeases.get(id);
-  if (!held) {
-    notify("Сначала захватите доступ к проекту", true);
-    return;
-  }
-  const button = event.currentTarget.querySelector("button[type=submit]");
-  button.disabled = true;
-  try {
-    const response = await api(`/api/v1/projects/${encodeURIComponent(id)}/commands`, {
-      method: "POST",
-      body: JSON.stringify({
-        lease_id: held.leaseId,
-        command: {
-          type: "create_box",
-          name: form.get("name"),
-          width: Number(form.get("width")),
-          height: Number(form.get("height")),
-          depth: Number(form.get("depth")),
-        },
-      }),
-    });
-    selectBodyFromResult(id, response.history_entry?.result);
-    setModelState(id, "updated", "Модель обновлена");
-    await refreshWorkspace();
-    notify("Тело добавлено в модель");
-  } catch (error) {
-    notify(error.message, true);
-  } finally {
-    button.disabled = false;
-  }
-});
-
 const stream = new EventSource("/api/v1/events");
-const eventTypes = ["project.created", "project.lock.changed", "command.started", "command.completed", "command.failed", "document.changed"];
+const eventTypes = ["project.created", "project.lock.changed", "command.completed", "command.failed", "document.changed"];
 for (const type of eventTypes) {
   stream.addEventListener(type, (message) => {
     try { handleStreamEvent(type, JSON.parse(message.data)); }
-    catch { setModelState(selectedProjectId, "failed", "Ошибка обновления"); }
+    catch { if (selectedProjectId) notify("Не удалось обновить деталь", true); }
   });
 }
 
-stream.addEventListener("open", () => {
-  setConnection("connected");
-  scheduleWorkspaceRefresh();
-});
-stream.addEventListener("error", () => {
-  setConnection(stream.readyState === EventSource.CLOSED ? "offline" : "reconnecting");
-});
-
-setInterval(() => {
-  for (const [projectId, held] of heldLeases) {
-    api(`/api/v1/projects/${encodeURIComponent(projectId)}/leases/${encodeURIComponent(held.leaseId)}/heartbeat`, {
-      method: "POST",
-      body: "{}",
-    }).catch(() => {
-      heldLeases.delete(projectId);
-      if (projectId === selectedProjectId) refreshWorkspace().catch((error) => notify(error.message, true));
-    });
-  }
-}, 15_000);
-
-$("#server-address").textContent = location.host;
-setConnection("connecting");
+stream.addEventListener("open", scheduleWorkspaceRefresh);
 refreshWorkspace().catch((error) => {
-  setConnection("offline");
   notify(error.message, true);
 });

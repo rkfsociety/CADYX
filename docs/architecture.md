@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-CADYX is AI-first: agents use a versioned API and the same Core command system as the browser. The browser observes authoritative project state and can issue commands only while its human edit lease is active. It does not call a geometry kernel or own CAD state.
+CADYX is AI-first: agents use a versioned API and the shared Core command system. The browser is a read-only, full-window detail viewer; project creation and document writes go through the Agent API. Model and property docks start collapsed. The browser does not call a geometry kernel or own CAD state.
 
 ```text
 AI provider (future) -> Agent API -> CADYX Core -> Command System -> Document
@@ -91,9 +91,11 @@ support these objects under the same leases and atomic save path. Document v1
 is upgraded in memory; the project envelope stays at version 1. See
 [Document Model v2](document-model-v2.md) for the supported commands, migration
 policy and exact semantics. Sketch points, lines and circles now render in the
-shared viewport; browser sketch editing remains future work.
+shared viewport. Project creation, model creation and editing stay on the Agent
+API; the browser provides no project or document mutation controls. Agents can
+fetch a server-rendered PNG snapshot through the Agent API without a browser.
 
-The HTTP API uses JSON under `/api/v1`. The Agent API is under `/api/v1/agent`; it shares Core operations and requires an agent lease for commands. Both `GET /api/v1/projects` and `GET /api/v1/agent/projects` return persisted CADYX projects in `projects` and immediate project-directory names in `folders`. `GET /api/v1/workspace/folders/{folder}/files` lists direct regular files; the corresponding `/files/{name}` route serves an individual file for browser preview. Folder entries are available for discovery and preview; project inspection, leases, and CADYX document commands continue to apply to persisted CADYX project records. The browser API is under `/api/v1/projects` and requires a human lease for commands. Both command routes enter the same Command System. Project updates are broadcast in-process over server-sent events at `/api/v1/events`; event history is not replayed after reconnect, so clients refresh project state through the API.
+The HTTP API uses JSON under `/api/v1`. The Agent API is under `/api/v1/agent`; it shares Core operations and requires an agent lease for commands. Agents create projects through `/api/v1/agent/projects` and edit supported bodies and sketches through `/api/v1/agent/projects/{id}/commands`, using the existing Command System and agent lease. Both Agent API and web API expose `GET .../viewport` for a JSON scene and `GET .../viewport.png` for a server-rendered image; image retrieval is read-only and requires no browser or edit lease. Both `GET /api/v1/projects` and `GET /api/v1/agent/projects` return persisted CADYX projects in `projects` and immediate project-directory names in `folders`. `GET /api/v1/workspace/folders/{folder}/files` lists direct regular files; the corresponding `/files/{name}` route serves an individual file for browser preview. Folder entries are available for discovery and preview; project inspection, leases, and CADYX document commands continue to apply to persisted CADYX project records. The browser reads `/api/v1/projects` snapshots and viewport scenes; it does not issue project or model writes. The HTTP Web command route remains available to human API clients. Its only default visible content is the detail; model and property docks start collapsed. Project updates are broadcast in-process over server-sent events at `/api/v1/events`; event history is not replayed after reconnect, so clients refresh project state through the API.
 
 The default host is `127.0.0.1`. No authentication or LAN deployment hardening is implemented in this foundation pass.
 

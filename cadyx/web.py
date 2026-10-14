@@ -59,6 +59,12 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
                     return
                 prefix = ["api", "v1", "projects"]
                 agent_prefix = ["api", "v1", "agent", "projects"]
+                if len(parts) == 5 and parts[:3] == prefix and parts[4] == "viewport.png":
+                    self._png(200, core.render_project_png(parts[3]))
+                    return
+                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "viewport.png":
+                    self._png(200, core.render_project_png(parts[4]))
+                    return
                 if len(parts) == 5 and parts[:3] == prefix and parts[4] == "viewport":
                     self._json(200, core.render_project(parts[3]))
                     return
@@ -180,6 +186,15 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(encoded)))
             self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def _png(self, status: int, encoded: bytes) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Disposition", "inline")
             self.end_headers()
             self.wfile.write(encoded)
 
