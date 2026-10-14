@@ -200,16 +200,33 @@ def render_scene_png(scene: dict) -> bytes:
             max_pixel_x = min(width - 1, math.ceil(max(point[0] for point in points)))
             min_pixel_y = max(0, math.floor(min(point[1] for point in points)))
             max_pixel_y = min(height - 1, math.ceil(max(point[1] for point in points)))
+            sample_x, sample_y = min_pixel_x + 0.5, min_pixel_y + 0.5
+            row_w0 = edge(points[1], points[2], sample_x, sample_y) * inverse_area
+            row_w1 = edge(points[2], points[0], sample_x, sample_y) * inverse_area
+            row_w2 = 1 - row_w0 - row_w1
+            w0_step_x = -(points[2][1] - points[1][1]) * inverse_area
+            w1_step_x = -(points[0][1] - points[2][1]) * inverse_area
+            w0_step_y = (points[2][0] - points[1][0]) * inverse_area
+            w1_step_y = (points[0][0] - points[2][0]) * inverse_area
+            w2_step_x = -w0_step_x - w1_step_x
+            w2_step_y = -w0_step_y - w1_step_y
             for y in range(min_pixel_y, max_pixel_y + 1):
+                w0, w1, w2 = row_w0, row_w1, row_w2
+                pixel_index = y * width + min_pixel_x
                 for x in range(min_pixel_x, max_pixel_x + 1):
-                    sample_x, sample_y = x + 0.5, y + 0.5
-                    w0 = edge(points[1], points[2], sample_x, sample_y) * inverse_area
-                    w1 = edge(points[2], points[0], sample_x, sample_y) * inverse_area
-                    w2 = 1 - w0 - w1
-                    if min(w0, w1, w2) < -1e-7:
-                        continue
-                    depth = points[0][2] * w0 + points[1][2] * w1 + points[2][2] * w2
-                    put_pixel(x, y, depth, color)
+                    if min(w0, w1, w2) >= -1e-7:
+                        depth = points[0][2] * w0 + points[1][2] * w1 + points[2][2] * w2
+                        if depth + 1e-7 >= depth_buffer[pixel_index]:
+                            depth_buffer[pixel_index] = depth
+                            byte_index = pixel_index * 3
+                            pixels[byte_index:byte_index + 3] = color
+                    pixel_index += 1
+                    w0 += w0_step_x
+                    w1 += w1_step_x
+                    w2 += w2_step_x
+                row_w0 += w0_step_y
+                row_w1 += w1_step_y
+                row_w2 += w2_step_y
 
     line_color = bytes((167, 216, 115))
     point_color = bytes((245, 202, 114))

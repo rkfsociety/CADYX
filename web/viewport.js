@@ -415,34 +415,107 @@
     function buildSweepProgress(positions, path, plane) {
       const worldPath = path.map((point) => plane === "XZ"
         ? [point.x, 0, point.y] : [point.x, point.y, 0]);
-      const cumulative = [0];
-      for (let i = 1; i < worldPath.length; i += 1) {
-        cumulative.push(cumulative[i - 1] + Math.hypot(
-          worldPath[i][0] - worldPath[i - 1][0],
-          worldPath[i][1] - worldPath[i - 1][1],
-          worldPath[i][2] - worldPath[i - 1][2],
-        ));
+      const segments = [];
+      let totalLength = 0;
+      for (let index = 0; index + 1 < worldPath.length; index += 1) {
+        const a = worldPath[index], b = worldPath[index + 1];
+        const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+        const lengthSquared = dx * dx + dy * dy + dz * dz;
+        if (!lengthSquared) continue;
+        const length = Math.sqrt(lengthSquared);
+        segments.push({
+          index,
+          ax: a[0], ay: a[1], az: a[2], dx, dy, dz,
+          lengthSquared, length, cumulativeLength: totalLength,
+          minX: Math.min(a[0], b[0]), maxX: Math.max(a[0], b[0]),
+          minY: Math.min(a[1], b[1]), maxY: Math.max(a[1], b[1]),
+          minZ: Math.min(a[2], b[2]), maxZ: Math.max(a[2], b[2]),
+          centerX: (a[0] + b[0]) / 2,
+          centerY: (a[1] + b[1]) / 2,
+          centerZ: (a[2] + b[2]) / 2,
+        });
+        totalLength += length;
       }
-      const totalLength = cumulative.at(-1) || 1;
+      totalLength ||= 1;
       const perVertex = new Float32Array(positions.length / 3);
+      if (!segments.length) return perVertex;
+
+      const tree = buildSweepSegmentTree(segments);
+      const best = { distance: Infinity, length: 0, segmentIndex: Infinity };
+      function distanceToBoundsSquared(node, px, py, pz) {
+        const dx = px < node.minX ? node.minX - px : px > node.maxX ? px - node.maxX : 0;
+        const dy = py < node.minY ? node.minY - py : py > node.maxY ? py - node.maxY : 0;
+        const dz = pz < node.minZ ? node.minZ - pz : pz > node.maxZ ? pz - node.maxZ : 0;
+        return dx * dx + dy * dy + dz * dz;
+      }
+      function searchTree(node, px, py, pz, boundsDistance) {
+        if (boundsDistance > best.distance) return;
+        if (node.segments) {
+          for (const segment of node.segments) {
+            const t = Math.max(0, Math.min(1, ((px - segment.ax) * segment.dx
+              + (py - segment.ay) * segment.dy + (pz - segment.az) * segment.dz)
+              / segment.lengthSquared));
+            const qx = segment.ax + segment.dx * t;
+            const qy = segment.ay + segment.dy * t;
+            const qz = segment.az + segment.dz * t;
+            const dx = px - qx, dy = py - qy, dz = pz - qz;
+            const distance = dx * dx + dy * dy + dz * dz;
+            if (distance < best.distance || (distance === best.distance && segment.index < best.segmentIndex)) {
+              best.distance = distance;
+              best.length = segment.cumulativeLength + segment.length * t;
+              best.segmentIndex = segment.index;
+            }
+          }
+          return;
+        }
+        const leftDistance = distanceToBoundsSquared(node.left, px, py, pz);
+        const rightDistance = distanceToBoundsSquared(node.right, px, py, pz);
+        if (leftDistance <= rightDistance) {
+          searchTree(node.left, px, py, pz, leftDistance);
+          searchTree(node.right, px, py, pz, rightDistance);
+        } else {
+          searchTree(node.right, px, py, pz, rightDistance);
+          searchTree(node.left, px, py, pz, leftDistance);
+        }
+      }
+
       for (let vertex = 0; vertex < perVertex.length; vertex += 1) {
         const px = positions[vertex * 3], py = positions[vertex * 3 + 1], pz = positions[vertex * 3 + 2];
-        let nearest = Infinity, nearestLength = 0;
-        for (let segment = 0; segment + 1 < worldPath.length; segment += 1) {
-          const a = worldPath[segment], b = worldPath[segment + 1];
-          const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
-          const lengthSquared = dx * dx + dy * dy + dz * dz;
-          const t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy + (pz - a[2]) * dz) / lengthSquared));
-          const qx = a[0] + dx * t, qy = a[1] + dy * t, qz = a[2] + dz * t;
-          const distance = (px - qx) ** 2 + (py - qy) ** 2 + (pz - qz) ** 2;
-          if (distance < nearest) {
-            nearest = distance;
-            nearestLength = cumulative[segment] + Math.sqrt(lengthSquared) * t;
-          }
-        }
-        perVertex[vertex] = nearestLength / totalLength;
+        best.distance = Infinity;
+        best.length = 0;
+        best.segmentIndex = Infinity;
+        searchTree(tree, px, py, pz, distanceToBoundsSquared(tree, px, py, pz));
+        perVertex[vertex] = best.length / totalLength;
       }
       return perVertex;
+    }
+
+    function buildSweepSegmentTree(segments) {
+      const bounds = {
+        minX: Infinity, maxX: -Infinity,
+        minY: Infinity, maxY: -Infinity,
+        minZ: Infinity, maxZ: -Infinity,
+      };
+      for (const segment of segments) {
+        bounds.minX = Math.min(bounds.minX, segment.minX);
+        bounds.maxX = Math.max(bounds.maxX, segment.maxX);
+        bounds.minY = Math.min(bounds.minY, segment.minY);
+        bounds.maxY = Math.max(bounds.maxY, segment.maxY);
+        bounds.minZ = Math.min(bounds.minZ, segment.minZ);
+        bounds.maxZ = Math.max(bounds.maxZ, segment.maxZ);
+      }
+      if (segments.length <= 8) return { ...bounds, segments };
+
+      const spans = [bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, bounds.maxZ - bounds.minZ];
+      const axis = spans.indexOf(Math.max(...spans));
+      const centerKey = ["centerX", "centerY", "centerZ"][axis];
+      const ordered = segments.slice().sort((left, right) => left[centerKey] - right[centerKey]);
+      const middle = Math.floor(ordered.length / 2);
+      return {
+        ...bounds,
+        left: buildSweepSegmentTree(ordered.slice(0, middle)),
+        right: buildSweepSegmentTree(ordered.slice(middle)),
+      };
     }
 
     function buildVertexNormals(positions, triangles) {

@@ -7,10 +7,12 @@ committed revision. Observation requires no edit
 lease and does not alter `project.json`, command history or lease ownership.
 Read-only routes load the last atomically saved snapshot without waiting on an
 agent's edit lease, so the viewer can show the latest committed operation while
-the next command runs. Core caches validated geometry and rendered scenes by a
-hash of the full document content for the life of the host process. Repeated
-reads and page reloads reuse that scene; a document edit invalidates it, and
-callers receive copies so they cannot mutate the cache. Missing projects use
+the next command runs. Core checks a stat-only project-file token before loading
+and validating the full document; unchanged reads reuse the cached scene. On a
+cache miss, geometry-validation results are keyed by the document revision,
+which changes atomically with accepted edits. This avoids serializing and hashing
+large scan meshes just to check the cache. A document edit invalidates the scene,
+and callers receive copies so they cannot mutate the cache. Missing projects use
 the existing 404 contract; invalid geometry uses 400. The scene is derived,
 never persisted; no project/document migration is required.
 
@@ -55,7 +57,9 @@ sketch may reappear only while its profile is actively being edited, then is
 hidden when that edit finishes. Agent operation events animate each new sketch
 stroke and apply eased visual transitions to profile extrusions/revolutions,
 path sweeps, Boolean fuses, and edge fillets; consuming a sketch removes its
-overlay as the solid feature appears. Boolean fuse hides its consumed source
+overlay as the solid feature appears. Sweep animation precomputes each mesh
+vertex's progress along its nearest path segment using a segment AABB hierarchy,
+so it avoids scanning the entire path for every vertex. Boolean fuse hides its consumed source
 bodies and eases the newly connected B-rep into the scene. Sketch lines and points
 overlay solid shading only while that sketch is active (no hidden-line removal
 or viewport picking). The activity card contains the fixed `РАБОТА АГЕНТА`

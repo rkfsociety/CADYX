@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import math
 import threading
 from collections import OrderedDict
@@ -107,14 +105,15 @@ class CadyxCore:
         return self._clone_scene(scene)
 
     def _scene_for_project(self, project_id: str) -> tuple[tuple[str, str], dict[str, Any]]:
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
-        key = self._document_cache_key(project_id, document)
+        # Check the stat-only revision token before loading and validating the full document.
+        key = (project_id, self.workspace.project_revision_token(project_id))
         with self._geometry_cache_guard:
             cached_scene = self._scene_cache.get(key)
             if cached_scene is not None:
                 self._scene_cache.move_to_end(key)
                 return key, cached_scene
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
         self._validate_geometry_once(project_id, document)
         scene = render_scene(document, self.kernel)
         with self._geometry_cache_guard:
@@ -554,10 +553,11 @@ class CadyxCore:
         return clone
 
     @staticmethod
-    def _document_cache_key(project_id: str, document: Document) -> tuple[str, str]:
-        payload = json.dumps(document.to_dict(), ensure_ascii=False, sort_keys=True,
-                             separators=(",", ":"))
-        return project_id, hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    def _document_cache_key(project_id: str, document: Document | dict[str, Any]) -> tuple[str, str]:
+        # The revision changes atomically with every accepted document edit.
+        # Use it instead of serializing and hashing large scan meshes on reads.
+        revision = document.get("revision", 0) if isinstance(document, dict) else document.revision
+        return project_id, f"{type(revision).__name__}:{revision!r}"
 
     def _remember_geometry_validation(self, project_id: str, document: Document) -> None:
         key = self._document_cache_key(project_id, document)

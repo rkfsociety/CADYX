@@ -127,4 +127,17 @@ assert.deepEqual(drawnPoints[0], [300, 200], "The revolution axis stays at the c
 assert.ok(drawnPoints[1][0] < 600, "The full asymmetric model remains fitted around its revolution axis");
 viewer.setCamera({ yaw: 2.1, pitch: 0.7, zoom: 1, projection: "orthographic" });
 assert.deepEqual(drawnPoints[0], [300, 200], "Camera orbit keeps the revolution axis anchored at the viewport center");
-console.log("Viewport: Z-up, camera controls, sketch and revolve transitions, zoom, refresh and fit passed.");
+const sweepPath = Array.from({ length: 512 }, (_, index) => ({ x: index / 511, y: 0 }));
+viewer.load({
+  positions: [0, 0, 0, 0.5, 0, 1, 0.5, 0, 0, 1, 0, 1],
+  triangles: [0, 1, 2, 2, 1, 3], lines: [], points: [],
+  bounds: { min: [0, 0, 0], max: [1, 0, 1] },
+}, { reset: false, transition: { type: "sweep", path: sweepPath, plane: "XY", durationMs: 100 } });
+animationTime = 350;
+animationFrames.shift()(animationTime);
+assert.equal(meshMoves.length, 3, "A long sweep path reveals only its first mesh portion at half progress");
+animationTime = 400;
+animationFrames.shift()(animationTime);
+assert.equal(meshMoves.length, 6, "The sweep transition reveals the complete mesh when finished");
+console.log("Viewport: Z-up, camera controls, sketch, revolve and sweep transitions, zoom, refresh and fit passed.");
+

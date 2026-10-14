@@ -1,11 +1,13 @@
 import math
+import struct
 import unittest
+import zlib
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
-from cadyx.rendering import render_scene
+from cadyx.rendering import render_scene, render_scene_png
 
 
 class RenderingTests(unittest.TestCase):
@@ -41,7 +43,8 @@ class RenderingTests(unittest.TestCase):
         result = self.command({"type": "create_box", "width": 2, "height": 3, "depth": 5})
         first = self.core.render_project(self.project)
         first["objects"][0]["positions"][0] = 999
-        with patch("cadyx.core.render_scene", side_effect=AssertionError("scene should be cached")):
+        with patch("cadyx.core.render_scene", side_effect=AssertionError("scene should be cached")), \
+                patch("cadyx.core.Document.from_dict", side_effect=AssertionError("document should not be copied on a cache hit")):
             repeated = self.core.render_project(self.project)
         self.assertEqual(repeated["objects"][0]["positions"][0], 0,
                          "Cached scenes are returned as isolated copies")
@@ -52,6 +55,37 @@ class RenderingTests(unittest.TestCase):
             changed = self.core.render_project(self.project)
         self.assertEqual(render.call_count, 1, "A document revision change rebuilds the scene")
         self.assertEqual(changed["bounds"]["max"], [4, 3, 5])
+
+    def test_scene_cache_hit_avoids_document_copy(self):
+        first = self.core.render_project(self.project)
+        with patch("cadyx.core.Document.from_dict", side_effect=AssertionError("cache hit should skip document copy")):
+            repeated = self.core.render_project(self.project)
+        self.assertEqual(repeated, first)
+
+    def test_png_rasterizer_fills_a_mesh(self):
+        scene = {"objects": [{
+            "type": "body",
+            "positions": [0, 0, 0, 2, 0, 0, 2, 3, 0, 0, 3, 0, 0, 0, 5, 2, 0, 5, 2, 3, 5, 0, 3, 5],
+            "triangles": [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4,
+                          1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7],
+            "lines": [], "points": [],
+        }]}
+        image = render_scene_png(scene)
+        self.assertEqual(image[:8], b"\x89PNG\r\n\x1a\n")
+        position = 8
+        compressed = bytearray()
+        while position < len(image):
+            length = struct.unpack(">I", image[position:position + 4])[0]
+            kind = image[position + 4:position + 8]
+            payload = image[position + 8:position + 8 + length]
+            if kind == b"IDAT":
+                compressed.extend(payload)
+            position += length + 12
+        raw = zlib.decompress(compressed)
+        width, height = struct.unpack(">II", image[16:24])
+        self.assertEqual((width, height), (960, 720))
+        pixel_offset = 360 * (width * 3 + 1) + 1 + 480 * 3
+        self.assertNotEqual(raw[pixel_offset:pixel_offset + 3], bytes((20, 25, 28)))
 
     def test_empty_and_sketch_scene_and_parameter_refresh(self):
         self.assertIsNone(self.core.render_project(self.project)["bounds"])
@@ -89,3 +123,4 @@ class RenderingTests(unittest.TestCase):
         scene = self.core.render_project(self.project)
         rendered = next(item for item in scene["objects"] if item["object_id"] == point)
         self.assertEqual(rendered["positions"], [2, 0, 7])
+
