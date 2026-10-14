@@ -27,12 +27,13 @@ empty), and `objects`. Each render object has its stable `object_id`, document
 `type`, flat XYZ `positions`, and zero-based vertex index arrays: `triangles`
 (triples), `lines` (pairs), `points` (single indices). Empty arrays are explicit.
 Features, sketches and constraints have no independent visible geometry.
-Body triangles come from native OCCT tessellation, including face location
+OCCT B-rep triangles come from native tessellation, including face location
 transforms and outward winding. Viewport-only tessellation uses an absolute
 linear deflection of 0.16 document units to keep camera orbit responsive; this
 is a display approximation and does not alter the exact editable B-rep or
-exports. Supported saved solids include boxes, closed
-profile extrusions and revolutions. XY sketch points/lines lie at Z=0; XZ
+exports. Editable OCCT solids include boxes, closed-profile extrusions and
+revolutions, swept pipes, Boolean fuses, and fillets. Imported scans remain
+validated `cadyx-mesh-v1` triangle meshes rather than B-reps. XY sketch points/lines lie at Z=0; XZ
 sketches map their points/lines onto Y=0 with stored y becoming global Z.
 Circles use 64 closed segments, a display approximation rather than replacement
 CAD geometry. Coordinates retain document units without inventing a physical
@@ -52,10 +53,10 @@ points/lines, and sketches already referenced by a solid feature are omitted
 from both the viewport and the user-facing object tree. A previously used
 sketch may reappear only while its profile is actively being edited, then is
 hidden when that edit finishes. Agent operation events animate each new sketch
-stroke and the formation of profile extrusions/revolutions with eased
-transitions; consuming a sketch removes its overlay as the solid feature
-appears. Boolean fuse hides its consumed source bodies and eases the newly
-connected B-rep into the scene. Sketch lines and points
+stroke and apply eased visual transitions to profile extrusions/revolutions,
+path sweeps, Boolean fuses, and edge fillets; consuming a sketch removes its
+overlay as the solid feature appears. Boolean fuse hides its consumed source
+bodies and eases the newly connected B-rep into the scene. Sketch lines and points
 overlay solid shading only while that sketch is active (no hidden-line removal
 or viewport picking). The activity card contains the fixed `РАБОТА АГЕНТА`
 label and one status line; it shows the current action, a short completion or
@@ -115,4 +116,4 @@ sketch rendering, parameter refresh and read-only persistence;
 `tests/test_web_api.py` checks both endpoints and unchanged inspection state;
 `tests/test_viewport.cjs` checks Z-up projection, top view, coordinate axes,
 vertical drag, zoom, camera validation, fit and camera preservation. See
-[run/check commands](../README.md).
+[run/check commands](../../README.md).

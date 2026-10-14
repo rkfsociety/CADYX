@@ -12,7 +12,7 @@ Every project lives at `projects/<project-name>/project.json`. The directory nam
   "modified_at": "<UTC ISO-8601>",
   "document": {
     "id": "document:<uuid>",
-    "version": 2,
+    "version": 3,
     "revision": 0,
     "objects": []
   },

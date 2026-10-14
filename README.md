@@ -1,6 +1,6 @@
 # CADYX
 
-CADYX is an AI-first CAD foundation prototype. Agents create projects and modify models through the Agent API and shared Core Command System; a per-project edit lease prevents concurrent writes. The provider-neutral in-process Agent Runtime can orchestrate a provider adapter and project tools without adding a provider dependency. The browser is a read-only, full-window detail viewer with collapsed model and property docks, plus a visual panel of the agent's current/completed operation stages and model result. Agents can fetch a server-rendered PNG snapshot through the Agent API without using a browser.
+CADYX is an AI-first CAD foundation prototype. Agents create projects and modify models through the Agent API and shared Core Command System; a per-project edit lease prevents concurrent writes. The provider-neutral in-process Agent Runtime can orchestrate a provider adapter and project tools without adding a provider dependency. The browser is a read-only, full-window detail viewer with collapsed model and property docks and a single-line agent action/result status. Agents can fetch a server-rendered PNG snapshot through the Agent API without using a browser.
 
 ## Run locally
 
@@ -46,7 +46,7 @@ Agents and operators can restart the host without browser interaction by running
 
 Use `-Action Status`, `-Action Stop`, or `-Action Uninstall` to manage the task. After moving the checkout or rebuilding its local runtime, run `-Action Install` again to refresh the registered paths and restart the host.
 
-Multiple current hosts may share a workspace on the same local machine; see the [lease contract](docs/architecture.md#edit-leases). SSE updates remain local to each host. The project workspace is `projects/`. Runtime project data is ignored by Git; keep source CAD files and scans backed up as user data.
+Multiple current hosts may share a workspace on the same local machine; see the [lease contract](.codex/docs/architecture.md#edit-leases). SSE updates remain local to each host. The project workspace is `projects/`. Runtime project data is ignored by Git; keep source CAD files and scans backed up as user data.
 
 ## Check
 
@@ -59,7 +59,7 @@ Multiple current hosts may share a workspace on the same local machine; see the 
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](docs/project-format-v1.md), [docs/document-model-v3.md](docs/document-model-v3.md), and [.codex/roadmap.md](.codex/roadmap.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, a durable per-project SQLite edit lease manager, a shared command system, and an Open CASCADE geometry-kernel adapter. Boxes, sketch extrusions, and sketch revolutions are rebuilt from JSON-safe parameters; reconstructed scan meshes are stored as bounded, compressed, validated triangle arrays, so native objects are never stored in project files. The JSON APIs support XY/XZ sketches with stable point/line/circle references, checked constraints, and linked extrusion/revolution features. Agents use the Agent API to create and edit models. The read-only browser displays all supported bodies and sketch elements through the shared [viewport contract](docs/viewport-api.md), and previews PLY files using the same renderer.
+See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/project-format-v1.md](.codex/docs/project-format-v1.md), [.codex/docs/document-model-v3.md](.codex/docs/document-model-v3.md), and [.codex/roadmap.md](.codex/roadmap.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, durable per-project SQLite edit leases, a shared command system, and an Open CASCADE geometry-kernel adapter. Editable OCCT B-reps include boxes, sketch extrusions and revolutions, path sweeps, Boolean fuses, and edge fillets. Imported scan results remain validated triangle meshes rather than B-reps; native kernel objects are never stored in project files. The JSON APIs support XY/XZ sketches with stable point/line/circle references, checked constraints, and linked solid features. Agents use the Agent API to create and edit models. The read-only browser displays supported bodies and sketch elements through the shared [viewport contract](.codex/docs/viewport-api.md), and previews PLY files using the same renderer.
 
 ## API starting points
 
@@ -72,11 +72,12 @@ See [docs/architecture.md](docs/architecture.md), [docs/project-format-v1.md](do
 - `POST /api/v1/projects/{id}/leases` with `owner_type` and `owner_id`
 - `POST /api/v1/projects/{id}/commands` with a human `lease_id` and a command
 - Agent equivalents under `/api/v1/agent/projects`
-- `extrude_sketch` and `revolve_sketch` commands for OCCT profile solids; see the [feature contract](docs/document-model-v3.md#sketch-driven-solid-features)
-- `import_scan` and `set_scan_parameter` commands for PLY-to-mesh reconstruction; see the [scan command contract](docs/document-model-v3.md#scan-import-and-editable-triangle-meshes)
-- `POST /api/v1/agent/projects/{id}/viewport/camera` to animate the selected browser viewport from the Agent API; see the [viewport contract](docs/viewport-api.md)
+- `extrude_sketch`, `revolve_sketch`, `sweep_sketch`, `fuse_bodies`, and `fillet_edges` commands for editable OCCT solids; see the [feature contract](.codex/docs/document-model-v3.md#sketch-driven-solid-features)
+- `GET /api/v1/agent/projects/{id}/topology?body_id=...` to inspect current B-rep edges before selecting fillets; edge indices must be refreshed after upstream edits
+- `import_scan` and `set_scan_parameter` commands for PLY-to-mesh reconstruction; see the [scan command contract](.codex/docs/document-model-v3.md#scan-import-and-editable-triangle-meshes)
+- `POST /api/v1/agent/projects/{id}/viewport/camera` to animate the selected browser viewport from the Agent API; see the [viewport contract](.codex/docs/viewport-api.md)
 - `GET /api/v1/projects/{id}/activity` and its Agent API equivalent return the recent visual activity snapshots; `agent.activity` SSE events update them live
-- Agent `/stop` with `lease_id` and `/resume` with `owner_id` / `expected_revision`; resumed commands require `expected_revision`. See the [stop/resume contract](docs/architecture.md#safe-agent-stop-and-resume).
+- Agent `/stop` with `lease_id` and `/resume` with `owner_id` / `expected_revision`; resumed commands require `expected_revision`. See the [stop/resume contract](.codex/docs/architecture.md#safe-agent-stop-and-resume).
 - `/api/v1/updates` is polled automatically alongside SSE so project, workspace-file, activity, and UI-asset changes appear without a manual page refresh
 - `GET /api/v1/events` for the SSE update channel
 
@@ -89,4 +90,4 @@ Provider adapters translate native model requests and responses to CADYX's
 provider-neutral messages, tool specifications and tool calls. The runtime
 offers project inspection, viewport inspection and revision-checked command
 execution, managing the agent lease for each run. No provider adapter is
-included. See the [Agent Runtime contract](docs/architecture.md#agent-runtime).
+included. See the [Agent Runtime contract](.codex/docs/architecture.md#agent-runtime).

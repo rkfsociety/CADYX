@@ -193,7 +193,7 @@ depth 5–9. The CPU processor caps itself at four threads and downsamples point
 clouds to at most 100,000 points; input PLYs are limited to 512 MiB, 2 million
 vertices, and 5 million faces. The processor is the hash-pinned CPU Open3D
 0.20.0 SDK behind a native C ABI bridge, so it does not depend on CADYX's Python
-ABI. See [runtime setup](../README.md#run-locally).
+ABI. See [runtime setup](../../README.md#run-locally).
 
 The Core emits `agent.activity` SSE snapshots as the scan moves through source
 validation, mesh or point-cloud cleanup, reconstruction, validation, sidecar
@@ -212,8 +212,9 @@ window by default; the model tree and properties are available in collapsed
 docks. The tree lists bodies and their features, plus only the sketch currently
 being edited and its points, lines, circles and constraints. Inactive sketches
 and sketches consumed by solid features are hidden from the tree and viewport.
-The viewport renders supported bodies and smoothly animates active sketch and
-profile-feature changes; view controls do not edit document state.
+The viewport renders supported bodies and smoothly animates active sketch,
+profile-feature, sweep, fuse, and fillet changes; view controls do not edit
+document state.
 
 Agents create and edit models through the Agent API under an agent edit lease.
 Projects are also created through the Agent API. Agents can get a server-rendered
