@@ -23,9 +23,9 @@ const folderPreviewPlaceholder = $("#folder-preview-placeholder");
 const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
 const modelViewer = window.CadyxViewport.createViewer($("#model-preview"), { showViewCube: true, wireframe: true });
 const orthographicViewers = [
-  { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true }), camera: { yaw: 0, pitch: 0 } },
-  { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true }), camera: { yaw: Math.PI / 2, pitch: 0 } },
-  { viewer: window.CadyxViewport.createViewer($("#ortho-top"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true }), camera: { yaw: 0, pitch: Math.PI / 2 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: 0 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: Math.PI / 2, pitch: 0 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-top"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: Math.PI / 2 } },
 ];
 orthographicViewers.forEach((view) => {
   view.viewer.setCamera({ ...view.camera, zoom: 1, projection: "orthographic" });
@@ -893,7 +893,7 @@ function renderAgentActivity(value, lock = null) {
   const action = runningActivity?.action || (agentLeaseActive ? "Обрабатывает CAD workflow" : activity?.action) || "Работает";
   title.textContent = state === "running" ? action
     : state === "failed" ? `${action} · ошибка`
-      : recentCompletion ? `${action} · готово` : "Думает";
+      : recentCompletion ? `${action} · готово` : "Ожидает задачу";
   $("#agent-runtime-label").textContent = state === "running"
     ? "CADYX AGENT · executing workflow" : "CADYX AGENT · provider-neutral runtime";
   if (recentCompletion && activityStatusOperationId !== activity.operation_id) {

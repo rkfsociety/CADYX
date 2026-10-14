@@ -2,7 +2,15 @@
   const MAX_PREVIEW_POINTS = 24000;
   const MAX_CAMERA_PITCH = Math.PI / 2;
   const featureEdgesCache = new WeakMap();
-  function createViewer(canvas, { showViewCube = false, showCoordinateGizmo = true, showRotationAxes = true, wireframe = false } = {}) {
+  function createViewer(canvas, {
+    showViewCube = false,
+    showCoordinateGizmo = true,
+    showRotationAxes = true,
+    wireframe = false,
+    shaded = true,
+    wireframeColor = "#69d9c4",
+    wireframeOpacity = 0.46,
+  } = {}) {
     const context = canvas.getContext("2d", { alpha: true });
     let geometry = null;
     let yaw = 0.68;
@@ -46,14 +54,14 @@
       return [x, y, value.bounds.min[2] / 2 + value.bounds.max[2] / 2];
     }
 
-    function fitRadiusFromBounds(bounds, center) {
+    function fitRadiusFromPositions(positions, center) {
       let radius = 0;
-      for (const x of [bounds.min[0], bounds.max[0]]) {
-        for (const y of [bounds.min[1], bounds.max[1]]) {
-          for (const z of [bounds.min[2], bounds.max[2]]) {
-            radius = Math.max(radius, Math.hypot(x - center[0], y - center[1], z - center[2]));
-          }
-        }
+      for (let index = 0; index < positions.length; index += 3) {
+        radius = Math.max(radius, Math.hypot(
+          positions[index] - center[0],
+          positions[index + 1] - center[1],
+          positions[index + 2] - center[2],
+        ));
       }
       return Math.max(radius, 0.001);
     }
@@ -179,7 +187,8 @@
 
       if (triangles.length) renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress,
-        geometry.vertexNormals, yaw, pitch, geometry.featureEdges, wireframe, dpr,
+        geometry.vertexNormals, yaw, pitch, geometry.featureEdges, wireframe, shaded,
+        wireframeColor, wireframeOpacity, dpr,
       );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale);
       for (let index = 0; index < (geometry.lines || []).length; index += 2) {
@@ -333,7 +342,7 @@
     }
 
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress,
-      vertexNormals, yaw, pitch, featureEdges, showWireframe, dpr) {
+      vertexNormals, yaw, pitch, featureEdges, showWireframe, shaded, wireframeColor, wireframeOpacity, dpr) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
       const cosYaw = Math.cos(yaw), sinYaw = Math.sin(yaw);
@@ -395,34 +404,36 @@
 
       const visibleFaces = faceOrder.subarray(0, visibleCount);
       visibleFaces.sort((left, right) => faceRecords[left * 8 + 6] - faceRecords[right * 8 + 6]);
-      for (const face of visibleFaces) {
-        const offset = face * 8;
-        const brightness = faceRecords[offset + 7];
-        const first = triangles[face * 3];
-        const second = triangles[face * 3 + 1];
-        const third = triangles[face * 3 + 2];
-        const steel = Math.round(78 + brightness * 85);
-        let red = Math.round(steel * 0.94), blue = Math.round(steel * 1.08), finalGreen = steel;
-        const forming = transition?.vertexRange
-          && [first, second, third].every((vertex) => vertex >= transition.vertexRange[0] && vertex < transition.vertexRange[1]);
-        if (forming && progress < 1) {
-          const glow = (1 - progress) * 0.38;
-          red = Math.round(red + (112 - red) * glow);
-          finalGreen = Math.round(finalGreen + (218 - finalGreen) * glow);
-          blue = Math.round(blue + (236 - blue) * glow);
+      if (shaded) {
+        for (const face of visibleFaces) {
+          const offset = face * 8;
+          const brightness = faceRecords[offset + 7];
+          const first = triangles[face * 3];
+          const second = triangles[face * 3 + 1];
+          const third = triangles[face * 3 + 2];
+          const steel = Math.round(78 + brightness * 85);
+          let red = Math.round(steel * 0.94), blue = Math.round(steel * 1.08), finalGreen = steel;
+          const forming = transition?.vertexRange
+            && [first, second, third].every((vertex) => vertex >= transition.vertexRange[0] && vertex < transition.vertexRange[1]);
+          if (forming && progress < 1) {
+            const glow = (1 - progress) * 0.38;
+            red = Math.round(red + (112 - red) * glow);
+            finalGreen = Math.round(finalGreen + (218 - finalGreen) * glow);
+            blue = Math.round(blue + (236 - blue) * glow);
+          }
+          context.fillStyle = `rgb(${red}, ${finalGreen}, ${blue})`;
+          context.beginPath();
+          context.moveTo(faceRecords[offset], faceRecords[offset + 1]);
+          context.lineTo(faceRecords[offset + 2], faceRecords[offset + 3]);
+          context.lineTo(faceRecords[offset + 4], faceRecords[offset + 5]);
+          context.closePath();
+          context.fill();
         }
-        context.fillStyle = `rgb(${red}, ${finalGreen}, ${blue})`;
-        context.beginPath();
-        context.moveTo(faceRecords[offset], faceRecords[offset + 1]);
-        context.lineTo(faceRecords[offset + 2], faceRecords[offset + 3]);
-        context.lineTo(faceRecords[offset + 4], faceRecords[offset + 5]);
-        context.closePath();
-        context.fill();
       }
       if (showWireframe && featureEdges?.length) {
         context.save();
-        context.strokeStyle = "#69d9c4";
-        context.globalAlpha = 0.46;
+        context.strokeStyle = wireframeColor;
+        context.globalAlpha = wireframeOpacity;
         context.lineWidth = Math.max(0.65, 0.72 * dpr);
         const edgesPerPath = 3500;
         for (let start = 0; start < featureEdges.length; start += edgesPerPath * 2) {
@@ -507,6 +518,7 @@
       },
       load(value, { reset = true, transition: nextTransition = null, smoothShading = false } = {}) {
         const orbitCenter = orbitCenterFor(value);
+        const fitCenter = orbitCenter || value.bounds.min.map((min, axis) => min / 2 + value.bounds.max[axis] / 2);
         const sourceTriangles = value.triangles || [];
         let featureEdges = featureEdgesCache.get(sourceTriangles);
         if (!featureEdges) {
@@ -516,7 +528,7 @@
         geometry = {
           ...value,
           orbitCenter,
-          fitRadius: orbitCenter ? fitRadiusFromBounds(value.bounds, orbitCenter) : null,
+          fitRadius: fitRadiusFromPositions(value.positions, fitCenter),
           featureEdges,
           vertexNormals: smoothShading ? buildVertexNormals(value.positions, value.triangles || []) : null,
         };
