@@ -8,6 +8,7 @@ import mimetypes
 import os
 import re
 import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,15 +33,29 @@ class ProjectWorkspace:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self._project_path_guard = threading.RLock()
+        self._project_path_by_id: dict[str, Path] = {}
+        self._project_id_by_path: dict[Path, str] = {}
 
     def _project_dir(self, project_id: str) -> Path:
         if not isinstance(project_id, str) or not _PROJECT_ID.fullmatch(project_id):
             raise NotFoundError("Project was not found.")
+        with self._project_path_guard:
+            cached = self._project_path_by_id.get(project_id)
+        if cached is not None:
+            try:
+                if not cached.is_symlink() and cached.is_dir() and cached.resolve(strict=True).parent == self.root:
+                    return cached
+            except OSError:
+                pass
+            self._forget_project_path(project_id, cached)
         legacy_path = self.root / project_id
         if legacy_path.is_dir() and not legacy_path.is_symlink():
-            return legacy_path.resolve()
+            resolved = legacy_path.resolve()
+            self._remember_project_path(project_id, resolved)
+            return resolved
         for entry in self._project_directories():
-            if self._project_record_id(entry) == project_id:
+            if self._project_id_for_directory(entry) == project_id:
                 return entry
         raise NotFoundError("Project was not found.")
 
@@ -61,10 +76,14 @@ class ProjectWorkspace:
         }
         project_dir = self._create_project_directory(project["name"], project_id)
         self._write_atomic(project_dir / "project.json", project)
+        self._remember_project_path(project_id, project_dir)
         return project
 
     def load(self, project_id: str) -> dict[str, Any]:
-        project_file = self._project_dir(project_id) / "project.json"
+        return self._load_project_from_directory(self._project_dir(project_id), project_id)
+
+    def _load_project_from_directory(self, directory: Path, project_id: str) -> dict[str, Any]:
+        project_file = directory / "project.json"
         try:
             with project_file.open("r", encoding="utf-8") as stream:
                 project = json.load(stream)
@@ -74,6 +93,7 @@ class ProjectWorkspace:
             raise ValidationError(f"Project file could not be read: {exc}.") from exc
         project = migrate_project(project)
         self._validate_current(project, expected_id=project_id)
+        self._remember_project_path(project_id, directory)
         return project
 
     def save(self, project: dict[str, Any]) -> None:
@@ -87,22 +107,16 @@ class ProjectWorkspace:
         projects: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
         for entry in self._project_directories():
-            project_file = entry / "project.json"
-            if project_file.is_symlink() or not project_file.is_file():
+            project_id = self._project_id_for_directory(entry)
+            if project_id is None:
                 continue
-            if _PROJECT_ID.fullmatch(entry.name):
-                project_id = entry.name
-            else:
-                project_id = self._project_record_id(entry)
-                if project_id is None:
-                    continue
             if project_id in seen_ids:
                 raise ConflictError(
                     f"More than one workspace folder contains project '{project_id}'.",
                     code="DUPLICATE_PROJECT_ID",
                 )
             seen_ids.add(project_id)
-            projects.append(self.load(project_id))
+            projects.append(self._load_project_from_directory(entry, project_id))
         projects.sort(key=lambda item: (item["name"].casefold(), item["id"]))
         return projects
 
@@ -110,14 +124,7 @@ class ProjectWorkspace:
         """Return direct workspace directories that do not contain a CADYX project record."""
         folders: list[str] = []
         for entry in self._project_directories():
-            if not entry.is_dir() or entry.is_symlink():
-                continue
-            if self._is_project_directory(entry):
-                continue
-            try:
-                if entry.resolve(strict=True).parent != self.root:
-                    continue
-            except OSError:
+            if self._project_id_for_directory(entry) is not None:
                 continue
             folders.append(entry.name)
         folders.sort(key=str.casefold)
@@ -150,11 +157,8 @@ class ProjectWorkspace:
         entries: list[tuple[str, str, int, int]] = []
         for entry in sorted(self._project_directories(), key=lambda item: item.name.casefold()):
             try:
-                if self._is_project_directory(entry):
+                if self._project_id_for_directory(entry) is not None:
                     project_file = entry / "project.json"
-                    if project_file.is_symlink() or not project_file.is_file():
-                        entries.append((entry.name, "folder", 0, 0))
-                        continue
                     stat = project_file.stat()
                     entries.append((entry.name, "project", stat.st_mtime_ns, stat.st_size))
                 else:
@@ -269,7 +273,7 @@ class ProjectWorkspace:
             raise NotFoundError("Project folder was not found.") from exc
         if resolved.parent != self.root:
             raise NotFoundError("Project folder was not found.")
-        if self._is_project_directory(resolved):
+        if self._project_id_for_directory(resolved) is not None:
             raise NotFoundError("Project folder was not found.")
         return resolved
 
@@ -289,6 +293,40 @@ class ProjectWorkspace:
         except OSError:
             return directories
         return directories
+
+    def _project_id_for_directory(self, directory: Path) -> str | None:
+        project_file = directory / "project.json"
+        if project_file.is_symlink() or not project_file.is_file():
+            return None
+        if _PROJECT_ID.fullmatch(directory.name):
+            self._remember_project_path(directory.name, directory)
+            return directory.name
+        with self._project_path_guard:
+            cached = self._project_id_by_path.get(directory)
+        if cached is not None:
+            return cached
+        project_id = self._project_record_id(directory)
+        if project_id is not None:
+            self._remember_project_path(project_id, directory)
+        return project_id
+
+    def _remember_project_path(self, project_id: str, directory: Path) -> None:
+        with self._project_path_guard:
+            previous_path = self._project_path_by_id.get(project_id)
+            if previous_path is not None and previous_path != directory:
+                self._project_id_by_path.pop(previous_path, None)
+            previous_id = self._project_id_by_path.get(directory)
+            if previous_id is not None and previous_id != project_id:
+                self._project_path_by_id.pop(previous_id, None)
+            self._project_path_by_id[project_id] = directory
+            self._project_id_by_path[directory] = project_id
+
+    def _forget_project_path(self, project_id: str, directory: Path) -> None:
+        with self._project_path_guard:
+            if self._project_path_by_id.get(project_id) == directory:
+                self._project_path_by_id.pop(project_id, None)
+            if self._project_id_by_path.get(directory) == project_id:
+                self._project_id_by_path.pop(directory, None)
 
     @staticmethod
     def _project_record_id(directory: Path) -> str | None:
@@ -315,8 +353,7 @@ class ProjectWorkspace:
         return project_id
 
     def _is_project_directory(self, directory: Path) -> bool:
-        return _PROJECT_ID.fullmatch(directory.name) is not None and (directory / "project.json").is_file() \
-            or self._project_record_id(directory) is not None
+        return self._project_id_for_directory(directory) is not None
 
     def _create_project_directory(self, name: str, project_id: str) -> Path:
         base_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", name.strip())
