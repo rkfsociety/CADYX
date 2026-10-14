@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.24)
+project(cadyx_kernel LANGUAGES CXX)
+if(NOT OCCT_ROOT)
+  message(FATAL_ERROR "Set OCCT_ROOT to the OCCT SDK directory")
+endif()
+add_library(cadyx_kernel SHARED kernel.cpp)
+target_compile_features(cadyx_kernel PRIVATE cxx_std_17)
+target_include_directories(cadyx_kernel PRIVATE "${OCCT_ROOT}/Library/include/opencascade")
+target_link_directories(cadyx_kernel PRIVATE "${OCCT_ROOT}/Library/lib")
+target_link_libraries(cadyx_kernel PRIVATE TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep
+  TKGeomAlgo TKTopAlgo TKPrim TKMesh)

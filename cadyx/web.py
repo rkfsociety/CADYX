@@ -59,6 +59,12 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
                     return
                 prefix = ["api", "v1", "projects"]
                 agent_prefix = ["api", "v1", "agent", "projects"]
+                if len(parts) == 5 and parts[:3] == prefix and parts[4] == "viewport":
+                    self._json(200, core.render_project(parts[3]))
+                    return
+                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "viewport":
+                    self._json(200, core.render_project(parts[4]))
+                    return
                 if len(parts) == 4 and parts[:3] == prefix:
                     self._json(200, core.inspect_project(parts[3]))
                     return
@@ -73,6 +79,9 @@ def make_request_handler(core: CadyxCore) -> type[BaseHTTPRequestHandler]:
                     return
                 if parsed.path == "/assets/app.js":
                     self._static("app.js", "text/javascript; charset=utf-8")
+                    return
+                if parsed.path == "/assets/viewport.js":
+                    self._static("viewport.js", "text/javascript; charset=utf-8")
                     return
                 if parsed.path == "/assets/ply-preview.js":
                     self._static("ply-preview.js", "text/javascript; charset=utf-8")

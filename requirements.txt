@@ -1,1 +1,2 @@
-cadquery-ocp==8.0.1.1.0
+# Python runtime uses only the standard library.
+# Native OCCT SDK and the project C ABI bridge: scripts/setup-runtime.ps1.

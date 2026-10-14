@@ -1,0 +1,17 @@
+{
+  "reviewed_on": "2026-10-14",
+  "python": {
+    "version": "3.15.0",
+    "url": "https://www.python.org/ftp/python/3.15.0/python-3.15.0-embed-amd64.zip",
+    "sha256": "a6999bcbcbe56f937159ef79c2630260eca99f65f7860bc5cd20430324079a44"
+  },
+  "occt": {
+    "version": "8.0.1",
+    "build": "novtk_h6bfc850_101",
+    "url": "https://api.anaconda.org/download/conda-forge/occt/8.0.1/win-64/occt-8.0.1-novtk_h6bfc850_101.conda",
+    "sha256": "a87336f2f318be46188479ad593b8b0c3129b7f2e25f5e7fd97ec0c7efc2f4eb"
+  },
+  "node": {
+    "version": "26.11.1"
+  }
+}

@@ -11,7 +11,8 @@ Browser ----------------> Web API -> CADYX Core -> Project Workspace
                                       +-> event broker -> SSE -> Browser
 ```
 
-The first pass is a local prototype with multi-process coordination. It uses Python 3.12+ standard-library modules for the Core and HTTP server, with plain browser HTML/CSS/JavaScript. Open CASCADE is provided through the pinned `cadquery-ocp` bindings, including VTK for the planned shared rendering and viewport API; there are no AI-provider integrations. The browser displays supported CADYX box geometry as an isometric SVG preview and can preview binary little-endian PLY meshes and point clouds from folder projects in a rotatable canvas. PLY rendering samples large inputs to keep the browser responsive. The project stream is an internal synchronization mechanism; the UI does not expose an agent command feed. There is no embedded Agent Runtime yet, so an external agent must use the Agent API.
+The local prototype uses Python standard-library modules for the Core and HTTP server, with plain browser HTML/CSS/JavaScript. The current Windows x64 runtime uses Python 3.15 and native OCCT 8.0.1 through a project-built C ABI bridge (`native/`, `cadyx/native_kernel.py`), independent of Python extension ABIs. It replaces the former cadquery-ocp/VTK dependency to permit the newest stable Python without bypassing dependency checks. The browser consumes Core-generated meshes and XY sketch primitives using the same Z-up orthographic canvas viewport as folder PLY previews. PLY rendering samples large inputs to keep the browser responsive. The project stream synchronizes snapshots; the UI does not expose an agent command feed. External agents still use the Agent API; no embedded Agent Runtime exists. See [viewport API](viewport-api.md) and [setup](../README.md).
+
 
 ## Core and storage
 
@@ -77,7 +78,7 @@ are outside this API milestone.
 
 ## Commands and geometry
 
-The initial command registry supports `create_box` and `set_parameter` for box dimensions. Object ids use typed UUIDs such as `body:<uuid>` and `feature:<uuid>`. The `GeometryKernel` protocol isolates CADYX Core from a specific kernel. The default `OCPKernelAdapter` creates box B-reps with Open CASCADE, checks topology with `BRepCheck_Analyzer`, and gets volume from kernel mass properties. Project files store JSON-safe dimensions and measured volume; the kernel shape is regenerated and checked instead of serializing a native object. The adapter continues to validate existing `primitive-v1` descriptors. `PrimitiveKernelAdapter` remains available for demos and does not create B-rep geometry.
+The initial command registry supports `create_box` and `set_parameter` for box dimensions. Object ids use typed UUIDs such as `body:<uuid>` and `feature:<uuid>`. The `GeometryKernel` protocol isolates CADYX Core from a specific kernel. The default `OCCTKernelAdapter` creates box B-reps with Open CASCADE, checks topology with `BRepCheck_Analyzer`, and gets volume from kernel mass properties. Project files store JSON-safe dimensions and measured volume; the kernel shape is regenerated and checked instead of serializing a native object. The adapter continues to validate existing `primitive-v1` descriptors. `PrimitiveKernelAdapter` remains available for demos and does not create B-rep geometry.
 
 ## APIs and events
 
@@ -89,8 +90,8 @@ check the supplied geometry without solving it. The existing command endpoints
 support these objects under the same leases and atomic save path. Document v1
 is upgraded in memory; the project envelope stays at version 1. See
 [Document Model v2](document-model-v2.md) for the supported commands, migration
-policy and exact semantics. Sketch rendering/editing in the browser remains
-future work.
+policy and exact semantics. Sketch points, lines and circles now render in the
+shared viewport; browser sketch editing remains future work.
 
 The HTTP API uses JSON under `/api/v1`. The Agent API is under `/api/v1/agent`; it shares Core operations and requires an agent lease for commands. Both `GET /api/v1/projects` and `GET /api/v1/agent/projects` return persisted CADYX projects in `projects` and immediate project-directory names in `folders`. `GET /api/v1/workspace/folders/{folder}/files` lists direct regular files; the corresponding `/files/{name}` route serves an individual file for browser preview. Folder entries are available for discovery and preview; project inspection, leases, and CADYX document commands continue to apply to persisted CADYX project records. The browser API is under `/api/v1/projects` and requires a human lease for commands. Both command routes enter the same Command System. Project updates are broadcast in-process over server-sent events at `/api/v1/events`; event history is not replayed after reconnect, so clients refresh project state through the API.
 

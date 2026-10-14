@@ -40,6 +40,17 @@ class OCPKernelAdapterConformanceTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.kernel.validate({"kernel": "unknown-v1"})
 
+    def test_native_construction_failure_returns_validation_error(self) -> None:
+        # Positive dimensions below OCCT's construction tolerance reach the
+        # native boundary; its exception must not escape or crash the host.
+        with self.assertRaises(ValidationError):
+            self.kernel.create_box(width=1e-12, height=2, depth=3)
+
+    def test_tessellation_accepts_legacy_descriptor(self) -> None:
+        legacy = PrimitiveKernelAdapter().create_box(width=2, height=3, depth=5)
+        mesh = self.kernel.tessellate(legacy)
+        self.assertEqual(len(mesh["triangles"]), 36)
+
     def test_validate_accepts_existing_primitive_descriptors(self) -> None:
         legacy_geometry = PrimitiveKernelAdapter().create_box(width=2, height=3, depth=5)
 

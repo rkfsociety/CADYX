@@ -15,7 +15,11 @@ const noSelection = $("#no-selection");
 const folderFileList = $("#folder-file-list");
 const folderPreviewCanvas = $("#ply-preview-canvas");
 const folderPreviewPlaceholder = $("#folder-preview-placeholder");
-const plyViewer = window.CadyxPlyPreview.createViewer(folderPreviewCanvas);
+const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
+const modelViewer = window.CadyxViewport.createViewer($("#model-preview"));
+let renderedSceneKey = null;
+let detailRequest = 0;
+$("#viewport-fit").addEventListener("click", () => modelViewer.fit());
 const toast = $("#toast");
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const dateFormat = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -390,8 +394,29 @@ function scheduleWorkspaceRefresh() {
 async function refreshDetail() {
   const projectId = selectedProjectId;
   if (!projectId) return;
+  const request = ++detailRequest;
   const info = await api(`/api/v1/projects/${encodeURIComponent(projectId)}`);
-  if (projectId !== selectedProjectId) return;
+  const scene = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/viewport`);
+  if (projectId !== selectedProjectId || request !== detailRequest) return;
+  if (scene.revision !== info.document.revision) { scheduleWorkspaceRefresh(); return; }
+  const key = `${projectId}:${scene.revision}`;
+  if (renderedSceneKey !== key) {
+    const positions = [], triangles = [], lines = [], points = [];
+    for (const object of scene.objects) {
+      const offset = positions.length / 3;
+      for (const value of object.positions) positions.push(value);
+      for (const index of object.triangles) triangles.push(index + offset);
+      for (const index of object.lines) lines.push(index + offset);
+      for (const index of object.points) points.push(index + offset);
+    }
+    if (scene.bounds) modelViewer.load({ positions, triangles, lines, points, bounds: scene.bounds },
+      { reset: !renderedSceneKey?.startsWith(`${projectId}:`) });
+    renderedSceneKey = key;
+  }
+  $("#viewport-empty").hidden = scene.objects.length > 0;
+  $("#model-preview").hidden = scene.objects.length === 0;
+  $("#viewport-label").textContent = `${scene.objects.length} объектов`;
+  modelViewer.render();
 
   $("#folder-detail").hidden = true;
   projectDetail.hidden = false;
@@ -468,69 +493,14 @@ function updateManualControls(projectId, lock) {
   $("#create-box-form").hidden = held?.ownerType !== "human";
 }
 
-function svgElement(name, attributes = {}) {
-  const element = document.createElementNS("http://www.w3.org/2000/svg", name);
-  for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, String(value));
-  return element;
-}
-
 function renderViewport(bodies) {
-  const empty = $("#viewport-empty");
-  const preview = $("#model-preview");
-  const meta = $("#viewport-meta");
-  const faces = $("#model-faces");
-  const edges = $("#model-edges");
   const body = bodies.find((item) => item.id === selectedBodyId) || bodies[bodies.length - 1];
-
-  if (!body || !body.geometry?.dimensions) {
-    selectedBodyId = null;
-    empty.hidden = false;
-    preview.hidden = true;
-    meta.hidden = true;
-    $("#viewport-label").textContent = "Нет тел";
-    $("#properties-empty").hidden = false;
-    $("#properties-list").hidden = true;
-    faces.replaceChildren();
-    edges.replaceChildren();
-    return;
-  }
-
+  $("#viewport-meta").hidden = !body;
+  if (!body) return;
   selectedBodyId = body.id;
-  empty.hidden = true;
-  preview.hidden = false;
-  meta.hidden = false;
-  $("#viewport-label").textContent = `${bodies.length} ${bodies.length === 1 ? "тело" : bodies.length < 5 ? "тела" : "тел"}`;
-
-  const { width, height, depth } = body.geometry.dimensions;
-  const scale = 106 / Math.max(width, height, depth);
-  const point = (x, y, z) => [
-    300 + (x - y) * scale,
-    255 + (x + y) * scale * 0.36 - z * scale * 0.78,
-  ];
-  const points = [
-    point(0, 0, 0), point(width, 0, 0), point(width, depth, 0), point(0, depth, 0),
-    point(0, 0, height), point(width, 0, height), point(width, depth, height), point(0, depth, height),
-  ];
-  const pointString = (indexes) => indexes.map((index) => points[index].map((value) => value.toFixed(1)).join(",")).join(" ");
-
-  faces.replaceChildren(
-    svgElement("polygon", { points: pointString([0, 1, 5, 4]), class: "face-front" }),
-    svgElement("polygon", { points: pointString([1, 2, 6, 5]), class: "face-side" }),
-    svgElement("polygon", { points: pointString([4, 5, 6, 7]), class: "face-top" }),
-  );
-  const path = [
-    `M ${points[0].join(" ")} L ${points[1].join(" ")} L ${points[2].join(" ")} L ${points[3].join(" ")} Z`,
-    `M ${points[4].join(" ")} L ${points[5].join(" ")} L ${points[6].join(" ")} L ${points[7].join(" ")} Z`,
-    `M ${points[0].join(" ")} L ${points[4].join(" ")}`,
-    `M ${points[1].join(" ")} L ${points[5].join(" ")}`,
-    `M ${points[2].join(" ")} L ${points[6].join(" ")}`,
-    `M ${points[3].join(" ")} L ${points[7].join(" ")}`,
-  ].join(" ");
-  edges.replaceChildren(svgElement("path", { d: path, class: "model-outline" }));
-
   $("#selected-object-name").textContent = body.name || "Тело";
-  $("#selected-object-dimensions").textContent = `${formatNumber(width)} × ${formatNumber(height)} × ${formatNumber(depth)}`;
-  $("#selected-object-volume").textContent = `V ${formatNumber(body.geometry.volume)}`;
+  $("#selected-object-dimensions").textContent = dimensionsText(body.geometry?.dimensions);
+  $("#selected-object-volume").textContent = `V ${formatNumber(body.geometry?.volume)}`;
 }
 
 function renderObjectTree(bodies) {

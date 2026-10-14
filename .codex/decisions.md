@@ -16,7 +16,12 @@
 
 ## Real geometry kernel
 
-- **Decision:** use Open CASCADE through the pinned `cadquery-ocp` Python bindings behind `GeometryKernel`; store box dimensions and kernel-measured volume as JSON descriptors, then rebuild and validate B-reps instead of serializing native kernel objects. Continue accepting `primitive-v1` descriptors. Include its VTK runtime for the planned shared rendering and viewport work. **Reason:** this adds real B-rep construction while preserving portable project files and existing projects, and prepares the selected visualization runtime for the next roadmap stage. **Constraint:** kernel-specific code stays inside the adapter. **Source:** `cadyx/kernel.py`, `docs/project-format-v1.md`, `requirements.txt`.
+- **Decision:** use current stable native OCCT through the small project-built C ABI bridge and Python `ctypes`, rather than a Python-version-bound third-party extension. Keep `GeometryKernel`, JSON descriptors, `occt-v1` and `primitive-v1` compatibility unchanged. **Reason:** the user requires absolute newest stable versions; latest cadquery-ocp excludes Python 3.15 and pins older VTK. The browser renderer requires no VTK. **Constraint:** verified setup is Windows x64 with CMake/MSVC and a modeling-only OCCT SDK; downloads/build artifacts stay local. **Source:** `native/`, `cadyx/native_kernel.py`, [setup](../README.md).
+- **Status:** active; supersedes the previous cadquery-ocp/VTK runtime decision.
+
+## Shared rendering and viewport
+
+- **Decision:** Core produces a versioned read-only JSON scene under the existing project guard, with kernel-derived body triangles, stable object ids and sampled XY sketch primitives. Browser and Agent API expose identical scenes. One browser canvas renderer serves these scenes and PLY previews; camera state is client-local and Z-up. **Reason:** keep authoritative geometry in Core and remove browser box-specific geometry duplication without changing portable project data or requiring edit leases for observation. **Constraint:** orthographic preview, 64-segment circle sampling and sketch overlays; no selection picking, visibility persistence, perspective or sketch editor. **Source:** [viewport contract](../docs/viewport-api.md), `cadyx/rendering.py`, `web/viewport.js`.
 - **Status:** active.
 
 ## Document Model v2

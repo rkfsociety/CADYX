@@ -35,7 +35,8 @@ class WebApiTests(unittest.TestCase):
             with urlopen(request, timeout=3) as response:
                 return response.status, json.loads(response.read())
         except HTTPError as error:
-            return error.code, json.loads(error.read())
+            with error:
+                return error.code, json.loads(error.read())
 
     def test_legacy_migration_uses_both_api_command_paths(self) -> None:
         for prefix, owner in (("/api/v1/projects", "human"), ("/api/v1/agent/projects", "agent")):
@@ -118,6 +119,23 @@ class WebApiTests(unittest.TestCase):
         with urlopen(self.base_url + "/", timeout=3) as response:
             self.assertEqual(response.status, 200)
             self.assertIn(b"CADYX", response.read())
+
+    def test_shared_viewport_api_is_read_only_and_identical(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "Viewport"})
+        project = created["project"]["id"]
+        lease = self.core.acquire_lease(project, "agent", "renderer")
+        self.core.execute_command(project, lease["lease_id"],
+                                  {"type": "create_box", "width": 2, "height": 3, "depth": 5})
+        before = self.core.inspect_project(project)
+        status, web = self.request(f"/api/v1/projects/{project}/viewport")
+        agent_status, agent = self.request(f"/api/v1/agent/projects/{project}/viewport")
+        self.assertEqual((status, agent_status), (200, 200))
+        self.assertEqual(web, agent)
+        self.assertEqual(web["revision"], 1)
+        self.assertEqual(self.core.inspect_project(project), before)
+        self.assertEqual(self.request("/api/v1/projects/invalid/viewport")[0], 404)
+        with urlopen(self.base_url + "/assets/viewport.js", timeout=3) as response:
+            self.assertIn(b"CadyxViewport", response.read())
 
     def test_agent_stop_resume_revision_contract(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Stop API"})

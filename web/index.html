@@ -126,6 +126,7 @@
               <div class="panel-heading">
                 <div><span class="panel-index">01</span><h2 id="model-title">Модель</h2></div>
                 <div class="model-toolbar">
+                  <button id="viewport-fit" class="button" type="button">Вписать</button>
                   <span id="viewport-label" class="panel-note">Нет тел</span>
                   <span id="model-live-state" class="model-live-state" data-state="idle">
                     <span class="live-dot" aria-hidden="true"></span><span id="model-live-label">Без изменений</span>
@@ -133,10 +134,7 @@
                 </div>
               </div>
               <div class="viewport" id="viewport">
-                <svg id="model-preview" class="model-preview" viewBox="0 0 600 360" role="img" aria-label="Схематичный вид выбранного тела" hidden>
-                  <g id="model-faces"></g>
-                  <g id="model-edges"></g>
-                </svg>
+                <canvas id="model-preview" class="model-preview ply-preview-canvas" aria-label="3D модель и эскизы" hidden></canvas>
                 <div id="viewport-empty" class="viewport-empty">
                   <span class="empty-cube" aria-hidden="true">⬡</span>
                   <p>Модель ещё не построена</p>
@@ -194,6 +192,7 @@
     </div>
 
     <p id="toast" class="toast" role="status" aria-live="polite"></p>
+    <script src="/assets/viewport.js" defer></script>
     <script src="/assets/ply-preview.js" defer></script>
     <script src="/assets/app.js" defer></script>
   </body>

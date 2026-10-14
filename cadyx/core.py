@@ -10,9 +10,10 @@ from typing import Any, Callable, Iterator
 from .commands import CommandSystem
 from .errors import ConflictError, ValidationError
 from .events import EventBroker
-from .kernel import GeometryKernel, OCPKernelAdapter
+from .kernel import GeometryKernel, OCCTKernelAdapter
 from .lease import EditLeaseManager
 from .models import Document, OwnerType
+from .rendering import render_scene
 from .workspace import ProjectWorkspace, utc_now
 
 
@@ -26,7 +27,7 @@ class CadyxCore:
         lease_clock: Callable[[], float] | None = None,
     ) -> None:
         self.workspace = ProjectWorkspace(projects_dir)
-        self.kernel = kernel if kernel is not None else OCPKernelAdapter()
+        self.kernel = kernel if kernel is not None else OCCTKernelAdapter()
         self.commands = CommandSystem(self.kernel)
         if lease_clock is None:
             self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds)
@@ -80,6 +81,13 @@ class CadyxCore:
             snapshot = self.leases.snapshot(project_id)
             self.events.publish("project.lock.changed", project_id, snapshot)
             return lease.as_dict()
+
+    def render_project(self, project_id: str) -> dict[str, Any]:
+        with self._project_guard(project_id):
+            project = self.workspace.load(project_id)
+            document = Document.from_dict(project["document"])
+            self._validate_geometry(document)
+            return render_scene(document, self.kernel)
 
     def heartbeat(self, project_id: str, lease_id: str) -> dict[str, Any]:
         with self._project_guard(project_id):

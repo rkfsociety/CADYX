@@ -1,5 +1,7 @@
 # CADYX Codex rules
 
+- When choosing or updating any dependency/runtime/tool version, use the newest stable release and verify it from its official source. Do not choose an older compatible release as a workaround: the user explicitly requires adapting or building the kernel when necessary. Never bypass dependency checks to claim compatibility. Reviewed versions and reproducible local setup live in `scripts/runtime-versions.json` and `scripts/setup-runtime.ps1`.
+
 - Keep CADYX AI-first: the Core owns authoritative project state, and both agents and the browser use its Command System for document mutations.
 - Keep the browser a clean working interface: no promotional slogans or banners, and show live visual model changes instead of an agent command feed. Use the event stream to update the model and status.
 - Every document mutation must hold the project's current edit lease. AI and human must never edit the same project concurrently.

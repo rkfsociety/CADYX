@@ -5,18 +5,16 @@ from __future__ import annotations
 import math
 from typing import Any, Protocol
 
-from OCP.BRepCheck import BRepCheck_Analyzer
-from OCP.BRepGProp import BRepGProp
-from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
-from OCP.GProp import GProp_GProps
-
 from .errors import ValidationError
+from .native_kernel import NativeKernel
 
 
 class GeometryKernel(Protocol):
     def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]: ...
 
     def validate(self, geometry: dict[str, Any]) -> None: ...
+
+    def tessellate(self, geometry: dict[str, Any]) -> dict[str, Any]: ...
 
 
 def _box_dimensions(width: Any, height: Any, depth: Any) -> dict[str, float]:
@@ -35,11 +33,17 @@ def _box_dimensions(width: Any, height: Any, depth: Any) -> dict[str, float]:
     return normalized
 
 
-class OCPKernelAdapter:
+class OCCTKernelAdapter:
     """Build and validate box B-reps with Open CASCADE Technology."""
 
     kernel_id = "occt-v1"
     _accepted_kernel_ids = {kernel_id, "primitive-v1"}
+
+    def tessellate(self, geometry: dict[str, Any]) -> dict[str, Any]:
+        """Return kernel-derived triangles in model coordinates, without native objects."""
+        self.validate(geometry)
+        result = NativeKernel().box(geometry["dimensions"], mesh=True)
+        return {key: result[key] for key in ("positions", "triangles")}
 
     def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]:
         dimensions = _box_dimensions(width, height, depth)
@@ -84,32 +88,19 @@ class OCPKernelAdapter:
 
     @staticmethod
     def _box_volume(dimensions: dict[str, float]) -> float:
-        try:
-            builder = BRepPrimAPI_MakeBox(
-                dimensions["width"], dimensions["height"], dimensions["depth"]
-            )
-            builder.Build()
-            if not builder.IsDone():
-                raise ValidationError("Open CASCADE could not construct the box solid.")
-            shape = builder.Shape()
-            if shape.IsNull() or not BRepCheck_Analyzer(shape).IsValid():
-                raise ValidationError("Open CASCADE constructed an invalid box solid.")
+        return NativeKernel().box(dimensions)["volume"]
 
-            properties = GProp_GProps()
-            BRepGProp.VolumeProperties_s(shape, properties)
-            volume = float(properties.Mass())
-        except ValidationError:
-            raise
-        except Exception as exc:
-            raise ValidationError("Open CASCADE failed to construct or measure the box solid.") from exc
 
-        if not math.isfinite(volume) or volume <= 0:
-            raise ValidationError("Open CASCADE returned an invalid box volume.")
-        return volume
+# Compatibility name for clients of the former Python-binding adapter.
+OCPKernelAdapter = OCCTKernelAdapter
 
 
 class PrimitiveKernelAdapter:
     """Demo adapter; it describes primitives but does not create B-Rep geometry."""
+
+    def tessellate(self, geometry: dict[str, Any]) -> dict[str, Any]:
+        self.validate(geometry)
+        return OCCTKernelAdapter().tessellate(geometry)
 
     def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]:
         dimensions = {"width": width, "height": height, "depth": depth}
