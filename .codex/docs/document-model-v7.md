@@ -232,6 +232,11 @@ their respective human/agent edit leases. Results below appear inside
 - `remove_sketch_object`: `object_id`. No cascading deletion: a referenced object
   cannot be removed. Remove constraints, lines/circles, points, then the sketch
   as appropriate. Returns `object_id`.
+- `remove_body`: `body_id`. Removes the body's owned feature records from the
+  current document only when no other document object references that body.
+  Sketches and prior command-history entries remain. Returns the removed body
+  and feature ids; export the body first when its standalone geometry must be
+  retained outside command history.
 - `import_step`: `file` names a direct `.step` or `.stp` file in the current
   CADYX project folder; optional `name` overrides the body name. It imports one
   solid through OCCT, stores its editable B-rep in the document, and returns the

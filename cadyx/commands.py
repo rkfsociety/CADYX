@@ -108,6 +108,8 @@ class CommandSystem:
             return self._fuse_bodies(document, command, progress=progress)
         if kind == "cut_bodies":
             return self._cut_bodies(document, command, progress=progress)
+        if kind == "remove_body":
+            return self._remove_body(document, command)
         if kind == "sweep_sketch":
             return self._sweep_sketch(document, command, progress=progress)
         if kind == "fillet_edges":
@@ -318,6 +320,45 @@ class CommandSystem:
             document.objects.remove(item)
             return {"object_id": object_id}
         raise ValidationError(f"Unsupported command type: {kind!r}.")
+
+    @staticmethod
+    def _remove_body(document: Document, command: dict[str, Any]) -> dict[str, Any]:
+        if not command.keys() <= {"type", "body_id"}:
+            raise ValidationError("Body removal contains unsupported fields.")
+        body_id = command.get("body_id")
+        if not isinstance(body_id, str):
+            raise NotFoundError("Body to remove was not found.")
+        body = next((item for item in document.objects
+                     if item.get("id") == body_id and item.get("type") == "body"), None)
+        if body is None:
+            raise NotFoundError("Body to remove was not found.")
+
+        # Do not leave dependent features or sections pointing at a missing body.
+        # A feature's body_id identifies its own output and is safe to cascade.
+        def contains_reference(value: Any) -> bool:
+            if isinstance(value, dict):
+                return any(contains_reference(child) for child in value.values())
+            if isinstance(value, list):
+                return any(contains_reference(child) for child in value)
+            return value == body_id
+
+        dependents = []
+        for item in document.objects:
+            if item is body:
+                continue
+            if item.get("type") == "feature" and item.get("body_id") == body_id:
+                continue
+            if contains_reference(item):
+                dependents.append(item.get("id"))
+        if dependents:
+            raise ValidationError("Body is referenced by other document objects and cannot be removed.")
+
+        feature_ids = set(body.get("feature_ids", []))
+        document.objects[:] = [
+            item for item in document.objects
+            if item is not body and item.get("id") not in feature_ids
+        ]
+        return {"body_id": body_id, "removed_feature_ids": sorted(feature_ids)}
 
     def _create_sketch_from_section(
         self, document: Document, command: dict[str, Any], *,

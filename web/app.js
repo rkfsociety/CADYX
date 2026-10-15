@@ -1705,6 +1705,13 @@ function handleStreamEvent(type, event) {
           projectId, bodyId: result.body_id, type: "loft",
           sectionOffsets: result.geometry?.section_offsets || [], durationMs: 1800,
         };
+      } else if (command.type === "create_ruled_shell") {
+        activeSketchId = null;
+        pendingViewportTransition = { projectId, bodyId: result.body_id, type: "brep", durationMs: 1500 };
+      } else if (command.type === "remove_body") {
+        activeSketchId = null;
+        pendingViewportTransition = null;
+        if (selectedObjectId === command.body_id) selectedObjectId = null;
       } else if (command.type === "create_metric_thread") {
         activeSketchId = null;
         pendingViewportTransition = { projectId, bodyId: result.body_id, type: "thread", durationMs: 1800 };

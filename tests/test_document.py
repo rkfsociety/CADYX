@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
+from cadyx.commands import CommandSystem
 from cadyx.core import CadyxCore
 from cadyx.errors import LeaseRequiredError, ValidationError
 from cadyx.kernel import PrimitiveKernelAdapter
@@ -152,6 +153,31 @@ class SketchDocumentTests(unittest.TestCase):
         for object_id in [constraint, self.line, self.a, self.b, self.sketch]:
             self.command(type="remove_sketch_object", object_id=object_id)
         self.assertEqual(self.core.inspect_project(self.project)["document"]["objects"], [])
+
+    def test_remove_body_removes_owned_features_and_preserves_sketches(self):
+        body = self.command(type="create_box", width=2, height=3, depth=4)["body_id"]
+        result = self.command(type="remove_body", body_id=body)
+        document = self.core.inspect_project(self.project)["document"]
+        self.assertEqual(result["body_id"], body)
+        self.assertTrue(result["removed_feature_ids"])
+        saved_ids = {item["id"] for item in document["objects"]}
+        self.assertNotIn(body, saved_ids)
+        self.assertTrue(set(result["removed_feature_ids"]).isdisjoint(saved_ids))
+        self.assertIn(self.sketch, [item["id"] for item in document["objects"]])
+
+    def test_remove_body_rejects_other_object_references(self):
+        source_id = self.command(type="create_box", width=2, height=3, depth=4)["body_id"]
+        target_id = self.command(type="create_box", width=3, height=4, depth=5)["body_id"]
+        document = Document.from_dict(self.core.inspect_project(self.project)["document"])
+        target = next(item for item in document.objects if item["id"] == target_id)
+        dependent_id = "feature:" + str(uuid4())
+        target["feature_ids"].append(dependent_id)
+        document.objects.append({"id": dependent_id, "type": "feature", "body_id": target_id,
+                                 "operation": "test_dependency", "source_body_id": source_id})
+        before = document.to_dict()
+        with self.assertRaises(ValidationError):
+            CommandSystem._remove_body(document, {"type": "remove_body", "body_id": source_id})
+        self.assertEqual(document.to_dict(), before)
 
     def test_tolerance_and_storage_order_are_explicit(self):
         self.constraint("horizontal", [self.line])
