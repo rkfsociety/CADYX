@@ -266,6 +266,7 @@ function lockAvailabilityKey(lock) {
 }
 
 function workspaceControlLockReason() {
+  if (!projectAddressPinned) return null;
   if (agentWorkActive) return "ИИ-АГЕНТ РАБОТАЕТ · ВСЯ ПАНЕЛЬ ЗАБЛОКИРОВАНА ДО ПОЛНОЙ ПРОВЕРКИ МОДЕЛЕЙ";
   if (!agentWorkStatusConnected) return "ГЛОБАЛЬНОЕ СОСТОЯНИЕ РАБОТЫ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
   if (!workspaceAvailabilityConnected) return "СОСТОЯНИЕ ПАНЕЛИ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";

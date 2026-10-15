@@ -166,7 +166,11 @@ Selecting a project in the browser replaces the current tab URL with
 project to that UUID and ignores process-wide selection and project-created SSE
 events, so separate tabs can keep different projects visible. Project data and
 leases remain shared by project ID; the address isolates the viewer selection,
-not the edit lock or global active-work safety controls.
+not the edit lock. A tab opened without `project_id` remains available for
+navigation and viewing while agent work is active; its project cards still
+prevent selecting a project whose own lock is occupied. A tab pinned to a
+project continues to disable controls while that project's lock or activity is
+not free.
 
 The default host is `127.0.0.1`. Non-loopback binds require the host authentication gate described above; the built-in server still relies on a trusted LAN or external TLS/VPN for transport confidentiality.
 
