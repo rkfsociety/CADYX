@@ -209,7 +209,13 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertGreater(rebuilt_body["geometry"]["volume"], before)
         self.assertEqual(rebuilt_body["geometry"], rebuilt_feature["geometry"])
         self.assertEqual(rebuilt_body["geometry"]["tool"], rebuilt_handle["geometry"])
-        delivered = self.command({"type": "export_brep", "body_id": fused["body_id"]})
+        exported = self.core.execute_command(
+            self.project_id,
+            self.lease_id,
+            {"type": "export_brep", "body_id": fused["body_id"]},
+            expected_revision=self.core.inspect_project(self.project_id)["document"]["revision"],
+        )
+        delivered = exported["history_entry"]["result"]
         step_check = delivered["verification"]["step_round_trip"]
         self.assertEqual(step_check["status"], "passed")
         self.assertEqual(step_check["source_solid_count"], 1)
