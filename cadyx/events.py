@@ -42,6 +42,7 @@ class EventBroker:
     ) -> None:
         self._capacity = subscriber_capacity
         self._lock = threading.Lock()
+        self._dashboard_persist_lock = threading.Lock()
         self._next_id = 1
         self._subscribers: dict[int, tuple[queue.Queue[ProjectEvent], str | None]] = {}
         self._next_subscriber_id = 1
@@ -233,54 +234,61 @@ class EventBroker:
             return self._activity_revisions.get(project_id, 0)
 
     def publish_agent_dashboard(self, project_id: str, data: dict[str, Any]) -> dict[str, Any]:
-        with self._lock:
-            previous = self._agent_dashboards.get(project_id)
-            revision = previous["revision"] + 1 if previous else 1
-            dashboard = {
-                **copy.deepcopy(data),
-                "revision": revision,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-            dashboards = {**self._agent_dashboards, project_id: copy.deepcopy(dashboard)}
-            work_revision = self._agent_work_revision + 1
+        # Disk durability is intentionally serialized separately from the
+        # broker lock. Dashboard fsync may be slow, but ordinary SSE events,
+        # snapshots, and subscriber management should remain responsive.
+        with self._dashboard_persist_lock:
+            with self._lock:
+                previous = self._agent_dashboards.get(project_id)
+                revision = previous["revision"] + 1 if previous else 1
+                dashboard = {
+                    **copy.deepcopy(data),
+                    "revision": revision,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+                dashboards = {**self._agent_dashboards, project_id: copy.deepcopy(dashboard)}
+                work_revision = self._agent_work_revision + 1
+
             self._persist_agent_dashboards(dashboards, work_revision)
-            self._agent_dashboards = dashboards
-            self._agent_work_revision = work_revision
-            item = ProjectEvent(
-                id=self._next_id,
-                event="agent.dashboard",
-                project_id=project_id,
-                data=copy.deepcopy(dashboard),
-                occurred_at=dashboard["updated_at"],
-            )
-            self._next_id += 1
-            for subscriber, filter_project in self._subscribers.values():
-                if filter_project is not None and filter_project != project_id:
-                    continue
-                if subscriber.full():
-                    try:
-                        subscriber.get_nowait()
-                    except queue.Empty:
-                        pass
-                subscriber.put_nowait(item)
-            work_item = ProjectEvent(
-                id=self._next_id,
-                event="workspace.agent-work",
-                project_id=None,
-                data={"active": self._agent_work_active_locked(), "revision": work_revision},
-                occurred_at=dashboard["updated_at"],
-            )
-            self._next_id += 1
-            for subscriber, filter_project in self._subscribers.values():
-                if filter_project is not None:
-                    continue
-                if subscriber.full():
-                    try:
-                        subscriber.get_nowait()
-                    except queue.Empty:
-                        pass
-                subscriber.put_nowait(work_item)
-            return copy.deepcopy(dashboard)
+
+            with self._lock:
+                self._agent_dashboards = dashboards
+                self._agent_work_revision = work_revision
+                item = ProjectEvent(
+                    id=self._next_id,
+                    event="agent.dashboard",
+                    project_id=project_id,
+                    data=copy.deepcopy(dashboard),
+                    occurred_at=dashboard["updated_at"],
+                )
+                self._next_id += 1
+                for subscriber, filter_project in self._subscribers.values():
+                    if filter_project is not None and filter_project != project_id:
+                        continue
+                    if subscriber.full():
+                        try:
+                            subscriber.get_nowait()
+                        except queue.Empty:
+                            pass
+                    subscriber.put_nowait(item)
+                work_item = ProjectEvent(
+                    id=self._next_id,
+                    event="workspace.agent-work",
+                    project_id=None,
+                    data={"active": self._agent_work_active_locked(), "revision": work_revision},
+                    occurred_at=dashboard["updated_at"],
+                )
+                self._next_id += 1
+                for subscriber, filter_project in self._subscribers.values():
+                    if filter_project is not None:
+                        continue
+                    if subscriber.full():
+                        try:
+                            subscriber.get_nowait()
+                        except queue.Empty:
+                            pass
+                    subscriber.put_nowait(work_item)
+                return copy.deepcopy(dashboard)
 
     def agent_work_snapshot(self) -> dict[str, Any]:
         with self._lock:

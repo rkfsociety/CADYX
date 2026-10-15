@@ -118,13 +118,6 @@ def install() -> None:
         native = NativeKernel()
         brep, _metrics = native.export_geometry(geometry)
 
-        face_payload = _call_json(
-            native, brep, "cadyx_face_topology", missing={"faces": []}
-        )
-        faces = face_payload.get("faces")
-        if not isinstance(faces, list):
-            raise ValidationError("OCCT returned invalid face topology metadata.")
-
         details = _call_json(
             native,
             brep,
@@ -132,9 +125,21 @@ def install() -> None:
             missing={"edges": [], "faces": []},
         )
         extra_edges = details.get("edges")
-        extra_faces = details.get("faces")
-        if not isinstance(extra_edges, list) or not isinstance(extra_faces, list):
+        faces = details.get("faces")
+        if not isinstance(extra_edges, list) or not isinstance(faces, list):
             raise ValidationError("OCCT returned invalid analytic topology metadata.")
+
+        # New runtimes return complete face metadata together with analytic
+        # topology, avoiding a second B-rep parse and face traversal. Keep the
+        # old bridge as a compatibility fallback for already-built runtimes.
+        if any(not isinstance(face, dict) or "surface" not in face for face in faces):
+            face_payload = _call_json(
+                native, brep, "cadyx_face_topology", missing={"faces": []}
+            )
+            base_faces = face_payload.get("faces")
+            if not isinstance(base_faces, list):
+                raise ValidationError("OCCT returned invalid face topology metadata.")
+            faces = _merge_by_index(base_faces, faces)
 
         edges = result.get("edges")
         if isinstance(edges, list):
@@ -143,7 +148,6 @@ def install() -> None:
                 if isinstance(edge, dict):
                     edge["semantic_key"] = _signature("edge", edge)
 
-        _merge_by_index(faces, extra_faces)
         for face in faces:
             if isinstance(face, dict):
                 face["semantic_key"] = _signature("face", face)

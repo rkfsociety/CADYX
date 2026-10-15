@@ -70,6 +70,9 @@ class AgentAuthoringNativeTests(unittest.TestCase):
         self.assertTrue(any(math.isclose(face["radius"], 3.0, rel_tol=1e-7) for face in cylinders))
         self.assertTrue(any(math.isclose(abs(face["semi_angle"]), math.pi / 4, rel_tol=1e-7) for face in cones))
         self.assertTrue(all("semantic_key" in face for face in topology["faces"]))
+        self.assertTrue(all(face.get("area", 0.0) > 0.0 for face in topology["faces"]))
+        self.assertTrue(all(len(face.get("center", [])) == 3 for face in topology["faces"]))
+        self.assertTrue(all(len(face.get("uv_bounds", [])) == 4 for face in topology["faces"]))
 
     def test_arbitrary_workplane_extrusion_has_expected_world_bounds(self):
         document = Document.create()

@@ -4,10 +4,12 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <GProp_GProps.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <GeomAbs_SurfaceType.hxx>
 #include <TopExp.hxx>
@@ -130,6 +132,23 @@ void WriteDirection(std::ostringstream& json, const gp_Dir& direction) {
   json << '[' << direction.X() << ',' << direction.Y() << ',' << direction.Z() << ']';
 }
 
+const char* SurfaceName(GeomAbs_SurfaceType type) {
+  switch (type) {
+    case GeomAbs_Plane: return "plane";
+    case GeomAbs_Cylinder: return "cylinder";
+    case GeomAbs_Cone: return "cone";
+    case GeomAbs_Sphere: return "sphere";
+    case GeomAbs_Torus: return "torus";
+    case GeomAbs_BezierSurface: return "bezier";
+    case GeomAbs_BSplineSurface: return "bspline";
+    case GeomAbs_SurfaceOfRevolution: return "revolution";
+    case GeomAbs_SurfaceOfExtrusion: return "extrusion";
+    case GeomAbs_OffsetSurface: return "offset";
+    case GeomAbs_OtherSurface: return "other";
+  }
+  return "other";
+}
+
 }  // namespace
 
 // operation 1: conical countersink cut
@@ -196,8 +215,8 @@ API char* cadyx_agent_feature_brep(const unsigned char* data, size_t size, int o
   return nullptr;
 }
 
-// Additional analytic topology data merged into the normal topology endpoint.
-// Existing edge/face indices remain authoritative for the inspected revision.
+// Complete face metadata and analytic edge/face data are emitted together so
+// Python can enrich semantic topology without parsing the same B-rep twice.
 API char* cadyx_agent_topology(const unsigned char* data, size_t size,
                                char* error, size_t capacity) noexcept {
   try {
@@ -263,7 +282,19 @@ API char* cadyx_agent_topology(const unsigned char* data, size_t size,
       if (index) json << ',';
       const TopoDS_Face face = TopoDS::Face(faces.FindKey(index + 1));
       BRepAdaptor_Surface surface(face, true);
-      json << "{\"index\":" << index;
+      GProp_GProps properties;
+      BRepGProp::SurfaceProperties(face, properties);
+      const double area = properties.Mass();
+      const gp_Pnt center = properties.CentreOfMass();
+      double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
+      BRepTools::UVBounds(face, u0, u1, v0, v1);
+
+      json << "{\"index\":" << index
+           << ",\"area\":" << area << ",\"center\":";
+      WritePoint(json, center);
+      json << ",\"surface\":\"" << SurfaceName(surface.GetType()) << "\""
+           << ",\"uv_bounds\":[" << u0 << ',' << u1 << ',' << v0 << ',' << v1 << ']';
+
       switch (surface.GetType()) {
         case GeomAbs_Plane: {
           const gp_Pln plane = surface.Plane();
