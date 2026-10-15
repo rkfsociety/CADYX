@@ -154,25 +154,23 @@ workspace folder. Agents select an existing CAD project with
 `POST /api/v1/agent/workspace/selection` and `{"type":"project","project_id":"..."}`;
 they select a workspace folder with `{"type":"folder","folder_name":"..."}`.
 The Core validates the target and publishes `workspace.selection.changed` over
-SSE. New projects remain automatically selected by `project.created`. Projects
-(07) lists saved projects and sends a project selection through this existing
-Agent API route only when the current resource is confirmed free and the target
-project lock is FREE with no running operation. Workspace-folder selection remains Agent API-only. The
-browser presents the selected project or folder inside the same workspace shell.
+SSE. New projects remain automatically selected by `project.created` for API
+clients. The browser's Projects (07) view lists saved projects and opens each
+project in a separate tab; this does not change the process-local Agent API
+selection. Workspace-folder selection remains Agent API-only.
 The browser loads a model only when its address contains `project_id`; the root
 address stays on the empty workspace regardless of local storage or the
 process-wide Agent API selection. The empty workspace offers a project picker;
-choosing a project adds its ID to the tab address before loading its model.
-Selecting a project in the browser replaces the current tab URL with
-`/?project_id=<project UUID>`. Opening that address pins the tab's displayed
-project to that UUID and ignores process-wide selection and project-created SSE
-events, so separate tabs can keep different projects visible. Project data and
-leases remain shared by project ID; the address isolates the viewer selection,
-not the edit lock. A tab opened without `project_id` remains available for
-navigation and viewing while agent work is active; its project cards still
-prevent selecting a project whose own lock is occupied. A tab pinned to a
-project continues to disable controls while that project's lock or activity is
-not free.
+opening a project creates a tab at `/?project_id=<project UUID>`. That address
+pins the tab's displayed project to that UUID and ignores process-wide selection
+and project-created SSE events, so separate tabs can keep different projects
+visible. Project cards open their URL in a new tab even when the project is
+locked; the new tab can observe the last committed model while its controls
+remain disabled until the project is free. Project data and leases remain shared by project ID; the
+address isolates the viewer selection, not the edit lock. A tab opened without
+`project_id` remains available for navigation and viewing while agent work is
+active. A tab pinned to a project continues to disable controls while that
+project's lock or activity is not free.
 
 The default host is `127.0.0.1`. Non-loopback binds require the host authentication gate described above; the built-in server still relies on a trusted LAN or external TLS/VPN for transport confidentiality.
 

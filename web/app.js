@@ -199,7 +199,6 @@ let automaticUpdateSnapshot = null;
 let automaticUpdateInFlight = false;
 let automaticUpdatesUnavailable = false;
 let workspaceAvailabilityConnected = false;
-let workspaceSelectionInFlight = false;
 let filesAvailabilityConnected = false;
 const activitiesByProject = new Map();
 const activityRevisionsByProject = new Map();
@@ -212,7 +211,7 @@ let agentWorkActive = savedAgentWorkLock.active;
 let agentWorkRevision = savedAgentWorkLock.revision;
 let agentWorkStatusConnected = false;
 const FOLDER_SELECTION_PREFIX = "folder:";
-let projectAddressPinned = new URLSearchParams(window.location.search).has("project_id");
+const projectAddressPinned = new URLSearchParams(window.location.search).has("project_id");
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
 const folderInspector = $("#folder-inspector");
@@ -270,7 +269,6 @@ function workspaceControlLockReason() {
   if (agentWorkActive) return "ИИ-АГЕНТ РАБОТАЕТ · ВСЯ ПАНЕЛЬ ЗАБЛОКИРОВАНА ДО ПОЛНОЙ ПРОВЕРКИ МОДЕЛЕЙ";
   if (!agentWorkStatusConnected) return "ГЛОБАЛЬНОЕ СОСТОЯНИЕ РАБОТЫ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
   if (!workspaceAvailabilityConnected) return "СОСТОЯНИЕ ПАНЕЛИ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
-  if (workspaceSelectionInFlight) return "ПЕРЕКЛЮЧЕНИЕ ПРОЕКТА · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
   if (!selectedProjectId || getSelectedFolder()) return null;
   const lock = agentLocksByProject.get(selectedProjectId);
   if (lock?.recovery_required) return "ТРЕБУЕТСЯ ВОССТАНОВЛЕНИЕ · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
@@ -304,15 +302,10 @@ function updateWorkspaceControls() {
 
   document.querySelectorAll("#project-detail button").forEach((button) => {
     const filesUnavailable = button.dataset.workspaceView === "files" && !canOpenFilesView();
-    const projectAlreadyActive = button.dataset.projectId === selectedProjectId;
-    const projectUnavailable = Boolean(button.dataset.projectId) && !canSelectProject(button.dataset.projectId);
-    button.disabled = !available || filesUnavailable || projectAlreadyActive || projectUnavailable;
+    button.disabled = !available || filesUnavailable;
     if (button.dataset.workspaceView) {
       button.title = lockReason || (filesUnavailable
         ? "Доступно, когда агент освободит панель и завершит текущую работу" : "");
-    } else if (button.dataset.projectId) {
-      button.title = projectAlreadyActive ? "Этот проект уже открыт"
-        : lockReason || (projectUnavailable ? "Проект занят или его состояние не подтверждено" : "");
     }
   });
   if (!available && ["files", "projects"].includes(primaryGrid.dataset.view)) {
@@ -372,14 +365,6 @@ $("#open-projects").addEventListener("click", () => {
 
 function readSelectedProject() {
   return new URLSearchParams(window.location.search).get("project_id");
-}
-
-function addressProject(id) {
-  const url = new URL(window.location.href);
-  if (id) url.searchParams.set("project_id", id);
-  else url.searchParams.delete("project_id");
-  window.history.replaceState(null, "", url);
-  projectAddressPinned = Boolean(id);
 }
 
 function notify(message, isError = false) {
@@ -611,12 +596,12 @@ function renderProjects() {
     state.textContent = active ? "АКТИВНЫЙ РЕСУРС" : projectAvailable ? "ГОТОВ К ОТКРЫТИЮ" : "ПАНЕЛЬ ЗАНЯТА";
     heading.append(name, state);
 
-    const action = document.createElement("button");
+    const action = document.createElement("a");
     action.className = "button workspace-project-open";
-    action.type = "button";
-    action.dataset.projectId = project.id;
-    action.textContent = active ? "ТЕКУЩИЙ ПРОЕКТ" : "ОТКРЫТЬ ПРОЕКТ";
-    action.disabled = active || !projectAvailable;
+    action.href = `/?project_id=${encodeURIComponent(project.id)}`;
+    action.target = "_blank";
+    action.rel = "noopener";
+    action.textContent = "ОТКРЫТЬ ПРОЕКТ";
 
     const meta = document.createElement("div");
     meta.className = "workspace-project-meta";
@@ -637,45 +622,6 @@ function renderProjects() {
     list.append(card);
   }
 }
-
-$("#projects-list").addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-project-id]");
-  if (!button || button.disabled || workspaceControlLockReason() !== null || !canSelectProject(button.dataset.projectId)) return;
-  const projectId = button.dataset.projectId;
-  if (!projectId || projectId === selectedProjectId) return;
-  workspaceSelectionInFlight = true;
-  updateWorkspaceControls();
-  try {
-    const result = await api("/api/v1/agent/workspace/selection", {
-      method: "POST",
-      body: JSON.stringify({ type: "project", project_id: projectId }),
-    });
-    if (result.selection?.type !== "project" || result.selection.project_id !== projectId) {
-      throw new Error("Сервер не подтвердил выбор проекта.");
-    }
-    selectedProjectId = projectId;
-    addressProject(projectId);
-    selectedObjectId = null;
-    activeSketchId = null;
-    pendingViewportTransition = null;
-    agentLocksByProject.delete(projectId);
-    activitiesByProject.delete(projectId);
-    activityRevisionsByProject.delete(projectId);
-    workspaceSelectionInFlight = false;
-    workspaceAvailabilityConnected = false;
-    filesAvailabilityConnected = false;
-    renderProjects();
-    updateWorkspaceControls();
-    scheduleWorkspaceRefresh();
-  } catch (error) {
-    workspaceSelectionInFlight = false;
-    workspaceAvailabilityConnected = false;
-    filesAvailabilityConnected = false;
-    updateWorkspaceControls();
-    notify("Не удалось открыть проект: " + error.message, true);
-    scheduleWorkspaceRefresh();
-  }
-});
 
 function showProjectLoading(name) {
   activeFolderName = null;

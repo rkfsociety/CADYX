@@ -132,7 +132,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .workspace-project-meta { display: flex; min-width: 0; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; padding-top: 10px; border-top: 1px solid var(--line-soft); color: var(--dim); font: 9px var(--mono); }
 .workspace-project-meta span { display: grid; min-width: 0; gap: 4px; }
 .workspace-project-meta strong { overflow: hidden; color: var(--muted); font: 10px var(--mono); text-overflow: ellipsis; }
-.workspace-project-open { justify-self: start; }
+.workspace-project-open { display: inline-flex; align-items: center; justify-self: start; text-decoration: none; }
 .projects-empty { align-self: center; justify-self: center; margin: 0; padding: 24px; color: var(--muted); font: 11px var(--mono); text-align: center; }
 .project-detail[data-controls-locked="true"] .project-main { pointer-events: none; }
 .project-detail[data-controls-locked="true"] #workflow-panel { pointer-events: auto; user-select: text; }
