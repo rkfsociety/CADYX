@@ -128,6 +128,19 @@ their respective human/agent edit leases. Results below appear inside
   coordinate objects. All three points must be distinct and non-collinear. The
   command solves their unique circumcircle and chooses the signed sweep that
   passes through `through`, returning the exact arc, center and radius.
+- `add_sketch_arc_start_center_end`: the same exact geometry as
+  `add_sketch_arc_center`, with parameter emphasis/order `start`, `center`,
+  `end`; optional `clockwise` selects sweep direction.
+- `add_sketch_arc_radius`: `sketch_id`, `start`, `end`, and positive `radius`;
+  endpoint distance cannot exceed the diameter. `large_arc` (default false)
+  selects the minor or major solution, and `clockwise` (default false) selects
+  its signed direction.
+- `add_sketch_arc_tangent`: `sketch_id`, same-sketch `line_id`, `tangent_point`,
+  positive `radius`, and signed `sweep_degrees` strictly between -360 and 360
+  (excluding zero). `side` (default 1 or -1) selects the circle center side of
+  the directed line. The tangent point must lie on the finite segment or, for
+  an infinite line, its support. The arc starts at that point and its initial
+  tangent is parallel to the selected line.
 - `add_sketch_rounded_rectangle`: `sketch_id`, lower-left `x`,`y`, positive
   `width`,`height`, and positive `corner_radius` less than half both side lengths.
   Creates exact quarter-circle arcs and tangent line segments as sketch geometry;

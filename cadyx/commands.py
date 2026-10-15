@@ -205,6 +205,16 @@ class CommandSystem:
             return self._add_sketch_arc_center(document, command, progress=progress)
         if kind == "add_sketch_arc_three_points":
             return self._add_sketch_arc_three_points(document, command, progress=progress)
+        if kind == "add_sketch_arc_start_center_end":
+            mapped = {"sketch_id": command.get("sketch_id"), "center": command.get("center"),
+                      "start": command.get("start"), "end": command.get("end"),
+                      "clockwise": command.get("clockwise", False)}
+            callback = (lambda event: progress({**event, "phase": kind})) if progress else None
+            return self._add_sketch_arc_center(document, mapped, progress=callback)
+        if kind == "add_sketch_arc_radius":
+            return self._add_sketch_arc_radius(document, command, progress=progress)
+        if kind == "add_sketch_arc_tangent":
+            return self._add_sketch_arc_tangent(document, command, progress=progress)
         if kind == "mirror_sketch_elements":
             return self._mirror_sketch_elements(document, command, progress=progress)
         if kind == "pattern_sketch_elements":
@@ -869,6 +879,124 @@ class CommandSystem:
         return {"sketch_id": sketch_id, "point_ids": point_ids, "circle_ids": [arc_id],
                 "arc_id": arc_id, "center": {"x": center_x, "y": center_y}, "radius": radius,
                 "sweep_radians": sweep, "through": {"x": bx, "y": by}}
+
+    def _add_sketch_arc_radius(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        start = self._coordinate_pair(command.get("start"), "Arc start")
+        end = self._coordinate_pair(command.get("end"), "Arc end")
+        radius = command.get("radius")
+        large_arc = command.get("large_arc", False)
+        clockwise = command.get("clockwise", False)
+        if (isinstance(radius, bool) or not isinstance(radius, (int, float))
+                or not math.isfinite(radius) or radius <= 1e-7):
+            raise ValidationError("Arc radius must be finite and positive.")
+        if not isinstance(large_arc, bool) or not isinstance(clockwise, bool):
+            raise ValidationError("large_arc and clockwise must be booleans.")
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        chord = math.hypot(dx, dy)
+        if chord <= 1e-7:
+            raise ValidationError("Arc start and end must be distinct.")
+        if chord > 2 * radius + 1e-7 * max(1.0, radius):
+            raise ValidationError("Arc radius must be at least half the endpoint distance.")
+        half_chord = chord / 2
+        height = math.sqrt(max(0.0, radius * radius - half_chord * half_chord))
+        midpoint_x, midpoint_y = start[0] + dx / 2, start[1] + dy / 2
+        normal_x, normal_y = -dy / chord, dx / chord
+        centers = ((midpoint_x + normal_x * height, midpoint_y + normal_y * height),
+                   (midpoint_x - normal_x * height, midpoint_y - normal_y * height))
+        candidates: list[tuple[float, tuple[float, float]]] = []
+        for center in centers:
+            start_angle = math.atan2(start[1] - center[1], start[0] - center[0])
+            end_angle = math.atan2(end[1] - center[1], end[0] - center[0])
+            candidates.append(((end_angle - start_angle) % math.tau, center))
+        desired_major_ccw = large_arc != clockwise
+        _, center = next((item for item in candidates
+                          if (item[0] > math.pi + 1e-10) == desired_major_ccw), candidates[0])
+        if progress is not None:
+            progress({"phase": "add_sketch_arc_radius"})
+        callback = (lambda event: progress({**event, "phase": "add_sketch_arc_radius"})) if progress else None
+        result = self._add_sketch_arc_center(
+            document,
+            {"sketch_id": sketch["id"], "center": {"x": center[0], "y": center[1]},
+             "start": {"x": start[0], "y": start[1]}, "end": {"x": end[0], "y": end[1]},
+             "clockwise": clockwise},
+            progress=callback,
+        )
+        if abs(result["radius"] - radius) > 1e-7 * max(1.0, radius):
+            raise ValidationError("The selected radius cannot define this arc.")
+        result["center"] = {"x": center[0], "y": center[1]}
+        result["large_arc"] = large_arc
+        return result
+
+    def _add_sketch_arc_tangent(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        line_id = command.get("line_id")
+        by_id = {item["id"]: item for item in document.objects}
+        line = by_id.get(line_id)
+        if line is None or line.get("type") != "line" or line.get("sketch_id") != sketch["id"]:
+            raise ValidationError("The tangent line must belong to the same sketch.")
+        start_point = self._coordinate_pair(command.get("tangent_point"), "Arc tangent point")
+        radius = command.get("radius")
+        sweep_degrees = command.get("sweep_degrees")
+        side = command.get("side", 1)
+        if (isinstance(radius, bool) or not isinstance(radius, (int, float))
+                or not math.isfinite(radius) or radius <= 1e-7):
+            raise ValidationError("Arc radius must be finite and positive.")
+        if (isinstance(sweep_degrees, bool) or not isinstance(sweep_degrees, (int, float))
+                or not math.isfinite(sweep_degrees) or abs(sweep_degrees) <= 1e-7
+                or abs(sweep_degrees) >= 360 - 1e-7):
+            raise ValidationError("sweep_degrees must be non-zero and less than one revolution.")
+        if type(side) is not int or side not in {-1, 1}:
+            raise ValidationError("Tangent side must be 1 or -1 relative to the line direction.")
+        start_obj, end_obj = by_id[line["start_id"]], by_id[line["end_id"]]
+        dx, dy = end_obj["x"] - start_obj["x"], end_obj["y"] - start_obj["y"]
+        line_length = math.hypot(dx, dy)
+        if not math.isfinite(line_length) or line_length <= 1e-7:
+            raise ValidationError("The tangent line must have finite positive length.")
+        ux, uy = dx / line_length, dy / line_length
+        nx, ny = -uy, ux
+        projection = ((start_point[0] - start_obj["x"]) * ux
+                      + (start_point[1] - start_obj["y"]) * uy)
+        offset = ((start_point[0] - start_obj["x"]) * nx
+                  + (start_point[1] - start_obj["y"]) * ny)
+        tolerance = 1e-7 * max(1.0, line_length, radius)
+        if abs(offset) > tolerance:
+            raise ValidationError("The tangent point must lie on the selected line.")
+        if line.get("extent", "segment") != "infinite" and not -tolerance <= projection <= line_length + tolerance:
+            raise ValidationError("The tangent point must lie within the finite line segment.")
+        center = {"x": start_point[0] + side * radius * nx,
+                  "y": start_point[1] + side * radius * ny}
+        sweep = math.radians(sweep_degrees)
+        radial_x, radial_y = start_point[0] - center["x"], start_point[1] - center["y"]
+        end = {"x": center["x"] + radial_x * math.cos(sweep) - radial_y * math.sin(sweep),
+               "y": center["y"] + radial_x * math.sin(sweep) + radial_y * math.cos(sweep)}
+        if progress is not None:
+            progress({"phase": "add_sketch_arc_tangent"})
+        callback = (lambda event: progress({**event, "phase": "add_sketch_arc_tangent"})) if progress else None
+        result = self._add_sketch_arc_center(
+            document,
+            {"sketch_id": sketch["id"], "center": center,
+             "start": {"x": start_point[0], "y": start_point[1]}, "end": end,
+             "clockwise": sweep < 0},
+            progress=callback,
+        )
+        result["line_id"] = line_id
+        result["tangent_point"] = {"x": start_point[0], "y": start_point[1]}
+        result["side"] = side
+        result["sweep_degrees"] = sweep_degrees
+        return result
 
     def _mirror_sketch_elements(
         self,

@@ -131,6 +131,9 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("add_sketch_circle_tangent_to_three_lines", advertised)
         self.assertIn("add_sketch_arc_center", advertised)
         self.assertIn("add_sketch_arc_three_points", advertised)
+        self.assertIn("add_sketch_arc_start_center_end", advertised)
+        self.assertIn("add_sketch_arc_radius", advertised)
+        self.assertIn("add_sketch_arc_tangent", advertised)
         for command_type in advertised:
             with self.subTest(command_type=command_type):
                 try:

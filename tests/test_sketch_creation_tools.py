@@ -299,3 +299,47 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
             self.command({"type": "add_sketch_arc_three_points", "sketch_id": self.sketch_id,
                           "start": {"x": 0, "y": 0}, "through": {"x": 1, "y": 1},
                           "end": {"x": 2, "y": 2}})
+
+    def test_arc_start_center_end(self) -> None:
+        result = self.command({"type": "add_sketch_arc_start_center_end", "sketch_id": self.sketch_id,
+                               "start": {"x": 5, "y": 0}, "center": {"x": 0, "y": 0},
+                               "end": {"x": 0, "y": 5}})
+        self.assertAlmostEqual(self.objects()[result["arc_id"]]["sweep_radians"], 3.141592653589793 / 2)
+
+    def test_arc_radius(self) -> None:
+        minor = self.command({"type": "add_sketch_arc_radius", "sketch_id": self.sketch_id,
+                              "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "radius": 3})
+        minor_arc = self.objects()[minor["arc_id"]]
+        self.assertAlmostEqual(minor_arc["radius"], 3)
+        self.assertLess(abs(minor_arc["sweep_radians"]), 3.141592653589793)
+        major = self.command({"type": "add_sketch_arc_radius", "sketch_id": self.sketch_id,
+                              "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "radius": 3,
+                              "large_arc": True, "clockwise": True})
+        self.assertLess(self.objects()[major["arc_id"]]["sweep_radians"], -3.141592653589793)
+        major_ccw = self.command({"type": "add_sketch_arc_radius", "sketch_id": self.sketch_id,
+                                  "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "radius": 3,
+                                  "large_arc": True})
+        self.assertGreater(self.objects()[major_ccw["arc_id"]]["sweep_radians"], 3.141592653589793)
+        minor_cw = self.command({"type": "add_sketch_arc_radius", "sketch_id": self.sketch_id,
+                                 "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "radius": 3,
+                                 "clockwise": True})
+        self.assertGreater(self.objects()[minor_cw["arc_id"]]["sweep_radians"], -3.141592653589793)
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_arc_radius", "sketch_id": self.sketch_id,
+                          "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "radius": 1.9})
+
+    def test_arc_tangent(self) -> None:
+        line = self.line_tool("add_sketch_line", start={"x": 0, "y": 0}, end={"x": 10, "y": 0})
+        result = self.command({"type": "add_sketch_arc_tangent", "sketch_id": self.sketch_id,
+                               "line_id": line["line_id"], "tangent_point": {"x": 5, "y": 0},
+                               "radius": 2, "sweep_degrees": 90})
+        arc = self.objects()[result["arc_id"]]
+        center = self.objects()[arc["center_id"]]
+        self.assertAlmostEqual(center["x"], 5)
+        self.assertAlmostEqual(center["y"], 2)
+        self.assertAlmostEqual(arc["sweep_radians"], 3.141592653589793 / 2)
+        self.assertAlmostEqual(result["radius"], 2)
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_arc_tangent", "sketch_id": self.sketch_id,
+                          "line_id": line["line_id"], "tangent_point": {"x": 5, "y": 1},
+                          "radius": 2, "sweep_degrees": 90})
