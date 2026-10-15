@@ -11,7 +11,7 @@
   <body>
     <header class="topbar">
       <div class="topbar-start">
-        <a class="brand" href="/" aria-label="CADYX — проекты">
+        <a id="brand-link" class="brand" href="/" aria-label="CADYX — проекты">
           <span>CADYX</span>
         </a>
       </div>
@@ -72,7 +72,11 @@
               <button id="files-nav" class="nav-item" type="button" data-workspace-view="files" disabled title="Доступно, когда агент освободит панель">
                 <span class="nav-index">06</span><span class="nav-copy"><strong>ФАЙЛЫ</strong><small>Файлы проекта</small></span>
               </button>
+              <button id="projects-nav" class="nav-item" type="button" data-workspace-view="projects" disabled title="Доступно, когда агент освободит панель">
+                <span class="nav-index">07</span><span class="nav-copy"><strong>ПРОЕКТЫ</strong><small>Сохранённые проекты</small></span>
+              </button>
             </nav>
+            <p id="workspace-lock-status" class="workspace-lock-status" role="status" aria-live="polite" hidden></p>
             <div class="sidebar-project">
               <span class="section-label">АКТИВНЫЙ РЕСУРС</span>
               <strong id="sidebar-project-name">—</strong>
@@ -228,6 +232,14 @@
                   <p>Данные для производства пока не подготовлены.</p>
                   <small>Для этого проекта пока нет траекторий инструмента или плана обработки.</small>
                 </div>
+              </section>
+              <section id="projects-panel" class="panel projects-panel" aria-labelledby="projects-title" hidden>
+                <div class="panel-heading">
+                  <div><span class="panel-index">07</span><h2 id="projects-title">ПРОЕКТЫ</h2></div>
+                  <span id="projects-count" class="subtle-count" title="Количество проектов">0</span>
+                </div>
+                <div id="projects-list" class="projects-list" role="list" aria-label="Сохранённые проекты" tabindex="-1"></div>
+                <p id="projects-empty" class="projects-empty" hidden>В рабочей области пока нет сохранённых проектов.</p>
               </section>
             </div>
           </div>

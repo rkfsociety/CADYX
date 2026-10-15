@@ -107,6 +107,7 @@ $("#viewport-fit").addEventListener("click", () => {
 const toast = $("#toast");
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const integerFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
+const projectDateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 let projects = [];
 let folders = [];
 let selectedProjectId = readSelectedProject();
@@ -129,6 +130,8 @@ let previewRequest = 0;
 let automaticUpdateSnapshot = null;
 let automaticUpdateInFlight = false;
 let automaticUpdatesUnavailable = false;
+let workspaceAvailabilityConnected = false;
+let workspaceSelectionInFlight = false;
 let filesAvailabilityConnected = false;
 let activityStatusTimer = 0;
 let activityStatusOperationId = null;
@@ -141,6 +144,7 @@ const FOLDER_SELECTION_PREFIX = "folder:";
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
 const folderInspector = $("#folder-inspector");
+const projectsPanel = $("#projects-panel");
 function canOpenFilesView(projectId = selectedProjectId) {
   if (!projectId || getSelectedFolder()) return false;
   const lock = agentLocksByProject.get(projectId);
@@ -154,12 +158,56 @@ function lockAvailabilityKey(lock) {
   return JSON.stringify([lock?.state || null, Boolean(lock?.recovery_required)]);
 }
 
-function updateFilesNavigation() {
-  const button = $("#files-nav");
-  const available = canOpenFilesView();
-  button.disabled = !available;
-  button.title = available ? "" : "Доступно, когда агент освободит панель и завершит текущую работу";
-  if (!available && primaryGrid.dataset.view === "files") setWorkspaceNavigation("overview");
+function workspaceControlLockReason() {
+  if (!workspaceAvailabilityConnected) return "СОСТОЯНИЕ ПАНЕЛИ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
+  if (workspaceSelectionInFlight) return "ПЕРЕКЛЮЧЕНИЕ ПРОЕКТА · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
+  if (!selectedProjectId || getSelectedFolder()) return null;
+  const lock = agentLocksByProject.get(selectedProjectId);
+  if (lock?.recovery_required) return "ТРЕБУЕТСЯ ВОССТАНОВЛЕНИЕ · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
+  const agentIsActive = (activitiesByProject.get(selectedProjectId) || []).some((item) => item.state === "running");
+  if (lock?.state === "AI_LOCKED" || agentIsActive) return "АГЕНТ РАБОТАЕТ · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
+  if (!activityRevisionsByProject.has(selectedProjectId) || !lock) {
+    return "СОСТОЯНИЕ ПАНЕЛИ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
+  }
+  if (lock.state !== "FREE") return "ПАНЕЛЬ ЗАНЯТА · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
+  return null;
+}
+
+function updateWorkspaceControls() {
+  const lockReason = workspaceControlLockReason();
+  const available = lockReason === null;
+  projectDetail.dataset.controlsLocked = String(!available);
+  const status = $("#workspace-lock-status");
+  status.hidden = available;
+  status.textContent = lockReason || "";
+
+  const brand = $("#brand-link");
+  if (available) {
+    brand.href = "/";
+    brand.removeAttribute("aria-disabled");
+    brand.removeAttribute("tabindex");
+  } else {
+    brand.removeAttribute("href");
+    brand.setAttribute("aria-disabled", "true");
+    brand.tabIndex = -1;
+  }
+
+  document.querySelectorAll("#project-detail button").forEach((button) => {
+    const filesUnavailable = button.dataset.workspaceView === "files" && !canOpenFilesView();
+    const projectAlreadyActive = button.dataset.projectId === selectedProjectId;
+    const projectUnavailable = Boolean(button.dataset.projectId) && !canSelectProject(button.dataset.projectId);
+    button.disabled = !available || filesUnavailable || projectAlreadyActive || projectUnavailable;
+    if (button.dataset.workspaceView) {
+      button.title = lockReason || (filesUnavailable
+        ? "Доступно, когда агент освободит панель и завершит текущую работу" : "");
+    } else if (button.dataset.projectId) {
+      button.title = projectAlreadyActive ? "Этот проект уже открыт"
+        : lockReason || (projectUnavailable ? "Проект занят или его состояние не подтверждено" : "");
+    }
+  });
+  if (!available && ["files", "projects"].includes(primaryGrid.dataset.view)) {
+    setWorkspaceNavigation("overview");
+  }
 }
 
 $("#workspace-navigation").addEventListener("click", (event) => {
@@ -183,16 +231,21 @@ $("#workspace-navigation").addEventListener("click", (event) => {
     folderInspector.hidden = true;
     loadProjectFiles(projectId).catch((error) => showProjectFilesLoadError(projectId, error));
     folderFileList.focus({ preventScroll: true });
+  } else if (view === "projects") {
+    $("#projects-list").focus({ preventScroll: true });
   }
 });
 
 function setWorkspaceNavigation(view) {
-  const views = new Set(["overview", "geometry", "analysis", "manufacturing", "activity", "files"]);
-  const activeView = views.has(view) && (view !== "files" || canOpenFilesView()) ? view : "overview";
+  const views = new Set(["overview", "geometry", "analysis", "manufacturing", "activity", "files", "projects"]);
+  const activeView = views.has(view)
+    && (view === "overview" || workspaceControlLockReason() === null)
+    && (view !== "files" || canOpenFilesView()) ? view : "overview";
   primaryGrid.dataset.view = activeView;
   folderDetail.hidden = !getSelectedFolder() && activeView !== "files";
   $("#comparison-panel").hidden = activeView !== "analysis";
   $("#manufacturing-panel").hidden = activeView !== "manufacturing";
+  projectsPanel.hidden = activeView !== "projects";
   $("#object-panel").hidden = activeView !== "geometry" || !selectedProjectId || Boolean(getSelectedFolder());
   document.querySelectorAll(".nav-item[data-workspace-view]").forEach((item) => {
     if (item.dataset.workspaceView === activeView) item.setAttribute("aria-current", "page");
@@ -340,6 +393,102 @@ function renderSceneMetrics(scene, objectsById, visibleSketchId) {
 function getProject(id) {
   return projects.find((item) => item.project.id === id);
 }
+
+function canSelectProject(id) {
+  const lock = agentLocksByProject.get(id) || getProject(id)?.lock;
+  const agentIsActive = (activitiesByProject.get(id) || []).some((item) => item.state === "running");
+  return lock?.state === "FREE" && !lock.recovery_required && !agentIsActive;
+}
+
+function renderProjects() {
+  const list = $("#projects-list");
+  list.replaceChildren();
+  $("#projects-count").textContent = integerFormat.format(projects.length);
+  $("#projects-empty").hidden = projects.length > 0;
+  for (const entry of projects) {
+    const project = entry.project;
+    const active = project.id === selectedProjectId;
+    const projectAvailable = canSelectProject(project.id);
+    const card = document.createElement("article");
+    card.className = "workspace-project-card";
+    card.dataset.active = String(active);
+    card.setAttribute("role", "listitem");
+
+    const heading = document.createElement("div");
+    heading.className = "workspace-project-card-heading";
+    const name = document.createElement("h3");
+    name.textContent = project.name;
+    name.title = project.name;
+    const state = document.createElement("span");
+    state.className = "workspace-project-state";
+    state.textContent = active ? "АКТИВНЫЙ РЕСУРС" : projectAvailable ? "ГОТОВ К ОТКРЫТИЮ" : "ПАНЕЛЬ ЗАНЯТА";
+    heading.append(name, state);
+
+    const action = document.createElement("button");
+    action.className = "button workspace-project-open";
+    action.type = "button";
+    action.dataset.projectId = project.id;
+    action.textContent = active ? "ТЕКУЩИЙ ПРОЕКТ" : "ОТКРЫТЬ ПРОЕКТ";
+    action.disabled = active || !projectAvailable;
+
+    const meta = document.createElement("div");
+    meta.className = "workspace-project-meta";
+    const modified = document.createElement("span");
+    modified.textContent = "ИЗМЕНЁН";
+    const modifiedAt = Date.parse(project.modified_at || "");
+    const modifiedValue = document.createElement("strong");
+    modifiedValue.textContent = Number.isFinite(modifiedAt)
+      ? projectDateFormat.format(new Date(modifiedAt)) : "—";
+    modified.append(modifiedValue);
+    const id = document.createElement("span");
+    id.textContent = "ID";
+    const idValue = document.createElement("strong");
+    idValue.textContent = project.id.slice(0, 8).toUpperCase();
+    id.append(idValue);
+    meta.append(modified, id);
+    card.append(heading, meta, action);
+    list.append(card);
+  }
+}
+
+$("#projects-list").addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-project-id]");
+  if (!button || button.disabled || workspaceControlLockReason() !== null || !canSelectProject(button.dataset.projectId)) return;
+  const projectId = button.dataset.projectId;
+  if (!projectId || projectId === selectedProjectId) return;
+  workspaceSelectionInFlight = true;
+  updateWorkspaceControls();
+  try {
+    const result = await api("/api/v1/agent/workspace/selection", {
+      method: "POST",
+      body: JSON.stringify({ type: "project", project_id: projectId }),
+    });
+    if (result.selection?.type !== "project" || result.selection.project_id !== projectId) {
+      throw new Error("Сервер не подтвердил выбор проекта.");
+    }
+    selectedProjectId = projectId;
+    selectedObjectId = null;
+    activeSketchId = null;
+    pendingViewportTransition = null;
+    agentLocksByProject.delete(projectId);
+    activitiesByProject.delete(projectId);
+    activityRevisionsByProject.delete(projectId);
+    workspaceSelectionInFlight = false;
+    workspaceAvailabilityConnected = false;
+    filesAvailabilityConnected = false;
+    saveSelectedProject(projectId);
+    renderProjects();
+    updateWorkspaceControls();
+    scheduleWorkspaceRefresh();
+  } catch (error) {
+    workspaceSelectionInFlight = false;
+    workspaceAvailabilityConnected = false;
+    filesAvailabilityConnected = false;
+    updateWorkspaceControls();
+    notify("Не удалось открыть проект: " + error.message, true);
+    scheduleWorkspaceRefresh();
+  }
+});
 
 function showProjectLoading(name) {
   activeFolderName = null;
@@ -653,9 +802,14 @@ async function refreshWorkspacePass() {
     .find((id) => id && workspaceSelectionExists(id));
   selectedProjectId = requestedSelection || projects[0]?.project.id || null;
   const selectionChanged = selectedProjectId !== previousSelection;
+  renderProjects();
   if (selectedProjectId !== savedSelection) {
     selectedObjectId = null;
     saveSelectedProject(selectedProjectId);
+  }
+  if (selectionChanged) {
+    workspaceAvailabilityConnected = false;
+    filesAvailabilityConnected = false;
   }
   if (selectionChanged && selectedProjectId && !getSelectedFolder()) {
     const selected = getProject(selectedProjectId);
@@ -663,7 +817,7 @@ async function refreshWorkspacePass() {
     activitiesByProject.delete(selectedProjectId);
     activityRevisionsByProject.delete(selectedProjectId);
   }
-  if (selectionChanged) updateFilesNavigation();
+  if (selectionChanged) updateWorkspaceControls();
 
   const selectedFolder = getSelectedFolder();
   if (selectedFolder) showFolderDetail(selectedFolder);
@@ -722,6 +876,7 @@ async function checkAutomaticUpdates() {
     const current = await api(`/api/v1/updates?${query.toString()}`, { cache: "no-store" });
     setApiConnectionStatus(true);
     if (selectionAtRequest !== selectedProjectId) return;
+    workspaceAvailabilityConnected = true;
     const previous = automaticUpdateSnapshot;
     automaticUpdateSnapshot = current;
     if (current.project_lock && Number.isInteger(current.activity_revision)) {
@@ -740,14 +895,14 @@ async function checkAutomaticUpdates() {
       }
     }
     if (!previous) {
-      updateFilesNavigation();
+      updateWorkspaceControls();
       return;
     }
     if (current.activity_revision !== null && previous.activity_revision !== null &&
         current.activity_revision < previous.activity_revision && selectedProjectId) {
       activitiesByProject.delete(selectedProjectId);
       activityRevisionsByProject.delete(selectedProjectId);
-      updateFilesNavigation();
+      updateWorkspaceControls();
     }
     if (current.dashboard_revision !== null && previous.dashboard_revision !== null &&
         current.dashboard_revision < previous.dashboard_revision && selectedProjectId) {
@@ -769,7 +924,7 @@ async function checkAutomaticUpdates() {
       scheduleWorkspaceRefresh();
     } else if (activityChanged && selectedProjectId && !folder) {
       activityRevisionsByProject.delete(selectedProjectId);
-      updateFilesNavigation();
+      updateWorkspaceControls();
       refreshActivitySnapshot(selectedProjectId)
         .catch((error) => notify(`Не удалось обновить состояние агента: ${error.message}`, true));
     }
@@ -777,11 +932,12 @@ async function checkAutomaticUpdates() {
       refreshAgentDashboardSnapshot(selectedProjectId)
         .catch((error) => notify(`Не удалось обновить очередь агента: ${error.message}`, true));
     }
-    updateFilesNavigation();
+    updateWorkspaceControls();
   } catch (error) {
     setApiConnectionStatus(false);
+    workspaceAvailabilityConnected = false;
     filesAvailabilityConnected = false;
-    updateFilesNavigation();
+    updateWorkspaceControls();
     if (error.status === 404) {
       scheduleWorkspaceRefresh();
       return;
@@ -1042,7 +1198,7 @@ function renderAgentActivity(value, lock = null) {
     activityStatusTimer = 0;
     activityStatusOperationId = null;
   }
-  updateFilesNavigation();
+  updateWorkspaceControls();
 }
 
 function objectTypeLabel(item) {
@@ -1220,12 +1376,14 @@ function handleStreamEvent(type, event) {
     selectedObjectId = null;
     activeSketchId = null;
     pendingViewportTransition = null;
+    workspaceSelectionInFlight = false;
     agentLocksByProject.delete(selectedId);
     activitiesByProject.delete(selectedId);
     activityRevisionsByProject.delete(selectedId);
+    workspaceAvailabilityConnected = false;
     filesAvailabilityConnected = false;
     saveSelectedProject(selectedId);
-    updateFilesNavigation();
+    updateWorkspaceControls();
     scheduleWorkspaceRefresh();
     return;
   }
@@ -1244,6 +1402,7 @@ function handleStreamEvent(type, event) {
     if (activities.length > 128) activities.splice(0, activities.length - 128);
     activitiesByProject.set(projectId, activities);
     if (projectId === selectedProjectId) renderAgentActivity(activities, agentLocksByProject.get(projectId));
+    else if (primaryGrid.dataset.view === "projects") renderProjects();
     if (projectId === selectedProjectId && data.state === "running") {
       $("#folder-detail").hidden = true;
       projectDetail.hidden = false;
@@ -1361,17 +1520,22 @@ function handleStreamEvent(type, event) {
     selectedObjectId = null;
     activeSketchId = null;
     pendingViewportTransition = null;
+    workspaceSelectionInFlight = false;
     agentLocksByProject.delete(projectId);
     activitiesByProject.delete(projectId);
     activityRevisionsByProject.delete(projectId);
+    workspaceAvailabilityConnected = false;
     filesAvailabilityConnected = false;
     saveSelectedProject(projectId);
-    updateFilesNavigation();
+    updateWorkspaceControls();
     scheduleWorkspaceRefresh();
   } else if (type === "project.lock.changed") {
     agentLocksByProject.set(projectId, data);
     if (projectId === selectedProjectId) {
       renderAgentActivity(activitiesByProject.get(projectId) || [], data);
+    } else if (primaryGrid.dataset.view === "projects") {
+      renderProjects();
+      updateWorkspaceControls();
     }
   }
 }
