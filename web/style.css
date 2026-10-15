@@ -122,6 +122,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .primary-grid[data-view="projects"] > :not(#projects-panel) { display: none; }
 .primary-grid[data-view="projects"] > #projects-panel { display: grid; grid-column: 1; grid-row: 1; min-height: 0; grid-template-rows: 38px minmax(0, 1fr) auto; overflow: hidden; }
 .primary-grid:not([data-view="projects"]) #projects-panel { display: none; }
+.projects-toolbar { display: flex; align-items: center; gap: 8px; }
+.projects-toolbar label { color: var(--dim); font: 8px var(--mono); letter-spacing: .06em; }
+.projects-toolbar select { max-width: min(245px, 48vw); min-height: 27px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 3px; background: #111b1e; color: var(--muted); font: 9px var(--mono); }
 .projects-list { display: grid; min-height: 0; align-content: start; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 10px; overflow: auto; padding: 12px; }
 .workspace-project-card { display: grid; min-width: 0; gap: 18px; padding: 15px; border: 1px solid var(--line); border-radius: 4px; background: linear-gradient(145deg, #121d20, #0d1417); }
 .workspace-project-card[data-active="true"] { border-color: #2d6658; background: linear-gradient(145deg, #14251f, #0e1717); }

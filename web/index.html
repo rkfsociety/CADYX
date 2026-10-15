@@ -233,7 +233,15 @@
               <section id="projects-panel" class="panel projects-panel" aria-labelledby="projects-title" hidden>
                 <div class="panel-heading">
                   <div><span class="panel-index">07</span><h2 id="projects-title">ПРОЕКТЫ</h2></div>
-                  <span id="projects-count" class="subtle-count" title="Количество проектов">0</span>
+                  <div class="projects-toolbar">
+                    <label for="projects-sort">СОРТИРОВКА</label>
+                    <select id="projects-sort" aria-label="Сортировка проектов">
+                      <option value="name">По имени</option>
+                      <option value="modified-desc">Сначала недавно изменённые</option>
+                      <option value="modified-asc">Сначала давно изменённые</option>
+                    </select>
+                    <span id="projects-count" class="subtle-count" title="Количество проектов">0</span>
+                  </div>
                 </div>
                 <div id="projects-list" class="projects-list" role="list" aria-label="Сохранённые проекты" tabindex="-1"></div>
                 <p id="projects-empty" class="projects-empty" hidden>В рабочей области пока нет сохранённых проектов.</p>

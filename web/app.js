@@ -118,6 +118,7 @@ const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }
 const integerFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 const projectDateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 let projects = [];
+let projectSort = "name";
 let folders = [];
 let selectedProjectId = readSelectedProject();
 let selectedObjectId = null;
@@ -572,12 +573,29 @@ function canSelectProject(id) {
   return lock?.state === "FREE" && !lock.recovery_required && !agentIsActive;
 }
 
+$("#projects-sort").addEventListener("change", (event) => {
+  projectSort = event.currentTarget.value;
+  renderProjects();
+});
+
 function renderProjects() {
   const list = $("#projects-list");
   list.replaceChildren();
   $("#projects-count").textContent = integerFormat.format(projects.length);
   $("#projects-empty").hidden = projects.length > 0;
-  for (const entry of projects) {
+  const sortedProjects = [...projects].sort((left, right) => {
+    if (projectSort === "name") {
+      return left.project.name.localeCompare(right.project.name, "ru", { sensitivity: "base" })
+        || left.project.id.localeCompare(right.project.id);
+    }
+    const leftModified = Date.parse(left.project.modified_at || "") || 0;
+    const rightModified = Date.parse(right.project.modified_at || "") || 0;
+    const direction = projectSort === "modified-asc" ? 1 : -1;
+    return direction * (leftModified - rightModified)
+      || left.project.name.localeCompare(right.project.name, "ru", { sensitivity: "base" })
+      || left.project.id.localeCompare(right.project.id);
+  });
+  for (const entry of sortedProjects) {
     const project = entry.project;
     const active = project.id === selectedProjectId;
     const projectAvailable = canSelectProject(project.id);
