@@ -115,6 +115,16 @@ $("#viewport-fit").addEventListener("click", () => {
   setCameraPresetState("isometric");
 });
 const toast = $("#toast");
+const copyProjectIdButton = $("#copy-project-id");
+copyProjectIdButton.addEventListener("click", async () => {
+  if (!selectedProjectId || selectedProjectId.startsWith(FOLDER_SELECTION_PREFIX)) return;
+  try {
+    await navigator.clipboard.writeText(selectedProjectId);
+    notify("UUID проекта скопирован.");
+  } catch {
+    notify("Не удалось скопировать UUID проекта.", true);
+  }
+});
 const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 });
 const integerFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 const projectDateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
@@ -798,6 +808,7 @@ function showProjectLoading(name) {
   $("#project-light").classList.add("active");
   $("#sidebar-project-name").textContent = name;
   $("#project-short-id").textContent = selectedProjectId?.slice(0, 8).toUpperCase() || "—";
+  copyProjectIdButton.disabled = !selectedProjectId;
   $("#document-revision").textContent = "—";
   $("#viewport-revision").textContent = "—";
   $("#comparison-description").hidden = true;
@@ -839,6 +850,7 @@ function showFolderDetail(name) {
   $("#document-title").textContent = name;
   $("#document-kind").textContent = "ПАПКА";
   $("#project-short-id").textContent = "РАБОЧАЯ ПАПКА";
+  copyProjectIdButton.disabled = true;
   $("#sidebar-project-name").textContent = name;
   $("#project-light").classList.remove("active");
   $("#document-revision").textContent = "—";
@@ -1110,6 +1122,7 @@ async function refreshWorkspacePass() {
     $("#document-title").textContent = "CADYX";
     $("#document-kind").textContent = "ПРОЕКТ НЕ ВЫБРАН";
     $("#project-short-id").textContent = "—";
+    copyProjectIdButton.disabled = true;
     $("#project-light").classList.remove("active");
     $("#document-revision").textContent = "—";
   }
@@ -1294,6 +1307,7 @@ async function refreshDetail() {
   detailedProjectId = projectId;
   detailedProjectModifiedAt = info.project.modified_at;
   $("#project-short-id").textContent = projectId.slice(0, 8).toUpperCase();
+  copyProjectIdButton.disabled = false;
   const objects = info.document.objects;
   const objectsById = new Map(objects.map((item) => [item.id, item]));
   const visibleSketchId = activeSketchId
