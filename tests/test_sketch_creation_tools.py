@@ -239,6 +239,37 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
                           "minor_axis_endpoint": {"x": 1, "y": 2}})
         self.assertEqual(len(self.objects()), before)
 
+    def test_elliptical_arc_is_exact_and_rejects_full_revolutions(self) -> None:
+        result = self.command({"type": "add_sketch_elliptical_arc", "sketch_id": self.sketch_id,
+                               "center": {"x": 2, "y": -1}, "major_radius": 5,
+                               "minor_radius": 3, "rotation_degrees": 30,
+                               "start_angle_degrees": 0, "sweep_degrees": 90})
+        ellipse = self.objects()[result["ellipse_id"]]
+        self.assertEqual((ellipse["center_x"], ellipse["center_y"]), (2, -1))
+        self.assertEqual((ellipse["major_radius"], ellipse["minor_radius"]), (5, 3))
+        self.assertAlmostEqual(ellipse["sweep_radians"], math.pi / 2)
+        start, end = (self.objects()[point_id] for point_id in result["point_ids"])
+        self.assertAlmostEqual(start["x"], 2 + 5 * math.cos(math.pi / 6))
+        self.assertAlmostEqual(end["y"], -1 + 3 * math.cos(math.pi / 6))
+        before = len(self.objects())
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_elliptical_arc", "sketch_id": self.sketch_id,
+                          "center": {"x": 0, "y": 0}, "major_radius": 5,
+                          "minor_radius": 3, "start_angle_degrees": 0, "sweep_degrees": 360})
+        self.assertEqual(len(self.objects()), before)
+
+    def test_elliptical_arc_mirror_reverses_its_parameter_direction(self) -> None:
+        source = self.command({"type": "add_sketch_elliptical_arc", "sketch_id": self.sketch_id,
+                               "center": {"x": 1, "y": 2}, "major_radius": 5,
+                               "minor_radius": 3, "start_angle_degrees": 20,
+                               "sweep_degrees": 100})["ellipse_id"]
+        result = self.command({"type": "mirror_sketch_elements", "sketch_id": self.sketch_id,
+                               "object_ids": [source], "axis_start": {"x": 0, "y": 0},
+                               "axis_end": {"x": 1, "y": 0}})
+        clone = self.objects()[result["ellipse_ids"][0]]
+        self.assertAlmostEqual(clone["start_angle_radians"], -math.radians(20))
+        self.assertAlmostEqual(clone["sweep_radians"], -math.radians(100))
+
     def test_circle_tangent_to_line_at_point(self) -> None:
         line = self.line_tool("add_sketch_line", start={"x": 0, "y": 0}, end={"x": 10, "y": 0})
         result = self.command({"type": "add_sketch_circle_tangent_to_line", "sketch_id": self.sketch_id,

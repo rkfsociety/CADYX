@@ -73,13 +73,16 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         elif kind == "ellipse":
             rotation = item["rotation_radians"]
             cosine, sine = math.cos(rotation), math.sin(rotation)
-            for index in range(128):
-                angle = math.tau * index / 128
+            is_arc = "sweep_radians" in item
+            sweep = item["sweep_radians"] if is_arc else math.tau
+            steps = max(1, math.ceil(128 * abs(sweep) / math.tau))
+            for index in range(steps + 1 if is_arc else steps):
+                angle = item["start_angle_radians"] + sweep * index / steps if is_arc else math.tau * index / steps
                 x = item["center_x"] + item["major_radius"] * math.cos(angle) * cosine - item["minor_radius"] * math.sin(angle) * sine
                 y = item["center_y"] + item["major_radius"] * math.cos(angle) * sine + item["minor_radius"] * math.sin(angle) * cosine
                 positions.extend(sketch_position(item["sketch_id"], x, y))
-            for index in range(128):
-                lines.extend([index, (index + 1) % 128])
+            for index in range(steps):
+                lines.extend([index, index + 1 if is_arc else (index + 1) % steps])
         else:
             continue
         for offset in range(0, len(positions), 3):

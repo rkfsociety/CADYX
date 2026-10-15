@@ -198,6 +198,8 @@ class CommandSystem:
         if kind in {"add_sketch_ellipse", "add_sketch_ellipse_center",
                     "add_sketch_ellipse_three_points"}:
             return self._add_sketch_ellipse(document, command, kind, progress=progress)
+        if kind == "add_sketch_elliptical_arc":
+            return self._add_sketch_elliptical_arc(document, command, progress=progress)
         if kind in {"add_sketch_circle_diameter", "add_sketch_circle_two_points", "add_sketch_circle_three_points"}:
             return self._add_sketch_circle_tool(document, command, kind, progress=progress)
         if kind == "add_sketch_circle_tangent_to_line":
@@ -578,6 +580,53 @@ class CommandSystem:
                 "center": {"x": center_x, "y": center_y},
                 "major_radius": major_radius, "minor_radius": minor_radius,
                 "rotation_radians": rotation}
+
+    def _add_sketch_elliptical_arc(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        center_x, center_y = self._coordinate_pair(command.get("center"), "Ellipse arc center")
+        major_radius = _number(command.get("major_radius"), "major_radius")
+        minor_radius = _number(command.get("minor_radius"), "minor_radius")
+        if major_radius < minor_radius or minor_radius <= 1e-7:
+            raise ValidationError("Ellipse radii must satisfy major_radius >= minor_radius > 1e-7.")
+        rotation = math.radians(_finite_number(command.get("rotation_degrees", 0), "Ellipse rotation"))
+        start_angle = math.radians(_finite_number(command.get("start_angle_degrees"), "Ellipse arc start angle"))
+        sweep = math.radians(_finite_number(command.get("sweep_degrees"), "Ellipse arc sweep"))
+        if abs(sweep) <= 1e-7 or abs(sweep) >= math.tau - 1e-7:
+            raise ValidationError("Ellipse arc sweep must be non-zero and less than one revolution.")
+        cosine, sine = math.cos(rotation), math.sin(rotation)
+
+        def ellipse_point(angle: float) -> tuple[float, float]:
+            local_x, local_y = major_radius * math.cos(angle), minor_radius * math.sin(angle)
+            return (center_x + local_x * cosine - local_y * sine,
+                    center_y + local_x * sine + local_y * cosine)
+
+        start, end = ellipse_point(start_angle), ellipse_point(start_angle + sweep)
+        if not all(math.isfinite(value) for value in (*start, *end)):
+            raise ValidationError("Ellipse arc coordinates must remain finite.")
+        if math.hypot(start[0] - end[0], start[1] - end[1]) <= 1e-7:
+            raise ValidationError("Ellipse arc endpoints must be distinct.")
+        if progress is not None:
+            progress({"phase": "add_sketch_elliptical_arc"})
+        ellipse_id = f"ellipse:{uuid4()}"
+        start_id, end_id = f"point:{uuid4()}", f"point:{uuid4()}"
+        insert_at = document.objects.index(sketch) + 1
+        document.objects[insert_at:insert_at] = [
+            {"id": start_id, "type": "point", "sketch_id": sketch["id"], "x": start[0], "y": start[1]},
+            {"id": end_id, "type": "point", "sketch_id": sketch["id"], "x": end[0], "y": end[1]},
+            {"id": ellipse_id, "type": "ellipse", "sketch_id": sketch["id"],
+             "center_x": center_x, "center_y": center_y,
+             "major_radius": major_radius, "minor_radius": minor_radius,
+             "rotation_radians": rotation, "start_id": start_id, "end_id": end_id,
+             "start_angle_radians": start_angle, "sweep_radians": sweep},
+        ]
+        self._rebuild_changed_features(document, {sketch["id"]}, progress=progress)
+        return {"sketch_id": sketch["id"], "ellipse_id": ellipse_id, "arc_id": ellipse_id,
+                "ellipse_ids": [ellipse_id], "point_ids": [start_id, end_id],
+                "start": {"x": start[0], "y": start[1]},
+                "end": {"x": end[0], "y": end[1]}, "sweep_radians": sweep}
 
     def _add_sketch_circle(
         self,
@@ -1170,6 +1219,8 @@ class CommandSystem:
                 pending.append(item["center_id"])
                 if "sweep_radians" in item:
                     pending.extend((item["start_id"], item["end_id"]))
+            elif item["type"] == "ellipse" and "sweep_radians" in item:
+                pending.extend((item["start_id"], item["end_id"]))
         return [item for item in document.objects if item.get("id") in included]
 
     def _copy_sketch_geometry(
@@ -1214,6 +1265,14 @@ class CommandSystem:
                                                             major_endpoint[0] - center[0])
                     if not all(math.isfinite(value) for value in (*origin, *center, *major_endpoint)):
                         raise ValidationError("Transformed ellipse coordinates must remain finite.")
+                    if "sweep_radians" in item:
+                        clone["start_id"], clone["end_id"] = id_map[item["start_id"]], id_map[item["end_id"]]
+                        x_axis, y_axis = transform(1.0, 0.0), transform(0.0, 1.0)
+                        determinant = ((x_axis[0] - origin[0]) * (y_axis[1] - origin[1])
+                                       - (x_axis[1] - origin[1]) * (y_axis[0] - origin[0]))
+                        if determinant < 0:
+                            clone["start_angle_radians"] = -clone["start_angle_radians"]
+                            clone["sweep_radians"] = -clone["sweep_radians"]
                 copies.append(clone)
         insert_at = document.objects.index(sketch) + 1
         document.objects[insert_at:insert_at] = copies

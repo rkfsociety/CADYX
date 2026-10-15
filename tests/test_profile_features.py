@@ -56,7 +56,7 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertGreater(handle["geometry"]["volume"], 0)
 
         document = self.core.inspect_project(self.project_id)["document"]
-        self.assertEqual(document["version"], 5)
+        self.assertEqual(document["version"], 6)
         self.assertEqual(Document.from_dict(document).to_dict(), document)
         features = [item for item in document["objects"] if item["type"] == "feature"]
         self.assertEqual([item["operation"] for item in features], ["revolve_sketch", "extrude_sketch"])
@@ -96,6 +96,22 @@ class ProfileFeatureTests(unittest.TestCase):
         saved = self.core.inspect_project(self.project_id)["document"]
         self.assertTrue(any(item["id"] == ellipse["ellipse_id"] and item["type"] == "ellipse"
                             for item in saved["objects"]))
+
+    def test_elliptical_arc_closes_with_lines_and_extrudes(self) -> None:
+        sketch = self.command({"type": "create_sketch", "name": "Профиль с эллиптической дугой",
+                              "plane": "XY"})["sketch_id"]
+        arc = self.command({"type": "add_sketch_elliptical_arc", "sketch_id": sketch,
+                            "center": {"x": 0, "y": 0}, "major_radius": 5,
+                            "minor_radius": 3, "start_angle_degrees": 0, "sweep_degrees": 90})
+        center = self.command({"type": "add_sketch_point", "sketch_id": sketch, "x": 0, "y": 0})["point_id"]
+        start_id, end_id = arc["point_ids"]
+        self.command({"type": "add_sketch_element", "sketch_id": sketch, "element_type": "line",
+                      "start_id": end_id, "end_id": center})
+        self.command({"type": "add_sketch_element", "sketch_id": sketch, "element_type": "line",
+                      "start_id": center, "end_id": start_id})
+        result = self.command({"type": "extrude_sketch", "sketch_id": sketch, "depth": 2})
+        self.assertGreater(result["geometry"]["volume"], 0)
+        self.assertIsNone(self.core.kernel.validate(result["geometry"]))
 
     def test_revolution_rejects_open_axis_or_xy_profiles_atomically(self) -> None:
         sketch, point_ids = self.closed_sketch("Профиль", [(2, 0), (4, 0), (4, 8), (2, 8)])

@@ -149,6 +149,17 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual(len(ellipse["lines"]), 128 * 2)
         self.assertEqual(ellipse["lines"][-2:], [127, 0])
 
+    def test_elliptical_arc_scene_renders_only_its_open_sweep(self):
+        sketch = self.command({"type": "create_sketch"})["sketch_id"]
+        result = self.command({"type": "add_sketch_elliptical_arc", "sketch_id": sketch,
+                               "center": {"x": 0, "y": 0}, "major_radius": 5,
+                               "minor_radius": 3, "start_angle_degrees": 0, "sweep_degrees": 90})
+        scene = self.core.render_project(self.project)
+        arc = next(item for item in scene["objects"] if item["object_id"] == result["ellipse_id"])
+        self.assertEqual(len(arc["positions"]), 33 * 3)
+        self.assertEqual(len(arc["lines"]), 32 * 2)
+        self.assertEqual(arc["lines"][-2:], [31, 32])
+
     def test_unrenderable_sketch_is_rejected_without_changing_document(self):
         sketch = self.command({"type": "create_sketch"})["sketch_id"]
         center = self.command({"type": "add_sketch_element", "sketch_id": sketch,

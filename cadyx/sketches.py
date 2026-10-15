@@ -116,6 +116,28 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
                 raise ValidationError("Ellipse radii must satisfy major_radius >= minor_radius > 1e-7.")
             if abs(rotation) > 1e12:
                 raise ValidationError("Ellipse rotation is out of range.")
+            arc_fields = {"start_id", "end_id", "start_angle_radians", "sweep_radians"}
+            present = arc_fields.intersection(item)
+            if present and present != arc_fields:
+                raise ValidationError("An elliptical arc needs endpoint references, start angle and sweep together.")
+            if present:
+                start = reference(item["start_id"], "point", sketch_id)
+                end = reference(item["end_id"], "point", sketch_id)
+                if start["id"] == end["id"]:
+                    raise ValidationError("Elliptical arc endpoints must be distinct.")
+                start_angle = number(item["start_angle_radians"])
+                sweep = number(item["sweep_radians"])
+                if abs(start_angle) > 1e12:
+                    raise ValidationError("Elliptical arc start angle is out of range.")
+                if abs(sweep) <= 1e-7 or abs(sweep) >= math.tau - 1e-7:
+                    raise ValidationError("Elliptical arc sweep must be non-zero and less than one revolution.")
+                cosine, sine = math.cos(rotation), math.sin(rotation)
+                for point, angle in ((start, start_angle), (end, start_angle + sweep)):
+                    local_x, local_y = major * math.cos(angle), minor * math.sin(angle)
+                    expected_x = number(item["center_x"]) + local_x * cosine - local_y * sine
+                    expected_y = number(item["center_y"]) + local_x * sine + local_y * cosine
+                    if not close(number(point["x"]), expected_x) or not close(number(point["y"]), expected_y):
+                        raise ValidationError("Elliptical arc endpoints must lie on its analytic curve.")
 
     # Geometry has been checked before constraints, regardless of storage order.
     for item in objects:
@@ -166,12 +188,16 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
              and not item.get("construction", False) and item.get("extent", "segment") == "segment"]
     circles = [item for item in owned if item.get("type") == "circle"
                and not item.get("construction", False)]
-    ellipses = [item for item in owned if item.get("type") == "ellipse"
-                and not item.get("construction", False)]
+    ellipse_objects = [item for item in owned if item.get("type") == "ellipse"
+                       and not item.get("construction", False)]
     arcs = [item for item in circles if "sweep_radians" in item]
     circles = [item for item in circles if "sweep_radians" not in item]
+    ellipse_arcs = [item for item in ellipse_objects if "sweep_radians" in item]
+    ellipses = [item for item in ellipse_objects if "sweep_radians" not in item]
 
     if not lines and not arcs:
+        if ellipse_arcs:
+            raise ValidationError("An elliptical arc must be combined with other edges to form a closed profile.")
         if ellipses:
             if len(ellipses) != 1 or circles:
                 raise ValidationError("A profile operation needs one closed ellipse or one circle.")
@@ -195,7 +221,7 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
              "y": number(center["y"]) + radius * math.sin(math.tau * index / 128)}
             for index in range(128)
         ]
-    edges = lines + arcs
+    edges = lines + arcs + ellipse_arcs
     if circles or ellipses or len(edges) < 3 or len(edges) > 4096:
         raise ValidationError("A profile operation needs one closed line/arc loop with 3 to 4096 edges.")
 
@@ -218,18 +244,33 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
             point = by_id[to_id]
             profile.append({"x": number(point["x"]), "y": number(point["y"])})
             return
-        center = by_id[edge["center_id"]]
-        from_point = by_id[from_id]
-        start_angle = math.atan2(from_point["y"] - center["y"], from_point["x"] - center["x"])
         sweep = number(edge["sweep_radians"])
+        if edge["type"] == "circle":
+            center = by_id[edge["center_id"]]
+            from_point = by_id[from_id]
+            start_angle = math.atan2(from_point["y"] - center["y"], from_point["x"] - center["x"])
+            if from_id != edge["start_id"]:
+                sweep = -sweep
+            steps = max(1, math.ceil(abs(sweep) / (math.pi / 64)))
+            radius = number(edge["radius"])
+            for index in range(1, steps + 1):
+                angle = start_angle + sweep * index / steps
+                profile.append({"x": number(center["x"]) + radius * math.cos(angle),
+                                "y": number(center["y"]) + radius * math.sin(angle)})
+            return
+        start_angle = number(edge["start_angle_radians"])
         if from_id != edge["start_id"]:
+            start_angle += sweep
             sweep = -sweep
         steps = max(1, math.ceil(abs(sweep) / (math.pi / 64)))
-        radius = number(edge["radius"])
+        rotation = number(edge["rotation_radians"])
+        cosine, sine = math.cos(rotation), math.sin(rotation)
         for index in range(1, steps + 1):
             angle = start_angle + sweep * index / steps
-            profile.append({"x": number(center["x"]) + radius * math.cos(angle),
-                            "y": number(center["y"]) + radius * math.sin(angle)})
+            local_x = number(edge["major_radius"]) * math.cos(angle)
+            local_y = number(edge["minor_radius"]) * math.sin(angle)
+            profile.append({"x": number(edge["center_x"]) + local_x * cosine - local_y * sine,
+                            "y": number(edge["center_y"]) + local_x * sine + local_y * cosine})
 
     current_id = first["end_id"]
     append_edge(first, start_id, current_id)

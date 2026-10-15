@@ -1412,7 +1412,7 @@ function objectSummary(item, objects = currentObjects) {
     return `${pointLabel(start)} → ${pointLabel(end)}`;
   }
   if (item.type === "circle") return `R ${formatNumber(item.radius)}`;
-  if (item.type === "ellipse") return `R ${formatNumber(item.major_radius)} × ${formatNumber(item.minor_radius)}`;
+  if (item.type === "ellipse") return `R ${formatNumber(item.major_radius)} × ${formatNumber(item.minor_radius)}${Number.isFinite(item.sweep_radians) ? ` · ${formatNumber(item.sweep_radians * 180 / Math.PI)}°` : ""}`;
   if (item.type === "constraint") return constraintLabel(item.kind);
   return "";
 }
@@ -1608,6 +1608,7 @@ function handleStreamEvent(type, event) {
         "add_sketch_circumscribed_polygon", "add_sketch_polygon_from_center", "add_sketch_rounded_rectangle",
         "add_sketch_circle_diameter",
         "add_sketch_ellipse", "add_sketch_ellipse_center", "add_sketch_ellipse_three_points",
+        "add_sketch_elliptical_arc",
         "add_sketch_circle_two_points", "add_sketch_circle_three_points", "add_sketch_circle_tangent_to_line",
         "add_sketch_circle_tangent_to_two_lines", "add_sketch_circle_tangent_to_three_lines",
         "add_sketch_arc_center", "add_sketch_arc_three_points", "add_sketch_arc_start_center_end",
