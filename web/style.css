@@ -83,7 +83,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .primary-grid:not([data-view="geometry"]) #object-panel { display: none; }
 .primary-grid[data-view="geometry"] .inspector-column { grid-template-rows: minmax(0, 1fr); }
 .primary-grid[data-view="geometry"] .inspector-column > :not(#object-panel) { display: none; }
-.primary-grid[data-view="geometry"] #object-panel { display: grid; grid-template-rows: 38px minmax(0, 1fr) auto; }
+.primary-grid[data-view="geometry"] #object-panel { display: grid; grid-template-rows: 38px minmax(0, 1fr) auto auto; }
 .primary-grid[data-view="analysis"] { grid-template-columns: minmax(0, 1fr); }
 .primary-grid[data-view="analysis"] > .model-panel,
 .primary-grid[data-view="analysis"] > .folder-detail,
@@ -292,6 +292,18 @@ button.object-row.selected { border-color: #285448; background: #45e1ba0b; }
 .folder-inspector-file dt { color: var(--dim); }
 .folder-inspector-file dd { margin: 0; color: var(--text); text-align: right; }
 .object-panel { min-height: 0; overflow: hidden; }
+.geometry-table-scroll { min-height: 0; overflow: auto; }
+.geometry-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.geometry-table th, .geometry-table td { padding: 9px 8px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font-size: 10px; text-align: left; vertical-align: middle; overflow-wrap: anywhere; }
+.geometry-table thead th { position: sticky; z-index: 1; top: 0; background: var(--surface); color: var(--dim); font: 9px var(--mono); }
+.geometry-table thead th:first-child { width: 24%; }
+.geometry-table thead th:nth-child(2) { width: 25%; }
+.geometry-table tbody th { color: var(--text); font-weight: 600; }
+.geometry-edit-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(75px, 1fr)); align-items: end; gap: 5px; }
+.geometry-edit-fields input { width: 100%; min-width: 0; padding: 5px 6px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-soft); color: var(--text); font: 10px var(--mono); }
+.geometry-apply { grid-column: 1 / -1; justify-self: start; min-height: 27px; padding: 4px 8px; font-size: 9px; }
+.geometry-not-editable { color: var(--dim) !important; font-size: 9px !important; }
+.geometry-status { margin: 0; padding: 9px; border-top: 1px solid var(--line-soft); color: var(--accent); font-size: 10px; }
 .toast { position: fixed; z-index: 5; right: 18px; bottom: 18px; max-width: min(400px, calc(100vw - 36px)); margin: 0; padding: 9px 12px; transform: translateY(8px); border: 1px solid var(--line); border-radius: 4px; background: var(--surface-soft); color: var(--text); font-size: 11px; opacity: 0; pointer-events: none; transition: opacity .16s ease, transform .16s ease; }
 .toast.visible { transform: translateY(0); opacity: 1; }
 .toast.error { border-color: #713e3c; color: #ffc3bd; }

@@ -155,9 +155,15 @@
 
               <aside class="inspector-column" aria-label="Состояние и виды модели">
                 <section id="object-panel" class="panel object-panel" aria-labelledby="objects-title" hidden>
-                  <div class="panel-heading"><div><h2 id="objects-title">Дерево модели</h2></div></div>
-                  <div id="object-tree" class="object-tree" tabindex="-1"></div>
+                  <div class="panel-heading"><div><span class="panel-index">02</span><h2 id="objects-title">ГЕОМЕТРИЯ МОДЕЛИ</h2></div></div>
+                  <div class="geometry-table-scroll">
+                    <table class="geometry-table">
+                      <thead><tr><th>Часть модели</th><th>Текущие размеры, мм</th><th>Желаемые размеры, мм</th></tr></thead>
+                      <tbody id="geometry-rows"></tbody>
+                    </table>
+                  </div>
                   <p id="objects-empty" class="panel-empty">В этой модели пока нет объектов.</p>
+                  <p id="geometry-status" class="geometry-status" role="status" aria-live="polite" hidden></p>
                 </section>
                 <section id="workflow-panel" class="panel workflow-panel" aria-labelledby="workflow-title" tabindex="-1">
                   <div class="panel-heading"><h2 id="workflow-title">ПРОГРЕСС</h2><span id="workflow-name" class="panel-note">РАБОТА НЕ НАЧАТА</span></div>
