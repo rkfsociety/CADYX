@@ -606,6 +606,25 @@ async function setProjectGroup(projectId, groupId) {
   await refreshWorkspace();
 }
 
+async function deleteProject(projectId, projectName) {
+  const confirmed = window.confirm(
+    `Безвозвратно удалить проект «${projectName}»?\n\n` +
+    "Будут удалены модель, история, файлы и сканы проекта. Это действие нельзя отменить.",
+  );
+  if (!confirmed) return;
+  try {
+    const result = await api(`/api/v1/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+    if (result.cleanup_pending) notify("Проект удалён из списка; очистка файлов завершится после закрытия открытых ресурсов.");
+    if (projectAddressPinned && selectedProjectId === projectId) {
+      window.location.assign("/");
+      return;
+    }
+    await refreshWorkspace();
+  } catch (error) {
+    notify(`Не удалось удалить проект: ${error.message}`, true);
+  }
+}
+
 function compareProjects(left, right) {
   const nameOrder = left.project.name.localeCompare(right.project.name, "ru", { sensitivity: "base" })
     || left.project.id.localeCompare(right.project.id);
@@ -672,6 +691,13 @@ function renderProjectCard(entry) {
   open.target = "_blank";
   open.rel = "noopener";
   open.textContent = "ОТКРЫТЬ ПРОЕКТ";
+  const remove = document.createElement("button");
+  remove.className = "button workspace-project-delete";
+  remove.type = "button";
+  remove.textContent = "УДАЛИТЬ";
+  remove.disabled = !projectAvailable;
+  remove.setAttribute("aria-label", `Удалить проект «${project.name}»`);
+  remove.addEventListener("click", () => deleteProject(project.id, project.name));
   const groupSelect = document.createElement("select");
   groupSelect.className = "workspace-project-group-select";
   groupSelect.setAttribute("aria-label", `Папка проекта «${project.name}»`);
@@ -688,7 +714,7 @@ function renderProjectCard(entry) {
   }
   groupSelect.value = entry.group_id || "";
   groupSelect.addEventListener("change", () => setProjectGroup(project.id, groupSelect.value));
-  actions.append(open, groupSelect);
+  actions.append(open, groupSelect, remove);
   card.append(heading, thumbnail, meta, actions);
   return card;
 }
@@ -1577,6 +1603,11 @@ function handleStreamEvent(type, event) {
     return;
   }
   if (type === "workspace.selection.changed" || type === "project.created") return;
+  if (type === "project.deleted") {
+    if (projectAddressPinned && projectId === selectedProjectId) window.location.assign("/");
+    else scheduleWorkspaceRefresh();
+    return;
+  }
   if (!projectId) return;
   const data = event.data || {};
 
@@ -1774,7 +1805,7 @@ folderFileList.addEventListener("click", (event) => {
 });
 
 const stream = new EventSource("/api/v1/events");
-const eventTypes = ["project.created", "workspace.selection.changed", "workspace.agent-work", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera"];
+const eventTypes = ["project.created", "project.deleted", "workspace.selection.changed", "workspace.agent-work", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera"];
 for (const type of eventTypes) {
   stream.addEventListener(type, (message) => {
     try { handleStreamEvent(type, JSON.parse(message.data)); }

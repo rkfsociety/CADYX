@@ -104,6 +104,26 @@ class CadyxCore:
             self.events.publish("project.renamed", project_id, summary)
             return {"project": summary, "lock": self.leases.snapshot(project_id)}
 
+    def delete_project(self, project_id: str) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id):
+            with self._project_guard(project_id):
+                lock = self.leases.snapshot(project_id)
+                activities, _ = self.events.activity_state_snapshot(project_id)
+                if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
+                    item.get("state") == "running" for item in activities
+                ):
+                    raise ConflictError("Project must be free with no running operation before deletion.", code="PROJECT_BUSY")
+                self.workspace.mark_project_deleting(project_id)
+            cleanup_pending = self.workspace.delete_project(project_id)
+        with self._workspace_selection_guard:
+            if self._workspace_selection == {"type": "project", "project_id": project_id}:
+                self._workspace_selection = None
+                self.events.publish("workspace.selection.changed", None, {})
+        self.events.publish("project.deleted", project_id, {
+            "project_id": project_id, "cleanup_pending": cleanup_pending,
+        })
+        return {"project_id": project_id, "cleanup_pending": cleanup_pending}
+
     def list_projects(self) -> list[dict[str, Any]]:
         result = []
         group_by_project = self.workspace.project_group_assignments()

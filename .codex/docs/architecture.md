@@ -182,6 +182,16 @@ to return a project to the ungrouped section. Assignment requires the project
 to be free with no running operation. Group creation and assignment do not
 move or rewrite project directories or documents.
 
+Project deletion is available through authenticated `DELETE /api/v1/projects/{id}`.
+The Projects view asks for confirmation that the model, history and all files
+in that project will be permanently removed. Core refuses deletion while the
+project is locked, requires lease recovery, or has a running operation. It
+fences new lease requests before detaching the project directory, clears its
+group assignment and active Core selection, then publishes `project.deleted`.
+If a viewer still holds files open, the directory remains in a hidden deletion
+tombstone and workspace listing retries cleanup; the API reports
+`cleanup_pending: true` in that case.
+
 The default host is `127.0.0.1`. Non-loopback binds require the host authentication gate described above; the built-in server still relies on a trusted LAN or external TLS/VPN for transport confidentiality.
 
 ### Agent API discovery and local Codex MCP adapter

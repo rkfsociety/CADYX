@@ -7,6 +7,7 @@ import json
 import mimetypes
 import os
 import re
+import shutil
 import sqlite3
 import tempfile
 import threading
@@ -108,6 +109,52 @@ class ProjectWorkspace:
         except sqlite3.IntegrityError as exc:
             raise NotFoundError("Project group was not found.") from exc
 
+    def mark_project_deleting(self, project_id: str) -> None:
+        directory = self._project_dir(project_id)
+        marker = directory / ".cadyx-deleting"
+        try:
+            descriptor = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError as exc:
+            raise ConflictError("Project deletion is already in progress.", code="PROJECT_BUSY") from exc
+        try:
+            with os.fdopen(descriptor, "w", encoding="ascii") as stream:
+                stream.write(f"{project_id}\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+        except OSError as exc:
+            marker.unlink(missing_ok=True)
+            raise ValidationError(f"Project deletion could not be fenced: {exc}.") from exc
+
+    def delete_project(self, project_id: str) -> bool:
+        with self._project_path_guard:
+            directory = self._project_path_by_id.get(project_id)
+        if directory is None or directory.parent != self.root or not directory.is_dir():
+            raise NotFoundError("Project was not found.")
+        marker = directory / ".cadyx-deleting"
+        if not marker.is_file() or marker.is_symlink():
+            raise ConflictError("Project deletion was not prepared.", code="PROJECT_BUSY")
+        tombstone = self.root / f".cadyx-deleted-{project_id}-{uuid4()}"
+        try:
+            with self._groups_connection() as connection:
+                connection.execute(
+                    "DELETE FROM project_group_assignment WHERE project_id = ?", (project_id,)
+                )
+                directory.rename(tombstone)
+        except Exception as exc:
+            if directory.exists() and marker.exists():
+                marker.unlink(missing_ok=True)
+            if isinstance(exc, OSError):
+                raise ValidationError(f"Project directory could not be detached for deletion: {exc}.") from exc
+            raise
+        self._forget_project_path(project_id, directory)
+        # A viewer may still hold a read handle briefly; the hidden tombstone
+        # is retried by workspace listing if Windows refuses immediate cleanup.
+        try:
+            shutil.rmtree(tombstone)
+        except OSError:
+            return True
+        return False
+
     def _project_dir(self, project_id: str) -> Path:
         if not isinstance(project_id, str) or not _PROJECT_ID.fullmatch(project_id):
             raise NotFoundError("Project was not found.")
@@ -115,10 +162,13 @@ class ProjectWorkspace:
             cached = self._project_path_by_id.get(project_id)
         if cached is not None:
             try:
-                if not cached.is_symlink() and cached.is_dir() and cached.resolve(strict=True).parent == self.root:
+                if (not cached.is_symlink() and cached.is_dir() and cached.resolve(strict=True).parent == self.root
+                        and not (cached / ".cadyx-deleting").exists()):
                     return cached
             except OSError:
                 pass
+            if (cached / ".cadyx-deleting").exists():
+                raise NotFoundError("Project is being deleted.")
             self._forget_project_path(project_id, cached)
         legacy_path = self.root / project_id
         if legacy_path.is_dir() and not legacy_path.is_symlink():
@@ -210,6 +260,7 @@ class ProjectWorkspace:
     def list(self) -> list[dict[str, Any]]:
         projects: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
+        self._cleanup_deleted_project_directories()
         for entry in self._project_directories():
             project_id = self._project_id_for_directory(entry)
             if project_id is None:
@@ -593,17 +644,31 @@ class ProjectWorkspace:
         try:
             entries = self.root.iterdir()
             for entry in entries:
-                if entry.is_symlink() or not entry.is_dir():
+                if entry.name.startswith(".cadyx-deleted-") or entry.is_symlink() or not entry.is_dir():
                     continue
                 try:
                     resolved = entry.resolve(strict=True)
                 except OSError:
                     continue
-                if resolved.parent == self.root:
+                if resolved.parent == self.root and not (resolved / ".cadyx-deleting").exists():
                     directories.append(resolved)
         except OSError:
             return directories
         return directories
+
+    def _cleanup_deleted_project_directories(self) -> None:
+        try:
+            entries = self.root.glob(".cadyx-deleted-*")
+            for entry in entries:
+                if entry.is_symlink() or not entry.is_dir():
+                    continue
+                try:
+                    if entry.resolve(strict=True).parent == self.root:
+                        shutil.rmtree(entry)
+                except OSError:
+                    continue
+        except OSError:
+            pass
 
     def _project_id_for_directory(self, directory: Path) -> str | None:
         project_file = directory / "project.json"

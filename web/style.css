@@ -146,6 +146,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .workspace-project-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .workspace-project-group-select { min-width: 0; min-height: 29px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 3px; background: #111b1e; color: var(--muted); font: 9px var(--mono); }
 .workspace-project-group-select:disabled { opacity: .43; cursor: not-allowed; }
+.workspace-project-delete { border-color: #684145; color: #d99298; }
+.workspace-project-delete:hover:not(:disabled) { border-color: #a64d57; background: #2a1518; color: #ffb6bb; }
 .project-group-dialog { width: min(420px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); }
 .project-group-dialog::backdrop { background: #05090bd9; }
 .project-group-dialog form { display: grid; gap: 12px; padding: 18px; }

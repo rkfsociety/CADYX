@@ -41,7 +41,10 @@ class EditLeaseManager:
         if project_id in connections:
             yield connections[project_id]
             return
-        path = self._project_directory(project_id) / ".cadyx-leases.sqlite3"
+        project_directory = self._project_directory(project_id)
+        if (project_directory / ".cadyx-deleting").exists():
+            raise NotFoundError("Project is being deleted.")
+        path = project_directory / ".cadyx-leases.sqlite3"
         if not path.parent.is_dir() or not (path.parent / "project.json").is_file():
             raise NotFoundError("Project was not found.")
         if path.is_symlink():
@@ -62,6 +65,8 @@ class EditLeaseManager:
                 acquired_at REAL NOT NULL, heartbeat_at REAL NOT NULL,
                 lease_id TEXT NOT NULL, timeout_seconds REAL NOT NULL
             )""")
+            if (project_directory / ".cadyx-deleting").exists():
+                raise NotFoundError("Project is being deleted.")
             connections[project_id] = connection
             yield connection
             connection.execute("COMMIT")

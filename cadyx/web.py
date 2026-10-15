@@ -286,6 +286,19 @@ def make_request_handler(
             except (json.JSONDecodeError, UnicodeDecodeError):
                 self._json(400, {"error": "INVALID_JSON", "message": "Request body must be valid UTF-8 JSON."})
 
+        def do_DELETE(self) -> None:  # noqa: N802 - stdlib handler method name
+            parsed = urlsplit(self.path)
+            try:
+                if not self._require_auth():
+                    return
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) == 4 and parts[:3] == ["api", "v1", "projects"]:
+                    self._json(200, core.delete_project(parts[3]))
+                    return
+                self._json(404, {"error": "NOT_FOUND", "message": "Route was not found."})
+            except CadyxError as exc:
+                self._json(exc.http_status, exc.as_dict())
+
         def _require_auth(self) -> bool:
             if authorization_matches(self.headers.get("Authorization"), auth_token):
                 return True
