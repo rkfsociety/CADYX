@@ -355,10 +355,11 @@ profile-feature, sweep, fuse, and fillet changes; view controls do not edit
 document state.
 
 Agents create and edit models through the Agent API under an agent edit lease.
-Projects are also created through the Agent API. Agents can get a server-rendered
-PNG image without a browser from
-`GET /api/v1/agent/projects/{id}/viewport.png`; the regular viewport API remains
-available as JSON scene data. The command objects above create boxes and XY/XZ
+Projects are also created through the Agent API. Agents can get the browser's
+exact main viewport PNG from
+`GET /api/v1/agent/projects/{id}/viewport.png` when the browser has published a
+current frame; without one, the API uses the standalone server-rendered fallback.
+The regular viewport API remains available as JSON scene data. The command objects above create boxes and XY/XZ
 sketches, add sketch geometry and checked constraints, extrude or revolve closed
 profiles, sweep circular sections along open sketches, fuse solid B-reps, fillet
 selected B-rep edges, change feature parameters or sketch elements, and remove

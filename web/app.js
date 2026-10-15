@@ -56,7 +56,9 @@ const folderFileList = $("#folder-file-list");
 const folderPreviewCanvas = $("#ply-preview-canvas");
 const folderPreviewPlaceholder = $("#folder-preview-placeholder");
 const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
-const modelViewer = window.CadyxViewport.createViewer($("#model-preview"), { showViewCube: true, wireframe: true });
+const modelViewer = window.CadyxViewport.createViewer($("#model-preview"), {
+  showViewCube: true, wireframe: true, onRender: queueViewportSnapshot,
+});
 const orthographicViewers = [
   { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: 0 } },
   { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: Math.PI / 2, pitch: 0 } },
@@ -97,6 +99,13 @@ $("#viewport-wireframe").addEventListener("click", (event) => {
 });
 let cameraAnimationId = 0;
 let renderedSceneKey = null;
+let renderedSceneProjectId = null;
+let renderedSceneRevision = null;
+let viewportSnapshotTimer = 0;
+let viewportSnapshotLastSentAt = 0;
+let viewportSnapshotInFlight = false;
+let viewportSnapshotDirty = false;
+let viewportSnapshotErrorShown = false;
 let detailRequest = 0;
 let detailedProjectId = null;
 let detailedProjectModifiedAt = null;
@@ -127,6 +136,65 @@ let fileListContextKey = null;
 let selectedFolderFileName = null;
 let folderListRequest = 0;
 let previewRequest = 0;
+
+function queueViewportSnapshot() {
+  if (!selectedProjectId || selectedProjectId.startsWith(FOLDER_SELECTION_PREFIX)
+      || renderedSceneProjectId !== selectedProjectId
+      || !Number.isInteger(renderedSceneRevision)) return;
+  viewportSnapshotDirty = true;
+  if (viewportSnapshotTimer || viewportSnapshotInFlight) return;
+  const delay = Math.max(0, 400 - (performance.now() - viewportSnapshotLastSentAt));
+  viewportSnapshotTimer = window.setTimeout(() => {
+    viewportSnapshotTimer = 0;
+    void publishViewportSnapshot();
+  }, delay);
+}
+
+async function publishViewportSnapshot() {
+  if (viewportSnapshotInFlight || !viewportSnapshotDirty) return;
+  const projectId = selectedProjectId;
+  const revision = renderedSceneRevision;
+  viewportSnapshotDirty = false;
+  viewportSnapshotInFlight = true;
+  try {
+    const image = await modelViewer.createSnapshotBlob();
+    if (projectId !== selectedProjectId || projectId !== renderedSceneProjectId
+        || revision !== renderedSceneRevision) {
+      viewportSnapshotDirty = true;
+      return;
+    }
+    const response = await fetch(
+      `/api/v1/agent/projects/${encodeURIComponent(projectId)}/viewport/snapshot`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "image/png",
+          "X-CADYX-Document-Revision": String(revision),
+        },
+        body: image,
+      },
+    );
+    if (!response.ok) {
+      if (response.status !== 409 && !viewportSnapshotErrorShown) {
+        notify("Не удалось передать точный снимок viewport в API.", true);
+        viewportSnapshotErrorShown = true;
+      }
+      return;
+    }
+    await response.json();
+    viewportSnapshotLastSentAt = performance.now();
+    viewportSnapshotErrorShown = false;
+  } catch {
+    if (!viewportSnapshotErrorShown) {
+      notify("Не удалось синхронизировать изображение viewport с API.", true);
+      viewportSnapshotErrorShown = true;
+    }
+  } finally {
+    viewportSnapshotInFlight = false;
+    if (viewportSnapshotDirty) queueViewportSnapshot();
+  }
+}
+
 let automaticUpdateSnapshot = null;
 let automaticUpdateInFlight = false;
 let automaticUpdatesUnavailable = false;
@@ -1221,6 +1289,8 @@ async function refreshDetail() {
   }
   $("#viewport-empty").hidden = hasVisibleGeometry;
   $("#model-preview").hidden = !hasVisibleGeometry;
+  renderedSceneProjectId = projectId;
+  renderedSceneRevision = scene.revision;
   modelViewer.render();
   renderSceneMetrics(scene, objectsById, visibleSketchId);
   $("#sidebar-project-name").textContent = info.project.name;

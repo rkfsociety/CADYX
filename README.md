@@ -1,6 +1,6 @@
 # CADYX
 
-CADYX is an AI-first CAD foundation prototype. Agents create projects and modify models through the Agent API and shared Core Command System; a per-project edit lease prevents concurrent writes. The provider-neutral in-process Agent Runtime can orchestrate a provider adapter and project tools without adding a provider dependency. The browser is a read-only, full-window detail viewer with a dominant CAD viewport, one live progress card with the current action and timestamped action history, and front/right/top projections. The full workflow plan and queue remain available to agents through the API. Agents can fetch a server-rendered PNG snapshot through the Agent API without using a browser.
+CADYX is an AI-first CAD foundation prototype. Agents create projects and modify models through the Agent API and shared Core Command System; a per-project edit lease prevents concurrent writes. The provider-neutral in-process Agent Runtime can orchestrate a provider adapter and project tools without adding a provider dependency. The browser is a read-only, full-window detail viewer with a dominant CAD viewport, one live progress card with the current action and timestamped action history, and front/right/top projections. The full workflow plan and queue remain available to agents through the API. Agents can fetch the exact browser viewport PNG when a live browser frame is available; standalone API use retains a server-rendered fallback.
 
 ## Run locally
 
@@ -69,7 +69,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - `GET /api/v1/projects/{id}`
 - `GET /api/v1/projects/{id}/dashboard` reads the agent workflow/task snapshot; `POST /api/v1/agent/projects/{id}/dashboard` replaces it with agent-reported progress, ETA and task states
 - `GET /api/v1/projects/{id}/viewport` and its Agent API equivalent return the same read-only render scene
-- `GET /api/v1/agent/projects/{id}/viewport.png` returns a server-rendered detail image without opening a browser
+- `GET /api/v1/agent/projects/{id}/viewport.png` returns the browser's exact main viewport frame when available; `X-CADYX-Viewport-Source` identifies browser or server-fallback output. The browser posts revision-tagged frames to `POST /api/v1/agent/projects/{id}/viewport/snapshot`.
 - `GET /api/v1/agent/workspace/selection` reports the active project or folder; `POST` selects an existing project or workspace folder and notifies the passive viewer over SSE
 - `GET /api/v1/workspace/folders/{folder}/files` and `GET /api/v1/workspace/folders/{folder}/files/{name}` for safe in-folder file preview
 - `POST /api/v1/projects/{id}/leases` with `owner_type` and `owner_id`

@@ -19,8 +19,10 @@ from .errors import CadyxError, NotFoundError, ValidationError
 from .models import OwnerType
 
 _MAX_BODY_BYTES = 1_000_000
+_MAX_VIEWPORT_SNAPSHOT_BYTES = 16 * 1024 * 1024
 _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 _UI_ASSETS = ("index.html", "app.js", "style.css", "viewport.js", "ply-preview.js", "favicon.svg")
+_CLIENT_API_CONTRACT_VERSION = "viewport-snapshot-v1"
 _UI_ASSET_VERSION_LOCK = threading.Lock()
 _UI_ASSET_VERSION_CACHE: tuple[tuple[tuple[str, int, int], ...], str] | None = None
 
@@ -36,6 +38,8 @@ def _ui_asset_version() -> str:
         if _UI_ASSET_VERSION_CACHE is not None and _UI_ASSET_VERSION_CACHE[0] == signature:
             return _UI_ASSET_VERSION_CACHE[1]
         digest = hashlib.sha256()
+        digest.update(_CLIENT_API_CONTRACT_VERSION.encode("ascii"))
+        digest.update(b"\0")
         for filename in _UI_ASSETS:
             digest.update(filename.encode("utf-8"))
             digest.update(b"\0")
@@ -141,11 +145,20 @@ def make_request_handler(
                         query.get("modified_body_id", [None])[0]))
                     return
                 if len(parts) == 5 and parts[:3] == prefix and parts[4] == "viewport.png":
-                    self._png(200, core.render_project_png(parts[3]))
+                    encoded, source, revision = core.render_project_png_with_source(parts[3])
+                    self._png(200, encoded, extra_headers=(
+                        ("X-CADYX-Viewport-Source", source),
+                        ("X-CADYX-Document-Revision", str(revision)),
+                    ))
                     return
                 if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "viewport.png":
-                    self._png(200, core.observe_agent_operation(
-                        parts[4], "Получает изображение модели", lambda: core.render_project_png(parts[4]),
+                    encoded, source, revision = core.observe_agent_operation(
+                        parts[4], "Получает изображение модели",
+                        lambda: core.render_project_png_with_source(parts[4]),
+                    )
+                    self._png(200, encoded, extra_headers=(
+                        ("X-CADYX-Viewport-Source", source),
+                        ("X-CADYX-Document-Revision", str(revision)),
                     ))
                     return
                 if len(parts) == 5 and parts[:3] == prefix and parts[4] == "viewport":
@@ -211,8 +224,23 @@ def make_request_handler(
             try:
                 if not self._require_auth():
                     return
-                body = self._read_json()
                 parts = parsed.path.strip("/").split("/")
+                if ((len(parts) == 7 and parts[:4] == ["api", "v1", "agent", "projects"]
+                     and parts[5:] == ["viewport", "snapshot"])
+                    or (len(parts) == 6 and parts[:3] == ["api", "v1", "projects"]
+                        and parts[4:] == ["viewport", "snapshot"])):
+                    project_id = parts[4] if parts[2] == "agent" else parts[3]
+                    revision_text = self.headers.get("X-CADYX-Document-Revision")
+                    try:
+                        revision = int(revision_text) if revision_text is not None else -1
+                    except ValueError as exc:
+                        raise ValidationError("X-CADYX-Document-Revision must be an integer.") from exc
+                    snapshot = core.publish_viewport_snapshot(
+                        project_id, revision, self._read_viewport_png(),
+                    )
+                    self._json(200, snapshot)
+                    return
+                body = self._read_json()
                 if parts == ["api", "v1", "agent", "workspace", "selection"]:
                     if body is None:
                         raise ValidationError("A JSON request body is required.")
@@ -351,17 +379,49 @@ def make_request_handler(
             self.end_headers()
             self.wfile.write(encoded)
 
-        def _png(self, status: int, encoded: bytes) -> None:
+        def _read_viewport_png(self) -> bytes:
+            content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+            if content_type != "image/png":
+                raise ValidationError("Viewport snapshots must use Content-Type image/png.")
+            raw_length = self.headers.get("Content-Length")
+            try:
+                length = int(raw_length) if raw_length is not None else 0
+            except ValueError as exc:
+                raise ValidationError("Content-Length is invalid.") from exc
+            if length < 24 or length > _MAX_VIEWPORT_SNAPSHOT_BYTES:
+                self.close_connection = True
+                raise ValidationError("Viewport snapshot must be between 24 bytes and 16 MiB.")
+            encoded = self.rfile.read(length)
+            if len(encoded) != length:
+                self.close_connection = True
+                raise ValidationError("Viewport snapshot body was incomplete.")
+            return encoded
+
+        def _png(
+            self,
+            status: int,
+            encoded: bytes,
+            *,
+            extra_headers: tuple[tuple[str, str], ...] = (),
+        ) -> None:
             self.send_response(status)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(encoded)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Disposition", "inline")
+            for name, header_value in extra_headers:
+                self.send_header(name, header_value)
             self.end_headers()
             self.wfile.write(encoded)
 
         def _static(self, filename: str, content_type: str) -> None:
             data = (_WEB_ROOT / filename).read_bytes()
+            if filename == "index.html":
+                version = _ui_asset_version()
+                for asset in ("style.css", "viewport.js", "ply-preview.js", "app.js"):
+                    reference = f'"/assets/{asset}"'.encode("ascii")
+                    versioned = f'"/assets/{asset}?v={version}"'.encode("ascii")
+                    data = data.replace(reference, versioned)
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))

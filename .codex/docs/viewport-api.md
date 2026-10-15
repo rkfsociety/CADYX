@@ -17,11 +17,21 @@ the existing 404 contract; invalid geometry uses 400. The scene is derived,
 never persisted; no project/document migration is required.
 
 The matching `GET /api/v1/projects/{id}/viewport.png` and
-`GET /api/v1/agent/projects/{id}/viewport.png` endpoints return the same scene
-as a server-rendered `image/png` isometric snapshot. The server derives it
-from the same validated scene data, so an agent can fetch a view of its model
-directly through HTTP without opening the browser. The response is read-only,
-is 960×720 pixels, and needs no edit lease or extra runtime dependency.
+`GET /api/v1/agent/projects/{id}/viewport.png` endpoints return the exact
+`image/png` frame drawn in the browser's main model canvas when a current
+browser frame is available. This includes the same camera, wireframe mode,
+rotation axis, coordinate gizmo, and grid. The browser publishes frames to
+`POST /api/v1/agent/projects/{id}/viewport/snapshot`, tagged with the document
+revision; this is a read-only observation update, needs no edit lease, and is
+held in memory only. Frames are refreshed as the viewport renders, with uploads
+coalesced to at most 2.5 per second. The image's pixel dimensions match the
+browser canvas backing size. Responses identify their origin through
+`X-CADYX-Viewport-Source` (`browser` or `server-fallback`) and the source
+revision through `X-CADYX-Document-Revision`. If no browser frame has arrived,
+the API retains the standalone 960×720 isometric server render as a fallback.
+If a stored browser frame belongs to an older document revision, the endpoint
+returns `409 VIEWPORT_SNAPSHOT_STALE` until the browser publishes a current
+frame. Both read routes return the same bytes for a given request state.
 
 The response has `version: 1`, document `revision`, `coordinate_system: "XYZ"`,
 `projection: "orthographic"`, `bounds` (`min`/`max` XYZ triples, or null when
@@ -48,7 +58,8 @@ if a command commits between requests, it refreshes again. SSE refreshes the
 scene immediately after local agent/human commands. A lightweight update
 snapshot also checks workspace, project, file, activity, and UI asset versions
 every five seconds, so changes made by another cooperating host appear
-automatically. Changed HTML, CSS, or JavaScript assets trigger a page reload;
+automatically. Changed HTML, CSS, JavaScript assets, or browser/API compatibility
+version trigger a page reload;
 the selected project is restored. Returning to a hidden tab or reconnecting also
 triggers a sync. The browser keeps the read-only model viewport dominant, with
 section navigation on the left and an inspection column on the right. The

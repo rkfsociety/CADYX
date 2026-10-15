@@ -55,6 +55,9 @@ class CadyxCore:
         self._document_validation_locks: dict[tuple[str, str], threading.Lock] = {}
         self._scene_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
         self._png_cache: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+        self._viewport_snapshot_guard = threading.RLock()
+        self._viewport_snapshots: OrderedDict[str, tuple[int, bytes]] = OrderedDict()
+        self._viewport_snapshot_bytes = 0
 
     @contextmanager
     def _project_guard(self, project_id: str) -> Iterator[None]:
@@ -312,7 +315,7 @@ class CadyxCore:
                 self._scene_cache.move_to_end(key)
         return key, cached_scene
 
-    def render_project_png(self, project_id: str) -> bytes:
+    def _render_project_png_server(self, project_id: str) -> bytes:
         key, scene = self._scene_for_project(project_id)
         with self._geometry_cache_guard:
             cached_png = self._png_cache.get(key)
@@ -330,6 +333,52 @@ class CadyxCore:
             while len(self._png_cache) > 8:
                 self._png_cache.popitem(last=False)
         return encoded
+
+    def publish_viewport_snapshot(self, project_id: str, revision: int, encoded: bytes) -> dict[str, int]:
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            raise ValidationError("Viewport snapshot revision must be a non-negative integer.")
+        if not isinstance(encoded, bytes) or len(encoded) < 24 or len(encoded) > 16 * 1024 * 1024:
+            raise ValidationError("Viewport snapshot must be a PNG no larger than 16 MiB.")
+        if encoded[:8] != b"\x89PNG\r\n\x1a\n":
+            raise ValidationError("Viewport snapshot must use PNG encoding.")
+        width = int.from_bytes(encoded[16:20], "big")
+        height = int.from_bytes(encoded[20:24], "big")
+        if not width or not height or width > 4096 or height > 4096 or width * height > 16_777_216:
+            raise ValidationError("Viewport snapshot dimensions exceed the supported limit.")
+
+        _, scene = self._scene_for_project(project_id)
+        if revision != scene["revision"]:
+            raise ConflictError(
+                "The browser viewport has not rendered the current project revision yet.",
+                code="VIEWPORT_SNAPSHOT_STALE",
+            )
+        with self._viewport_snapshot_guard:
+            previous = self._viewport_snapshots.pop(project_id, None)
+            if previous is not None:
+                self._viewport_snapshot_bytes -= len(previous[1])
+            self._viewport_snapshots[project_id] = (revision, encoded)
+            self._viewport_snapshot_bytes += len(encoded)
+            while len(self._viewport_snapshots) > 8 or self._viewport_snapshot_bytes > 32 * 1024 * 1024:
+                _, evicted = self._viewport_snapshots.popitem(last=False)
+                self._viewport_snapshot_bytes -= len(evicted[1])
+        return {"revision": revision, "width": width, "height": height}
+
+    def render_project_png_with_source(self, project_id: str) -> tuple[bytes, str, int]:
+        _, scene = self._scene_for_project(project_id)
+        with self._viewport_snapshot_guard:
+            snapshot = self._viewport_snapshots.get(project_id)
+            if snapshot is not None:
+                if snapshot[0] != scene["revision"]:
+                    raise ConflictError(
+                        "Waiting for the browser viewport to render the current project revision.",
+                        code="VIEWPORT_SNAPSHOT_STALE",
+                    )
+                self._viewport_snapshots.move_to_end(project_id)
+                return snapshot[1], "browser", scene["revision"]
+        return self._render_project_png_server(project_id), "server-fallback", scene["revision"]
+
+    def render_project_png(self, project_id: str) -> bytes:
+        return self.render_project_png_with_source(project_id)[0]
 
     def inspect_body_topology(self, project_id: str, body_id: str) -> dict[str, Any]:
         project = self.workspace.load(project_id)

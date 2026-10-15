@@ -88,6 +88,7 @@
     shaded = true,
     wireframeColor = "#69d9c4",
     wireframeOpacity = 0.46,
+    onRender = null,
   } = {}) {
     const context = canvas.getContext("2d", { alpha: true });
     let geometry = null;
@@ -209,7 +210,10 @@
         canvas.height = height;
       }
       context.clearRect(0, 0, width, height);
-      if (!geometry) return;
+      if (!geometry) {
+        onRender?.();
+        return;
+      }
 
       let progress = 1;
       if (transition) {
@@ -305,6 +309,40 @@
       if (showRotationAxes) drawRotationAxes(geometry.rotationAxes || [], project, dpr);
       if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cameraOrientation);
       if (showViewCube) drawViewCube(width, dpr, cameraOrientation);
+      onRender?.();
+    }
+
+    function createSnapshotBlob() {
+      const snapshot = document.createElement("canvas");
+      snapshot.width = canvas.width;
+      snapshot.height = canvas.height;
+      const context = snapshot.getContext("2d");
+      if (!context || !snapshot.width || !snapshot.height) {
+        return Promise.reject(new Error("Viewport canvas is not ready for a snapshot."));
+      }
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = snapshot.width / Math.max(rect.width, 1);
+      const scaleY = snapshot.height / Math.max(rect.height, 1);
+      const grid = 27 * scaleX;
+      context.fillStyle = "#0b1114";
+      context.fillRect(0, 0, snapshot.width, snapshot.height);
+      context.fillStyle = "rgba(38, 50, 56, 0.3215686275)";
+      for (let x = 0; x < snapshot.width; x += grid) {
+        context.fillRect(Math.round(x), 0, Math.max(1, Math.round(scaleX)), snapshot.height);
+      }
+      for (let y = 0; y < snapshot.height; y += 27 * scaleY) {
+        context.fillRect(0, Math.round(y), snapshot.width, Math.max(1, Math.round(scaleY)));
+      }
+      context.drawImage(canvas, 0, 0);
+      context.fillStyle = "rgba(48, 56, 62, 0.2666666667)";
+      context.fillRect(0, snapshot.height - Math.max(1, Math.round(scaleY)),
+        snapshot.width, Math.max(1, Math.round(scaleY)));
+      return new Promise((resolve, reject) => {
+        snapshot.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("Browser could not encode the viewport snapshot."));
+        }, "image/png");
+      });
     }
 
     function drawRotationAxes(axes, project, dpr) {
@@ -616,6 +654,7 @@
 
     return {
       fit() { resetView(); render(); },
+      createSnapshotBlob,
       getCamera() { return { orientation: cameraOrientation.slice(), zoom, projection: "orthographic" }; },
       setCamera(value) {
         if (!value || !Number.isFinite(value.zoom) || value.zoom < 0.25 || value.zoom > 5
