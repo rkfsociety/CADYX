@@ -1,4 +1,4 @@
-"""Face topology and geometric selector fingerprints for advanced feature authoring."""
+"""Face/edge topology metadata and geometric selector fingerprints for agent authoring."""
 from __future__ import annotations
 
 import ctypes
@@ -12,27 +12,66 @@ from .native_kernel import NativeKernel
 _INSTALLED = False
 
 
+def _rounded(value: Any) -> Any:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return round(float(value), 6)
+    if isinstance(value, list):
+        return [_rounded(item) for item in value]
+    return value
+
+
 def _signature(kind: str, item: dict[str, Any]) -> str:
-    center = item.get("center", [])
-    payload = {
+    payload: dict[str, Any] = {
         "kind": kind,
         "type": item.get("surface") or item.get("curve"),
-        "center": [round(float(value), 6) for value in center] if isinstance(center, list) else [],
-        "measure": round(float(item.get("area", item.get("length", 0.0))), 6),
+        "center": _rounded(item.get("center", [])),
+        "measure": _rounded(item.get("area", item.get("length", 0.0))),
     }
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:20]
+    analytic = {}
+    for key in (
+        "radius",
+        "major_radius",
+        "minor_radius",
+        "reference_radius",
+        "semi_angle",
+        "origin",
+        "normal",
+        "direction",
+        "axis_origin",
+        "axis_direction",
+        "start",
+        "end",
+    ):
+        if key in item:
+            analytic[key] = _rounded(item[key])
+    if analytic:
+        payload["analytic"] = analytic
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:20]
     return f"{kind}:{digest}"
 
 
-def _faces(geometry: dict[str, Any]) -> list[dict[str, Any]]:
-    native = NativeKernel()
+def _call_json(
+    native: NativeKernel,
+    brep: bytes,
+    function_name: str,
+    *,
+    missing: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     library = native.library
-    if not hasattr(library, "cadyx_face_topology"):
-        return []
-    brep, _metrics = native.export_geometry(geometry)
+    if not hasattr(library, function_name):
+        return {} if missing is None else missing
     data = (ctypes.c_ubyte * len(brep)).from_buffer_copy(brep)
-    function = library.cadyx_face_topology
-    function.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t]
+    function = getattr(library, function_name)
+    function.argtypes = [
+        ctypes.POINTER(ctypes.c_ubyte),
+        ctypes.c_size_t,
+        ctypes.c_char_p,
+        ctypes.c_size_t,
+    ]
     function.restype = ctypes.c_void_p
     error = ctypes.create_string_buffer(2048)
     result = function(data, len(brep), error, len(error))
@@ -42,12 +81,28 @@ def _faces(geometry: dict[str, Any]) -> list[dict[str, Any]]:
         payload = json.loads(ctypes.string_at(result))
     finally:
         library.cadyx_free(result)
-    faces = payload.get("faces")
-    if not isinstance(faces, list):
-        raise ValidationError("OCCT returned invalid face topology metadata.")
-    for face in faces:
-        face["semantic_key"] = _signature("face", face)
-    return faces
+    if not isinstance(payload, dict):
+        raise ValidationError("OCCT returned invalid topology metadata.")
+    return payload
+
+
+def _merge_by_index(
+    base: list[dict[str, Any]], extra: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    details = {
+        item.get("index"): item
+        for item in extra
+        if isinstance(item, dict) and type(item.get("index")) is int
+    }
+    for item in base:
+        if not isinstance(item, dict):
+            continue
+        supplement = details.get(item.get("index"))
+        if supplement:
+            for key, value in supplement.items():
+                if key != "index":
+                    item[key] = value
+    return base
 
 
 def install() -> None:
@@ -55,16 +110,44 @@ def install() -> None:
     if _INSTALLED:
         return
     from .kernel import OCCTKernelAdapter
+
     original = OCCTKernelAdapter.topology
 
     def topology(self, geometry):
         result = original(self, geometry)
+        native = NativeKernel()
+        brep, _metrics = native.export_geometry(geometry)
+
+        face_payload = _call_json(
+            native, brep, "cadyx_face_topology", missing={"faces": []}
+        )
+        faces = face_payload.get("faces")
+        if not isinstance(faces, list):
+            raise ValidationError("OCCT returned invalid face topology metadata.")
+
+        details = _call_json(
+            native,
+            brep,
+            "cadyx_agent_topology",
+            missing={"edges": [], "faces": []},
+        )
+        extra_edges = details.get("edges")
+        extra_faces = details.get("faces")
+        if not isinstance(extra_edges, list) or not isinstance(extra_faces, list):
+            raise ValidationError("OCCT returned invalid analytic topology metadata.")
+
         edges = result.get("edges")
         if isinstance(edges, list):
+            _merge_by_index(edges, extra_edges)
             for edge in edges:
                 if isinstance(edge, dict):
                     edge["semantic_key"] = _signature("edge", edge)
-        result["faces"] = _faces(geometry)
+
+        _merge_by_index(faces, extra_faces)
+        for face in faces:
+            if isinstance(face, dict):
+                face["semantic_key"] = _signature("face", face)
+        result["faces"] = faces
         return result
 
     OCCTKernelAdapter.topology = topology
