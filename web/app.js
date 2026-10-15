@@ -214,7 +214,8 @@ let agentWorkActive = savedAgentWorkLock.active;
 let agentWorkRevision = savedAgentWorkLock.revision;
 let agentWorkStatusConnected = false;
 const FOLDER_SELECTION_PREFIX = "folder:";
-const projectAddressPinned = new URLSearchParams(window.location.search).has("project_id");
+const initialAddress = new URLSearchParams(window.location.search);
+const projectAddressPinned = initialAddress.has("project_id") && initialAddress.get("view") !== "projects";
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
 const folderInspector = $("#folder-inspector");
@@ -350,6 +351,10 @@ function setWorkspaceNavigation(view) {
   const activeView = views.has(view)
     && (view === "overview" || view === "projects" || workspaceControlLockReason() === null)
     && (view !== "files" || canOpenFilesView()) ? view : "overview";
+  const address = new URL(window.location.href);
+  if (activeView === "projects") address.searchParams.set("view", "projects");
+  else address.searchParams.delete("view");
+  window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
   primaryGrid.dataset.view = activeView;
   folderDetail.hidden = !getSelectedFolder() && activeView !== "files";
   $("#comparison-panel").hidden = activeView !== "analysis";
@@ -367,6 +372,18 @@ $("#open-projects").addEventListener("click", () => {
   noSelection.hidden = true;
   renderProjects();
   setWorkspaceNavigation("projects");
+});
+
+window.addEventListener("popstate", () => {
+  const requestedView = new URLSearchParams(window.location.search).get("view");
+  if (requestedView === "projects") {
+    projectDetail.hidden = false;
+    noSelection.hidden = true;
+    renderProjects();
+    setWorkspaceNavigation("projects");
+  } else {
+    setWorkspaceNavigation("overview");
+  }
 });
 
 function readSelectedProject() {
@@ -1049,6 +1066,11 @@ async function refreshWorkspacePass() {
   const requestedSelection = projectAddressPinned
     ? [readSelectedProject(), selectedProjectId].find((id) => id && workspaceSelectionExists(id)) : null;
   selectedProjectId = requestedSelection || null;
+  if (new URLSearchParams(window.location.search).get("view") === "projects") {
+    projectDetail.hidden = false;
+    noSelection.hidden = true;
+    setWorkspaceNavigation("projects");
+  }
   const selectionChanged = selectedProjectId !== previousSelection;
   renderProjects();
   if (selectionChanged) {
