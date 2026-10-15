@@ -52,10 +52,13 @@ automatically. Changed HTML, CSS, or JavaScript assets trigger a page reload;
 the selected project is restored. Returning to a hidden tab or reconnecting also
 triggers a sync. The browser keeps the read-only model viewport dominant, with
 section navigation on the left and an inspection column on the right. The
-column shows current agent status, an agent-reported workflow plan and
-progress/ETA estimate, the reported task queue, and front/right/top projections
-of the same validated viewport geometry. Orthographic wireframes include
-view-dependent silhouette edges so smooth revolved walls remain outlined in
+column shows a single progress block with current status, progress/ETA, the
+current or last actual agent action, and its current or most recently finished
+task. The browser does not show planned phases or future queue entries; agents
+continue to receive the full plan and queue through the Agent API. The column
+also shows front/right/top projections of the same validated viewport
+geometry. Orthographic wireframes include view-dependent silhouette edges so
+smooth revolved walls remain outlined in
 front and side views. Scene geometry metrics remain in the
 viewport footer. Object selection remains available in the Geometry view; object
 properties are not shown in a separate panel. Files is navigation item 06 and
@@ -78,14 +81,16 @@ nearest path segment using a segment AABB hierarchy, so it avoids scanning the
 entire path for every vertex. Boolean fuse hides its consumed source bodies and
 eases the newly connected B-rep into the scene. Sketch lines and points overlay
 solid shading only while that sketch is active (no hidden-line removal or
-viewport picking). The agent card shows the current action/result or idle state;
-detailed operation history remains available in the Agent API and is not
-rendered as a transcript.
+viewport picking). The progress card shows the current action/result, a distinct
+current or most recently finished task, and a compact history of completed or
+failed agent actions in newest-first order. Action rows include local completion
+time derived from the API snapshot timestamp; the full API journal remains
+available to agents and is not rendered as a transcript.
 
 ## Agent dashboard reports
 
 `GET /api/v1/projects/{id}/dashboard` (also available under
-`/api/v1/agent/projects/{id}/dashboard`) returns the latest process-local
+`/api/v1/agent/projects/{id}/dashboard`) returns the latest persisted
 dashboard snapshot:
 
 ```json
@@ -112,15 +117,25 @@ Agents replace the current report with
 plan is available and `tasks: []` when the queue is empty. A workflow contains
 1–24 ordered phases (`pending`, `in_progress`, `completed`, or `failed`), an
 agent-reported progress estimate from 0 to 100, and an optional ETA in seconds.
+100% is accepted only when every phase and queued task is completed; an active
+report cannot be cleared with `workflow: null`. Mark verification phases
+completed only after the model and its deliverables have been inspected.
 The queue accepts at most 100 tasks with `running`, `pending`, `completed`, or
 `failed` state. `revision` and `updated_at` are assigned by Core. Reports do not
 edit the CAD document or require an edit lease. External agent integrations
 publish workflow and queue updates through this Agent API endpoint. Core
 publishes each snapshot as `agent.dashboard` over SSE; `/api/v1/updates` includes
-`dashboard_revision` so the browser can recover missed events. Dashboard state
-is process-local and is cleared when the host restarts. Hardware telemetry is
-not currently reported, so the UI does not display invented CPU/GPU/memory
-values.
+`dashboard_revision` so the browser can recover missed events. Dashboard
+reports and their monotonic global work revision are saved atomically in the
+workspace runtime state, so an unfinished workflow remains active after a host
+restart. `/api/v1/updates` exposes `agent_work_active` and
+`agent_work_revision`, and the host publishes `workspace.agent-work` over
+SSE. The browser disables every project control while any workflow is below
+100%, any phase or task is not completed, or the global work state has not yet
+been confirmed. It persists an active browser lock across reloads and clears it
+only after a newer API revision confirms that all workflows and queues have
+completed. Hardware telemetry is not currently reported, so the UI does not
+display invented CPU/GPU/memory values.
 Workflow titles, phase names, task titles, and `agent.activity.action` values
 are shown as received; send them in Russian to keep the localized browser
 interface consistent. Project names, object names, and file names remain as
@@ -133,8 +148,10 @@ and report 0% progress. Set ETA only when it can be estimated honestly; use
 `null` otherwise, and leave the task queue empty unless work is actually queued.
 Update phase states, progress, and ETA as work advances; publish a revised plan
 before continuing if findings change the steps. Mark phases complete only after
-verification, and mark failed work explicitly. This early report lets the
-browser show the intended workflow before geometry changes begin.
+verification, and mark failed work explicitly. Publish the plan before model
+changes so the agent has a stable execution sequence; the browser displays the
+latest actual action, current or most recently finished task, and the timestamped
+history of completed/failed actions without exposing future steps.
 
 `window.CadyxViewport.createViewer(canvas)` is shared with PLY preview and returns:
 

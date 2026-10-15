@@ -133,13 +133,16 @@ let automaticUpdatesUnavailable = false;
 let workspaceAvailabilityConnected = false;
 let workspaceSelectionInFlight = false;
 let filesAvailabilityConnected = false;
-let activityStatusTimer = 0;
-let activityStatusOperationId = null;
 const activitiesByProject = new Map();
 const activityRevisionsByProject = new Map();
 const agentLocksByProject = new Map();
 const dashboardsByProject = new Map();
 const dashboardRevisionsByProject = new Map();
+const AGENT_WORK_LOCK_KEY = "cadyx.agent-work-lock";
+const savedAgentWorkLock = readSavedAgentWorkLock();
+let agentWorkActive = savedAgentWorkLock.active;
+let agentWorkRevision = savedAgentWorkLock.revision;
+let agentWorkStatusConnected = false;
 const FOLDER_SELECTION_PREFIX = "folder:";
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
@@ -154,11 +157,48 @@ function canOpenFilesView(projectId = selectedProjectId) {
     && !lock.recovery_required && !agentIsActive;
 }
 
+function readSavedAgentWorkLock() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(AGENT_WORK_LOCK_KEY) || "null");
+    if (saved && typeof saved.active === "boolean" && Number.isInteger(saved.revision) && saved.revision >= 0) {
+      return saved;
+    }
+  } catch { /* A fresh lock state is safe before the API snapshot arrives. */ }
+  return { active: false, revision: 0 };
+}
+
+function applyAgentWorkLock(active, revision) {
+  if (typeof active !== "boolean" || !Number.isInteger(revision) || revision < agentWorkRevision) return;
+  if (active) {
+    agentWorkActive = true;
+    agentWorkRevision = revision;
+  } else if (!agentWorkActive || revision > agentWorkRevision) {
+    agentWorkActive = false;
+    agentWorkRevision = revision;
+  }
+  try {
+    localStorage.setItem(AGENT_WORK_LOCK_KEY, JSON.stringify({
+      active: agentWorkActive,
+      revision: agentWorkRevision,
+    }));
+  } catch { /* The server snapshot remains authoritative when browser storage is unavailable. */ }
+}
+
+function dashboardHasUnfinishedWork(dashboard) {
+  const workflow = dashboard?.workflow;
+  return Boolean(workflow && (
+    Number(workflow.progress_percent) < 100
+    || workflow.phases.some((phase) => phase.state !== "completed")
+  )) || (dashboard?.tasks || []).some((task) => task.state !== "completed");
+}
+
 function lockAvailabilityKey(lock) {
   return JSON.stringify([lock?.state || null, Boolean(lock?.recovery_required)]);
 }
 
 function workspaceControlLockReason() {
+  if (agentWorkActive) return "ИИ-АГЕНТ РАБОТАЕТ · ВСЯ ПАНЕЛЬ ЗАБЛОКИРОВАНА ДО ПОЛНОЙ ПРОВЕРКИ МОДЕЛЕЙ";
+  if (!agentWorkStatusConnected) return "ГЛОБАЛЬНОЕ СОСТОЯНИЕ РАБОТЫ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
   if (!workspaceAvailabilityConnected) return "СОСТОЯНИЕ ПАНЕЛИ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
   if (workspaceSelectionInFlight) return "ПЕРЕКЛЮЧЕНИЕ ПРОЕКТА · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
   if (!selectedProjectId || getSelectedFolder()) return null;
@@ -224,7 +264,7 @@ $("#workspace-navigation").addEventListener("click", (event) => {
   } else if (view === "manufacturing") {
     $("#manufacturing-panel").focus({ preventScroll: true });
   } else if (view === "activity") {
-    $("#agent-activity").focus({ preventScroll: true });
+    $("#workflow-panel").focus({ preventScroll: true });
   } else if (view === "files") {
     const projectId = selectedProjectId;
     $("#folder-files-title").textContent = "Файлы проекта";
@@ -304,14 +344,18 @@ const phaseStateLabel = (state) => ({
 const taskStateLabel = (state) => ({
   running: "В РАБОТЕ", pending: "ОЖИДАЕТ", completed: "ЗАВЕРШЕНО", failed: "ОШИБКА",
 })[state] || "НЕИЗВЕСТНО";
+function formatActivityTimestamp(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).format(date).replace(", ", " ");
+}
 
 function renderAgentDashboard(dashboard) {
   const workflow = dashboard?.workflow;
   const workflowPanel = $("#workflow-panel");
-  const phaseList = $("#workflow-phases");
   workflowPanel.dataset.available = String(Boolean(workflow));
-  phaseList.replaceChildren();
-  $("#workflow-empty").hidden = Boolean(workflow);
   if (workflow) {
     const progress = Math.max(0, Math.min(100, Number(workflow.progress_percent) || 0));
     $("#workflow-name").textContent = workflow.title;
@@ -320,24 +364,8 @@ function renderAgentDashboard(dashboard) {
     $("#workflow-progress").setAttribute("aria-valuenow", String(progress));
     $("#workflow-progress-bar").style.width = `${progress}%`;
     $("#workflow-eta").textContent = formatEta(workflow.eta_seconds);
-    workflow.phases.forEach((phase, index) => {
-      const row = document.createElement("li");
-      row.dataset.state = phase.state;
-      const marker = document.createElement("span");
-      marker.className = "phase-marker";
-      marker.textContent = String(index + 1);
-      const title = document.createElement("span");
-      title.className = "phase-title";
-      title.textContent = phase.title;
-      title.title = phase.title;
-      const state = document.createElement("span");
-      state.className = "phase-state";
-      state.textContent = phaseStateLabel(phase.state);
-      row.append(marker, title, state);
-      phaseList.append(row);
-    });
   } else {
-    $("#workflow-name").textContent = "ПЛАНА ПОКА НЕТ";
+    $("#workflow-name").textContent = "РАБОТА НЕ НАЧАТА";
     $("#workflow-percent").textContent = "—";
     $("#workflow-progress").dataset.available = "false";
     $("#workflow-progress").setAttribute("aria-valuenow", "0");
@@ -345,30 +373,110 @@ function renderAgentDashboard(dashboard) {
     $("#workflow-eta").textContent = "ОСТАЛОСЬ —";
   }
 
+  renderCurrentProgress(
+    dashboard,
+    activitiesByProject.get(selectedProjectId) || [],
+    agentLocksByProject.get(selectedProjectId),
+  );
+  renderWorkflowHistory(activitiesByProject.get(selectedProjectId) || []);
+  if (dashboardHasUnfinishedWork(dashboard)) {
+    applyAgentWorkLock(true, agentWorkRevision);
+    updateWorkspaceControls();
+  }
+}
+
+function renderCurrentProgress(dashboard, value, lock = null) {
+  const activities = Array.isArray(value) ? value : value ? [value] : [];
+  const runningActivity = activities.slice().reverse().find((item) => item.state === "running") || null;
+  const activity = runningActivity || activities[activities.length - 1] || null;
+  const agentLeaseActive = lock?.state === "AI_LOCKED" && lock.lease?.owner_type === "agent"
+    && !lock.recovery_required;
   const tasks = dashboard?.tasks || [];
-  const queuePanel = $("#task-queue-panel");
-  const queue = $("#task-queue");
-  queuePanel.dataset.hasTasks = String(tasks.length > 0);
-  queue.replaceChildren();
-  $("#task-queue-empty").hidden = tasks.length > 0;
-  $("#task-running-count").textContent = String(tasks.filter((task) => task.state === "running").length);
-  $("#task-pending-count").textContent = String(tasks.filter((task) => task.state === "pending").length);
-  for (const task of tasks) {
+  const runningTask = tasks.find((task) => task.state === "running") || null;
+  const phases = dashboard?.workflow?.phases || [];
+  const activePhase = phases.find((phase) => phase.state === "in_progress") || null;
+  const isWorking = Boolean(runningActivity || agentLeaseActive || runningTask || activePhase);
+  const state = isWorking ? "running"
+    : activity?.state === "failed" ? "failed" : activity?.state === "completed" ? "completed" : "idle";
+  const action = runningActivity?.action || (agentLeaseActive ? "Выполняет команду" : activity?.action) || "Действий пока нет";
+  const shownTask = runningTask || activePhase;
+
+  $("#workflow-current").dataset.state = state;
+  const agentState = $("#agent-state");
+  agentState.dataset.state = state;
+  agentState.textContent = state === "running" ? "В РАБОТЕ"
+    : state === "failed" ? "ОШИБКА" : state === "completed" ? "ЗАВЕРШЕНО" : "ОЖИДАЕТ";
+  $("#workflow-action-label").textContent = runningActivity || agentLeaseActive ? "ДЕЙСТВИЕ СЕЙЧАС"
+    : activity?.state === "failed" ? "ПОСЛЕДНЕЕ ДЕЙСТВИЕ · ОШИБКА" : "ПОСЛЕДНЕЕ ДЕЙСТВИЕ";
+  const actionElement = $("#activity-title");
+  actionElement.textContent = action;
+  actionElement.title = action;
+
+  const taskRow = $("#workflow-task-row");
+  const taskElement = $("#workflow-current-task");
+  const taskState = $("#workflow-current-task-state");
+  if (shownTask) {
+    taskElement.textContent = shownTask.title;
+    taskElement.title = shownTask.title;
+    const isTask = tasks.includes(shownTask);
+    const shownState = shownTask.state;
+    taskState.textContent = isTask ? taskStateLabel(shownState) : phaseStateLabel(shownState);
+    taskState.dataset.state = shownState;
+    $("#workflow-task-label").textContent = isTask
+      ? shownState === "running" ? "ТЕКУЩАЯ ЗАДАЧА" : "ПОСЛЕДНЯЯ ЗАДАЧА"
+      : shownState === "in_progress" ? "ТЕКУЩИЙ ЭТАП" : "ПОСЛЕДНИЙ ЭТАП";
+    const normalizedAction = action.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru");
+    const normalizedTask = shownTask.title.replace(/\s+/g, " ").trim().toLocaleLowerCase("ru");
+    taskRow.hidden = normalizedTask === normalizedAction;
+  } else {
+    taskElement.textContent = isWorking ? "Текущая задача не указана" : "Нет выполняемой задачи";
+    taskElement.title = "";
+    taskState.textContent = "";
+    taskState.dataset.state = "idle";
+    $("#workflow-task-label").textContent = "ТЕКУЩАЯ ЗАДАЧА";
+    taskRow.hidden = true;
+  }
+}
+
+function renderWorkflowHistory(value) {
+  const activities = Array.isArray(value) ? value : value ? [value] : [];
+  const completedActivities = activities
+    .filter((activity) => (activity.state === "completed" || activity.state === "failed") && activity.action)
+    .slice()
+    .reverse();
+  const history = completedActivities.map((activity) => ({
+    state: activity.state, title: activity.action, completedAt: activity.updated_at,
+  }));
+  const list = $("#workflow-history-list");
+  list.replaceChildren();
+  list.scrollTop = 0;
+  $("#workflow-history-count").textContent = String(history.length);
+  $("#workflow-history-empty").hidden = history.length > 0;
+  for (const item of history) {
     const row = document.createElement("li");
-    row.dataset.state = task.state;
-    const id = document.createElement("span");
-    id.className = "task-id";
-    id.textContent = task.id;
-    id.title = task.id;
-    const title = document.createElement("span");
-    title.className = "task-title";
-    title.textContent = task.title;
-    title.title = task.title;
+    row.dataset.state = item.state;
     const state = document.createElement("span");
-    state.className = "task-state";
-    state.textContent = taskStateLabel(task.state);
-    row.append(id, title, state);
-    queue.append(row);
+    state.className = "workflow-history-state";
+    state.textContent = taskStateLabel(item.state);
+    const title = document.createElement("span");
+    title.className = "workflow-history-title";
+    title.textContent = item.title;
+    title.title = item.title;
+    const time = document.createElement("time");
+    time.className = "workflow-history-time";
+    if (item.completedAt) {
+      const completedAt = new Date(item.completedAt);
+      if (Number.isFinite(completedAt.getTime())) {
+        time.dateTime = completedAt.toISOString();
+        time.textContent = formatActivityTimestamp(item.completedAt);
+        time.title = completedAt.toLocaleString("ru-RU", {
+          year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+          hourCycle: "h23",
+        });
+      }
+    }
+    row.append(state, title, time);
+    list.append(row);
   }
 }
 
@@ -876,6 +984,10 @@ async function checkAutomaticUpdates() {
     const current = await api(`/api/v1/updates?${query.toString()}`, { cache: "no-store" });
     setApiConnectionStatus(true);
     if (selectionAtRequest !== selectedProjectId) return;
+    if (typeof current.agent_work_active === "boolean" && Number.isInteger(current.agent_work_revision)) {
+      applyAgentWorkLock(current.agent_work_active, current.agent_work_revision);
+      agentWorkStatusConnected = true;
+    }
     workspaceAvailabilityConnected = true;
     const previous = automaticUpdateSnapshot;
     automaticUpdateSnapshot = current;
@@ -1165,39 +1277,13 @@ async function refreshAgentDashboardSnapshot(projectId) {
 
 function renderAgentActivity(value, lock = null) {
   const activities = Array.isArray(value) ? value : value ? [value] : [];
-  const runningActivity = activities.slice().reverse().find((item) => item.state === "running") || null;
-  const activity = runningActivity || activities[activities.length - 1] || null;
-  const agentLeaseActive = lock?.state === "AI_LOCKED" && lock.lease?.owner_type === "agent"
-    && !lock.recovery_required;
-  const panel = $("#agent-activity");
-  const title = $("#activity-title");
-  const completedAt = Date.parse(activity?.updated_at || "");
-  const age = Number.isFinite(completedAt) ? Date.now() - completedAt : Infinity;
-  const recentCompletion = !agentLeaseActive && activity?.state === "completed" && age >= 0 && age < 2200;
-  const state = runningActivity || agentLeaseActive ? "running"
-    : activity?.state === "failed" ? "failed" : recentCompletion ? "completed" : "idle";
-  panel.dataset.state = state;
-  const agentState = $("#agent-state");
-  agentState.dataset.state = state;
-  agentState.textContent = state === "running" ? "РАБОТАЕТ"
-    : state === "failed" ? "ОШИБКА" : state === "completed" ? "ЗАВЕРШЕНО" : "ОЖИДАЕТ";
-  const action = runningActivity?.action || (agentLeaseActive ? "Выполняет команду" : activity?.action) || "Работает";
-  title.textContent = state === "running" ? action
-    : state === "failed" ? `${action} · ошибка`
-      : recentCompletion ? `${action} · готово` : "Ждёт задачу";
-  if (recentCompletion && activityStatusOperationId !== activity.operation_id) {
-    clearTimeout(activityStatusTimer);
-    activityStatusOperationId = activity.operation_id;
-    activityStatusTimer = setTimeout(() => {
-      if (selectedProjectId) renderAgentActivity(
-        activitiesByProject.get(selectedProjectId) || [], agentLocksByProject.get(selectedProjectId),
-      );
-    }, Math.max(1, 2200 - age));
-  } else if (!recentCompletion) {
-    clearTimeout(activityStatusTimer);
-    activityStatusTimer = 0;
-    activityStatusOperationId = null;
-  }
+  const dashboard = dashboardsByProject.get(selectedProjectId);
+  renderCurrentProgress(
+    dashboard,
+    activities,
+    lock,
+  );
+  renderWorkflowHistory(activities);
   updateWorkspaceControls();
 }
 
@@ -1369,6 +1455,13 @@ function animateModelCamera(change) {
 
 function handleStreamEvent(type, event) {
   const projectId = event.project_id;
+  if (type === "workspace.agent-work") {
+    const data = event.data || {};
+    applyAgentWorkLock(data.active, data.revision);
+    agentWorkStatusConnected = true;
+    updateWorkspaceControls();
+    return;
+  }
   if (type === "workspace.selection.changed") {
     const selectedId = workspaceSelectionId(event.data || {});
     if (!selectedId) return;
@@ -1550,7 +1643,7 @@ folderFileList.addEventListener("click", (event) => {
 });
 
 const stream = new EventSource("/api/v1/events");
-const eventTypes = ["project.created", "workspace.selection.changed", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera"];
+const eventTypes = ["project.created", "workspace.selection.changed", "workspace.agent-work", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera"];
 for (const type of eventTypes) {
   stream.addEventListener(type, (message) => {
     try { handleStreamEvent(type, JSON.parse(message.data)); }

@@ -49,12 +49,14 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Solid.hxx>
 #include <TopLoc_Location.hxx>
 #include <Standard_Version.hxx>
 #include <Standard_Failure.hxx>
 #include <STEPControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
 #include <STEPControl_StepModelType.hxx>
+#include <DESTEP_Parameters.hxx>
 #include <StlAPI_Writer.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <ShapeFix_Shape.hxx>
@@ -139,7 +141,9 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
   if (!std::isfinite(surface_area) || surface_area <= 0)
     throw std::runtime_error("OCCT returned an invalid surface area.");
   Bnd_Box bounds;
-  BRepBndLib::Add(shape, bounds);
+  // Compare the actual geometric extents, independent of cached viewport
+  // triangulations and B-rep tolerances that can inflate Add() bounds.
+  BRepBndLib::AddOptimal(shape, bounds, false, false);
   double xmin, ymin, zmin, xmax, ymax, zmax;
   bounds.Get(xmin, ymin, zmin, xmax, ymax, zmax);
   const auto count_shapes = [&](TopAbs_ShapeEnum type) {
@@ -270,6 +274,7 @@ double ShapeVolume(const TopoDS_Shape& shape) {
 }
 
 TopoDS_Shape EnsureOneSolid(const TopoDS_Shape& shape, const char* operation);
+TopoDS_Solid ExtractSingleSolid(const TopoDS_Shape& shape);
 
 TopoDS_Shape RepairImportedBrep(const TopoDS_Shape& source) {
   if (BRepCheck_Analyzer(source).IsValid()) return source;
@@ -475,10 +480,13 @@ std::string ImportStepJson(const unsigned char* data, size_t size) {
 }
 
 std::string ExportStepBytes(const unsigned char* data, size_t size) {
-  const TopoDS_Shape shape = ReadImportedBrep(data, size);
-  ShapeJson(shape, 0);
+  const TopoDS_Solid solid = ExtractSingleSolid(ReadImportedBrep(data, size));
+  ShapeJson(solid, 0);
   STEPControl_Writer writer;
-  if (writer.Transfer(shape, STEPControl_AsIs) != IFSelect_RetDone)
+  DESTEP_Parameters transfer_parameters;
+  transfer_parameters.InitFromStatic();
+  transfer_parameters.WritePrecisionMode = DESTEP_Parameters::WriteMode_PrecisionMode_Greatest;
+  if (writer.Transfer(solid, STEPControl_ManifoldSolidBrep, transfer_parameters) != IFSelect_RetDone)
     throw std::runtime_error("OCCT could not transfer the B-rep to STEP.");
   std::ostringstream output;
   if (writer.WriteStream(output) != IFSelect_RetDone || !output.good())
@@ -676,6 +684,17 @@ TopoDS_Shape EnsureOneSolid(const TopoDS_Shape& shape, const char* operation) {
   for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More(); explorer.Next()) ++solids;
   if (solids != 1) throw std::runtime_error(std::string(operation) + " must produce one connected solid.");
   return shape;
+}
+
+TopoDS_Solid ExtractSingleSolid(const TopoDS_Shape& shape) {
+  TopExp_Explorer explorer(shape, TopAbs_SOLID);
+  if (!explorer.More()) throw std::runtime_error("CAD delivery needs one closed solid.");
+  const TopoDS_Solid solid = TopoDS::Solid(explorer.Current());
+  explorer.Next();
+  if (explorer.More()) throw std::runtime_error("CAD delivery needs exactly one closed solid.");
+  if (!BRepCheck_Analyzer(solid).IsValid())
+    throw std::runtime_error("CAD delivery solid is invalid.");
+  return solid;
 }
 
 TopoDS_Shape MakeFillet(const TopoDS_Shape& source, const int* edge_indices, size_t edge_count, double radius) {
@@ -886,9 +905,10 @@ GeometryExportResult SerializeGraphForExport(const OperationNode* nodes, size_t 
       edge_indices, edge_count, brep_data, brep_size, allow_invalid_import);
   if (allow_invalid_import && !BRepCheck_Analyzer(shape).IsValid())
     throw std::runtime_error("Invalid imported B-reps cannot be exported.");
-  const std::string metrics = ShapeJson(shape, 0, 0, false);
+  const TopoDS_Solid solid = ExtractSingleSolid(shape);
+  const std::string metrics = ShapeJson(solid, 0, 0, false);
   std::ostringstream output;
-  BRepTools::Write(shape, output, false, false, TopTools_FormatVersion_CURRENT);
+  BRepTools::Write(solid, output, false, false, TopTools_FormatVersion_CURRENT);
   if (!output.good()) throw std::runtime_error("OCCT could not serialize the B-rep for export.");
   const std::string serialized = output.str();
   if (serialized.empty() || serialized.size() > 64 * 1024 * 1024)

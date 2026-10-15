@@ -131,6 +131,11 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertGreater(rebuilt_body["geometry"]["volume"], before)
         self.assertEqual(rebuilt_body["geometry"], rebuilt_feature["geometry"])
         self.assertEqual(rebuilt_body["geometry"]["tool"], rebuilt_handle["geometry"])
+        delivered = self.command({"type": "export_brep", "body_id": fused["body_id"]})
+        step_check = delivered["verification"]["step_round_trip"]
+        self.assertEqual(step_check["status"], "passed")
+        self.assertEqual(step_check["source_solid_count"], 1)
+        self.assertEqual(step_check["reimported_solid_count"], 1)
 
     def test_replacing_profile_rebuilds_feature_with_smooth_sampled_loop(self) -> None:
         original = [(31, 60), (42, 60), (52, 55), (60, 47), (65, 40), (60, 33),

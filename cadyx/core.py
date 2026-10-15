@@ -47,7 +47,7 @@ class CadyxCore:
             self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds)
         else:
             self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds, clock=lease_clock)
-        self.events = EventBroker()
+        self.events = EventBroker(dashboard_state_path=self.workspace.root / ".cadyx-agent-dashboards.json")
         self._workspace_selection_guard = threading.RLock()
         self._workspace_selection: dict[str, str] | None = None
         self._geometry_cache_guard = threading.RLock()
@@ -197,6 +197,14 @@ class CadyxCore:
             if not isinstance(task_state, str) or task_state not in {"running", "pending", "completed", "failed"}:
                 raise ValidationError("Task state is not supported.")
             normalized_tasks.append({"id": task_id, "title": task_title.strip(), "state": task_state})
+
+        if normalized_workflow and normalized_workflow["progress_percent"] == 100 and (
+            any(phase["state"] != "completed" for phase in normalized_workflow["phases"])
+            or any(task["state"] != "completed" for task in normalized_tasks)
+        ):
+            raise ValidationError("100% progress requires every workflow phase and queued task to be completed.")
+        if normalized_workflow is None and self.events.agent_dashboard_is_active(project_id):
+            raise ValidationError("An active workflow cannot be cleared before it reaches verified 100% progress.")
 
         return self.events.publish_agent_dashboard(project_id, {
             "workflow": normalized_workflow,

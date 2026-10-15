@@ -54,6 +54,43 @@ class CadDeliveryTests(unittest.TestCase):
             self.assertEqual(core.inspect_project(project_id)["document"]["revision"], 2)
             self.assertEqual(core.render_project(project_id)["objects"][0]["object_id"], body_id)
 
+    def test_export_round_trip_preserves_a_fillet_brep(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            core = CadyxCore(temporary)
+            project_id = core.create_project("Rounded delivery")['project']['id']
+            lease_id = core.acquire_lease(project_id, "agent", "rounded-delivery-test")["lease_id"]
+            created = core.execute_command(
+                project_id,
+                lease_id,
+                {"type": "create_box", "name": "Rounded body", "width": 24, "height": 18, "depth": 12},
+                expected_owner_type=OwnerType.AGENT,
+                expected_revision=0,
+            )
+            filleted = core.execute_command(
+                project_id,
+                lease_id,
+                {"type": "fillet_edges", "body_id": created["history_entry"]["result"]["body_id"],
+                 "edge_indices": [0], "radius": 1.25},
+                expected_owner_type=OwnerType.AGENT,
+                expected_revision=created["document"]["revision"],
+            )
+            body_id = filleted["history_entry"]["result"]["body_id"]
+            exported = core.execute_command(
+                project_id,
+                lease_id,
+                {"type": "export_brep", "body_id": body_id},
+                expected_owner_type=OwnerType.AGENT,
+                expected_revision=filleted["document"]["revision"],
+            )
+            result = exported["history_entry"]["result"]
+            manifest = json.loads((core.workspace._project_dir(project_id) / result["manifest"]["file"]).read_bytes())
+            step_check = manifest["verification"]["step_round_trip"]
+            self.assertEqual(step_check["status"], "passed")
+            self.assertEqual(step_check["source_solid_count"], 1)
+            self.assertEqual(step_check["reimported_solid_count"], 1)
+            self.assertLessEqual(step_check["bounds_max_deviation"], 1e-6)
+            self.assertLessEqual(step_check["relative_volume_error"], 1e-8)
+
     def test_export_requires_an_exact_revision_and_rejects_mesh_bodies(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             core = CadyxCore(temporary)

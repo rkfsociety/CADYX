@@ -303,6 +303,72 @@ class WebApiTests(unittest.TestCase):
         finally:
             self.core.events.unsubscribe(subscriber_id)
 
+    def test_agent_work_lock_persists_and_releases_only_after_completed_queue(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Persistent work lock"})
+        project_id = created["project"]["id"]
+        report = {
+            "workflow": {
+                "title": "Проверенная модель",
+                "progress_percent": 50,
+                "eta_seconds": None,
+                "phases": [
+                    {"id": "build", "title": "Построение", "state": "in_progress"},
+                    {"id": "verify", "title": "Проверка", "state": "pending"},
+                ],
+            },
+            "tasks": [
+                {"id": "model", "title": "Пересобрать модель", "state": "running"},
+                {"id": "step", "title": "Проверить STEP", "state": "pending"},
+            ],
+        }
+        status, active_report = self.request(
+            f"/api/v1/agent/projects/{project_id}/dashboard", report,
+        )
+        self.assertEqual(status, 200)
+        status, active_updates = self.request("/api/v1/updates")
+        self.assertEqual(status, 200)
+        self.assertTrue(active_updates["agent_work_active"])
+        self.assertEqual(active_updates["agent_work_revision"], 1)
+        status, _ = self.request(
+            f"/api/v1/agent/projects/{project_id}/dashboard",
+            {"workflow": None, "tasks": []},
+        )
+        self.assertEqual(status, 400)
+        self.assertTrue(self.core.events.agent_work_snapshot()["active"])
+
+        restarted_core = CadyxCore(str(self.core.workspace.root))
+        self.assertEqual(restarted_core.agent_dashboard_snapshot(project_id), active_report)
+        self.assertEqual(restarted_core.events.agent_work_snapshot(), {"active": True, "revision": 1})
+
+        report["workflow"]["progress_percent"] = 100
+        report["workflow"]["phases"] = [
+            {"id": "build", "title": "Построение", "state": "completed"},
+            {"id": "verify", "title": "Проверка", "state": "completed"},
+        ]
+        report["tasks"][0]["state"] = "completed"
+        report["tasks"][1]["state"] = "pending"
+        status, _ = self.request(f"/api/v1/agent/projects/{project_id}/dashboard", report)
+        self.assertEqual(status, 400)
+        report["workflow"]["progress_percent"] = 99
+        self.request(f"/api/v1/agent/projects/{project_id}/dashboard", report)
+        self.assertTrue(self.core.events.agent_work_snapshot()["active"])
+
+        subscriber_id, events = self.core.events.subscribe()
+        try:
+            report["tasks"][1]["state"] = "completed"
+            report["workflow"]["progress_percent"] = 100
+            self.request(f"/api/v1/agent/projects/{project_id}/dashboard", report)
+            status, completed_updates = self.request("/api/v1/updates")
+            self.assertEqual(status, 200)
+            self.assertFalse(completed_updates["agent_work_active"])
+            self.assertEqual(completed_updates["agent_work_revision"], 3)
+            self.assertEqual(events.get(timeout=1).event, "agent.dashboard")
+            work_event = events.get(timeout=1)
+            self.assertEqual((work_event.event, work_event.project_id, work_event.data),
+                             ("workspace.agent-work", None, {"active": False, "revision": 3}))
+        finally:
+            self.core.events.unsubscribe(subscriber_id)
+
     def test_web_assets_are_served(self) -> None:
         with urlopen(self.base_url + "/", timeout=3) as response:
             self.assertEqual(response.status, 200)

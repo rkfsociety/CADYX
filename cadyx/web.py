@@ -73,6 +73,7 @@ def make_request_handler(
                     query = parse_qs(parsed.query)
                     project_id = query.get("project_id", [None])[0]
                     folder_name = query.get("folder", [None])[0]
+                    agent_work = core.events.agent_work_snapshot()
                     snapshot: dict[str, Any] = {
                         "ui_version": _ui_asset_version(),
                         "workspace_revision": core.workspace.workspace_revision_token(),
@@ -80,6 +81,8 @@ def make_request_handler(
                         "project_lock": None,
                         "activity_revision": None,
                         "dashboard_revision": None,
+                        "agent_work_active": agent_work["active"],
+                        "agent_work_revision": agent_work["revision"],
                         "folder_revision": None,
                     }
                     if project_id:

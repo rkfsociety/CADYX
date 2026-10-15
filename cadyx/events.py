@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import copy
+import json
+import math
+import os
 import queue
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -29,7 +34,12 @@ class ProjectEvent:
 
 
 class EventBroker:
-    def __init__(self, *, subscriber_capacity: int = 128) -> None:
+    def __init__(
+        self,
+        *,
+        subscriber_capacity: int = 128,
+        dashboard_state_path: str | Path | None = None,
+    ) -> None:
         self._capacity = subscriber_capacity
         self._lock = threading.Lock()
         self._next_id = 1
@@ -38,6 +48,125 @@ class EventBroker:
         self._activities: dict[str, list[dict[str, Any]]] = {}
         self._activity_revisions: dict[str, int] = {}
         self._agent_dashboards: dict[str, dict[str, Any]] = {}
+        self._dashboard_state_path = Path(dashboard_state_path) if dashboard_state_path is not None else None
+        self._agent_work_revision = 0
+        self._load_agent_dashboards()
+
+    def _load_agent_dashboards(self) -> None:
+        path = self._dashboard_state_path
+        if path is None or not path.exists():
+            return
+        try:
+            with path.open("r", encoding="utf-8") as stream:
+                state = json.load(stream)
+            if not isinstance(state, dict):
+                raise ValueError("invalid dashboard state structure")
+            dashboards = state["dashboards"]
+            revision = state["agent_work_revision"]
+            if (
+                state.get("version") != 1
+                or not isinstance(dashboards, dict)
+                or any(not isinstance(project_id, str) or not self._dashboard_state_is_valid(value)
+                       for project_id, value in dashboards.items())
+                or type(revision) is not int
+                or revision < 0
+            ):
+                raise ValueError("invalid dashboard state structure")
+            self._agent_dashboards = copy.deepcopy(dashboards)
+            self._agent_work_revision = revision
+        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(f"CADYX agent dashboard state could not be loaded from {path}: {exc}") from exc
+
+    @staticmethod
+    def _dashboard_state_is_valid(dashboard: Any) -> bool:
+        if (
+            not isinstance(dashboard, dict)
+            or set(dashboard) != {"workflow", "tasks", "revision", "updated_at"}
+            or type(dashboard.get("revision")) is not int
+            or dashboard["revision"] < 1
+            or not isinstance(dashboard.get("updated_at"), str)
+            or not isinstance(dashboard.get("tasks"), list)
+        ):
+            return False
+        workflow = dashboard["workflow"]
+        if workflow is not None:
+            if (
+                not isinstance(workflow, dict)
+                or set(workflow) != {"title", "progress_percent", "eta_seconds", "phases"}
+                or not isinstance(workflow["title"], str)
+                or isinstance(workflow["progress_percent"], bool)
+                or not isinstance(workflow["progress_percent"], (int, float))
+                or not math.isfinite(workflow["progress_percent"])
+                or not 0 <= workflow["progress_percent"] <= 100
+                or (workflow["eta_seconds"] is not None and type(workflow["eta_seconds"]) is not int)
+                or not isinstance(workflow["phases"], list)
+            ):
+                return False
+            if any(
+                not isinstance(phase, dict)
+                or set(phase) != {"id", "title", "state"}
+                or phase.get("state") not in {"pending", "in_progress", "completed", "failed"}
+                for phase in workflow["phases"]
+            ):
+                return False
+        return all(
+            isinstance(task, dict)
+            and set(task) == {"id", "title", "state"}
+            and task.get("state") in {"pending", "running", "completed", "failed"}
+            for task in dashboard["tasks"]
+        )
+
+    def _persist_agent_dashboards(self, dashboards: dict[str, dict[str, Any]], revision: int) -> None:
+        path = self._dashboard_state_path
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=f"{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary_path = stream.name
+                json.dump(
+                    {"version": 1, "agent_work_revision": revision, "dashboards": dashboards},
+                    stream,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                )
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary_path, path)
+        except OSError:
+            if temporary_path is not None:
+                try:
+                    os.unlink(temporary_path)
+                except OSError:
+                    pass
+            raise
+
+    @staticmethod
+    def _dashboard_is_active(dashboard: dict[str, Any]) -> bool:
+        workflow = dashboard.get("workflow")
+        if workflow is not None:
+            if float(workflow.get("progress_percent", 0)) < 100:
+                return True
+            if any(phase.get("state") != "completed" for phase in workflow.get("phases", [])):
+                return True
+        return any(task.get("state") != "completed" for task in dashboard.get("tasks", []))
+
+    def _agent_work_active_locked(self) -> bool:
+        return any(self._dashboard_is_active(dashboard) for dashboard in self._agent_dashboards.values())
+
+    def agent_dashboard_is_active(self, project_id: str) -> bool:
+        with self._lock:
+            dashboard = self._agent_dashboards.get(project_id)
+            return dashboard is not None and self._dashboard_is_active(dashboard)
 
     def publish(self, event: str, project_id: str | None, data: dict[str, Any]) -> ProjectEvent:
         with self._lock:
@@ -98,7 +227,11 @@ class EventBroker:
                 "revision": revision,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            self._agent_dashboards[project_id] = copy.deepcopy(dashboard)
+            dashboards = {**self._agent_dashboards, project_id: copy.deepcopy(dashboard)}
+            work_revision = self._agent_work_revision + 1
+            self._persist_agent_dashboards(dashboards, work_revision)
+            self._agent_dashboards = dashboards
+            self._agent_work_revision = work_revision
             item = ProjectEvent(
                 id=self._next_id,
                 event="agent.dashboard",
@@ -116,7 +249,31 @@ class EventBroker:
                     except queue.Empty:
                         pass
                 subscriber.put_nowait(item)
+            work_item = ProjectEvent(
+                id=self._next_id,
+                event="workspace.agent-work",
+                project_id=None,
+                data={"active": self._agent_work_active_locked(), "revision": work_revision},
+                occurred_at=dashboard["updated_at"],
+            )
+            self._next_id += 1
+            for subscriber, filter_project in self._subscribers.values():
+                if filter_project is not None:
+                    continue
+                if subscriber.full():
+                    try:
+                        subscriber.get_nowait()
+                    except queue.Empty:
+                        pass
+                subscriber.put_nowait(work_item)
             return copy.deepcopy(dashboard)
+
+    def agent_work_snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "active": self._agent_work_active_locked(),
+                "revision": self._agent_work_revision,
+            }
 
     def agent_dashboard_snapshot(self, project_id: str) -> dict[str, Any]:
         with self._lock:
