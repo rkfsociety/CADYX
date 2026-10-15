@@ -90,6 +90,8 @@ their respective human/agent edit leases. Results below appear inside
   `side_count` (3–512), positive `radius`, optional `rotation_degrees` (default
   0) and `radius_mode` (`inscribed` default or `circumscribed`). Each command
   creates a closed point/line profile and returns its point and line ids.
+  `add_sketch_inscribed_polygon` fixes the circumradius; `add_sketch_circumscribed_polygon`
+  fixes the inradius. Both expose the same center, side count and optional rotation.
 - `add_sketch_circle`: `sketch_id`, center `x` and `y`, and positive `radius`.
   Adds the center point and circle together and returns `point_id` and `circle_id`.
 - `add_sketch_circle_diameter`: `sketch_id`, center `x`/`y`, and positive

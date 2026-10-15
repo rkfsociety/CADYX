@@ -116,6 +116,22 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
         self.assertEqual(len(result["point_ids"]), 5)
         self.assertEqual(len(result["line_ids"]), 5)
 
+    def test_inscribed_polygon(self) -> None:
+        result = self.command({"type": "add_sketch_inscribed_polygon", "sketch_id": self.sketch_id,
+                              "center_x": 0, "center_y": 0, "side_count": 4, "radius": 2})
+        objects = self.objects()
+        vertices = [objects[item] for item in result["point_ids"]]
+        self.assertTrue(all(abs((item["x"] ** 2 + item["y"] ** 2) ** 0.5 - 2) < 1e-9
+                            for item in vertices))
+
+    def test_circumscribed_polygon(self) -> None:
+        result = self.command({"type": "add_sketch_circumscribed_polygon", "sketch_id": self.sketch_id,
+                              "center_x": 0, "center_y": 0, "side_count": 4, "radius": 2})
+        objects = self.objects()
+        vertices = [objects[item] for item in result["point_ids"]]
+        self.assertTrue(all(abs(max(abs(item["x"]), abs(item["y"])) - 2 / (2**0.5 / 2)) < 1e-9
+                            for item in vertices))
+
     def test_circle_center_radius(self) -> None:
         result = self.command({"type": "add_sketch_circle", "sketch_id": self.sketch_id,
                               "x": 2, "y": 3, "radius": 4})

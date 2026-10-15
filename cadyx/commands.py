@@ -165,7 +165,14 @@ class CommandSystem:
             return self._add_sketch_rectangle(document, command, progress=progress)
         if kind in {"add_sketch_rectangle_two_corners", "add_sketch_rectangle_center",
                     "add_sketch_rectangle_three_points", "add_sketch_rotated_rectangle",
-                    "add_sketch_parallelogram", "add_sketch_regular_polygon"}:
+                    "add_sketch_parallelogram", "add_sketch_regular_polygon",
+                    "add_sketch_inscribed_polygon", "add_sketch_circumscribed_polygon"}:
+            if kind == "add_sketch_inscribed_polygon":
+                command = {**command, "radius_mode": "inscribed"}
+                kind = "add_sketch_regular_polygon"
+            elif kind == "add_sketch_circumscribed_polygon":
+                command = {**command, "radius_mode": "circumscribed"}
+                kind = "add_sketch_regular_polygon"
             return self._add_sketch_polygon_tool(document, command, kind, progress=progress)
         if kind == "add_sketch_circle":
             return self._add_sketch_circle(document, command, progress=progress)
