@@ -77,9 +77,14 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
                     bounds_min[axis] = value
                 if value > bounds_max[axis]:
                     bounds_max[axis] = value
-        objects.append({"object_id": item["id"], "type": kind,
-                        "positions": positions, "triangles": triangles,
-                        "lines": lines, "points": points})
+        scene_item = {"object_id": item["id"], "type": kind,
+                      "positions": positions, "triangles": triangles,
+                      "lines": lines, "points": points}
+        if kind in {"point", "line"}:
+            scene_item["construction"] = item.get("construction", False)
+        if kind == "line":
+            scene_item["line_modes"] = [item.get("extent", "segment")]
+        objects.append(scene_item)
     bounds = None
     if has_coordinates:
         bounds = {"min": bounds_min, "max": bounds_max}
@@ -179,6 +184,22 @@ def render_scene_png(scene: dict) -> bytes:
                 for delta_x in range(-radius, radius + 1):
                     put_pixel(x + delta_x, y + delta_y, depth, color)
 
+    def draw_dashed_segment(start: tuple[float, float, float], end: tuple[float, float, float],
+                            color: bytes, dash: int = 8, gap: int = 5) -> None:
+        length = math.hypot(end[0] - start[0], end[1] - start[1])
+        if length <= 0:
+            return
+        direction = tuple((end[index] - start[index]) / length for index in range(3))
+        cursor = 0.0
+        while cursor < length:
+            finish = min(length, cursor + dash)
+            draw_segment(
+                tuple(start[index] + direction[index] * cursor for index in range(3)),
+                tuple(start[index] + direction[index] * finish for index in range(3)),
+                color,
+            )
+            cursor = finish + gap
+
     light = (0.38, -0.52, 0.76)
     light_length = math.sqrt(sum(value * value for value in light))
     light = tuple(value / light_length for value in light)
@@ -249,9 +270,31 @@ def render_scene_png(scene: dict) -> bytes:
         for index in range(0, len(item["lines"]), 2):
             start = screen_vertices[item["lines"][index]]
             end = screen_vertices[item["lines"][index + 1]]
-            draw_segment(start, end, line_color)
+            line_index = index // 2
+            mode = item.get("line_modes", ["segment"] * (len(item["lines"]) // 2))[line_index]
+            if mode == "infinite":
+                dx, dy = end[0] - start[0], end[1] - start[1]
+                length = math.hypot(dx, dy)
+                if length > 0:
+                    half = math.hypot(width, height) * 1.5
+                    middle = tuple((start[axis] + end[axis]) / 2 for axis in range(3))
+                    direction = (dx / length, dy / length, 0.0)
+                    start = tuple(middle[axis] - direction[axis] * half for axis in range(3))
+                    end = tuple(middle[axis] + direction[axis] * half for axis in range(3))
+            if item.get("construction") or mode == "centerline":
+                draw_dashed_segment(start, end, line_color)
+            else:
+                draw_segment(start, end, line_color)
         for vertex in item["points"]:
             x, y, _ = screen_vertices[vertex]
+            if item.get("construction"):
+                for angle_index in range(32):
+                    angle = math.tau * angle_index / 32
+                    next_angle = math.tau * (angle_index + 1) / 32
+                    draw_segment((x + 4 * math.cos(angle), y + 4 * math.sin(angle), math.inf),
+                                 (x + 4 * math.cos(next_angle), y + 4 * math.sin(next_angle), math.inf),
+                                 point_color)
+                continue
             for delta_y in range(-4, 5):
                 for delta_x in range(-4, 5):
                     if delta_x * delta_x + delta_y * delta_y <= 16:

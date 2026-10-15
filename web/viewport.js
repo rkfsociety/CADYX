@@ -281,6 +281,21 @@
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale);
       for (let index = 0; index < (geometry.lines || []).length; index += 2) {
         const a = geometry.lines[index], b = geometry.lines[index + 1];
+        let startX = screenX[a], startY = screenY[a];
+        let endX = screenX[b], endY = screenY[b];
+        const lineMode = geometry.line_modes?.[index / 2] || "segment";
+        if (lineMode === "infinite") {
+          const dx = endX - startX, dy = endY - startY;
+          const length = Math.hypot(dx, dy);
+          if (length > 1e-9) {
+            const half = Math.hypot(width, height) * 1.5;
+            const middleX = (startX + endX) / 2, middleY = (startY + endY) / 2;
+            startX = middleX - dx / length * half;
+            startY = middleY - dy / length * half;
+            endX = middleX + dx / length * half;
+            endY = middleY + dy / length * half;
+          }
+        }
         let segmentProgress = 1;
         if (transition?.lineRange && index >= transition.lineRange[0] && index < transition.lineRange[1]) {
           const segment = (index - transition.lineRange[0]) / 2;
@@ -291,19 +306,29 @@
         context.strokeStyle = segmentProgress < 1 ? "#b8f2ff" : "#8ed4ed";
         context.globalAlpha = segmentProgress < 1 ? 0.72 + 0.28 * segmentProgress : 1;
         context.lineWidth = segmentProgress < 1 ? 2.4 : 2;
+        context.setLineDash(geometry.construction || lineMode === "centerline" ? [6, 5] : []);
         context.beginPath();
-        context.moveTo(screenX[a], screenY[a]);
-        context.lineTo(screenX[a] + (screenX[b] - screenX[a]) * segmentProgress,
-          screenY[a] + (screenY[b] - screenY[a]) * segmentProgress);
+        context.moveTo(startX, startY);
+        context.lineTo(startX + (endX - startX) * segmentProgress,
+          startY + (endY - startY) * segmentProgress);
         context.stroke();
       }
       context.globalAlpha = 1;
+      context.setLineDash([]);
       context.fillStyle = "#c3ecff";
       for (const point of geometry.points || []) {
         const forming = transition?.pointIndex === point;
         const size = forming ? 4 * Math.max(0.05, progress) : 4;
         context.globalAlpha = forming ? 0.2 + 0.8 * progress : 1;
-        context.fillRect(screenX[point] - size / 2, screenY[point] - size / 2, size, size);
+        if (geometry.construction) {
+          context.strokeStyle = "#c3ecff";
+          context.lineWidth = 1.5;
+          context.beginPath();
+          context.arc(screenX[point], screenY[point], Math.max(2, size), 0, Math.PI * 2);
+          context.stroke();
+        } else {
+          context.fillRect(screenX[point] - size / 2, screenY[point] - size / 2, size, size);
+        }
       }
       context.globalAlpha = 1;
       if (showRotationAxes) drawRotationAxes(geometry.rotationAxes || [], project, dpr);

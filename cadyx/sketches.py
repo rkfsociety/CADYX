@@ -67,9 +67,15 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
         if kind == "point":
             number(item.get("x"))
             number(item.get("y"))
+            if "construction" in item and type(item["construction"]) is not bool:
+                raise ValidationError("Sketch point construction flag must be a boolean.")
         elif kind == "line":
             start = reference(item.get("start_id"), "point", sketch_id)
             end = reference(item.get("end_id"), "point", sketch_id)
+            if "construction" in item and type(item["construction"]) is not bool:
+                raise ValidationError("Sketch line construction flag must be a boolean.")
+            if item.get("extent", "segment") not in {"segment", "infinite", "centerline"}:
+                raise ValidationError("Sketch line extent must be segment, infinite, or centerline.")
             length = math.hypot(number(start["x"]) - number(end["x"]), number(start["y"]) - number(end["y"]))
             if not math.isfinite(length) or length <= 1e-7:
                 raise ValidationError("Line endpoints must be distinct.")
@@ -123,8 +129,10 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
         raise ValidationError("A profile operation needs an existing sketch.")
     plane = sketch["plane"]
     owned = [item for item in objects if item.get("sketch_id") == sketch_id]
-    lines = [item for item in owned if item.get("type") == "line"]
-    circles = [item for item in owned if item.get("type") == "circle"]
+    lines = [item for item in owned if item.get("type") == "line"
+             and not item.get("construction", False) and item.get("extent", "segment") == "segment"]
+    circles = [item for item in owned if item.get("type") == "circle"
+               and not item.get("construction", False)]
 
     if not lines:
         if len(circles) != 1:
@@ -184,7 +192,8 @@ def open_path(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[
     if sketch is None:
         raise ValidationError("A sweep operation needs an existing sketch.")
     owned = [item for item in objects if item.get("sketch_id") == sketch_id]
-    lines = [item for item in owned if item.get("type") == "line"]
+    lines = [item for item in owned if item.get("type") == "line"
+             and not item.get("construction", False) and item.get("extent", "segment") == "segment"]
     if not 2 <= len(lines) <= 511 or any(item.get("type") not in {"point", "line"} for item in owned):
         raise ValidationError("A sweep path needs 3 to 512 points and no other sketch geometry.")
 
@@ -196,7 +205,8 @@ def open_path(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[
     endpoints = [point_id for point_id, edges in adjacency.items() if len(edges) == 1]
     if len(endpoints) != 2 or any(len(edges) not in {1, 2} for edges in adjacency.values()):
         raise ValidationError("A sweep path must be one open line chain without branches or loops.")
-    point_ids = {item["id"] for item in owned if item.get("type") == "point"}
+    point_ids = {item["id"] for item in owned
+                 if item.get("type") == "point" and not item.get("construction", False)}
     if set(adjacency) != point_ids:
         raise ValidationError("Every point in a sweep sketch must belong to its open line chain.")
 

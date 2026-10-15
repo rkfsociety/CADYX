@@ -104,6 +104,17 @@ class RenderingTests(unittest.TestCase):
         self.command({"type": "set_parameter", "feature_id": result["feature_id"], "name": "width", "value": 8})
         self.assertEqual(self.core.render_project(self.project)["bounds"]["max"], [8, 3, 5])
 
+    def test_sketch_scene_exposes_construction_and_infinite_line_modes(self):
+        sketch = self.command({"type": "create_sketch"})["sketch_id"]
+        self.command({"type": "add_sketch_construction_point", "sketch_id": sketch, "x": 2, "y": 3})
+        infinite = self.command({"type": "add_sketch_infinite_line", "sketch_id": sketch,
+                                 "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 2}})
+        scene = self.core.render_project(self.project)
+        by_id = {item["object_id"]: item for item in scene["objects"]}
+        self.assertTrue(by_id[infinite["line_id"]]["construction"])
+        self.assertEqual(by_id[infinite["line_id"]]["line_modes"], ["infinite"])
+        self.assertTrue(all(by_id[point_id]["construction"] for point_id in infinite["point_ids"]))
+
     def test_unrenderable_sketch_is_rejected_without_changing_document(self):
         sketch = self.command({"type": "create_sketch"})["sketch_id"]
         center = self.command({"type": "add_sketch_element", "sketch_id": sketch,

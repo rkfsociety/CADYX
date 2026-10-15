@@ -18,8 +18,8 @@ line, circle and constraint. Existing body/feature relationships remain intact.
 | Type | Persisted fields in addition to id/type | Meaning |
 | --- | --- | --- |
 | sketch | name, plane | Name of 1–120 characters; plane is `XY` or `XZ` |
-| point | sketch_id, x, y | Finite coordinates in the owning sketch plane |
-| line | sketch_id, start_id, end_id | References two points; length must exceed 1e-7 |
+| point | sketch_id, x, y, optional construction | Finite coordinates; construction points are reference geometry |
+| line | sketch_id, start_id, end_id, optional construction/extent | References two points; length must exceed 1e-7; extent is `segment` (default), `infinite`, or `centerline` |
 | circle | sketch_id, center_id, radius | Point center and finite positive radius |
 | constraint | sketch_id, kind, references, value | Explicit invariant checked on every load and command |
 
@@ -28,6 +28,12 @@ Point/line/circle references must resolve to the appropriate object type in the
 same sketch. Editing coordinates preserves ids and references. There are no
 references to transient kernel topology. An `XZ` sketch maps stored `x,y`
 coordinates to global `X,Z`; `XY` retains its existing mapping.
+
+Construction points and lines remain visible in the sketch scene, but are not
+included in closed profiles or sweep paths. Infinite lines render across the
+viewport through their two defining points; centerlines and construction lines
+render dashed. Optional fields preserve compatibility with documents that
+pre-date construction geometry.
 
 ## Constraint semantics
 
@@ -52,6 +58,13 @@ their respective human/agent edit leases. Results below appear inside
 
 - `create_sketch`: optional `name` (default Sketch), `plane` (default XY).
   Returns `sketch_id`.
+- `add_sketch_point` / `add_sketch_construction_point`: `sketch_id`, finite
+  `x`, `y`. Construction points are excluded from profiles and sweep paths.
+- `add_sketch_segment`, `add_sketch_line`, `add_sketch_infinite_line`,
+  `add_sketch_centerline`, and `add_sketch_construction_line`: `sketch_id`,
+  distinct finite `start` and `end` coordinate objects (`{x, y}`). Infinite
+  lines and centerlines are excluded from profiles and sweep paths; centerlines
+  and construction lines are dashed in the viewport.
 - `add_sketch_element`: `sketch_id`, `element_type` (point, line or circle),
   and that element's fields from the table. Returns `object_id`.
 - `add_sketch_polyline`: `sketch_id`, `points` (`{x, y}` coordinates), and
@@ -60,6 +73,9 @@ their respective human/agent edit leases. Results below appear inside
   including the closing pair for a polygon, must be more than 1e-7 apart.
   Returns the created `point_ids`, `line_ids`, and `closed` state. These are
   ordinary point and line objects in the document.
+- `add_sketch_line_chain`: `sketch_id`, `points` (`{x, y}` coordinates).
+  Adds one open chain of 2–512 points; use `add_sketch_polyline` when a closed
+  profile is required.
 - `add_sketch_rectangle`: `sketch_id`, lower-left `x` and `y`, positive `width`
   and `height`. Adds a closed four-sided profile as ordinary points and lines
   and returns their ids in one command.

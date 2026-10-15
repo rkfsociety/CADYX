@@ -11,6 +11,7 @@ from cadyx.core import CadyxCore
 from cadyx.errors import LeaseRequiredError, ValidationError
 from cadyx.kernel import PrimitiveKernelAdapter
 from cadyx.models import Document
+from cadyx.sketches import closed_profile, open_path
 
 
 class SketchDocumentTests(unittest.TestCase):
@@ -369,6 +370,29 @@ class SketchDocumentTests(unittest.TestCase):
         self.assertEqual(persisted["document"]["version"], 3)
         self.assertEqual(persisted["history"][0], legacy["history"][0])
         self.assertEqual(persisted["document"]["objects"][1]["id"], feature)
+
+
+    def test_construction_and_unbounded_lines_are_excluded_from_profiles_and_paths(self):
+        profile_sketch = self.command(type="create_sketch")["sketch_id"]
+        self.command(type="add_sketch_rectangle", sketch_id=profile_sketch, x=0, y=0, width=4, height=3)
+        self.command(type="add_sketch_construction_line", sketch_id=profile_sketch,
+                     start={"x": -5, "y": 0}, end={"x": 5, "y": 0})
+        self.command(type="add_sketch_infinite_line", sketch_id=profile_sketch,
+                     start={"x": 0, "y": -5}, end={"x": 0, "y": 5})
+        self.command(type="add_sketch_centerline", sketch_id=profile_sketch,
+                     start={"x": -5, "y": -5}, end={"x": 5, "y": 5})
+        objects = self.core.inspect_project(self.project)["document"]["objects"]
+        _, profile = closed_profile(objects, profile_sketch)
+        self.assertEqual(len(profile), 4)
+
+        path_sketch = self.command(type="create_sketch")["sketch_id"]
+        self.command(type="add_sketch_polyline", sketch_id=path_sketch,
+                     points=[{"x": 0, "y": 0}, {"x": 2, "y": 1}, {"x": 4, "y": 0}])
+        self.command(type="add_sketch_construction_line", sketch_id=path_sketch,
+                     start={"x": -1, "y": 0}, end={"x": 5, "y": 0})
+        objects = self.core.inspect_project(self.project)["document"]["objects"]
+        _, path = open_path(objects, path_sketch)
+        self.assertEqual(len(path), 3)
 
 
 if __name__ == "__main__":

@@ -113,6 +113,35 @@ class CommandSystem:
                 "name": command.get("name", "Sketch"), "plane": command.get("plane", "XY"),
             })
             return {"sketch_id": sketch_id}
+        if kind in {"add_sketch_point", "add_sketch_construction_point"}:
+            sketch = self._find_sketch(document, command.get("sketch_id"))
+            point_id = f"point:{uuid4()}"
+            point = {
+                "id": point_id, "type": "point", "sketch_id": sketch["id"],
+                "x": _finite_number(command.get("x"), "Sketch point x"),
+                "y": _finite_number(command.get("y"), "Sketch point y"),
+            }
+            if kind == "add_sketch_construction_point":
+                point["construction"] = True
+            document.objects.append(point)
+            return {"point_id": point_id}
+        if kind in {"add_sketch_segment", "add_sketch_line", "add_sketch_infinite_line",
+                    "add_sketch_centerline", "add_sketch_construction_line"}:
+            sketch = self._find_sketch(document, command.get("sketch_id"))
+            start = self._coordinate_pair(command.get("start"), "Line start")
+            end = self._coordinate_pair(command.get("end"), "Line end")
+            extent = "infinite" if kind == "add_sketch_infinite_line" else (
+                "centerline" if kind == "add_sketch_centerline" else "segment"
+            )
+            construction = kind == "add_sketch_construction_line" or extent != "segment"
+            result = self._append_sketch_polyline(
+                document, sketch, [start, end], closed=False, operation=kind,
+                construction=construction, line_extent=extent,
+                progress=progress,
+            )
+            return {"sketch_id": sketch["id"], "point_ids": result["point_ids"],
+                    "line_ids": result["line_ids"], "line_id": result["line_ids"][0],
+                    "closed": False}
         if kind == "add_sketch_element":
             element_kind = command.get("element_type")
             fields = {"point": ("x", "y"), "line": ("start_id", "end_id"), "circle": ("center_id", "radius")}
@@ -126,6 +155,10 @@ class CommandSystem:
             return {"object_id": object_id}
         if kind == "add_sketch_polyline":
             return self._add_sketch_polyline(document, command, progress=progress)
+        if kind == "add_sketch_line_chain":
+            if command.get("closed", False) is not False:
+                raise ValidationError("A line chain is always open; use add_sketch_polyline for a closed path.")
+            return self._add_sketch_polyline(document, command, operation=kind, progress=progress)
         if kind == "add_sketch_involute_gear":
             return self._add_sketch_involute_gear(document, command, progress=progress)
         if kind == "add_sketch_rectangle":
@@ -199,6 +232,7 @@ class CommandSystem:
         document: Document,
         command: dict[str, Any],
         *,
+        operation: str = "add_sketch_polyline",
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         sketch_id = command.get("sketch_id")
@@ -222,7 +256,7 @@ class CommandSystem:
 
         sketch = self._find_sketch(document, sketch_id)
         return self._append_sketch_polyline(
-            document, sketch, points, closed=closed, operation="add_sketch_polyline", progress=progress,
+            document, sketch, points, closed=closed, operation=operation, progress=progress,
         )
 
     def _add_sketch_involute_gear(
@@ -578,6 +612,8 @@ class CommandSystem:
         *,
         closed: bool,
         operation: str,
+        construction: bool = False,
+        line_extent: str = "segment",
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         segments = list(zip(points, points[1:]))
@@ -594,14 +630,18 @@ class CommandSystem:
         line_count = len(points) if closed else len(points) - 1
         line_ids = [f"line:{uuid4()}" for _ in range(line_count)]
         elements = [
-            {"id": point_id, "type": "point", "sketch_id": sketch_id, "x": x, "y": y}
+            {"id": point_id, "type": "point", "sketch_id": sketch_id, "x": x, "y": y,
+             **({"construction": True} if construction else {})}
             for point_id, (x, y) in zip(point_ids, points, strict=True)
         ]
-        elements.extend(
+        lines = [
             {"id": line_id, "type": "line", "sketch_id": sketch_id,
-             "start_id": point_ids[index], "end_id": point_ids[(index + 1) % len(points)]}
+             "start_id": point_ids[index], "end_id": point_ids[(index + 1) % len(points)],
+             **({"construction": True} if construction else {}),
+             **({"extent": line_extent} if line_extent != "segment" else {})}
             for index, line_id in enumerate(line_ids)
-        )
+        ]
+        elements.extend(lines)
         sketch_index = document.objects.index(sketch)
         document.objects[sketch_index + 1:sketch_index + 1] = elements
         self._rebuild_changed_features(document, {sketch_id}, progress=progress)

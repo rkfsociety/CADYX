@@ -36,9 +36,9 @@
 
 ## Видимые проектные прогоны
 
-- Индивидуальная модельная партия: проект `Эскизы — индивидуальные видимые тесты`, ID `6865cd10-79be-4af2-9e58-6b9495d02c42`; текущий checkpoint включает только SK-010…SK-019 и SK-043. Остальные индивидуальные прогоны pending.
-- Проверенные команды завершены на ревизиях 2, 4, 6, 8, 10, 12, 14, 16, 18 и 20 соответственно; каждая команда рисования запускалась в своём именованном XY-эскизе и видна отдельным событием в истории/активности CADYX.
-- Инспекция после прогона: 68 объектов, 20 записей истории, revision 20, проектный lock `FREE`; сцена Agent API revision 20 содержит геометрию эскизов. Финальный viewport PNG просмотрен.
+- Видимый checkpoint SK-010…SK-019 и SK-043: проект `Эскизы — индивидуальные видимые тесты`, ID `6865cd10-79be-4af2-9e58-6b9495d02c42`; команды завершены на revision 2, 4, 6, 8, 10, 12, 14, 16, 18 и 20.
+- Видимый checkpoint SK-001…SK-009: проект `Эскизы — базовые инструменты SK-001—SK-009`, ID `f31862d2-81fc-4293-9bab-67befe312c45`; команды завершены на revision 2, 4, 6, 8, 10, 12, 14, 16 и 18, каждая в отдельном именованном XY-эскизе.
+- Инспекция второго проекта: 36 объектов, 18 записей истории, revision 18, project lock `FREE`; сцена Agent API revision 18 содержит только активный эскиз и его геометрию, финальный viewport PNG просмотрен.
 
 ## Реестр отдельных проверок
 
@@ -46,15 +46,15 @@
 
 | ID | Инструмент | Unit-тест (доп.) | Видимый индивидуальный прогон | Тест группы | Общий проект |
 |---|---|---|---|---|---|
-| SK-001 | Точка | pending | pending | pending | pending |
-| SK-002 | Вспомогательная точка | pending | pending | pending | pending |
-| SK-003 | Отрезок | pending | pending | pending | pending |
-| SK-004 | Линия | pending | pending | pending | pending |
-| SK-005 | Бесконечная линия | pending | pending | pending | pending |
-| SK-006 | Осевая линия | pending | pending | pending | pending |
-| SK-007 | Вспомогательная линия | pending | pending | pending | pending |
-| SK-008 | Ломаная | pending | pending | pending | pending |
-| SK-009 | Цепочка линий | pending | pending | pending | pending |
+| SK-001 | Точка | test_regular_point (passed) | PASS · rev 2 | pending | pending |
+| SK-002 | Вспомогательная точка | test_construction_point (passed) | PASS · rev 4 | pending | pending |
+| SK-003 | Отрезок | test_segment (passed) | PASS · rev 6 | pending | pending |
+| SK-004 | Линия | test_line (passed) | PASS · rev 8 | pending | pending |
+| SK-005 | Бесконечная линия | test_infinite_line (passed) | PASS · rev 10 | pending | pending |
+| SK-006 | Осевая линия | test_centerline (passed) | PASS · rev 12 | pending | pending |
+| SK-007 | Вспомогательная линия | test_construction_line (passed) | PASS · rev 14 | pending | pending |
+| SK-008 | Ломаная | test_open_polyline (passed) | PASS · rev 16 | pending | pending |
+| SK-009 | Цепочка линий | test_line_chain (passed) | PASS · rev 18 | pending | pending |
 | SK-010 | Прямоугольник по двум углам | test_rectangle_two_corners (passed) | PASS · rev 2 | pending | pending |
 | SK-011 | Прямоугольник из центра | test_rectangle_center (passed) | PASS · rev 4 | pending | pending |
 | SK-012 | Прямоугольник по трём точкам | test_rectangle_three_points (passed) | PASS · rev 6 | pending | pending |

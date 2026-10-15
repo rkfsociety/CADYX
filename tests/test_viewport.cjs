@@ -10,15 +10,18 @@ let meshMoves = [];
 let drawnLabels = [];
 let currentPath = [];
 let strokedPaths = [];
+let dashPatterns = [];
+let arcs = 0;
 let animationTime = 0;
 let renderCalls = 0;
 const animationFrames = [];
 const context = {
-  clearRect() { renderCalls++; drawnPoints = []; segments = 0; drawnLines = []; meshMoves = []; drawnLabels = []; currentPath = []; strokedPaths = []; },
+  clearRect() { renderCalls++; drawnPoints = []; segments = 0; drawnLines = []; meshMoves = []; drawnLabels = []; currentPath = []; strokedPaths = []; dashPatterns = []; arcs = 0; },
   fillRect(x, y) { drawnPoints.push([x, y]); },
   beginPath() { currentPath = []; }, moveTo(x, y) { currentPath.push([x, y]); },
   lineTo(x, y) { segments++; drawnLines.push([x, y]); currentPath.push([x, y]); },
-  closePath() {}, fill() { meshMoves.push(...currentPath); }, stroke() { strokedPaths.push(currentPath.slice()); }, strokeRect() {}, save() {}, restore() {}, setLineDash() {},
+  closePath() {}, fill() { meshMoves.push(...currentPath); }, stroke() { strokedPaths.push(currentPath.slice()); }, strokeRect() {}, save() {}, restore() {},
+  setLineDash(value) { dashPatterns.push(value.slice()); }, arc() { arcs++; },
   fillText(value) { drawnLabels.push(value); },
 };
 const canvas = {
@@ -126,6 +129,18 @@ animationTime = 100;
 animationFrames.shift()(animationTime);
 assert.ok(Math.abs(drawnLines[0][0] - (drawnPoints[1][0] + 2)) < 1e-9
   && Math.abs(drawnLines[0][1] - (drawnPoints[1][1] + 2)) < 1e-9, "The sketch stroke finishes at its endpoint");
+viewer.load({
+  positions: [0, 0, 0, 1, 1, 0], triangles: [], lines: [0, 1], points: [], line_modes: ["infinite"],
+  bounds: { min: [0, 0, 0], max: [1, 1, 0] },
+}, { reset: false });
+assert.ok(Math.hypot(strokedPaths[0][1][0] - strokedPaths[0][0][0],
+  strokedPaths[0][1][1] - strokedPaths[0][0][1]) > 600, "Infinite sketch lines span the viewport");
+viewer.load({
+  positions: [0, 0, 0, 1, 1, 0], triangles: [], lines: [0, 1], points: [0],
+  construction: true, line_modes: ["segment"], bounds: { min: [0, 0, 0], max: [1, 1, 0] },
+}, { reset: false });
+assert.ok(dashPatterns.some((pattern) => pattern.join(",") === "6,5"), "Construction lines are dashed");
+assert.ok(arcs > 0, "Construction points use a visible hollow marker");
 const profileBody = {
   positions: [1, 0, 0, 1, 0, 1, 0, 0, 1], triangles: [0, 1, 2], lines: [], points: [],
   bounds: { min: [0, 0, 0], max: [1, 1, 1] },

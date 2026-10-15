@@ -1596,8 +1596,12 @@ function handleStreamEvent(type, event) {
           type: command.element_type === "point" ? "sketch-point" : "sketch-lines",
           durationMs: command.element_type === "circle" ? 700 : 460,
         };
+      } else if (["add_sketch_point", "add_sketch_construction_point"].includes(command.type)) {
+        activeSketchId = command.sketch_id || activeSketchId;
+        pendingViewportTransition = { projectId, objectId: result.point_id, type: "sketch-point", durationMs: 460 };
       } else if ([
-        "add_sketch_polyline", "add_sketch_rectangle", "add_sketch_rectangle_two_corners",
+        "add_sketch_segment", "add_sketch_line", "add_sketch_infinite_line", "add_sketch_centerline",
+        "add_sketch_construction_line", "add_sketch_polyline", "add_sketch_line_chain", "add_sketch_rectangle",
         "add_sketch_rectangle_center", "add_sketch_rectangle_three_points", "add_sketch_rotated_rectangle",
         "add_sketch_parallelogram", "add_sketch_regular_polygon", "add_sketch_circle_diameter",
         "add_sketch_circle_two_points", "add_sketch_circle_three_points", "add_sketch_involute_gear",

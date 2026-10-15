@@ -24,6 +24,57 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
     def objects(self) -> dict[str, dict]:
         return {item["id"]: item for item in self.core.inspect_project(self.project_id)["document"]["objects"]}
 
+    def line_tool(self, kind: str, *, start=None, end=None) -> dict:
+        return self.command({"type": kind, "sketch_id": self.sketch_id,
+                             "start": start or {"x": 0, "y": 0},
+                             "end": end or {"x": 4, "y": 3}})
+
+    def test_regular_point(self) -> None:
+        result = self.command({"type": "add_sketch_point", "sketch_id": self.sketch_id, "x": 2, "y": -3})
+        self.assertEqual(self.objects()[result["point_id"]]["x"], 2)
+        self.assertNotIn("construction", self.objects()[result["point_id"]])
+
+    def test_construction_point(self) -> None:
+        result = self.command({"type": "add_sketch_construction_point", "sketch_id": self.sketch_id,
+                              "x": -2, "y": 5})
+        self.assertTrue(self.objects()[result["point_id"]]["construction"])
+
+    def test_segment(self) -> None:
+        result = self.line_tool("add_sketch_segment")
+        objects = self.objects()
+        self.assertEqual(len(result["line_ids"]), 1)
+        self.assertEqual(objects[result["line_id"]].get("extent", "segment"), "segment")
+
+    def test_line(self) -> None:
+        result = self.line_tool("add_sketch_line")
+        self.assertEqual(self.objects()[result["line_id"]].get("extent", "segment"), "segment")
+
+    def test_infinite_line(self) -> None:
+        result = self.line_tool("add_sketch_infinite_line")
+        self.assertEqual(self.objects()[result["line_id"]]["extent"], "infinite")
+
+    def test_centerline(self) -> None:
+        result = self.line_tool("add_sketch_centerline")
+        self.assertEqual(self.objects()[result["line_id"]]["extent"], "centerline")
+
+    def test_construction_line(self) -> None:
+        result = self.line_tool("add_sketch_construction_line")
+        objects = self.objects()
+        self.assertTrue(objects[result["line_id"]]["construction"])
+        self.assertTrue(all(objects[point_id]["construction"] for point_id in result["point_ids"]))
+
+    def test_open_polyline(self) -> None:
+        result = self.command({"type": "add_sketch_polyline", "sketch_id": self.sketch_id,
+                              "points": [{"x": 0, "y": 0}, {"x": 2, "y": 1}, {"x": 4, "y": 0}]})
+        self.assertFalse(result["closed"])
+        self.assertEqual(len(result["line_ids"]), 2)
+
+    def test_line_chain(self) -> None:
+        result = self.command({"type": "add_sketch_line_chain", "sketch_id": self.sketch_id,
+                              "points": [{"x": 1, "y": 2}, {"x": 3, "y": 2}, {"x": 3, "y": 5}]})
+        self.assertFalse(result["closed"])
+        self.assertEqual(len(result["line_ids"]), 2)
+
     def test_rectangle_two_corners(self) -> None:
         result = self.command({"type": "add_sketch_rectangle_two_corners", "sketch_id": self.sketch_id,
                               "x1": 5, "y1": 7, "x2": 1, "y2": 2})
