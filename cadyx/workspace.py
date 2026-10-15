@@ -236,6 +236,44 @@ class ProjectWorkspace:
         files.sort(key=lambda item: item["name"].casefold())
         return files
 
+    def publish_project_step(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
+        """Atomically add one STEP source file without replacing project data."""
+        if (not self._is_single_path_segment(filename)
+                or Path(filename).suffix.casefold() not in {".step", ".stp"}
+                or not isinstance(content, bytes) or not content
+                or len(content) > 64 * 1024 * 1024):
+            raise ValidationError("STEP upload needs a direct .step/.stp filename and a non-empty payload no larger than 64 MiB.")
+        directory = self._project_dir(project_id)
+        target = directory / filename
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", prefix=".cadyx-tmp-", suffix=".step-upload", dir=directory, delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            try:
+                os.link(temporary, target)
+            except FileExistsError as exc:
+                raise ConflictError(
+                    "A file with this name already exists in the project; uploads never overwrite files.",
+                    code="ARTIFACT_CONFLICT",
+                ) from exc
+        except ConflictError:
+            raise
+        except OSError as exc:
+            raise ValidationError(f"STEP source file could not be saved: {exc}.") from exc
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return {
+            "name": filename,
+            "size": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+
     def workspace_revision_token(self) -> str:
         """Return a cheap token for project records and selectable workspace folders."""
         entries: list[tuple[str, str, int, int]] = []

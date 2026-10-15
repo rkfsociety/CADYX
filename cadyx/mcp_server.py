@@ -17,7 +17,7 @@ from typing import Any
 from uuid import uuid4
 
 _PROTOCOL_VERSION = "2025-11-25"
-_MAX_FILE_BYTES = 4 * 1024 * 1024
+_MAX_FILE_BYTES = 64 * 1024 * 1024
 _JSON = "application/json"
 
 
@@ -49,12 +49,15 @@ class CadyxAPI:
             if not self.token:
                 raise ValueError("CADYX_API_TOKEN_FILE is empty.")
 
-    def request(self, method: str, path: str, body: dict[str, Any] | None = None) -> tuple[bytes, Any]:
+    def request(self, method: str, path: str, body: dict[str, Any] | bytes | None = None) -> tuple[bytes, Any]:
         headers = {"Accept": "application/json, image/png, */*"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         data = None
-        if body is not None:
+        if isinstance(body, bytes):
+            data = body
+            headers["Content-Type"] = "application/octet-stream"
+        elif body is not None:
             data = json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
             headers["Content-Type"] = _JSON
         request = urllib.request.Request(self.base_url + path, data=data, headers=headers, method=method)
@@ -96,12 +99,13 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_list_workspace", "description": "List saved CADYX projects and direct workspace folders with lock snapshots.", "inputSchema": _schema()},
     {"name": "cadyx_get_selection", "description": "Read the local host's currently selected project or folder.", "inputSchema": _schema()},
     {"name": "cadyx_select_resource", "description": "Select an existing project or workspace folder through the Agent API.", "inputSchema": _schema({"type": {"enum": ["project", "folder"]}, "project_id": _STRING, "folder_name": _STRING}, ["type"])},
-    {"name": "cadyx_create_project", "description": "Create and select a project through the Agent API.", "inputSchema": _schema({"name": {"type": "string", "minLength": 1, "maxLength": 120}}, ["name"])},
+    {"name": "cadyx_create_project", "description": "Create a project; set select=false to leave the current viewer selection unchanged.", "inputSchema": _schema({"name": {"type": "string", "minLength": 1, "maxLength": 120}, "select": {"type": "boolean"}}, ["name"])},
     {"name": "cadyx_rename_project", "description": "Rename and move a FREE project folder through the Agent API while preserving its identity and model history.", "inputSchema": _schema({"project_id": _STRING, "name": {"type": "string", "minLength": 1, "maxLength": 120}}, ["project_id", "name"])},
     {"name": "cadyx_inspect_project", "description": "Read the saved model, revision, command history and lock state without acquiring a lease.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_capabilities", "description": "Discover supported Agent API routes, model commands, parameter names, documented constraints and error meanings.", "inputSchema": _schema()},
     {"name": "cadyx_list_project_files", "description": "List direct user files in a saved project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_read_project_file", "description": "Read a direct project file through the read-only Agent API; small images are returned as image content.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING}, ["project_id", "name"])},
+    {"name": "cadyx_upload_project_step", "description": "Copy a local STEP file into a project through the Agent API without overwriting existing files or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
     {"name": "cadyx_list_folder_files", "description": "List direct user files in a workspace folder.", "inputSchema": _schema({"folder_name": _STRING}, ["folder_name"])},
     {"name": "cadyx_read_folder_file", "description": "Read a direct workspace file through the read-only API; small images are returned as image content.", "inputSchema": _schema({"folder_name": _STRING, "name": _STRING}, ["folder_name", "name"])},
     {"name": "cadyx_inspect_topology", "description": "Inspect current editable B-rep edges before a fillet. Refresh topology after any upstream edit.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING}, ["project_id", "body_id"])},
@@ -158,8 +162,10 @@ class MCPApplication:
             self._assert_selection_is_safe(selection_type, args.get(key))
             return self.api.post("/api/v1/agent/workspace/selection", selection)
         if name == "cadyx_create_project":
-            self._assert_selection_is_safe("new-project", None)
-            return self.api.post("/api/v1/agent/projects", {"name": args.get("name")})
+            select = args.get("select", True)
+            if select:
+                self._assert_selection_is_safe("new-project", None)
+            return self.api.post("/api/v1/agent/projects", {"name": args.get("name"), "select": select})
         if name == "cadyx_rename_project":
             return self.api.post(self._project(args["project_id"], "/rename"), {"name": args["name"]})
         if name == "cadyx_inspect_project":
@@ -170,6 +176,18 @@ class MCPApplication:
             return self.api.get(self._project(args["project_id"], "/files"))
         if name == "cadyx_read_project_file":
             return self._read_file(self._project(args["project_id"], "/files/" + urllib.parse.quote(args["name"], safe="")), args["name"])
+        if name == "cadyx_upload_project_step":
+            source = Path(args["source_path"]).expanduser()
+            if source.suffix.casefold() not in {".step", ".stp"}:
+                raise ValueError("Only .step and .stp files can be uploaded as STEP sources.")
+            if source.is_symlink() or not source.is_file():
+                raise ValueError("The STEP source must be a regular, non-symlink local file.")
+            if source.stat().st_size < 1 or source.stat().st_size > _MAX_FILE_BYTES:
+                raise ValueError("The STEP source must be between 1 byte and 64 MiB.")
+            content = source.read_bytes()
+            path = self._project(args["project_id"], "/files/" + urllib.parse.quote(source.name, safe=""))
+            raw, _ = self.api.request("POST", path, content)
+            return json.loads(raw.decode("utf-8"))
         if name == "cadyx_list_folder_files":
             folder = urllib.parse.quote(args["folder_name"], safe="")
             return self.api.get(f"/api/v1/workspace/folders/{folder}/files")

@@ -20,6 +20,7 @@ from .errors import CadyxError, NotFoundError, ValidationError
 from .models import OwnerType
 
 _MAX_BODY_BYTES = 1_000_000
+_MAX_STEP_UPLOAD_BYTES = 64 * 1024 * 1024
 _MAX_VIEWPORT_SNAPSHOT_BYTES = 16 * 1024 * 1024
 _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 _UI_ASSETS = ("index.html", "app.js", "style.css", "viewport.js", "ply-preview.js", "favicon.svg")
@@ -248,6 +249,13 @@ def make_request_handler(
                     )
                     self._json(200, snapshot)
                     return
+                if (len(parts) == 7 and parts[:4] == ["api", "v1", "agent", "projects"]
+                        and parts[5] == "files"):
+                    project_id = parts[4]
+                    filename = unquote(parts[6])
+                    result = core.upload_project_step(project_id, filename, self._read_step_upload())
+                    self._json(201, {"project_id": project_id, "file": result})
+                    return
                 body = self._read_json()
                 if parts == ["api", "v1", "agent", "workspace", "selection"]:
                     if body is None:
@@ -290,9 +298,17 @@ def make_request_handler(
             if not parts:
                 if body is None:
                     raise ValidationError("A JSON request body is required.")
-                if "name" not in body:
-                    raise ValidationError("Project name is required.")
-                result = core.create_project(body["name"])
+                if agent_api:
+                    if not body.keys() <= {"name", "select"} or "name" not in body:
+                        raise ValidationError("Agent project creation requires name and accepts optional select.")
+                    select = body.get("select", True)
+                    if not isinstance(select, bool):
+                        raise ValidationError("select must be a boolean.")
+                else:
+                    if set(body) != {"name"}:
+                        raise ValidationError("Project creation requires only a name field.")
+                    select = True
+                result = core.create_project(body["name"], select=select)
                 self._json(201, result)
                 return
             project_id = parts[0]
@@ -409,6 +425,24 @@ def make_request_handler(
                 self.close_connection = True
                 raise ValidationError("Viewport snapshot body was incomplete.")
             return encoded
+
+        def _read_step_upload(self) -> bytes:
+            content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+            if content_type != "application/octet-stream":
+                raise ValidationError("STEP uploads must use Content-Type application/octet-stream.")
+            raw_length = self.headers.get("Content-Length")
+            try:
+                length = int(raw_length) if raw_length is not None else 0
+            except ValueError as exc:
+                raise ValidationError("Content-Length is invalid.") from exc
+            if length < 1 or length > _MAX_STEP_UPLOAD_BYTES:
+                self.close_connection = True
+                raise ValidationError("STEP upload must be between 1 byte and 64 MiB.")
+            content = self.rfile.read(length)
+            if len(content) != length:
+                self.close_connection = True
+                raise ValidationError("STEP upload body was incomplete.")
+            return content
 
         def _png(
             self,

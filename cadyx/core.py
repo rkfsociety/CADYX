@@ -73,15 +73,26 @@ class CadyxCore:
         with lock:
             yield
 
-    def create_project(self, name: str) -> dict[str, Any]:
+    def create_project(self, name: str, *, select: bool = True) -> dict[str, Any]:
         project = self.workspace.create(name)
         summary = self._summary(project)
         lock = self.leases.snapshot(project["id"])
-        with self._workspace_selection_guard:
-            self._workspace_selection = {"type": "project", "project_id": project["id"]}
-            self.events.publish("project.created", project["id"], summary)
+        if select:
+            with self._workspace_selection_guard:
+                self._workspace_selection = {"type": "project", "project_id": project["id"]}
+                self.events.publish("project.created", project["id"], summary)
         self.events.publish("project.lock.changed", project["id"], lock)
         return {"project": summary, "lock": lock}
+
+    def upload_project_step(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            lock = self.leases.snapshot(project_id)
+            activities, _ = self.events.activity_state_snapshot(project_id)
+            if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
+                item.get("state") == "running" for item in activities
+            ):
+                raise ConflictError("STEP files can only be staged in a free project with no running operation.", code="PROJECT_BUSY")
+            return self.workspace.publish_project_step(project_id, filename, content)
 
     def rename_project(self, project_id: str, name: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id):

@@ -109,6 +109,32 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertIn("PROJECT_BUSY", blocked["content"][0]["text"])
         self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": project_id})
 
+    def test_can_stage_step_in_unselected_project_while_other_workflow_is_active(self) -> None:
+        active = self.core.create_project("Active workflow")
+        active_id = active["project"]["id"]
+        self.core.report_agent_dashboard(active_id, {
+            "workflow": {
+                "title": "Текущая работа",
+                "progress_percent": 40,
+                "eta_seconds": None,
+                "phases": [{"id": "build", "title": "Построение", "state": "in_progress"}],
+            },
+            "tasks": [],
+        })
+        staged = self._tool_value("cadyx_create_project", {"name": "Staged STEP", "select": False})
+        staged_id = staged["project"]["id"]
+        self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": active_id})
+
+        source = Path(self.temporary_directory.name) / "source model.stp"
+        source.write_bytes(b"ISO-10303-21;source")
+        uploaded = self._tool_value("cadyx_upload_project_step", {
+            "project_id": staged_id,
+            "source_path": str(source),
+        })
+        self.assertEqual(uploaded["project_id"], staged_id)
+        self.assertEqual((self.core.workspace._project_dir(staged_id) / source.name).read_bytes(), source.read_bytes())
+        self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": active_id})
+
     def test_errors_keep_saved_document_and_free_the_lease(self) -> None:
         project_id = self._create_project()
         invalid = self.app.call_tool("cadyx_execute_command", {

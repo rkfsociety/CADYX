@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from cadyx.core import CadyxCore
@@ -43,6 +44,48 @@ class WebApiTests(unittest.TestCase):
         except HTTPError as error:
             with error:
                 return error.code, json.loads(error.read())
+
+    def upload(self, path: str, filename: str, content: bytes) -> tuple[int, dict]:
+        request = Request(
+            self.base_url + path + "/" + quote(filename, safe=""),
+            data=content,
+            headers={"Content-Type": "application/octet-stream"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=3) as response:
+                return response.status, json.loads(response.read())
+        except HTTPError as error:
+            with error:
+                return error.code, json.loads(error.read())
+
+    def test_agent_project_can_be_created_without_changing_selection_and_receive_step(self) -> None:
+        _, current = self.request("/api/v1/agent/projects", {"name": "Current project"})
+        current_id = current["project"]["id"]
+        status, created = self.request("/api/v1/agent/projects", {"name": "Staged project", "select": False})
+        self.assertEqual(status, 201)
+        project_id = created["project"]["id"]
+        self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": current_id})
+
+        payload = b"ISO-10303-21;\x00source"
+        status, uploaded = self.upload(f"/api/v1/agent/projects/{project_id}/files", "source model.stp", payload)
+        self.assertEqual(status, 201)
+        self.assertEqual(uploaded["file"]["size"], len(payload))
+        source = self.core.workspace._project_dir(project_id) / "source model.stp"
+        self.assertEqual(source.read_bytes(), payload)
+
+        status, conflict = self.upload(f"/api/v1/agent/projects/{project_id}/files", "source model.stp", b"other")
+        self.assertEqual((status, conflict["error"]), (409, "ARTIFACT_CONFLICT"))
+        self.assertEqual(source.read_bytes(), payload)
+
+    def test_agent_step_upload_rejects_invalid_filename_or_locked_project(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Upload constraints"})
+        project_id = created["project"]["id"]
+        status, error = self.upload(f"/api/v1/agent/projects/{project_id}/files", "source.txt", b"x")
+        self.assertEqual((status, error["error"]), (400, "VALIDATION_ERROR"))
+        self.core.acquire_lease(project_id, "agent", "upload-test")
+        status, error = self.upload(f"/api/v1/agent/projects/{project_id}/files", "source.stp", b"x")
+        self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
 
     def test_legacy_migration_uses_both_api_command_paths(self) -> None:
         for prefix, owner in (("/api/v1/projects", "human"), ("/api/v1/agent/projects", "agent")):

@@ -415,6 +415,17 @@ the source filename, SHA-256, byte length, and source geometry metrics. The save
 B-rep is self-contained and remains usable if the source file later moves. Source
 and serialized B-rep payloads are limited to 64 MiB each.
 
+The Agent API can stage a local STEP source into a project with
+`POST /api/v1/agent/projects/{id}/files/{name}` using
+`Content-Type: application/octet-stream`. Uploads are limited to 64 MiB, must
+use a direct `.step` or `.stp` filename, require the target project to be free,
+follow the host's configured authentication policy, and never replace an
+existing project file. The local `cadyx_upload_project_step`
+MCP tool reads the supplied local regular file and transfers its bytes; the HTTP
+host does not accept or resolve arbitrary filesystem paths. A project can be
+created without changing the viewer selection using `select: false` on the Agent
+API project-creation route.
+
 The source metrics include volume, surface area, bounding coordinates, unique
 solid/face/edge/vertex counts, B-rep validity, and whether OCCT repaired the shape
 within a precision of 1e-7 and a maximum tolerance of 1e-5 model units. CADYX

@@ -88,6 +88,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - `GET /api/v1/projects/{id}/viewport` and its Agent API equivalent return the same read-only render scene
 - `GET /api/v1/agent/projects/{id}/viewport.png` returns the browser's exact main viewport frame when available; `X-CADYX-Viewport-Source` identifies browser or server-fallback output. The browser posts revision-tagged frames to `POST /api/v1/agent/projects/{id}/viewport/snapshot`.
 - `GET /api/v1/agent/workspace/selection` reports the active project or folder; `POST` selects an existing project or workspace folder and notifies the passive viewer over SSE
+- `POST /api/v1/agent/projects` accepts `select: false` to create a project while preserving viewer selection; `POST /api/v1/agent/projects/{id}/files/{name}` accepts authenticated `.step`/`.stp` bytes up to 64 MiB without overwriting existing files
 - `GET /api/v1/workspace/folders/{folder}/files` and `GET /api/v1/workspace/folders/{folder}/files/{name}` for safe in-folder file preview
 - `POST /api/v1/projects/{id}/leases` with `owner_type` and `owner_id`
 - `POST /api/v1/projects/{id}/commands` with a human `lease_id` and a command
