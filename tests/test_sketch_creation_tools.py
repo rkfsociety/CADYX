@@ -229,6 +229,36 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
                           "first_line_id": horizontal["line_id"], "second_line_id": parallel["line_id"],
                           "radius": 2})
 
+    def test_circle_tangent_to_three_lines(self) -> None:
+        root_two = 2 ** 0.5
+        horizontal = self.line_tool("add_sketch_line", start={"x": -10, "y": 0}, end={"x": 10, "y": 0})
+        vertical = self.line_tool("add_sketch_line", start={"x": 0, "y": -10}, end={"x": 0, "y": 10})
+        tangent = {"x": -2 - root_two, "y": 2 - root_two}
+        diagonal = self.line_tool("add_sketch_line",
+                                  start={"x": tangent["x"] - 10 / root_two,
+                                         "y": tangent["y"] + 10 / root_two},
+                                  end={"x": tangent["x"] + 10 / root_two,
+                                       "y": tangent["y"] - 10 / root_two})
+        result = self.command({"type": "add_sketch_circle_tangent_to_three_lines", "sketch_id": self.sketch_id,
+                               "first_line_id": horizontal["line_id"],
+                               "second_line_id": vertical["line_id"],
+                               "third_line_id": diagonal["line_id"]})
+        objects = self.objects()
+        circle = objects[result["circle_id"]]
+        center = objects[circle["center_id"]]
+        self.assertAlmostEqual(center["x"], -2)
+        self.assertAlmostEqual(center["y"], 2)
+        self.assertAlmostEqual(circle["radius"], 2)
+        self.assertEqual(len(result["tangent_points"]), 3)
+        self.assertAlmostEqual(result["tangent_points"][0]["x"], -2)
+        self.assertAlmostEqual(result["tangent_points"][1]["y"], 2)
+
+        concurrent = self.line_tool("add_sketch_line", start={"x": -10, "y": -10}, end={"x": 10, "y": 10})
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_circle_tangent_to_three_lines", "sketch_id": self.sketch_id,
+                          "first_line_id": horizontal["line_id"], "second_line_id": vertical["line_id"],
+                          "third_line_id": concurrent["line_id"]})
+
     def test_arc_center_rejects_different_endpoint_radii(self) -> None:
         with self.assertRaises(ValidationError):
             self.command({"type": "add_sketch_arc_center", "sketch_id": self.sketch_id,

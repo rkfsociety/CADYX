@@ -199,6 +199,8 @@ class CommandSystem:
             return self._add_sketch_circle_tangent_to_line(document, command, progress=progress)
         if kind == "add_sketch_circle_tangent_to_two_lines":
             return self._add_sketch_circle_tangent_to_two_lines(document, command, progress=progress)
+        if kind == "add_sketch_circle_tangent_to_three_lines":
+            return self._add_sketch_circle_tangent_to_three_lines(document, command, progress=progress)
         if kind == "add_sketch_arc_center":
             return self._add_sketch_arc_center(document, command, progress=progress)
         if kind == "mirror_sketch_elements":
@@ -660,6 +662,97 @@ class CommandSystem:
         ]
         result["circle_ids"] = [result["circle_id"]]
         result["point_ids"] = [result["point_id"]]
+        return result
+
+    def _add_sketch_circle_tangent_to_three_lines(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        line_ids = [command.get("first_line_id"), command.get("second_line_id"), command.get("third_line_id")]
+        if len(set(line_ids)) != 3:
+            raise ValidationError("A three-tangent circle needs three different lines.")
+        by_id = {item["id"]: item for item in document.objects}
+        lines = [by_id.get(line_id) for line_id in line_ids]
+        if any(line is None or line.get("type") != "line" or line.get("sketch_id") != sketch["id"]
+               for line in lines):
+            raise ValidationError("All tangent lines must belong to the same sketch.")
+        sides = [command.get("first_side", 1), command.get("second_side", 1),
+                 command.get("third_side", 1)]
+        if any(type(side) is not int or side not in {-1, 1} for side in sides):
+            raise ValidationError("Tangent sides must be 1 or -1 relative to each line direction.")
+
+        matrix: list[list[float]] = []
+        right_hand_side: list[float] = []
+        directions: list[tuple[float, float]] = []
+        normals: list[tuple[float, float]] = []
+        starts: list[tuple[float, float]] = []
+        lengths: list[float] = []
+        for index, line in enumerate(lines):
+            start, end = by_id[line["start_id"]], by_id[line["end_id"]]
+            ax, ay = start["x"], start["y"]
+            dx, dy = end["x"] - ax, end["y"] - ay
+            length = math.hypot(dx, dy)
+            if not math.isfinite(length) or length <= 1e-7:
+                raise ValidationError("Tangent lines must have finite positive lengths.")
+            direction = (dx / length, dy / length)
+            normal = (-direction[1], direction[0])
+            directions.append(direction)
+            normals.append(normal)
+            starts.append((ax, ay))
+            lengths.append(length)
+            matrix.append([normal[0], normal[1], -sides[index]])
+            right_hand_side.append(normal[0] * ax + normal[1] * ay)
+
+        def determinant(rows: list[list[float]]) -> float:
+            return (rows[0][0] * (rows[1][1] * rows[2][2] - rows[1][2] * rows[2][1])
+                    - rows[0][1] * (rows[1][0] * rows[2][2] - rows[1][2] * rows[2][0])
+                    + rows[0][2] * (rows[1][0] * rows[2][1] - rows[1][1] * rows[2][0]))
+
+        denominator = determinant(matrix)
+        if not math.isfinite(denominator) or abs(denominator) <= 1e-12:
+            raise ValidationError("The selected tangent sides do not define one finite circle.")
+        solution = []
+        for column in range(3):
+            replaced = [row[:] for row in matrix]
+            for row_index in range(3):
+                replaced[row_index][column] = right_hand_side[row_index]
+            solution.append(determinant(replaced) / denominator)
+        center_x, center_y, radius = solution
+        if not all(math.isfinite(value) for value in solution) or radius <= 1e-7:
+            raise ValidationError("The three tangent lines and selected sides do not define a positive circle.")
+
+        tangent_points = [
+            (center_x - sides[index] * radius * normals[index][0],
+             center_y - sides[index] * radius * normals[index][1])
+            for index in range(3)
+        ]
+        for index, (line, tangent_point) in enumerate(zip(lines, tangent_points, strict=True)):
+            if line.get("extent", "segment") == "infinite":
+                continue
+            projection = ((tangent_point[0] - starts[index][0]) * directions[index][0]
+                          + (tangent_point[1] - starts[index][1]) * directions[index][1])
+            tolerance = 1e-7 * max(1.0, lengths[index], radius)
+            if not -tolerance <= projection <= lengths[index] + tolerance:
+                raise ValidationError("Each tangent point must lie within its finite line segment.")
+
+        if progress is not None:
+            progress({"phase": "add_sketch_circle_tangent_to_three_lines"})
+        result = self._add_sketch_circle(
+            document,
+            {"sketch_id": sketch["id"], "x": center_x, "y": center_y, "radius": radius},
+            progress=progress,
+        )
+        result["line_ids"] = line_ids
+        result["tangent_points"] = [
+            {"x": point[0], "y": point[1]} for point in tangent_points
+        ]
+        result["circle_ids"] = [result["circle_id"]]
+        result["point_ids"] = [result["point_id"]]
+        result["radius"] = radius
         return result
 
     def _add_sketch_arc_center(

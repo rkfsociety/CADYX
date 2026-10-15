@@ -114,6 +114,12 @@ their respective human/agent edit leases. Results below appear inside
   angle-bisector solutions. Parallel lines are rejected, and contact points
   must lie within finite line segments; infinite lines use their full support.
   Returns the circle and both exact contact coordinates.
+- `add_sketch_circle_tangent_to_three_lines`: `sketch_id` and three distinct
+  same-sketch line ids, with optional `first_side`, `second_side`, and
+  `third_side` (each `1` by default or `-1` relative to the corresponding line
+  direction). The three line offsets jointly solve the center and positive
+  radius. Degenerate side combinations are rejected; contact points must lie
+  within finite segments. Returns the solved radius and all contact coordinates.
 - `add_sketch_arc_center`: `sketch_id`, `center`, `start`, and `end` coordinate
   objects, with optional boolean `clockwise` (default false). Start and end
   must lie on the same circle and be distinct from each other and the center.
