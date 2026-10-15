@@ -203,6 +203,8 @@ class CommandSystem:
             return self._add_sketch_circle_tangent_to_three_lines(document, command, progress=progress)
         if kind == "add_sketch_arc_center":
             return self._add_sketch_arc_center(document, command, progress=progress)
+        if kind == "add_sketch_arc_three_points":
+            return self._add_sketch_arc_three_points(document, command, progress=progress)
         if kind == "mirror_sketch_elements":
             return self._mirror_sketch_elements(document, command, progress=progress)
         if kind == "pattern_sketch_elements":
@@ -808,6 +810,65 @@ class CommandSystem:
         self._rebuild_changed_features(document, {sketch_id}, progress=progress)
         return {"sketch_id": sketch_id, "point_ids": point_ids, "circle_ids": [arc_id],
                 "arc_id": arc_id, "radius": radius, "sweep_radians": sweep}
+
+    def _add_sketch_arc_three_points(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        start = self._coordinate_pair(command.get("start"), "Arc start")
+        through = self._coordinate_pair(command.get("through"), "Arc through point")
+        end = self._coordinate_pair(command.get("end"), "Arc end")
+        if (math.hypot(start[0] - through[0], start[1] - through[1]) <= 1e-7
+                or math.hypot(start[0] - end[0], start[1] - end[1]) <= 1e-7
+                or math.hypot(through[0] - end[0], through[1] - end[1]) <= 1e-7):
+            raise ValidationError("Arc start, through and end points must be distinct.")
+
+        ax, ay = start
+        bx, by = through
+        cx, cy = end
+        ux, uy = bx - ax, by - ay
+        vx, vy = cx - ax, cy - ay
+        determinant = 2 * (ux * vy - uy * vx)
+        coordinate_scale = max(1.0, math.hypot(ux, uy), math.hypot(vx, vy))
+        if not math.isfinite(determinant) or abs(determinant) <= 1e-12 * coordinate_scale**2:
+            raise ValidationError("Arc points must not be collinear.")
+        u_squared, v_squared = ux * ux + uy * uy, vx * vx + vy * vy
+        center_x = ax + (u_squared * vy - v_squared * uy) / determinant
+        center_y = ay + (ux * v_squared - vx * u_squared) / determinant
+        radius = math.hypot(ax - center_x, ay - center_y)
+        if not all(math.isfinite(value) for value in (center_x, center_y, radius)) or radius <= 1e-7:
+            raise ValidationError("Arc points must define a finite positive radius.")
+        start_angle = math.atan2(ay - center_y, ax - center_x)
+        through_angle = math.atan2(by - center_y, bx - center_x)
+        end_angle = math.atan2(cy - center_y, cx - center_x)
+        ccw_sweep = (end_angle - start_angle) % math.tau
+        ccw_through = (through_angle - start_angle) % math.tau
+        sweep = ccw_sweep if ccw_through < ccw_sweep else ccw_sweep - math.tau
+        if not math.isfinite(sweep) or abs(sweep) <= 1e-7 or abs(sweep) >= math.tau - 1e-7:
+            raise ValidationError("Arc sweep must be non-zero and less than one revolution.")
+        if progress is not None:
+            progress({"phase": "add_sketch_arc_three_points"})
+        sketch_id = sketch["id"]
+        point_ids = [f"point:{uuid4()}" for _ in range(3)]
+        arc_id = f"circle:{uuid4()}"
+        sketch_index = document.objects.index(sketch)
+        document.objects[sketch_index + 1:sketch_index + 1] = [
+            {"id": point_ids[0], "type": "point", "sketch_id": sketch_id,
+             "x": center_x, "y": center_y, "construction": True},
+            {"id": point_ids[1], "type": "point", "sketch_id": sketch_id, "x": ax, "y": ay},
+            {"id": point_ids[2], "type": "point", "sketch_id": sketch_id, "x": cx, "y": cy},
+            {"id": arc_id, "type": "circle", "sketch_id": sketch_id,
+             "center_id": point_ids[0], "start_id": point_ids[1], "end_id": point_ids[2],
+             "radius": radius, "sweep_radians": sweep},
+        ]
+        self._rebuild_changed_features(document, {sketch_id}, progress=progress)
+        return {"sketch_id": sketch_id, "point_ids": point_ids, "circle_ids": [arc_id],
+                "arc_id": arc_id, "center": {"x": center_x, "y": center_y}, "radius": radius,
+                "sweep_radians": sweep, "through": {"x": bx, "y": by}}
 
     def _mirror_sketch_elements(
         self,

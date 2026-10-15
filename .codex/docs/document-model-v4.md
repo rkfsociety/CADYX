@@ -124,6 +124,10 @@ their respective human/agent edit leases. Results below appear inside
   objects, with optional boolean `clockwise` (default false). Start and end
   must lie on the same circle and be distinct from each other and the center.
   Creates an exact signed circular arc; the default sweep is counterclockwise.
+- `add_sketch_arc_three_points`: `sketch_id`, `start`, `through`, and `end`
+  coordinate objects. All three points must be distinct and non-collinear. The
+  command solves their unique circumcircle and chooses the signed sweep that
+  passes through `through`, returning the exact arc, center and radius.
 - `add_sketch_rounded_rectangle`: `sketch_id`, lower-left `x`,`y`, positive
   `width`,`height`, and positive `corner_radius` less than half both side lengths.
   Creates exact quarter-circle arcs and tangent line segments as sketch geometry;

@@ -276,3 +276,26 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
                                   "center": {"x": 0, "y": 0}, "start": {"x": 5, "y": 0},
                                   "end": {"x": 0, "y": -5}, "clockwise": True})
         self.assertAlmostEqual(self.objects()[clockwise["arc_id"]]["sweep_radians"], -3.141592653589793 / 2)
+
+    def test_arc_three_points(self) -> None:
+        result = self.command({"type": "add_sketch_arc_three_points", "sketch_id": self.sketch_id,
+                               "start": {"x": 1, "y": 0}, "through": {"x": 0, "y": 1},
+                               "end": {"x": -1, "y": 0}})
+        arc = self.objects()[result["arc_id"]]
+        center = self.objects()[arc["center_id"]]
+        self.assertAlmostEqual(center["x"], 0)
+        self.assertAlmostEqual(center["y"], 0)
+        self.assertAlmostEqual(arc["radius"], 1)
+        self.assertAlmostEqual(arc["sweep_radians"], 3.141592653589793)
+        self.assertEqual(result["through"], {"x": 0, "y": 1})
+
+        clockwise = self.command({"type": "add_sketch_arc_three_points", "sketch_id": self.sketch_id,
+                                  "start": {"x": 1, "y": 0}, "through": {"x": 0, "y": -1},
+                                  "end": {"x": -1, "y": 0}})
+        self.assertAlmostEqual(self.objects()[clockwise["arc_id"]]["sweep_radians"], -3.141592653589793)
+
+    def test_arc_three_points_rejects_collinear_points(self) -> None:
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_arc_three_points", "sketch_id": self.sketch_id,
+                          "start": {"x": 0, "y": 0}, "through": {"x": 1, "y": 1},
+                          "end": {"x": 2, "y": 2}})
