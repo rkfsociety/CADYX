@@ -24,6 +24,15 @@ Use the `cadyx_*` MCP tools for every CADYX document operation: workspace select
 5. Keep the viewer on the target project. Use API camera operations when a useful angle is needed. Inspect the final complete scene and image, not just the latest command: verify intended dimensions and datum, closed profiles, joins/intersections, number of solids and B-rep validity/topology where applicable. Distinguish imported triangle meshes from editable B-reps. Report only properties the API or measurements establish.
 6. After final verification, mark every dashboard phase completed and progress 100%. Confirm the project lock is `FREE` and the final activity has no running operation.
 
+## Scan reverse engineering
+
+1. Start with `import_scan`. Keep the PLY source unchanged and tune reconstruction parameters before committing to reconstruction geometry.
+2. Do not infer physical units from PLY coordinates. Use `align_scan` to establish the datum/orientation, and set `scale` plus `units` only from a known dimension or explicit user requirement. For elongated parts, PCA with `long_axis=Y` and `ground_z=true` is the default reverse-engineering datum unless the reference requires another orientation.
+3. Use `create_scan_sections` for a station series. Y-normal stations create XZ sketches whose returned `section_groups` can be passed directly to `loft_sketches`; increase station density around curvature changes, ribs, clips, bosses and contour topology changes. Use `create_sketch_from_scan_section` for one diagnostic or local station.
+4. Build a clean editable design model from the scan-derived sketches using existing loft, extrusion, cut, fuse, shell, fillet and other B-rep commands. Do not reproduce scanner noise as CAD topology. X-normal/YZ sections are not faked through another plane: explicitly re-align the scan when that datum is required until native YZ sketches exist.
+5. Run `compare_body_to_scan` after the principal B-rep and again after local features. Use RMS/P95/max and worst sampled points to decide where to refine the model. State that this is sampled point-to-tessellated-triangle deviation, not exhaustive exact B-rep metrology.
+6. If `set_scan_parameter` is used after alignment, CADYX reapplies the stored scan alignment automatically; still inspect the resulting bounds and current revision before continuing.
+
 ## Report
 
 Summarize what was created or changed, the actual final revision and geometry checks, and whether the result is an editable B-rep or triangle mesh. State unresolved requirements or unverified measurements plainly. Never claim browser observation, command success, cancellation, or lease release unless the API confirmed it.
@@ -31,7 +40,8 @@ Summarize what was created or changed, the actual final revision and geometry ch
 ## Canonical contracts
 
 - Repository rules and host setup: `AGENTS.md`, `.codex/rules.md`, and `README.md`.
-- Model commands, sketches, scans and B-rep delivery: `.codex/docs/document-model-v3.md`.
+- Model commands, sketches, scans and B-rep delivery: `.codex/docs/document-model-v7.md`.
+- Scan alignment, section extraction and deviation checks: `.codex/docs/scan-reverse-engineering.md`.
 - Leases, cancellation, stop/resume and Core boundaries: `.codex/docs/architecture.md`.
 - Viewport scene, PNG and dashboard behavior: `.codex/docs/viewport-api.md`.
 - Current features and deferred engineering validation: `.codex/roadmap.md`.
