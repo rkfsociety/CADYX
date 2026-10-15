@@ -35,9 +35,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .project-light.active { background: var(--accent); box-shadow: 0 0 12px #45e1ba66; }
 .topbar-project-copy { display: grid; min-width: 0; gap: 3px; }
 .document-title { overflow: hidden; color: var(--text); font: 600 13px/1.25 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
-.project-short-id { overflow: hidden; color: var(--dim); font: 9px/1.2 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.project-short-id { overflow: hidden; color: var(--dim); font: 11px/1.2 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .project-id-copy-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.copy-project-id { padding: 2px 5px; border: 1px solid var(--line); border-radius: 3px; background: transparent; color: var(--muted); font: 8px var(--mono); white-space: nowrap; }
+.copy-project-id { min-height: 24px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 3px; background: transparent; color: var(--muted); font: 10px var(--mono); white-space: nowrap; }
 .copy-project-id:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .copy-project-id:disabled { opacity: .45; cursor: default; }
 .topbar-end { justify-content: flex-end; gap: 14px; }
