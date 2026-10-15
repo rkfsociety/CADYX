@@ -296,7 +296,7 @@ API char* cadyx_agent_topology(const unsigned char* data, size_t size,
           json << ",\"radius\":" << sphere.Radius() << ",\"center\":";
           WritePoint(json, sphere.Position().Location());
           json << ",\"axis_direction\":";
-          WriteDirection(json, sphere.Axis().Direction());
+          WriteDirection(json, sphere.Position().Direction());
           break;
         }
         case GeomAbs_Torus: {
@@ -306,7 +306,7 @@ API char* cadyx_agent_topology(const unsigned char* data, size_t size,
                << ",\"center\":";
           WritePoint(json, torus.Position().Location());
           json << ",\"axis_direction\":";
-          WriteDirection(json, torus.Axis().Direction());
+          WriteDirection(json, torus.Position().Direction());
           break;
         }
         default:
