@@ -42,12 +42,15 @@ class Document:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> Document:
+        # migrate_document already returns an isolated deep-copied snapshot.
+        # Reusing its object list avoids cloning large B-rep payloads twice on
+        # every project read while preserving caller isolation.
         value = migrate_document(value)
         document = cls(
             id=value.get("id", ""),
             version=value["version"],
             revision=value.get("revision", 0),
-            objects=deepcopy(value.get("objects", [])),
+            objects=value.get("objects", []),
         )
         document.validate()
         return document

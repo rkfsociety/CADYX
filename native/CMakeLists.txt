@@ -10,7 +10,7 @@ if(NOT OPEN3D_ROOT)
   message(FATAL_ERROR "Set OPEN3D_ROOT to the Open3D SDK directory")
 endif()
 
-add_library(cadyx_kernel SHARED kernel.cpp advanced.cpp advanced_topology.cpp)
+add_library(cadyx_kernel SHARED kernel.cpp advanced.cpp advanced_topology.cpp agent_features.cpp)
 target_compile_features(cadyx_kernel PRIVATE cxx_std_17)
 target_include_directories(cadyx_kernel PRIVATE "${OCCT_ROOT}/Library/include/opencascade")
 target_link_directories(cadyx_kernel PRIVATE "${OCCT_ROOT}/Library/lib")

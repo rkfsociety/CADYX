@@ -5,6 +5,7 @@ import math
 from typing import Any
 from uuid import uuid4
 
+from .advanced_features import _raw_brep
 from .errors import NotFoundError, ValidationError
 from .native_kernel import NativeKernel
 from .sketches import closed_profile
@@ -60,8 +61,9 @@ def _execute(self, document, command, *, progress=None):
         max_points = command.get("max_points", 2048)
         if type(max_points) is not int or not 16 <= max_points <= 4096:
             raise ValidationError("max_points must be an integer from 16 to 4096.")
-        brep, _metrics = NativeKernel().export_geometry(source["geometry"])
-        result = NativeKernel().section_profile(brep, normal_axis=axis, offset=offset, max_points=max_points)
+        native = NativeKernel()
+        brep = _raw_brep(source["geometry"])
+        result = native.section_profile(brep, normal_axis=axis, offset=offset, max_points=max_points)
         profiles = result.get("profiles") if isinstance(result, dict) else None
         if not isinstance(profiles, list) or not profiles:
             raise ValidationError("Body section produced no closed contours.")

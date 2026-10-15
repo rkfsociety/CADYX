@@ -1,6 +1,6 @@
 # Advanced solid modeling
 
-CADYX extends the v7 document/command contract with OCCT-backed operations intended for complex molded housings and similar single-part models. The browser remains observation-only; agents author these features through `cadyx_execute_command` / the Agent API.
+CADYX extends the v7 document/command contract with OCCT-backed operations intended for complex molded housings, machined parts, and similar single-part models. The browser remains observation-only; agents author these features through `cadyx_execute_command` / the Agent API.
 
 ## Direct section loft workflow
 
@@ -17,29 +17,65 @@ Use `create_section_sketch` to create editable XZ sections at explicit Y offsets
 - `variable_fillet_edges`: linear start/end-radius fillet.
 - Existing `fillet_edges` remains available for constant-radius fillets.
 
-Topology inspection now includes faces as well as edges. Each reported face/edge carries a `semantic_key` generated from current geometric properties. Advanced commands accept `face_keys` / `edge_keys` as alternatives to raw indices. These keys are guards against blind index selection, not permanent topological names: after an upstream geometry change, inspect topology again before applying a downstream topology-selected feature.
+Topology inspection includes faces as well as edges. Each reported face/edge carries a `semantic_key` generated from current geometric properties. Advanced commands accept `face_keys` / `edge_keys` as alternatives to raw indices. These keys are guards against blind index selection, not permanent topological names: after an upstream geometry change, inspect topology again before applying a downstream topology-selected feature.
+
+The topology response is also the agent's measurement surface. In addition to body volume, surface area, bounds, and topology counts, current native runtimes report analytic data where OCCT exposes it:
+
+- line edges: endpoints, line origin and direction;
+- circular edges: radius and axis;
+- elliptical edges: major/minor radii and axis;
+- planar faces: plane origin and normal;
+- cylindrical faces: radius and axis;
+- conical faces: reference radius, semi-angle and axis;
+- spherical/toric faces: center/axis and their radii.
+
+This makes dimensions such as hole diameter, coaxiality cues, face orientation, body extents, and edge radii directly inspectable through the existing `cadyx_inspect_topology` MCP tool. Semantic fingerprints include these analytic properties when available.
 
 ## Constructive features
 
 - `hole` / `boss`: arbitrary-axis cylindrical subtractive/additive features.
+- `through_hole`: arbitrary-axis cylindrical hole with a cutter automatically extended across the current body bounds.
+- `counterbore_hole`: a through or blind main bore plus a larger coaxial cylindrical recess.
+- `countersink_hole`: a through or blind main bore plus an analytic conical countersink; the default included angle is 90 degrees.
+- `threaded_hole`: an arbitrary-axis internal single-start ISO metric thread, created by subtracting CADYX's exact external metric-thread B-rep.
 - `pad_sketch_to_body`: extrude a closed sketch and fuse it into an existing body.
 - `rib_from_sketch`: additive thin-profile rib workflow.
 - `pocket_sketch`: extrude a closed sketch and subtract it from a body.
 - `mirror_body`: mirror a complete body across an arbitrary plane.
 - `linear_pattern_body` / `circular_pattern_body`: transform and fuse repeated instances; the result must remain one valid solid.
 
-All advanced solid results are persisted as validated OCCT `imported_brep` geometry. Existing rendering, topology inspection, booleans and verified STEP/STL delivery therefore continue through the same native-kernel path.
+The specialized hole commands keep the existing simple `hole` command backward compatible. Through cutters are resolved from the inspected body bounds at execution time and the resolved cutter origin/depth are retained in feature parameters for auditability. Counterbore/countersink commands reject no-op cuts and require the result to remain one closed solid.
+
+## Arbitrary work-plane authoring
+
+`extrude_profile_on_plane` creates a standalone exact B-rep from a local 2D closed profile on an arbitrary 3D plane. The command takes:
+
+- `profile`: ordered local `{x, y}` profile points;
+- `origin`: the world-space work-plane origin;
+- `normal`: work-plane normal / positive extrusion direction;
+- `x_axis`: local profile X direction, which must not be parallel to `normal`;
+- `depth`, with optional `centered`.
+
+CADYX orthonormalizes the supplied work-plane frame, builds the profile as a local XY extrusion, then applies an exact rigid OCCT transform. The normalized plane definition is stored with the feature. This intentionally adds arbitrary-plane solid authoring without changing the persisted v7 sketch schema: ordinary editable sketches remain XY/XZ, while the new feature is a direct local-profile operation intended for agent-driven reconstruction and reference-image workflows.
+
+## Feature history and viewport behavior
+
+Advanced commands preserve their source body and append a new result body/feature so the operation remains auditable. The live viewport suppresses consumed source bodies for shell, offset, chamfer, draft, fillet variants, body mirror/pattern, pads/ribs/pockets, and the high-level hole commands. This prevents the historical source B-rep from visually filling a subtractive result such as a hole.
+
+All advanced solid results are persisted as validated OCCT geometry (normally an `imported_brep` at the extension boundary). Existing rendering, topology inspection, booleans and verified STEP/STL delivery therefore continue through the same native-kernel path.
 
 ## Native runtime
 
-The advanced bridge is compiled into `cadyx_kernel` from `native/advanced.cpp` and `native/advanced_topology.cpp`. After pulling a commit that adds these sources, rebuild the local Windows runtime:
+The advanced bridge is compiled into `cadyx_kernel` from `native/advanced.cpp`, `native/advanced_topology.cpp`, and `native/agent_features.cpp`. After pulling a commit that changes these sources, rebuild the local Windows runtime:
 
 ```powershell
 .\scripts\setup-runtime.ps1
 ```
 
-A host still running an older DLL intentionally rejects advanced commands with a stale-runtime error instead of silently degrading the operation.
+A host still running an older DLL intentionally rejects commands that need the new authoring bridge with a stale-runtime error instead of silently degrading the operation. Basic existing advanced commands remain available when their older symbols are present.
 
 ## Modeling scope
 
-These features target exact single-solid B-rep workflows such as molded lamp housings: section lofts for the primary envelope, shell/offset for wall thickness, draft/fillets/chamfers for molded transitions, and pads/ribs/pockets/bosses/holes for internal and mounting details. Surface-only bodies and a separate trim/sew surface document model are not introduced; the workflow stays within validated closed solids so CADYX's existing delivery and revision guarantees remain intact.
+These features target exact single-solid B-rep workflows such as machined mounting plates and molded housings: section lofts for the primary envelope, shell/offset for wall thickness, draft/fillets/chamfers for transitions, and pads/ribs/pockets/bosses/holes for internal and mounting details. Surface-only bodies and a separate trim/sew surface document model are not introduced; the workflow stays within validated closed solids so CADYX's existing delivery and revision guarantees remain intact.
+
+Absolute dimensions still come from the agent/user input or another calibrated source. A reference image can guide feature recognition and proportions, but CADYX does not infer a physical scale from pixels by itself.
