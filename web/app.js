@@ -348,7 +348,8 @@ function formatActivityTimestamp(value) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
   return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
   }).format(date).replace(", ", " ");
 }
 
@@ -445,7 +446,8 @@ function renderWorkflowHistory(value) {
     .slice()
     .reverse();
   const history = completedActivities.map((activity) => ({
-    state: activity.state, title: activity.action, completedAt: activity.updated_at,
+    state: activity.state, title: activity.action,
+    completedAt: activity.completed_at || activity.updated_at,
   }));
   const list = $("#workflow-history-list");
   list.replaceChildren();

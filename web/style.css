@@ -207,7 +207,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .workflow-history-state { color: var(--accent); font: 9px var(--mono); white-space: nowrap; }
 .workflow-history-list li[data-state="failed"] .workflow-history-state { color: var(--danger); }
 .workflow-history-title { min-width: 0; overflow: hidden; color: var(--text); font: 10px/1.4 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
-.workflow-history-time { color: var(--dim); font: 9px var(--mono); white-space: nowrap; }
+.workflow-history-time { justify-self: end; color: var(--muted); font: 9px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .workflow-history-empty { margin: 0; padding: 8px 13px; color: var(--dim); font: 9px/1.5 var(--mono); }
 .workflow-panel .panel-heading, .orthographic-panel .panel-heading, .comparison-panel .panel-heading { min-height: 36px; }
 .orthographic-panel { display: grid; min-height: 0; grid-template-rows: 38px minmax(0, 1fr); overflow: hidden; }
