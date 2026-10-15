@@ -159,8 +159,10 @@ SSE. New projects remain automatically selected by `project.created`. Projects
 Agent API route only when the current resource is confirmed free and the target
 project lock is FREE with no running operation. Workspace-folder selection remains Agent API-only. The
 browser presents the selected project or folder inside the same workspace shell.
-After host restart, the in-memory Agent API selection is empty; the viewer may
-restore its last local selection until an agent selects a resource again.
+The browser loads a model only when its address contains `project_id`; the root
+address stays on the empty workspace regardless of local storage or the
+process-wide Agent API selection. The empty workspace offers a project picker;
+choosing a project adds its ID to the tab address before loading its model.
 Selecting a project in the browser replaces the current tab URL with
 `/?project_id=<project UUID>`. Opening that address pins the tab's displayed
 project to that UUID and ignores process-wide selection and project-created SSE

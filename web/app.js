@@ -363,11 +363,15 @@ function setWorkspaceNavigation(view) {
   });
 }
 
+$("#open-projects").addEventListener("click", () => {
+  projectDetail.hidden = false;
+  noSelection.hidden = true;
+  renderProjects();
+  setWorkspaceNavigation("projects");
+});
+
 function readSelectedProject() {
-  const addressedProject = new URLSearchParams(window.location.search).get("project_id");
-  if (addressedProject) return addressedProject;
-  try { return localStorage.getItem("cadyx.selected-project"); }
-  catch { return null; }
+  return new URLSearchParams(window.location.search).get("project_id");
 }
 
 function addressProject(id) {
@@ -376,13 +380,6 @@ function addressProject(id) {
   else url.searchParams.delete("project_id");
   window.history.replaceState(null, "", url);
   projectAddressPinned = Boolean(id);
-}
-
-function saveSelectedProject(id) {
-  try {
-    if (id) localStorage.setItem("cadyx.selected-project", id);
-    else localStorage.removeItem("cadyx.selected-project");
-  } catch { /* Selection still works when browser storage is unavailable. */ }
 }
 
 function notify(message, isError = false) {
@@ -667,7 +664,6 @@ $("#projects-list").addEventListener("click", async (event) => {
     workspaceSelectionInFlight = false;
     workspaceAvailabilityConnected = false;
     filesAvailabilityConnected = false;
-    saveSelectedProject(projectId);
     renderProjects();
     updateWorkspaceControls();
     scheduleWorkspaceRefresh();
@@ -713,31 +709,10 @@ function showProjectLoading(name) {
   }
 }
 
-function folderSelectionId(name) {
-  return `${FOLDER_SELECTION_PREFIX}${name}`;
-}
-
-function workspaceSelectionId(selection) {
-  if (selection?.type === "project" && typeof selection.project_id === "string") return selection.project_id;
-  if (selection?.type === "folder" && typeof selection.folder_name === "string") {
-    return folderSelectionId(selection.folder_name);
-  }
-  return null;
-}
-
 function workspaceSelectionExists(id) {
   if (projects.some((item) => item.project.id === id)) return true;
   return id?.startsWith(FOLDER_SELECTION_PREFIX)
     && folders.includes(id.slice(FOLDER_SELECTION_PREFIX.length));
-}
-
-async function readAgentWorkspaceSelection() {
-  try {
-    return await api("/api/v1/agent/workspace/selection");
-  } catch (error) {
-    if (error.status === 404) return { selection: null };
-    throw error;
-  }
 }
 
 function getSelectedFolder() {
@@ -980,25 +955,16 @@ async function refreshWorkspace() {
 }
 
 async function refreshWorkspacePass() {
-  const [response, selectionResponse] = await Promise.all([
-    api("/api/v1/projects"), readAgentWorkspaceSelection(),
-  ]);
+  const response = await api("/api/v1/projects");
   projects = response.projects;
   folders = response.folders || [];
 
-  const apiSelection = workspaceSelectionId(selectionResponse.selection);
-  const savedSelection = readSelectedProject();
   const previousSelection = selectedProjectId;
   const requestedSelection = projectAddressPinned
-    ? [savedSelection, selectedProjectId].find((id) => id && workspaceSelectionExists(id))
-    : [apiSelection, savedSelection, selectedProjectId].find((id) => id && workspaceSelectionExists(id));
-  selectedProjectId = requestedSelection || (projectAddressPinned ? null : projects[0]?.project.id || null);
+    ? [readSelectedProject(), selectedProjectId].find((id) => id && workspaceSelectionExists(id)) : null;
+  selectedProjectId = requestedSelection || null;
   const selectionChanged = selectedProjectId !== previousSelection;
   renderProjects();
-  if (!projectAddressPinned && selectedProjectId !== savedSelection) {
-    selectedObjectId = null;
-    saveSelectedProject(selectedProjectId);
-  }
   if (selectionChanged) {
     workspaceAvailabilityConnected = false;
     filesAvailabilityConnected = false;
@@ -1027,10 +993,11 @@ async function refreshWorkspacePass() {
     }
   }
   else {
-    projectDetail.hidden = true;
+    const browsingProjects = !projectAddressPinned && primaryGrid.dataset.view === "projects";
+    projectDetail.hidden = !browsingProjects;
     $("#object-panel").hidden = true;
     $("#folder-detail").hidden = true;
-    noSelection.hidden = false;
+    noSelection.hidden = browsingProjects;
     $("#document-title").textContent = "CADYX";
     $("#document-kind").textContent = "ПРОЕКТ НЕ ВЫБРАН";
     $("#project-short-id").textContent = "—";
@@ -1551,25 +1518,7 @@ function handleStreamEvent(type, event) {
     updateWorkspaceControls();
     return;
   }
-  if (type === "workspace.selection.changed") {
-    if (projectAddressPinned) return;
-    const selectedId = workspaceSelectionId(event.data || {});
-    if (!selectedId) return;
-    selectedProjectId = selectedId;
-    selectedObjectId = null;
-    activeSketchId = null;
-    pendingViewportTransition = null;
-    workspaceSelectionInFlight = false;
-    agentLocksByProject.delete(selectedId);
-    activitiesByProject.delete(selectedId);
-    activityRevisionsByProject.delete(selectedId);
-    workspaceAvailabilityConnected = false;
-    filesAvailabilityConnected = false;
-    saveSelectedProject(selectedId);
-    updateWorkspaceControls();
-    scheduleWorkspaceRefresh();
-    return;
-  }
+  if (type === "workspace.selection.changed" || type === "project.created") return;
   if (!projectId) return;
   const data = event.data || {};
 
@@ -1739,21 +1688,6 @@ function handleStreamEvent(type, event) {
     scheduleWorkspaceRefresh();
   } else if (type === "viewport.camera") {
     if (projectId === selectedProjectId) animateModelCamera(data);
-  } else if (type === "project.created") {
-    if (projectAddressPinned) return;
-    selectedProjectId = projectId;
-    selectedObjectId = null;
-    activeSketchId = null;
-    pendingViewportTransition = null;
-    workspaceSelectionInFlight = false;
-    agentLocksByProject.delete(projectId);
-    activitiesByProject.delete(projectId);
-    activityRevisionsByProject.delete(projectId);
-    workspaceAvailabilityConnected = false;
-    filesAvailabilityConnected = false;
-    saveSelectedProject(projectId);
-    updateWorkspaceControls();
-    scheduleWorkspaceRefresh();
   } else if (type === "project.lock.changed") {
     agentLocksByProject.set(projectId, data);
     if (projectId === selectedProjectId) {
