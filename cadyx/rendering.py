@@ -58,13 +58,18 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
             lines = [0, 1]
         elif kind == "circle":
             center = by_id[item["center_id"]]
-            for index in range(64):
-                angle = math.tau * index / 64
+            sweep = item.get("sweep_radians", math.tau)
+            steps = max(1, math.ceil(64 * abs(sweep) / math.tau))
+            for index in range(steps + (0 if sweep == math.tau else 1)):
+                angle = math.atan2(by_id[item["start_id"]]["y"] - center["y"],
+                                   by_id[item["start_id"]]["x"] - center["x"]) + sweep * index / steps \
+                    if "sweep_radians" in item else math.tau * index / steps
                 positions.extend(sketch_position(
                     item["sketch_id"], center["x"] + item["radius"] * math.cos(angle),
                     center["y"] + item["radius"] * math.sin(angle),
                 ))
-                lines.extend([index, (index + 1) % 64])
+            for index in range(steps):
+                lines.extend([index, index + 1 if "sweep_radians" in item else (index + 1) % steps])
         else:
             continue
         for offset in range(0, len(positions), 3):

@@ -689,6 +689,7 @@ class CadyxCore:
             "add_sketch_circle_diameter": "Рисует окружность по диаметру",
             "add_sketch_circle_two_points": "Рисует окружность по двум точкам",
             "add_sketch_circle_three_points": "Рисует окружность по трём точкам",
+            "add_sketch_rounded_rectangle": "Строит скруглённый прямоугольник",
             "mirror_sketch_elements": "Зеркально копирует геометрию эскиза",
             "pattern_sketch_elements": "Создаёт массив геометрии эскиза",
             "add_sketch_constraint": "Проверяет ограничение эскиза",

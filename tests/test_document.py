@@ -357,7 +357,7 @@ class SketchDocumentTests(unittest.TestCase):
         path.write_text(json.dumps(legacy))
         before = path.read_bytes()
         inspected = self.core.inspect_project(project)
-        self.assertEqual(inspected["document"]["version"], 3)
+        self.assertEqual(inspected["document"]["version"], 4)
         self.assertEqual(inspected["document"]["objects"], legacy["document"]["objects"])
         self.assertEqual(inspected["history"], legacy["history"])
         self.assertEqual(path.read_bytes(), before)
@@ -367,7 +367,7 @@ class SketchDocumentTests(unittest.TestCase):
         feature = box["history_entry"]["result"]["feature_id"]
         self.core.execute_command(project, lease, {"type": "set_parameter", "feature_id": feature, "name": "width", "value": 5})
         persisted = json.loads(path.read_text())
-        self.assertEqual(persisted["document"]["version"], 3)
+        self.assertEqual(persisted["document"]["version"], 4)
         self.assertEqual(persisted["history"][0], legacy["history"][0])
         self.assertEqual(persisted["document"]["objects"][1]["id"], feature)
 
@@ -393,6 +393,33 @@ class SketchDocumentTests(unittest.TestCase):
         objects = self.core.inspect_project(self.project)["document"]["objects"]
         _, path = open_path(objects, path_sketch)
         self.assertEqual(len(path), 3)
+
+    def test_rounded_rectangle_arcs_form_a_closed_profile(self):
+        sketch = self.command(type="create_sketch")["sketch_id"]
+        result = self.command(type="add_sketch_rounded_rectangle", sketch_id=sketch,
+                              x=0, y=0, width=20, height=10, corner_radius=2)
+        objects = self.core.inspect_project(self.project)["document"]["objects"]
+        _, profile = closed_profile(objects, sketch)
+        expected_area = 20 * 10 - (4 - 3.141592653589793) * 2**2
+        area = abs(sum(point["x"] * profile[(i + 1) % len(profile)]["y"]
+                       - profile[(i + 1) % len(profile)]["x"] * point["y"]
+                       for i, point in enumerate(profile))) / 2
+        self.assertEqual(len(result["circle_ids"]), 4)
+        self.assertAlmostEqual(area, expected_area, delta=0.02)
+
+    def test_mirror_copies_arc_dependencies_and_reverses_sweep(self):
+        sketch = self.command(type="create_sketch")["sketch_id"]
+        result = self.command(type="add_sketch_rounded_rectangle", sketch_id=sketch,
+                              x=0, y=0, width=20, height=10, corner_radius=2)
+        original_arc = result["circle_ids"][0]
+        mirrored = self.command(type="mirror_sketch_elements", sketch_id=sketch,
+                                object_ids=[original_arc], axis_start={"x": 0, "y": -1},
+                                axis_end={"x": 0, "y": 1})
+        objects = {item["id"]: item for item in self.core.inspect_project(self.project)["document"]["objects"]}
+        copied_arc = objects[mirrored["circle_ids"][0]]
+        self.assertEqual(copied_arc["sweep_radians"], -objects[original_arc]["sweep_radians"])
+        self.assertIn(copied_arc["start_id"], mirrored["point_ids"])
+        self.assertIn(copied_arc["end_id"], mirrored["point_ids"])
 
 
 if __name__ == "__main__":

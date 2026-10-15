@@ -56,7 +56,7 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertGreater(handle["geometry"]["volume"], 0)
 
         document = self.core.inspect_project(self.project_id)["document"]
-        self.assertEqual(document["version"], 3)
+        self.assertEqual(document["version"], 4)
         self.assertEqual(Document.from_dict(document).to_dict(), document)
         features = [item for item in document["objects"] if item["type"] == "feature"]
         self.assertEqual([item["operation"] for item in features], ["revolve_sketch", "extrude_sketch"])
@@ -72,9 +72,17 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertGreater(rebuilt_body["geometry"]["volume"], before_volume)
         rebuilt_feature = next(item for item in rebuilt["objects"] if item.get("id") == bowl["feature_id"])
         self.assertEqual(rebuilt_feature["geometry"], rebuilt_body["geometry"])
-
         with self.assertRaises(ValidationError):
             self.command({"type": "remove_sketch_object", "object_id": bowl_sketch})
+
+    def test_rounded_rectangle_extrudes_from_arc_profile(self) -> None:
+        sketch = self.command({"type": "create_sketch", "name": "Скруглённый профиль", "plane": "XY"})["sketch_id"]
+        self.command({"type": "add_sketch_rounded_rectangle", "sketch_id": sketch,
+                      "x": 0, "y": 0, "width": 20, "height": 10, "corner_radius": 2})
+        result = self.command({"type": "extrude_sketch", "sketch_id": sketch, "depth": 3})
+        self.assertEqual(result["geometry"]["kind"], "extruded_profile")
+        self.assertGreater(result["geometry"]["volume"], 0)
+        self.assertIsNone(self.core.kernel.validate(result["geometry"]))
 
     def test_revolution_rejects_open_axis_or_xy_profiles_atomically(self) -> None:
         sketch, point_ids = self.closed_sketch("Профиль", [(2, 0), (4, 0), (4, 8), (2, 8)])

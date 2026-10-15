@@ -1,11 +1,11 @@
-# Document Model v3
+# Document Model v4
 
 The project envelope remains `cadyx-project` version 1. New documents use version
-3. Reading documents v1 or v2 upgrades their version in memory without changing ids,
+4. Reading documents v1, v2 or v3 upgrades their version in memory without changing ids,
 objects, revision, history or files. The next successful command atomically saves
 the upgraded document with its new history entry. Failed commands leave the file
 unchanged. Unknown versions are rejected. A v1 document supports only bodies and
-features. Older CADYX hosts cannot read document v3; this is a forward schema
+features. Older CADYX hosts cannot read document v4; this is a forward schema
 change, not a claim of backwards host compatibility. Sequential migration steps are defined in `cadyx/migrations.py`; see the
 [project migration contract](project-format-v1.md#migration-contract).
 
@@ -20,7 +20,7 @@ line, circle and constraint. Existing body/feature relationships remain intact.
 | sketch | name, plane | Name of 1–120 characters; plane is `XY` or `XZ` |
 | point | sketch_id, x, y, optional construction | Finite coordinates; construction points are reference geometry |
 | line | sketch_id, start_id, end_id, optional construction/extent | References two points; length must exceed 1e-7; extent is `segment` (default), `infinite`, or `centerline` |
-| circle | sketch_id, center_id, radius | Point center and finite positive radius |
+| circle | sketch_id, center_id, radius, optional start_id/end_id/sweep_radians | Exact full circle or signed partial circular arc; arc endpoints lie on the radius and match the sweep |
 | constraint | sketch_id, kind, references, value | Explicit invariant checked on every load and command |
 
 Membership is defined by `sketch_id`, with no duplicated membership lists.
@@ -101,6 +101,10 @@ their respective human/agent edit leases. Results below appear inside
   coordinates as opposite ends of a diameter. `add_sketch_circle_three_points`
   takes three distinct non-collinear coordinate objects. All create an exact
   circle object and its center point, returning `point_id` and `circle_id`.
+- `add_sketch_rounded_rectangle`: `sketch_id`, lower-left `x`,`y`, positive
+  `width`,`height`, and positive `corner_radius` less than half both side lengths.
+  Creates exact quarter-circle arcs and tangent line segments as sketch geometry;
+  profile extraction samples arcs at no more than 2.8125 degree intervals.
 - `mirror_sketch_elements`: `sketch_id`, non-empty `object_ids`, and `axis_start`
   / `axis_end` coordinate objects (`{x, y}`). Copies selected points, lines and
   circles reflected across the arbitrary in-plane axis; its endpoints must be

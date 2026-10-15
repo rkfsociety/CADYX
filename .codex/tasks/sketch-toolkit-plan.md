@@ -40,6 +40,7 @@
 - Видимый checkpoint SK-001…SK-009: проект `Эскизы — базовые инструменты SK-001—SK-009`, ID `f31862d2-81fc-4293-9bab-67befe312c45`; команды завершены на revision 2, 4, 6, 8, 10, 12, 14, 16 и 18, каждая в отдельном именованном XY-эскизе.
 - Видимый checkpoint SK-044…SK-045: проект `Эскизы — индивидуальные видимые тесты SK-044—SK-045`, ID `5be80ab4-e3f7-47ee-94cc-7c818b6186ee`; отдельные именованные XY-эскизы, вписанный шестиугольник завершён на revision 2, описанный квадрат — на revision 4; сцена PNG просмотрена, lock `FREE`, активности завершены.
 - Видимый индивидуальный прогон SK-046: проект `Эскизы — индивидуальный видимый тест SK-046`, ID `47cbd83e-d459-4924-b7bf-74f2caf46621`; пятиугольник из центра `(0,0)` и первой вершины `(6,8)`, 5 сторон, замкнут; revision 2, сцена PNG просмотрена, lock `FREE`, активных операций нет.
+- Видимый индивидуальный прогон SK-015: проект `Эскизы — индивидуальный видимый тест SK-015`, ID `19c00d98-d2b6-471c-8822-640aa0e77aea`; XY-профиль 50×30 с радиусом углов 5, четыре круговые дуги и четыре прямые стороны, результат замкнут; revision 2, габариты Agent API `[0,0,0]`…`[50,30,0]`, изображение просмотрено, lock `FREE`, активных операций нет.
 - Инспекция второго проекта: 36 объектов, 18 записей истории, revision 18, project lock `FREE`; сцена Agent API revision 18 содержит только активный эскиз и его геометрию, финальный viewport PNG просмотрен.
 
 ## Реестр отдельных проверок
@@ -62,7 +63,7 @@
 | SK-012 | Прямоугольник по трём точкам | test_rectangle_three_points (passed) | PASS · rev 6 | pending | pending |
 | SK-013 | Повернутый прямоугольник | test_rotated_rectangle (passed) | PASS · rev 8 | pending | pending |
 | SK-014 | Параллелограмм | test_parallelogram (passed) | PASS · rev 10 | pending | pending |
-| SK-015 | Скруглённый прямоугольник | pending | pending | pending | pending |
+| SK-015 | Скруглённый прямоугольник | test_rounded_rectangle (passed) | PASS · rev 2 | pending | pending |
 | SK-016 | Окружность по центру и радиусу | test_circle_center_radius (passed) | PASS · rev 14 | pending | pending |
 | SK-017 | Окружность по центру и диаметру | test_circle_center_diameter (passed) | PASS · rev 16 | pending | pending |
 | SK-018 | Окружность по двум точкам | test_circle_two_points (passed) | PASS · rev 18 | pending | pending |

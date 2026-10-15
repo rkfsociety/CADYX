@@ -40,7 +40,7 @@ in `.cadyx-agent.sqlite3`; they do not change the portable schema. See the
 
 The project envelope remains version 1; the nested document now uses version 3.
 Legacy document v1 and v2 snapshots are explicitly upgraded in memory on read
-and persisted only with a successful command. See [Document Model v3](document-model-v3.md)
+and persisted only with a successful command. See [Document Model v4](document-model-v4.md)
 for the sketch schema, solid feature commands, constraint semantics and
 compatibility policy.
 

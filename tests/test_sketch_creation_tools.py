@@ -81,6 +81,16 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
         self.assertEqual(len(result["line_ids"]), 4)
         self.assertEqual(len(result["point_ids"]), 4)
 
+    def test_rounded_rectangle(self) -> None:
+        result = self.command({"type": "add_sketch_rounded_rectangle", "sketch_id": self.sketch_id,
+                              "x": 1, "y": 2, "width": 20, "height": 12, "corner_radius": 3})
+        objects = self.objects()
+        arcs = [objects[item] for item in result["circle_ids"]]
+        self.assertEqual(len(result["line_ids"]), 4)
+        self.assertTrue(result["closed"])
+        self.assertTrue(all(arc["radius"] == 3 and abs(arc["sweep_radians"]) == 3.141592653589793 / 2
+                            for arc in arcs))
+
     def test_rectangle_center(self) -> None:
         result = self.command({"type": "add_sketch_rectangle_center", "sketch_id": self.sketch_id,
                               "center_x": 4, "center_y": -2, "width": 6, "height": 4})

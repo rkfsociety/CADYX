@@ -1604,14 +1604,16 @@ function handleStreamEvent(type, event) {
         "add_sketch_construction_line", "add_sketch_polyline", "add_sketch_line_chain", "add_sketch_rectangle",
         "add_sketch_rectangle_center", "add_sketch_rectangle_three_points", "add_sketch_rotated_rectangle",
         "add_sketch_parallelogram", "add_sketch_regular_polygon", "add_sketch_inscribed_polygon",
-        "add_sketch_circumscribed_polygon", "add_sketch_polygon_from_center", "add_sketch_circle_diameter",
+        "add_sketch_circumscribed_polygon", "add_sketch_polygon_from_center", "add_sketch_rounded_rectangle",
+        "add_sketch_circle_diameter",
         "add_sketch_circle_two_points", "add_sketch_circle_three_points", "add_sketch_involute_gear",
         "mirror_sketch_elements", "pattern_sketch_elements",
       ].includes(command.type)) {
         activeSketchId = command.sketch_id || activeSketchId;
+        const transitionSegments = (result.line_ids?.length || 0) + (result.circle_ids?.length || 0) * 16;
         pendingViewportTransition = activeSketchId ? {
           projectId, sketchId: activeSketchId, allSketchLines: true,
-          type: "sketch-lines", durationMs: Math.min(1800, Math.max(460, 250 + (result.line_ids?.length || 0) * 3)),
+          type: "sketch-lines", durationMs: Math.min(1800, Math.max(460, 250 + transitionSegments * 20)),
         } : null;
       } else if (command.type === "add_sketch_circle") {
         activeSketchId = command.sketch_id || activeSketchId;

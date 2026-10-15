@@ -163,6 +163,8 @@ class CommandSystem:
             return self._add_sketch_involute_gear(document, command, progress=progress)
         if kind == "add_sketch_rectangle":
             return self._add_sketch_rectangle(document, command, progress=progress)
+        if kind == "add_sketch_rounded_rectangle":
+            return self._add_sketch_rounded_rectangle(document, command, progress=progress)
         if kind in {"add_sketch_rectangle_two_corners", "add_sketch_rectangle_center",
                     "add_sketch_rectangle_three_points", "add_sketch_rotated_rectangle",
                     "add_sketch_parallelogram", "add_sketch_regular_polygon",
@@ -328,6 +330,63 @@ class CommandSystem:
         return self._append_sketch_polyline(
             document, sketch, points, closed=True, operation="add_sketch_rectangle", progress=progress,
         )
+
+    def _add_sketch_rounded_rectangle(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        x, y = _finite_number(command.get("x"), "Rectangle x"), _finite_number(command.get("y"), "Rectangle y")
+        width, height = _number(command.get("width"), "width"), _number(command.get("height"), "height")
+        radius = _number(command.get("corner_radius"), "corner_radius")
+        if radius <= 1e-7 or width <= 2 * radius or height <= 2 * radius:
+            raise ValidationError("Rounded rectangle needs positive dimensions and a radius below half its smaller side.")
+        right, top = x + width, y + height
+        if not math.isfinite(right) or not math.isfinite(top):
+            raise ValidationError("Rounded rectangle coordinates must remain finite.")
+        centers = [(x + radius, y + radius), (right - radius, y + radius),
+                   (right - radius, top - radius), (x + radius, top - radius)]
+        starts = [math.pi, -math.pi / 2, 0.0, math.pi / 2]
+        arc_points = []
+        for (cx, cy), angle in zip(centers, starts, strict=True):
+            arc_points.append(((cx + radius * math.cos(angle), cy + radius * math.sin(angle)),
+                               (cx + radius * math.cos(angle + math.pi / 2),
+                                cy + radius * math.sin(angle + math.pi / 2))))
+        if progress is not None:
+            progress({"phase": "add_sketch_rounded_rectangle"})
+        sketch_id = sketch["id"]
+        center_ids = [f"point:{uuid4()}" for _ in centers]
+        endpoint_ids = [f"point:{uuid4()}" for _ in range(8)]
+        circle_ids = [f"circle:{uuid4()}" for _ in centers]
+        line_ids = [f"line:{uuid4()}" for _ in centers]
+        points = [
+            {"id": point_id, "type": "point", "sketch_id": sketch_id, "x": cx, "y": cy,
+             "construction": True}
+            for point_id, (cx, cy) in zip(center_ids, centers, strict=True)
+        ]
+        points.extend(
+            {"id": endpoint_ids[arc_index * 2 + endpoint_index], "type": "point", "sketch_id": sketch_id,
+             "x": xy[0], "y": xy[1]}
+            for arc_index, pair in enumerate(arc_points)
+            for endpoint_index, xy in enumerate(pair)
+        )
+        arcs = [
+            {"id": circle_ids[index], "type": "circle", "sketch_id": sketch_id,
+             "center_id": center_ids[index], "radius": radius,
+             "start_id": endpoint_ids[index * 2], "end_id": endpoint_ids[index * 2 + 1],
+             "sweep_radians": math.pi / 2}
+            for index in range(4)
+        ]
+        lines = [
+            {"id": line_ids[index], "type": "line", "sketch_id": sketch_id,
+             "start_id": endpoint_ids[index * 2 + 1], "end_id": endpoint_ids[((index + 1) % 4) * 2]}
+            for index in range(4)
+        ]
+        insert_at = document.objects.index(sketch) + 1
+        document.objects[insert_at:insert_at] = points + arcs + lines
+        self._rebuild_changed_features(document, {sketch_id}, progress=progress)
+        return {"sketch_id": sketch_id, "point_ids": center_ids + endpoint_ids,
+                "line_ids": line_ids, "circle_ids": circle_ids, "closed": True}
 
     def _add_sketch_polygon_tool(
         self,
@@ -579,6 +638,8 @@ class CommandSystem:
                 pending.extend((item["start_id"], item["end_id"]))
             elif item["type"] == "circle":
                 pending.append(item["center_id"])
+                if "sweep_radians" in item:
+                    pending.extend((item["start_id"], item["end_id"]))
         return [item for item in document.objects if item.get("id") in included]
 
     def _copy_sketch_geometry(
@@ -605,6 +666,13 @@ class CommandSystem:
                     clone["start_id"], clone["end_id"] = id_map[item["start_id"]], id_map[item["end_id"]]
                 else:
                     clone["center_id"] = id_map[item["center_id"]]
+                    if "sweep_radians" in item:
+                        clone["start_id"], clone["end_id"] = id_map[item["start_id"]], id_map[item["end_id"]]
+                        origin, x_axis, y_axis = transform(0.0, 0.0), transform(1.0, 0.0), transform(0.0, 1.0)
+                        determinant = ((x_axis[0] - origin[0]) * (y_axis[1] - origin[1])
+                                       - (x_axis[1] - origin[1]) * (y_axis[0] - origin[0]))
+                        if determinant < 0:
+                            clone["sweep_radians"] = -clone["sweep_radians"]
                 copies.append(clone)
         insert_at = document.objects.index(sketch) + 1
         document.objects[insert_at:insert_at] = copies

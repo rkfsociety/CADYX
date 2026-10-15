@@ -81,8 +81,31 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
                 raise ValidationError("Line endpoints must be distinct.")
         elif kind == "circle":
             reference(item.get("center_id"), "point", sketch_id)
-            if number(item.get("radius")) <= 0:
+            radius = number(item.get("radius"))
+            if radius <= 0:
                 raise ValidationError("Circle radius must be positive.")
+            arc_fields = {"start_id", "end_id", "sweep_radians"}
+            present = arc_fields.intersection(item)
+            if present and present != arc_fields:
+                raise ValidationError("A circular arc needs start_id, end_id and sweep_radians together.")
+            if present:
+                center = by_id[item["center_id"]]
+                start = reference(item["start_id"], "point", sketch_id)
+                end = reference(item["end_id"], "point", sketch_id)
+                sweep = number(item["sweep_radians"])
+                for endpoint in (start, end):
+                    distance = math.hypot(number(endpoint["x"]) - number(center["x"]),
+                                          number(endpoint["y"]) - number(center["y"]))
+                    if not close(distance, radius):
+                        raise ValidationError("Circular arc endpoints must lie on their center radius.")
+                if abs(sweep) <= 1e-7 or abs(sweep) >= math.tau - 1e-7:
+                    raise ValidationError("Circular arc sweep must be non-zero and less than one revolution.")
+                start_angle = math.atan2(start["y"] - center["y"], start["x"] - center["x"])
+                end_angle = math.atan2(end["y"] - center["y"], end["x"] - center["x"])
+                angular_error = math.atan2(math.sin(end_angle - start_angle - sweep),
+                                           math.cos(end_angle - start_angle - sweep))
+                if abs(angular_error) > 1e-7:
+                    raise ValidationError("Circular arc sweep does not reach its end point.")
 
     # Geometry has been checked before constraints, regardless of storage order.
     for item in objects:
@@ -123,7 +146,7 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
 
 
 def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[dict[str, float]]]:
-    """Return one closed line loop or one sampled circle from a sketch."""
+    """Return one closed line/arc loop or one sampled full circle from a sketch."""
     sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
     if sketch is None:
         raise ValidationError("A profile operation needs an existing sketch.")
@@ -133,8 +156,10 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
              and not item.get("construction", False) and item.get("extent", "segment") == "segment"]
     circles = [item for item in owned if item.get("type") == "circle"
                and not item.get("construction", False)]
+    arcs = [item for item in circles if "sweep_radians" in item]
+    circles = [item for item in circles if "sweep_radians" not in item]
 
-    if not lines:
+    if not lines and not arcs:
         if len(circles) != 1:
             raise ValidationError("A profile operation needs one closed line loop or one circle.")
         by_id = {item["id"]: item for item in objects}
@@ -146,36 +171,58 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
              "y": number(center["y"]) + radius * math.sin(math.tau * index / 128)}
             for index in range(128)
         ]
-    if circles or len(lines) < 3 or len(lines) > 4096:
-        raise ValidationError("A profile operation needs one closed line loop with 3 to 4096 edges.")
+    edges = lines + arcs
+    if circles or len(edges) < 3 or len(edges) > 4096:
+        raise ValidationError("A profile operation needs one closed line/arc loop with 3 to 4096 edges.")
 
     by_id = {item["id"]: item for item in objects}
     adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for line in lines:
-        adjacency[line["start_id"]].append(line)
-        adjacency[line["end_id"]].append(line)
+    for edge in edges:
+        adjacency[edge["start_id"]].append(edge)
+        adjacency[edge["end_id"]].append(edge)
     if any(len(edges) != 2 for edges in adjacency.values()):
         raise ValidationError("Profile lines must form one closed loop without branches.")
 
-    first = lines[0]
+    first = edges[0]
     start_id = first["start_id"]
-    current_id = first["end_id"]
     used = {first["id"]}
-    ordered_ids = [start_id]
+    start_point = by_id[start_id]
+    profile = [{"x": number(start_point["x"]), "y": number(start_point["y"])}]
+
+    def append_edge(edge: dict[str, Any], from_id: str, to_id: str) -> None:
+        if edge["type"] == "line":
+            point = by_id[to_id]
+            profile.append({"x": number(point["x"]), "y": number(point["y"])})
+            return
+        center = by_id[edge["center_id"]]
+        from_point = by_id[from_id]
+        start_angle = math.atan2(from_point["y"] - center["y"], from_point["x"] - center["x"])
+        sweep = number(edge["sweep_radians"])
+        if from_id != edge["start_id"]:
+            sweep = -sweep
+        steps = max(1, math.ceil(abs(sweep) / (math.pi / 64)))
+        radius = number(edge["radius"])
+        for index in range(1, steps + 1):
+            angle = start_angle + sweep * index / steps
+            profile.append({"x": number(center["x"]) + radius * math.cos(angle),
+                            "y": number(center["y"]) + radius * math.sin(angle)})
+
+    current_id = first["end_id"]
+    append_edge(first, start_id, current_id)
     while current_id != start_id:
-        if current_id in ordered_ids or len(used) >= len(lines):
+        if len(used) >= len(edges):
             raise ValidationError("Profile lines must form one closed loop without branches.")
-        ordered_ids.append(current_id)
-        next_lines = [line for line in adjacency[current_id] if line["id"] not in used]
-        if len(next_lines) != 1:
+        next_edges = [edge for edge in adjacency[current_id] if edge["id"] not in used]
+        if len(next_edges) != 1:
             raise ValidationError("Profile lines must form one closed loop without branches.")
-        next_line = next_lines[0]
-        used.add(next_line["id"])
-        current_id = next_line["end_id"] if next_line["start_id"] == current_id else next_line["start_id"]
-    if len(used) != len(lines) or len(ordered_ids) != len(lines):
+        next_edge = next_edges[0]
+        used.add(next_edge["id"])
+        next_id = next_edge["end_id"] if next_edge["start_id"] == current_id else next_edge["start_id"]
+        append_edge(next_edge, current_id, next_id)
+        current_id = next_id
+    if len(used) != len(edges):
         raise ValidationError("Profile lines must form exactly one closed loop.")
-    profile = [{"x": number(by_id[point_id]["x"]), "y": number(by_id[point_id]["y"])}
-               for point_id in ordered_ids]
+    profile.pop()  # discard the final sampled endpoint, which closes onto the first vertex
     area = sum(
         point["x"] * profile[(index + 1) % len(profile)]["y"]
         - profile[(index + 1) % len(profile)]["x"] * point["y"]
