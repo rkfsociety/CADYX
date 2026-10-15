@@ -1,7 +1,7 @@
 [mcp_servers.cadyx]
-command = "python"
+command = "D:\\github\\CADYX\\.runtime\\python\\python.exe"
 args = ["-m", "cadyx.mcp_server"]
-cwd = "C:\\github\\CADYX"
+cwd = "D:\\github\\CADYX"
 startup_timeout_sec = 20
 tool_timeout_sec = 600
 enabled = true
