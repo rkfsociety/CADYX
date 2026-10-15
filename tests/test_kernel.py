@@ -59,6 +59,31 @@ class OCPKernelAdapterConformanceTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.kernel.create_box(width=1e-12, height=2, depth=3)
 
+    def test_section_extraction_preserves_closed_circle_boundaries(self) -> None:
+        outer = self.kernel.create_revolved_profile(
+            [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 3}, {"x": 0, "y": 3}],
+            angle_degrees=360,
+        )
+        inner = self.kernel.create_revolved_profile(
+            [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 2, "y": 3}, {"x": 0, "y": 3}],
+            angle_degrees=360,
+        )
+        annulus = self.kernel.cut_solids(outer, inner)
+        step = self.kernel.export_delivery(annulus, include_stl=False)["step"]
+        imported, _ = self.kernel.create_imported_step(step)
+
+        profiles = self.kernel.extract_section_profile(
+            imported, normal_axis="Z", offset=1.5, max_points=128,
+        )
+
+        self.assertEqual(len(profiles), 2)
+        areas = sorted(abs(sum(
+            point["x"] * profiles[index][(point_index + 1) % len(profiles[index])]["y"]
+            - profiles[index][(point_index + 1) % len(profiles[index])]["x"] * point["y"]
+            for point_index, point in enumerate(profiles[index])
+        )) / 2 for index in range(len(profiles)))
+        self.assertGreater(areas[1] / areas[0], 3.8)
+
     def test_centered_extrusion_is_symmetric_about_the_sketch_plane(self) -> None:
         geometry = self.kernel.create_extruded_profile(
             [{"x": 2, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 8}, {"x": 2, "y": 8}],

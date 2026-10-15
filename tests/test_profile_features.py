@@ -75,6 +75,74 @@ class ProfileFeatureTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.command({"type": "remove_sketch_object", "object_id": bowl_sketch})
 
+    def test_loft_is_editable_and_rebuilds_when_a_section_changes(self) -> None:
+        section_ids = []
+        section_points = []
+        for y, radius, sample_count in ((-2.0, 2.0, 16), (0.0, 3.0, 24), (2.0, 2.0, 32)):
+            sketch_id = self.command({"type": "create_sketch", "name": f"Сечение {y}",
+                                      "plane": "XZ"})["sketch_id"]
+            points = [(radius * math.cos(math.tau * index / sample_count),
+                       radius * math.sin(math.tau * index / sample_count)) for index in range(sample_count)]
+            result = self.command({"type": "add_sketch_polyline", "sketch_id": sketch_id,
+                                   "points": [{"x": x, "y": z} for x, z in points], "closed": True})
+            section_ids.append(sketch_id)
+            section_points.append(result["point_ids"])
+        document = self.core.inspect_project(self.project_id)["document"]
+        sketch_offsets = dict(zip(section_ids, (-2.0, 0.0, 2.0), strict=True))
+        for sketch in (item for item in document["objects"] if item["id"] in section_ids):
+            sketch.update(section_normal_axis="Y", section_offset=sketch_offsets[sketch["id"]])
+        from cadyx.models import Document as ModelDocument
+        model_document = ModelDocument.from_dict(document)
+        result = self.core.commands.execute(model_document, {"type": "loft_sketches", "sketch_ids": section_ids,
+                                                            "name": "Проверочный loft"}, project_id=self.project_id)
+        loft = result
+        geometry = loft["geometry"]
+        self.assertEqual(geometry["kind"], "lofted_profiles")
+        self.assertGreater(geometry["volume"], 0)
+        self.assertIsNone(self.core.kernel.validate(geometry))
+
+        shifted_sections = []
+        for y, radius, sample_count in ((-2.0, 2.0, 16), (0.0, 3.0, 24), (2.0, 2.0, 32)):
+            sketch_id = self.core.commands.execute(model_document, {
+                "type": "create_sketch", "name": f"Смещённое сечение {y}", "plane": "XZ",
+            }, project_id=self.project_id)["sketch_id"]
+            points = [(1.5 + radius * math.cos(math.tau * index / sample_count),
+                       radius * math.sin(math.tau * index / sample_count))
+                      for index in range(sample_count)]
+            self.core.commands.execute(model_document, {
+                "type": "add_sketch_polyline", "sketch_id": sketch_id,
+                "points": [{"x": x, "y": z} for x, z in points], "closed": True,
+            }, project_id=self.project_id)
+            next(item for item in model_document.objects if item["id"] == sketch_id).update(
+                section_normal_axis="Y", section_offset=y,
+            )
+            shifted_sections.append(sketch_id)
+        shifted = self.core.commands.execute(model_document, {
+            "type": "loft_sketches", "sketch_ids": shifted_sections, "name": "Смещённый loft",
+        }, project_id=self.project_id)
+        fused = self.core.commands.execute(model_document, {
+            "type": "fuse_bodies", "base_body_id": loft["body_id"],
+            "tool_body_id": shifted["body_id"], "name": "Объединённые loft-тела",
+        }, project_id=self.project_id)
+        self.assertEqual(fused["geometry"]["kind"], "fused_solids")
+        self.assertGreater(fused["geometry"]["volume"], geometry["volume"])
+        with self.assertRaises(ValidationError):
+            self.core.commands.execute(model_document, {
+                "type": "remove_sketch_object", "object_id": section_ids[0],
+            }, project_id=self.project_id)
+        model_document.validate()
+        self.core._validate_geometry(model_document)
+        old_volume = geometry["volume"]
+        point = next(item for item in model_document.objects if item["id"] == section_points[1][0])
+        point["x"] = 4.0
+        self.core.commands._rebuild_changed_features(model_document, {section_ids[1]})
+        body = next(item for item in model_document.objects if item["id"] == loft["body_id"])
+        self.assertNotEqual(body["geometry"]["volume"], old_volume)
+        fused_body = next(item for item in model_document.objects if item["id"] == fused["body_id"])
+        self.assertNotEqual(fused_body["geometry"]["volume"], fused["geometry"]["volume"])
+        model_document.validate()
+        self.core._validate_geometry(model_document)
+
     def test_rounded_rectangle_extrudes_from_arc_profile(self) -> None:
         sketch = self.command({"type": "create_sketch", "name": "Скруглённый профиль", "plane": "XY"})["sketch_id"]
         self.command({"type": "add_sketch_rounded_rectangle", "sketch_id": sketch,

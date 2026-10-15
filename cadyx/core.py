@@ -714,6 +714,8 @@ class CadyxCore:
             "create_metric_thread": "Строит метрическую резьбу",
             "resize_imported_thread": "Увеличивает диаметр резьбы",
             "transform_imported_brep": "Выравнивает импортированную модель",
+            "create_sketch_from_section": "Извлекает сечение STEP в эскиз",
+            "loft_sketches": "Строит loft по эскизам сечений",
             "import_step": "Импортирует точную STEP-геометрию",
             "export_brep": "Проверяет и экспортирует модель САПР",
             "import_scan": "Обрабатывает скан",
@@ -834,6 +836,29 @@ class CadyxCore:
                             or not math.isfinite(angle) or abs(angle) > 360
                             or math.hypot(*axis) <= 1e-12):
                         raise ValidationError("Imported B-rep transform parameters are invalid.")
+                continue
+            if item.get("operation") == "loft_sketches":
+                body = by_id.get(item.get("body_id"))
+                feature_geometry = item.get("geometry")
+                source_sketch_ids = item.get("source_sketch_ids")
+                parameters = item.get("parameters")
+                if (body is None or body.get("type") != "body"
+                        or feature_geometry != body.get("geometry")
+                        or not isinstance(source_sketch_ids, list) or not isinstance(parameters, dict)
+                        or parameters.get("section_sketch_ids") != source_sketch_ids):
+                    raise ValidationError("Loft feature geometry must match its body and ordered source sketches.")
+                sections, offsets = [], []
+                for sketch_id in source_sketch_ids:
+                    sketch = by_id.get(sketch_id)
+                    if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != "XZ"
+                            or sketch.get("section_normal_axis") != "Y"):
+                        raise ValidationError("Loft feature source sketches must be Y-normal XZ sections.")
+                    _, profile = closed_profile(document.objects, sketch_id)
+                    sections.append(profile)
+                    offsets.append(sketch.get("section_offset"))
+                expected = self.kernel.create_lofted_profiles(sections, section_offsets=offsets)
+                if expected != feature_geometry:
+                    raise ValidationError("Loft feature geometry is out of date with its section sketches.")
                 continue
             if item.get("operation") == "import_step":
                 body = by_id.get(item.get("body_id"))

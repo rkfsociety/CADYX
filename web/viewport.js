@@ -106,6 +106,7 @@
     let transitionFrame = 0;
     let cameraFrame = 0;
     let sweepProgress = null;
+    let loftProgress = null;
 
     function scheduleCameraRender() {
       if (cameraFrame) return;
@@ -273,7 +274,7 @@
       }
 
       if (triangles.length) renderMesh(
-        triangles, camera, screenX, screenY, progress, sweepProgress,
+        triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.silhouetteCandidates, wireframe, shaded,
         wireframeColor, wireframeOpacity, dpr,
@@ -485,7 +486,7 @@
       context.restore();
     }
 
-    function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress,
+    function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
       vertexNormals, orientation, faceNormals, featureEdges, silhouetteCandidates, showWireframe, shaded,
       wireframeColor, wireframeOpacity, dpr) {
       const faceTotal = triangles.length / 3;
@@ -511,6 +512,8 @@
         const third = triangles[face * 3 + 2];
         if (sweepProgress && progress < 1
             && (sweepProgress[first] + sweepProgress[second] + sweepProgress[third]) / 3 > progress) continue;
+        if (loftProgress && progress < 1
+            && (loftProgress[first] + loftProgress[second] + loftProgress[third]) / 3 > progress) continue;
         const a = first * 3;
         const b = second * 3;
         const c = third * 3;
@@ -738,6 +741,9 @@
         sweepProgress = transition?.type === "sweep" && transition.path?.length >= 2
           ? buildSweepProgress(value.positions, transition.path, transition.plane)
           : null;
+        loftProgress = transition?.type === "loft" && transition.sectionOffsets?.length >= 2
+          ? buildLoftProgress(value.positions, transition.vertexRange, transition.sectionOffsets)
+          : null;
         camera = new Float64Array(value.positions.length);
         screenX = new Float64Array(value.positions.length / 3);
         screenY = new Float64Array(value.positions.length / 3);
@@ -825,6 +831,18 @@
         perVertex[vertex] = best.length / totalLength;
       }
       return perVertex;
+    }
+
+    function buildLoftProgress(positions, vertexRange, sectionOffsets) {
+      if (!vertexRange || vertexRange.length !== 2) return null;
+      const start = sectionOffsets[0], end = sectionOffsets[sectionOffsets.length - 1];
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+      const result = new Float32Array(positions.length / 3);
+      for (let vertex = vertexRange[0]; vertex < vertexRange[1]; vertex += 1) {
+        result[vertex] = Math.max(0, Math.min(1,
+          (positions[vertex * 3 + 1] - start) / (end - start)));
+      }
+      return result;
     }
 
     function buildSweepSegmentTree(segments) {

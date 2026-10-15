@@ -169,7 +169,13 @@ class EventBroker:
         return any(task.get("state") in {"pending", "running"} for task in dashboard.get("tasks", []))
 
     def _agent_work_active_locked(self) -> bool:
-        return any(self._dashboard_is_active(dashboard) for dashboard in self._agent_dashboards.values())
+        return bool(self._agent_work_project_ids_locked())
+
+    def _agent_work_project_ids_locked(self) -> list[str]:
+        return sorted(
+            project_id for project_id, dashboard in self._agent_dashboards.items()
+            if self._dashboard_is_active(dashboard)
+        )
 
     def agent_dashboard_is_active(self, project_id: str) -> bool:
         with self._lock:
@@ -278,8 +284,10 @@ class EventBroker:
 
     def agent_work_snapshot(self) -> dict[str, Any]:
         with self._lock:
+            active_projects = self._agent_work_project_ids_locked()
             return {
-                "active": self._agent_work_active_locked(),
+                "active": bool(active_projects),
+                "active_project_ids": active_projects,
                 "revision": self._agent_work_revision,
             }
 

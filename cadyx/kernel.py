@@ -21,6 +21,10 @@ class GeometryKernel(Protocol):
         self, profile: list[dict[str, float]], *, plane: str, depth: float, centered: bool = False,
     ) -> dict[str, Any]: ...
 
+    def create_lofted_profiles(
+        self, sections: list[list[dict[str, float]]], *, section_offsets: list[float],
+    ) -> dict[str, Any]: ...
+
     def create_revolved_profile(
         self, profile: list[dict[str, float]], *, angle_degrees: float,
     ) -> dict[str, Any]: ...
@@ -38,6 +42,10 @@ class GeometryKernel(Protocol):
     ) -> dict[str, Any]: ...
 
     def create_imported_step(self, source: bytes) -> tuple[dict[str, Any], dict[str, Any]]: ...
+
+    def extract_section_profile(
+        self, geometry: dict[str, Any], *, normal_axis: str, offset: float, max_points: int,
+    ) -> list[list[dict[str, float]]]: ...
 
     def export_delivery(
         self, geometry: dict[str, Any], *, include_stl: bool,
@@ -135,6 +143,55 @@ def _positive_or_signed_coordinate(value: Any) -> float:
     return number
 
 
+def _finite_coordinate(value: Any, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValidationError(f"{name} must be finite.")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValidationError(f"{name} must be finite.")
+    return number
+
+
+def _resample_loft_profile(profile: list[dict[str, float]], count: int) -> list[dict[str, float]]:
+    points = [(point["x"], point["y"]) for point in profile]
+    area = sum(points[i][0] * points[(i + 1) % len(points)][1]
+               - points[(i + 1) % len(points)][0] * points[i][1]
+               for i in range(len(points)))
+    if area < 0:
+        points.reverse()
+    lengths = [math.hypot(points[(i + 1) % len(points)][0] - point[0],
+                          points[(i + 1) % len(points)][1] - point[1])
+               for i, point in enumerate(points)]
+    perimeter = sum(lengths)
+    if not math.isfinite(perimeter) or perimeter <= 1e-7:
+        raise ValidationError("Loft section perimeter must be finite and positive.")
+    samples: list[dict[str, float]] = []
+    edge = 0
+    start = 0.0
+    for index in range(count):
+        distance = perimeter * index / count
+        while edge < len(lengths) - 1 and start + lengths[edge] < distance:
+            start += lengths[edge]
+            edge += 1
+        ratio = (distance - start) / lengths[edge]
+        first, second = points[edge], points[(edge + 1) % len(points)]
+        samples.append({"x": first[0] + ratio * (second[0] - first[0]),
+                        "y": first[1] + ratio * (second[1] - first[1])})
+    anchor = min(range(count), key=lambda i: (samples[i]["x"], samples[i]["y"]))
+    return samples[anchor:] + samples[:anchor]
+
+
+def _canonical_loft_profile(profile: list[dict[str, float]]) -> list[dict[str, float]]:
+    points = list(profile)
+    area = sum(points[i]["x"] * points[(i + 1) % len(points)]["y"]
+               - points[(i + 1) % len(points)]["x"] * points[i]["y"]
+               for i in range(len(points)))
+    if area < 0:
+        points.reverse()
+    anchor = min(range(len(points)), key=lambda i: (points[i]["x"], points[i]["y"]))
+    return points[anchor:] + points[:anchor]
+
+
 class OCCTKernelAdapter:
     """Build and validate box B-reps with Open CASCADE Technology."""
 
@@ -175,6 +232,30 @@ class OCCTKernelAdapter:
         angle = _positive_amount(angle_degrees, "angle_degrees", maximum=360.0)
         return self._create_profile_geometry(profile, plane="XZ", operation=1,
                                              amount=math.radians(angle), angle_degrees=angle)
+
+    def create_lofted_profiles(
+        self, sections: list[list[dict[str, float]]], *, section_offsets: list[float],
+    ) -> dict[str, Any]:
+        if (not isinstance(sections, list) or not 2 <= len(sections) <= 64
+                or not isinstance(section_offsets, list) or len(section_offsets) != len(sections)):
+            raise ValidationError("A loft needs 2 to 64 paired sketch sections and offsets.")
+        raw_sections = []
+        offsets = []
+        for section, offset in zip(sections, section_offsets, strict=True):
+            points, _ = _profile_values(section, "XZ")
+            raw_sections.append(points)
+            offsets.append(_finite_coordinate(offset, "Loft section offset"))
+        point_count = max(len(section) for section in raw_sections)
+        if all(len(section) == point_count for section in raw_sections):
+            normalized = [_canonical_loft_profile(section) for section in raw_sections]
+        else:
+            normalized = [_resample_loft_profile(section, point_count) for section in raw_sections]
+        if any(right <= left for left, right in zip(offsets, offsets[1:])):
+            raise ValidationError("Loft section offsets must be strictly increasing.")
+        payload = {"kernel": self.kernel_id, "kind": "lofted_profiles", "sections": normalized,
+                   "section_offsets": offsets}
+        payload["volume"] = NativeKernel().geometry_graph(payload)["volume"]
+        return payload
 
     @staticmethod
     def _create_profile_geometry(
@@ -296,6 +377,36 @@ class OCCTKernelAdapter:
             raise ValidationError("Imported B-rep did not preserve the STEP model geometry.")
         return geometry, metrics
 
+    def extract_section_profile(
+        self, geometry: dict[str, Any], *, normal_axis: str, offset: float, max_points: int,
+    ) -> list[list[dict[str, float]]]:
+        if not isinstance(geometry, dict) or geometry.get("kind") != "imported_brep":
+            raise ValidationError("Section extraction requires an imported OCCT B-rep.")
+        try:
+            compressed = base64.b64decode(geometry["data"], validate=True)
+            decoder = zlib.decompressobj()
+            brep = decoder.decompress(compressed, 64 * 1024 * 1024 + 1)
+            if (len(brep) > 64 * 1024 * 1024 or not decoder.eof
+                    or decoder.unused_data or decoder.unconsumed_tail):
+                raise ValueError("invalid compressed B-rep payload")
+        except (KeyError, TypeError, ValueError, zlib.error) as exc:
+            raise ValidationError("Imported B-rep data is invalid or exceeds the 64 MB limit.") from exc
+        result = NativeKernel().section_profile(
+            brep, normal_axis=normal_axis, offset=offset, max_points=max_points,
+        )
+        profiles = result.get("profiles") if isinstance(result, dict) else None
+        if (not isinstance(result, dict) or result.get("closed") is not True
+                or not isinstance(profiles, list) or not profiles
+                or sum(len(profile) for profile in profiles if isinstance(profile, list)) > max_points
+                or any(not isinstance(profile, list) or len(profile) < 3
+                       or any(not isinstance(point, dict) or set(point) != {"x", "y"}
+                              or any(isinstance(point[key], bool) or not isinstance(point[key], (int, float))
+                                     or not math.isfinite(point[key]) for key in ("x", "y"))
+                              for point in profile)
+                       for profile in profiles)):
+            raise ValidationError("OCCT returned invalid closed section profiles.")
+        return profiles
+
     def export_delivery(
         self,
         geometry: dict[str, Any],
@@ -397,6 +508,9 @@ class OCCTKernelAdapter:
             raise ValidationError("Geometry does not match a supported box format.")
         if kernel_id == self.kernel_id and geometry.get("kind") in {"extruded_profile", "revolved_profile"}:
             self._validate_profile_geometry(geometry)
+            return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "lofted_profiles":
+            self._validate_loft_geometry(geometry)
             return
         if kernel_id == self.kernel_id and geometry.get("kind") == "fused_profiles":
             self._validate_fused_geometry(geometry)
@@ -511,6 +625,14 @@ class OCCTKernelAdapter:
         if not math.isclose(saved_volume, actual, rel_tol=1e-12, abs_tol=1e-12):
             raise ValidationError("Saved geometry volume does not match the Open CASCADE fused solid.")
 
+    def _validate_loft_geometry(self, geometry: dict[str, Any]) -> None:
+        if (set(geometry) != {"kernel", "kind", "sections", "section_offsets", "volume"}
+                or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "lofted_profiles"):
+            raise ValidationError("Loft geometry descriptor is invalid.")
+        rebuilt = self.create_lofted_profiles(geometry.get("sections"),
+                                              section_offsets=geometry.get("section_offsets"))
+        self._same_saved_volume(geometry, rebuilt["volume"])
+
     def _validate_swept_pipe_geometry(self, geometry: dict[str, Any]) -> None:
         if (set(geometry) != {"kernel", "kind", "plane", "path", "radius", "volume"}
                 or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "swept_pipe"):
@@ -615,6 +737,9 @@ class PrimitiveKernelAdapter:
 
     def create_extruded_profile(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not build extruded B-reps.")
+
+    def create_lofted_profiles(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise ValidationError("The primitive demo kernel does not build lofted B-reps.")
 
     def fuse_profiles(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not fuse B-rep solids.")

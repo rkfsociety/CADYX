@@ -87,6 +87,7 @@ def make_request_handler(
                         "activity_revision": None,
                         "dashboard_revision": None,
                         "agent_work_active": agent_work["active"],
+                        "agent_work_active_project_ids": agent_work["active_project_ids"],
                         "agent_work_revision": agent_work["revision"],
                         "folder_revision": None,
                     }

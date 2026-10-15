@@ -71,6 +71,11 @@ class NativeKernel:
                         ctypes.c_char_p, ctypes.c_size_t,
                     ]
                     library.cadyx_step_import.restype = ctypes.c_void_p
+                    library.cadyx_section_profile.argtypes = [
+                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_int,
+                        ctypes.c_double, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t,
+                    ]
+                    library.cadyx_section_profile.restype = ctypes.c_void_p
                     library.cadyx_brep_export.argtypes = [
                         ctypes.POINTER(GraphNode), ctypes.c_size_t,
                         ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
@@ -175,6 +180,17 @@ class NativeKernel:
     def geometry_graph(self, geometry, *, mesh=False, topology=False):
         return self._geometry_graph(geometry, mesh=mesh, topology=topology)
 
+    def loft(self, sections):
+        if not isinstance(sections, list) or not 2 <= len(sections) <= 64:
+            raise ValidationError("A loft needs between 2 and 64 sketch sections.")
+        normalized = []
+        for section in sections:
+            if not isinstance(section, list) or len(section) < 3:
+                raise ValidationError("Every loft section needs at least 3 points.")
+            normalized.append([{"x": float(point["x"]), "y": float(point["y"])} for point in section])
+        return self._geometry_graph({"kind": "lofted_profiles", "sections": normalized},
+                                    mesh=False, topology=False)
+
     def export_geometry(self, geometry):
         return self._geometry_graph(geometry, export=True)
 
@@ -199,6 +215,17 @@ class NativeKernel:
                             centered=int(value.get("centered", False)), amount=amount,
                             coordinate_offset=len(coordinates), coordinate_count=len(value["profile"]) * 2)
                 coordinates.extend(coord for point in value["profile"] for coord in (point["x"], point["y"]))
+            elif kind == "lofted_profiles":
+                section_sizes = []
+                start = len(coordinates)
+                for section, offset in zip(value["sections"], value["section_offsets"], strict=True):
+                    section_sizes.append(len(section))
+                    coordinates.extend(coord for point in section
+                                       for coord in (offset, point["x"], point["y"]))
+                node.update(type=8, coordinate_offset=start,
+                            coordinate_count=len(coordinates) - start,
+                            edge_offset=len(edge_indices), edge_count=len(section_sizes))
+                edge_indices.extend(section_sizes)
             elif kind == "swept_pipe":
                 node.update(type=1, plane=int(value["plane"] == "XZ"), amount=value["radius"],
                             coordinate_offset=len(coordinates), coordinate_count=len(value["path"]) * 2)
@@ -278,6 +305,27 @@ class NativeKernel:
         source_buffer = (ctypes.c_ubyte * len(source)).from_buffer_copy(source)
         error = ctypes.create_string_buffer(1024)
         result = self.library.cadyx_step_import(source_buffer, len(source), error, len(error))
+        if not result:
+            raise ValidationError(error.value.decode("utf-8", errors="replace"))
+        try:
+            return json.loads(ctypes.string_at(result))
+        finally:
+            self.library.cadyx_free(result)
+
+    def section_profile(self, brep, *, normal_axis, offset, max_points):
+        if not isinstance(brep, bytes) or not brep or len(brep) > 64 * 1024 * 1024:
+            raise ValidationError("Section source B-rep is empty or exceeds the 64 MB limit.")
+        axes = {"X": 0, "Y": 1, "Z": 2}
+        if normal_axis not in axes:
+            raise ValidationError("Section normal axis must be X, Y or Z.")
+        if (isinstance(max_points, bool) or not isinstance(max_points, int)
+                or not 16 <= max_points <= 4096):
+            raise ValidationError("Section sample limit must be between 16 and 4096 points.")
+        source = (ctypes.c_ubyte * len(brep)).from_buffer_copy(brep)
+        error = ctypes.create_string_buffer(1024)
+        result = self.library.cadyx_section_profile(
+            source, len(brep), axes[normal_axis], float(offset), max_points, error, len(error),
+        )
         if not result:
             raise ValidationError(error.value.decode("utf-8", errors="replace"))
         try:

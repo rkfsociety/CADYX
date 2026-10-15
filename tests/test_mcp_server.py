@@ -84,6 +84,31 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(detail["document"]["revision"], 1)
         self.assertEqual(detail["lock"]["state"], "FREE")
 
+    def test_selection_can_return_to_the_only_active_workflow_project(self) -> None:
+        project = self.core.workspace.create("Resumable workflow")
+        project_id = project["id"]
+        self.core.report_agent_dashboard(project_id, {
+            "workflow": {
+                "title": "Продолжаем модель",
+                "progress_percent": 40,
+                "eta_seconds": None,
+                "phases": [
+                    {"id": "build", "title": "Построение модели", "state": "in_progress"},
+                    {"id": "verify", "title": "Проверка модели", "state": "pending"},
+                ],
+            },
+            "tasks": [],
+        })
+        self.assertIsNone(self.core.workspace_selection_snapshot())
+        selected = self._tool_value("cadyx_select_resource", {"type": "project", "project_id": project_id})
+        self.assertEqual(selected["selection"], {"type": "project", "project_id": project_id})
+
+        other = self.core.workspace.create("Other project")
+        blocked = self.app.call_tool("cadyx_select_resource", {"type": "project", "project_id": other["id"]})
+        self.assertTrue(blocked["isError"])
+        self.assertIn("PROJECT_BUSY", blocked["content"][0]["text"])
+        self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": project_id})
+
     def test_errors_keep_saved_document_and_free_the_lease(self) -> None:
         project_id = self._create_project()
         invalid = self.app.call_tool("cadyx_execute_command", {

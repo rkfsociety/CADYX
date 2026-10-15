@@ -132,6 +132,20 @@ class RenderingTests(unittest.TestCase):
         self.command({"type": "set_parameter", "feature_id": result["feature_id"], "name": "width", "value": 8})
         self.assertEqual(self.core.render_project(self.project)["bounds"]["max"], [8, 3, 5])
 
+    def test_extracted_section_sketches_render_on_their_source_plane(self):
+        sketch = self.command({"type": "create_sketch", "plane": "XZ"})["sketch_id"]
+        self.command({"type": "add_sketch_polyline", "sketch_id": sketch,
+                      "points": [{"x": 1, "y": 2}, {"x": 4, "y": 2}, {"x": 1, "y": 5}],
+                      "closed": True})
+        document = Document.from_dict(self.core.inspect_project(self.project)["document"])
+        section = next(item for item in document.objects if item["id"] == sketch)
+        section.update(section_normal_axis="Y", section_offset=-7.5, section_profile_index=0)
+
+        scene = render_scene(document, self.core.kernel)
+        positions = [item["positions"] for item in scene["objects"] if item["type"] == "line"]
+        self.assertTrue(positions)
+        self.assertTrue(all(values[index] == -7.5 for values in positions for index in (1, 4)))
+
     def test_sketch_scene_exposes_construction_and_infinite_line_modes(self):
         sketch = self.command({"type": "create_sketch"})["sketch_id"]
         self.command({"type": "add_sketch_construction_point", "sketch_id": sketch, "x": 2, "y": 3})

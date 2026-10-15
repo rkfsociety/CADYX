@@ -1387,6 +1387,7 @@ const featureOperationLabels = {
   import_step: "Импорт STEP-модели",
   extrude_sketch: "Выдавливание профиля",
   revolve_sketch: "Вращение профиля",
+  loft_sketches: "Построение loft по сечениям",
   fuse_bodies: "Объединение тел",
   resize_imported_thread: "Изменение диаметра резьбы",
   transform_imported_brep: "Преобразование импортированной модели",
@@ -1657,6 +1658,15 @@ function handleStreamEvent(type, event) {
           projectId, sketchId: activeSketchId, allSketchLines: true,
           type: "sketch-lines", durationMs: 1800,
         } : null;
+      } else if (command.type === "create_sketch_from_section") {
+        const sketches = Array.isArray(result.sketches) ? result.sketches : [];
+        const largest = sketches.reduce((selected, sketch) =>
+          !selected || (sketch.sample_count || 0) > (selected.sample_count || 0) ? sketch : selected, null);
+        activeSketchId = largest?.sketch_id || null;
+        pendingViewportTransition = activeSketchId ? {
+          projectId, sketchId: activeSketchId, allSketchLines: true,
+          type: "sketch-lines", durationMs: 1600,
+        } : null;
       } else if (command.type === "remove_sketch_object") {
         if (command.object_id === activeSketchId) activeSketchId = null;
         pendingViewportTransition = null;
@@ -1666,6 +1676,12 @@ function handleStreamEvent(type, event) {
           projectId, bodyId: result.body_id,
           type: command.type === "extrude_sketch" ? "extrude" : "revolve",
           plane: result.geometry?.plane || "XZ", durationMs: 1400,
+        };
+      } else if (command.type === "loft_sketches") {
+        activeSketchId = null;
+        pendingViewportTransition = {
+          projectId, bodyId: result.body_id, type: "loft",
+          sectionOffsets: result.geometry?.section_offsets || [], durationMs: 1800,
         };
       } else if (command.type === "create_metric_thread") {
         activeSketchId = null;
@@ -1691,6 +1707,7 @@ function handleStreamEvent(type, event) {
         const transitionType = result.geometry.kind === "revolved_profile" ? "revolve"
           : result.geometry.kind === "extruded_profile" ? "extrude"
           : result.geometry.kind === "swept_pipe" ? "sweep"
+          : result.geometry.kind === "lofted_profiles" ? "loft"
           : result.geometry.kind === "metric_thread" ? "thread"
           : result.geometry.kind === "filleted_solid" ? "fillet"
           : ["fused_profiles", "fused_solids"].includes(result.geometry.kind) ? "fuse" : null;

@@ -26,10 +26,14 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
                           } else ())
     }
     feature_sketches = {
-        item.get("source_sketch_id")
+        source_id
         for item in document.objects
         if item.get("type") == "feature"
-        and item.get("operation") in {"extrude_sketch", "revolve_sketch", "sweep_sketch"}
+        for source_id in (
+            [item.get("source_sketch_id")] if item.get("source_sketch_id")
+            else item.get("source_sketch_ids", [])
+        )
+        if item.get("operation") in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches"}
     }
     bounds_min = [math.inf, math.inf, math.inf]
     bounds_max = [-math.inf, -math.inf, -math.inf]
@@ -37,6 +41,14 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
 
     def sketch_position(sketch_id: str, x: float, y: float) -> list[float]:
         sketch = by_id[sketch_id]
+        section_axis = sketch.get("section_normal_axis")
+        section_offset = sketch.get("section_offset")
+        if section_axis == "X" and isinstance(section_offset, (int, float)):
+            return [section_offset, x, y]
+        if section_axis == "Y" and isinstance(section_offset, (int, float)):
+            return [x, section_offset, y]
+        if section_axis == "Z" and isinstance(section_offset, (int, float)):
+            return [x, y, section_offset]
         return [x, 0, y] if sketch["plane"] == "XZ" else [x, y, 0]
 
     for item in document.objects:

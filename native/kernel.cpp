@@ -4,6 +4,7 @@
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Common.hxx>
+#include <BRepAlgoAPI_Section.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -35,6 +36,7 @@
 #include <gp_Circ.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Pln.hxx>
 #include <gp_Vec.hxx>
 #include <gp_GTrsf.hxx>
 #include <gp_Trsf.hxx>
@@ -480,6 +482,131 @@ std::string ImportStepJson(const unsigned char* data, size_t size) {
   return json;
 }
 
+std::string SectionProfileJson(const unsigned char* data, size_t size, int normal_axis,
+                               double offset, size_t max_points) {
+  const TopoDS_Shape source = ReadImportedBrep(data, size);
+  if (!std::isfinite(offset) || normal_axis < 0 || normal_axis > 2
+      || max_points < 16 || max_points > 4096)
+    throw std::runtime_error("Section plane or profile sampling limit is invalid.");
+  const gp_Dir normal = normal_axis == 0 ? gp_Dir(1, 0, 0)
+      : normal_axis == 1 ? gp_Dir(0, 1, 0) : gp_Dir(0, 0, 1);
+  const gp_Pnt origin = normal_axis == 0 ? gp_Pnt(offset, 0, 0)
+      : normal_axis == 1 ? gp_Pnt(0, offset, 0) : gp_Pnt(0, 0, offset);
+  BRepAlgoAPI_Section operation(source, gp_Pln(origin, normal), Standard_False);
+  operation.ComputePCurveOn1(false);
+  operation.Approximation(true);
+  operation.Build();
+  if (!operation.IsDone()) throw std::runtime_error("OCCT could not section the imported solid.");
+
+  struct SectionEdge { TopoDS_Edge edge; gp_Pnt first; gp_Pnt last; double length; };
+  std::vector<SectionEdge> edges;
+  for (TopExp_Explorer explorer(operation.Shape(), TopAbs_EDGE); explorer.More(); explorer.Next()) {
+    const TopoDS_Edge edge = TopoDS::Edge(explorer.Current());
+    TopoDS_Vertex first_vertex, last_vertex;
+    TopExp::Vertices(edge, first_vertex, last_vertex, true);
+    if (first_vertex.IsNull() || last_vertex.IsNull())
+      throw std::runtime_error("Section contains an edge without two finite endpoints.");
+    GProp_GProps properties;
+    BRepGProp::LinearProperties(edge, properties);
+    const double length = properties.Mass();
+    if (!std::isfinite(length) || length <= 1e-7)
+      throw std::runtime_error("Section contains a degenerate edge.");
+    edges.push_back({edge, BRep_Tool::Pnt(first_vertex), BRep_Tool::Pnt(last_vertex), length});
+  }
+  if (edges.empty() || edges.size() > max_points)
+    throw std::runtime_error("Section must contain closed profiles within the point limit.");
+
+  std::vector<bool> used(edges.size(), false);
+  std::vector<std::vector<std::pair<size_t, bool>>> loops;
+  for (size_t seed = 0; seed < edges.size(); ++seed) {
+    if (used[seed]) continue;
+    std::vector<std::pair<size_t, bool>> ordered;
+    ordered.reserve(edges.size());
+    const gp_Pnt start = edges[seed].first;
+    gp_Pnt current = edges[seed].last;
+    used[seed] = true;
+    ordered.emplace_back(seed, false);
+    while (current.Distance(start) > 1e-5) {
+      size_t next = edges.size();
+      bool reverse = false;
+      for (size_t index = 0; index < edges.size(); ++index) {
+        if (used[index]) continue;
+        if (current.Distance(edges[index].first) <= 1e-5) { next = index; break; }
+        if (current.Distance(edges[index].last) <= 1e-5) { next = index; reverse = true; break; }
+      }
+      if (next == edges.size())
+        throw std::runtime_error("Section boundary is open or contains a branched contour.");
+      used[next] = true;
+      ordered.emplace_back(next, reverse);
+      current = reverse ? edges[next].first : edges[next].last;
+      if (ordered.size() > edges.size()) throw std::runtime_error("Section boundary is branched.");
+    }
+    loops.push_back(std::move(ordered));
+  }
+  double total_length = 0;
+  for (const auto& edge : edges) total_length += edge.length;
+  if (edges.size() > max_points)
+    throw std::runtime_error("Section has more boundary edges than the requested sample limit.");
+  std::vector<std::vector<gp_Pnt>> profiles;
+  profiles.reserve(loops.size());
+  const size_t remaining_samples = max_points - edges.size();
+  for (const auto& ordered : loops) {
+    std::vector<gp_Pnt> points;
+    for (const auto& item : ordered) {
+      const auto& edge = edges[item.first];
+      BRepAdaptor_Curve curve(edge.edge);
+      const double first = curve.FirstParameter();
+      const double last = curve.LastParameter();
+      if (!std::isfinite(first) || !std::isfinite(last) || !(last > first))
+        throw std::runtime_error("Section edge has unsupported parameter bounds.");
+      const size_t segments = 1 + static_cast<size_t>(std::floor(
+          static_cast<double>(remaining_samples) * edge.length / total_length));
+      for (size_t sample = 0; sample < segments; ++sample) {
+        const double ratio = static_cast<double>(sample) / segments;
+        const double parameter = item.second ? last - (last - first) * ratio
+                                             : first + (last - first) * ratio;
+        points.push_back(curve.Value(parameter));
+      }
+    }
+    if (points.size() < 3) continue;
+    double twice_area = 0;
+    for (size_t index = 0; index < points.size(); ++index) {
+      const gp_Pnt& point = points[index];
+      const gp_Pnt& next = points[(index + 1) % points.size()];
+      const double x = normal_axis == 0 ? point.Y() : point.X();
+      const double y = normal_axis == 2 ? point.Y() : point.Z();
+      const double next_x = normal_axis == 0 ? next.Y() : next.X();
+      const double next_y = normal_axis == 2 ? next.Y() : next.Z();
+      twice_area += x * next_y - next_x * y;
+    }
+    if (std::isfinite(twice_area) && std::abs(twice_area) > 1e-12)
+      profiles.push_back(std::move(points));
+  }
+  if (profiles.empty())
+    throw std::runtime_error("Section contains no closed contour with non-zero area.");
+
+  std::ostringstream json;
+  json.imbue(std::locale::classic());
+  json << std::setprecision(17) << "{\"closed\":true,\"profiles\":[";
+  for (size_t profile_index = 0; profile_index < profiles.size(); ++profile_index) {
+    if (profile_index) json << ',';
+    json << '[';
+    const auto& points = profiles[profile_index];
+    for (size_t index = 0; index < points.size(); ++index) {
+      const auto& point = points[index];
+      const double x = normal_axis == 0 ? point.Y() : point.X();
+      const double y = normal_axis == 2 ? point.Y() : point.Z();
+      if (!std::isfinite(x) || !std::isfinite(y))
+        throw std::runtime_error("OCCT returned a non-finite section point.");
+      if (index) json << ',';
+      json << "{\"x\":" << x << ",\"y\":" << y << '}';
+    }
+    json << ']';
+  }
+  json << "]}";
+  return json.str();
+}
+
 std::string ExportStepBytes(const unsigned char* data, size_t size) {
   const TopoDS_Solid solid = ExtractSingleSolid(ReadImportedBrep(data, size));
   ShapeJson(solid, 0);
@@ -680,6 +807,48 @@ TopoDS_Shape MakePipeShape(const double* coordinates, size_t point_count, int pl
   return pipe.Shape();
 }
 
+TopoDS_Shape MakeLoftShape(const double* coordinates, const int* section_sizes,
+                           size_t section_count, size_t coordinate_count) {
+  if (!coordinates || !section_sizes || section_count < 2 || section_count > 64)
+    throw std::runtime_error("A loft needs between 2 and 64 sketch sections.");
+  BRepOffsetAPI_ThruSections loft(true, false, 1e-6);
+  size_t offset = 0;
+  for (size_t section = 0; section < section_count; ++section) {
+    const int count = section_sizes[section];
+    const double station = coordinates[offset * 3];
+    if (!std::isfinite(station)) throw std::runtime_error("Loft section offset must be finite.");
+    if (count < 3 || offset > coordinate_count || static_cast<size_t>(count) > coordinate_count - offset)
+      throw std::runtime_error("Loft section coordinates are invalid.");
+    BRepBuilderAPI_MakePolygon polygon;
+    double twice_area = 0;
+    for (int point = 0; point < count; ++point) {
+      const size_t current = offset + static_cast<size_t>(point);
+      const size_t next = offset + static_cast<size_t>((point + 1) % count);
+      const double x = coordinates[3 * current + 1];
+      const double z = coordinates[3 * current + 2];
+      const double next_x = coordinates[3 * next + 1];
+      const double next_z = coordinates[3 * next + 2];
+      if (!std::isfinite(x) || !std::isfinite(z) || std::hypot(x - next_x, z - next_z) <= 1e-7)
+        throw std::runtime_error("Loft section points must be finite and distinct.");
+      twice_area += x * next_z - next_x * z;
+      polygon.Add(gp_Pnt(x, station, z));
+    }
+    if (!std::isfinite(twice_area) || std::abs(twice_area) <= 1e-12)
+      throw std::runtime_error("Loft section must enclose non-zero area.");
+  // Section sketches are stored in XZ coordinates; the native loft consumes
+  // xyz triples, with the section station supplied from a parallel offset buffer.
+    polygon.Close();
+    if (!polygon.IsDone()) throw std::runtime_error("OCCT could not close a loft section.");
+    loft.AddWire(polygon.Wire());
+    offset += static_cast<size_t>(count);
+  }
+  if (offset != coordinate_count)
+    throw std::runtime_error("Loft coordinates do not match the section sizes.");
+  loft.Build();
+  if (!loft.IsDone()) throw std::runtime_error("OCCT could not build the loft through sketch sections.");
+  return EnsureOneSolid(loft.Shape(), "Loft");
+}
+
 TopoDS_Shape EnsureOneSolid(const TopoDS_Shape& shape, const char* operation) {
   size_t solids = 0;
   for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More(); explorer.Next()) ++solids;
@@ -872,6 +1041,12 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
           throw std::runtime_error("Boolean cut graph references must point to earlier operations.");
         shape = MakeCut(shapes[node.input_a], shapes[node.input_b]);
         break;
+      case 8:
+        if (node.edge_offset > edge_count || node.edge_count < 2 || node.edge_count > edge_count - node.edge_offset
+            || node.coordinate_count % 3 != 0)
+          throw std::runtime_error("Loft graph operation needs at least two section sizes.");
+        shape = MakeLoftShape(points, edges, node.edge_count, node.coordinate_count / 3);
+        break;
       case 3:
         if (node.input_a < 0 || static_cast<size_t>(node.input_a) >= i)
           throw std::runtime_error("Fillet graph reference must point to an earlier operation.");
@@ -994,6 +1169,22 @@ API char* cadyx_step_import(const unsigned char* data, size_t size,
     CopyError(error, capacity, exception.what());
   } catch (...) {
     CopyError(error, capacity, "Unknown OCCT STEP import failure.");
+  }
+  return nullptr;
+}
+
+API char* cadyx_section_profile(const unsigned char* data, size_t size, int normal_axis,
+                                double offset, size_t max_points,
+                                char* error, size_t capacity) noexcept {
+  try {
+    return CopyResult(SectionProfileJson(data, size, normal_axis, offset, max_points));
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString()
+        ? exception.GetMessageString() : "OCCT could not extract the B-rep section.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown native section extraction failure.");
   }
   return nullptr;
 }

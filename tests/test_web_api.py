@@ -502,6 +502,7 @@ class WebApiTests(unittest.TestCase):
         status, active_updates = self.request("/api/v1/updates")
         self.assertEqual(status, 200)
         self.assertTrue(active_updates["agent_work_active"])
+        self.assertEqual(active_updates["agent_work_active_project_ids"], [project_id])
         self.assertEqual(active_updates["agent_work_revision"], 1)
         status, _ = self.request(
             f"/api/v1/agent/projects/{project_id}/dashboard",
@@ -512,7 +513,9 @@ class WebApiTests(unittest.TestCase):
 
         restarted_core = CadyxCore(str(self.core.workspace.root))
         self.assertEqual(restarted_core.agent_dashboard_snapshot(project_id), active_report)
-        self.assertEqual(restarted_core.events.agent_work_snapshot(), {"active": True, "revision": 1})
+        self.assertEqual(restarted_core.events.agent_work_snapshot(), {
+            "active": True, "active_project_ids": [project_id], "revision": 1,
+        })
 
         report["workflow"]["progress_percent"] = 100
         report["workflow"]["phases"] = [
@@ -535,6 +538,7 @@ class WebApiTests(unittest.TestCase):
             status, completed_updates = self.request("/api/v1/updates")
             self.assertEqual(status, 200)
             self.assertFalse(completed_updates["agent_work_active"])
+            self.assertEqual(completed_updates["agent_work_active_project_ids"], [])
             self.assertEqual(completed_updates["agent_work_revision"], 3)
             self.assertEqual(events.get(timeout=1).event, "agent.dashboard")
             work_event = events.get(timeout=1)

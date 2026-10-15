@@ -328,6 +328,26 @@ closed OCCT solid, remains linked to the source sketch, and rebuilds when path
 points or the radius change. The command transition progressively reveals the
 pipe along the path.
 
+`create_sketch_from_section` accepts an imported STEP B-rep `body_id`, a plane
+`normal_axis` (`X`, `Y` or `Z`), an `offset`, optional `max_points` (16–4096,
+default 2048 total samples across all contours), and optional `name`. OCCT
+intersects the exact B-rep with the plane and returns every closed, non-zero-area
+contour as a separate editable polyline sketch. Open or branched section
+boundaries are rejected. The source B-rep is preserved. These polylines are
+sampled approximations of analytic or NURBS section curves, with the total
+sample budget shared among all contours.
+
+`loft_sketches` accepts 2–64 ordered `sketch_ids` and optional `name`. It
+builds a capped editable OCCT solid through closed XZ section sketches extracted
+from Y-normal STEP planes. Each sketch must retain its finite `section_offset`,
+offsets must strictly increase. The command equalizes profile sampling along
+each closed polygon perimeter and normalizes winding/start points for vertex
+correspondence. The sections are sampled
+polygons, so the loft is an editable approximation rather than exact recovery
+of the source STEP analytic or NURBS surfaces. Editing any source sketch
+rebuilds the loft atomically. The feature retains its ordered
+`source_sketch_ids`.
+
 `fuse_bodies` accepts `base_body_id`, `tool_body_id`, and optional `name` for two
 intersecting OCCT B-rep solids. The native Boolean operation must produce one
 connected valid solid. It supports profile solids, swept pipes, and prior

@@ -229,7 +229,11 @@ class MCPApplication:
             if detail["lock"].get("state") != "FREE" or any(item.get("state") == "running" for item in activity.get("activities", [])):
                 raise APIError(409, {"error": "PROJECT_BUSY", "message": "The currently selected project is locked or has a running operation; selection is unchanged."})
         updates = self.api.get("/api/v1/updates")
-        if updates.get("agent_work_active"):
+        if updates.get("agent_work_active") and not (
+            target_type == "project"
+            and target_name in updates.get("agent_work_active_project_ids", [])
+            and len(updates.get("agent_work_active_project_ids", [])) == 1
+        ):
             raise APIError(409, {"error": "PROJECT_BUSY", "message": "CADYX reports active agent work; selection is unchanged."})
         if target_type == "project":
             detail = self.api.get(self._project(target_name or ""))

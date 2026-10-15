@@ -98,6 +98,8 @@ class CommandSystem:
             return self._create_metric_thread(document, command, progress=progress)
         if kind in {"extrude_sketch", "revolve_sketch"}:
             return self._create_profile_feature(document, command, kind, progress=progress)
+        if kind == "loft_sketches":
+            return self._loft_sketches(document, command, progress=progress)
         if kind == "fuse_bodies":
             return self._fuse_bodies(document, command, progress=progress)
         if kind == "cut_bodies":
@@ -118,6 +120,8 @@ class CommandSystem:
             return self._resize_imported_thread(document, command, progress=progress)
         if kind == "transform_imported_brep":
             return self._transform_imported_brep(document, command, progress=progress)
+        if kind == "create_sketch_from_section":
+            return self._create_sketch_from_section(document, command, progress=progress)
         if kind == "set_scan_parameter":
             return self._set_scan_parameter(document, command, progress=progress)
         if kind in {"add_sketch_spiral", "add_sketch_parametric_curve", "add_sketch_coordinate_curve"}:
@@ -301,13 +305,58 @@ class CommandSystem:
             if item is None or item["type"] not in {"sketch", "point", "line", "circle", "spline", "constraint"}:
                 raise NotFoundError("Sketch object was not found.")
             if item["type"] == "sketch" and any(
-                feature.get("type") == "feature" and feature.get("source_sketch_id") == object_id
+                feature.get("type") == "feature"
+                and (feature.get("source_sketch_id") == object_id
+                     or object_id in feature.get("source_sketch_ids", []))
                 for feature in document.objects
             ):
                 raise ValidationError("A sketch used by a solid feature cannot be removed.")
             document.objects.remove(item)
             return {"object_id": object_id}
         raise ValidationError(f"Unsupported command type: {kind!r}.")
+
+    def _create_sketch_from_section(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        body_id = command.get("body_id")
+        body = next((item for item in document.objects
+                     if item.get("id") == body_id and item.get("type") == "body"), None)
+        if body is None:
+            raise NotFoundError("Section source body was not found.")
+        if not isinstance(body.get("geometry"), dict) or body["geometry"].get("kind") != "imported_brep":
+            raise ValidationError("Section extraction requires an imported STEP B-rep body.")
+        axis = command.get("normal_axis")
+        if axis not in {"X", "Y", "Z"}:
+            raise ValidationError("normal_axis must be X, Y or Z.")
+        offset = _finite_number(command.get("offset"), "Section plane offset")
+        max_points = command.get("max_points", 2048)
+        if type(max_points) is not int or not 16 <= max_points <= 4096:
+            raise ValidationError("max_points must be an integer between 16 and 4096.")
+        name = command.get("name", f"Сечение {axis}={offset:g}")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Sketch name must be a non-empty string of at most 120 characters.")
+        if progress is not None:
+            progress({"phase": "extract_imported_section"})
+        profiles = self.kernel.extract_section_profile(
+            body["geometry"], normal_axis=axis, offset=offset, max_points=max_points,
+        )
+        sketches = []
+        sketch_plane = "XZ" if axis == "Y" else "XY"
+        for index, points in enumerate(profiles, start=1):
+            sketch_id = f"sketch:{uuid4()}"
+            sketch_name = name.strip() if len(profiles) == 1 else f"{name.strip()} · контур {index}"
+            sketch = {"id": sketch_id, "type": "sketch", "name": sketch_name,
+                      "plane": sketch_plane, "section_normal_axis": axis,
+                      "section_offset": offset, "section_profile_index": index - 1}
+            document.objects.append(sketch)
+            result = self._add_sketch_polyline(
+                document, {"sketch_id": sketch_id, "points": points, "closed": True},
+                operation="draw_extracted_section", progress=progress,
+            )
+            sketches.append({"sketch_id": sketch_id, "sample_count": len(points),
+                             "point_ids": result["point_ids"], "line_ids": result["line_ids"]})
+        return {"sketches": sketches, "body_id": body_id, "normal_axis": axis, "offset": offset}
 
     def _add_sketch_polyline(
         self,
@@ -2105,15 +2154,55 @@ class CommandSystem:
         return {"body_id": body_id, "feature_id": feature_id, "source_sketch_id": sketch_id,
                 "geometry": geometry}
 
+    def _loft_sketches(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch_ids = command.get("sketch_ids")
+        if (not isinstance(sketch_ids, list) or not 2 <= len(sketch_ids) <= 64
+                or any(not isinstance(value, str) for value in sketch_ids)
+                or len(set(sketch_ids)) != len(sketch_ids)):
+            raise ValidationError("Loft needs 2 to 64 unique sketch_ids in section order.")
+        name = command.get("name", "Loft")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Feature name must be a non-empty string of at most 120 characters.")
+        sections, offsets = [], []
+        for sketch_id in sketch_ids:
+            sketch = self._find_sketch(document, sketch_id)
+            if sketch.get("plane") != "XZ" or sketch.get("section_normal_axis") != "Y":
+                raise ValidationError("Loft sections must be XZ sketches extracted from Y-normal planes.")
+            if not isinstance(sketch.get("section_offset"), (int, float)):
+                raise ValidationError("Each loft sketch must retain its source section offset.")
+            _, profile = closed_profile(document.objects, sketch_id)
+            sections.append(profile)
+            offsets.append(float(sketch["section_offset"]))
+        if any(right <= left for left, right in zip(offsets, offsets[1:])):
+            raise ValidationError("Loft sketches must be ordered by strictly increasing section_offset.")
+        if progress is not None:
+            progress({"phase": "prepare_loft_sections"})
+            progress({"phase": "kernel_loft"})
+        geometry = self.kernel.create_lofted_profiles(sections, section_offsets=offsets)
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        parameters = {"section_sketch_ids": sketch_ids, "section_offsets": offsets}
+        document.objects.extend([
+            {"id": body_id, "type": "body", "name": name.strip(),
+             "feature_ids": [feature_id], "geometry": geometry},
+            {"id": feature_id, "type": "feature", "operation": "loft_sketches",
+             "body_id": body_id, "source_sketch_ids": sketch_ids,
+             "parameters": parameters, "geometry": geometry},
+        ])
+        return {"body_id": body_id, "feature_id": feature_id,
+                "source_sketch_ids": sketch_ids, "geometry": geometry}
+
     def _profile_geometry(
         self, document: Document, feature: dict[str, Any], parameters: dict[str, Any], *,
         profile: list[dict[str, float]] | None = None, plane: str | None = None,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         source_sketch_id = feature.get("source_sketch_id") or parameters.get("source_sketch_id")
-        if profile is None or plane is None:
-            plane, profile = closed_profile(document.objects, source_sketch_id)
         operation = feature.get("operation")
+        if operation != "loft_sketches" and (profile is None or plane is None):
+            plane, profile = closed_profile(document.objects, source_sketch_id)
         if operation == "extrude_sketch":
             if progress is not None:
                 progress({"phase": "kernel_extrusion"})
@@ -2127,6 +2216,20 @@ class CommandSystem:
             if plane != "XZ":
                 raise ValidationError("Revolution requires a sketch on the XZ plane.")
             return self.kernel.create_revolved_profile(profile, angle_degrees=parameters["angle_degrees"])
+        if operation == "loft_sketches":
+            sketch_ids = parameters.get("section_sketch_ids")
+            if (not isinstance(sketch_ids, list) or not 2 <= len(sketch_ids) <= 64
+                    or not isinstance(parameters.get("section_offsets"), list)):
+                raise ValidationError("Loft feature section references are invalid.")
+            sections, offsets = [], []
+            for sketch_id in sketch_ids:
+                sketch = next((item for item in document.objects if item.get("id") == sketch_id), None)
+                if sketch is None:
+                    raise ValidationError("Loft section sketch is missing.")
+                _, section = closed_profile(document.objects, sketch_id)
+                sections.append(section)
+                offsets.append(sketch.get("section_offset"))
+            return self.kernel.create_lofted_profiles(sections, section_offsets=offsets)
         raise ValidationError("Unsupported sketch feature operation.")
 
     def _replace_sketch_profile(
@@ -2235,8 +2338,11 @@ class CommandSystem:
         changed_bodies: set[str] = set()
         features = [item for item in document.objects if item.get("type") == "feature"]
         for feature in features:
-            if (feature.get("operation") not in {"extrude_sketch", "revolve_sketch", "sweep_sketch"}
-                    or feature.get("source_sketch_id") not in changed_sketches):
+            source_sketch_ids = feature.get("source_sketch_ids", [])
+            if feature.get("source_sketch_id"):
+                source_sketch_ids = [feature["source_sketch_id"]]
+            if (feature.get("operation") not in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches"}
+                    or not changed_sketches.intersection(source_sketch_ids)):
                 continue
             if progress is not None:
                 progress({"phase": "rebuild_features"})
@@ -2248,6 +2354,8 @@ class CommandSystem:
                 geometry = self.kernel.create_swept_pipe(
                     path, plane=plane, radius=feature["parameters"]["radius"],
                 )
+            elif feature.get("operation") == "loft_sketches":
+                geometry = self._profile_geometry(document, feature, feature["parameters"], progress=progress)
             else:
                 geometry = self._profile_geometry(document, feature, feature["parameters"], progress=progress)
             body["geometry"] = geometry
