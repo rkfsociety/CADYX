@@ -586,7 +586,7 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(events.get(timeout=1).event, "agent.dashboard")
             work_event = events.get(timeout=1)
             self.assertEqual((work_event.event, work_event.project_id, work_event.data),
-                             ("workspace.agent-work", None, {"active": False, "revision": 3}))
+                             ("workspace.agent-work", None, {"active": False, "revision": 3, "project_ids": []}))
         finally:
             self.core.events.unsubscribe(subscriber_id)
 

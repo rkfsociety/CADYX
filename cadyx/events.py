@@ -275,7 +275,8 @@ class EventBroker:
                     id=self._next_id,
                     event="workspace.agent-work",
                     project_id=None,
-                    data={"active": self._agent_work_active_locked(), "revision": work_revision},
+                    data={"active": self._agent_work_active_locked(), "revision": work_revision,
+                          "project_ids": self._agent_work_project_ids_locked()},
                     occurred_at=dashboard["updated_at"],
                 )
                 self._next_id += 1

@@ -222,6 +222,7 @@ const AGENT_WORK_LOCK_KEY = "cadyx.agent-work-lock";
 const savedAgentWorkLock = readSavedAgentWorkLock();
 let agentWorkActive = savedAgentWorkLock.active;
 let agentWorkRevision = savedAgentWorkLock.revision;
+let agentWorkProjectIds = savedAgentWorkLock.projectIds;
 let agentWorkStatusConnected = false;
 const FOLDER_SELECTION_PREFIX = "folder:";
 const initialAddress = new URLSearchParams(window.location.search);
@@ -243,25 +244,35 @@ function readSavedAgentWorkLock() {
   try {
     const saved = JSON.parse(localStorage.getItem(AGENT_WORK_LOCK_KEY) || "null");
     if (saved && typeof saved.active === "boolean" && Number.isInteger(saved.revision) && saved.revision >= 0) {
-      return saved;
+      return {
+        ...saved,
+        projectIds: Array.isArray(saved.projectIds) ? saved.projectIds.filter((id) => typeof id === "string") : [],
+      };
     }
   } catch { /* A fresh lock state is safe before the API snapshot arrives. */ }
-  return { active: false, revision: 0 };
+  return { active: false, revision: 0, projectIds: [] };
 }
 
-function applyAgentWorkLock(active, revision) {
+function applyAgentWorkLock(active, revision, projectIds = null) {
   if (typeof active !== "boolean" || !Number.isInteger(revision) || revision < agentWorkRevision) return;
   if (active) {
     agentWorkActive = true;
     agentWorkRevision = revision;
+    if (Array.isArray(projectIds)) {
+      agentWorkProjectIds = projectIds.filter((id) => typeof id === "string");
+    } else if (!agentWorkProjectIds.length) {
+      agentWorkProjectIds = [];
+    }
   } else if (!agentWorkActive || revision > agentWorkRevision) {
     agentWorkActive = false;
     agentWorkRevision = revision;
+    agentWorkProjectIds = [];
   }
   try {
     localStorage.setItem(AGENT_WORK_LOCK_KEY, JSON.stringify({
       active: agentWorkActive,
       revision: agentWorkRevision,
+      projectIds: agentWorkProjectIds,
     }));
   } catch { /* The server snapshot remains authoritative when browser storage is unavailable. */ }
 }
@@ -280,8 +291,10 @@ function lockAvailabilityKey(lock) {
 
 function workspaceControlLockReason() {
   if (!projectAddressPinned) return null;
-  if (agentWorkActive) return "ИИ-АГЕНТ РАБОТАЕТ · ВСЯ ПАНЕЛЬ ЗАБЛОКИРОВАНА ДО ПОЛНОЙ ПРОВЕРКИ МОДЕЛЕЙ";
   if (!agentWorkStatusConnected) return "ГЛОБАЛЬНОЕ СОСТОЯНИЕ РАБОТЫ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
+  if (agentWorkActive && (!selectedProjectId || !agentWorkProjectIds.length || agentWorkProjectIds.includes(selectedProjectId))) {
+    return "ИИ-АГЕНТ РАБОТАЕТ С ЭТОЙ МОДЕЛЬЮ · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
+  }
   if (!workspaceAvailabilityConnected) return "СОСТОЯНИЕ ПАНЕЛИ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
   if (!selectedProjectId || getSelectedFolder()) return null;
   const lock = agentLocksByProject.get(selectedProjectId);
@@ -1158,7 +1171,7 @@ async function checkAutomaticUpdates() {
     setApiConnectionStatus(true);
     if (selectionAtRequest !== selectedProjectId) return;
     if (typeof current.agent_work_active === "boolean" && Number.isInteger(current.agent_work_revision)) {
-      applyAgentWorkLock(current.agent_work_active, current.agent_work_revision);
+      applyAgentWorkLock(current.agent_work_active, current.agent_work_revision, current.agent_work_active_project_ids);
       agentWorkStatusConnected = true;
     }
     workspaceAvailabilityConnected = true;
@@ -1691,7 +1704,7 @@ function handleStreamEvent(type, event) {
   const projectId = event.project_id;
   if (type === "workspace.agent-work") {
     const data = event.data || {};
-    applyAgentWorkLock(data.active, data.revision);
+    applyAgentWorkLock(data.active, data.revision, data.project_ids);
     agentWorkStatusConnected = true;
     updateWorkspaceControls();
     return;
