@@ -160,6 +160,19 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual(len(arc["lines"]), 32 * 2)
         self.assertEqual(arc["lines"][-2:], [31, 32])
 
+    def test_spline_scene_renders_a_smooth_open_curve_through_its_points(self):
+        sketch = self.command({"type": "create_sketch", "plane": "XZ"})["sketch_id"]
+        result = self.command({"type": "add_sketch_spline", "sketch_id": sketch,
+                               "points": [{"x": 0, "y": 1}, {"x": 2, "y": 4},
+                                          {"x": 5, "y": 2}]})
+        scene = self.core.render_project(self.project)
+        spline = next(item for item in scene["objects"] if item["object_id"] == result["spline_id"])
+        self.assertEqual(len(spline["positions"]), (2 * 24 + 1) * 3)
+        self.assertEqual(len(spline["lines"]), 2 * 24 * 2)
+        self.assertEqual(spline["positions"][:3], [0, 0, 1])
+        self.assertEqual(spline["positions"][24 * 3:24 * 3 + 3], [2, 0, 4])
+        self.assertEqual(spline["positions"][-3:], [5, 0, 2])
+
     def test_unrenderable_sketch_is_rejected_without_changing_document(self):
         sketch = self.command({"type": "create_sketch"})["sketch_id"]
         center = self.command({"type": "add_sketch_element", "sketch_id": sketch,

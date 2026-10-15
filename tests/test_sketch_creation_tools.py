@@ -270,6 +270,36 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
         self.assertAlmostEqual(clone["start_angle_radians"], -math.radians(20))
         self.assertAlmostEqual(clone["sweep_radians"], -math.radians(100))
 
+    def test_spline_interpolates_every_supplied_point(self) -> None:
+        points = [{"x": 0, "y": 0}, {"x": 2, "y": 3}, {"x": 5, "y": -1}, {"x": 8, "y": 2}]
+        result = self.command({"type": "add_sketch_spline", "sketch_id": self.sketch_id,
+                               "points": points})
+        objects = self.objects()
+        spline = objects[result["spline_id"]]
+        self.assertEqual(spline["point_ids"], result["point_ids"])
+        self.assertEqual([(objects[point_id]["x"], objects[point_id]["y"])
+                          for point_id in spline["point_ids"]],
+                         [(point["x"], point["y"]) for point in points])
+        before = len(objects)
+        for invalid in (points[:2], [points[0], points[0], points[2]]):
+            with self.assertRaises(ValidationError):
+                self.command({"type": "add_sketch_spline", "sketch_id": self.sketch_id,
+                              "points": invalid})
+        self.assertEqual(len(self.objects()), before)
+
+    def test_spline_geometry_dependencies_copy_with_mirror(self) -> None:
+        source = self.command({"type": "add_sketch_spline", "sketch_id": self.sketch_id,
+                               "points": [{"x": 1, "y": 1}, {"x": 3, "y": 4},
+                                          {"x": 5, "y": 2}]})
+        result = self.command({"type": "mirror_sketch_elements", "sketch_id": self.sketch_id,
+                               "object_ids": [source["spline_id"]],
+                               "axis_start": {"x": 0, "y": 0}, "axis_end": {"x": 1, "y": 0}})
+        objects = self.objects()
+        clone = objects[result["spline_ids"][0]]
+        self.assertEqual(len(clone["point_ids"]), 3)
+        self.assertTrue(all(point_id in objects for point_id in clone["point_ids"]))
+        self.assertEqual([objects[point_id]["y"] for point_id in clone["point_ids"]], [-1, -4, -2])
+
     def test_circle_tangent_to_line_at_point(self) -> None:
         line = self.line_tool("add_sketch_line", start={"x": 0, "y": 0}, end={"x": 10, "y": 0})
         result = self.command({"type": "add_sketch_circle_tangent_to_line", "sketch_id": self.sketch_id,

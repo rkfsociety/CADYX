@@ -200,6 +200,8 @@ class CommandSystem:
             return self._add_sketch_ellipse(document, command, kind, progress=progress)
         if kind == "add_sketch_elliptical_arc":
             return self._add_sketch_elliptical_arc(document, command, progress=progress)
+        if kind == "add_sketch_spline":
+            return self._add_sketch_spline(document, command, progress=progress)
         if kind in {"add_sketch_circle_diameter", "add_sketch_circle_two_points", "add_sketch_circle_three_points"}:
             return self._add_sketch_circle_tool(document, command, kind, progress=progress)
         if kind == "add_sketch_circle_tangent_to_line":
@@ -267,7 +269,7 @@ class CommandSystem:
         if kind == "remove_sketch_object":
             object_id = command.get("object_id")
             item = next((item for item in document.objects if item["id"] == object_id), None)
-            if item is None or item["type"] not in {"sketch", "point", "line", "circle", "constraint"}:
+            if item is None or item["type"] not in {"sketch", "point", "line", "circle", "spline", "constraint"}:
                 raise NotFoundError("Sketch object was not found.")
             if item["type"] == "sketch" and any(
                 feature.get("type") == "feature" and feature.get("source_sketch_id") == object_id
@@ -627,6 +629,42 @@ class CommandSystem:
                 "ellipse_ids": [ellipse_id], "point_ids": [start_id, end_id],
                 "start": {"x": start[0], "y": start[1]},
                 "end": {"x": end[0], "y": end[1]}, "sweep_radians": sweep}
+
+    def _add_sketch_spline(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        coordinates = command.get("points")
+        if not isinstance(coordinates, list) or not 3 <= len(coordinates) <= 128:
+            raise ValidationError("An interpolating spline needs 3 to 128 points.")
+        construction = command.get("construction", False)
+        if type(construction) is not bool:
+            raise ValidationError("Spline construction flag must be a boolean.")
+        points = [self._coordinate_pair(point, "Spline point") for point in coordinates]
+        if any(math.hypot(right[0] - left[0], right[1] - left[1]) <= 1e-7
+               for left, right in zip(points, points[1:])):
+            raise ValidationError("Adjacent spline points must be distinct.")
+
+        point_ids = [f"point:{uuid4()}" for _ in points]
+        spline_id = f"spline:{uuid4()}"
+        additions = [
+            {"id": point_id, "type": "point", "sketch_id": sketch["id"],
+             "x": point[0], "y": point[1], "construction": construction}
+            for point_id, point in zip(point_ids, points)
+        ]
+        additions.append({"id": spline_id, "type": "spline", "sketch_id": sketch["id"],
+                          "point_ids": point_ids, "construction": construction})
+        insert_at = document.objects.index(sketch) + 1
+        document.objects[insert_at:insert_at] = additions
+        self._rebuild_changed_features(document, {sketch["id"]}, progress=progress)
+        if progress is not None:
+            progress({"phase": "add_sketch_spline"})
+        return {"sketch_id": sketch["id"], "spline_id": spline_id,
+                "point_ids": point_ids, "point_count": len(point_ids), "closed": False}
 
     def _add_sketch_circle(
         self,
@@ -1206,8 +1244,8 @@ class CommandSystem:
         while pending:
             object_id = pending.pop()
             item = by_id.get(object_id)
-            if item is None or item.get("sketch_id") != sketch_id or item.get("type") not in {"point", "line", "circle", "ellipse"}:
-                raise ValidationError("Selected objects must be point, line, circle, or ellipse geometry from the same sketch.")
+            if item is None or item.get("sketch_id") != sketch_id or item.get("type") not in {"point", "line", "circle", "ellipse", "spline"}:
+                raise ValidationError("Selected objects must be point, line, circle, ellipse, or spline geometry from the same sketch.")
             if object_id in included:
                 continue
             included.add(object_id)
@@ -1221,6 +1259,8 @@ class CommandSystem:
                     pending.extend((item["start_id"], item["end_id"]))
             elif item["type"] == "ellipse" and "sweep_radians" in item:
                 pending.extend((item["start_id"], item["end_id"]))
+            elif item["type"] == "spline":
+                pending.extend(item["point_ids"])
         return [item for item in document.objects if item.get("id") in included]
 
     def _copy_sketch_geometry(
@@ -1245,6 +1285,8 @@ class CommandSystem:
                         raise ValidationError("Transformed sketch coordinates must be finite.")
                 elif item["type"] == "line":
                     clone["start_id"], clone["end_id"] = id_map[item["start_id"]], id_map[item["end_id"]]
+                elif item["type"] == "spline":
+                    clone["point_ids"] = [id_map[point_id] for point_id in item["point_ids"]]
                 elif item["type"] == "circle":
                     clone["center_id"] = id_map[item["center_id"]]
                     if "sweep_radians" in item:
@@ -1285,6 +1327,7 @@ class CommandSystem:
             "line_ids": [item["id"] for item in copies if item["type"] == "line"],
             "circle_ids": [item["id"] for item in copies if item["type"] == "circle"],
             "ellipse_ids": [item["id"] for item in copies if item["type"] == "ellipse"],
+            "spline_ids": [item["id"] for item in copies if item["type"] == "spline"],
             "instance_count": len(transforms) + 1,
         }
 

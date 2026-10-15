@@ -56,7 +56,7 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertGreater(handle["geometry"]["volume"], 0)
 
         document = self.core.inspect_project(self.project_id)["document"]
-        self.assertEqual(document["version"], 6)
+        self.assertEqual(document["version"], 7)
         self.assertEqual(Document.from_dict(document).to_dict(), document)
         features = [item for item in document["objects"] if item["type"] == "feature"]
         self.assertEqual([item["operation"] for item in features], ["revolve_sketch", "extrude_sketch"])
@@ -110,6 +110,31 @@ class ProfileFeatureTests(unittest.TestCase):
         self.command({"type": "add_sketch_element", "sketch_id": sketch, "element_type": "line",
                       "start_id": center, "end_id": start_id})
         result = self.command({"type": "extrude_sketch", "sketch_id": sketch, "depth": 2})
+        self.assertGreater(result["geometry"]["volume"], 0)
+        self.assertIsNone(self.core.kernel.validate(result["geometry"]))
+
+    def test_interpolating_spline_closes_with_lines_and_extrudes(self) -> None:
+        sketch = self.command({"type": "create_sketch", "name": "Профиль со сплайном",
+                               "plane": "XY"})["sketch_id"]
+        spline = self.command({"type": "add_sketch_spline", "sketch_id": sketch,
+                               "points": [{"x": 0, "y": 0}, {"x": 2, "y": -1},
+                                          {"x": 4, "y": 0}]})
+        start_id, end_id = spline["point_ids"][0], spline["point_ids"][-1]
+        top = self.command({"type": "add_sketch_point", "sketch_id": sketch, "x": 2, "y": 3})["point_id"]
+        self.command({"type": "add_sketch_element", "sketch_id": sketch, "element_type": "line",
+                      "start_id": end_id, "end_id": top})
+        self.command({"type": "add_sketch_element", "sketch_id": sketch, "element_type": "line",
+                      "start_id": top, "end_id": start_id})
+        result = self.command({"type": "extrude_sketch", "sketch_id": sketch, "depth": 2})
+        self.assertGreater(result["geometry"]["volume"], 0)
+        self.assertIsNone(self.core.kernel.validate(result["geometry"]))
+
+    def test_interpolating_spline_is_a_sweep_path(self) -> None:
+        sketch = self.command({"type": "create_sketch", "name": "Сплайновая траектория",
+                               "plane": "XY"})["sketch_id"]
+        self.command({"type": "add_sketch_spline", "sketch_id": sketch,
+                      "points": [{"x": 0, "y": 0}, {"x": 4, "y": 3}, {"x": 8, "y": 0}]})
+        result = self.command({"type": "sweep_sketch", "sketch_id": sketch, "radius": 0.5})
         self.assertGreater(result["geometry"]["volume"], 0)
         self.assertIsNone(self.core.kernel.validate(result["geometry"]))
 

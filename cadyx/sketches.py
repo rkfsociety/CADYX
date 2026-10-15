@@ -33,6 +33,44 @@ def number(value: Any) -> float:
     return result
 
 
+def spline_sample_points(item: dict[str, Any], by_id: dict[str, dict[str, Any]],
+                        samples_per_span: int = 24) -> list[dict[str, float]]:
+    """Sample an open centripetal Catmull-Rom spline that interpolates every point."""
+    points = [(number(by_id[point_id]["x"]), number(by_id[point_id]["y"]))
+              for point_id in item["point_ids"]]
+    result = [dict(x=points[0][0], y=points[0][1])]
+
+    def mix(a: tuple[float, float], b: tuple[float, float], ratio: float) -> tuple[float, float]:
+        return a[0] + (b[0] - a[0]) * ratio, a[1] + (b[1] - a[1]) * ratio
+
+    def interval(a: tuple[float, float], b: tuple[float, float]) -> float:
+        value = math.sqrt(math.hypot(b[0] - a[0], b[1] - a[1]))
+        if not math.isfinite(value) or value <= 1e-12:
+            raise ValidationError("Spline points must be distinct and numerically stable.")
+        return value
+
+    for index in range(len(points) - 1):
+        p1, p2 = points[index], points[index + 1]
+        p0 = points[index - 1] if index else (2 * p1[0] - p2[0], 2 * p1[1] - p2[1])
+        p3 = points[index + 2] if index + 2 < len(points) else (2 * p2[0] - p1[0], 2 * p2[1] - p1[1])
+        t0 = 0.0
+        t1 = t0 + interval(p0, p1)
+        t2 = t1 + interval(p1, p2)
+        t3 = t2 + interval(p2, p3)
+        for step in range(1, samples_per_span + 1):
+            t = t1 + (t2 - t1) * step / samples_per_span
+            a1 = mix(p0, p1, (t - t0) / (t1 - t0))
+            a2 = mix(p1, p2, (t - t1) / (t2 - t1))
+            a3 = mix(p2, p3, (t - t2) / (t3 - t2))
+            b1 = mix(a1, a2, (t - t0) / (t2 - t0))
+            b2 = mix(a2, a3, (t - t1) / (t3 - t1))
+            sampled = mix(b1, b2, (t - t1) / (t2 - t1))
+            if not all(math.isfinite(value) for value in sampled):
+                raise ValidationError("Spline interpolation must remain finite.")
+            result.append({"x": sampled[0], "y": sampled[1]})
+    return result
+
+
 def validate_sketches(objects: list[dict[str, Any]]) -> None:
     by_id = {item["id"]: item for item in objects}
 
@@ -51,7 +89,7 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
 
     for item in objects:
         kind = item.get("type")
-        if kind not in {"sketch", "point", "line", "circle", "ellipse", "constraint"}:
+        if kind not in {"sketch", "point", "line", "circle", "ellipse", "spline", "constraint"}:
             continue
         typed_id(item["id"], kind)
         if kind == "sketch":
@@ -138,6 +176,20 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
                     expected_y = number(item["center_y"]) + local_x * sine + local_y * cosine
                     if not close(number(point["x"]), expected_x) or not close(number(point["y"]), expected_y):
                         raise ValidationError("Elliptical arc endpoints must lie on its analytic curve.")
+        elif kind == "spline":
+            point_ids = item.get("point_ids")
+            if (not isinstance(point_ids, list) or not 3 <= len(point_ids) <= 128
+                    or any(not isinstance(point_id, str) for point_id in point_ids)
+                    or len(set(point_ids)) != len(point_ids)):
+                raise ValidationError("An interpolating spline needs 3 to 128 unique point references.")
+            points = [reference(point_id, "point", sketch_id) for point_id in point_ids]
+            if any(math.hypot(number(right["x"]) - number(left["x"]),
+                              number(right["y"]) - number(left["y"])) <= 1e-7
+                   for left, right in zip(points, points[1:])):
+                raise ValidationError("Adjacent spline points must be distinct.")
+            if "construction" in item and type(item["construction"]) is not bool:
+                raise ValidationError("Spline construction flag must be a boolean.")
+            spline_sample_points(item, by_id)
 
     # Geometry has been checked before constraints, regardless of storage order.
     for item in objects:
@@ -194,8 +246,10 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
     circles = [item for item in circles if "sweep_radians" not in item]
     ellipse_arcs = [item for item in ellipse_objects if "sweep_radians" in item]
     ellipses = [item for item in ellipse_objects if "sweep_radians" not in item]
+    splines = [item for item in owned if item.get("type") == "spline"
+               and not item.get("construction", False)]
 
-    if not lines and not arcs:
+    if not lines and not arcs and not splines:
         if ellipse_arcs:
             raise ValidationError("An elliptical arc must be combined with other edges to form a closed profile.")
         if ellipses:
@@ -221,25 +275,33 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
              "y": number(center["y"]) + radius * math.sin(math.tau * index / 128)}
             for index in range(128)
         ]
-    edges = lines + arcs + ellipse_arcs
+    edges = lines + arcs + ellipse_arcs + splines
     if circles or ellipses or len(edges) < 3 or len(edges) > 4096:
         raise ValidationError("A profile operation needs one closed line/arc loop with 3 to 4096 edges.")
 
     by_id = {item["id"]: item for item in objects}
     adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for edge in edges:
-        adjacency[edge["start_id"]].append(edge)
-        adjacency[edge["end_id"]].append(edge)
+        start_id, end_id = ((edge["point_ids"][0], edge["point_ids"][-1]) if edge["type"] == "spline"
+                            else (edge["start_id"], edge["end_id"]))
+        adjacency[start_id].append(edge)
+        adjacency[end_id].append(edge)
     if any(len(edges) != 2 for edges in adjacency.values()):
         raise ValidationError("Profile lines must form one closed loop without branches.")
 
     first = edges[0]
-    start_id = first["start_id"]
+    start_id = first["point_ids"][0] if first["type"] == "spline" else first["start_id"]
     used = {first["id"]}
     start_point = by_id[start_id]
     profile = [{"x": number(start_point["x"]), "y": number(start_point["y"])}]
 
     def append_edge(edge: dict[str, Any], from_id: str, to_id: str) -> None:
+        if edge["type"] == "spline":
+            sampled = spline_sample_points(edge, by_id)
+            if from_id != edge["point_ids"][0]:
+                sampled.reverse()
+            profile.extend(sampled[1:])
+            return
         if edge["type"] == "line":
             point = by_id[to_id]
             profile.append({"x": number(point["x"]), "y": number(point["y"])})
@@ -272,7 +334,7 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
             profile.append({"x": number(edge["center_x"]) + local_x * cosine - local_y * sine,
                             "y": number(edge["center_y"]) + local_x * sine + local_y * cosine})
 
-    current_id = first["end_id"]
+    current_id = first["point_ids"][-1] if first["type"] == "spline" else first["end_id"]
     append_edge(first, start_id, current_id)
     while current_id != start_id:
         if len(used) >= len(edges):
@@ -282,7 +344,10 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
             raise ValidationError("Profile lines must form one closed loop without branches.")
         next_edge = next_edges[0]
         used.add(next_edge["id"])
-        next_id = next_edge["end_id"] if next_edge["start_id"] == current_id else next_edge["start_id"]
+        next_start, next_end = ((next_edge["point_ids"][0], next_edge["point_ids"][-1])
+                                if next_edge["type"] == "spline"
+                                else (next_edge["start_id"], next_edge["end_id"]))
+        next_id = next_end if next_start == current_id else next_start
         append_edge(next_edge, current_id, next_id)
         current_id = next_id
     if len(used) != len(edges):
@@ -299,17 +364,29 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
 
 
 def open_path(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[dict[str, float]]]:
-    """Return the ordered vertices of one connected, non-branching open line chain."""
+    """Return sampled vertices from one interpolating spline or open line chain."""
     sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
     if sketch is None:
         raise ValidationError("A sweep operation needs an existing sketch.")
     owned = [item for item in objects if item.get("sketch_id") == sketch_id]
     lines = [item for item in owned if item.get("type") == "line"
              and not item.get("construction", False) and item.get("extent", "segment") == "segment"]
-    if not 2 <= len(lines) <= 511 or any(item.get("type") not in {"point", "line"} for item in owned):
+    splines = [item for item in owned if item.get("type") == "spline"
+               and not item.get("construction", False)]
+    if any(item.get("type") not in {"point", "line", "spline"} for item in owned):
         raise ValidationError("A sweep path needs 3 to 512 points and no other sketch geometry.")
 
     by_id = {item["id"]: item for item in objects}
+    point_ids = {item["id"] for item in owned
+                 if item.get("type") == "point" and not item.get("construction", False)}
+    if not lines and len(splines) == 1:
+        spline = splines[0]
+        if point_ids != set(spline["point_ids"]):
+            raise ValidationError("Every point in a spline sweep sketch must belong to its spline.")
+        return sketch["plane"], spline_sample_points(spline, by_id, samples_per_span=4)
+    if len(splines) or not 2 <= len(lines) <= 511:
+        raise ValidationError("A sweep path needs one open spline or a line chain with 3 to 512 points.")
+
     adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for line in lines:
         adjacency[line["start_id"]].append(line)
@@ -317,8 +394,6 @@ def open_path(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[
     endpoints = [point_id for point_id, edges in adjacency.items() if len(edges) == 1]
     if len(endpoints) != 2 or any(len(edges) not in {1, 2} for edges in adjacency.values()):
         raise ValidationError("A sweep path must be one open line chain without branches or loops.")
-    point_ids = {item["id"] for item in owned
-                 if item.get("type") == "point" and not item.get("construction", False)}
     if set(adjacency) != point_ids:
         raise ValidationError("Every point in a sweep sketch must belong to its open line chain.")
 

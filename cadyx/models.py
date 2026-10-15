@@ -79,7 +79,7 @@ class Document:
             if object_id in seen:
                 raise ValidationError(f"Duplicate document object id: {object_id}.")
             kind = item.get("type")
-            if not isinstance(kind, str) or kind not in {"body", "feature", "sketch", "point", "line", "circle", "ellipse", "constraint"}:
+            if not isinstance(kind, str) or kind not in {"body", "feature", "sketch", "point", "line", "circle", "ellipse", "spline", "constraint"}:
                 raise ValidationError("Unsupported document object type.")
             typed_id(object_id, kind)
             seen.add(object_id)

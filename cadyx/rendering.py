@@ -8,6 +8,7 @@ from array import array
 from .kernel import GeometryKernel
 from .models import Document
 from .errors import ValidationError
+from .sketches import spline_sample_points
 
 
 def render_scene(document: Document, kernel: GeometryKernel) -> dict:
@@ -42,7 +43,7 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         kind = item["type"]
         if kind == "body" and item["id"] in consumed_bodies:
             continue
-        if kind in {"point", "line", "circle", "ellipse"} and item.get("sketch_id") in feature_sketches:
+        if kind in {"point", "line", "circle", "ellipse", "spline"} and item.get("sketch_id") in feature_sketches:
             continue
         positions, triangles, lines, points = [], [], [], []
         if kind == "body" and item.get("geometry") is not None:
@@ -83,6 +84,11 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
                 positions.extend(sketch_position(item["sketch_id"], x, y))
             for index in range(steps):
                 lines.extend([index, index + 1 if is_arc else (index + 1) % steps])
+        elif kind == "spline":
+            sampled = spline_sample_points(item, by_id)
+            for point in sampled:
+                positions.extend(sketch_position(item["sketch_id"], point["x"], point["y"]))
+            lines = [index for step in range(len(sampled) - 1) for index in (step, step + 1)]
         else:
             continue
         for offset in range(0, len(positions), 3):
@@ -98,7 +104,7 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         scene_item = {"object_id": item["id"], "type": kind,
                       "positions": positions, "triangles": triangles,
                       "lines": lines, "points": points}
-        if kind in {"point", "line"}:
+        if kind in {"point", "line", "spline"}:
             scene_item["construction"] = item.get("construction", False)
         if kind == "line":
             scene_item["line_modes"] = [item.get("extent", "segment")]

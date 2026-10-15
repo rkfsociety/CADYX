@@ -357,7 +357,7 @@ class SketchDocumentTests(unittest.TestCase):
         path.write_text(json.dumps(legacy))
         before = path.read_bytes()
         inspected = self.core.inspect_project(project)
-        self.assertEqual(inspected["document"]["version"], 6)
+        self.assertEqual(inspected["document"]["version"], 7)
         self.assertEqual(inspected["document"]["objects"], legacy["document"]["objects"])
         self.assertEqual(inspected["history"], legacy["history"])
         self.assertEqual(path.read_bytes(), before)
@@ -367,7 +367,7 @@ class SketchDocumentTests(unittest.TestCase):
         feature = box["history_entry"]["result"]["feature_id"]
         self.core.execute_command(project, lease, {"type": "set_parameter", "feature_id": feature, "name": "width", "value": 5})
         persisted = json.loads(path.read_text())
-        self.assertEqual(persisted["document"]["version"], 6)
+        self.assertEqual(persisted["document"]["version"], 7)
         self.assertEqual(persisted["history"][0], legacy["history"][0])
         self.assertEqual(persisted["document"]["objects"][1]["id"], feature)
 

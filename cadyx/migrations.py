@@ -10,7 +10,7 @@ from typing import Any, Callable
 from .errors import ValidationError
 
 PROJECT_VERSION = 1
-DOCUMENT_VERSION = 6
+DOCUMENT_VERSION = 7
 
 
 def _document_v1_to_v2(value: dict[str, Any]) -> None:
@@ -56,9 +56,17 @@ def _document_v5_to_v6(value: dict[str, Any]) -> None:
     value["version"] = 6
 
 
+def _document_v6_to_v7(value: dict[str, Any]) -> None:
+    objects = value.get("objects")
+    if not isinstance(objects, list) or any(not isinstance(item, dict) for item in objects):
+        raise ValidationError("Document objects must be a list of objects.")
+    # v7 adds point-interpolating spline sketch objects without changing legacy geometry.
+    value["version"] = 7
+
+
 _DOCUMENT_STEPS = {1: _document_v1_to_v2, 2: _document_v2_to_v3,
                    3: _document_v3_to_v4, 4: _document_v4_to_v5,
-                   5: _document_v5_to_v6}
+                   5: _document_v5_to_v6, 6: _document_v6_to_v7}
 _PROJECT_STEPS: dict[int, Callable[[dict[str, Any]], None]] = {}
 
 
