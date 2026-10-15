@@ -69,6 +69,35 @@ class ProjectWorkspace:
         self._remember_project_path(project_id, project_dir)
         return project
 
+    def rename(self, project_id: str, name: str) -> dict[str, Any]:
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Project name must be a non-empty string of at most 120 characters.")
+        project = self.load(project_id)
+        source = self._project_dir(project_id)
+        base_name = self._safe_project_directory_name(name.strip())
+        target = self._unique_project_directory_path(base_name, exclude=source)
+        project["name"] = name.strip()
+        project["modified_at"] = utc_now()
+        try:
+            source.rename(target)
+            self._write_atomic(target / "project.json", project)
+        except OSError as exc:
+            if target.exists() and not source.exists():
+                try:
+                    target.rename(source)
+                except OSError as rollback_error:
+                    raise ConflictError(
+                        f"Project folder rename failed and rollback needs recovery: {rollback_error}.",
+                        code="PROJECT_RENAME_RECOVERY_REQUIRED",
+                    ) from exc
+            raise ValidationError(f"Project folder could not be renamed: {exc}.") from exc
+        except Exception:
+            if target.exists() and not source.exists():
+                target.rename(source)
+            raise
+        self._remember_project_path(project_id, target)
+        return project
+
     @staticmethod
     def _new_project_record(project_id: str, name: str) -> dict[str, Any]:
         now = utc_now()
@@ -528,16 +557,8 @@ class ProjectWorkspace:
         )
 
     def _create_project_directory(self, name: str, project_id: str) -> Path:
-        base_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", name.strip())
-        base_name = re.sub(r"\s+", " ", base_name).strip(" .")[:80].rstrip(" .")
-        if not base_name:
-            base_name = "CADYX project"
-        if base_name.split(".", maxsplit=1)[0].upper() in _WINDOWS_RESERVED_NAMES:
-            base_name = f"_{base_name}"
-
-        for suffix in range(1, 10_000):
-            candidate = base_name if suffix == 1 else f"{base_name[:72].rstrip(' .')} ({suffix})"
-            directory = self.root / candidate
+        base_name = self._safe_project_directory_name(name)
+        for directory in self._unique_project_directory_paths(base_name):
             try:
                 directory.mkdir()
                 marker = directory / ".cadyx-project-id"
@@ -549,6 +570,31 @@ class ProjectWorkspace:
             except FileExistsError:
                 continue
         raise ConflictError("A unique project folder name could not be allocated.", code="PROJECT_FOLDER_CONFLICT")
+
+    @staticmethod
+    def _safe_project_directory_name(name: str) -> str:
+        base_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", name.strip())
+        base_name = re.sub(r"\s+", " ", base_name).strip(" .")[:80].rstrip(" .")
+        if not base_name:
+            base_name = "CADYX project"
+        if base_name.split(".", maxsplit=1)[0].upper() in _WINDOWS_RESERVED_NAMES:
+            base_name = f"_{base_name}"
+        return base_name
+
+    def _unique_project_directory_paths(self, base_name: str, *, exclude: Path | None = None):
+        for suffix in range(1, 10_000):
+            candidate = base_name if suffix == 1 else f"{base_name[:72].rstrip(' .')} ({suffix})"
+            directory = self.root / candidate
+            if directory == exclude:
+                continue
+            if not directory.exists() and not directory.is_symlink():
+                yield directory
+
+    def _unique_project_directory_path(self, base_name: str, *, exclude: Path | None = None) -> Path:
+        try:
+            return next(self._unique_project_directory_paths(base_name, exclude=exclude))
+        except StopIteration as exc:
+            raise ConflictError("A unique project folder name could not be allocated.", code="PROJECT_FOLDER_CONFLICT") from exc
 
     @staticmethod
     def _is_single_path_segment(value: str) -> bool:

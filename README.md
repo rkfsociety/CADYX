@@ -50,13 +50,13 @@ Use `-Action Status`, `-Action Stop`, or `-Action Uninstall` to manage the task.
 
 The repository root [`AGENTS.md`](AGENTS.md) points Codex to the project rules and the repository skill at `.agents/skills/cadyx-operator/SKILL.md`. The skill uses the local stdlib MCP adapter, which calls only CADYX's existing HTTP Agent API and exposes no shell, arbitrary HTTP, or model-file write tools.
 
-After setting up the runtime and starting the local host, open this trusted checkout in Codex. The repository-scoped [`.codex/config.toml`](.codex/config.toml) registers the adapter without changing your user-wide MCP configuration. If the checkout is moved, update its `cwd` in that file. To check the MCP registration from this directory:
+After setting up the runtime and starting the local host, open this trusted checkout in Codex. The repository-scoped [`.codex/config.toml`](.codex/config.toml) registers the adapter without changing your user-wide MCP configuration. Its approval setting is scoped to the CADYX server so its Agent API tools remain callable under non-interactive Codex policies; the adapter exposes no shell, generic HTTP, or direct model-file write tool. If the checkout is moved, update its `cwd` in that file. To check the MCP registration from this directory:
 
 ```powershell
 codex mcp list
 ```
 
-The project config launches the adapter with the Python runtime available on `PATH`. If CADYX authentication is enabled, provide `CADYX_API_TOKEN_FILE` as an MCP environment value pointing to the same protected token file used by the host. The adapter reads the token from the file and never writes it to logs or Git. `CADYX_API_TOKEN` may be supplied through the process environment instead; do not put token values in command arguments or repository configuration. Restart Codex's MCP servers or open a fresh conversation after first enabling the project config so it discovers the tools.
+The project config launches the adapter with the Python runtime available on `PATH` and forces Python UTF-8 mode so Russian and other Unicode names survive Windows MCP stdio transport. If CADYX authentication is enabled, provide `CADYX_API_TOKEN_FILE` as an MCP environment value pointing to the same protected token file used by the host. The adapter reads the token from the file and never writes it to logs or Git. `CADYX_API_TOKEN` may be supplied through the process environment instead; do not put token values in command arguments or repository configuration. Restart Codex's MCP servers or open a fresh conversation after first enabling the project config so it discovers the tools.
 
 `GET /api/v1/agent/capabilities` is a read-only route/command guide. Command parameter lists are advisory; existing Command System validators and the linked model contracts remain authoritative. MCP PNG tools return image content for visual inspection. Long operations can be fenced through `cadyx_stop_agent_work`; the stop waits for an admitted atomic command and validates the committed state.
 
@@ -90,7 +90,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - `POST /api/v1/projects/{id}/leases` with `owner_type` and `owner_id`
 - `POST /api/v1/projects/{id}/commands` with a human `lease_id` and a command
 - Agent equivalents under `/api/v1/agent/projects`
-- `extrude_sketch`, `revolve_sketch`, `sweep_sketch`, `fuse_bodies`, and `fillet_edges` commands for editable OCCT solids; see the [feature contract](.codex/docs/document-model-v3.md#sketch-driven-solid-features)
+- `extrude_sketch`, `revolve_sketch`, `sweep_sketch`, `fuse_bodies`, `cut_bodies`, and `fillet_edges` commands for editable OCCT solids; see the [feature contract](.codex/docs/document-model-v3.md#sketch-driven-solid-features)
 - `import_step` to preserve a single-solid STEP model as an OCCT B-rep; see the [STEP import contract](.codex/docs/document-model-v3.md#step-import-and-editable-b-reps)
 - `export_brep` to validate and atomically publish a revision-bound STEP file, optional STL, and verification manifest; see the [CAD delivery contract](.codex/docs/document-model-v3.md#verified-cad-delivery)
 - `resize_imported_thread` and `transform_imported_brep` to modify and align imported OCCT B-reps; see the [imported B-rep feature contract](.codex/docs/document-model-v3.md#step-import-and-editable-b-reps)

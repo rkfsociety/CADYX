@@ -154,11 +154,19 @@ class EventBroker:
     def _dashboard_is_active(dashboard: dict[str, Any]) -> bool:
         workflow = dashboard.get("workflow")
         if workflow is not None:
-            if float(workflow.get("progress_percent", 0)) < 100:
+            phases = workflow.get("phases", [])
+            phase_states = [phase.get("state") for phase in phases]
+            if any(state in {"pending", "in_progress"} for state in phase_states):
                 return True
-            if any(phase.get("state") != "completed" for phase in workflow.get("phases", [])):
+            # Failed is a terminal state, not active work. Requiring failed
+            # workflows to report 100% would leave workspace selection locked
+            # forever after an interrupted/abandoned task.
+            if phase_states and all(state == "completed" for state in phase_states):
+                if float(workflow.get("progress_percent", 0)) < 100:
+                    return True
+            elif not phase_states:
                 return True
-        return any(task.get("state") != "completed" for task in dashboard.get("tasks", []))
+        return any(task.get("state") in {"pending", "running"} for task in dashboard.get("tasks", []))
 
     def _agent_work_active_locked(self) -> bool:
         return any(self._dashboard_is_active(dashboard) for dashboard in self._agent_dashboards.values())

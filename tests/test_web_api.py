@@ -99,6 +99,25 @@ class WebApiTests(unittest.TestCase):
         status, activity = self.request(f"/api/v1/agent/projects/{project_id}/activity")
         self.assertEqual((status, activity["activities"][-1]["state"]), (200, "completed"))
 
+    def test_agent_project_rename_is_utf8_and_rejects_locked_projects(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Mojibake temporary"})
+        project_id = created["project"]["id"]
+        status, renamed = self.request(
+            f"/api/v1/agent/projects/{project_id}/rename",
+            {"name": "Приёмка Operator временный проект"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(renamed["project"]["name"], "Приёмка Operator временный проект")
+        self.assertEqual(self.core.workspace._project_dir(project_id).name, "Приёмка Operator временный проект")
+
+        self.core.acquire_lease(project_id, "agent", "rename-test")
+        status, error = self.request(
+            f"/api/v1/agent/projects/{project_id}/rename", {"name": "Should not move"},
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(error["error"], "PROJECT_LOCKED")
+        self.assertEqual(self.core.workspace._project_dir(project_id).name, "Приёмка Operator временный проект")
+
     def test_agent_capabilities_are_read_only_and_command_names_are_current(self) -> None:
         before = self.core.workspace.workspace_revision_token()
         status, capabilities = self.request("/api/v1/agent/capabilities")
@@ -385,6 +404,22 @@ class WebApiTests(unittest.TestCase):
                              ("workspace.agent-work", None, {"active": False, "revision": 3}))
         finally:
             self.core.events.unsubscribe(subscriber_id)
+
+        failed_report = {
+            "workflow": {
+                "title": "Interrupted acceptance",
+                "progress_percent": 20,
+                "eta_seconds": None,
+                "phases": [
+                    {"id": "inspect", "title": "Inspect project", "state": "failed"},
+                    {"id": "model", "title": "Build model", "state": "failed"},
+                ],
+            },
+            "tasks": [{"id": "acceptance", "title": "Acceptance blocked", "state": "failed"}],
+        }
+        status, _ = self.request(f"/api/v1/agent/projects/{project_id}/dashboard", failed_report)
+        self.assertEqual(status, 200)
+        self.assertFalse(self.core.events.agent_work_snapshot()["active"])
 
     def test_web_assets_are_served(self) -> None:
         with urlopen(self.base_url + "/", timeout=3) as response:

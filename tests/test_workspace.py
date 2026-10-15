@@ -38,6 +38,35 @@ class ProjectWorkspaceTests(unittest.TestCase):
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve")
         self.assertEqual(self.workspace.list_folder_projects(), ["Кружка"])
 
+    def test_rename_moves_project_folder_and_preserves_identity_and_history(self) -> None:
+        project = self.workspace.create("РџСЂРёС‘РјРєР° Operator")
+        source = self.workspace._project_dir(project["id"])
+        document_before = project["document"]
+
+        renamed = self.workspace.rename(project["id"], "Acceptance Operator temporary project")
+        target = self.workspace._project_dir(project["id"])
+
+        self.assertFalse(source.exists())
+        self.assertEqual(target.name, "Acceptance Operator temporary project")
+        self.assertEqual(renamed["id"], project["id"])
+        self.assertEqual(renamed["name"], "Acceptance Operator temporary project")
+        saved = self.workspace.load(project["id"])
+        self.assertEqual(saved["document"], document_before)
+        self.assertEqual(saved["history"], [])
+        self.assertEqual([item["id"] for item in ProjectWorkspace(self.root).list()], [project["id"]])
+
+    def test_rename_chooses_available_directory_without_overwriting(self) -> None:
+        project = self.workspace.create("Old name")
+        occupied = self.root / "New name"
+        occupied.mkdir()
+        sentinel = occupied / "keep.txt"
+        sentinel.write_text("keep", encoding="utf-8")
+
+        self.workspace.rename(project["id"], "New name")
+
+        self.assertEqual(self.workspace._project_dir(project["id"]).name, "New name (2)")
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
+
     def test_listing_adopts_workspace_directories_without_replacing_their_files(self) -> None:
         directory = self.root / "kobras1backcover"
         directory.mkdir()

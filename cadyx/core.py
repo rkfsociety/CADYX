@@ -50,6 +50,8 @@ class CadyxCore:
         self.events = EventBroker(dashboard_state_path=self.workspace.root / ".cadyx-agent-dashboards.json")
         self._workspace_selection_guard = threading.RLock()
         self._workspace_selection: dict[str, str] | None = None
+        self._project_lifecycle_guard = threading.Lock()
+        self._project_lifecycle_locks: dict[str, threading.RLock] = {}
         self._geometry_cache_guard = threading.RLock()
         self._validated_document_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
         self._document_validation_locks: dict[tuple[str, str], threading.Lock] = {}
@@ -64,6 +66,13 @@ class CadyxCore:
         with self.leases.guard(project_id):
             yield
 
+    @contextmanager
+    def _project_lifecycle_lock(self, project_id: str) -> Iterator[None]:
+        with self._project_lifecycle_guard:
+            lock = self._project_lifecycle_locks.setdefault(project_id, threading.RLock())
+        with lock:
+            yield
+
     def create_project(self, name: str) -> dict[str, Any]:
         project = self.workspace.create(name)
         summary = self._summary(project)
@@ -73,6 +82,16 @@ class CadyxCore:
             self.events.publish("project.created", project["id"], summary)
         self.events.publish("project.lock.changed", project["id"], lock)
         return {"project": summary, "lock": lock}
+
+    def rename_project(self, project_id: str, name: str) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id):
+            lock = self.leases.snapshot(project_id)
+            if lock.get("state") != "FREE":
+                raise ConflictError("Project must be unlocked before it can be renamed.", code="PROJECT_LOCKED")
+            project = self.workspace.rename(project_id, name)
+            summary = self._summary(project)
+            self.events.publish("project.renamed", project_id, summary)
+            return {"project": summary, "lock": self.leases.snapshot(project_id)}
 
     def list_projects(self) -> list[dict[str, Any]]:
         result = []
@@ -228,7 +247,7 @@ class CadyxCore:
         }
 
     def acquire_lease(self, project_id: str, owner_type: str, owner_id: str) -> dict[str, Any]:
-        with self._project_guard(project_id):
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
             self.workspace.load(project_id)
             lease = self.leases.acquire(project_id, owner_type, owner_id)
             snapshot = self.leases.snapshot(project_id)
@@ -670,6 +689,7 @@ class CadyxCore:
             "replace_sketch_profile": "Перерисовывает профиль",
             "replace_sketch_path": "Рисует траекторию",
             "fuse_bodies": "Объединяет тела",
+            "cut_bodies": "Вырезает материал",
             "set_parameter": "Меняет параметры модели",
             "create_metric_thread": "Строит метрическую резьбу",
             "resize_imported_thread": "Увеличивает диаметр резьбы",
@@ -708,7 +728,7 @@ class CadyxCore:
             for item in document.objects
             if item.get("type") == "feature"
             for source_id in ((item.get("base_body_id"), item.get("tool_body_id"))
-                              if item.get("operation") == "fuse_bodies"
+                              if item.get("operation") in {"fuse_bodies", "cut_bodies"}
                               else (item.get("source_body_id"),)
                               if item.get("operation") in {
                                   "fillet_edges", "resize_imported_thread", "transform_imported_brep",
@@ -724,20 +744,21 @@ class CadyxCore:
                 self.kernel.validate(geometry)
             if item.get("type") != "feature":
                 continue
-            if item.get("operation") == "fuse_bodies":
+            if item.get("operation") in {"fuse_bodies", "cut_bodies"}:
                 feature_geometry = item.get("geometry")
                 body = by_id.get(item.get("body_id"))
                 base = by_id.get(item.get("base_body_id"))
                 tool = by_id.get(item.get("tool_body_id"))
                 if any(value is None or value.get("type") != "body" for value in (body, base, tool)):
-                    raise ValidationError("Boolean fuse feature refers to a missing body.")
+                    raise ValidationError("Boolean feature refers to a missing body.")
                 if feature_geometry != body.get("geometry"):
-                    raise ValidationError("Boolean fuse feature geometry must match its body.")
+                    raise ValidationError("Boolean feature geometry must match its body.")
+                expected_kind = {"fused_profiles", "fused_solids"} if item.get("operation") == "fuse_bodies" else {"cut_solids"}
                 if (not isinstance(feature_geometry, dict)
-                        or feature_geometry.get("kind") not in {"fused_profiles", "fused_solids"}
+                        or feature_geometry.get("kind") not in expected_kind
                         or feature_geometry.get("base") != base.get("geometry")
                         or feature_geometry.get("tool") != tool.get("geometry")):
-                    raise ValidationError("Boolean fuse geometry is out of date with its source bodies.")
+                    raise ValidationError("Boolean feature geometry is out of date with its source bodies.")
                 continue
             if item.get("operation") == "fillet_edges":
                 body = by_id.get(item.get("body_id"))

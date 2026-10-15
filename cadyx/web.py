@@ -295,6 +295,11 @@ def make_request_handler(
                 self._json(201, result)
                 return
             project_id = parts[0]
+            if agent_api and len(parts) == 2 and parts[1] == "rename":
+                if body is None or set(body) != {"name"}:
+                    raise ValidationError("Project rename requires only a name field.")
+                self._json(200, core.rename_project(project_id, body["name"]))
+                return
             if agent_api and len(parts) == 2 and parts[1] == "dashboard":
                 if body is None:
                     raise ValidationError("A JSON request body is required.")

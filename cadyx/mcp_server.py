@@ -97,6 +97,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_get_selection", "description": "Read the local host's currently selected project or folder.", "inputSchema": _schema()},
     {"name": "cadyx_select_resource", "description": "Select an existing project or workspace folder through the Agent API.", "inputSchema": _schema({"type": {"enum": ["project", "folder"]}, "project_id": _STRING, "folder_name": _STRING}, ["type"])},
     {"name": "cadyx_create_project", "description": "Create and select a project through the Agent API.", "inputSchema": _schema({"name": {"type": "string", "minLength": 1, "maxLength": 120}}, ["name"])},
+    {"name": "cadyx_rename_project", "description": "Rename and move a FREE project folder through the Agent API while preserving its identity and model history.", "inputSchema": _schema({"project_id": _STRING, "name": {"type": "string", "minLength": 1, "maxLength": 120}}, ["project_id", "name"])},
     {"name": "cadyx_inspect_project", "description": "Read the saved model, revision, command history and lock state without acquiring a lease.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_capabilities", "description": "Discover supported Agent API routes, model commands, parameter names, documented constraints and error meanings.", "inputSchema": _schema()},
     {"name": "cadyx_list_project_files", "description": "List direct user files in a saved project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
@@ -159,6 +160,8 @@ class MCPApplication:
         if name == "cadyx_create_project":
             self._assert_selection_is_safe("new-project", None)
             return self.api.post("/api/v1/agent/projects", {"name": args.get("name")})
+        if name == "cadyx_rename_project":
+            return self.api.post(self._project(args["project_id"], "/rename"), {"name": args["name"]})
         if name == "cadyx_inspect_project":
             return self.api.get(self._project(args["project_id"]))
         if name == "cadyx_capabilities":
