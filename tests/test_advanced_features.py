@@ -29,7 +29,8 @@ class AdvancedFeaturesTests(unittest.TestCase):
         for offset, scale in ((0.0, 10.0), (20.0, 8.0)):
             sketch_id = system.execute(document, {"type": "create_section_sketch", "offset": offset})["sketch_id"]
             system.execute(document, {"type": "add_sketch_polyline", "sketch_id": sketch_id, "closed": True,
-                                      "points": [[0, 0], [scale, 0], [scale, scale], [0, scale]]})
+                                      "points": [{"x": 0, "y": 0}, {"x": scale, "y": 0},
+                                                 {"x": scale, "y": scale}, {"x": 0, "y": scale}]})
             sketches.append(sketch_id)
         result = system.execute(document, {"type": "loft_profiles", "sketch_ids": sketches,
                                            "section_offsets": [0.0, 20.0]})
