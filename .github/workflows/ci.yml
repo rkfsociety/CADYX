@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up PowerShell 7
+        uses: actions/setup-powershell@v2
+
+      - name: Set up CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Build verified runtime
+        shell: pwsh
+        run: ./scripts/setup-runtime.ps1 -WithNode
+
+      - name: Run Python tests
+        shell: pwsh
+        run: ./.runtime/python/python.exe -m unittest discover -s tests -v
+
+      - name: Compile Python sources
+        shell: pwsh
+        run: ./.runtime/python/python.exe -m compileall -q cadyx tests
+
+      - name: Run browser tests
+        shell: pwsh
+        run: |
+          $versions = Get-Content scripts/runtime-versions.json -Raw | ConvertFrom-Json
+          $node = ".\.runtime\node-v$($versions.node.version)-win-x64\node.exe"
+          & $node tests/test_viewport.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Viewport tests failed.' }
+          & $node tests/test_ply_preview.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'PLY preview tests failed.' }
