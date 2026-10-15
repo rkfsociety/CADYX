@@ -65,6 +65,21 @@ their respective human/agent edit leases. Results below appear inside
   and returns their ids in one command.
 - `add_sketch_circle`: `sketch_id`, center `x` and `y`, and positive `radius`.
   Adds the center point and circle together and returns `point_id` and `circle_id`.
+- `mirror_sketch_elements`: `sketch_id`, non-empty `object_ids`, and `axis_start`
+  / `axis_end` coordinate objects (`{x, y}`). Copies selected points, lines and
+  circles reflected across the arbitrary in-plane axis; its endpoints must be
+  more than 1e-7 apart. Selecting a line or
+  circle also copies its endpoint or center point dependencies; each copied
+  component gets new point references. Constraints are not copied. Returns the
+  source closure ids and created point, line, circle and object ids.
+- `pattern_sketch_elements`: `sketch_id`, non-empty `object_ids`, `mode`
+  (`linear` or `circular`), and `count` from 2 through 64 including the source.
+  Linear mode uses `offset_x` / `offset_y` per instance. Circular mode uses
+  `center_x`, `center_y` and `angle_step_degrees` per instance. It copies the
+  same point/line/circle dependency closure as mirroring; constraints are not
+  copied. A linear offset must exceed 1e-7; repeated circular positions and
+  results over 4096 created objects are rejected. The response groups created
+  ids by object type and reports the source closure and total instance count.
 - `add_sketch_constraint`: `sketch_id`, `kind`, ordered `references`, and `value`
   for distance/radius. Returns `constraint_id`.
 - `update_sketch_elements`: non-empty `updates` list of

@@ -147,6 +147,83 @@ class SketchDocumentTests(unittest.TestCase):
         document["objects"].reverse()
         self.assertEqual(Document.from_dict(document).to_dict(), document)
 
+    def test_mirror_copies_selected_geometry_and_its_point_dependencies(self):
+        result = self.command(
+            type="mirror_sketch_elements", sketch_id=self.sketch,
+            object_ids=[self.line], axis_start={"x": 0, "y": 0}, axis_end={"x": 1, "y": 0},
+        )
+        self.assertEqual(result["instance_count"], 2)
+        self.assertEqual(len(result["point_ids"]), 2)
+        self.assertEqual(len(result["line_ids"]), 1)
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        mirrored_points = [by_id[object_id] for object_id in result["point_ids"]]
+        self.assertEqual({(item["x"], item["y"]) for item in mirrored_points}, {(0, 0), (3, 0)})
+        mirrored_line = by_id[result["line_ids"][0]]
+        self.assertNotEqual(mirrored_line["start_id"], self.a)
+        self.assertNotEqual(mirrored_line["end_id"], self.b)
+
+        result = self.command(
+            type="mirror_sketch_elements", sketch_id=self.sketch,
+            object_ids=[self.line], axis_start={"x": 0, "y": 0}, axis_end={"x": 0, "y": 1},
+        )
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        self.assertEqual({(by_id[item]["x"], by_id[item]["y"]) for item in result["point_ids"]}, {(0, 0), (-3, 0)})
+
+    def test_linear_and_circular_patterns_preserve_object_graphs(self):
+        self.constraint("horizontal", [self.line])
+        linear = self.command(
+            type="pattern_sketch_elements", sketch_id=self.sketch, object_ids=[self.line],
+            mode="linear", count=3, offset_x=10, offset_y=2,
+        )
+        self.assertEqual(linear["instance_count"], 3)
+        self.assertEqual(len(linear["line_ids"]), 2)
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        self.assertEqual(
+            {(by_id[item]["x"], by_id[item]["y"]) for item in linear["point_ids"]},
+            {(10, 2), (13, 2), (20, 4), (23, 4)},
+        )
+        for object_id in linear["line_ids"]:
+            line = by_id[object_id]
+            self.assertIn(line["start_id"], linear["point_ids"])
+            self.assertIn(line["end_id"], linear["point_ids"])
+        self.assertEqual(sum(item["type"] == "constraint" for item in document["objects"]), 1)
+
+        circle = self.command(type="add_sketch_circle", sketch_id=self.sketch, x=4, y=0, radius=1)
+        circular = self.command(
+            type="pattern_sketch_elements", sketch_id=self.sketch, object_ids=[circle["circle_id"]],
+            mode="circular", count=4, center_x=0, center_y=0, angle_step_degrees=90,
+        )
+        self.assertEqual(len(circular["circle_ids"]), 3)
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        centers = [by_id[by_id[item]["center_id"]] for item in circular["circle_ids"]]
+        self.assertEqual({(round(item["x"], 7), round(item["y"], 7)) for item in centers}, {(0, 4), (-4, 0), (0, -4)})
+
+    def test_sketch_copy_commands_reject_invalid_or_repeated_inputs_atomically(self):
+        other = self.command(type="create_sketch")["sketch_id"]
+        constraint = self.constraint("horizontal", [self.line])
+        for command in [
+            {"type": "mirror_sketch_elements", "sketch_id": self.sketch, "object_ids": [self.line],
+             "axis_start": {"x": 0, "y": 0}, "axis_end": {"x": 0, "y": 0}},
+            {"type": "mirror_sketch_elements", "sketch_id": self.sketch, "object_ids": [constraint],
+             "axis_start": {"x": 0, "y": 0}, "axis_end": {"x": 0, "y": 1}},
+            {"type": "pattern_sketch_elements", "sketch_id": self.sketch, "object_ids": [self.line],
+             "mode": "linear", "count": 2, "offset_x": 0, "offset_y": 0},
+            {"type": "pattern_sketch_elements", "sketch_id": self.sketch, "object_ids": [self.line],
+             "mode": "linear", "count": 65, "offset_x": 1, "offset_y": 0},
+            {"type": "pattern_sketch_elements", "sketch_id": self.sketch, "object_ids": [self.line],
+             "mode": "circular", "count": 3, "center_x": 0, "center_y": 0, "angle_step_degrees": 180},
+            {"type": "pattern_sketch_elements", "sketch_id": self.sketch, "object_ids": [self.line],
+             "mode": "unknown", "count": 2},
+            {"type": "mirror_sketch_elements", "sketch_id": other, "object_ids": [self.line],
+             "axis_start": {"x": 0, "y": 0}, "axis_end": {"x": 1, "y": 0}},
+        ]:
+            with self.subTest(command=command):
+                self.rejected(**command)
+
     def test_load_rejects_unsatisfied_saved_constraint(self):
         self.constraint("horizontal", [self.line])
         project = json.loads(self.path.read_text())

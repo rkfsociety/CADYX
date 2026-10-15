@@ -680,6 +680,8 @@ class CadyxCore:
             "add_sketch_involute_gear": "Строит эвольвентный профиль",
             "add_sketch_rectangle": "Рисует прямоугольник",
             "add_sketch_circle": "Рисует окружность",
+            "mirror_sketch_elements": "Зеркально копирует геометрию эскиза",
+            "pattern_sketch_elements": "Создаёт массив геометрии эскиза",
             "add_sketch_constraint": "Проверяет ограничение эскиза",
             "update_sketch_elements": "Меняет геометрию эскиза",
             "extrude_sketch": "Выдавливает профиль",

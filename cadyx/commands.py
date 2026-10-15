@@ -132,6 +132,10 @@ class CommandSystem:
             return self._add_sketch_rectangle(document, command, progress=progress)
         if kind == "add_sketch_circle":
             return self._add_sketch_circle(document, command, progress=progress)
+        if kind == "mirror_sketch_elements":
+            return self._mirror_sketch_elements(document, command, progress=progress)
+        if kind == "pattern_sketch_elements":
+            return self._pattern_sketch_elements(document, command, progress=progress)
         if kind == "add_sketch_constraint":
             object_id = f"constraint:{uuid4()}"
             document.objects.append({
@@ -289,6 +293,157 @@ class CommandSystem:
         ]
         self._rebuild_changed_features(document, {sketch_id}, progress=progress)
         return {"sketch_id": sketch_id, "point_id": point_id, "circle_id": circle_id}
+
+    def _mirror_sketch_elements(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch_id = command.get("sketch_id")
+        sketch = self._find_sketch(document, sketch_id)
+        start = self._coordinate_pair(command.get("axis_start"), "Mirror axis start")
+        end = self._coordinate_pair(command.get("axis_end"), "Mirror axis end")
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length_squared = dx * dx + dy * dy
+        if not math.isfinite(length_squared) or length_squared <= 1e-14:
+            raise ValidationError("Mirror axis endpoints must be distinct.")
+
+        source = self._sketch_geometry_closure(document, sketch_id, command.get("object_ids"))
+
+        def reflect(x: float, y: float) -> tuple[float, float]:
+            along = ((x - start[0]) * dx + (y - start[1]) * dy) / length_squared
+            projected_x, projected_y = start[0] + along * dx, start[1] + along * dy
+            return 2 * projected_x - x, 2 * projected_y - y
+
+        if progress is not None:
+            progress({"phase": "mirror_sketch_elements"})
+        return self._copy_sketch_geometry(document, sketch, source, [reflect], progress=progress)
+
+    def _pattern_sketch_elements(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch_id = command.get("sketch_id")
+        sketch = self._find_sketch(document, sketch_id)
+        count = command.get("count")
+        if type(count) is not int or not 2 <= count <= 64:
+            raise ValidationError("Pattern count must be an integer from 2 to 64, including the source.")
+        mode = command.get("mode")
+        transforms: list[Callable[[float, float], tuple[float, float]]] = []
+        if mode == "linear":
+            offset_x = _finite_number(command.get("offset_x"), "Pattern x offset")
+            offset_y = _finite_number(command.get("offset_y"), "Pattern y offset")
+            if math.hypot(offset_x, offset_y) <= 1e-7:
+                raise ValidationError("Linear pattern offset must be non-zero.")
+            transforms = [
+                (lambda x, y, step=index: (x + offset_x * step, y + offset_y * step))
+                for index in range(1, count)
+            ]
+        elif mode == "circular":
+            center_x = _finite_number(command.get("center_x"), "Pattern center x")
+            center_y = _finite_number(command.get("center_y"), "Pattern center y")
+            step_degrees = _finite_number(command.get("angle_step_degrees"), "Pattern angle step")
+            if math.isclose(step_degrees % 360, 0, rel_tol=0, abs_tol=1e-10):
+                raise ValidationError("Circular pattern angle step must not repeat the source position.")
+            stepped_degrees = [step_degrees * index for index in range(1, count)]
+            if any(not math.isfinite(angle) for angle in stepped_degrees):
+                raise ValidationError("Circular pattern angles must remain finite.")
+            angles = [math.radians(angle) for angle in stepped_degrees]
+            normalized = [0.0, *(round(angle % math.tau, 12) for angle in angles)]
+            if len(set(normalized)) != len(normalized):
+                raise ValidationError("Circular pattern would create overlapping repeated instances.")
+            transforms = [
+                (lambda x, y, angle=angle: (
+                    center_x + (x - center_x) * math.cos(angle) - (y - center_y) * math.sin(angle),
+                    center_y + (x - center_x) * math.sin(angle) + (y - center_y) * math.cos(angle),
+                ))
+                for angle in angles
+            ]
+        else:
+            raise ValidationError("Pattern mode must be linear or circular.")
+
+        source = self._sketch_geometry_closure(document, sketch_id, command.get("object_ids"))
+        if len(source) * len(transforms) > 4096:
+            raise ValidationError("Pattern would create more than 4096 sketch objects.")
+        if progress is not None:
+            progress({"phase": "pattern_sketch_elements"})
+        return self._copy_sketch_geometry(document, sketch, source, transforms, progress=progress)
+
+    @staticmethod
+    def _coordinate_pair(value: Any, name: str) -> tuple[float, float]:
+        if not isinstance(value, dict) or set(value) != {"x", "y"}:
+            raise ValidationError(f"{name} needs x and y coordinates.")
+        return _finite_number(value["x"], f"{name} x"), _finite_number(value["y"], f"{name} y")
+
+    @staticmethod
+    def _sketch_geometry_closure(
+        document: Document, sketch_id: str, object_ids: Any,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(object_ids, list) or not object_ids or len(object_ids) > 4096:
+            raise ValidationError("object_ids must contain between 1 and 4096 sketch geometry ids.")
+        if any(not isinstance(object_id, str) for object_id in object_ids) or len(set(object_ids)) != len(object_ids):
+            raise ValidationError("object_ids must contain unique text ids.")
+        by_id = {item["id"]: item for item in document.objects}
+        included: set[str] = set()
+        pending = list(object_ids)
+        while pending:
+            object_id = pending.pop()
+            item = by_id.get(object_id)
+            if item is None or item.get("sketch_id") != sketch_id or item.get("type") not in {"point", "line", "circle"}:
+                raise ValidationError("Selected objects must be points, lines, or circles from the same sketch.")
+            if object_id in included:
+                continue
+            included.add(object_id)
+            if len(included) > 4096:
+                raise ValidationError("Selected sketch geometry exceeds 4096 objects including dependencies.")
+            if item["type"] == "line":
+                pending.extend((item["start_id"], item["end_id"]))
+            elif item["type"] == "circle":
+                pending.append(item["center_id"])
+        return [item for item in document.objects if item.get("id") in included]
+
+    def _copy_sketch_geometry(
+        self,
+        document: Document,
+        sketch: dict[str, Any],
+        source: list[dict[str, Any]],
+        transforms: list[Callable[[float, float], tuple[float, float]]],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch_id = sketch["id"]
+        copies: list[dict[str, Any]] = []
+        for transform in transforms:
+            id_map = {item["id"]: f"{item['type']}:{uuid4()}" for item in source}
+            for item in source:
+                clone = dict(item)
+                clone["id"] = id_map[item["id"]]
+                if item["type"] == "point":
+                    clone["x"], clone["y"] = transform(item["x"], item["y"])
+                    if not math.isfinite(clone["x"]) or not math.isfinite(clone["y"]):
+                        raise ValidationError("Transformed sketch coordinates must be finite.")
+                elif item["type"] == "line":
+                    clone["start_id"], clone["end_id"] = id_map[item["start_id"]], id_map[item["end_id"]]
+                else:
+                    clone["center_id"] = id_map[item["center_id"]]
+                copies.append(clone)
+        insert_at = document.objects.index(sketch) + 1
+        document.objects[insert_at:insert_at] = copies
+        self._rebuild_changed_features(document, {sketch_id}, progress=progress)
+        return {
+            "sketch_id": sketch_id,
+            "source_object_ids": [item["id"] for item in source],
+            "object_ids": [item["id"] for item in copies],
+            "point_ids": [item["id"] for item in copies if item["type"] == "point"],
+            "line_ids": [item["id"] for item in copies if item["type"] == "line"],
+            "circle_ids": [item["id"] for item in copies if item["type"] == "circle"],
+            "instance_count": len(transforms) + 1,
+        }
 
     @staticmethod
     def _find_sketch(document: Document, sketch_id: Any) -> dict[str, Any]:
