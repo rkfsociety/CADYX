@@ -14,6 +14,7 @@ const apiErrorLabels = {
   DUPLICATE_PROJECT_ID: "Проект с таким идентификатором уже существует.",
   PROJECT_FOLDER_CONFLICT: "Не удалось подобрать имя папки для проекта.",
   ARTIFACT_CONFLICT: "Файл результата с таким именем уже существует.",
+  PROJECT_GROUP_EXISTS: "Папка с таким именем уже существует.",
 };
 
 function apiErrorMessage(value, status) {
@@ -119,6 +120,7 @@ const integerFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 
 const projectDateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 let projects = [];
 let projectSort = "name";
+let projectGroups = [];
 let folders = [];
 let selectedProjectId = readSelectedProject();
 let selectedObjectId = null;
@@ -573,6 +575,141 @@ function canSelectProject(id) {
   return lock?.state === "FREE" && !lock.recovery_required && !agentIsActive;
 }
 
+$("#create-project-group").addEventListener("click", () => {
+  const dialog = $("#project-group-dialog");
+  $("#project-group-name").value = "";
+  dialog.showModal();
+  $("#project-group-name").focus();
+});
+$("#cancel-project-group").addEventListener("click", () => $("#project-group-dialog").close());
+$("#project-group-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("#project-group-name").value.trim();
+  if (!name) return;
+  try {
+    await api("/api/v1/project-groups", { method: "POST", body: JSON.stringify({ name }) });
+    $("#project-group-dialog").close();
+    await refreshWorkspace();
+  } catch (error) {
+    notify(`Не удалось создать папку: ${error.message}`, true);
+  }
+});
+
+async function setProjectGroup(projectId, groupId) {
+  try {
+    await api(`/api/v1/projects/${encodeURIComponent(projectId)}/group`, {
+      method: "POST", body: JSON.stringify({ group_id: groupId || null }),
+    });
+  } catch (error) {
+    notify(`Не удалось переместить проект: ${error.message}`, true);
+  }
+  await refreshWorkspace();
+}
+
+function compareProjects(left, right) {
+  const nameOrder = left.project.name.localeCompare(right.project.name, "ru", { sensitivity: "base" })
+    || left.project.id.localeCompare(right.project.id);
+  if (projectSort === "name") return nameOrder;
+  const leftModified = Date.parse(left.project.modified_at || "") || 0;
+  const rightModified = Date.parse(right.project.modified_at || "") || 0;
+  const direction = projectSort === "modified-asc" ? 1 : -1;
+  return direction * (leftModified - rightModified) || nameOrder;
+}
+
+function renderProjectCard(entry) {
+  const project = entry.project;
+  const active = project.id === selectedProjectId;
+  const projectAvailable = canSelectProject(project.id);
+  const card = document.createElement("article");
+  card.className = "workspace-project-card";
+  card.dataset.active = String(active);
+  card.setAttribute("role", "listitem");
+
+  const heading = document.createElement("div");
+  heading.className = "workspace-project-card-heading";
+  const name = document.createElement("h3");
+  name.textContent = project.name;
+  name.title = project.name;
+  const state = document.createElement("span");
+  state.className = "workspace-project-state";
+  state.textContent = active ? "АКТИВНЫЙ РЕСУРС" : projectAvailable ? "ГОТОВ К ОТКРЫТИЮ" : "ПАНЕЛЬ ЗАНЯТА";
+  heading.append(name, state);
+
+  const thumbnail = document.createElement("div");
+  thumbnail.className = "workspace-project-thumbnail";
+  const image = document.createElement("img");
+  image.src = `/api/v1/projects/${encodeURIComponent(project.id)}/viewport.png`;
+  image.alt = `Миниатюра проекта «${project.name}»`;
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.addEventListener("error", () => {
+    image.remove();
+    thumbnail.classList.add("unavailable");
+  }, { once: true });
+  thumbnail.append(image);
+
+  const meta = document.createElement("div");
+  meta.className = "workspace-project-meta";
+  const modified = document.createElement("span");
+  modified.textContent = "ИЗМЕНЁН";
+  const modifiedAt = Date.parse(project.modified_at || "");
+  const modifiedValue = document.createElement("strong");
+  modifiedValue.textContent = Number.isFinite(modifiedAt)
+    ? projectDateFormat.format(new Date(modifiedAt)) : "—";
+  modified.append(modifiedValue);
+  const projectId = document.createElement("span");
+  projectId.textContent = "ID";
+  const projectIdValue = document.createElement("strong");
+  projectIdValue.textContent = project.id.slice(0, 8).toUpperCase();
+  projectId.append(projectIdValue);
+  meta.append(modified, projectId);
+
+  const actions = document.createElement("div");
+  actions.className = "workspace-project-actions";
+  const open = document.createElement("a");
+  open.className = "button workspace-project-open";
+  open.href = `/?project_id=${encodeURIComponent(project.id)}`;
+  open.target = "_blank";
+  open.rel = "noopener";
+  open.textContent = "ОТКРЫТЬ ПРОЕКТ";
+  const groupSelect = document.createElement("select");
+  groupSelect.className = "workspace-project-group-select";
+  groupSelect.setAttribute("aria-label", `Папка проекта «${project.name}»`);
+  groupSelect.disabled = !projectAvailable;
+  const ungrouped = document.createElement("option");
+  ungrouped.value = "";
+  ungrouped.textContent = "Без папки";
+  groupSelect.append(ungrouped);
+  for (const group of projectGroups) {
+    const option = document.createElement("option");
+    option.value = group.id;
+    option.textContent = group.name;
+    groupSelect.append(option);
+  }
+  groupSelect.value = entry.group_id || "";
+  groupSelect.addEventListener("change", () => setProjectGroup(project.id, groupSelect.value));
+  actions.append(open, groupSelect);
+  card.append(heading, thumbnail, meta, actions);
+  return card;
+}
+
+function renderProjectGroup(title, groupId, entries) {
+  const section = document.createElement("section");
+  section.className = "project-group";
+  if (groupId) section.dataset.groupId = groupId;
+  const heading = document.createElement("h3");
+  heading.className = "project-group-heading";
+  heading.textContent = title;
+  const count = document.createElement("span");
+  count.textContent = integerFormat.format(entries.length);
+  heading.append(count);
+  const cards = document.createElement("div");
+  cards.className = "project-group-cards";
+  for (const entry of entries.sort(compareProjects)) cards.append(renderProjectCard(entry));
+  section.append(heading, cards);
+  $("#projects-list").append(section);
+}
+
 $("#projects-sort").addEventListener("change", (event) => {
   projectSort = event.currentTarget.value;
   renderProjects();
@@ -583,75 +720,17 @@ function renderProjects() {
   list.replaceChildren();
   $("#projects-count").textContent = integerFormat.format(projects.length);
   $("#projects-empty").hidden = projects.length > 0;
-  const sortedProjects = [...projects].sort((left, right) => {
-    if (projectSort === "name") {
-      return left.project.name.localeCompare(right.project.name, "ru", { sensitivity: "base" })
-        || left.project.id.localeCompare(right.project.id);
-    }
-    const leftModified = Date.parse(left.project.modified_at || "") || 0;
-    const rightModified = Date.parse(right.project.modified_at || "") || 0;
-    const direction = projectSort === "modified-asc" ? 1 : -1;
-    return direction * (leftModified - rightModified)
-      || left.project.name.localeCompare(right.project.name, "ru", { sensitivity: "base" })
-      || left.project.id.localeCompare(right.project.id);
-  });
-  for (const entry of sortedProjects) {
-    const project = entry.project;
-    const active = project.id === selectedProjectId;
-    const projectAvailable = canSelectProject(project.id);
-    const card = document.createElement("article");
-    card.className = "workspace-project-card";
-    card.dataset.active = String(active);
-    card.setAttribute("role", "listitem");
-
-    const heading = document.createElement("div");
-    heading.className = "workspace-project-card-heading";
-    const name = document.createElement("h3");
-    name.textContent = project.name;
-    name.title = project.name;
-    const state = document.createElement("span");
-    state.className = "workspace-project-state";
-    state.textContent = active ? "АКТИВНЫЙ РЕСУРС" : projectAvailable ? "ГОТОВ К ОТКРЫТИЮ" : "ПАНЕЛЬ ЗАНЯТА";
-    heading.append(name, state);
-
-    const thumbnail = document.createElement("div");
-    thumbnail.className = "workspace-project-thumbnail";
-    const image = document.createElement("img");
-    image.src = `/api/v1/projects/${encodeURIComponent(project.id)}/viewport.png`;
-    image.alt = `Миниатюра проекта «${project.name}»`;
-    image.loading = "lazy";
-    image.decoding = "async";
-    image.addEventListener("error", () => {
-      image.remove();
-      thumbnail.classList.add("unavailable");
-    }, { once: true });
-    thumbnail.append(image);
-
-    const action = document.createElement("a");
-    action.className = "button workspace-project-open";
-    action.href = `/?project_id=${encodeURIComponent(project.id)}`;
-    action.target = "_blank";
-    action.rel = "noopener";
-    action.textContent = "ОТКРЫТЬ ПРОЕКТ";
-
-    const meta = document.createElement("div");
-    meta.className = "workspace-project-meta";
-    const modified = document.createElement("span");
-    modified.textContent = "ИЗМЕНЁН";
-    const modifiedAt = Date.parse(project.modified_at || "");
-    const modifiedValue = document.createElement("strong");
-    modifiedValue.textContent = Number.isFinite(modifiedAt)
-      ? projectDateFormat.format(new Date(modifiedAt)) : "—";
-    modified.append(modifiedValue);
-    const id = document.createElement("span");
-    id.textContent = "ID";
-    const idValue = document.createElement("strong");
-    idValue.textContent = project.id.slice(0, 8).toUpperCase();
-    id.append(idValue);
-    meta.append(modified, id);
-    card.append(heading, thumbnail, meta, action);
-    list.append(card);
+  const grouped = new Map(projectGroups.map((group) => [group.id, { group, entries: [] }]));
+  const ungrouped = [];
+  for (const entry of projects) {
+    const section = grouped.get(entry.group_id);
+    if (section) section.entries.push(entry);
+    else ungrouped.push(entry);
   }
+  if (ungrouped.length) renderProjectGroup("БЕЗ ПАПКИ", null, ungrouped);
+  const sortedGroups = [...grouped.values()].sort((left, right) =>
+    left.group.name.localeCompare(right.group.name, "ru", { sensitivity: "base" }));
+  for (const { group, entries } of sortedGroups) renderProjectGroup(group.name, group.id, entries);
 }
 
 function showProjectLoading(name) {
@@ -934,6 +1013,7 @@ async function refreshWorkspace() {
 async function refreshWorkspacePass() {
   const response = await api("/api/v1/projects");
   projects = response.projects;
+  projectGroups = response.groups || [];
   folders = response.folders || [];
 
   const previousSelection = selectedProjectId;

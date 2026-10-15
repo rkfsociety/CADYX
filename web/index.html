@@ -240,6 +240,7 @@
                       <option value="modified-desc">Сначала недавно изменённые</option>
                       <option value="modified-asc">Сначала давно изменённые</option>
                     </select>
+                    <button id="create-project-group" class="button" type="button">НОВАЯ ПАПКА</button>
                     <span id="projects-count" class="subtle-count" title="Количество проектов">0</span>
                   </div>
                 </div>
@@ -251,6 +252,18 @@
         </div>
       </main>
     </div>
+
+    <dialog id="project-group-dialog" class="project-group-dialog" aria-labelledby="project-group-dialog-title">
+      <form id="project-group-form">
+        <h2 id="project-group-dialog-title">НОВАЯ ПАПКА ПРОЕКТОВ</h2>
+        <label for="project-group-name">Название папки</label>
+        <input id="project-group-name" name="name" type="text" maxlength="80" required autocomplete="off">
+        <div class="project-group-dialog-actions">
+          <button id="cancel-project-group" class="button" type="button">ОТМЕНА</button>
+          <button class="button" type="submit">СОЗДАТЬ</button>
+        </div>
+      </form>
+    </dialog>
 
     <p id="toast" class="toast" role="status" aria-live="polite"></p>
     <script src="/assets/viewport.js" defer></script>

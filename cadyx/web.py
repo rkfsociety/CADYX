@@ -263,6 +263,17 @@ def make_request_handler(
                     selection = core.select_workspace_resource(body)
                     self._json(200, {"selection": selection})
                     return
+                if parts == ["api", "v1", "project-groups"]:
+                    if body is None or set(body) != {"name"}:
+                        raise ValidationError("Project group creation requires only a name field.")
+                    self._json(201, {"group": core.create_project_group(body["name"])})
+                    return
+                if (len(parts) == 5 and parts[:3] == ["api", "v1", "projects"]
+                        and parts[4] == "group"):
+                    if body is None or set(body) != {"group_id"}:
+                        raise ValidationError("Project group assignment requires only group_id.")
+                    self._json(200, core.assign_project_group(parts[3], body["group_id"]))
+                    return
                 if parts[:3] == ["api", "v1", "projects"]:
                     self._route_project(parts[3:], body, agent_api=False)
                     return

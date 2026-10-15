@@ -7,11 +7,13 @@ import json
 import mimetypes
 import os
 import re
+import sqlite3
 import tempfile
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from uuid import uuid4
 
 from .errors import ConflictError, NotFoundError, ValidationError
@@ -36,6 +38,75 @@ class ProjectWorkspace:
         self._project_path_guard = threading.RLock()
         self._project_path_by_id: dict[str, Path] = {}
         self._project_id_by_path: dict[Path, str] = {}
+        self._groups_db_path = self.root / ".cadyx-project-groups.sqlite3"
+
+    @contextmanager
+    def _groups_connection(self) -> Iterator[sqlite3.Connection]:
+        if self._groups_db_path.is_symlink():
+            raise ValidationError("Project group database must not be a symbolic link.")
+        connection = sqlite3.connect(self._groups_db_path, timeout=5)
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("""CREATE TABLE IF NOT EXISTS project_group (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                name_key TEXT NOT NULL UNIQUE
+            )""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS project_group_assignment (
+                project_id TEXT PRIMARY KEY,
+                group_id TEXT REFERENCES project_group(id) ON DELETE SET NULL
+            )""")
+            connection.commit()
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def list_project_groups(self) -> list[dict[str, str]]:
+        with self._groups_connection() as connection:
+            rows = connection.execute(
+                "SELECT id, name FROM project_group ORDER BY name COLLATE NOCASE, id"
+            ).fetchall()
+            return [{"id": group_id, "name": name} for group_id, name in rows]
+
+    def project_group_assignments(self) -> dict[str, str]:
+        with self._groups_connection() as connection:
+            rows = connection.execute(
+                "SELECT project_id, group_id FROM project_group_assignment WHERE group_id IS NOT NULL"
+            ).fetchall()
+            return {project_id: group_id for project_id, group_id in rows}
+
+    def create_project_group(self, name: str) -> dict[str, str]:
+        if (not isinstance(name, str) or not name.strip() or len(name.strip()) > 80
+                or any(ord(character) < 32 for character in name)):
+            raise ValidationError("Project group name must be 1 to 80 characters without control characters.")
+        group = {"id": str(uuid4()), "name": name.strip()}
+        try:
+            with self._groups_connection() as connection:
+                connection.execute(
+                    "INSERT INTO project_group (id, name, name_key) VALUES (?, ?, ?)",
+                    (group["id"], group["name"], group["name"].casefold()),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ConflictError("A project group with this name already exists.", code="PROJECT_GROUP_EXISTS") from exc
+        return group
+
+    def assign_project_group(self, project_id: str, group_id: str | None) -> None:
+        self.load(project_id)
+        if group_id is not None and (not isinstance(group_id, str) or not group_id):
+            raise ValidationError("group_id must be a group ID or null.")
+        try:
+            with self._groups_connection() as connection:
+                connection.execute(
+                    "INSERT INTO project_group_assignment (project_id, group_id) VALUES (?, ?) "
+                    "ON CONFLICT(project_id) DO UPDATE SET group_id = excluded.group_id",
+                    (project_id, group_id),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise NotFoundError("Project group was not found.") from exc
 
     def _project_dir(self, project_id: str) -> Path:
         if not isinstance(project_id, str) or not _PROJECT_ID.fullmatch(project_id):
@@ -275,7 +346,7 @@ class ProjectWorkspace:
         }
 
     def workspace_revision_token(self) -> str:
-        """Return a cheap token for project records and selectable workspace folders."""
+        """Return a cheap token for project, folder and group-list changes."""
         entries: list[tuple[str, str, int, int]] = []
         for entry in sorted(self._project_directories(), key=lambda item: item.name.casefold()):
             try:
@@ -288,6 +359,12 @@ class ProjectWorkspace:
             except OSError:
                 # A concurrent workspace change is picked up on the next poll.
                 continue
+        try:
+            groups_stat = self._groups_db_path.stat()
+            if self._groups_db_path.is_file() and not self._groups_db_path.is_symlink():
+                entries.append((self._groups_db_path.name, "groups", groups_stat.st_mtime_ns, groups_stat.st_size))
+        except OSError:
+            pass
         return self._revision_token(entries)
 
     def folder_revision_token(self, folder_name: str) -> str:

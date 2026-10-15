@@ -126,6 +126,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .projects-toolbar label { color: var(--dim); font: 8px var(--mono); letter-spacing: .06em; }
 .projects-toolbar select { max-width: min(245px, 48vw); min-height: 27px; padding: 3px 7px; border: 1px solid var(--line); border-radius: 3px; background: #111b1e; color: var(--muted); font: 9px var(--mono); }
 .projects-list { display: grid; min-height: 0; align-content: start; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 10px; overflow: auto; padding: 12px; }
+.project-group { display: grid; min-width: 0; grid-column: 1 / -1; gap: 8px; }
+.project-group-heading { display: flex; align-items: center; gap: 8px; margin: 0; padding-bottom: 7px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font: 10px var(--mono); letter-spacing: .06em; }
+.project-group-heading span { color: var(--dim); font-size: 9px; }
+.project-group-cards { display: grid; min-width: 0; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 10px; }
 .workspace-project-card { display: grid; min-width: 0; gap: 18px; padding: 15px; border: 1px solid var(--line); border-radius: 4px; background: linear-gradient(145deg, #121d20, #0d1417); }
 .workspace-project-card[data-active="true"] { border-color: #2d6658; background: linear-gradient(145deg, #14251f, #0e1717); }
 .workspace-project-card-heading { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: start; }
@@ -139,6 +143,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .workspace-project-meta span { display: grid; min-width: 0; gap: 4px; }
 .workspace-project-meta strong { overflow: hidden; color: var(--muted); font: 10px var(--mono); text-overflow: ellipsis; }
 .workspace-project-open { display: inline-flex; align-items: center; justify-self: start; text-decoration: none; }
+.workspace-project-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.workspace-project-group-select { min-width: 0; min-height: 29px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 3px; background: #111b1e; color: var(--muted); font: 9px var(--mono); }
+.workspace-project-group-select:disabled { opacity: .43; cursor: not-allowed; }
+.project-group-dialog { width: min(420px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); }
+.project-group-dialog::backdrop { background: #05090bd9; }
+.project-group-dialog form { display: grid; gap: 12px; padding: 18px; }
+.project-group-dialog h2 { margin: 0; font: 12px var(--mono); letter-spacing: .05em; }
+.project-group-dialog label { color: var(--muted); font: 10px var(--mono); }
+.project-group-dialog input { min-width: 0; min-height: 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 3px; background: #0b1114; color: var(--text); font: 12px var(--mono); }
+.project-group-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .projects-empty { align-self: center; justify-self: center; margin: 0; padding: 24px; color: var(--muted); font: 11px var(--mono); text-align: center; }
 .project-detail[data-controls-locked="true"] .project-main { pointer-events: none; }
 .project-detail[data-controls-locked="true"] #workflow-panel { pointer-events: auto; user-select: text; }

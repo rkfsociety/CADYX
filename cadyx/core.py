@@ -106,16 +106,36 @@ class CadyxCore:
 
     def list_projects(self) -> list[dict[str, Any]]:
         result = []
+        group_by_project = self.workspace.project_group_assignments()
         for project in self.workspace.list():
             project_id = project["id"]
             result.append({
                 "project": self._summary(project),
                 "lock": self.leases.snapshot_for_listing(project_id),
+                "group_id": group_by_project.get(project_id),
             })
         return result
 
     def list_workspace(self) -> dict[str, Any]:
-        return {"projects": self.list_projects(), "folders": self.workspace.list_folder_projects()}
+        return {
+            "projects": self.list_projects(),
+            "folders": self.workspace.list_folder_projects(),
+            "groups": self.workspace.list_project_groups(),
+        }
+
+    def create_project_group(self, name: str) -> dict[str, str]:
+        return self.workspace.create_project_group(name)
+
+    def assign_project_group(self, project_id: str, group_id: str | None) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            lock = self.leases.snapshot(project_id)
+            activities, _ = self.events.activity_state_snapshot(project_id)
+            if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
+                item.get("state") == "running" for item in activities
+            ):
+                raise ConflictError("A project can only be moved when it is free with no running operation.", code="PROJECT_BUSY")
+            self.workspace.assign_project_group(project_id, group_id)
+        return {"project_id": project_id, "group_id": group_id}
 
     def workspace_selection_snapshot(self) -> dict[str, str] | None:
         with self._workspace_selection_guard:
@@ -721,6 +741,7 @@ class CadyxCore:
             "replace_sketch_path": "Рисует траекторию",
             "fuse_bodies": "Объединяет тела",
             "cut_bodies": "Вырезает материал",
+            "remove_body": "Удаляет тело из модели",
             "set_parameter": "Меняет параметры модели",
             "create_metric_thread": "Строит метрическую резьбу",
             "resize_imported_thread": "Увеличивает диаметр резьбы",

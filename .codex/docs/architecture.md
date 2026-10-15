@@ -172,6 +172,16 @@ address isolates the viewer selection, not the edit lock. A tab opened without
 active. A tab pinned to a project continues to disable controls while that
 project's lock or activity is not free.
 
+The Projects view also supports logical project groups. Group definitions and
+project-to-group assignments are stored in `.cadyx-project-groups.sqlite3` in
+the workspace root, separate from project documents and physical workspace
+folders. `GET /api/v1/projects` includes `groups` and each entry's `group_id`;
+`POST /api/v1/project-groups` creates a group, and
+`POST /api/v1/projects/{id}/group` assigns a group or accepts `group_id: null`
+to return a project to the ungrouped section. Assignment requires the project
+to be free with no running operation. Group creation and assignment do not
+move or rewrite project directories or documents.
+
 The default host is `127.0.0.1`. Non-loopback binds require the host authentication gate described above; the built-in server still relies on a trusted LAN or external TLS/VPN for transport confidentiality.
 
 ### Agent API discovery and local Codex MCP adapter
