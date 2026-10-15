@@ -107,6 +107,13 @@ their respective human/agent edit leases. Results below appear inside
   on a finite line segment, or on the support of an infinite line. Creates an
   exact circle whose center is offset by the requested radius along the chosen
   line normal.
+- `add_sketch_circle_tangent_to_two_lines`: `sketch_id`, distinct same-sketch
+  `first_line_id` and `second_line_id`, positive `radius`, and optional
+  `first_side`/`second_side` (each `1` by default or `-1` relative to the
+  corresponding line direction). The side pair selects one of four
+  angle-bisector solutions. Parallel lines are rejected, and contact points
+  must lie within finite line segments; infinite lines use their full support.
+  Returns the circle and both exact contact coordinates.
 - `add_sketch_arc_center`: `sketch_id`, `center`, `start`, and `end` coordinate
   objects, with optional boolean `clockwise` (default false). Start and end
   must lie on the same circle and be distinct from each other and the center.

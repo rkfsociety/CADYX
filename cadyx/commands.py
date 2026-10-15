@@ -197,6 +197,8 @@ class CommandSystem:
             return self._add_sketch_circle_tool(document, command, kind, progress=progress)
         if kind == "add_sketch_circle_tangent_to_line":
             return self._add_sketch_circle_tangent_to_line(document, command, progress=progress)
+        if kind == "add_sketch_circle_tangent_to_two_lines":
+            return self._add_sketch_circle_tangent_to_two_lines(document, command, progress=progress)
         if kind == "add_sketch_arc_center":
             return self._add_sketch_arc_center(document, command, progress=progress)
         if kind == "mirror_sketch_elements":
@@ -573,6 +575,89 @@ class CommandSystem:
         )
         result["tangent_point"] = {"x": tangent[0], "y": tangent[1]}
         result["line_id"] = line_id
+        result["circle_ids"] = [result["circle_id"]]
+        result["point_ids"] = [result["point_id"]]
+        return result
+
+    def _add_sketch_circle_tangent_to_two_lines(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        line_ids = [command.get("first_line_id"), command.get("second_line_id")]
+        if line_ids[0] == line_ids[1]:
+            raise ValidationError("A two-tangent circle needs two different lines.")
+        by_id = {item["id"]: item for item in document.objects}
+        lines = [by_id.get(line_id) for line_id in line_ids]
+        if any(line is None or line.get("type") != "line" or line.get("sketch_id") != sketch["id"]
+               for line in lines):
+            raise ValidationError("Both tangent lines must belong to the same sketch.")
+        radius = _number(command.get("radius"), "radius")
+        if radius <= 1e-7:
+            raise ValidationError("A tangent circle radius must be greater than 1e-7.")
+        sides = [command.get("first_side", 1), command.get("second_side", 1)]
+        if any(type(side) is not int or side not in {-1, 1} for side in sides):
+            raise ValidationError("Tangent sides must be 1 or -1 relative to each line direction.")
+
+        directions: list[tuple[float, float]] = []
+        normals: list[tuple[float, float]] = []
+        starts: list[tuple[float, float]] = []
+        lengths: list[float] = []
+        for line in lines:
+            start, end = by_id[line["start_id"]], by_id[line["end_id"]]
+            ax, ay = start["x"], start["y"]
+            dx, dy = end["x"] - ax, end["y"] - ay
+            length = math.hypot(dx, dy)
+            if not math.isfinite(length) or length <= 1e-7:
+                raise ValidationError("Tangent lines must have finite positive lengths.")
+            directions.append((dx / length, dy / length))
+            normals.append((-dy / length, dx / length))
+            starts.append((ax, ay))
+            lengths.append(length)
+
+        first_offset = (starts[0][0] + sides[0] * radius * normals[0][0],
+                        starts[0][1] + sides[0] * radius * normals[0][1])
+        second_offset = (starts[1][0] + sides[1] * radius * normals[1][0],
+                         starts[1][1] + sides[1] * radius * normals[1][1])
+        first_direction, second_direction = directions
+        cross = first_direction[0] * second_direction[1] - first_direction[1] * second_direction[0]
+        if abs(cross) <= 1e-12:
+            raise ValidationError("Parallel lines do not define one circle center for the selected radius and sides.")
+        delta = (second_offset[0] - first_offset[0], second_offset[1] - first_offset[1])
+        along_first = (delta[0] * second_direction[1] - delta[1] * second_direction[0]) / cross
+        center = (first_offset[0] + along_first * first_direction[0],
+                  first_offset[1] + along_first * first_direction[1])
+        if not all(math.isfinite(value) for value in center):
+            raise ValidationError("Tangent circle coordinates must remain finite.")
+
+        tangent_points = [
+            (center[0] - sides[index] * radius * normals[index][0],
+             center[1] - sides[index] * radius * normals[index][1])
+            for index in range(2)
+        ]
+        for index, (line, tangent_point) in enumerate(zip(lines, tangent_points, strict=True)):
+            if line.get("extent", "segment") == "infinite":
+                continue
+            projection = ((tangent_point[0] - starts[index][0]) * directions[index][0]
+                          + (tangent_point[1] - starts[index][1]) * directions[index][1])
+            tolerance = 1e-7 * max(1.0, lengths[index], radius)
+            if not -tolerance <= projection <= lengths[index] + tolerance:
+                raise ValidationError("Each tangent point must lie within its finite line segment.")
+
+        if progress is not None:
+            progress({"phase": "add_sketch_circle_tangent_to_two_lines"})
+        result = self._add_sketch_circle(
+            document,
+            {"sketch_id": sketch["id"], "x": center[0], "y": center[1], "radius": radius},
+            progress=progress,
+        )
+        result["line_ids"] = line_ids
+        result["tangent_points"] = [
+            {"x": point[0], "y": point[1]} for point in tangent_points
+        ]
         result["circle_ids"] = [result["circle_id"]]
         result["point_ids"] = [result["point_id"]]
         return result

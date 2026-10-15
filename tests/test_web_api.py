@@ -127,6 +127,7 @@ class WebApiTests(unittest.TestCase):
         advertised = {item["type"] for item in capabilities["commands"]}
         self.assertEqual(len(advertised), len(capabilities["commands"]))
         self.assertIn("add_sketch_circle_tangent_to_line", advertised)
+        self.assertIn("add_sketch_circle_tangent_to_two_lines", advertised)
         self.assertIn("add_sketch_arc_center", advertised)
         for command_type in advertised:
             with self.subTest(command_type=command_type):

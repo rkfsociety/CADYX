@@ -210,6 +210,25 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
                               "line_id": line["line_id"], "tangent_point": tangent_point,
                               "radius": 2})
 
+    def test_circle_tangent_to_two_lines(self) -> None:
+        horizontal = self.line_tool("add_sketch_line", start={"x": -10, "y": 0}, end={"x": 0, "y": 0})
+        vertical = self.line_tool("add_sketch_line", start={"x": 0, "y": 0}, end={"x": 0, "y": 10})
+        result = self.command({"type": "add_sketch_circle_tangent_to_two_lines", "sketch_id": self.sketch_id,
+                              "first_line_id": horizontal["line_id"], "second_line_id": vertical["line_id"],
+                              "radius": 2})
+        objects = self.objects()
+        circle = objects[result["circle_id"]]
+        center = objects[circle["center_id"]]
+        self.assertEqual((center["x"], center["y"], circle["radius"]), (-2, 2, 2))
+        self.assertEqual(result["tangent_points"], [{"x": -2.0, "y": 0.0}, {"x": 0.0, "y": 2.0}])
+        self.assertEqual(result["circle_ids"], [result["circle_id"]])
+
+        parallel = self.line_tool("add_sketch_line", start={"x": -10, "y": 5}, end={"x": 0, "y": 5})
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_circle_tangent_to_two_lines", "sketch_id": self.sketch_id,
+                          "first_line_id": horizontal["line_id"], "second_line_id": parallel["line_id"],
+                          "radius": 2})
+
     def test_arc_center_rejects_different_endpoint_radii(self) -> None:
         with self.assertRaises(ValidationError):
             self.command({"type": "add_sketch_arc_center", "sketch_id": self.sketch_id,
