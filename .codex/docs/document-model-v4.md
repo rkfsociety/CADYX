@@ -101,6 +101,16 @@ their respective human/agent edit leases. Results below appear inside
   coordinates as opposite ends of a diameter. `add_sketch_circle_three_points`
   takes three distinct non-collinear coordinate objects. All create an exact
   circle object and its center point, returning `point_id` and `circle_id`.
+- `add_sketch_circle_tangent_to_line`: `sketch_id`, a same-sketch `line_id`,
+  `tangent_point` (`{x, y}`), positive `radius`, and optional `side` (`1`
+  default or `-1` relative to the line direction). The contact point must lie
+  on a finite line segment, or on the support of an infinite line. Creates an
+  exact circle whose center is offset by the requested radius along the chosen
+  line normal.
+- `add_sketch_arc_center`: `sketch_id`, `center`, `start`, and `end` coordinate
+  objects, with optional boolean `clockwise` (default false). Start and end
+  must lie on the same circle and be distinct from each other and the center.
+  Creates an exact signed circular arc; the default sweep is counterclockwise.
 - `add_sketch_rounded_rectangle`: `sketch_id`, lower-left `x`,`y`, positive
   `width`,`height`, and positive `corner_radius` less than half both side lengths.
   Creates exact quarter-circle arcs and tangent line segments as sketch geometry;

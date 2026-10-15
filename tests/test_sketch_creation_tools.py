@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 from cadyx.core import CadyxCore
+from cadyx.errors import ValidationError
 from cadyx.kernel import PrimitiveKernelAdapter
 
 
@@ -181,3 +182,48 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
         self.assertAlmostEqual(center["x"], 101)
         self.assertAlmostEqual(center["y"], 101)
         self.assertAlmostEqual(circle["radius"], 2**0.5)
+
+    def test_circle_tangent_to_line_at_point(self) -> None:
+        line = self.line_tool("add_sketch_line", start={"x": 0, "y": 0}, end={"x": 10, "y": 0})
+        result = self.command({"type": "add_sketch_circle_tangent_to_line", "sketch_id": self.sketch_id,
+                               "line_id": line["line_id"], "tangent_point": {"x": 4, "y": 0},
+                               "radius": 2})
+        objects = self.objects()
+        circle = objects[result["circle_id"]]
+        center = objects[circle["center_id"]]
+        self.assertEqual((center["x"], center["y"], circle["radius"]), (4, 2, 2))
+        self.assertEqual(result["circle_ids"], [result["circle_id"]])
+        self.command({"type": "add_sketch_circle_tangent_to_line", "sketch_id": self.sketch_id,
+                      "line_id": line["line_id"], "tangent_point": {"x": 4, "y": 0},
+                      "radius": 2, "side": -1})
+        diagonal = self.line_tool("add_sketch_line", start={"x": 0, "y": 0}, end={"x": 3, "y": 4})
+        rotated = self.command({"type": "add_sketch_circle_tangent_to_line", "sketch_id": self.sketch_id,
+                                "line_id": diagonal["line_id"], "tangent_point": {"x": 1.2, "y": 1.6},
+                                "radius": 2})
+        center = self.objects()[rotated["circle_id"]]["center_id"]
+        center_point = self.objects()[center]
+        self.assertAlmostEqual(center_point["x"], -0.4)
+        self.assertAlmostEqual(center_point["y"], 2.8)
+        for tangent_point in ({"x": 4, "y": 1}, {"x": 11, "y": 0}):
+            with self.subTest(tangent_point=tangent_point), self.assertRaises(ValidationError):
+                self.command({"type": "add_sketch_circle_tangent_to_line", "sketch_id": self.sketch_id,
+                              "line_id": line["line_id"], "tangent_point": tangent_point,
+                              "radius": 2})
+
+    def test_arc_center_rejects_different_endpoint_radii(self) -> None:
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_arc_center", "sketch_id": self.sketch_id,
+                          "center": {"x": 0, "y": 0}, "start": {"x": 5, "y": 0},
+                          "end": {"x": 0, "y": 4}})
+
+    def test_arc_center(self) -> None:
+        result = self.command({"type": "add_sketch_arc_center", "sketch_id": self.sketch_id,
+                               "center": {"x": 0, "y": 0}, "start": {"x": 5, "y": 0},
+                               "end": {"x": 0, "y": 5}})
+        arc = self.objects()[result["arc_id"]]
+        self.assertAlmostEqual(arc["radius"], 5)
+        self.assertAlmostEqual(arc["sweep_radians"], 3.141592653589793 / 2)
+        clockwise = self.command({"type": "add_sketch_arc_center", "sketch_id": self.sketch_id,
+                                  "center": {"x": 0, "y": 0}, "start": {"x": 5, "y": 0},
+                                  "end": {"x": 0, "y": -5}, "clockwise": True})
+        self.assertAlmostEqual(self.objects()[clockwise["arc_id"]]["sweep_radians"], -3.141592653589793 / 2)

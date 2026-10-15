@@ -195,6 +195,10 @@ class CommandSystem:
             return self._add_sketch_circle(document, command, progress=progress)
         if kind in {"add_sketch_circle_diameter", "add_sketch_circle_two_points", "add_sketch_circle_three_points"}:
             return self._add_sketch_circle_tool(document, command, kind, progress=progress)
+        if kind == "add_sketch_circle_tangent_to_line":
+            return self._add_sketch_circle_tangent_to_line(document, command, progress=progress)
+        if kind == "add_sketch_arc_center":
+            return self._add_sketch_arc_center(document, command, progress=progress)
         if kind == "mirror_sketch_elements":
             return self._mirror_sketch_elements(document, command, progress=progress)
         if kind == "pattern_sketch_elements":
@@ -526,6 +530,106 @@ class CommandSystem:
         ]
         self._rebuild_changed_features(document, {sketch_id}, progress=progress)
         return {"sketch_id": sketch_id, "point_id": point_id, "circle_id": circle_id}
+
+    def _add_sketch_circle_tangent_to_line(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        line_id = command.get("line_id")
+        line = next((item for item in document.objects if item.get("id") == line_id), None)
+        if line is None or line.get("type") != "line" or line.get("sketch_id") != sketch["id"]:
+            raise ValidationError("A tangent circle needs a line from the same sketch.")
+        tangent = self._coordinate_pair(command.get("tangent_point"), "Tangent point")
+        radius = _number(command.get("radius"), "radius")
+        if radius <= 1e-7:
+            raise ValidationError("A tangent circle radius must be greater than 1e-7.")
+        side = command.get("side", 1)
+        if type(side) is not int or side not in {-1, 1}:
+            raise ValidationError("side must be 1 or -1 relative to the line direction.")
+        by_id = {item["id"]: item for item in document.objects}
+        start, end = by_id[line["start_id"]], by_id[line["end_id"]]
+        dx, dy = end["x"] - start["x"], end["y"] - start["y"]
+        length = math.hypot(dx, dy)
+        offset_x, offset_y = tangent[0] - start["x"], tangent[1] - start["y"]
+        cross = dx * offset_y - dy * offset_x
+        dot = dx * offset_x + dy * offset_y
+        tolerance = 1e-7 * max(1.0, length, math.hypot(offset_x, offset_y))
+        if abs(cross) > tolerance * length:
+            raise ValidationError("The tangent point must lie on the selected line.")
+        if line.get("extent", "segment") != "infinite" and not -tolerance <= dot / length <= length + tolerance:
+            raise ValidationError("The tangent point must lie within the selected line segment.")
+        center_x = tangent[0] - side * dy / length * radius
+        center_y = tangent[1] + side * dx / length * radius
+        if not all(math.isfinite(value) for value in (center_x, center_y)):
+            raise ValidationError("Tangent circle coordinates must remain finite.")
+        result = self._add_sketch_circle(
+            document,
+            {"sketch_id": sketch["id"], "x": center_x, "y": center_y, "radius": radius},
+            progress=progress,
+        )
+        result["tangent_point"] = {"x": tangent[0], "y": tangent[1]}
+        result["line_id"] = line_id
+        result["circle_ids"] = [result["circle_id"]]
+        result["point_ids"] = [result["point_id"]]
+        return result
+
+    def _add_sketch_arc_center(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        center = self._coordinate_pair(command.get("center"), "Arc center")
+        start = self._coordinate_pair(command.get("start"), "Arc start")
+        end = self._coordinate_pair(command.get("end"), "Arc end")
+        clockwise = command.get("clockwise", False)
+        if not isinstance(clockwise, bool):
+            raise ValidationError("clockwise must be a boolean.")
+        start_radius = math.hypot(start[0] - center[0], start[1] - center[1])
+        end_radius = math.hypot(end[0] - center[0], end[1] - center[1])
+        if start_radius <= 1e-7 or end_radius <= 1e-7:
+            raise ValidationError("Arc endpoints must differ from the center.")
+        if math.hypot(start[0] - end[0], start[1] - end[1]) <= 1e-7:
+            raise ValidationError("Arc start and end must be distinct.")
+        if abs(start_radius - end_radius) > 1e-7:
+            raise ValidationError("Arc start and end must have the same radius from the center.")
+        radius = (start_radius + end_radius) / 2
+        if not all(math.isfinite(value) for value in
+                   (center[0] - radius, center[0] + radius, center[1] - radius, center[1] + radius)):
+            raise ValidationError("Arc coordinates must remain finite.")
+        start_angle = math.atan2(start[1] - center[1], start[0] - center[0])
+        end_angle = math.atan2(end[1] - center[1], end[0] - center[0])
+        sweep = (end_angle - start_angle) % math.tau
+        if clockwise:
+            sweep -= math.tau
+        if abs(sweep) <= 1e-7 or abs(sweep) >= math.tau - 1e-7:
+            raise ValidationError("Arc sweep must be non-zero and less than one revolution.")
+        if progress is not None:
+            progress({"phase": "add_sketch_arc_center"})
+        sketch_id = sketch["id"]
+        point_ids = [f"point:{uuid4()}" for _ in range(3)]
+        arc_id = f"circle:{uuid4()}"
+        sketch_index = document.objects.index(sketch)
+        document.objects[sketch_index + 1:sketch_index + 1] = [
+            {"id": point_ids[0], "type": "point", "sketch_id": sketch_id,
+             "x": center[0], "y": center[1], "construction": True},
+            {"id": point_ids[1], "type": "point", "sketch_id": sketch_id,
+             "x": start[0], "y": start[1]},
+            {"id": point_ids[2], "type": "point", "sketch_id": sketch_id,
+             "x": end[0], "y": end[1]},
+            {"id": arc_id, "type": "circle", "sketch_id": sketch_id,
+             "center_id": point_ids[0], "start_id": point_ids[1], "end_id": point_ids[2],
+             "radius": radius, "sweep_radians": sweep},
+        ]
+        self._rebuild_changed_features(document, {sketch_id}, progress=progress)
+        return {"sketch_id": sketch_id, "point_ids": point_ids, "circle_ids": [arc_id],
+                "arc_id": arc_id, "radius": radius, "sweep_radians": sweep}
 
     def _mirror_sketch_elements(
         self,

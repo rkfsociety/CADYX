@@ -124,6 +124,19 @@ class RenderingTests(unittest.TestCase):
         arc = by_id[result["circle_ids"][0]]
         self.assertEqual(len(arc["lines"]), 32)
 
+    def test_center_defined_arc_renders_only_its_sweep(self):
+        sketch = self.command({"type": "create_sketch"})["sketch_id"]
+        result = self.command({"type": "add_sketch_arc_center", "sketch_id": sketch,
+                               "center": {"x": 0, "y": 0}, "start": {"x": 5, "y": 0},
+                               "end": {"x": 0, "y": 5}})
+        scene = self.core.render_project(self.project)
+        arc = next(item for item in scene["objects"] if item["object_id"] == result["arc_id"])
+        self.assertEqual(len(arc["lines"]), 32)
+        self.assertAlmostEqual(min(arc["positions"][0::3]), 0)
+        self.assertAlmostEqual(max(arc["positions"][0::3]), 5)
+        self.assertAlmostEqual(min(arc["positions"][1::3]), 0)
+        self.assertAlmostEqual(max(arc["positions"][1::3]), 5)
+
     def test_unrenderable_sketch_is_rejected_without_changing_document(self):
         sketch = self.command({"type": "create_sketch"})["sketch_id"]
         center = self.command({"type": "add_sketch_element", "sketch_id": sketch,

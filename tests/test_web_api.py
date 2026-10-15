@@ -126,6 +126,8 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(any(route["path"] == "/api/v1/agent/projects/{id}/commands" for route in capabilities["routes"]))
         advertised = {item["type"] for item in capabilities["commands"]}
         self.assertEqual(len(advertised), len(capabilities["commands"]))
+        self.assertIn("add_sketch_circle_tangent_to_line", advertised)
+        self.assertIn("add_sketch_arc_center", advertised)
         for command_type in advertised:
             with self.subTest(command_type=command_type):
                 try:
