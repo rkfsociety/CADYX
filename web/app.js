@@ -212,6 +212,7 @@ let agentWorkActive = savedAgentWorkLock.active;
 let agentWorkRevision = savedAgentWorkLock.revision;
 let agentWorkStatusConnected = false;
 const FOLDER_SELECTION_PREFIX = "folder:";
+let projectAddressPinned = new URLSearchParams(window.location.search).has("project_id");
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
 const folderInspector = $("#folder-inspector");
@@ -362,8 +363,18 @@ function setWorkspaceNavigation(view) {
 }
 
 function readSelectedProject() {
+  const addressedProject = new URLSearchParams(window.location.search).get("project_id");
+  if (addressedProject) return addressedProject;
   try { return localStorage.getItem("cadyx.selected-project"); }
   catch { return null; }
+}
+
+function addressProject(id) {
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set("project_id", id);
+  else url.searchParams.delete("project_id");
+  window.history.replaceState(null, "", url);
+  projectAddressPinned = Boolean(id);
 }
 
 function saveSelectedProject(id) {
@@ -645,6 +656,7 @@ $("#projects-list").addEventListener("click", async (event) => {
       throw new Error("Сервер не подтвердил выбор проекта.");
     }
     selectedProjectId = projectId;
+    addressProject(projectId);
     selectedObjectId = null;
     activeSketchId = null;
     pendingViewportTransition = null;
@@ -976,12 +988,13 @@ async function refreshWorkspacePass() {
   const apiSelection = workspaceSelectionId(selectionResponse.selection);
   const savedSelection = readSelectedProject();
   const previousSelection = selectedProjectId;
-  const requestedSelection = [apiSelection, savedSelection, selectedProjectId]
-    .find((id) => id && workspaceSelectionExists(id));
-  selectedProjectId = requestedSelection || projects[0]?.project.id || null;
+  const requestedSelection = projectAddressPinned
+    ? [savedSelection, selectedProjectId].find((id) => id && workspaceSelectionExists(id))
+    : [apiSelection, savedSelection, selectedProjectId].find((id) => id && workspaceSelectionExists(id));
+  selectedProjectId = requestedSelection || (projectAddressPinned ? null : projects[0]?.project.id || null);
   const selectionChanged = selectedProjectId !== previousSelection;
   renderProjects();
-  if (selectedProjectId !== savedSelection) {
+  if (!projectAddressPinned && selectedProjectId !== savedSelection) {
     selectedObjectId = null;
     saveSelectedProject(selectedProjectId);
   }
@@ -1538,6 +1551,7 @@ function handleStreamEvent(type, event) {
     return;
   }
   if (type === "workspace.selection.changed") {
+    if (projectAddressPinned) return;
     const selectedId = workspaceSelectionId(event.data || {});
     if (!selectedId) return;
     selectedProjectId = selectedId;
@@ -1725,6 +1739,7 @@ function handleStreamEvent(type, event) {
   } else if (type === "viewport.camera") {
     if (projectId === selectedProjectId) animateModelCamera(data);
   } else if (type === "project.created") {
+    if (projectAddressPinned) return;
     selectedProjectId = projectId;
     selectedObjectId = null;
     activeSketchId = null;

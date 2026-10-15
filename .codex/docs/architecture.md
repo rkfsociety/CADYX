@@ -161,6 +161,12 @@ project lock is FREE with no running operation. Workspace-folder selection remai
 browser presents the selected project or folder inside the same workspace shell.
 After host restart, the in-memory Agent API selection is empty; the viewer may
 restore its last local selection until an agent selects a resource again.
+Selecting a project in the browser replaces the current tab URL with
+`/?project_id=<project UUID>`. Opening that address pins the tab's displayed
+project to that UUID and ignores process-wide selection and project-created SSE
+events, so separate tabs can keep different projects visible. Project data and
+leases remain shared by project ID; the address isolates the viewer selection,
+not the edit lock or global active-work safety controls.
 
 The default host is `127.0.0.1`. Non-loopback binds require the host authentication gate described above; the built-in server still relies on a trusted LAN or external TLS/VPN for transport confidentiality.
 
