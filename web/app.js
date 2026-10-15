@@ -1607,7 +1607,7 @@ function handleStreamEvent(type, event) {
         "add_sketch_parallelogram", "add_sketch_regular_polygon", "add_sketch_inscribed_polygon",
         "add_sketch_circumscribed_polygon", "add_sketch_polygon_from_center", "add_sketch_rounded_rectangle",
         "add_sketch_circle_diameter",
-        "add_sketch_ellipse", "add_sketch_ellipse_center",
+        "add_sketch_ellipse", "add_sketch_ellipse_center", "add_sketch_ellipse_three_points",
         "add_sketch_circle_two_points", "add_sketch_circle_three_points", "add_sketch_circle_tangent_to_line",
         "add_sketch_circle_tangent_to_two_lines", "add_sketch_circle_tangent_to_three_lines",
         "add_sketch_arc_center", "add_sketch_arc_three_points", "add_sketch_arc_start_center_end",

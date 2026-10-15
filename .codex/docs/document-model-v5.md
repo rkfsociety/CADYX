@@ -110,6 +110,11 @@ their respective human/agent edit leases. Results below appear inside
   `major_radius` and `minor_radius`, and optional `rotation_degrees` (default 0).
   The major radius must be at least the minor radius. Stores one exact analytic
   ellipse and returns `ellipse_id`, center and radii.
+- `add_sketch_ellipse_three_points`: `sketch_id`, `center`, `major_axis_endpoint`
+  and `minor_axis_endpoint` coordinate objects. The two endpoint vectors from
+  center must be perpendicular within 1e-7 relative tolerance; their lengths
+  are the radii and the major one must be at least the minor one. Stores one
+  exact analytic ellipse and returns `ellipse_id`, center and radii.
 - `add_sketch_circle_tangent_to_line`: `sketch_id`, a same-sketch `line_id`,
   `tangent_point` (`{x, y}`), positive `radius`, and optional `side` (`1`
   default or `-1` relative to the line direction). The contact point must lie

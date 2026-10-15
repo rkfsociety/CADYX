@@ -195,7 +195,8 @@ class CommandSystem:
             )
         if kind == "add_sketch_circle":
             return self._add_sketch_circle(document, command, progress=progress)
-        if kind in {"add_sketch_ellipse", "add_sketch_ellipse_center"}:
+        if kind in {"add_sketch_ellipse", "add_sketch_ellipse_center",
+                    "add_sketch_ellipse_three_points"}:
             return self._add_sketch_ellipse(document, command, kind, progress=progress)
         if kind in {"add_sketch_circle_diameter", "add_sketch_circle_two_points", "add_sketch_circle_three_points"}:
             return self._add_sketch_circle_tool(document, command, kind, progress=progress)
@@ -536,11 +537,25 @@ class CommandSystem:
             major_radius = math.hypot(second[0] - first[0], second[1] - first[1]) / 2
             minor_radius = _number(command.get("minor_radius"), "minor_radius")
             rotation = math.atan2(second[1] - first[1], second[0] - first[0])
-        else:
+        elif kind == "add_sketch_ellipse_center":
             center_x, center_y = self._coordinate_pair(command.get("center"), "Ellipse center")
             major_radius = _number(command.get("major_radius"), "major_radius")
             minor_radius = _number(command.get("minor_radius"), "minor_radius")
             rotation = math.radians(_finite_number(command.get("rotation_degrees", 0), "Ellipse rotation"))
+        else:
+            center_x, center_y = self._coordinate_pair(command.get("center"), "Ellipse center")
+            major_x, major_y = self._coordinate_pair(command.get("major_axis_endpoint"), "Major axis endpoint")
+            minor_x, minor_y = self._coordinate_pair(command.get("minor_axis_endpoint"), "Minor axis endpoint")
+            major_dx, major_dy = major_x - center_x, major_y - center_y
+            minor_dx, minor_dy = minor_x - center_x, minor_y - center_y
+            major_radius = math.hypot(major_dx, major_dy)
+            minor_radius = math.hypot(minor_dx, minor_dy)
+            dot = major_dx * minor_dx + major_dy * minor_dy
+            scale = major_radius * minor_radius
+            if (not math.isfinite(dot) or not math.isfinite(scale)
+                    or abs(dot) > 1e-7 * max(scale, 1e-14)):
+                raise ValidationError("Ellipse axis endpoints must be perpendicular from the center.")
+            rotation = math.atan2(major_dy, major_dx)
         if major_radius < minor_radius or min(major_radius, minor_radius) <= 1e-7:
             raise ValidationError("Ellipse radii must satisfy major_radius >= minor_radius > 1e-7.")
         cosine, sine = math.cos(rotation), math.sin(rotation)

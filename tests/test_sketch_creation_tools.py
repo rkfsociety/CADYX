@@ -222,6 +222,23 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
         self.assertAlmostEqual(rotated["center_y"], 2)
         self.assertAlmostEqual(rotated["rotation_radians"], 2 * math.pi / 3)
 
+    def test_ellipse_three_points_define_center_and_perpendicular_axes(self) -> None:
+        result = self.command({"type": "add_sketch_ellipse_three_points", "sketch_id": self.sketch_id,
+                               "center": {"x": 1, "y": -2},
+                               "major_axis_endpoint": {"x": 5, "y": 1},
+                               "minor_axis_endpoint": {"x": -0.5, "y": 0}})
+        ellipse = self.objects()[result["ellipse_id"]]
+        self.assertEqual((ellipse["center_x"], ellipse["center_y"]), (1, -2))
+        self.assertEqual((ellipse["major_radius"], ellipse["minor_radius"]), (5, 2.5))
+        self.assertAlmostEqual(ellipse["rotation_radians"], math.atan2(3, 4))
+        before = len(self.objects())
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_ellipse_three_points", "sketch_id": self.sketch_id,
+                          "center": {"x": 0, "y": 0},
+                          "major_axis_endpoint": {"x": 4, "y": 0},
+                          "minor_axis_endpoint": {"x": 1, "y": 2}})
+        self.assertEqual(len(self.objects()), before)
+
     def test_circle_tangent_to_line_at_point(self) -> None:
         line = self.line_tool("add_sketch_line", start={"x": 0, "y": 0}, end={"x": 10, "y": 0})
         result = self.command({"type": "add_sketch_circle_tangent_to_line", "sketch_id": self.sketch_id,
