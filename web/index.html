@@ -7,6 +7,302 @@
     <title>CADYX — Проекты</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/assets/style.css">
+    <style id="cadyx-compact-ui">
+/* CADYX compact viewport-first shell */
+:root {
+  --cadyx-rail-width: 108px;
+  --cadyx-shell-gap: 8px;
+  --cadyx-overlay-width: min(330px, calc(100% - 24px));
+}
+
+.topbar {
+  height: 56px;
+  grid-template-columns: auto minmax(250px, 1fr) auto auto;
+  grid-template-areas: "brand project sync end";
+  gap: 12px;
+  padding: 0 12px;
+}
+.topbar-start { grid-area: brand; }
+.topbar-project { grid-area: project; }
+.topbar-sync { grid-area: sync; }
+.topbar-end { grid-area: end; }
+.brand { font-size: 25px; letter-spacing: .09em; }
+.topbar-sync { gap: 7px; padding-left: 12px; }
+.topbar-sync .topbar-project-copy { gap: 1px; }
+.topbar-sync .document-title { display: none; }
+.topbar-project { gap: 9px; padding-left: 12px; }
+.topbar-project-copy { gap: 1px; }
+.topbar-project { position: relative; }
+.project-id-copy-row {
+  position: absolute;
+  z-index: 10;
+  top: 40px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: max-content;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #0b1114f2;
+  box-shadow: 0 10px 24px #00000055;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity .12s ease, transform .12s ease;
+}
+.topbar-project:hover .project-id-copy-row,
+.topbar-project:focus-within .project-id-copy-row { opacity: 1; pointer-events: auto; transform: translateY(0); }
+.header-revision { min-width: 58px; padding-left: 11px; }
+.readonly-badge { padding: 4px 6px; }
+.agent-owner-chip {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--muted);
+  background: #0d1518;
+  font: 9px var(--mono);
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+.agent-owner-chip[data-state="running"] {
+  border-color: #2d6658;
+  color: var(--agent);
+  background: #10211e;
+  box-shadow: 0 0 18px #45e1ba12;
+}
+.agent-owner-chip[data-state="warning"] { border-color: #5a4930; color: var(--warning); }
+.agent-owner-chip[data-state="failed"] { border-color: #684145; color: var(--danger); }
+
+.app-shell { height: calc(100vh - 56px); height: calc(100dvh - 56px); }
+.project-detail {
+  grid-template-columns: var(--cadyx-rail-width) minmax(0, 1fr);
+  gap: var(--cadyx-shell-gap);
+  padding: var(--cadyx-shell-gap);
+}
+.section-sidebar { border-radius: 3px; }
+.workspace-navigation { gap: 3px; padding: 5px; }
+.nav-item {
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 5px;
+  min-height: 56px;
+  padding: 7px 6px;
+  border-radius: 2px;
+}
+.nav-index { font-size: 11px; color: var(--dim); }
+.nav-copy { gap: 0; }
+.nav-copy strong { font-size: 9px; letter-spacing: .03em; }
+.nav-copy small { display: none; }
+.workspace-lock-status { margin: 5px; padding: 7px; font-size: 8px; }
+
+.project-main, .primary-grid { position: relative; }
+.primary-grid[data-view="overview"] { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.primary-grid[data-view="overview"] > .model-panel { grid-column: 1; grid-row: 1; }
+.primary-grid[data-view="overview"] > .inspector-column {
+  position: absolute;
+  z-index: 6;
+  top: 12px;
+  right: 12px;
+  width: var(--cadyx-overlay-width);
+  max-height: calc(100% - 24px);
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+}
+.primary-grid[data-view="overview"] > .inspector-column > :not(#workflow-panel) { display: none; }
+.primary-grid[data-view="overview"] #workflow-panel {
+  width: 100%;
+  pointer-events: auto;
+  border-color: #2a3e43;
+  background: #0d1518e8;
+  box-shadow: 0 12px 34px #00000052;
+  backdrop-filter: blur(10px);
+}
+.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] {
+  grid-template-rows: 34px 42px minmax(82px, auto);
+}
+.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="false"] {
+  height: min(520px, calc(100vh - 100px));
+  height: min(520px, calc(100dvh - 100px));
+}
+.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-history { display: none; }
+.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-summary {
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  padding: 3px 9px;
+}
+.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-percent { font-size: 19px; }
+.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-current { gap: 6px; padding: 8px 10px; }
+.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-action { font-size: 11px; line-height: 1.35; }
+.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-task { display: none !important; }
+.workflow-heading-actions { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.workflow-collapse-button {
+  width: 25px;
+  height: 25px;
+  min-height: 25px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--dim);
+  font: 13px/1 var(--mono);
+  cursor: pointer;
+}
+.workflow-collapse-button:hover:not(:disabled) { border-color: #2d5a50; color: var(--accent); background: #10211e; }
+.workflow-collapse-button:disabled { opacity: .35; cursor: default; }
+.primary-grid:not([data-view="overview"]) .workflow-collapse-button { display: none; }
+
+.model-panel {
+  position: relative;
+  grid-template-rows: 42px minmax(0, 1fr);
+  border-radius: 3px;
+}
+.viewport-heading { min-height: 42px; padding: 0 10px; }
+.viewport-heading h2 { font-size: 13px; }
+.viewport-mode { font-size: 8px; }
+.model-toolbar { gap: 4px; }
+.viewport-toolbar-divider { height: 20px; }
+.viewport-icon-button { width: 27px; height: 27px; }
+.viewport-mode-button, .viewport-fit-button, .viewport-four-views-button { min-height: 27px; padding: 3px 7px; }
+.viewport-four-views-button[aria-pressed="true"] { border-color: #2d5a50; background: #10211e; color: var(--accent); }
+.viewport { min-height: 0; }
+.viewport-footer {
+  position: absolute;
+  z-index: 5;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  width: auto;
+  min-height: 28px;
+  gap: clamp(8px, 1.3vw, 18px);
+  padding: 0 9px;
+  border: 1px solid #26373db8;
+  border-radius: 3px;
+  background: #0a1013d9;
+  box-shadow: 0 7px 22px #00000038;
+  backdrop-filter: blur(7px);
+  pointer-events: none;
+}
+.viewport-footer::after {
+  margin-left: auto;
+  color: var(--dim);
+  content: "mm · Z-UP";
+  font: 9px var(--mono);
+  letter-spacing: .06em;
+}
+.viewport-footer span + span { padding-left: clamp(8px, 1vw, 13px); }
+
+.project-detail[data-ai-state="running"] .model-panel::before {
+  position: absolute;
+  z-index: 8;
+  top: -1px;
+  left: 0;
+  width: 36%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--agent), transparent);
+  content: "";
+  pointer-events: none;
+  animation: cadyx-agent-scan 1.8s linear infinite;
+}
+@keyframes cadyx-agent-scan {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(280%); }
+}
+
+.primary-grid[data-four-views="true"] { display: block; }
+.primary-grid[data-four-views="true"] > .model-panel {
+  position: absolute;
+  z-index: 3;
+  inset: 0 calc(50% + 4px) calc(50% + 4px) 0;
+  width: auto;
+  height: auto;
+}
+.primary-grid[data-four-views="true"] > .inspector-column { display: none; }
+.primary-grid[data-four-views="true"] > .orthographic-panel {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: block;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+.primary-grid[data-four-views="true"] > .orthographic-panel > .panel-heading { display: none; }
+.primary-grid[data-four-views="true"] > .orthographic-panel > .orthographic-views {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
+}
+.primary-grid[data-four-views="true"] > .orthographic-panel > .orthographic-views::before {
+  grid-column: 1;
+  grid-row: 1;
+  content: "";
+}
+.primary-grid[data-four-views="true"] .ortho-view {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #0b1114;
+}
+.primary-grid[data-four-views="true"] .ortho-view:nth-child(1) { grid-column: 2; grid-row: 1; }
+.primary-grid[data-four-views="true"] .ortho-view:nth-child(2) { grid-column: 1; grid-row: 2; }
+.primary-grid[data-four-views="true"] .ortho-view:nth-child(3) { grid-column: 2; grid-row: 2; }
+.primary-grid[data-four-views="true"] .ortho-canvas { width: 100%; height: calc(100% - 24px); }
+.primary-grid[data-four-views="true"] .ortho-view figcaption {
+  height: 24px;
+  padding: 5px 8px;
+  border-top: 1px solid var(--line-soft);
+  background: #0d1417;
+  color: var(--dim);
+  font: 8px var(--mono);
+  letter-spacing: .06em;
+}
+
+.panel { border-radius: 3px; }
+
+@media (max-width: 1180px) {
+  :root { --cadyx-rail-width: 82px; }
+  .nav-item { grid-template-columns: 1fr; justify-items: center; min-height: 52px; text-align: center; }
+  .nav-index { font-size: 10px; }
+  .nav-copy strong { font-size: 8px; }
+  .topbar {
+    grid-template-columns: auto minmax(180px, 1fr) auto;
+    grid-template-areas: "brand project end";
+  }
+  .topbar-sync { display: none; }
+  .viewport-mode { display: none; }
+  .toolbar-label { display: none; }
+  .viewport-mode-button, .viewport-fit-button, .viewport-four-views-button { width: 28px; padding: 3px; justify-content: center; }
+  .viewport-footer span:nth-child(3), .viewport-footer span:nth-child(4) { display: none; }
+}
+
+@media (max-width: 760px) {
+  .topbar { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .header-revision, .readonly-badge { display: none; }
+  .agent-owner-chip { font-size: 8px; }
+  .project-detail { grid-template-columns: 64px minmax(0, 1fr); padding: 5px; gap: 5px; }
+  .nav-copy strong { writing-mode: vertical-rl; transform: rotate(180deg); }
+  .primary-grid[data-view="overview"] > .inspector-column { top: 8px; right: 8px; width: min(290px, calc(100% - 16px)); }
+  .viewport-footer { left: 6px; right: 6px; bottom: 6px; }
+  .viewport-footer span:nth-child(n+3) { display: none; }
+  .viewport-footer::after { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-detail[data-ai-state="running"] .model-panel::before { animation: none; width: 100%; opacity: .65; }
+}
+    </style>
   </head>
   <body>
     <header class="topbar">
@@ -35,6 +331,7 @@
           <span class="topbar-label">РЕВИЗИЯ</span>
           <strong id="document-revision">—</strong>
         </div>
+        <span id="agent-owner-chip" class="agent-owner-chip" data-state="idle">○ PROJECT FREE</span>
         <span class="readonly-badge">ТОЛЬКО ЧТЕНИЕ</span>
       </div>
     </header>
@@ -105,6 +402,9 @@
                       </button>
                     </div>
                     <span class="viewport-toolbar-divider" aria-hidden="true"></span>
+                    <button id="viewport-four-views" class="button viewport-four-views-button" type="button" aria-label="Показать четыре вида" title="Показать четыре вида" aria-pressed="false">
+                      <span class="viewport-mode-icon" aria-hidden="true">⊞</span><span class="toolbar-label">4 ВИДА</span>
+                    </button>
                     <button id="viewport-wireframe" class="button viewport-mode-button" type="button" aria-label="Скрыть рёбра сетки" title="Скрыть рёбра сетки" aria-pressed="true">
                       <span class="viewport-mode-icon" aria-hidden="true">▧</span><span id="viewport-mode-label" class="toolbar-label">ЗАТЕНЕНИЕ + РЁБРА</span>
                     </button>
@@ -166,7 +466,7 @@
                   <p id="geometry-status" class="geometry-status" role="status" aria-live="polite" hidden></p>
                 </section>
                 <section id="workflow-panel" class="panel workflow-panel" aria-labelledby="workflow-title" tabindex="-1">
-                  <div class="panel-heading"><h2 id="workflow-title">ПРОГРЕСС</h2><span id="workflow-name" class="panel-note">РАБОТА НЕ НАЧАТА</span></div>
+                  <div class="panel-heading"><h2 id="workflow-title">ПРОГРЕСС</h2><div class="workflow-heading-actions"><span id="workflow-name" class="panel-note">РАБОТА НЕ НАЧАТА</span><button id="workflow-toggle" class="workflow-collapse-button" type="button" aria-expanded="false" aria-controls="workflow-current workflow-history" title="Развернуть прогресс" aria-label="Развернуть прогресс">+</button></div></div>
                   <div class="workflow-summary">
                     <strong id="workflow-percent" class="workflow-percent">—</strong>
                     <div id="workflow-progress" class="workflow-progress" role="progressbar" aria-label="Прогресс выполнения" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-available="false"><i id="workflow-progress-bar"></i></div>
@@ -275,5 +575,134 @@
     <script src="/assets/viewport.js" defer></script>
     <script src="/assets/ply-preview.js" defer></script>
     <script src="/assets/app.js" defer></script>
+    <script id="cadyx-compact-ui-script">
+window.addEventListener("DOMContentLoaded", () => {
+  const detail = document.querySelector("#project-detail");
+  const grid = document.querySelector("#primary-grid");
+  const inspector = document.querySelector(".inspector-column");
+  const workflow = document.querySelector("#workflow-panel");
+  const orthographic = document.querySelector(".orthographic-panel");
+  const fourViewsButton = document.querySelector("#viewport-four-views");
+  const workflowToggle = document.querySelector("#workflow-toggle");
+  const ownerChip = document.querySelector("#agent-owner-chip");
+  const copyProjectIdButton = document.querySelector("#copy-project-id");
+  const documentKind = document.querySelector("#document-kind");
+  const lockStatus = document.querySelector("#workspace-lock-status");
+  const agentState = document.querySelector("#agent-state");
+
+  if (!detail || !grid || !inspector || !workflow || !orthographic || !fourViewsButton || !workflowToggle || !ownerChip) return;
+
+  document.querySelectorAll("#workspace-navigation .nav-item").forEach((button) => {
+    const title = button.querySelector("strong")?.textContent?.trim();
+    const description = button.querySelector("small")?.textContent?.trim();
+    if (title && !button.disabled) button.title = description ? `${title} — ${description}` : title;
+  });
+
+  workflow.dataset.collapsed = "true";
+  workflowToggle.setAttribute("aria-expanded", "false");
+
+  const renderWorkflowToggle = () => {
+    const collapsed = workflow.dataset.collapsed !== "false";
+    workflowToggle.textContent = collapsed ? "+" : "−";
+    workflowToggle.title = collapsed ? "Развернуть прогресс" : "Свернуть прогресс";
+    workflowToggle.setAttribute("aria-label", workflowToggle.title);
+    workflowToggle.setAttribute("aria-expanded", String(!collapsed));
+  };
+
+  const setWorkflowCollapsed = (collapsed) => {
+    workflow.dataset.collapsed = String(Boolean(collapsed));
+    renderWorkflowToggle();
+  };
+
+  const requestViewerLayout = () => {
+    window.dispatchEvent(new Event("resize"));
+    requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+  };
+
+  const setFourViews = (enabled) => {
+    const next = Boolean(enabled) && grid.dataset.view === "overview";
+    grid.dataset.fourViews = String(next);
+    fourViewsButton.setAttribute("aria-pressed", String(next));
+    fourViewsButton.title = next ? "Вернуться к одному 3D-виду" : "Показать четыре вида";
+    fourViewsButton.setAttribute("aria-label", fourViewsButton.title);
+
+    if (next) {
+      grid.appendChild(orthographic);
+    } else if (orthographic.parentElement !== inspector) {
+      inspector.appendChild(orthographic);
+    }
+    requestViewerLayout();
+  };
+
+  workflowToggle.addEventListener("click", () => {
+    if (workflowToggle.disabled) return;
+    setWorkflowCollapsed(workflow.dataset.collapsed === "false");
+  });
+
+  fourViewsButton.addEventListener("click", () => {
+    if (fourViewsButton.disabled) return;
+    setFourViews(fourViewsButton.getAttribute("aria-pressed") !== "true");
+  });
+
+  const syncShellState = () => {
+    const locked = detail.dataset.controlsLocked === "true";
+    const reason = lockStatus?.textContent?.trim() || "";
+    const state = agentState?.dataset.state || "idle";
+    const hasProject = !detail.hidden;
+
+    let label = "○ PROJECT FREE";
+    let chipState = "idle";
+    let aiState = "idle";
+
+    if (!hasProject) {
+      label = "○ NO PROJECT";
+    } else if (locked && /ИИ-АГЕНТ|АГЕНТ РАБОТАЕТ/.test(reason)) {
+      label = "● AI EDITING";
+      chipState = "running";
+      aiState = "running";
+    } else if (locked && /ВОССТАНОВЛЕНИЕ/.test(reason)) {
+      label = "! RECOVERY";
+      chipState = "failed";
+      aiState = "failed";
+    } else if (locked) {
+      label = "◌ PANEL LOCKED";
+      chipState = "warning";
+      aiState = "warning";
+    } else if (state === "failed") {
+      label = "! AGENT ISSUE";
+      chipState = "failed";
+      aiState = "failed";
+    } else if (state === "running") {
+      label = "● AI EDITING";
+      chipState = "running";
+      aiState = "running";
+    }
+
+    ownerChip.textContent = label;
+    ownerChip.dataset.state = chipState;
+    detail.dataset.aiState = aiState;
+
+    fourViewsButton.disabled = locked;
+    workflowToggle.disabled = locked;
+    if (copyProjectIdButton) {
+      copyProjectIdButton.disabled = locked || !hasProject || documentKind?.textContent?.trim() !== "ПРОЕКТ";
+    }
+    if (locked && grid.dataset.fourViews === "true") setFourViews(false);
+  };
+
+  const stateObserver = new MutationObserver(syncShellState);
+  stateObserver.observe(detail, { attributes: true, attributeFilter: ["hidden", "data-controls-locked"] });
+  if (lockStatus) stateObserver.observe(lockStatus, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
+  if (agentState) stateObserver.observe(agentState, { attributes: true, attributeFilter: ["data-state"], childList: true, characterData: true, subtree: true });
+
+  const viewObserver = new MutationObserver(() => {
+    if (grid.dataset.view !== "overview" && grid.dataset.fourViews === "true") setFourViews(false);
+  });
+  viewObserver.observe(grid, { attributes: true, attributeFilter: ["data-view"] });
+
+  renderWorkflowToggle();
+  syncShellState();
+});
+    </script>
   </body>
 </html>
