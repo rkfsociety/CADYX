@@ -952,6 +952,7 @@ async function refreshWorkspacePass() {
     }
   }
   else {
+    if (!projectAddressPinned) setWorkspaceNavigation("projects");
     const browsingProjects = !projectAddressPinned && primaryGrid.dataset.view === "projects";
     projectDetail.hidden = !browsingProjects;
     $("#object-panel").hidden = true;
