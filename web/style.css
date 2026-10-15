@@ -129,6 +129,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .workspace-project-card h3 { overflow: hidden; margin: 0; color: var(--text); font: 600 14px/1.4 var(--mono); text-overflow: ellipsis; overflow-wrap: anywhere; }
 .workspace-project-state { align-self: start; padding: 4px 6px; border: 1px solid var(--line); border-radius: 3px; color: var(--muted); font: 8px var(--mono); letter-spacing: .06em; white-space: nowrap; }
 .workspace-project-card[data-active="true"] .workspace-project-state { border-color: #2d6658; color: var(--accent); }
+.workspace-project-thumbnail { display: grid; min-height: 145px; place-items: center; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 3px; background-color: #0b1114; background-image: linear-gradient(#26323852 1px, transparent 1px), linear-gradient(90deg, #26323852 1px, transparent 1px); background-size: 18px 18px; }
+.workspace-project-thumbnail img { display: block; width: 100%; height: 145px; object-fit: contain; }
+.workspace-project-thumbnail.unavailable::after { color: var(--dim); content: "ПРЕДПРОСМОТР НЕДОСТУПЕН"; font: 9px var(--mono); letter-spacing: .06em; }
 .workspace-project-meta { display: flex; min-width: 0; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; padding-top: 10px; border-top: 1px solid var(--line-soft); color: var(--dim); font: 9px var(--mono); }
 .workspace-project-meta span { display: grid; min-width: 0; gap: 4px; }
 .workspace-project-meta strong { overflow: hidden; color: var(--muted); font: 10px var(--mono); text-overflow: ellipsis; }

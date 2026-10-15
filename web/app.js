@@ -596,6 +596,19 @@ function renderProjects() {
     state.textContent = active ? "АКТИВНЫЙ РЕСУРС" : projectAvailable ? "ГОТОВ К ОТКРЫТИЮ" : "ПАНЕЛЬ ЗАНЯТА";
     heading.append(name, state);
 
+    const thumbnail = document.createElement("div");
+    thumbnail.className = "workspace-project-thumbnail";
+    const image = document.createElement("img");
+    image.src = `/api/v1/projects/${encodeURIComponent(project.id)}/viewport.png`;
+    image.alt = `Миниатюра проекта «${project.name}»`;
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.addEventListener("error", () => {
+      image.remove();
+      thumbnail.classList.add("unavailable");
+    }, { once: true });
+    thumbnail.append(image);
+
     const action = document.createElement("a");
     action.className = "button workspace-project-open";
     action.href = `/?project_id=${encodeURIComponent(project.id)}`;
@@ -618,7 +631,7 @@ function renderProjects() {
     idValue.textContent = project.id.slice(0, 8).toUpperCase();
     id.append(idValue);
     meta.append(modified, id);
-    card.append(heading, meta, action);
+    card.append(heading, thumbnail, meta, action);
     list.append(card);
   }
 }
