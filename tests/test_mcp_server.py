@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from cadyx.capabilities import COMMAND_CAPABILITIES
 from cadyx.core import CadyxCore
+from cadyx.errors import ValidationError
 from cadyx.mcp_server import CadyxAPI, MCPApplication, TOOLS, handle_message
 from cadyx.web import CadyxHTTPServer, make_request_handler
 
@@ -93,6 +94,47 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertTrue(invalid["isError"])
         detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
         self.assertEqual(detail["document"]["revision"], 0)
+        self.assertEqual(detail["lock"]["state"], "FREE")
+
+    def test_dropped_command_response_is_stopped_and_never_replayed(self) -> None:
+        project_id = self._create_project()
+        original_post = self.app.api.post
+        dropped = False
+
+        def drop_command_response(path: str, body: dict):
+            nonlocal dropped
+            result = original_post(path, body)
+            if path.endswith("/commands") and not dropped:
+                dropped = True
+                raise RuntimeError("simulated lost command response")
+            return result
+
+        with patch.object(self.app.api, "post", side_effect=drop_command_response):
+            result = self.app.call_tool("cadyx_execute_command", {
+                "project_id": project_id,
+                "expected_revision": 0,
+                "command": {"type": "create_box", "width": 10, "height": 8, "depth": 4},
+            })
+        self.assertTrue(result["isError"])
+        self.assertIn("inspect history and geometry before deciding whether to retry", result["content"][0]["text"])
+        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(detail["document"]["revision"], 1)
+        self.assertEqual(len(detail["history"]), 1)
+        self.assertEqual(detail["lock"]["state"], "FREE")
+
+    def test_kernel_failure_is_reported_without_changing_saved_revision(self) -> None:
+        project_id = self._create_project()
+        with patch.object(self.core, "_validate_geometry", side_effect=ValidationError("simulated kernel validation failure")):
+            result = self.app.call_tool("cadyx_execute_command", {
+                "project_id": project_id,
+                "expected_revision": 0,
+                "command": {"type": "create_box", "width": 10, "height": 8, "depth": 4},
+            })
+        self.assertTrue(result["isError"])
+        self.assertIn("simulated kernel validation failure", result["content"][0]["text"])
+        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(detail["document"]["revision"], 0)
+        self.assertEqual(detail["history"], [])
         self.assertEqual(detail["lock"]["state"], "FREE")
 
     def test_selection_refuses_busy_current_or_target_project(self) -> None:
