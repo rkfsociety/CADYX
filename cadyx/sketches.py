@@ -51,7 +51,7 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
 
     for item in objects:
         kind = item.get("type")
-        if kind not in {"sketch", "point", "line", "circle", "constraint"}:
+        if kind not in {"sketch", "point", "line", "circle", "ellipse", "constraint"}:
             continue
         typed_id(item["id"], kind)
         if kind == "sketch":
@@ -106,6 +106,16 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
                                            math.cos(end_angle - start_angle - sweep))
                 if abs(angular_error) > 1e-7:
                     raise ValidationError("Circular arc sweep does not reach its end point.")
+        elif kind == "ellipse":
+            for key in ("center_x", "center_y"):
+                number(item.get(key))
+            major = number(item.get("major_radius"))
+            minor = number(item.get("minor_radius"))
+            rotation = number(item.get("rotation_radians"))
+            if minor <= 1e-7 or major < minor or major <= 1e-7:
+                raise ValidationError("Ellipse radii must satisfy major_radius >= minor_radius > 1e-7.")
+            if abs(rotation) > 1e12:
+                raise ValidationError("Ellipse rotation is out of range.")
 
     # Geometry has been checked before constraints, regardless of storage order.
     for item in objects:
@@ -146,7 +156,7 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
 
 
 def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[dict[str, float]]]:
-    """Return one closed line/arc loop or one sampled full circle from a sketch."""
+    """Return one closed line/arc loop or one sampled analytic conic from a sketch."""
     sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
     if sketch is None:
         raise ValidationError("A profile operation needs an existing sketch.")
@@ -156,10 +166,24 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
              and not item.get("construction", False) and item.get("extent", "segment") == "segment"]
     circles = [item for item in owned if item.get("type") == "circle"
                and not item.get("construction", False)]
+    ellipses = [item for item in owned if item.get("type") == "ellipse"
+                and not item.get("construction", False)]
     arcs = [item for item in circles if "sweep_radians" in item]
     circles = [item for item in circles if "sweep_radians" not in item]
 
     if not lines and not arcs:
+        if ellipses:
+            if len(ellipses) != 1 or circles:
+                raise ValidationError("A profile operation needs one closed ellipse or one circle.")
+            ellipse = ellipses[0]
+            cosine, sine = math.cos(ellipse["rotation_radians"]), math.sin(ellipse["rotation_radians"])
+            return plane, [
+                {"x": ellipse["center_x"] + ellipse["major_radius"] * math.cos(math.tau * index / 128) * cosine
+                       - ellipse["minor_radius"] * math.sin(math.tau * index / 128) * sine,
+                 "y": ellipse["center_y"] + ellipse["major_radius"] * math.cos(math.tau * index / 128) * sine
+                       + ellipse["minor_radius"] * math.sin(math.tau * index / 128) * cosine}
+                for index in range(128)
+            ]
         if len(circles) != 1:
             raise ValidationError("A profile operation needs one closed line loop or one circle.")
         by_id = {item["id"]: item for item in objects}
@@ -172,7 +196,7 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
             for index in range(128)
         ]
     edges = lines + arcs
-    if circles or len(edges) < 3 or len(edges) > 4096:
+    if circles or ellipses or len(edges) < 3 or len(edges) > 4096:
         raise ValidationError("A profile operation needs one closed line/arc loop with 3 to 4096 edges.")
 
     by_id = {item["id"]: item for item in objects}

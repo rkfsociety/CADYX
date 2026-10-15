@@ -56,7 +56,7 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertGreater(handle["geometry"]["volume"], 0)
 
         document = self.core.inspect_project(self.project_id)["document"]
-        self.assertEqual(document["version"], 4)
+        self.assertEqual(document["version"], 5)
         self.assertEqual(Document.from_dict(document).to_dict(), document)
         features = [item for item in document["objects"] if item["type"] == "feature"]
         self.assertEqual([item["operation"] for item in features], ["revolve_sketch", "extrude_sketch"])
@@ -83,6 +83,19 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertEqual(result["geometry"]["kind"], "extruded_profile")
         self.assertGreater(result["geometry"]["volume"], 0)
         self.assertIsNone(self.core.kernel.validate(result["geometry"]))
+
+    def test_exact_ellipse_sketch_extrudes_from_sampled_profile(self) -> None:
+        sketch = self.command({"type": "create_sketch", "name": "Эллипс", "plane": "XY"})["sketch_id"]
+        ellipse = self.command({"type": "add_sketch_ellipse_center", "sketch_id": sketch,
+                                "center": {"x": 0, "y": 0}, "major_radius": 6,
+                                "minor_radius": 3, "rotation_degrees": 35})
+        result = self.command({"type": "extrude_sketch", "sketch_id": sketch, "depth": 4})
+        expected_polygon_volume = math.pi * 6 * 3 * 4 * (128 * math.sin(math.tau / 128) / (2 * math.pi))
+        self.assertAlmostEqual(result["geometry"]["volume"], expected_polygon_volume, delta=0.1)
+        self.assertIsNone(self.core.kernel.validate(result["geometry"]))
+        saved = self.core.inspect_project(self.project_id)["document"]
+        self.assertTrue(any(item["id"] == ellipse["ellipse_id"] and item["type"] == "ellipse"
+                            for item in saved["objects"]))
 
     def test_revolution_rejects_open_axis_or_xy_profiles_atomically(self) -> None:
         sketch, point_ids = self.closed_sketch("Профиль", [(2, 0), (4, 0), (4, 8), (2, 8)])

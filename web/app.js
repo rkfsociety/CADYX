@@ -1360,7 +1360,7 @@ function renderAgentActivity(value, lock = null) {
 }
 
 function objectTypeLabel(item) {
-  return ({ body: "Тело", feature: "Операция", sketch: "Эскиз", point: "Точка", line: "Отрезок", circle: "Окружность", constraint: "Ограничение" })[item?.type] || "Объект";
+  return ({ body: "Тело", feature: "Операция", sketch: "Эскиз", point: "Точка", line: "Отрезок", circle: "Окружность", ellipse: "Эллипс", constraint: "Ограничение" })[item?.type] || "Объект";
 }
 
 function constraintLabel(kind) {
@@ -1412,6 +1412,7 @@ function objectSummary(item, objects = currentObjects) {
     return `${pointLabel(start)} → ${pointLabel(end)}`;
   }
   if (item.type === "circle") return `R ${formatNumber(item.radius)}`;
+  if (item.type === "ellipse") return `R ${formatNumber(item.major_radius)} × ${formatNumber(item.minor_radius)}`;
   if (item.type === "constraint") return constraintLabel(item.kind);
   return "";
 }
@@ -1439,7 +1440,7 @@ function renderObjectTree(objects) {
     const marker = document.createElement("span");
     marker.className = "object-symbol";
     marker.setAttribute("aria-hidden", "true");
-    marker.textContent = ({ body: "▰", feature: "↳", sketch: "⌗", point: "·", line: "／", circle: "○", constraint: "⊙" })[item.type] || "•";
+    marker.textContent = ({ body: "▰", feature: "↳", sketch: "⌗", point: "·", line: "／", circle: "○", ellipse: "⬭", constraint: "⊙" })[item.type] || "•";
     const copy = document.createElement("span");
     copy.className = "object-copy";
     const name = document.createElement("strong");
@@ -1606,6 +1607,7 @@ function handleStreamEvent(type, event) {
         "add_sketch_parallelogram", "add_sketch_regular_polygon", "add_sketch_inscribed_polygon",
         "add_sketch_circumscribed_polygon", "add_sketch_polygon_from_center", "add_sketch_rounded_rectangle",
         "add_sketch_circle_diameter",
+        "add_sketch_ellipse", "add_sketch_ellipse_center",
         "add_sketch_circle_two_points", "add_sketch_circle_three_points", "add_sketch_circle_tangent_to_line",
         "add_sketch_circle_tangent_to_two_lines", "add_sketch_circle_tangent_to_three_lines",
         "add_sketch_arc_center", "add_sketch_arc_three_points", "add_sketch_arc_start_center_end",

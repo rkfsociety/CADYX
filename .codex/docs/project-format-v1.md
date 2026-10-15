@@ -12,7 +12,7 @@ Every project lives at `projects/<project-name>/project.json`. Newly created pro
   "modified_at": "<UTC ISO-8601>",
   "document": {
     "id": "document:<uuid>",
-    "version": 3,
+    "version": 5,
     "revision": 0,
     "objects": []
   },
@@ -38,9 +38,9 @@ Agent stop fences and resumed-lease revision protection are stored separately
 in `.cadyx-agent.sqlite3`; they do not change the portable schema. See the
 [stop/resume contract](architecture.md#safe-agent-stop-and-resume).
 
-The project envelope remains version 1; the nested document now uses version 3.
-Legacy document v1 and v2 snapshots are explicitly upgraded in memory on read
-and persisted only with a successful command. See [Document Model v4](document-model-v4.md)
+The project envelope remains version 1; the nested document now uses version 5.
+Legacy document v1 through v4 snapshots are explicitly upgraded in memory on read
+and persisted only with a successful command. See [Document Model v5](document-model-v5.md)
 for the sketch schema, solid feature commands, constraint semantics and
 compatibility policy.
 
@@ -51,7 +51,8 @@ Box geometry is stored as a JSON descriptor with its kernel id, dimensions, and 
 `cadyx/migrations.py` owns current schema versions and explicit one-version
 steps. Project-envelope and document versions are independent: migrate the
 envelope first, then the nested document. The envelope is still v1 (no envelope
-step is needed); the supported document steps are v1 to v2 and v2 to v3. New schema changes
+step is needed); the supported document steps are v1 to v2, v2 to v3, v3 to v4,
+and v4 to v5. New schema changes
 must add each required consecutive step instead of relabelling an unknown
 snapshot. Missing steps, unsupported versions (including future versions), and
 non-integer version tags are errors.

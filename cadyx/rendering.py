@@ -42,7 +42,7 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         kind = item["type"]
         if kind == "body" and item["id"] in consumed_bodies:
             continue
-        if kind in {"point", "line", "circle"} and item.get("sketch_id") in feature_sketches:
+        if kind in {"point", "line", "circle", "ellipse"} and item.get("sketch_id") in feature_sketches:
             continue
         positions, triangles, lines, points = [], [], [], []
         if kind == "body" and item.get("geometry") is not None:
@@ -70,6 +70,16 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
                 ))
             for index in range(steps):
                 lines.extend([index, index + 1 if "sweep_radians" in item else (index + 1) % steps])
+        elif kind == "ellipse":
+            rotation = item["rotation_radians"]
+            cosine, sine = math.cos(rotation), math.sin(rotation)
+            for index in range(128):
+                angle = math.tau * index / 128
+                x = item["center_x"] + item["major_radius"] * math.cos(angle) * cosine - item["minor_radius"] * math.sin(angle) * sine
+                y = item["center_y"] + item["major_radius"] * math.cos(angle) * sine + item["minor_radius"] * math.sin(angle) * cosine
+                positions.extend(sketch_position(item["sketch_id"], x, y))
+            for index in range(128):
+                lines.extend([index, (index + 1) % 128])
         else:
             continue
         for offset in range(0, len(positions), 3):

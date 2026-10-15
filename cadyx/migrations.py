@@ -10,7 +10,7 @@ from typing import Any, Callable
 from .errors import ValidationError
 
 PROJECT_VERSION = 1
-DOCUMENT_VERSION = 4
+DOCUMENT_VERSION = 5
 
 
 def _document_v1_to_v2(value: dict[str, Any]) -> None:
@@ -40,7 +40,16 @@ def _document_v3_to_v4(value: dict[str, Any]) -> None:
     value["version"] = 4
 
 
-_DOCUMENT_STEPS = {1: _document_v1_to_v2, 2: _document_v2_to_v3, 3: _document_v3_to_v4}
+def _document_v4_to_v5(value: dict[str, Any]) -> None:
+    objects = value.get("objects")
+    if not isinstance(objects, list) or any(not isinstance(item, dict) for item in objects):
+        raise ValidationError("Document objects must be a list of objects.")
+    # v5 adds analytic ellipse sketch objects without changing existing geometry.
+    value["version"] = 5
+
+
+_DOCUMENT_STEPS = {1: _document_v1_to_v2, 2: _document_v2_to_v3,
+                   3: _document_v3_to_v4, 4: _document_v4_to_v5}
 _PROJECT_STEPS: dict[int, Callable[[dict[str, Any]], None]] = {}
 
 

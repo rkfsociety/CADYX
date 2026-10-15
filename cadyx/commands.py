@@ -144,7 +144,9 @@ class CommandSystem:
                     "closed": False}
         if kind == "add_sketch_element":
             element_kind = command.get("element_type")
-            fields = {"point": ("x", "y"), "line": ("start_id", "end_id"), "circle": ("center_id", "radius")}
+            fields = {"point": ("x", "y"), "line": ("start_id", "end_id"),
+                      "circle": ("center_id", "radius"),
+                      "ellipse": ("center_x", "center_y", "major_radius", "minor_radius", "rotation_radians")}
             if not isinstance(element_kind, str) or element_kind not in fields:
                 raise ValidationError("Unsupported sketch element type.")
             object_id = f"{element_kind}:{uuid4()}"
@@ -193,6 +195,8 @@ class CommandSystem:
             )
         if kind == "add_sketch_circle":
             return self._add_sketch_circle(document, command, progress=progress)
+        if kind in {"add_sketch_ellipse", "add_sketch_ellipse_center"}:
+            return self._add_sketch_ellipse(document, command, kind, progress=progress)
         if kind in {"add_sketch_circle_diameter", "add_sketch_circle_two_points", "add_sketch_circle_three_points"}:
             return self._add_sketch_circle_tool(document, command, kind, progress=progress)
         if kind == "add_sketch_circle_tangent_to_line":
@@ -519,6 +523,46 @@ class CommandSystem:
             document, {"sketch_id": command.get("sketch_id"), "x": cx, "y": cy, "radius": radius},
             progress=progress,
         )
+
+    def _add_sketch_ellipse(
+        self, document: Document, command: dict[str, Any], kind: str, *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        if kind == "add_sketch_ellipse":
+            first = self._coordinate_pair(command.get("major_axis_start"), "Major axis start")
+            second = self._coordinate_pair(command.get("major_axis_end"), "Major axis end")
+            center_x, center_y = first[0] / 2 + second[0] / 2, first[1] / 2 + second[1] / 2
+            major_radius = math.hypot(second[0] - first[0], second[1] - first[1]) / 2
+            minor_radius = _number(command.get("minor_radius"), "minor_radius")
+            rotation = math.atan2(second[1] - first[1], second[0] - first[0])
+        else:
+            center_x, center_y = self._coordinate_pair(command.get("center"), "Ellipse center")
+            major_radius = _number(command.get("major_radius"), "major_radius")
+            minor_radius = _number(command.get("minor_radius"), "minor_radius")
+            rotation = math.radians(_finite_number(command.get("rotation_degrees", 0), "Ellipse rotation"))
+        if major_radius < minor_radius or min(major_radius, minor_radius) <= 1e-7:
+            raise ValidationError("Ellipse radii must satisfy major_radius >= minor_radius > 1e-7.")
+        cosine, sine = math.cos(rotation), math.sin(rotation)
+        extent_x = math.hypot(major_radius * cosine, minor_radius * sine)
+        extent_y = math.hypot(major_radius * sine, minor_radius * cosine)
+        if not all(math.isfinite(value) for value in (center_x - extent_x, center_x + extent_x,
+                                                        center_y - extent_y, center_y + extent_y)):
+            raise ValidationError("Ellipse coordinates must remain finite.")
+        if progress is not None:
+            progress({"phase": kind})
+        ellipse_id = f"ellipse:{uuid4()}"
+        document.objects.insert(document.objects.index(sketch) + 1, {
+            "id": ellipse_id, "type": "ellipse", "sketch_id": sketch["id"],
+            "center_x": center_x, "center_y": center_y,
+            "major_radius": major_radius, "minor_radius": minor_radius,
+            "rotation_radians": rotation,
+        })
+        self._rebuild_changed_features(document, {sketch["id"]}, progress=progress)
+        return {"sketch_id": sketch["id"], "ellipse_id": ellipse_id,
+                "center": {"x": center_x, "y": center_y},
+                "major_radius": major_radius, "minor_radius": minor_radius,
+                "rotation_radians": rotation}
 
     def _add_sketch_circle(
         self,
@@ -1098,8 +1142,8 @@ class CommandSystem:
         while pending:
             object_id = pending.pop()
             item = by_id.get(object_id)
-            if item is None or item.get("sketch_id") != sketch_id or item.get("type") not in {"point", "line", "circle"}:
-                raise ValidationError("Selected objects must be points, lines, or circles from the same sketch.")
+            if item is None or item.get("sketch_id") != sketch_id or item.get("type") not in {"point", "line", "circle", "ellipse"}:
+                raise ValidationError("Selected objects must be point, line, circle, or ellipse geometry from the same sketch.")
             if object_id in included:
                 continue
             included.add(object_id)
@@ -1135,7 +1179,7 @@ class CommandSystem:
                         raise ValidationError("Transformed sketch coordinates must be finite.")
                 elif item["type"] == "line":
                     clone["start_id"], clone["end_id"] = id_map[item["start_id"]], id_map[item["end_id"]]
-                else:
+                elif item["type"] == "circle":
                     clone["center_id"] = id_map[item["center_id"]]
                     if "sweep_radians" in item:
                         clone["start_id"], clone["end_id"] = id_map[item["start_id"]], id_map[item["end_id"]]
@@ -1144,6 +1188,17 @@ class CommandSystem:
                                        - (x_axis[1] - origin[1]) * (y_axis[0] - origin[0]))
                         if determinant < 0:
                             clone["sweep_radians"] = -clone["sweep_radians"]
+                else:
+                    origin = transform(0.0, 0.0)
+                    center = transform(item["center_x"], item["center_y"])
+                    major_direction = (math.cos(item["rotation_radians"]), math.sin(item["rotation_radians"]))
+                    major_endpoint = transform(item["center_x"] + major_direction[0],
+                                               item["center_y"] + major_direction[1])
+                    clone["center_x"], clone["center_y"] = center
+                    clone["rotation_radians"] = math.atan2(major_endpoint[1] - center[1],
+                                                            major_endpoint[0] - center[0])
+                    if not all(math.isfinite(value) for value in (*origin, *center, *major_endpoint)):
+                        raise ValidationError("Transformed ellipse coordinates must remain finite.")
                 copies.append(clone)
         insert_at = document.objects.index(sketch) + 1
         document.objects[insert_at:insert_at] = copies
@@ -1155,6 +1210,7 @@ class CommandSystem:
             "point_ids": [item["id"] for item in copies if item["type"] == "point"],
             "line_ids": [item["id"] for item in copies if item["type"] == "line"],
             "circle_ids": [item["id"] for item in copies if item["type"] == "circle"],
+            "ellipse_ids": [item["id"] for item in copies if item["type"] == "ellipse"],
             "instance_count": len(transforms) + 1,
         }
 

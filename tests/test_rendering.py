@@ -137,6 +137,18 @@ class RenderingTests(unittest.TestCase):
         self.assertAlmostEqual(min(arc["positions"][1::3]), 0)
         self.assertAlmostEqual(max(arc["positions"][1::3]), 5)
 
+    def test_ellipse_scene_is_a_closed_analytic_conic_polyline(self):
+        sketch = self.command({"type": "create_sketch"})["sketch_id"]
+        result = self.command({"type": "add_sketch_ellipse_center", "sketch_id": sketch,
+                               "center": {"x": 2, "y": -1}, "major_radius": 5,
+                               "minor_radius": 2, "rotation_degrees": 30})
+        scene = self.core.render_project(self.project)
+        ellipse = next(item for item in scene["objects"] if item["object_id"] == result["ellipse_id"])
+        self.assertEqual(ellipse["type"], "ellipse")
+        self.assertEqual(len(ellipse["positions"]), 128 * 3)
+        self.assertEqual(len(ellipse["lines"]), 128 * 2)
+        self.assertEqual(ellipse["lines"][-2:], [127, 0])
+
     def test_unrenderable_sketch_is_rejected_without_changing_document(self):
         sketch = self.command({"type": "create_sketch"})["sketch_id"]
         center = self.command({"type": "add_sketch_element", "sketch_id": sketch,

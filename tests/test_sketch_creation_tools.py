@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import tempfile
 import unittest
 
@@ -182,6 +183,44 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
         self.assertAlmostEqual(center["x"], 101)
         self.assertAlmostEqual(center["y"], 101)
         self.assertAlmostEqual(circle["radius"], 2**0.5)
+
+    def test_ellipse_major_axis_and_minor_radius(self) -> None:
+        result = self.command({"type": "add_sketch_ellipse", "sketch_id": self.sketch_id,
+                               "major_axis_start": {"x": -3, "y": 2},
+                               "major_axis_end": {"x": 5, "y": 2}, "minor_radius": 2})
+        ellipse = self.objects()[result["ellipse_id"]]
+        self.assertEqual((ellipse["center_x"], ellipse["center_y"]), (1, 2))
+        self.assertEqual((ellipse["major_radius"], ellipse["minor_radius"]), (4, 2))
+        self.assertEqual(ellipse["rotation_radians"], 0)
+
+    def test_center_ellipse_with_rotation_and_validation(self) -> None:
+        result = self.command({"type": "add_sketch_ellipse_center", "sketch_id": self.sketch_id,
+                               "center": {"x": -2, "y": 3}, "major_radius": 5,
+                               "minor_radius": 2, "rotation_degrees": 30})
+        ellipse = self.objects()[result["ellipse_id"]]
+        self.assertAlmostEqual(ellipse["rotation_radians"], math.pi / 6)
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_ellipse_center", "sketch_id": self.sketch_id,
+                          "center": {"x": 0, "y": 0}, "major_radius": 2, "minor_radius": 3})
+
+    def test_ellipse_can_be_mirrored_as_sketch_geometry(self) -> None:
+        source = self.command({"type": "add_sketch_ellipse_center", "sketch_id": self.sketch_id,
+                               "center": {"x": 2, "y": 3}, "major_radius": 5,
+                               "minor_radius": 2, "rotation_degrees": 30})["ellipse_id"]
+        result = self.command({"type": "mirror_sketch_elements", "sketch_id": self.sketch_id,
+                               "object_ids": [source], "axis_start": {"x": 0, "y": 0},
+                               "axis_end": {"x": 1, "y": 0}})
+        self.assertEqual(len(result["ellipse_ids"]), 1)
+        clone = self.objects()[result["ellipse_ids"][0]]
+        self.assertAlmostEqual(clone["center_y"], -3)
+        self.assertAlmostEqual(clone["rotation_radians"], -math.pi / 6)
+        pattern = self.command({"type": "pattern_sketch_elements", "sketch_id": self.sketch_id,
+                                "object_ids": [source], "mode": "circular", "count": 2,
+                                "center_x": 0, "center_y": 0, "angle_step_degrees": 90})
+        rotated = self.objects()[pattern["ellipse_ids"][0]]
+        self.assertAlmostEqual(rotated["center_x"], -3)
+        self.assertAlmostEqual(rotated["center_y"], 2)
+        self.assertAlmostEqual(rotated["rotation_radians"], 2 * math.pi / 3)
 
     def test_circle_tangent_to_line_at_point(self) -> None:
         line = self.line_tool("add_sketch_line", start={"x": 0, "y": 0}, end={"x": 10, "y": 0})
