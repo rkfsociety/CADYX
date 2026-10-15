@@ -55,7 +55,8 @@ class ModelingExtensionTests(unittest.TestCase):
         body_id = self.seed_body(document)
         sketch_id = system.execute(document, {"type": "create_sketch", "plane": "XY", "name": "Rib"})["sketch_id"]
         system.execute(document, {"type": "add_sketch_polyline", "sketch_id": sketch_id, "closed": True,
-                                  "points": [[0, 0], [1, 0], [1, 0.2], [0, 0.2]]})
+                                  "points": [{"x": 0, "y": 0}, {"x": 1, "y": 0},
+                                             {"x": 1, "y": 0.2}, {"x": 0, "y": 0.2}]})
         result = system.execute(document, {"type": "rib_from_sketch", "body_id": body_id,
                                            "sketch_id": sketch_id, "depth": 2.0})
         self.assertTrue(result["body_id"].startswith("body:"))
