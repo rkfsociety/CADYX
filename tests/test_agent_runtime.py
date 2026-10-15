@@ -39,7 +39,7 @@ class FailingProvider:
 
 class SlowProvider:
     def complete(self, messages: Sequence[AgentMessage], tools: Sequence[AgentToolSpec]) -> AgentResponse:
-        time.sleep(0.25)
+        time.sleep(0.75)
         return AgentResponse("Completed after a long provider call.")
 
 
@@ -126,7 +126,7 @@ class AgentRuntimeTests(unittest.TestCase):
         core = CadyxCore(
             str(Path(self.temporary_directory.name) / "short-lease-projects"),
             kernel=PrimitiveKernelAdapter(),
-            lease_timeout_seconds=0.09,
+            lease_timeout_seconds=0.30,
         )
         project_id = core.create_project("Heartbeat test")["project"]["id"]
 
