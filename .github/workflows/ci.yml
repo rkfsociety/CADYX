@@ -17,9 +17,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up PowerShell 7
-        uses: actions/setup-powershell@v2
-
       - name: Set up CMake
         uses: lukka/get-cmake@latest
 

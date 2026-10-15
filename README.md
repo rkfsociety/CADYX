@@ -68,8 +68,10 @@ Multiple current hosts may share a workspace on the same local machine; see the 
 .\.runtime\python\python.exe -m unittest discover -s tests -v
 .\.runtime\python\python.exe -m compileall -q cadyx tests
 .\scripts\setup-runtime.ps1 -WithNode
-.\.runtime\node-v26.11.1-win-x64\node.exe tests/test_viewport.cjs
-.\.runtime\node-v26.11.1-win-x64\node.exe tests/test_ply_preview.cjs
+$nodeVersion = (Get-Content scripts/runtime-versions.json -Raw | ConvertFrom-Json).node.version
+$node = ".\.runtime\node-v$nodeVersion-win-x64\node.exe"
+& $node tests/test_viewport.cjs
+& $node tests/test_ply_preview.cjs
 ```
 
 ## Architecture
