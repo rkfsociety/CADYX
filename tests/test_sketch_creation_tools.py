@@ -7,6 +7,7 @@ import unittest
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
 from cadyx.kernel import PrimitiveKernelAdapter
+from cadyx.sketches import closed_profile
 
 
 class IndividualSketchCreationToolTests(unittest.TestCase):
@@ -300,6 +301,150 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
         self.assertTrue(all(point_id in objects for point_id in clone["point_ids"]))
         self.assertEqual([objects[point_id]["y"] for point_id in clone["point_ids"]], [-1, -4, -2])
 
+    def test_control_point_spline_uses_a_clamped_uniform_bspline(self) -> None:
+        points = [{"x": 0, "y": 0}, {"x": 1, "y": 3},
+                  {"x": 3, "y": 4}, {"x": 5, "y": 0}]
+        result = self.command({"type": "add_sketch_spline_control_points",
+                               "sketch_id": self.sketch_id, "points": points})
+        objects = self.objects()
+        spline = objects[result["spline_id"]]
+        self.assertEqual(spline["mode"], "control")
+        scene = self.core.render_project(self.project_id)
+        rendered = next(item for item in scene["objects"] if item["object_id"] == result["spline_id"])
+        middle = rendered["positions"][12 * 3:12 * 3 + 3]
+        self.assertAlmostEqual(middle[0], 2.125)
+        self.assertAlmostEqual(middle[1], 2.625)
+        self.assertNotEqual((middle[0], middle[1]), (points[1]["x"], points[1]["y"]))
+
+    def test_control_point_spline_uses_a_quadratic_for_three_controls(self) -> None:
+        points = [{"x": 0, "y": 0}, {"x": 2, "y": 4}, {"x": 4, "y": 0}]
+        result = self.command({"type": "add_sketch_spline_control_points",
+                               "sketch_id": self.sketch_id, "points": points})
+        scene = self.core.render_project(self.project_id)
+        rendered = next(item for item in scene["objects"] if item["object_id"] == result["spline_id"])
+        midpoint = rendered["positions"][12 * 3:12 * 3 + 3]
+        self.assertAlmostEqual(midpoint[0], 2)
+        self.assertAlmostEqual(midpoint[1], 2)
+
+    def test_bspline_and_bezier_commands_persist_their_curve_modes(self) -> None:
+        points = [{"x": 0, "y": 0}, {"x": 1, "y": 3},
+                  {"x": 3, "y": 4}, {"x": 5, "y": 0}]
+        for command_type, expected_mode in (("add_sketch_bspline", "bspline"),
+                                            ("add_sketch_bezier_curve", "bezier")):
+            with self.subTest(command_type=command_type):
+                result = self.command({"type": command_type, "sketch_id": self.sketch_id,
+                                       "points": points})
+                spline = self.objects()[result["spline_id"]]
+                self.assertEqual(spline["mode"], expected_mode)
+                self.assertEqual(result["mode"], expected_mode)
+                self.assertEqual(result["point_count"], len(points))
+
+    def test_archimedean_spiral_command_stores_sampled_spline(self) -> None:
+        result = self.command({"type": "add_sketch_spiral", "sketch_id": self.sketch_id,
+                               "center": {"x": 2, "y": -1}, "initial_radius": 1,
+                               "pitch_per_turn": 2, "end_angle_degrees": 360,
+                               "samples": 25})
+        objects = self.objects()
+        spline = objects[result["spline_id"]]
+        first, last = (objects[point_id] for point_id in spline["point_ids"][:1] + spline["point_ids"][-1:])
+        self.assertEqual(result["curve_tool"], "add_sketch_spiral")
+        self.assertEqual(spline.get("mode", "interpolating"), "interpolating")
+        self.assertEqual(result["point_count"], 25)
+        self.assertAlmostEqual(first["x"], 3)
+        self.assertAlmostEqual(first["y"], -1)
+        self.assertAlmostEqual(last["x"], 5)
+        self.assertAlmostEqual(last["y"], -1)
+        rendered = next(item for item in self.core.render_project(self.project_id)["objects"]
+                        if item["object_id"] == result["spline_id"])
+        self.assertEqual(rendered["type"], "spline")
+
+    def test_parametric_curve_command_samples_safe_equations(self) -> None:
+        result = self.command({"type": "add_sketch_parametric_curve", "sketch_id": self.sketch_id,
+                               "x_expression": "t", "y_expression": "t^2",
+                               "parameter_start": -1, "parameter_end": 1, "samples": 5})
+        objects = self.objects()
+        spline = objects[result["spline_id"]]
+        points = [objects[point_id] for point_id in spline["point_ids"]]
+        self.assertEqual(result["curve_tool"], "add_sketch_parametric_curve")
+        self.assertEqual([(point["x"], point["y"]) for point in points],
+                         [(-1, 1), (-0.5, 0.25), (0, 0), (0.5, 0.25), (1, 1)])
+        rendered = next(item for item in self.core.render_project(self.project_id)["objects"]
+                        if item["object_id"] == result["spline_id"])
+        self.assertTrue(rendered["lines"])
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_parametric_curve", "sketch_id": self.sketch_id,
+                          "x_expression": "__import__('os')", "y_expression": "t",
+                          "parameter_start": 0, "parameter_end": 1, "samples": 3})
+
+    def test_coordinate_curve_command_interpolates_supplied_points(self) -> None:
+        coordinates = [{"x": 0, "y": 0}, {"x": 2, "y": 3}, {"x": 5, "y": 1}]
+        result = self.command({"type": "add_sketch_coordinate_curve", "sketch_id": self.sketch_id,
+                               "points": coordinates})
+        objects = self.objects()
+        spline = objects[result["spline_id"]]
+        actual = [objects[point_id] for point_id in spline["point_ids"]]
+        self.assertEqual(result["curve_tool"], "add_sketch_coordinate_curve")
+        self.assertEqual([(point["x"], point["y"]) for point in actual],
+                         [(point["x"], point["y"]) for point in coordinates])
+        self.assertEqual(spline.get("mode", "interpolating"), "interpolating")
+        rendered = next(item for item in self.core.render_project(self.project_id)["objects"]
+                        if item["object_id"] == result["spline_id"])
+        self.assertTrue(rendered["lines"])
+
+    def _assert_slot_command(self, command: dict) -> dict:
+        result = self.command({"sketch_id": self.sketch_id, **command})
+        self.assertTrue(result["closed"])
+        self.assertEqual(len(result["object_ids"]), len(result["point_ids"])
+                         + len(result["line_ids"]) + len(result["circle_ids"]))
+        self.assertTrue(result["line_ids"] or result["circle_ids"])
+        return result
+
+    def test_straight_slot(self) -> None:
+        result = self._assert_slot_command({"type": "add_sketch_slot", "start": {"x": 0, "y": 0},
+                                            "end": {"x": 10, "y": 0}, "width": 2})
+        self.assertEqual((len(result["line_ids"]), len(result["circle_ids"])), (2, 2))
+
+    def test_slot_by_centers(self) -> None:
+        result = self._assert_slot_command({"type": "add_sketch_slot_by_centers",
+                                            "start_center": {"x": -4, "y": 2},
+                                            "end_center": {"x": 6, "y": 2}, "width": 3})
+        self.assertEqual((len(result["line_ids"]), len(result["circle_ids"])), (2, 2))
+
+    def test_slot_by_total_length(self) -> None:
+        result = self._assert_slot_command({"type": "add_sketch_slot_total_length",
+                                            "center": {"x": 2, "y": -3}, "length": 12,
+                                            "width": 2, "angle_degrees": 45})
+        self.assertEqual((len(result["line_ids"]), len(result["circle_ids"])), (2, 2))
+
+    def test_centered_slot(self) -> None:
+        result = self._assert_slot_command({"type": "add_sketch_slot_centered",
+                                            "center_point": {"x": 2, "y": -3},
+                                            "total_length": 12, "slot_width": 2,
+                                            "rotation_degrees": -20})
+        self.assertEqual((len(result["line_ids"]), len(result["circle_ids"])), (2, 2))
+
+    def test_three_point_arc_slot(self) -> None:
+        result = self._assert_slot_command({"type": "add_sketch_arc_slot_three_points",
+                                            "start": {"x": 5, "y": 0},
+                                            "through": {"x": 0, "y": 5},
+                                            "end": {"x": -5, "y": 0}, "width": 1})
+        self.assertEqual((len(result["line_ids"]), len(result["circle_ids"])), (0, 4))
+
+    def test_center_arc_slot(self) -> None:
+        result = self._assert_slot_command({"type": "add_sketch_arc_slot_center",
+                                            "center": {"x": 0, "y": 0}, "radius": 6,
+                                            "start_angle_degrees": 0, "sweep_degrees": 90,
+                                            "width": 2})
+        self.assertEqual((len(result["line_ids"]), len(result["circle_ids"])), (0, 4))
+
+    def test_tangent_arc_slot(self) -> None:
+        line = self.line_tool("add_sketch_line", start={"x": 0, "y": 0}, end={"x": 10, "y": 0})
+        result = self._assert_slot_command({"type": "add_sketch_arc_slot_tangent",
+                                            "line_id": line["line_id"],
+                                            "tangent_point": {"x": 5, "y": 0}, "radius": 4,
+                                            "sweep_degrees": 90, "width": 1, "side": 1})
+        self.assertEqual((len(result["line_ids"]), len(result["circle_ids"])), (0, 4))
+
     def test_circle_tangent_to_line_at_point(self) -> None:
         line = self.line_tool("add_sketch_line", start={"x": 0, "y": 0}, end={"x": 10, "y": 0})
         result = self.command({"type": "add_sketch_circle_tangent_to_line", "sketch_id": self.sketch_id,
@@ -460,3 +605,43 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
             self.command({"type": "add_sketch_arc_tangent", "sketch_id": self.sketch_id,
                           "line_id": line["line_id"], "tangent_point": {"x": 5, "y": 1},
                           "radius": 2, "sweep_degrees": 90})
+
+    def test_arc_slot_three_points_is_a_closed_profile(self) -> None:
+        result = self.command({"type": "add_sketch_arc_slot_three_points", "sketch_id": self.sketch_id,
+                               "start": {"x": 5, "y": 0}, "through": {"x": 0, "y": 5},
+                               "end": {"x": -5, "y": 0}, "width": 2})
+        self.assertTrue(result["closed"])
+        self.assertEqual((len(result["circle_ids"]), len(result["line_ids"])), (4, 0))
+        document = self.core.inspect_project(self.project_id)["document"]
+        plane, profile = closed_profile(document["objects"], self.sketch_id)
+        self.assertEqual(plane, "XY")
+        self.assertGreater(len(profile), 100)
+        self.assertAlmostEqual(result["centerline"]["sweep_radians"], math.pi)
+
+    def test_arc_slot_from_center_accepts_signed_sweep(self) -> None:
+        result = self.command({"type": "add_sketch_arc_slot_center", "sketch_id": self.sketch_id,
+                               "center": {"x": 2, "y": 3}, "radius": 8,
+                               "start_angle_degrees": 25, "sweep_degrees": -120, "width": 2})
+        centerline = result["centerline"]
+        self.assertAlmostEqual(centerline["center"][0], 2)
+        self.assertAlmostEqual(centerline["center"][1], 3)
+        self.assertLess(centerline["sweep_radians"], 0)
+        self.assertEqual((len(result["circle_ids"]), len(result["line_ids"])), (4, 0))
+
+    def test_tangent_arc_slot_uses_line_direction_and_validates_contact(self) -> None:
+        line = self.line_tool("add_sketch_line", start={"x": 0, "y": 0}, end={"x": 10, "y": 0})
+        result = self.command({"type": "add_sketch_arc_slot_tangent", "sketch_id": self.sketch_id,
+                               "line_id": line["line_id"], "tangent_point": {"x": 5, "y": 0},
+                               "radius": 8, "sweep_degrees": 90, "width": 2})
+        centerline = result["centerline"]
+        self.assertAlmostEqual(centerline["center"][0], 5)
+        self.assertAlmostEqual(centerline["center"][1], 8)
+        self.assertAlmostEqual(centerline["start_angle_radians"], -math.pi / 2)
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_arc_slot_tangent", "sketch_id": self.sketch_id,
+                          "line_id": line["line_id"], "tangent_point": {"x": 5, "y": 1},
+                          "radius": 8, "sweep_degrees": 90, "width": 2})
+        with self.assertRaises(ValidationError):
+            self.command({"type": "add_sketch_arc_slot_tangent", "sketch_id": self.sketch_id,
+                          "line_id": line["line_id"], "tangent_point": {"x": 11, "y": 0},
+                          "radius": 8, "sweep_degrees": 90, "width": 2})

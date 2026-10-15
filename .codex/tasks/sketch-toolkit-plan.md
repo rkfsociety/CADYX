@@ -1,22 +1,27 @@
-# Приостановленный план реализации инструментов эскиза CADYX
+# План реализации инструментов эскиза CADYX
 
 Канонический список 357 пунктов сохранён в [`docs/sketch-tools-backlog.md`](../../docs/sketch-tools-backlog.md). Повторы из источника сохранены отдельно.
 
-**Актуальное решение пользователя:** не реализовывать весь список заранее. Добавлять инструменты по мере необходимости. План массовой реализации и последовательных групповых/общего стресс-проектов приостановлен; они не являются текущим критерием готовности. Для конкретно выбранного инструмента определить контракт, реализовать нужные интеграционные слои и выполнить адресные проверки. Видимые модельные прогоны делать по отдельному запросу или когда они нужны для проверки пользовательского сценария.
+**Актуальное решение пользователя:** реализовать все 357 инструментов из списка и последовательно проверять каждый отдельно. Индивидуальный этап — unit/API-проверками, без создания видимой CAD-модели для каждого пункта. После него создать по одному видимому CADYX-проекту для каждой функциональной группы и провести групповые стресс-проверки. Затем выполнить общий стресс-прогон всех инструментов в одном видимом проекте. Этот план заменяет прежнюю приостановку.
 
-Материалы и таблица ниже сохранены как контекст прежней работы. Их статусы исторические и перед использованием должны быть сверены с текущим кодом; они не означают, что реализацию всех пунктов нужно продолжать.
+Канонический backlog, таблица статусов, групповые сценарии и модельные прогоны ниже — активный план. Перед обновлением статуса сверять реализацию с текущим кодом и фактически выполненными проверками.
 
-## Работа по запросу
+## Этапы реализации и приёмки
 
-Реализовывать инструменты из backlog только когда выбранный инструмент нужен для конкретной задачи. Для него уточнить недостающую семантику, проверить существующий код и интегрировать необходимый результат в модель/команды/API/viewport по применимости. Проверки ограничивать выбранным поведением и связанными регрессиями. Отдельные CAD-проекты, групповые стресс-прогоны и общий прогон всех 357 пунктов не обязательны; создавать их только по отдельной потребности.
+1. Сверить семантику каждого пункта с исходным списком и уточнить только действительно неоднозначные контракты.
+2. Реализовать каждый пункт по применимости во всех нужных слоях: документ, команда, геометрическое ядро, Agent API и viewport.
+3. Добавить отдельный unit/API-тест для каждого инструмента, включая некорректный ввод и атомарность изменений.
+4. После индивидуального этапа выполнить 12 видимых групповых стресс-проектов; проверять результат каждого инструмента внутри общего проекта группы.
+5. После группового этапа выполнить общий видимый стресс-проект со всеми 357 инструментами.
+6. Выполнить финальный аудит реализации, результатов групповых/общего прогонов и diff; создать task-only commit. Push — только по прямому запросу.
 
-Не считать инструмент завершённым только по регистрации имени: если он выбран для реализации, проверить фактический результат и отклонение некорректного ввода. Браузер остаётся пассивной поверхностью наблюдения согласно `.codex/rules.md`.
+Не считать инструмент завершённым только по регистрации имени: для каждого из 357 пунктов проверить фактический результат и отклонение некорректного ввода. Браузер остаётся пассивной поверхностью наблюдения согласно `.codex/rules.md`.
 
-## Отложенные материалы прежнего плана
+## Текущий прогресс
 
-Ниже сохранены прежние групповые сценарии, проектные заметки и реестр для справки. Они не являются активными этапами, а статусы в реестре нужно перепроверять по коду перед использованием.
+Текущий статус индивидуальной реализации нужно обновлять в реестре ниже; групповые сценарии и общий прогон остаются закрытыми воротами до их начала.
 
-**Исторический прогресс (проверять по текущему коду):** предыдущая работа добавила unit/API-проверки части инструментов, а также видимые spot-check прогоны для ранних пунктов. Полный реестр реализации и план массовых стресс-проектов приостановлены. Для каждого выбранного позже пункта статус нужно заново подтвердить по коду и адресным проверкам; новые видимые проекты создаются только по необходимости для выбранной задачи.
+**Подтверждено в текущей сессии:** SK-034/035 и SK-036 имеют отдельные команды с API/unit проверками; SK-047…053 подключены к командам и имеют адресные проверки; SK-054/056/057 и SK-290/292 уже поддерживаются отдельными командами. 118 целевых тестов команд, API, рендера и документа прошли; 34 теста геометрических/измерительных helpers прошли. Один широкий регрессионный запуск из 184 тестов выявил независимый сбой существующего теста `export_brep`, которому не передан обязательный `expected_revision`; он не относится к эскизным изменениям. Read-only аудит SK-108…357 подтвердил большие отсутствующие области: размерные аннотации/solver, edit/offset и большинство преобразований, проекция/reference geometry, 3D-эскизы, импорт DXF/DWG/SVG, выбор/привязки и динамический ввод. Имеющиеся dimension/transform/curve helpers, generic pattern/mirror/removal, profile inspection helpers и validation-only constraints не засчитываются как полностью реализованные пункты. Групповые и общий видимые стресс-проекты ещё не запускались.
 
 ## Групповые тесты
 
@@ -109,10 +114,10 @@
 | SK-051 | Дуговой паз по трём точкам | add_sketch_arc_slot_three_points | PASS · unit/Agent API | pending | pending |
 | SK-052 | Дуговой паз из центра | add_sketch_arc_slot_center | PASS · unit/Agent API | pending | pending |
 | SK-053 | Касательный дуговой паз | add_sketch_arc_slot_tangent | PASS · unit/Agent API | pending | pending |
-| SK-054 | Спираль | pending | pending | pending | pending |
+| SK-054 | Спираль | add_sketch_spiral | PASS · unit/Agent API | pending | pending |
 | SK-055 | Уравнительная кривая | pending | pending | pending | pending |
-| SK-056 | Параметрическая кривая | pending | pending | pending | pending |
-| SK-057 | Кривая по координатам | pending | pending | pending | pending |
+| SK-056 | Параметрическая кривая | add_sketch_parametric_curve | PASS · unit/Agent API | pending | pending |
+| SK-057 | Кривая по координатам | add_sketch_coordinate_curve (XY only) | PASS · unit/Agent API | pending | pending |
 | SK-058 | Текст | pending | pending | pending | pending |
 | SK-059 | Многострочный текст | pending | pending | pending | pending |
 | SK-060 | Текст по линии | pending | pending | pending | pending |
@@ -207,26 +212,26 @@
 | SK-149 | Смещение контура | pending | pending | pending | pending |
 | SK-150 | Двустороннее смещение | pending | pending | pending | pending |
 | SK-151 | Переменное смещение | pending | pending | pending | pending |
-| SK-152 | Перемещение | pending | pending | pending | pending |
-| SK-153 | Копирование | pending | pending | pending | pending |
-| SK-154 | Перемещение с копированием | pending | pending | pending | pending |
-| SK-155 | Поворот | pending | pending | pending | pending |
-| SK-156 | Масштабирование | pending | pending | pending | pending |
+| SK-152 | Перемещение | helper translate_geometry only | pending · helper test only | pending | pending |
+| SK-153 | Копирование | helper duplicate_geometry only | pending · helper test only | pending | pending |
+| SK-154 | Перемещение с копированием | helper duplicate_geometry only | pending · helper test only | pending | pending |
+| SK-155 | Поворот | helper rotate_geometry only | pending · helper test only | pending | pending |
+| SK-156 | Масштабирование | helper scale_geometry only | pending · helper test only | pending | pending |
 | SK-157 | Растяжение | pending | pending | pending | pending |
 | SK-158 | Выравнивание | pending | pending | pending | pending |
-| SK-159 | Линейный массив | pending | pending | pending | pending |
+| SK-159 | Линейный массив | partial: pattern_sketch_elements(mode=linear) | generic command tests; dedicated SK tool pending | pending | pending |
 | SK-160 | Прямоугольный массив | pending | pending | pending | pending |
 | SK-161 | Направленный массив | pending | pending | pending | pending |
-| SK-162 | Круговой массив | pending | pending | pending | pending |
+| SK-162 | Круговой массив | partial: pattern_sketch_elements(mode=circular) | generic command tests; dedicated SK tool pending | pending | pending |
 | SK-163 | Полярный массив | pending | pending | pending | pending |
 | SK-164 | Массив по кривой | pending | pending | pending | pending |
 | SK-165 | Массив по траектории | pending | pending | pending | pending |
 | SK-166 | Массив по сетке | pending | pending | pending | pending |
 | SK-167 | Массив по эскизу | pending | pending | pending | pending |
 | SK-168 | Зеркальный массив | pending | pending | pending | pending |
-| SK-169 | Зеркальное отражение | pending | pending | pending | pending |
+| SK-169 | Зеркальное отражение | mirror_sketch_elements | PASS · generic command tests | pending | pending |
 | SK-170 | Зеркальное отражение цепочки | pending | pending | pending | pending |
-| SK-171 | Зеркальное отражение относительно линии | pending | pending | pending | pending |
+| SK-171 | Зеркальное отражение относительно линии | partial: mirror_sketch_elements takes axis coordinates, not line_id | dedicated linked-line tool pending | pending | pending |
 | SK-172 | Динамическое зеркало | pending | pending | pending | pending |
 | SK-173 | Проецирование геометрии | pending | pending | pending | pending |
 | SK-174 | Проецирование ребра | pending | pending | pending | pending |
@@ -331,7 +336,7 @@
 | SK-273 | Выбор вспомогательной геометрии | pending | pending | pending | pending |
 | SK-274 | Выбор ограничений | pending | pending | pending | pending |
 | SK-275 | Выбор профилей | pending | pending | pending | pending |
-| SK-276 | Удаление объекта | pending | pending | pending | pending |
+| SK-276 | Удаление объекта | partial: remove_sketch_object | generic command tests; selection workflow pending | pending | pending |
 | SK-277 | Удаление ограничения | pending | pending | pending | pending |
 | SK-278 | Удаление размера | pending | pending | pending | pending |
 | SK-279 | Подавление объекта | pending | pending | pending | pending |
@@ -345,9 +350,9 @@
 | SK-287 | Импорт координат | pending | pending | pending | pending |
 | SK-288 | Вставка векторной геометрии | pending | pending | pending | pending |
 | SK-289 | Трассировка геометрии | pending | pending | pending | pending |
-| SK-290 | Кривая по уравнению | pending | pending | pending | pending |
+| SK-290 | Кривая по уравнению | add_sketch_parametric_curve | PASS · unit/Agent API | pending | pending |
 | SK-291 | Кривая по закону | pending | pending | pending | pending |
-| SK-292 | Кривая через XYZ-точки | pending | pending | pending | pending |
+| SK-292 | Кривая через XYZ-точки | partial: add_sketch_coordinate_curve only in XY | planar unit/Agent API; 3D tool pending | pending | pending |
 | SK-293 | Полиномиальная кривая | pending | pending | pending | pending |
 | SK-294 | Кривая перехода | pending | pending | pending | pending |
 | SK-295 | Смешанная кривая | pending | pending | pending | pending |
@@ -369,7 +374,7 @@
 | SK-311 | 3D-расстояние | pending | pending | pending | pending |
 | SK-312 | Расстояние XYZ | pending | pending | pending | pending |
 | SK-313 | 3D-угол | pending | pending | pending | pending |
-| SK-314 | Добавление ограничения | pending | pending | pending | pending |
+| SK-314 | Добавление ограничения | add_sketch_constraint (validation only) | PASS · generic constraint tests | pending | pending |
 | SK-315 | Удаление ограничения | pending | pending | pending | pending |
 | SK-316 | Редактирование ограничения | pending | pending | pending | pending |
 | SK-317 | Подавление ограничения | pending | pending | pending | pending |

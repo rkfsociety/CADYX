@@ -18,6 +18,20 @@ from .mesh_geometry import mesh_ply_bytes
 from .models import Document
 from .scan import DEFAULT_SCAN_PARAMETERS, ScanProcessor, normalize_scan_parameters
 from .sketches import closed_profile, open_path
+from .sketch_slot_tools import (
+    build_arc_slot_from_center,
+    build_arc_slot_three_points,
+    build_slot_by_centers,
+    build_slot_by_total_length,
+    build_slot_from_center,
+    build_straight_slot,
+    build_tangent_arc_slot,
+    contour_to_sketch_objects,
+)
+from .sketch_curve_toolkit import (
+    evaluate_archimedean_spiral,
+    sample_parametric_expressions,
+)
 from .capabilities import COMMAND_CAPABILITIES
 
 _SUPPORTED_COMMAND_TYPES = frozenset(item["type"] for item in COMMAND_CAPABILITIES)
@@ -106,6 +120,8 @@ class CommandSystem:
             return self._transform_imported_brep(document, command, progress=progress)
         if kind == "set_scan_parameter":
             return self._set_scan_parameter(document, command, progress=progress)
+        if kind in {"add_sketch_spiral", "add_sketch_parametric_curve", "add_sketch_coordinate_curve"}:
+            return self._add_sketch_sampled_curve(document, command, kind=kind, progress=progress)
         if kind == "create_sketch":
             sketch_id = f"sketch:{uuid4()}"
             document.objects.append({
@@ -201,7 +217,15 @@ class CommandSystem:
         if kind == "add_sketch_elliptical_arc":
             return self._add_sketch_elliptical_arc(document, command, progress=progress)
         if kind == "add_sketch_spline":
-            return self._add_sketch_spline(document, command, progress=progress)
+            return self._add_sketch_spline(document, command, mode="interpolating", progress=progress)
+        if kind == "add_sketch_spline_control_points":
+            return self._add_sketch_spline(document, command, mode="control", progress=progress)
+        if kind == "add_sketch_bspline":
+            return self._add_sketch_spline(document, command, mode="bspline", progress=progress)
+        if kind == "add_sketch_bezier_curve":
+            return self._add_sketch_spline(document, command, mode="bezier", progress=progress)
+        if kind == "add_sketch_nurbs":
+            return self._add_sketch_nurbs(document, command, progress=progress)
         if kind in {"add_sketch_circle_diameter", "add_sketch_circle_two_points", "add_sketch_circle_three_points"}:
             return self._add_sketch_circle_tool(document, command, kind, progress=progress)
         if kind == "add_sketch_circle_tangent_to_line":
@@ -224,6 +248,11 @@ class CommandSystem:
             return self._add_sketch_arc_radius(document, command, progress=progress)
         if kind == "add_sketch_arc_tangent":
             return self._add_sketch_arc_tangent(document, command, progress=progress)
+        if kind in {"add_sketch_slot", "add_sketch_slot_by_centers",
+                    "add_sketch_slot_total_length", "add_sketch_slot_centered",
+                    "add_sketch_arc_slot_three_points",
+                    "add_sketch_arc_slot_center", "add_sketch_arc_slot_tangent"}:
+            return self._add_sketch_slot(document, command, kind, progress=progress)
         if kind == "mirror_sketch_elements":
             return self._mirror_sketch_elements(document, command, progress=progress)
         if kind == "pattern_sketch_elements":
@@ -473,7 +502,7 @@ class CommandSystem:
                 raise ValidationError("A regular polygon needs 3 to 512 sides.")
             radius = _number(command.get("radius"), "radius")
             radius_mode = command.get("radius_mode", "inscribed")
-            if radius_mode not in {"inscribed", "circumscribed"}:
+            if not isinstance(radius_mode, str) or radius_mode not in {"inscribed", "circumscribed"}:
                 raise ValidationError("radius_mode must be inscribed or circumscribed.")
             if radius_mode == "circumscribed":
                 radius /= math.cos(math.pi / sides)
@@ -635,6 +664,8 @@ class CommandSystem:
         document: Document,
         command: dict[str, Any],
         *,
+        mode: str,
+        curve_data: dict[str, Any] | None = None,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         sketch = self._find_sketch(document, command.get("sketch_id"))
@@ -656,15 +687,86 @@ class CommandSystem:
              "x": point[0], "y": point[1], "construction": construction}
             for point_id, point in zip(point_ids, points)
         ]
-        additions.append({"id": spline_id, "type": "spline", "sketch_id": sketch["id"],
-                          "point_ids": point_ids, "construction": construction})
+        spline = {"id": spline_id, "type": "spline", "sketch_id": sketch["id"],
+                  "point_ids": point_ids, "construction": construction}
+        if mode != "interpolating":
+            spline["mode"] = mode
+        if curve_data:
+            spline.update(curve_data)
+        additions.append(spline)
         insert_at = document.objects.index(sketch) + 1
         document.objects[insert_at:insert_at] = additions
         self._rebuild_changed_features(document, {sketch["id"]}, progress=progress)
         if progress is not None:
             progress({"phase": "add_sketch_spline"})
         return {"sketch_id": sketch["id"], "spline_id": spline_id,
-                "point_ids": point_ids, "point_count": len(point_ids), "closed": False}
+                "point_ids": point_ids, "point_count": len(point_ids), "closed": False,
+                "mode": mode}
+
+    def _add_sketch_nurbs(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        degree = command.get("degree")
+        if isinstance(degree, bool) or not isinstance(degree, int):
+            raise ValidationError("NURBS degree must be an integer.")
+        knots = command.get("knots")
+        weights = command.get("weights")
+        if not isinstance(knots, list) or not isinstance(weights, list):
+            raise ValidationError("NURBS knots and weights must be lists.")
+        return self._add_sketch_spline(
+            document, command, mode="nurbs",
+            curve_data={"degree": degree, "knots": knots, "weights": weights},
+            progress=progress,
+        )
+
+    def _add_sketch_sampled_curve(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        kind: str,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        samples = command.get("samples", 48)
+        if isinstance(samples, bool) or not isinstance(samples, int) or not 3 <= samples <= 128:
+            raise ValidationError("Curve samples must be an integer from 3 to 128.")
+        if kind == "add_sketch_spiral":
+            center = self._coordinate_pair(command.get("center"), "Spiral center")
+            initial_radius = _finite_number(command.get("initial_radius"), "Initial radius")
+            pitch = _finite_number(command.get("pitch_per_turn"), "Spiral pitch")
+            start = math.radians(_finite_number(command.get("start_angle_degrees", 0), "Start angle"))
+            end = math.radians(_finite_number(command.get("end_angle_degrees"), "End angle"))
+            if initial_radius < 0 or pitch < 0:
+                raise ValidationError("Spiral radius and pitch must be nonnegative.")
+            points = [evaluate_archimedean_spiral(center, initial_radius, pitch,
+                                                   start + (end - start) * i / (samples - 1))
+                      for i in range(samples)]
+        elif kind == "add_sketch_parametric_curve":
+            try:
+                points = sample_parametric_expressions(
+                    command.get("x_expression"), command.get("y_expression"),
+                    _finite_number(command.get("parameter_start"), "Parameter start"),
+                    _finite_number(command.get("parameter_end"), "Parameter end"), samples,
+                )
+            except (ValueError, TypeError) as exc:
+                raise ValidationError(str(exc)) from exc
+        else:
+            coordinates = command.get("points")
+            if not isinstance(coordinates, list):
+                raise ValidationError("Coordinate curve points must be a list.")
+            points = [self._coordinate_pair(point, "Curve coordinate") for point in coordinates]
+
+        result = self._add_sketch_spline(
+            document, {**command, "points": [{"x": x, "y": y} for x, y in points]},
+            mode="interpolating", progress=progress,
+        )
+        result["curve_tool"] = kind
+        return result
 
     def _add_sketch_circle(
         self,
@@ -1143,6 +1245,101 @@ class CommandSystem:
         result["side"] = side
         result["sweep_degrees"] = sweep_degrees
         return result
+
+    def _add_sketch_slot(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        operation: str,
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        """Create one exact closed slot contour as ordinary sketch point/edge objects."""
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        if operation == "add_sketch_slot":
+            contour = build_straight_slot(
+                self._coordinate_pair(command.get("start"), "Slot start"),
+                self._coordinate_pair(command.get("end"), "Slot end"),
+                command.get("width"),
+            )
+        elif operation == "add_sketch_slot_by_centers":
+            contour = build_slot_by_centers(
+                self._coordinate_pair(command.get("start_center"), "Slot start center"),
+                self._coordinate_pair(command.get("end_center"), "Slot end center"),
+                command.get("width"),
+            )
+        elif operation == "add_sketch_slot_total_length":
+            contour = build_slot_by_total_length(
+                self._coordinate_pair(command.get("center"), "Slot center"),
+                command.get("length"), command.get("width"), command.get("angle_degrees", 0),
+            )
+        elif operation == "add_sketch_slot_centered":
+            contour = build_slot_from_center(
+                self._coordinate_pair(command.get("center_point"), "Slot center point"),
+                command.get("total_length"), command.get("slot_width"),
+                command.get("rotation_degrees", 0),
+            )
+        elif operation == "add_sketch_arc_slot_three_points":
+            contour = build_arc_slot_three_points(
+                self._coordinate_pair(command.get("start"), "Arc slot start"),
+                self._coordinate_pair(command.get("through"), "Arc slot through point"),
+                self._coordinate_pair(command.get("end"), "Arc slot end"),
+                command.get("width"),
+            )
+        elif operation == "add_sketch_arc_slot_center":
+            contour = build_arc_slot_from_center(
+                self._coordinate_pair(command.get("center"), "Arc slot center"),
+                command.get("radius"), command.get("start_angle_degrees"),
+                command.get("sweep_degrees"), command.get("width"),
+            )
+        elif operation == "add_sketch_arc_slot_tangent":
+            line_id = command.get("line_id")
+            line = next((item for item in document.objects if item.get("id") == line_id), None)
+            if line is None or line.get("type") != "line" or line.get("sketch_id") != sketch["id"]:
+                raise ValidationError("The tangent line must belong to the same sketch.")
+            by_id = {item["id"]: item for item in document.objects}
+            start_obj, end_obj = by_id.get(line.get("start_id")), by_id.get(line.get("end_id"))
+            if (start_obj is None or end_obj is None or start_obj.get("type") != "point"
+                    or end_obj.get("type") != "point"):
+                raise ValidationError("The tangent line must reference valid sketch points.")
+            dx, dy = end_obj["x"] - start_obj["x"], end_obj["y"] - start_obj["y"]
+            line_length = math.hypot(dx, dy)
+            if not math.isfinite(line_length) or line_length <= 1e-7:
+                raise ValidationError("The tangent line must have finite positive length.")
+            ux, uy = dx / line_length, dy / line_length
+            tangent_point = self._coordinate_pair(command.get("tangent_point"), "Slot tangent point")
+            projection = ((tangent_point[0] - start_obj["x"]) * ux
+                          + (tangent_point[1] - start_obj["y"]) * uy)
+            offset = ((tangent_point[0] - start_obj["x"]) * -uy
+                      + (tangent_point[1] - start_obj["y"]) * ux)
+            tolerance = 1e-7 * max(1.0, line_length)
+            if abs(offset) > tolerance:
+                raise ValidationError("The tangent point must lie on the selected line.")
+            if line.get("extent", "segment") != "infinite" and not -tolerance <= projection <= line_length + tolerance:
+                raise ValidationError("The tangent point must lie within the finite line segment.")
+            side = command.get("side", 1)
+            contour = build_tangent_arc_slot(
+                tangent_point, (ux, uy), command.get("radius"),
+                command.get("sweep_degrees"), command.get("width"), side,
+            )
+        else:
+            raise ValidationError(f"Unsupported slot tool: {operation!r}.")
+
+        if progress is not None:
+            progress({"phase": operation})
+        records = contour_to_sketch_objects(contour, sketch["id"])
+        insert_at = document.objects.index(sketch) + 1
+        document.objects[insert_at:insert_at] = records
+        self._rebuild_changed_features(document, {sketch["id"]}, progress=progress)
+        return {
+            "sketch_id": sketch["id"],
+            "object_ids": [item["id"] for item in records],
+            "point_ids": [item["id"] for item in records if item["type"] == "point"],
+            "line_ids": [item["id"] for item in records if item["type"] == "line"],
+            "circle_ids": [item["id"] for item in records if item["type"] == "circle"],
+            "closed": True,
+            "centerline": contour["centerline"],
+        }
 
     def _mirror_sketch_elements(
         self,

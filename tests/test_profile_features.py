@@ -138,6 +138,22 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertGreater(result["geometry"]["volume"], 0)
         self.assertIsNone(self.core.kernel.validate(result["geometry"]))
 
+    def test_control_point_spline_closes_a_profile_and_extrudes(self) -> None:
+        sketch = self.command({"type": "create_sketch", "name": "Профиль с B-сплайном",
+                               "plane": "XY"})["sketch_id"]
+        spline = self.command({"type": "add_sketch_spline_control_points", "sketch_id": sketch,
+                               "points": [{"x": 0, "y": 0}, {"x": 1, "y": -1},
+                                          {"x": 3, "y": -1}, {"x": 4, "y": 0}]})
+        start_id, end_id = spline["point_ids"][0], spline["point_ids"][-1]
+        top = self.command({"type": "add_sketch_point", "sketch_id": sketch, "x": 2, "y": 3})["point_id"]
+        self.command({"type": "add_sketch_element", "sketch_id": sketch, "element_type": "line",
+                      "start_id": end_id, "end_id": top})
+        self.command({"type": "add_sketch_element", "sketch_id": sketch, "element_type": "line",
+                      "start_id": top, "end_id": start_id})
+        result = self.command({"type": "extrude_sketch", "sketch_id": sketch, "depth": 2})
+        self.assertGreater(result["geometry"]["volume"], 0)
+        self.assertIsNone(self.core.kernel.validate(result["geometry"]))
+
     def test_revolution_rejects_open_axis_or_xy_profiles_atomically(self) -> None:
         sketch, point_ids = self.closed_sketch("Профиль", [(2, 0), (4, 0), (4, 8), (2, 8)])
         before = self.core.inspect_project(self.project_id)["document"]

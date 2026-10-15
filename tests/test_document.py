@@ -35,6 +35,19 @@ class SketchDocumentTests(unittest.TestCase):
         return self.command(type="add_sketch_element", sketch_id=self.sketch,
                             element_type="point", x=x, y=y)["object_id"]
 
+    def test_spline_mode_rejects_non_string_values_as_validation_errors(self):
+        document = Document.create()
+        sketch_id = f"sketch:{uuid4()}"
+        point_ids = [f"point:{uuid4()}" for _ in range(3)]
+        document.objects = ([{"id": sketch_id, "type": "sketch", "name": "Sketch", "plane": "XY"}]
+                            + [{"id": point_id, "type": "point", "sketch_id": sketch_id,
+                                "x": float(index), "y": float(index % 2)}
+                               for index, point_id in enumerate(point_ids)]
+                            + [{"id": f"spline:{uuid4()}", "type": "spline", "sketch_id": sketch_id,
+                                "point_ids": point_ids, "mode": []}])
+        with self.assertRaises(ValidationError):
+            document.validate()
+
     def constraint(self, kind, refs, value=None):
         return self.command(type="add_sketch_constraint", sketch_id=self.sketch,
                             kind=kind, references=refs, value=value)["constraint_id"]

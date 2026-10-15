@@ -139,6 +139,24 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("add_sketch_ellipse_three_points", advertised)
         self.assertIn("add_sketch_elliptical_arc", advertised)
         self.assertIn("add_sketch_spline", advertised)
+        self.assertIn("add_sketch_spline_control_points", advertised)
+        self.assertIn("add_sketch_bspline", advertised)
+        self.assertIn("add_sketch_bezier_curve", advertised)
+        self.assertIn("add_sketch_nurbs", advertised)
+        self.assertIn("add_sketch_spiral", advertised)
+        self.assertIn("add_sketch_parametric_curve", advertised)
+        self.assertIn("add_sketch_coordinate_curve", advertised)
+        for command_type in (
+            "add_sketch_regular_polygon", "add_sketch_inscribed_polygon",
+            "add_sketch_circumscribed_polygon", "add_sketch_polygon_from_center",
+            "add_sketch_slot", "add_sketch_slot_by_centers", "add_sketch_slot_total_length",
+            "add_sketch_slot_centered", "add_sketch_arc_slot_three_points",
+            "add_sketch_arc_slot_center", "add_sketch_arc_slot_tangent",
+        ):
+            self.assertIn(command_type, advertised)
+        for command_type in ("add_sketch_arc_slot_three_points", "add_sketch_arc_slot_center",
+                             "add_sketch_arc_slot_tangent"):
+            self.assertIn(command_type, advertised)
         for command_type in advertised:
             with self.subTest(command_type=command_type):
                 try:
@@ -146,6 +164,113 @@ class WebApiTests(unittest.TestCase):
                 except Exception as exc:
                     self.assertNotIn("Unsupported command type", str(exc))
         self.assertEqual(before, self.core.workspace.workspace_revision_token())
+
+    def _run_sketch_curve_agent_command(self, command_value: dict) -> tuple[dict, dict]:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Curve tool API"})
+        project_id = created["project"]["id"]
+        base = f"/api/v1/agent/projects/{project_id}"
+        _, acquired = self.request(base + "/leases", {"owner_id": "curve-tool-api-test"})
+        lease_id = acquired["lease"]["lease_id"]
+
+        def command(value: dict) -> dict:
+            status, response = self.request(base + "/commands", {
+                "lease_id": lease_id, "command": value,
+            })
+            self.assertEqual(status, 200, response)
+            return response["history_entry"]["result"]
+
+        sketch_id = command({"type": "create_sketch"})["sketch_id"]
+        result = command({"sketch_id": sketch_id, **command_value})
+        status, detail = self.request(base)
+        self.assertEqual(status, 200)
+        return result, detail
+
+    def test_archimedean_spiral_agent_api(self) -> None:
+        result, detail = self._run_sketch_curve_agent_command({
+            "type": "add_sketch_spiral", "center": {"x": 0, "y": 0},
+            "initial_radius": 1, "pitch_per_turn": 2,
+            "end_angle_degrees": 360, "samples": 12,
+        })
+        objects = {item["id"]: item for item in detail["document"]["objects"]}
+        spline = objects[result["spline_id"]]
+        self.assertEqual(result["curve_tool"], "add_sketch_spiral")
+        self.assertEqual(len(spline["point_ids"]), 12)
+        self.assertAlmostEqual(objects[spline["point_ids"][-1]]["x"], 3)
+
+    def test_parametric_curve_agent_api(self) -> None:
+        result, detail = self._run_sketch_curve_agent_command({
+            "type": "add_sketch_parametric_curve", "x_expression": "cos(t)",
+            "y_expression": "sin(t)", "parameter_start": 0,
+            "parameter_end": 6.283185307179586, "samples": 8,
+        })
+        objects = {item["id"]: item for item in detail["document"]["objects"]}
+        spline = objects[result["spline_id"]]
+        self.assertEqual(result["curve_tool"], "add_sketch_parametric_curve")
+        self.assertEqual(len(spline["point_ids"]), 8)
+        self.assertAlmostEqual(objects[spline["point_ids"][0]]["x"], 1)
+        self.assertAlmostEqual(objects[spline["point_ids"][0]]["y"], 0)
+
+    def test_coordinate_curve_agent_api(self) -> None:
+        coordinates = [{"x": 0, "y": 0}, {"x": 3, "y": 4}, {"x": 8, "y": 2}]
+        result, detail = self._run_sketch_curve_agent_command({
+            "type": "add_sketch_coordinate_curve", "points": coordinates,
+        })
+        objects = {item["id"]: item for item in detail["document"]["objects"]}
+        spline = objects[result["spline_id"]]
+        stored = [(objects[point_id]["x"], objects[point_id]["y"]) for point_id in spline["point_ids"]]
+        self.assertEqual(result["curve_tool"], "add_sketch_coordinate_curve")
+        self.assertEqual(stored, [(0, 0), (3, 4), (8, 2)])
+
+    def _run_arc_slot_agent_command(self, value: dict, *, needs_line: bool = False) -> tuple[dict, dict]:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Arc slot API"})
+        project_id = created["project"]["id"]
+        base = f"/api/v1/agent/projects/{project_id}"
+        _, acquired = self.request(base + "/leases", {"owner_id": "arc-slot-api-test"})
+        lease_id = acquired["lease"]["lease_id"]
+
+        def command(value: dict) -> dict:
+            status, response = self.request(base + "/commands", {
+                "lease_id": lease_id, "command": value,
+            })
+            self.assertEqual(status, 200, response)
+            return response["history_entry"]["result"]
+
+        sketch_id = command({"type": "create_sketch"})["sketch_id"]
+        if needs_line:
+            line = command({"type": "add_sketch_line", "sketch_id": sketch_id,
+                            "start": {"x": -10, "y": 0}, "end": {"x": 10, "y": 0}})
+            value = {**value, "line_id": line["line_id"]}
+        result = command({"sketch_id": sketch_id, **value})
+        status, detail = self.request(base)
+        self.assertEqual(status, 200)
+        objects = {item["id"]: item for item in detail["document"]["objects"]}
+        self.assertTrue(all(objects[arc_id]["type"] == "circle" for arc_id in result["circle_ids"]))
+        return result, detail
+
+    def test_arc_slot_three_points_agent_api(self) -> None:
+        result, _ = self._run_arc_slot_agent_command({
+            "type": "add_sketch_arc_slot_three_points", "start": {"x": 5, "y": 0},
+            "through": {"x": 0, "y": 5}, "end": {"x": -5, "y": 0}, "width": 2,
+        })
+        self.assertTrue(result["closed"])
+        self.assertEqual((len(result["circle_ids"]), len(result["line_ids"])), (4, 0))
+
+    def test_arc_slot_from_center_agent_api(self) -> None:
+        result, _ = self._run_arc_slot_agent_command({
+            "type": "add_sketch_arc_slot_center", "center": {"x": 20, "y": 0},
+            "radius": 8, "start_angle_degrees": 10, "sweep_degrees": -90, "width": 2,
+        })
+        self.assertTrue(result["closed"])
+        self.assertEqual((len(result["circle_ids"]), len(result["line_ids"])), (4, 0))
+        self.assertLess(result["centerline"]["sweep_radians"], 0)
+
+    def test_tangent_arc_slot_agent_api(self) -> None:
+        result, _ = self._run_arc_slot_agent_command({
+            "type": "add_sketch_arc_slot_tangent", "tangent_point": {"x": 0, "y": 0},
+            "radius": 8, "sweep_degrees": 90, "width": 2,
+        }, needs_line=True)
+        self.assertTrue(result["closed"])
+        self.assertEqual((len(result["circle_ids"]), len(result["line_ids"])), (4, 0))
 
     def test_agent_lease_acquire_and_release_publish_lock_events(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Lock event"})

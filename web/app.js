@@ -1611,10 +1611,16 @@ function handleStreamEvent(type, event) {
         "add_sketch_ellipse", "add_sketch_ellipse_center", "add_sketch_ellipse_three_points",
         "add_sketch_elliptical_arc",
         "add_sketch_spline",
+        "add_sketch_spline_control_points",
+        "add_sketch_bspline", "add_sketch_bezier_curve",
+        "add_sketch_spiral", "add_sketch_parametric_curve", "add_sketch_coordinate_curve",
         "add_sketch_circle_two_points", "add_sketch_circle_three_points", "add_sketch_circle_tangent_to_line",
         "add_sketch_circle_tangent_to_two_lines", "add_sketch_circle_tangent_to_three_lines",
         "add_sketch_arc_center", "add_sketch_arc_three_points", "add_sketch_arc_start_center_end",
         "add_sketch_arc_radius", "add_sketch_arc_tangent", "add_sketch_involute_gear",
+        "add_sketch_slot", "add_sketch_slot_by_centers", "add_sketch_slot_total_length",
+        "add_sketch_slot_centered",
+        "add_sketch_arc_slot_three_points", "add_sketch_arc_slot_center", "add_sketch_arc_slot_tangent",
         "mirror_sketch_elements", "pattern_sketch_elements",
       ].includes(command.type)) {
         activeSketchId = command.sketch_id || activeSketchId;

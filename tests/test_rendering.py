@@ -1,13 +1,17 @@
+import copy
 import math
 import struct
 import unittest
 import zlib
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from uuid import uuid4
 
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
+from cadyx.models import Document
 from cadyx.rendering import render_scene, render_scene_png
+from cadyx.sketches import closed_profile, spline_sample_points
 
 
 class RenderingTests(unittest.TestCase):
@@ -55,6 +59,30 @@ class RenderingTests(unittest.TestCase):
             changed = self.core.render_project(self.project)
         self.assertEqual(render.call_count, 1, "A document revision change rebuilds the scene")
         self.assertEqual(changed["bounds"]["max"], [4, 3, 5])
+
+    def test_arc_slot_commands_render_all_analytic_profile_arcs(self):
+        sketch_id = self.command({"type": "create_sketch"})["sketch_id"]
+        line = self.command({"type": "add_sketch_line", "sketch_id": sketch_id,
+                             "start": {"x": -10, "y": 0}, "end": {"x": 10, "y": 0}})
+        results = (
+            self.command({"type": "add_sketch_arc_slot_three_points", "sketch_id": sketch_id,
+                          "start": {"x": 5, "y": 0}, "through": {"x": 0, "y": 5},
+                          "end": {"x": -5, "y": 0}, "width": 2}),
+            self.command({"type": "add_sketch_arc_slot_center", "sketch_id": sketch_id,
+                          "center": {"x": 20, "y": 0}, "radius": 8,
+                          "start_angle_degrees": 10, "sweep_degrees": -90, "width": 2}),
+            self.command({"type": "add_sketch_arc_slot_tangent", "sketch_id": sketch_id,
+                          "line_id": line["line_id"], "tangent_point": {"x": 0, "y": 0},
+                          "radius": 8, "sweep_degrees": 90, "width": 2}),
+        )
+        scene = self.core.render_project(self.project)
+        scene_by_id = {item["object_id"]: item for item in scene["objects"]}
+        for result in results:
+            self.assertTrue(all(scene_by_id[object_id]["positions"]
+                                for object_id in result["object_ids"]))
+            self.assertTrue(all(scene_by_id[arc_id]["type"] == "circle"
+                                and len(scene_by_id[arc_id]["lines"]) > 1
+                                for arc_id in result["circle_ids"]))
 
     def test_scene_cache_hit_avoids_document_copy(self):
         first = self.core.render_project(self.project)
@@ -172,6 +200,108 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual(spline["positions"][:3], [0, 0, 1])
         self.assertEqual(spline["positions"][24 * 3:24 * 3 + 3], [2, 0, 4])
         self.assertEqual(spline["positions"][-3:], [5, 0, 2])
+
+    def test_control_point_spline_scene_renders_a_clamped_bspline(self):
+        sketch = self.command({"type": "create_sketch"})["sketch_id"]
+        result = self.command({"type": "add_sketch_spline_control_points", "sketch_id": sketch,
+                               "points": [{"x": 0, "y": 0}, {"x": 1, "y": 3},
+                                          {"x": 3, "y": 4}, {"x": 5, "y": 0}]})
+        scene = self.core.render_project(self.project)
+        spline = next(item for item in scene["objects"] if item["object_id"] == result["spline_id"])
+        middle = spline["positions"][12 * 3:12 * 3 + 3]
+        self.assertAlmostEqual(middle[0], 2.125)
+        self.assertAlmostEqual(middle[1], 2.625)
+
+    def test_bezier_and_uniform_bspline_document_curves_render(self):
+        for mode, points, expected_count in (
+            ("bezier", [(0, 0), (1, 3), (3, 4), (5, 0)], 25),
+            ("bspline", [(0, 0), (1, 3), (3, 4), (5, 2), (6, 0)], 49),
+        ):
+            with self.subTest(mode=mode):
+                document = Document.create()
+                sketch_id = f"sketch:{uuid4()}"
+                point_ids = [f"point:{uuid4()}" for _ in points]
+                spline_id = f"spline:{uuid4()}"
+                document.objects = ([{"id": sketch_id, "type": "sketch", "name": "Curve", "plane": "XY"}]
+                                    + [{"id": point_id, "type": "point", "sketch_id": sketch_id,
+                                        "x": x, "y": y}
+                                       for point_id, (x, y) in zip(point_ids, points)]
+                                    + [{"id": f"line:{uuid4()}", "type": "line", "sketch_id": sketch_id,
+                                        "start_id": point_ids[-1], "end_id": point_ids[-2]},
+                                       {"id": f"line:{uuid4()}", "type": "line", "sketch_id": sketch_id,
+                                        "start_id": point_ids[-2], "end_id": point_ids[0]}]
+                                    + [{"id": spline_id, "type": "spline", "sketch_id": sketch_id,
+                                        "point_ids": point_ids, "mode": mode}])
+                document.validate()
+                _, profile = closed_profile(document.objects, sketch_id)
+                self.assertGreaterEqual(len(profile), expected_count)
+                self.assertNotEqual(profile[0], profile[-1])
+                scene = render_scene(document, self.core.kernel)
+                curve = next(item for item in scene["objects"] if item["object_id"] == spline_id)
+                self.assertEqual(len(curve["positions"]), expected_count * 3)
+                self.assertEqual(len(curve["lines"]), (expected_count - 1) * 2)
+                self.assertEqual(curve["positions"][:3], [float(points[0][0]), float(points[0][1]), 0.0])
+                self.assertEqual(curve["positions"][-3:], [float(points[-1][0]), float(points[-1][1]), 0.0])
+                midpoint_index = (expected_count - 1) // 2
+                midpoint = curve["positions"][midpoint_index * 3:midpoint_index * 3 + 3]
+                if mode == "bezier":
+                    self.assertAlmostEqual(midpoint[0], 2.125)
+                    self.assertAlmostEqual(midpoint[1], 2.625)
+                else:
+                    self.assertAlmostEqual(midpoint[0], 3.0)
+                    self.assertAlmostEqual(midpoint[1], 3.25)
+
+    def test_nurbs_document_curve_requires_valid_clamped_parameters_and_renders(self):
+        control_points = [(0, 0), (1, 3), (3, 4), (5, 0)]
+        document = Document.create()
+        sketch_id = f"sketch:{uuid4()}"
+        point_ids = [f"point:{uuid4()}" for _ in control_points]
+        spline_id = f"spline:{uuid4()}"
+        document.objects = ([{"id": sketch_id, "type": "sketch", "name": "NURBS", "plane": "XY"}]
+                            + [{"id": point_id, "type": "point", "sketch_id": sketch_id,
+                                "x": x, "y": y}
+                               for point_id, (x, y) in zip(point_ids, control_points)]
+                            + [{"id": f"line:{uuid4()}", "type": "line", "sketch_id": sketch_id,
+                                "start_id": point_ids[-1], "end_id": point_ids[-2]},
+                               {"id": f"line:{uuid4()}", "type": "line", "sketch_id": sketch_id,
+                                "start_id": point_ids[-2], "end_id": point_ids[0]},
+                               {"id": spline_id, "type": "spline", "sketch_id": sketch_id,
+                                "point_ids": point_ids, "mode": "nurbs", "degree": 2,
+                                "weights": [1.0, math.sqrt(.5), 1.0, 1.0],
+                                "knots": [0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0]}])
+        document.validate()
+
+        _, profile = closed_profile(document.objects, sketch_id)
+        self.assertGreater(len(profile), 25)
+        scene = render_scene(document, self.core.kernel)
+        curve = next(item for item in scene["objects"] if item["object_id"] == spline_id)
+        self.assertEqual(len(curve["positions"]), 49 * 3)
+        self.assertEqual(curve["positions"][:3], [0.0, 0.0, 0.0])
+        self.assertEqual(curve["positions"][-3:], [5.0, 0.0, 0.0])
+
+        invalid_variants = (
+            lambda spline: spline.update(knots=[0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0]),
+            lambda spline: spline.update(weights=[1.0, 0.0, 1.0, 1.0]),
+            lambda spline: spline.update(knots=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            lambda spline: spline.update(knots=[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0]),
+        )
+        for mutate in invalid_variants:
+            corrupted = copy.deepcopy(document)
+            spline = next(item for item in corrupted.objects if item["id"] == spline_id)
+            mutate(spline)
+            with self.subTest(spline=spline), self.assertRaises(ValidationError):
+                corrupted.validate()
+
+    def test_spline_sampling_rejects_invalid_sample_count(self):
+        sketch = self.command({"type": "create_sketch"})["sketch_id"]
+        result = self.command({"type": "add_sketch_spline", "sketch_id": sketch,
+                               "points": [{"x": 0, "y": 0}, {"x": 1, "y": 2}, {"x": 2, "y": 0}]})
+        document = Document.from_dict(self.core.inspect_project(self.project)["document"])
+        by_id = {item["id"]: item for item in document.objects}
+        spline = by_id[result["spline_id"]]
+        for count in (0, -1, True, 1.5):
+            with self.subTest(count=count), self.assertRaises(ValidationError):
+                spline_sample_points(spline, by_id, samples_per_span=count)
 
     def test_unrenderable_sketch_is_rejected_without_changing_document(self):
         sketch = self.command({"type": "create_sketch"})["sketch_id"]

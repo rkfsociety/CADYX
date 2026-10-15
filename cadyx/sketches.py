@@ -8,6 +8,9 @@ from typing import Any
 from uuid import UUID
 
 from .errors import ValidationError
+from .sketch_curve_tools import (
+    evaluate_bezier, evaluate_bspline, evaluate_nurbs,
+)
 
 
 def typed_id(value: Any, kind: str) -> None:
@@ -35,9 +38,22 @@ def number(value: Any) -> float:
 
 def spline_sample_points(item: dict[str, Any], by_id: dict[str, dict[str, Any]],
                         samples_per_span: int = 24) -> list[dict[str, float]]:
-    """Sample an open centripetal Catmull-Rom spline that interpolates every point."""
+    """Sample persisted sketch curves using their selected interpolation mode."""
+    if isinstance(samples_per_span, bool) or not isinstance(samples_per_span, int) or samples_per_span < 1:
+        raise ValidationError("Spline samples per span must be a positive integer.")
     points = [(number(by_id[point_id]["x"]), number(by_id[point_id]["y"]))
               for point_id in item["point_ids"]]
+    mode = item.get("mode", "interpolating")
+    if mode == "control":
+        return _control_spline_sample_points(points, samples_per_span)
+    if mode == "bezier":
+        return _bezier_sample_points(points, samples_per_span)
+    if mode == "bspline":
+        return _bspline_sample_points(points, samples_per_span)
+    if mode == "nurbs":
+        return _nurbs_sample_points(points, item, samples_per_span)
+    if mode == "closed":
+        return _closed_interpolating_sample_points(points, samples_per_span)
     result = [dict(x=points[0][0], y=points[0][1])]
 
     def mix(a: tuple[float, float], b: tuple[float, float], ratio: float) -> tuple[float, float]:
@@ -68,6 +84,139 @@ def spline_sample_points(item: dict[str, Any], by_id: dict[str, dict[str, Any]],
             if not all(math.isfinite(value) for value in sampled):
                 raise ValidationError("Spline interpolation must remain finite.")
             result.append({"x": sampled[0], "y": sampled[1]})
+    return result
+
+
+def _closed_interpolating_sample_points(
+        points: list[tuple[float, float]], samples_per_span: int) -> list[dict[str, float]]:
+    """Sample a periodic centripetal Catmull-Rom curve through unique vertices."""
+    result = [dict(x=points[0][0], y=points[0][1])]
+
+    def mix(a: tuple[float, float], b: tuple[float, float], ratio: float) -> tuple[float, float]:
+        return a[0] + (b[0] - a[0]) * ratio, a[1] + (b[1] - a[1]) * ratio
+
+    def interval(a: tuple[float, float], b: tuple[float, float]) -> float:
+        value = math.sqrt(math.hypot(b[0] - a[0], b[1] - a[1]))
+        if not math.isfinite(value) or value <= 1e-12:
+            raise ValidationError("Closed spline vertices must be distinct and numerically stable.")
+        return value
+
+    for segment in range(len(points)):
+        p1 = points[segment]
+        p2 = points[(segment + 1) % len(points)]
+        p0 = points[(segment - 1) % len(points)]
+        p3 = points[(segment + 2) % len(points)]
+        t0 = 0.0
+        t1 = t0 + interval(p0, p1)
+        t2 = t1 + interval(p1, p2)
+        t3 = t2 + interval(p2, p3)
+        for step in range(1, samples_per_span + 1):
+            if step == samples_per_span:
+                sampled = p2
+            else:
+                t = t1 + (t2 - t1) * step / samples_per_span
+                a1 = mix(p0, p1, (t - t0) / (t1 - t0))
+                a2 = mix(p1, p2, (t - t1) / (t2 - t1))
+                a3 = mix(p2, p3, (t - t2) / (t3 - t2))
+                b1 = mix(a1, a2, (t - t0) / (t2 - t0))
+                b2 = mix(a2, a3, (t - t1) / (t3 - t1))
+                sampled = mix(b1, b2, (t - t1) / (t2 - t1))
+            if not all(math.isfinite(value) for value in sampled):
+                raise ValidationError("Closed spline interpolation must remain finite.")
+            result.append({"x": sampled[0], "y": sampled[1]})
+    return result
+
+
+def _bezier_sample_points(points: list[tuple[float, float]], samples_per_span: int) -> list[dict[str, float]]:
+    """Sample one polynomial Bezier curve defined by all ordered control points."""
+    return [dict(x=x, y=y) for x, y in
+            (evaluate_bezier(points, index / samples_per_span)
+             for index in range(samples_per_span + 1))]
+
+
+def _bspline_sample_points(points: list[tuple[float, float]], samples_per_span: int) -> list[dict[str, float]]:
+    """Sample an open clamped uniform B-spline with degree min(3, point count - 1)."""
+    degree = min(3, len(points) - 1)
+    span_count = len(points) - degree
+    knots = [0.0] * (degree + 1)
+    knots.extend(index / span_count for index in range(1, span_count))
+    knots.extend([1.0] * (degree + 1))
+    result: list[dict[str, float]] = []
+    for span in range(span_count):
+        low, high = knots[degree + span], knots[degree + span + 1]
+        first_step = 0 if span == 0 else 1
+        for step in range(first_step, samples_per_span + 1):
+            if span == span_count - 1 and step == samples_per_span:
+                point = points[-1]
+            else:
+                parameter = low + (high - low) * step / samples_per_span
+                point = evaluate_bspline(points, degree, knots, parameter)
+            if not all(math.isfinite(value) for value in point):
+                raise ValidationError("Spline interpolation must remain finite.")
+            result.append({"x": point[0], "y": point[1]})
+    return result
+
+
+def _nurbs_sample_points(points: list[tuple[float, float]], item: dict[str, Any],
+                         samples_per_span: int) -> list[dict[str, float]]:
+    """Sample a persisted rational B-spline over each non-empty knot span."""
+    degree = item["degree"]
+    knots = [number(value) for value in item["knots"]]
+    weights = [number(value) for value in item["weights"]]
+    count = len(points)
+    domain_start, domain_end = knots[degree], knots[count]
+    result: list[dict[str, float]] = []
+    spans = [(index, knots[index], knots[index + 1])
+             for index in range(degree, count)
+             if knots[index] < knots[index + 1]]
+    for index, low, high in spans:
+        first_step = 0 if not result else 1
+        for step in range(first_step, samples_per_span + 1):
+            parameter = low + (high - low) * step / samples_per_span
+            if index == spans[-1][0] and step == samples_per_span:
+                parameter = domain_end
+            try:
+                x, y = evaluate_nurbs(points, weights, degree, knots, parameter)
+            except (ValueError, OverflowError, ZeroDivisionError) as exc:
+                raise ValidationError("NURBS evaluation must remain finite and valid.") from exc
+            if not math.isfinite(x) or not math.isfinite(y):
+                raise ValidationError("NURBS evaluation must remain finite and valid.")
+            result.append({"x": x, "y": y})
+    if not result or spans[0][1] != domain_start or spans[-1][2] != domain_end:
+        raise ValidationError("NURBS knot vector must cover its parameter domain.")
+    return result
+
+
+def _control_spline_sample_points(points: list[tuple[float, float]],
+                                  samples_per_span: int) -> list[dict[str, float]]:
+    """Sample an open clamped uniform B-spline of degree 2 or 3 by de Boor evaluation."""
+    degree = min(3, len(points) - 1)
+    span_count = len(points) - degree
+    knots = [0.0] * (degree + 1)
+    knots.extend(index / span_count for index in range(1, span_count))
+    knots.extend([1.0] * (degree + 1))
+    result = [dict(x=points[0][0], y=points[0][1])]
+    for span in range(span_count):
+        low, high = knots[degree + span], knots[degree + span + 1]
+        for step in range(1, samples_per_span + 1):
+            if span == span_count - 1 and step == samples_per_span:
+                result.append({"x": points[-1][0], "y": points[-1][1]})
+                continue
+            parameter = low + (high - low) * step / samples_per_span
+            knot_span = next(index for index in range(degree, len(points))
+                             if knots[index] <= parameter < knots[index + 1])
+            work = [points[knot_span - degree + index] for index in range(degree + 1)]
+            for level in range(1, degree + 1):
+                for index in range(degree, level - 1, -1):
+                    knot_index = knot_span - degree + index
+                    denominator = knots[knot_index + degree - level + 1] - knots[knot_index]
+                    ratio = (parameter - knots[knot_index]) / denominator if denominator else 0.0
+                    work[index] = (work[index - 1][0] * (1 - ratio) + work[index][0] * ratio,
+                                   work[index - 1][1] * (1 - ratio) + work[index][1] * ratio)
+            point = work[degree]
+            if not all(math.isfinite(value) for value in point):
+                raise ValidationError("Spline interpolation must remain finite.")
+            result.append({"x": point[0], "y": point[1]})
     return result
 
 
@@ -182,6 +331,11 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
                     or any(not isinstance(point_id, str) for point_id in point_ids)
                     or len(set(point_ids)) != len(point_ids)):
                 raise ValidationError("An interpolating spline needs 3 to 128 unique point references.")
+            mode = item.get("mode", "interpolating")
+            if not isinstance(mode, str) or mode not in {
+                "interpolating", "closed", "control", "bezier", "bspline", "nurbs",
+            }:
+                raise ValidationError("Spline mode must be interpolating, closed, control, bezier, bspline, or nurbs.")
             points = [reference(point_id, "point", sketch_id) for point_id in point_ids]
             if any(math.hypot(number(right["x"]) - number(left["x"]),
                               number(right["y"]) - number(left["y"])) <= 1e-7
@@ -189,7 +343,48 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
                 raise ValidationError("Adjacent spline points must be distinct.")
             if "construction" in item and type(item["construction"]) is not bool:
                 raise ValidationError("Spline construction flag must be a boolean.")
-            spline_sample_points(item, by_id)
+            if mode == "closed" and math.hypot(
+                    number(points[0]["x"]) - number(points[-1]["x"]),
+                    number(points[0]["y"]) - number(points[-1]["y"])) <= 1e-7:
+                raise ValidationError("A closed spline's last vertex must differ from its first vertex.")
+            if mode == "nurbs":
+                degree = item.get("degree")
+                if isinstance(degree, bool) or not isinstance(degree, int) or not 1 <= degree < len(point_ids):
+                    raise ValidationError("NURBS degree must be an integer from 1 to control point count minus one.")
+                weights = item.get("weights")
+                if (not isinstance(weights, list) or len(weights) != len(point_ids)
+                        or any(number(weight) <= 0 for weight in weights)):
+                    raise ValidationError("NURBS needs one finite positive weight per control point.")
+                knots = item.get("knots")
+                if not isinstance(knots, list) or len(knots) != len(point_ids) + degree + 1:
+                    raise ValidationError("NURBS knot count must equal control point count plus degree plus one.")
+                knot_values = [number(value) for value in knots]
+                if any(left > right for left, right in zip(knot_values, knot_values[1:])):
+                    raise ValidationError("NURBS knots must be nondecreasing.")
+                if not knot_values[degree] < knot_values[len(point_ids)]:
+                    raise ValidationError("NURBS parameter domain must have positive length.")
+                domain_start, domain_end = knot_values[degree], knot_values[len(point_ids)]
+                if (any(value != domain_start for value in knot_values[:degree + 1])
+                        or any(value != domain_end for value in knot_values[len(point_ids):])):
+                    raise ValidationError("NURBS knots must be clamped at both endpoints.")
+                multiplicity = 1
+                for index, (left, right) in enumerate(zip(knot_values, knot_values[1:])):
+                    multiplicity = multiplicity + 1 if left == right else 1
+                    if multiplicity > degree + 1:
+                        raise ValidationError("NURBS knot multiplicity cannot exceed degree plus one.")
+                    if (multiplicity > degree and left not in {domain_start, domain_end}
+                            and index >= degree and index < len(point_ids)):
+                        raise ValidationError("Interior NURBS knot multiplicity cannot exceed the degree.")
+            sampled = spline_sample_points(item, by_id)
+            if mode == "closed":
+                if sampled[0] != sampled[-1]:
+                    raise ValidationError("A closed spline must return exactly to its first vertex.")
+                area = sum(
+                    point["x"] * sampled[index + 1]["y"] - sampled[index + 1]["x"] * point["y"]
+                    for index, point in enumerate(sampled[:-1])
+                )
+                if not math.isfinite(area) or abs(area) <= 1e-12:
+                    raise ValidationError("A closed spline must enclose non-zero area.")
 
     # Geometry has been checked before constraints, regardless of storage order.
     for item in objects:
@@ -248,6 +443,13 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
     ellipses = [item for item in ellipse_objects if "sweep_radians" not in item]
     splines = [item for item in owned if item.get("type") == "spline"
                and not item.get("construction", False)]
+
+    closed_splines = [item for item in splines if item.get("mode") == "closed"]
+    if closed_splines:
+        if (len(closed_splines) != 1 or len(splines) != 1 or lines or arcs or circles
+                or ellipse_arcs or ellipses):
+            raise ValidationError("A closed spline profile must be the only non-construction sketch geometry.")
+        raise ValidationError("Closed spline profiles require curve-capable geometry-kernel support.")
 
     if not lines and not arcs and not splines:
         if ellipse_arcs:
@@ -381,6 +583,8 @@ def open_path(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[
                  if item.get("type") == "point" and not item.get("construction", False)}
     if not lines and len(splines) == 1:
         spline = splines[0]
+        if spline.get("mode") == "closed":
+            raise ValidationError("A sweep path must be open.")
         if point_ids != set(spline["point_ids"]):
             raise ValidationError("Every point in a spline sweep sketch must belong to its spline.")
         return sketch["plane"], spline_sample_points(spline, by_id, samples_per_span=4)
