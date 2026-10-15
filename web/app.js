@@ -287,6 +287,7 @@ function workspaceControlLockReason() {
 function updateWorkspaceControls() {
   const lockReason = workspaceControlLockReason();
   const available = lockReason === null;
+  const projectsAvailable = !projectAddressPinned || !agentWorkStatusConnected || !agentWorkActive;
   projectDetail.dataset.controlsLocked = String(!available);
   const status = $("#workspace-lock-status");
   status.hidden = available;
@@ -305,13 +306,15 @@ function updateWorkspaceControls() {
 
   document.querySelectorAll("#project-detail button").forEach((button) => {
     const filesUnavailable = button.dataset.workspaceView === "files" && !canOpenFilesView();
-    button.disabled = !available || filesUnavailable;
+    const projectsNavigation = button.dataset.workspaceView === "projects";
+    button.disabled = (projectsNavigation ? !projectsAvailable : !available) || filesUnavailable;
     if (button.dataset.workspaceView) {
-      button.title = lockReason || (filesUnavailable
+      button.title = projectsNavigation && projectsAvailable ? ""
+        : lockReason || (filesUnavailable
         ? "Доступно, когда агент освободит панель и завершит текущую работу" : "");
     }
   });
-  if (!available && ["files", "projects"].includes(primaryGrid.dataset.view)) {
+  if (!available && primaryGrid.dataset.view === "files") {
     setWorkspaceNavigation("overview");
   }
 }
@@ -324,7 +327,7 @@ $("#workspace-navigation").addEventListener("click", (event) => {
   if (view === "overview") {
     $("#viewport-fit").focus({ preventScroll: true });
   } else if (view === "geometry") {
-    $("#object-tree").focus({ preventScroll: true });
+    $("#geometry-rows").focus({ preventScroll: true });
   } else if (view === "analysis") {
     $("#comparison-panel").focus({ preventScroll: true });
   } else if (view === "manufacturing") {
@@ -345,7 +348,7 @@ $("#workspace-navigation").addEventListener("click", (event) => {
 function setWorkspaceNavigation(view) {
   const views = new Set(["overview", "geometry", "analysis", "manufacturing", "activity", "files", "projects"]);
   const activeView = views.has(view)
-    && (view === "overview" || workspaceControlLockReason() === null)
+    && (view === "overview" || view === "projects" || workspaceControlLockReason() === null)
     && (view !== "files" || canOpenFilesView()) ? view : "overview";
   primaryGrid.dataset.view = activeView;
   folderDetail.hidden = !getSelectedFolder() && activeView !== "files";
@@ -767,7 +770,7 @@ function showProjectLoading(name) {
   projectDetail.hidden = false;
   noSelection.hidden = true;
   $("#object-panel").hidden = true;
-  $("#object-tree").replaceChildren();
+  $("#geometry-rows").replaceChildren();
   $("#objects-empty").textContent = "Загружаю дерево модели…";
   $("#objects-empty").hidden = false;
   setWorkspaceNavigation("overview");
@@ -1491,72 +1494,127 @@ function containsRevolvedProfile(geometry) {
       && (containsRevolvedProfile(geometry.base) || containsRevolvedProfile(geometry.tool));
 }
 
+const editableDimensionLabels = { width: "Ширина", height: "Высота", depth: "Глубина", major_diameter: "Диаметр", pitch: "Шаг", length: "Длина", angle_degrees: "Угол", radius: "Радиус" };
+
+function editableDimensions(feature) {
+  if (!feature || feature.type !== "feature") return null;
+  const fields = ({
+    create_box: ["width", "height", "depth"],
+    metric_thread: ["major_diameter", "pitch", "length"],
+    extrude_sketch: ["depth"],
+    revolve_sketch: ["angle_degrees"],
+    sweep_sketch: ["radius"],
+    fillet_edges: ["radius"],
+  })[feature.operation];
+  if (!fields) return null;
+  return fields.filter((name) => Number.isFinite(feature.parameters?.[name]))
+    .map((name) => ({ name, value: feature.parameters[name], label: editableDimensionLabels[name] }));
+}
+
 function renderObjectTree(objects) {
-  const root = $("#object-tree");
+  const root = $("#geometry-rows");
   root.replaceChildren();
-  $("#objects-empty").textContent = objects.length ? "" : "В этой модели пока нет объектов.";
-  $("#objects-empty").hidden = objects.length > 0;
-
-  const appendRow = (parent, item, nested = false) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `object-row${nested ? " nested" : ""}${item.id === selectedObjectId ? " selected" : ""}`;
-    button.dataset.objectId = item.id;
-    button.title = item.id;
-    button.setAttribute("aria-pressed", String(item.id === selectedObjectId));
-    const marker = document.createElement("span");
-    marker.className = "object-symbol";
-    marker.setAttribute("aria-hidden", "true");
-    marker.textContent = ({ body: "▰", feature: "↳", sketch: "⌗", point: "·", line: "／", circle: "○", ellipse: "⬭", constraint: "⊙" })[item.type] || "•";
-    const copy = document.createElement("span");
-    copy.className = "object-copy";
-    const name = document.createElement("strong");
-    name.textContent = displayObjectName(item.name) || (item.type === "feature" ? "Построение параллелепипеда" : objectTypeLabel(item));
-    const detail = document.createElement("small");
-    detail.textContent = objectSummary(item, objects);
-    copy.append(name, detail);
-    button.append(marker, copy);
-    button.addEventListener("click", () => {
-      selectedObjectId = item.id;
-      renderViewport(currentObjects);
-      renderObjectTree(currentObjects);
-    });
-    parent.append(button);
-  };
-
   const bodies = objects.filter((item) => item.type === "body");
   const consumedBodies = new Set(objects
     .filter((item) => item.type === "feature")
     .flatMap((item) => item.operation === "fuse_bodies" ? [item.base_body_id, item.tool_body_id]
       : ["fillet_edges", "resize_imported_thread", "transform_imported_brep"].includes(item.operation) ? [item.source_body_id] : []));
-  const sketches = objects.filter((item) => item.type === "sketch");
   for (const body of bodies) {
     if (consumedBodies.has(body.id)) continue;
-    const group = document.createElement("div");
-    group.className = "object-group";
-    appendRow(group, body);
-    const children = objects.filter((item) => item.type === "feature" && item.body_id === body.id);
-    if (children.length) {
-      const nested = document.createElement("div");
-      nested.className = "object-children";
-      for (const child of children) appendRow(nested, child, true);
-      group.append(nested);
+    const feature = [...objects].reverse().find((item) => item.type === "feature" && item.body_id === body.id);
+    const tr = document.createElement("tr");
+    const nameCell = document.createElement("th");
+    nameCell.scope = "row";
+    nameCell.textContent = displayObjectName(feature?.name) || displayObjectName(body.name) || featureOperationLabels[feature?.operation] || "Тело модели";
+    const currentCell = document.createElement("td");
+    currentCell.textContent = dimensionsText(body.geometry?.dimensions) || objectSummary(feature, objects) || "Размеры не определены";
+    const inputCell = document.createElement("td");
+    const dimensions = editableDimensions(feature);
+    if (dimensions?.length) {
+      const fields = document.createElement("div");
+      fields.className = "geometry-edit-fields";
+      for (const field of dimensions) {
+        const label = document.createElement("label");
+        label.className = "sr-only";
+        label.textContent = `${field.label}: ${nameCell.textContent}`;
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "0.000001";
+        input.step = "any";
+        input.value = field.value;
+        input.dataset.featureId = feature.id;
+        input.dataset.parameter = field.name;
+        input.dataset.originalValue = String(field.value);
+        input.title = field.label;
+        label.append(input);
+        fields.append(label);
+      }
+      const apply = document.createElement("button");
+      apply.type = "button";
+      apply.className = "button geometry-apply";
+      apply.textContent = "Применить";
+      apply.addEventListener("click", () => applyGeometryDimensions(feature.id, fields));
+      fields.append(apply);
+      inputCell.append(fields);
+    } else {
+      inputCell.textContent = "Параметры этой геометрии нельзя изменить здесь";
+      inputCell.className = "geometry-not-editable";
     }
-    root.append(group);
+    tr.append(nameCell, currentCell, inputCell);
+    tr.title = body.id;
+    root.append(tr);
   }
-  for (const sketch of sketches) {
-    if (sketch.id !== activeSketchId) continue;
-    const group = document.createElement("div");
-    group.className = "object-group";
-    appendRow(group, sketch);
-    const children = objects.filter((item) => item.sketch_id === sketch.id);
-    if (children.length) {
-      const nested = document.createElement("div");
-      nested.className = "object-children";
-      for (const child of children) appendRow(nested, child, true);
-      group.append(nested);
+  const hasBodies = root.children.length > 0;
+  $("#objects-empty").textContent = hasBodies ? "" : "В этой модели пока нет тел геометрии.";
+  $("#objects-empty").hidden = hasBodies;
+}
+
+async function applyGeometryDimensions(featureId, fields) {
+  const status = $("#geometry-status");
+  if (!selectedProjectId || workspaceControlLockReason() !== null) {
+    status.textContent = "Изменение недоступно: проект сейчас занят или его состояние не подтверждено.";
+    status.hidden = false;
+    return;
+  }
+  const inputs = [...fields.querySelectorAll("input")];
+  if (inputs.some((input) => !input.value.trim() || !Number.isFinite(Number(input.value)) || Number(input.value) <= 0)) {
+    status.textContent = "Введите для каждого размера положительное число.";
+    status.hidden = false;
+    return;
+  }
+  const changed = inputs.filter((input) => Number(input.value) !== Number(input.dataset.originalValue));
+  if (!changed.length) return;
+  const projectId = selectedProjectId;
+  status.textContent = "Перестраиваю геометрию…";
+  status.hidden = false;
+  fields.querySelectorAll("button, input").forEach((element) => { element.disabled = true; });
+  let leaseId;
+  try {
+    const encoded = encodeURIComponent(projectId);
+    const info = await api(`/api/v1/projects/${encoded}`);
+    if (info.lock?.state !== "FREE" || workspaceControlLockReason() !== null || projectId !== selectedProjectId) {
+      throw new Error("Проект занят; дождитесь завершения текущей операции.");
     }
-    root.append(group);
+    const lease = await api(`/api/v1/projects/${encoded}/leases`, { method: "POST", body: JSON.stringify({ owner_id: `geometry-ui:${crypto.randomUUID()}` }) });
+    leaseId = lease.lease.lease_id;
+    let expectedRevision = info.document.revision;
+    for (const input of changed) {
+      await api(`/api/v1/projects/${encoded}/commands`, { method: "POST", body: JSON.stringify({ lease_id: leaseId, expected_revision: expectedRevision, command: { type: "set_parameter", feature_id: featureId, name: input.dataset.parameter, value: Number(input.value) } }) });
+      expectedRevision += 1;
+      input.dataset.originalValue = input.value;
+    }
+    status.textContent = "Геометрия перестроена.";
+    await refreshDetail();
+  } catch (error) {
+    status.textContent = error.message || "Не удалось перестроить геометрию.";
+    notify(status.textContent, true);
+    if (projectId === selectedProjectId) await refreshDetail().catch(() => {});
+  } finally {
+    if (leaseId) {
+      try { await api(`/api/v1/projects/${encodeURIComponent(projectId)}/leases/${encodeURIComponent(leaseId)}/release`, { method: "POST", body: "{}" }); }
+      catch { scheduleWorkspaceRefresh(); }
+    }
+    fields.querySelectorAll("button, input").forEach((element) => { element.disabled = false; });
   }
 }
 
