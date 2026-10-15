@@ -18,6 +18,9 @@ from .mesh_geometry import mesh_ply_bytes
 from .models import Document
 from .scan import DEFAULT_SCAN_PARAMETERS, ScanProcessor, normalize_scan_parameters
 from .sketches import closed_profile, open_path
+from .capabilities import COMMAND_CAPABILITIES
+
+_SUPPORTED_COMMAND_TYPES = frozenset(item["type"] for item in COMMAND_CAPABILITIES)
 
 
 def _finite_number(value: Any, name: str) -> float:
@@ -73,6 +76,8 @@ class CommandSystem:
         if not isinstance(command, dict):
             raise ValidationError("command must be a JSON object.")
         kind = command.get("type")
+        if not isinstance(kind, str) or kind not in _SUPPORTED_COMMAND_TYPES:
+            raise ValidationError(f"Unsupported command type: {kind!r}.")
         if kind == "create_box":
             return self._create_box(document, command)
         if kind == "create_metric_thread":

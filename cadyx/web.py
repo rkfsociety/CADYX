@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from .auth import authorization_matches
+from .capabilities import agent_api_capabilities
 from .core import CadyxCore
 from .errors import CadyxError, NotFoundError, ValidationError
 from .models import OwnerType
@@ -101,6 +102,9 @@ def make_request_handler(
                 if parsed.path == "/api/v1/agent/workspace/selection":
                     self._json(200, {"selection": core.workspace_selection_snapshot()})
                     return
+                if parsed.path == "/api/v1/agent/capabilities":
+                    self._json(200, agent_api_capabilities())
+                    return
                 if parsed.path == "/api/v1/projects":
                     self._json(200, core.list_workspace())
                     return
@@ -123,12 +127,15 @@ def make_request_handler(
                     return
                 prefix = ["api", "v1", "projects"]
                 agent_prefix = ["api", "v1", "agent", "projects"]
-                if len(parts) in {5, 6} and parts[:3] == prefix and parts[4] == "files":
-                    project_id = parts[3]
-                    if len(parts) == 5:
+                project_file_prefix = agent_prefix if parts[:4] == agent_prefix else prefix
+                if (len(parts) in {len(project_file_prefix) + 2, len(project_file_prefix) + 3}
+                        and parts[:len(project_file_prefix)] == project_file_prefix
+                        and parts[len(project_file_prefix) + 1] == "files"):
+                    project_id = parts[len(project_file_prefix)]
+                    if len(parts) == len(project_file_prefix) + 2:
                         self._json(200, {"files": core.workspace.list_project_files(project_id)})
                     else:
-                        file_name = unquote(parts[5])
+                        file_name = unquote(parts[len(project_file_prefix) + 2])
                         self._binary_file(core.workspace.resolve_project_file(project_id, file_name))
                     return
                 comparison_prefix = agent_prefix if parts[:4] == agent_prefix else prefix

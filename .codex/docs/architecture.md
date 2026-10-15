@@ -163,6 +163,14 @@ restore its last local selection until an agent selects a resource again.
 
 The default host is `127.0.0.1`. Non-loopback binds require the host authentication gate described above; the built-in server still relies on a trusted LAN or external TLS/VPN for transport confidentiality.
 
+### Agent API discovery and local Codex MCP adapter
+
+`GET /api/v1/agent/capabilities` is a read-only machine-readable inventory of Agent API routes, supported Command System names, required/optional parameter names, known error codes and documented limitations. Parameter lists are an operator guide; Core and command validators plus the linked model contracts remain authoritative. `CommandSystem.execute` rejects command types absent from the discovery registry, so a new operation is not exposed until its contract is registered.
+
+`cadyx/mcp_server.py` implements a local stdio MCP adapter using only Python's standard library. It calls the protected CADYX HTTP Agent API; it does not import Core or access project files directly. Tools cover workspace selection, project/file/model inspection, capabilities, current B-rep topology, scene and PNG image retrieval, camera, dashboard, commands, stop/resume, and validated expired-lease recovery. It has no shell, generic HTTP, or model-file write tool. Each model command requires the revision observed by the caller, acquires an agent lease immediately before the command, and releases it after the atomic API call. A dropped command response is never replayed automatically. A concurrent stop tool sets Core's durable stop fence, waits for an admitted command to finish, and returns Core's validated saved state. Project selection is refused when the current/target resource is locked, has a running operation, or global agent work remains active.
+
+The repository entry point is [`AGENTS.md`](../../AGENTS.md), which points to the repo-local skill at `.agents/skills/cadyx-operator/SKILL.md`. `.codex/config.toml` registers the stdio process at project scope after this trusted checkout is opened in Codex; see [README](../../README.md#codex-operator-integration). The client accepts a token from process environment or `CADYX_API_TOKEN_FILE`; token contents are not passed as process arguments or logged. No MCP package or provider SDK is required.
+
 ## Foundation roadmap
 
 The development sequence, including authenticated LAN access and the prerequisites for Scan-to-CAD, is maintained in the [CADYX project roadmap](../roadmap.md). Inspect the current implementation before treating a milestone as unfinished or complete.

@@ -1,0 +1,10 @@
+[mcp_servers.cadyx]
+command = "python"
+args = ["-m", "cadyx.mcp_server"]
+cwd = "C:\\github\\CADYX"
+startup_timeout_sec = 20
+tool_timeout_sec = 600
+enabled = true
+
+[mcp_servers.cadyx.env]
+CADYX_API_URL = "http://127.0.0.1:8888"

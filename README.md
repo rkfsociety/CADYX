@@ -46,6 +46,20 @@ Agents and operators can restart the host without browser interaction by running
 
 Use `-Action Status`, `-Action Stop`, or `-Action Uninstall` to manage the task. After moving the checkout or rebuilding its local runtime, run `-Action Install` again to refresh the registered paths and restart the host.
 
+## Codex operator integration
+
+The repository root [`AGENTS.md`](AGENTS.md) points Codex to the project rules and the repository skill at `.agents/skills/cadyx-operator/SKILL.md`. The skill uses the local stdlib MCP adapter, which calls only CADYX's existing HTTP Agent API and exposes no shell, arbitrary HTTP, or model-file write tools.
+
+After setting up the runtime and starting the local host, open this trusted checkout in Codex. The repository-scoped [`.codex/config.toml`](.codex/config.toml) registers the adapter without changing your user-wide MCP configuration. If the checkout is moved, update its `cwd` in that file. To check the MCP registration from this directory:
+
+```powershell
+codex mcp list
+```
+
+The project config launches the adapter with the Python runtime available on `PATH`. If CADYX authentication is enabled, provide `CADYX_API_TOKEN_FILE` as an MCP environment value pointing to the same protected token file used by the host. The adapter reads the token from the file and never writes it to logs or Git. `CADYX_API_TOKEN` may be supplied through the process environment instead; do not put token values in command arguments or repository configuration. Restart Codex's MCP servers or open a fresh conversation after first enabling the project config so it discovers the tools.
+
+`GET /api/v1/agent/capabilities` is a read-only route/command guide. Command parameter lists are advisory; existing Command System validators and the linked model contracts remain authoritative. MCP PNG tools return image content for visual inspection. Long operations can be fenced through `cadyx_stop_agent_work`; the stop waits for an admitted atomic command and validates the committed state.
+
 Multiple current hosts may share a workspace on the same local machine; see the [lease contract](.codex/docs/architecture.md#edit-leases). SSE updates remain local to each host. The project workspace is `projects/`. Runtime project data is ignored by Git; keep source CAD files and scans backed up as user data.
 
 ## Check
@@ -66,6 +80,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 
 - `GET /api/v1/health` for minimal unauthenticated readiness
 - `GET /api/v1/projects` and `GET /api/v1/agent/projects` (CADYX project records plus `folders` for immediate project directories); agent project creation uses `POST /api/v1/agent/projects`
+- `GET /api/v1/agent/capabilities` for machine-readable routes, supported model command names/parameter guides, known errors and limitations
 - `GET /api/v1/projects/{id}`
 - `GET /api/v1/projects/{id}/dashboard` reads the agent workflow/task snapshot; `POST /api/v1/agent/projects/{id}/dashboard` replaces it with agent-reported progress, ETA and task states
 - `GET /api/v1/projects/{id}/viewport` and its Agent API equivalent return the same read-only render scene

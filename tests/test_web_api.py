@@ -13,6 +13,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from cadyx.core import CadyxCore
+from cadyx.models import Document
 from cadyx.web import CadyxHTTPServer, make_request_handler
 import cadyx.web as web_module
 
@@ -97,6 +98,22 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(activity["activities"][-1]["state"], "completed")
         status, activity = self.request(f"/api/v1/agent/projects/{project_id}/activity")
         self.assertEqual((status, activity["activities"][-1]["state"]), (200, "completed"))
+
+    def test_agent_capabilities_are_read_only_and_command_names_are_current(self) -> None:
+        before = self.core.workspace.workspace_revision_token()
+        status, capabilities = self.request("/api/v1/agent/capabilities")
+        self.assertEqual(status, 200)
+        self.assertTrue(capabilities["read_only"])
+        self.assertTrue(any(route["path"] == "/api/v1/agent/projects/{id}/commands" for route in capabilities["routes"]))
+        advertised = {item["type"] for item in capabilities["commands"]}
+        self.assertEqual(len(advertised), len(capabilities["commands"]))
+        for command_type in advertised:
+            with self.subTest(command_type=command_type):
+                try:
+                    self.core.commands.execute(Document.create(), {"type": command_type})
+                except Exception as exc:
+                    self.assertNotIn("Unsupported command type", str(exc))
+        self.assertEqual(before, self.core.workspace.workspace_revision_token())
 
     def test_agent_lease_acquire_and_release_publish_lock_events(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Lock event"})
