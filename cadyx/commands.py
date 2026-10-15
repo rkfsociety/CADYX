@@ -166,14 +166,29 @@ class CommandSystem:
         if kind in {"add_sketch_rectangle_two_corners", "add_sketch_rectangle_center",
                     "add_sketch_rectangle_three_points", "add_sketch_rotated_rectangle",
                     "add_sketch_parallelogram", "add_sketch_regular_polygon",
-                    "add_sketch_inscribed_polygon", "add_sketch_circumscribed_polygon"}:
+                    "add_sketch_inscribed_polygon", "add_sketch_circumscribed_polygon",
+                    "add_sketch_polygon_from_center"}:
+            operation_name = kind
             if kind == "add_sketch_inscribed_polygon":
                 command = {**command, "radius_mode": "inscribed"}
                 kind = "add_sketch_regular_polygon"
             elif kind == "add_sketch_circumscribed_polygon":
                 command = {**command, "radius_mode": "circumscribed"}
                 kind = "add_sketch_regular_polygon"
-            return self._add_sketch_polygon_tool(document, command, kind, progress=progress)
+            elif kind == "add_sketch_polygon_from_center":
+                center_x = _finite_number(command.get("center_x"), "Polygon center x")
+                center_y = _finite_number(command.get("center_y"), "Polygon center y")
+                vertex = self._coordinate_pair(command.get("first_vertex"), "First polygon vertex")
+                radius = math.hypot(vertex[0] - center_x, vertex[1] - center_y)
+                if not math.isfinite(radius) or radius <= 1e-7:
+                    raise ValidationError("The first polygon vertex must differ from its center.")
+                command = {**command, "radius": radius,
+                           "rotation_degrees": math.degrees(math.atan2(vertex[1] - center_y,
+                                                                        vertex[0] - center_x))}
+                kind = "add_sketch_regular_polygon"
+            return self._add_sketch_polygon_tool(
+                document, command, kind, operation_name=operation_name, progress=progress,
+            )
         if kind == "add_sketch_circle":
             return self._add_sketch_circle(document, command, progress=progress)
         if kind in {"add_sketch_circle_diameter", "add_sketch_circle_two_points", "add_sketch_circle_three_points"}:
@@ -320,6 +335,7 @@ class CommandSystem:
         command: dict[str, Any],
         kind: str,
         *,
+        operation_name: str | None = None,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         sketch = self._find_sketch(document, command.get("sketch_id"))
@@ -379,7 +395,7 @@ class CommandSystem:
         if any(not math.isfinite(value) for point in points for value in point):
             raise ValidationError("Sketch coordinates must remain finite.")
         return self._append_sketch_polyline(
-            document, sketch, points, closed=True, operation=kind, progress=progress,
+            document, sketch, points, closed=True, operation=operation_name or kind, progress=progress,
         )
 
     def _add_sketch_circle_tool(

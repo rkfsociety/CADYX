@@ -92,6 +92,8 @@ their respective human/agent edit leases. Results below appear inside
   creates a closed point/line profile and returns its point and line ids.
   `add_sketch_inscribed_polygon` fixes the circumradius; `add_sketch_circumscribed_polygon`
   fixes the inradius. Both expose the same center, side count and optional rotation.
+  `add_sketch_polygon_from_center` takes the center and first vertex coordinates
+  directly; the vertex sets both the circumradius and initial rotation.
 - `add_sketch_circle`: `sketch_id`, center `x` and `y`, and positive `radius`.
   Adds the center point and circle together and returns `point_id` and `circle_id`.
 - `add_sketch_circle_diameter`: `sketch_id`, center `x`/`y`, and positive

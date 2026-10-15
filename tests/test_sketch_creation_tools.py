@@ -132,6 +132,16 @@ class IndividualSketchCreationToolTests(unittest.TestCase):
         self.assertTrue(all(abs(max(abs(item["x"]), abs(item["y"])) - 2 / (2**0.5 / 2)) < 1e-9
                             for item in vertices))
 
+    def test_polygon_from_center(self) -> None:
+        result = self.command({"type": "add_sketch_polygon_from_center", "sketch_id": self.sketch_id,
+                              "center_x": 2, "center_y": -1,
+                              "first_vertex": {"x": 2, "y": 4}, "side_count": 5})
+        objects = self.objects()
+        first = objects[result["point_ids"][0]]
+        self.assertAlmostEqual(first["x"], 2)
+        self.assertAlmostEqual(first["y"], 4)
+        self.assertEqual(len(result["line_ids"]), 5)
+
     def test_circle_center_radius(self) -> None:
         result = self.command({"type": "add_sketch_circle", "sketch_id": self.sketch_id,
                               "x": 2, "y": 3, "radius": 4})

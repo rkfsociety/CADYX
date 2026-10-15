@@ -39,6 +39,7 @@
 - Видимый checkpoint SK-010…SK-019 и SK-043: проект `Эскизы — индивидуальные видимые тесты`, ID `6865cd10-79be-4af2-9e58-6b9495d02c42`; команды завершены на revision 2, 4, 6, 8, 10, 12, 14, 16, 18 и 20.
 - Видимый checkpoint SK-001…SK-009: проект `Эскизы — базовые инструменты SK-001—SK-009`, ID `f31862d2-81fc-4293-9bab-67befe312c45`; команды завершены на revision 2, 4, 6, 8, 10, 12, 14, 16 и 18, каждая в отдельном именованном XY-эскизе.
 - Видимый checkpoint SK-044…SK-045: проект `Эскизы — индивидуальные видимые тесты SK-044—SK-045`, ID `5be80ab4-e3f7-47ee-94cc-7c818b6186ee`; отдельные именованные XY-эскизы, вписанный шестиугольник завершён на revision 2, описанный квадрат — на revision 4; сцена PNG просмотрена, lock `FREE`, активности завершены.
+- Видимый индивидуальный прогон SK-046: проект `Эскизы — индивидуальный видимый тест SK-046`, ID `47cbd83e-d459-4924-b7bf-74f2caf46621`; пятиугольник из центра `(0,0)` и первой вершины `(6,8)`, 5 сторон, замкнут; revision 2, сцена PNG просмотрена, lock `FREE`, активных операций нет.
 - Инспекция второго проекта: 36 объектов, 18 записей истории, revision 18, project lock `FREE`; сцена Agent API revision 18 содержит только активный эскиз и его геометрию, финальный viewport PNG просмотрен.
 
 ## Реестр отдельных проверок
@@ -92,7 +93,7 @@
 | SK-043 | Правильный многоугольник | test_regular_polygon (passed) | PASS · rev 12 | pending | pending |
 | SK-044 | Вписанный многоугольник | test_inscribed_polygon (passed) | PASS · rev 2 | pending | pending |
 | SK-045 | Описанный многоугольник | test_circumscribed_polygon (passed) | PASS · rev 4 | pending | pending |
-| SK-046 | Многоугольник из центра | pending | pending | pending | pending |
+| SK-046 | Многоугольник из центра | test_polygon_from_center (passed) | PASS · rev 2 | pending | pending |
 | SK-047 | Прямой паз | pending | pending | pending | pending |
 | SK-048 | Паз по центрам | pending | pending | pending | pending |
 | SK-049 | Паз по общей длине | pending | pending | pending | pending |
