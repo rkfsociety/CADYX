@@ -24,6 +24,13 @@ class GeometryKernel(Protocol):
     def create_lofted_profiles(
         self, sections: list[list[dict[str, float]]], *, section_offsets: list[float],
     ) -> dict[str, Any]: ...
+    def create_multicontour_loft(
+        self, section_groups: list[list[list[dict[str, float]]]], *, section_offsets: list[float],
+    ) -> dict[str, Any]: ...
+    def create_ruled_shell(
+        self, patches: list[dict[str, list[list[float]]]], *,
+        sewing_tolerance: float = 1e-3, compute_volume: bool = True,
+    ) -> dict[str, Any]: ...
 
     def create_revolved_profile(
         self, profile: list[dict[str, float]], *, angle_degrees: float,
@@ -152,6 +159,104 @@ def _finite_coordinate(value: Any, name: str) -> float:
     return number
 
 
+def _ruled_patch_values(patches: Any) -> list[dict[str, list[list[float]]]]:
+    if not isinstance(patches, list) or not 4 <= len(patches) <= 4096:
+        raise ValidationError("Ruled shell needs between 4 and 4096 surface patches.")
+    normalized, total_points = [], 0
+    for patch in patches:
+        if not isinstance(patch, dict) or set(patch) != {"first", "second"}:
+            raise ValidationError("Each ruled patch needs exactly two rail point arrays.")
+        rails = {}
+        for key in ("first", "second"):
+            points = patch[key]
+            if not isinstance(points, list) or not 2 <= len(points) <= 4096:
+                raise ValidationError("Each ruled rail needs between 2 and 4096 points.")
+            total_points += len(points)
+            if total_points > 131072:
+                raise ValidationError("Ruled shell is limited to 131072 input rail points.")
+            rail = []
+            for point in points:
+                if not isinstance(point, list) or len(point) != 3:
+                    raise ValidationError("Ruled rail points must be [x, y, z] coordinate triples.")
+                rail.append([_finite_coordinate(value, "Ruled rail coordinate") for value in point])
+            if any(math.dist(a, b) <= 1e-7 for a, b in zip(rail, rail[1:])):
+                raise ValidationError("Ruled rail points must be distinct and consecutive.")
+            rails[key] = rail
+        normalized.append(rails)
+    return normalized
+
+
+def _loft_contour_signature(profile: list[dict[str, float]]) -> tuple[float, float, float, float]:
+    signed_twice_area = 0.0
+    centroid_x = centroid_y = 0.0
+    for index, point in enumerate(profile):
+        following = profile[(index + 1) % len(profile)]
+        cross = point["x"] * following["y"] - following["x"] * point["y"]
+        signed_twice_area += cross
+        centroid_x += (point["x"] + following["x"]) * cross
+        centroid_y += (point["y"] + following["y"]) * cross
+    area = abs(signed_twice_area) / 2
+    if area <= 1e-12:
+        raise ValidationError("Loft section area must be non-zero.")
+    return area, centroid_x / (3 * signed_twice_area), centroid_y / (3 * signed_twice_area), signed_twice_area
+
+
+def _match_loft_contours(
+    left: list[tuple[list[dict[str, float]], float, float, float]],
+    right: list[tuple[list[dict[str, float]], float, float, float]],
+) -> list[tuple[int, int]]:
+    """Pair contours by centroid proximity with area as a secondary shape cue."""
+    all_points = [point for profile, _, _, _ in (*left, *right) for point in profile]
+    span = max(
+        max(point["x"] for point in all_points) - min(point["x"] for point in all_points),
+        max(point["y"] for point in all_points) - min(point["y"] for point in all_points),
+        1e-9,
+    )
+
+    def cost(a: tuple[list[dict[str, float]], float, float, float],
+             b: tuple[list[dict[str, float]], float, float, float]) -> float:
+        _, area_a, cx_a, cy_a = a
+        _, area_b, cx_b, cy_b = b
+        center_distance = math.hypot(cx_a - cx_b, cy_a - cy_b) / span
+        area_change = abs(math.log(area_a / area_b))
+        return center_distance + 0.25 * area_change
+
+    left_is_shorter = len(left) <= len(right)
+    short, long = (left, right) if left_is_shorter else (right, left)
+
+    @lru_cache(maxsize=None)
+    def assign(index: int, used: int) -> tuple[float, tuple[int, ...]]:
+        if index == len(short):
+            return 0.0, ()
+        best_cost = math.inf
+        best_path: tuple[int, ...] = ()
+        for long_index, candidate in enumerate(long):
+            bit = 1 << long_index
+            if used & bit:
+                continue
+            pair_cost = cost(short[index], candidate)
+            tail_cost, tail_path = assign(index + 1, used | bit)
+            total = pair_cost + tail_cost
+            if total < best_cost:
+                best_cost, best_path = total, (long_index, *tail_path)
+        return best_cost, best_path
+
+    _, assignment = assign(0, 0)
+    pairs = ([(i, j) for i, j in enumerate(assignment)] if left_is_shorter
+             else [(j, i) for i, j in enumerate(assignment)])
+    matched_left = {i for i, _ in pairs}
+    matched_right = {j for _, j in pairs}
+    for left_index in range(len(left)):
+        if left_index not in matched_left:
+            right_index = min(range(len(right)), key=lambda j: cost(left[left_index], right[j]))
+            pairs.append((left_index, right_index))
+    for right_index in range(len(right)):
+        if right_index not in matched_right:
+            left_index = min(range(len(left)), key=lambda i: cost(left[i], right[right_index]))
+            pairs.append((left_index, right_index))
+    return pairs
+
+
 def _resample_loft_profile(profile: list[dict[str, float]], count: int) -> list[dict[str, float]]:
     points = [(point["x"], point["y"]) for point in profile]
     area = sum(points[i][0] * points[(i + 1) % len(points)][1]
@@ -190,6 +295,29 @@ def _canonical_loft_profile(profile: list[dict[str, float]]) -> list[dict[str, f
         points.reverse()
     anchor = min(range(len(points)), key=lambda i: (points[i]["x"], points[i]["y"]))
     return points[anchor:] + points[:anchor]
+
+
+def _align_loft_profile(
+    profile: list[dict[str, float]], reference: list[dict[str, float]],
+) -> list[dict[str, float]]:
+    """Rotate a resampled section to keep its vertices aligned with the prior section."""
+    if len(profile) != len(reference):
+        raise ValidationError("Loft sections must have matching sample counts before alignment.")
+    count = len(profile)
+    stride = max(1, count // 64)
+    sample_indices = list(range(0, count, stride))
+
+    def squared_error(shift: int, indices: list[int]) -> float:
+        return sum(
+            (profile[(index + shift) % count]["x"] - reference[index]["x"]) ** 2
+            + (profile[(index + shift) % count]["y"] - reference[index]["y"]) ** 2
+            for index in indices
+        )
+
+    coarse = min(range(count), key=lambda shift: squared_error(shift, sample_indices))
+    candidates = {(coarse + delta) % count for delta in range(-stride, stride + 1)}
+    anchor = min(candidates, key=lambda shift: squared_error(shift, list(range(count))))
+    return profile[anchor:] + profile[:anchor]
 
 
 class OCCTKernelAdapter:
@@ -235,10 +363,17 @@ class OCCTKernelAdapter:
 
     def create_lofted_profiles(
         self, sections: list[list[dict[str, float]]], *, section_offsets: list[float],
+        alignment: str = "minimum-displacement-v2",
+        compute_volume: bool = True,
     ) -> dict[str, Any]:
         if (not isinstance(sections, list) or not 2 <= len(sections) <= 64
                 or not isinstance(section_offsets, list) or len(section_offsets) != len(sections)):
             raise ValidationError("A loft needs 2 to 64 paired sketch sections and offsets.")
+        if alignment not in {
+                "independent-start-v1", "minimum-displacement-v1", "minimum-displacement-v2"}:
+            raise ValidationError("Loft profile alignment mode is unsupported.")
+        if type(compute_volume) is not bool:
+            raise ValidationError("compute_volume must be a boolean.")
         raw_sections = []
         offsets = []
         for section, offset in zip(sections, section_offsets, strict=True):
@@ -246,16 +381,94 @@ class OCCTKernelAdapter:
             raw_sections.append(points)
             offsets.append(_finite_coordinate(offset, "Loft section offset"))
         point_count = max(len(section) for section in raw_sections)
-        if all(len(section) == point_count for section in raw_sections):
-            normalized = [_canonical_loft_profile(section) for section in raw_sections]
+        if alignment == "independent-start-v1":
+            if all(len(section) == point_count for section in raw_sections):
+                normalized = [_canonical_loft_profile(section) for section in raw_sections]
+            else:
+                normalized = [_resample_loft_profile(section, point_count) for section in raw_sections]
         else:
-            normalized = [_resample_loft_profile(section, point_count) for section in raw_sections]
+            normalized = []
+            for section in raw_sections:
+                profile = (_resample_loft_profile(section, point_count)
+                           if len(section) != point_count else list(section))
+                area = sum(profile[i]["x"] * profile[(i + 1) % len(profile)]["y"]
+                           - profile[(i + 1) % len(profile)]["x"] * profile[i]["y"]
+                           for i in range(len(profile)))
+                if area < 0:
+                    profile.reverse()
+                if normalized:
+                    reference = normalized[0] if alignment == "minimum-displacement-v2" else normalized[-1]
+                    profile = _align_loft_profile(profile, reference)
+                else:
+                    profile = _canonical_loft_profile(profile)
+                normalized.append(profile)
         if any(right <= left for left, right in zip(offsets, offsets[1:])):
             raise ValidationError("Loft section offsets must be strictly increasing.")
         payload = {"kernel": self.kernel_id, "kind": "lofted_profiles", "sections": normalized,
-                   "section_offsets": offsets}
-        payload["volume"] = NativeKernel().geometry_graph(payload)["volume"]
+                   "section_offsets": offsets, "profile_alignment": alignment}
+        payload["volume"] = NativeKernel().geometry_graph(payload)["volume"] if compute_volume else 0.0
         return payload
+
+    def create_multicontour_loft(
+        self, section_groups: list[list[list[dict[str, float]]]], *, section_offsets: list[float],
+        compute_volume: bool = True,
+    ) -> dict[str, Any]:
+        """Build and fuse adjacent-station loft branches when section contour counts change."""
+        if (not isinstance(section_groups, list) or not 2 <= len(section_groups) <= 64
+                or not isinstance(section_offsets, list) or len(section_offsets) != len(section_groups)):
+            raise ValidationError("A grouped loft needs 2 to 64 paired stations and offsets.")
+        if type(compute_volume) is not bool:
+            raise ValidationError("compute_volume must be a boolean.")
+        offsets = [_finite_coordinate(value, "Loft section offset") for value in section_offsets]
+        if any(right <= left for left, right in zip(offsets, offsets[1:])):
+            raise ValidationError("Loft section offsets must be strictly increasing.")
+
+        normalized_groups: list[list[tuple[list[dict[str, float]], float, float, float]]] = []
+        for group in section_groups:
+            if not isinstance(group, list) or not 1 <= len(group) <= 16:
+                raise ValidationError("Each loft station needs 1 to 16 closed contour profiles.")
+            normalized_group = []
+            for section in group:
+                points, _ = _profile_values(section, "XZ")
+                points = _resample_loft_profile(points, min(len(points), 128))
+                area, center_x, center_y, _ = _loft_contour_signature(points)
+                normalized_group.append((points, area, center_x, center_y))
+            normalized_groups.append(normalized_group)
+
+        all_branches = []
+        for index, (left, right) in enumerate(zip(normalized_groups, normalized_groups[1:], strict=False)):
+            section_branches = _match_loft_contours(left, right)
+            for left_index, right_index in section_branches:
+                left_profile, right_profile = left[left_index], right[right_index]
+                loft = self.create_lofted_profiles(
+                    [left_profile[0], right_profile[0]],
+                    section_offsets=[offsets[index], offsets[index + 1]],
+                    compute_volume=False,
+                )
+                all_branches.append(loft)
+        if not all_branches:
+            raise ValidationError("Grouped loft produced no branch geometry.")
+        result = {"kernel": self.kernel_id, "kind": "multicontour_loft",
+                  "branches": all_branches, "volume": 0.0}
+        result["volume"] = (NativeKernel().geometry_graph(result)["volume"]
+                             if compute_volume else 0.0)
+        return result
+
+    def create_ruled_shell(
+        self, patches: list[dict[str, list[list[float]]]], *,
+        sewing_tolerance: float = 1e-3, compute_volume: bool = True,
+    ) -> dict[str, Any]:
+        normalized = _ruled_patch_values(patches)
+        tolerance = _finite_coordinate(sewing_tolerance, "Ruled shell sewing tolerance")
+        if not 1e-7 <= tolerance <= 1.0:
+            raise ValidationError("Ruled shell sewing tolerance must be between 1e-7 and 1 mm.")
+        if type(compute_volume) is not bool:
+            raise ValidationError("compute_volume must be a boolean.")
+        result = {"kernel": self.kernel_id, "kind": "ruled_shell", "patches": normalized,
+                  "sewing_tolerance": tolerance, "volume": 0.0}
+        if compute_volume:
+            result["volume"] = NativeKernel().geometry_graph(result)["volume"]
+        return result
 
     @staticmethod
     def _create_profile_geometry(
@@ -512,6 +725,12 @@ class OCCTKernelAdapter:
         if kernel_id == self.kernel_id and geometry.get("kind") == "lofted_profiles":
             self._validate_loft_geometry(geometry)
             return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "multicontour_loft":
+            self._validate_multicontour_loft_geometry(geometry)
+            return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "ruled_shell":
+            self._validate_ruled_shell_geometry(geometry)
+            return
         if kernel_id == self.kernel_id and geometry.get("kind") == "fused_profiles":
             self._validate_fused_geometry(geometry)
             return
@@ -626,12 +845,55 @@ class OCCTKernelAdapter:
             raise ValidationError("Saved geometry volume does not match the Open CASCADE fused solid.")
 
     def _validate_loft_geometry(self, geometry: dict[str, Any]) -> None:
-        if (set(geometry) != {"kernel", "kind", "sections", "section_offsets", "volume"}
+        if (set(geometry) not in (
+                    {"kernel", "kind", "sections", "section_offsets", "volume"},
+                    {"kernel", "kind", "sections", "section_offsets", "volume", "profile_alignment"},
+                )
                 or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "lofted_profiles"):
             raise ValidationError("Loft geometry descriptor is invalid.")
-        rebuilt = self.create_lofted_profiles(geometry.get("sections"),
-                                              section_offsets=geometry.get("section_offsets"))
+        rebuilt = self.create_lofted_profiles(
+            geometry.get("sections"), section_offsets=geometry.get("section_offsets"),
+            alignment=geometry.get("profile_alignment", "independent-start-v1"),
+        )
         self._same_saved_volume(geometry, rebuilt["volume"])
+
+    def _validate_multicontour_loft_geometry(self, geometry: dict[str, Any]) -> None:
+        if (set(geometry) != {"kernel", "kind", "branches", "volume"}
+                or geometry.get("kind") != "multicontour_loft"
+                or not isinstance(geometry.get("branches"), list) or len(geometry["branches"]) < 2
+                or any(not isinstance(branch, dict) or branch.get("kind") != "lofted_profiles"
+                       for branch in geometry["branches"])):
+            raise ValidationError("Multi-contour loft geometry descriptor is invalid.")
+        for branch in geometry["branches"]:
+            if (set(branch) != {"kernel", "kind", "sections", "section_offsets", "profile_alignment", "volume"}
+                    or branch.get("kernel") != self.kernel_id
+                    or not isinstance(branch.get("sections"), list) or len(branch["sections"]) != 2
+                    or not isinstance(branch.get("section_offsets"), list)
+                    or len(branch["section_offsets"]) != 2
+                    or branch.get("profile_alignment") not in {
+                        "independent-start-v1", "minimum-displacement-v1", "minimum-displacement-v2"}):
+                raise ValidationError("Multi-contour loft branch descriptor is invalid.")
+            for profile in branch["sections"]:
+                _profile_values(profile, "XZ")
+            left, right = (_finite_coordinate(value, "Loft section offset")
+                           for value in branch["section_offsets"])
+            if right <= left:
+                raise ValidationError("Loft section offsets must be strictly increasing.")
+        actual = NativeKernel().geometry_graph(geometry)["volume"]
+        self._same_saved_volume(geometry, actual)
+
+    def _validate_ruled_shell_geometry(self, geometry: dict[str, Any]) -> None:
+        if (set(geometry) != {"kernel", "kind", "patches", "sewing_tolerance", "volume"}
+                or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "ruled_shell"):
+            raise ValidationError("Ruled shell geometry descriptor is invalid.")
+        patches = _ruled_patch_values(geometry.get("patches"))
+        tolerance = _finite_coordinate(geometry.get("sewing_tolerance"), "Ruled shell sewing tolerance")
+        if not 1e-7 <= tolerance <= 1.0:
+            raise ValidationError("Ruled shell sewing tolerance must be between 1e-7 and 1 mm.")
+        rebuilt = {"kernel": self.kernel_id, "kind": "ruled_shell", "patches": patches,
+                   "sewing_tolerance": tolerance, "volume": 0.0}
+        actual = NativeKernel().geometry_graph(rebuilt)["volume"]
+        self._same_saved_volume(geometry, actual)
 
     def _validate_swept_pipe_geometry(self, geometry: dict[str, Any]) -> None:
         if (set(geometry) != {"kernel", "kind", "plane", "path", "radius", "volume"}

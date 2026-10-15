@@ -837,6 +837,24 @@ class CadyxCore:
                             or math.hypot(*axis) <= 1e-12):
                         raise ValidationError("Imported B-rep transform parameters are invalid.")
                 continue
+            if item.get("operation") == "create_ruled_shell":
+                body = by_id.get(item.get("body_id"))
+                feature_geometry = item.get("geometry")
+                parameters = item.get("parameters")
+                if (body is None or body.get("type") != "body"
+                        or feature_geometry != body.get("geometry")
+                        or not isinstance(parameters, dict)
+                        or set(parameters) != {"patches", "sewing_tolerance"}):
+                    raise ValidationError("Ruled shell feature geometry must match its body and patch parameters.")
+                expected = self.kernel.create_ruled_shell(
+                    parameters["patches"], sewing_tolerance=parameters["sewing_tolerance"],
+                    compute_volume=False,
+                )
+                expected.pop("volume", None)
+                comparable_geometry = {key: value for key, value in feature_geometry.items() if key != "volume"}
+                if expected != comparable_geometry:
+                    raise ValidationError("Ruled shell geometry is out of date with its saved rail patches.")
+                continue
             if item.get("operation") == "loft_sketches":
                 body = by_id.get(item.get("body_id"))
                 feature_geometry = item.get("geometry")
@@ -847,17 +865,45 @@ class CadyxCore:
                         or not isinstance(source_sketch_ids, list) or not isinstance(parameters, dict)
                         or parameters.get("section_sketch_ids") != source_sketch_ids):
                     raise ValidationError("Loft feature geometry must match its body and ordered source sketches.")
+                groups = parameters.get("section_sketch_groups", [[value] for value in source_sketch_ids])
+                if (not isinstance(groups, list) or not groups
+                        or [value for group in groups for value in group] != source_sketch_ids):
+                    raise ValidationError("Loft feature contour groups do not match their source sketches.")
                 sections, offsets = [], []
-                for sketch_id in source_sketch_ids:
-                    sketch = by_id.get(sketch_id)
-                    if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != "XZ"
-                            or sketch.get("section_normal_axis") != "Y"):
-                        raise ValidationError("Loft feature source sketches must be Y-normal XZ sections.")
-                    _, profile = closed_profile(document.objects, sketch_id)
-                    sections.append(profile)
-                    offsets.append(sketch.get("section_offset"))
-                expected = self.kernel.create_lofted_profiles(sections, section_offsets=offsets)
-                if expected != feature_geometry:
+                for group in groups:
+                    group_profiles, group_offsets = [], []
+                    for sketch_id in group:
+                        sketch = by_id.get(sketch_id)
+                        if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != "XZ"
+                                or sketch.get("section_normal_axis") != "Y"):
+                            raise ValidationError("Loft feature source sketches must be Y-normal XZ sections.")
+                        _, profile = closed_profile(document.objects, sketch_id)
+                        group_profiles.append(profile)
+                        group_offsets.append(sketch.get("section_offset"))
+                    if not group_offsets or any(value != group_offsets[0] for value in group_offsets):
+                        raise ValidationError("Loft feature contour group has inconsistent section offsets.")
+                    sections.append(group_profiles)
+                    offsets.append(group_offsets[0])
+                if any(len(group) != 1 for group in sections):
+                    expected = self.kernel.create_multicontour_loft(
+                        sections, section_offsets=offsets, compute_volume=False,
+                    )
+                else:
+                    expected = self.kernel.create_lofted_profiles(
+                        [group[0] for group in sections], section_offsets=offsets,
+                        alignment=feature_geometry.get("profile_alignment", "independent-start-v1"),
+                    )
+                    if "profile_alignment" not in feature_geometry:
+                        expected.pop("profile_alignment", None)
+                if expected.get("kind") == "multicontour_loft":
+                    expected.pop("volume", None)
+                    comparable_geometry = copy.deepcopy(feature_geometry)
+                    comparable_geometry.pop("volume", None)
+                    for branch in expected["branches"] + comparable_geometry.get("branches", []):
+                        branch.pop("volume", None)
+                else:
+                    comparable_geometry = feature_geometry
+                if expected != comparable_geometry:
                     raise ValidationError("Loft feature geometry is out of date with its section sketches.")
                 continue
             if item.get("operation") == "import_step":

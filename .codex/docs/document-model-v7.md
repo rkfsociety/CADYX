@@ -337,16 +337,39 @@ boundaries are rejected. The source B-rep is preserved. These polylines are
 sampled approximations of analytic or NURBS section curves, with the total
 sample budget shared among all contours.
 
-`loft_sketches` accepts 2–64 ordered `sketch_ids` and optional `name`. It
-builds a capped editable OCCT solid through closed XZ section sketches extracted
-from Y-normal STEP planes. Each sketch must retain its finite `section_offset`,
-offsets must strictly increase. The command equalizes profile sampling along
-each closed polygon perimeter and normalizes winding/start points for vertex
-correspondence. The sections are sampled
-polygons, so the loft is an editable approximation rather than exact recovery
-of the source STEP analytic or NURBS surfaces. Editing any source sketch
-rebuilds the loft atomically. The feature retains its ordered
-`source_sketch_ids`.
+`loft_sketches` accepts ordered `sketch_ids` for one contour per station or
+ordered `section_groups` for stations with multiple section contours, plus
+optional `name`. A group contains 1–16 XZ section sketches that share one finite
+`section_offset`; station offsets must strictly increase. `update_loft_sections`
+replaces these groups on an existing loft feature atomically. Single-contour
+lofts equalize perimeter samples, normalize winding, then align cyclic starts by
+minimum sampled vertex displacement. The current
+`minimum-displacement-v2` mode aligns every later section to the first;
+`minimum-displacement-v1` aligns each to its predecessor. New simple lofts record
+the alignment mode; existing v7 lofts without that field retain independent-start
+interpretation.
+
+When contour counts change between stations, CADYX creates adjacent two-section
+loft branches, pairs contours by minimum centroid distance with enclosed area as
+a secondary cue, duplicates the nearest spatial branch across a split or merge,
+and fuses all branches into one OCCT solid. This approximates split/merge sections,
+not exact topology tracking; inspect the result against its source because sampled
+contours do not preserve persistent surface identity. Grouped loft profiles are
+sampled to at most 128 points per contour. All sections remain editable and source sketch edits rebuild the feature
+atomically. The feature retains ordered `source_sketch_ids` and
+`section_sketch_groups` when groups contain multiple contours. Sections are
+sampled polygons, so both loft forms approximate the source STEP analytic or
+NURBS surfaces.
+
+`create_ruled_shell` builds a solid from 4–4096 ruled surface patches. Each
+patch has two 3D rails, with 2–4096 `[x,y,z]` samples per rail and a total input
+limit of 131072 rail points. OCCT interpolates each rail as a B-spline, creates
+the ruled face with `BRepFill::Face`, sews the faces, checks for free or multiple
+edges, fixes shell orientation, and validates the resulting single solid.
+`sewing_tolerance` defaults to 0.001 mm and is bounded to 1e-7–1 mm. All patches
+must form one closed manifold; this operation does not cap open patch networks.
+Rail samples are interpolated approximations of the supplied curves. The feature
+stores its patch inputs and rebuilds from them during document validation.
 
 `fuse_bodies` accepts `base_body_id`, `tool_body_id`, and optional `name` for two
 intersecting OCCT B-rep solids. The native Boolean operation must produce one

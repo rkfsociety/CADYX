@@ -13,6 +13,7 @@
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepFill.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
@@ -48,6 +49,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopExp.hxx>
 #include <NCollection_IndexedMap.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
@@ -65,6 +67,7 @@
 #include <ShapeFix_Shape.hxx>
 #include <ShapeFix_Wire.hxx>
 #include <ShapeFix_Solid.hxx>
+#include <ShapeFix_Shell.hxx>
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -849,6 +852,82 @@ TopoDS_Shape MakeLoftShape(const double* coordinates, const int* section_sizes,
   return EnsureOneSolid(loft.Shape(), "Loft");
 }
 
+TopoDS_Edge MakeRuledRail(const double* coordinates, size_t point_count) {
+  if (!coordinates || point_count < 2 || point_count > 4096)
+    throw std::runtime_error("A ruled rail needs between 2 and 4096 points.");
+  for (size_t i = 0; i < point_count * 3; ++i)
+    if (!std::isfinite(coordinates[i]))
+      throw std::runtime_error("Ruled rail coordinates must be finite.");
+  if (point_count == 2) {
+    const gp_Pnt start(coordinates[0], coordinates[1], coordinates[2]);
+    const gp_Pnt end(coordinates[3], coordinates[4], coordinates[5]);
+    if (start.Distance(end) <= 1e-7)
+      throw std::runtime_error("Ruled rail endpoints must be distinct.");
+    BRepBuilderAPI_MakeEdge edge(start, end);
+    if (!edge.IsDone()) throw std::runtime_error("OCCT could not build a ruled rail edge.");
+    return edge.Edge();
+  }
+  NCollection_Array1<gp_Pnt> points(1, static_cast<Standard_Integer>(point_count));
+  for (size_t i = 0; i < point_count; ++i)
+    points.SetValue(static_cast<Standard_Integer>(i + 1),
+                    gp_Pnt(coordinates[3 * i], coordinates[3 * i + 1], coordinates[3 * i + 2]));
+  GeomAPI_PointsToBSpline spline(points, 3, 8, GeomAbs_C2, 1e-4);
+  if (!spline.IsDone()) throw std::runtime_error("OCCT could not interpolate a ruled rail.");
+  BRepBuilderAPI_MakeEdge edge(spline.Curve());
+  if (!edge.IsDone()) throw std::runtime_error("OCCT could not build an interpolated rail edge.");
+  return edge.Edge();
+}
+
+TopoDS_Shape MakeRuledSolid(const double* coordinates, size_t coordinate_count,
+                            const int* patch_sizes, size_t patch_count, double tolerance) {
+  if (!coordinates || !patch_sizes || patch_count < 4 || patch_count > 4096
+      || !std::isfinite(tolerance) || tolerance < 1e-7 || tolerance > 1.0)
+    throw std::runtime_error("Ruled shell needs 4 to 4096 patches and a sewing tolerance in [1e-7, 1].");
+  BRepBuilderAPI_Sewing sewing(tolerance, true, true, true, false);
+  size_t offset = 0;
+  for (size_t patch = 0; patch < patch_count; ++patch) {
+    const int first_count = patch_sizes[2 * patch];
+    const int second_count = patch_sizes[2 * patch + 1];
+    if (first_count < 2 || second_count < 2
+        || offset > coordinate_count
+        || static_cast<size_t>(first_count + second_count) * 3 > coordinate_count - offset)
+      throw std::runtime_error("Ruled patch rail sizes do not match the coordinate buffer.");
+    const TopoDS_Edge first = MakeRuledRail(coordinates + offset, static_cast<size_t>(first_count));
+    offset += static_cast<size_t>(first_count) * 3;
+    const TopoDS_Edge second = MakeRuledRail(coordinates + offset, static_cast<size_t>(second_count));
+    offset += static_cast<size_t>(second_count) * 3;
+    const TopoDS_Face face = BRepFill::Face(first, second);
+    if (face.IsNull() || !BRepCheck_Analyzer(face).IsValid())
+      throw std::runtime_error("OCCT could not build a valid ruled surface patch.");
+    sewing.Add(face);
+  }
+  if (offset != coordinate_count)
+    throw std::runtime_error("Ruled patch coordinates contain unused values.");
+  sewing.Perform();
+  const TopoDS_Shape sewed = sewing.SewedShape();
+  if (sewed.IsNull() || sewing.NbFreeEdges() != 0 || sewing.NbMultipleEdges() != 0)
+    throw std::runtime_error("Ruled surface patches did not sew into one closed manifold shell.");
+  TopExp_Explorer shell_explorer(sewed, TopAbs_SHELL);
+  if (!shell_explorer.More())
+    throw std::runtime_error("Sewn ruled surfaces did not produce a shell.");
+  const TopoDS_Shell shell = TopoDS::Shell(shell_explorer.Current());
+  shell_explorer.Next();
+  if (shell_explorer.More() || !BRep_Tool::IsClosed(shell))
+    throw std::runtime_error("Sewn ruled surfaces must form one closed shell.");
+  ShapeFix_Shell shell_fix(shell);
+  shell_fix.FixFaceOrientation(shell);
+  BRepBuilderAPI_MakeSolid solid_builder(shell_fix.Shell());
+  if (!solid_builder.IsDone()) throw std::runtime_error("OCCT could not make a solid from the ruled shell.");
+  ShapeFix_Solid solid_fix(solid_builder.Solid());
+  solid_fix.SetPrecision(1e-7);
+  solid_fix.SetMaxTolerance(tolerance);
+  solid_fix.Perform();
+  const TopoDS_Shape solid = solid_fix.Solid();
+  if (!BRepCheck_Analyzer(solid).IsValid())
+    throw std::runtime_error("Ruled shell did not produce a valid B-rep solid.");
+  return EnsureOneSolid(solid, "Ruled shell");
+}
+
 TopoDS_Shape EnsureOneSolid(const TopoDS_Shape& shape, const char* operation) {
   size_t solids = 0;
   for (TopExp_Explorer explorer(shape, TopAbs_SOLID); explorer.More(); explorer.Next()) ++solids;
@@ -899,6 +978,40 @@ TopoDS_Shape MakeFuse(const TopoDS_Shape& base, const TopoDS_Shape& tool) {
     throw std::runtime_error("OCCT could not fuse the solids: " + detail.str());
   }
   return EnsureOneSolid(operation.Shape(), "Boolean fuse");
+}
+
+TopoDS_Shape MakeFuseParts(const TopoDS_Shape& base, const TopoDS_Shape& tool) {
+  BRepAlgoAPI_Fuse operation(base, tool);
+  operation.SetFuzzyValue(1e-7);
+  operation.Build();
+  if (!operation.IsDone()) {
+    std::ostringstream detail;
+    operation.DumpErrors(detail);
+    throw std::runtime_error("OCCT could not fuse loft branches: " + detail.str());
+  }
+  return operation.Shape();
+}
+
+TopoDS_Shape MakeFusePartsBatch(const std::vector<TopoDS_Shape>& shapes,
+                                const int* shape_indices, size_t shape_count) {
+  if (!shape_indices || shape_count < 2)
+    throw std::runtime_error("Multi-contour loft fusion needs at least two branch solids.");
+  TopTools_ListOfShape arguments;
+  TopTools_ListOfShape tools;
+  arguments.Append(shapes[static_cast<size_t>(shape_indices[0])]);
+  for (size_t i = 1; i < shape_count; ++i)
+    tools.Append(shapes[static_cast<size_t>(shape_indices[i])]);
+  BRepAlgoAPI_Fuse operation;
+  operation.SetArguments(arguments);
+  operation.SetTools(tools);
+  operation.SetFuzzyValue(1e-7);
+  operation.Build();
+  if (!operation.IsDone()) {
+    std::ostringstream detail;
+    operation.DumpErrors(detail);
+    throw std::runtime_error("OCCT could not batch-fuse loft branches: " + detail.str());
+  }
+  return operation.Shape();
 }
 
 TopoDS_Shape MakeCut(const TopoDS_Shape& base, const TopoDS_Shape& tool) {
@@ -1046,6 +1159,26 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
             || node.coordinate_count % 3 != 0)
           throw std::runtime_error("Loft graph operation needs at least two section sizes.");
         shape = MakeLoftShape(points, edges, node.edge_count, node.coordinate_count / 3);
+        break;
+      case 9:
+        if (node.input_a < 0 || node.input_b < 0
+            || static_cast<size_t>(node.input_a) >= i || static_cast<size_t>(node.input_b) >= i)
+          throw std::runtime_error("Multi-contour loft fuse references must point to earlier operations.");
+        shape = MakeFuseParts(shapes[node.input_a], shapes[node.input_b]);
+        break;
+      case 10:
+        if (node.edge_count < 2)
+          throw std::runtime_error("Multi-contour loft batch fusion needs at least two branches.");
+        for (size_t j = 0; j < node.edge_count; ++j) {
+          if (edges[j] < 0 || static_cast<size_t>(edges[j]) >= i)
+            throw std::runtime_error("Multi-contour loft batch references must point to earlier operations.");
+        }
+        shape = MakeFusePartsBatch(shapes, edges, node.edge_count);
+        break;
+      case 11:
+        if (node.edge_count < 8 || node.edge_count % 2 != 0)
+          throw std::runtime_error("Ruled shell graph needs at least four paired surface patches.");
+        shape = MakeRuledSolid(points, node.coordinate_count, edges, node.edge_count / 2, node.amount);
         break;
       case 3:
         if (node.input_a < 0 || static_cast<size_t>(node.input_a) >= i)

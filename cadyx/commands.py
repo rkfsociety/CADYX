@@ -100,6 +100,10 @@ class CommandSystem:
             return self._create_profile_feature(document, command, kind, progress=progress)
         if kind == "loft_sketches":
             return self._loft_sketches(document, command, progress=progress)
+        if kind == "create_ruled_shell":
+            return self._create_ruled_shell(document, command, progress=progress)
+        if kind == "update_loft_sections":
+            return self._update_loft_sections(document, command, progress=progress)
         if kind == "fuse_bodies":
             return self._fuse_bodies(document, command, progress=progress)
         if kind == "cut_bodies":
@@ -2158,32 +2162,54 @@ class CommandSystem:
         self, document: Document, command: dict[str, Any], *,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        sketch_ids = command.get("sketch_ids")
+        section_groups = command.get("section_groups")
+        if section_groups is not None:
+            if (not isinstance(section_groups, list) or not 2 <= len(section_groups) <= 64
+                    or any(not isinstance(group, list) or not 1 <= len(group) <= 16
+                           or any(not isinstance(value, str) for value in group) for group in section_groups)):
+                raise ValidationError("Loft section_groups needs 2 to 64 stations with 1 to 16 sketch IDs each.")
+            sketch_ids = [sketch_id for group in section_groups for sketch_id in group]
+            if len(set(sketch_ids)) != len(sketch_ids):
+                raise ValidationError("Loft section_groups must contain unique sketch IDs.")
+        else:
+            sketch_ids = command.get("sketch_ids")
+            section_groups = [[sketch_id] for sketch_id in sketch_ids] if isinstance(sketch_ids, list) else None
         if (not isinstance(sketch_ids, list) or not 2 <= len(sketch_ids) <= 64
                 or any(not isinstance(value, str) for value in sketch_ids)
                 or len(set(sketch_ids)) != len(sketch_ids)):
-            raise ValidationError("Loft needs 2 to 64 unique sketch_ids in section order.")
+            raise ValidationError("Loft needs 2 to 64 unique section sketch IDs.")
         name = command.get("name", "Loft")
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
             raise ValidationError("Feature name must be a non-empty string of at most 120 characters.")
         sections, offsets = [], []
-        for sketch_id in sketch_ids:
-            sketch = self._find_sketch(document, sketch_id)
-            if sketch.get("plane") != "XZ" or sketch.get("section_normal_axis") != "Y":
-                raise ValidationError("Loft sections must be XZ sketches extracted from Y-normal planes.")
-            if not isinstance(sketch.get("section_offset"), (int, float)):
-                raise ValidationError("Each loft sketch must retain its source section offset.")
-            _, profile = closed_profile(document.objects, sketch_id)
-            sections.append(profile)
-            offsets.append(float(sketch["section_offset"]))
+        for group in section_groups:
+            group_profiles, group_offsets = [], []
+            for sketch_id in group:
+                sketch = self._find_sketch(document, sketch_id)
+                if sketch.get("plane") != "XZ" or sketch.get("section_normal_axis") != "Y":
+                    raise ValidationError("Loft sections must be XZ sketches extracted from Y-normal planes.")
+                if not isinstance(sketch.get("section_offset"), (int, float)):
+                    raise ValidationError("Each loft sketch must retain its source section offset.")
+                _, profile = closed_profile(document.objects, sketch_id)
+                group_profiles.append(profile)
+                group_offsets.append(float(sketch["section_offset"]))
+            if any(offset != group_offsets[0] for offset in group_offsets):
+                raise ValidationError("All sketches in one loft station must share a section_offset.")
+            sections.append(group_profiles)
+            offsets.append(group_offsets[0])
         if any(right <= left for left, right in zip(offsets, offsets[1:])):
-            raise ValidationError("Loft sketches must be ordered by strictly increasing section_offset.")
+            raise ValidationError("Loft station groups must be ordered by strictly increasing section_offset.")
         if progress is not None:
             progress({"phase": "prepare_loft_sections"})
             progress({"phase": "kernel_loft"})
-        geometry = self.kernel.create_lofted_profiles(sections, section_offsets=offsets)
+        geometry = (self.kernel.create_lofted_profiles(
+            [group[0] for group in sections], section_offsets=offsets,
+        ) if all(len(group) == 1 for group in sections) else
+            self.kernel.create_multicontour_loft(sections, section_offsets=offsets))
         body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
         parameters = {"section_sketch_ids": sketch_ids, "section_offsets": offsets}
+        if any(len(group) > 1 for group in section_groups):
+            parameters["section_sketch_groups"] = section_groups
         document.objects.extend([
             {"id": body_id, "type": "body", "name": name.strip(),
              "feature_ids": [feature_id], "geometry": geometry},
@@ -2193,6 +2219,81 @@ class CommandSystem:
         ])
         return {"body_id": body_id, "feature_id": feature_id,
                 "source_sketch_ids": sketch_ids, "geometry": geometry}
+
+    def _create_ruled_shell(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        name = command.get("name", "Ruled shell")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Feature name must be a non-empty string of at most 120 characters.")
+        tolerance = _finite_number(command.get("sewing_tolerance", 1e-3), "sewing_tolerance")
+        if progress is not None:
+            progress({"phase": "prepare_ruled_patches"})
+        geometry = self.kernel.create_ruled_shell(
+            command.get("patches"), sewing_tolerance=tolerance,
+        )
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        parameters = {"patches": geometry["patches"], "sewing_tolerance": geometry["sewing_tolerance"]}
+        document.objects.extend([
+            {"id": body_id, "type": "body", "name": name.strip(),
+             "feature_ids": [feature_id], "geometry": geometry},
+            {"id": feature_id, "type": "feature", "operation": "create_ruled_shell",
+             "body_id": body_id, "parameters": parameters, "geometry": geometry},
+        ])
+        return {"body_id": body_id, "feature_id": feature_id, "geometry": geometry}
+
+    def _update_loft_sections(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        feature_id = command.get("feature_id")
+        feature = next((item for item in document.objects
+                        if item.get("id") == feature_id and item.get("type") == "feature"
+                        and item.get("operation") == "loft_sketches"), None)
+        if feature is None:
+            raise NotFoundError("Loft feature was not found.")
+        groups = command.get("section_groups")
+        if (not isinstance(groups, list) or not 2 <= len(groups) <= 64
+                or any(not isinstance(group, list) or not 1 <= len(group) <= 16
+                       or any(not isinstance(sketch_id, str) for sketch_id in group) for group in groups)):
+            raise ValidationError("section_groups needs 2 to 64 stations with 1 to 16 sketch IDs each.")
+        flattened = [sketch_id for group in groups for sketch_id in group]
+        if len(set(flattened)) != len(flattened):
+            raise ValidationError("Loft section_groups must contain unique sketch IDs.")
+        offsets, profiles = [], []
+        for group in groups:
+            group_offsets, group_profiles = [], []
+            for sketch_id in group:
+                sketch = self._find_sketch(document, sketch_id)
+                if sketch.get("plane") != "XZ" or sketch.get("section_normal_axis") != "Y":
+                    raise ValidationError("Loft sections must be XZ sketches extracted from Y-normal planes.")
+                group_offsets.append(_finite_number(sketch.get("section_offset"), "section_offset"))
+                _, profile = closed_profile(document.objects, sketch_id)
+                group_profiles.append(profile)
+            if any(offset != group_offsets[0] for offset in group_offsets):
+                raise ValidationError("All sketches in one loft station must share a section_offset.")
+            offsets.append(group_offsets[0])
+            profiles.append(group_profiles)
+        if any(right <= left for left, right in zip(offsets, offsets[1:])):
+            raise ValidationError("Loft station groups must be ordered by strictly increasing section_offset.")
+        geometry = (self.kernel.create_lofted_profiles(
+            [group[0] for group in profiles], section_offsets=offsets,
+        ) if all(len(group) == 1 for group in profiles) else
+            self.kernel.create_multicontour_loft(profiles, section_offsets=offsets))
+        body = next((item for item in document.objects if item.get("id") == feature.get("body_id")), None)
+        if body is None or body.get("type") != "body":
+            raise ValidationError("Loft feature refers to a missing body.")
+        section_groups = {"section_sketch_ids": flattened, "section_offsets": offsets}
+        if any(len(group) > 1 for group in groups):
+            section_groups["section_sketch_groups"] = groups
+        feature["source_sketch_ids"] = flattened
+        feature["parameters"] = section_groups
+        feature["geometry"] = geometry
+        body["geometry"] = geometry
+        if progress is not None:
+            progress({"phase": "update_loft_sections"})
+        return {"feature_id": feature_id, "body_id": body["id"], "geometry": geometry}
 
     def _profile_geometry(
         self, document: Document, feature: dict[str, Any], parameters: dict[str, Any], *,
@@ -2221,15 +2322,26 @@ class CommandSystem:
             if (not isinstance(sketch_ids, list) or not 2 <= len(sketch_ids) <= 64
                     or not isinstance(parameters.get("section_offsets"), list)):
                 raise ValidationError("Loft feature section references are invalid.")
+            groups = parameters.get("section_sketch_groups", [[value] for value in sketch_ids])
             sections, offsets = [], []
-            for sketch_id in sketch_ids:
-                sketch = next((item for item in document.objects if item.get("id") == sketch_id), None)
-                if sketch is None:
-                    raise ValidationError("Loft section sketch is missing.")
-                _, section = closed_profile(document.objects, sketch_id)
-                sections.append(section)
-                offsets.append(sketch.get("section_offset"))
-            return self.kernel.create_lofted_profiles(sections, section_offsets=offsets)
+            for group in groups:
+                group_profiles, group_offsets = [], []
+                for sketch_id in group:
+                    sketch = next((item for item in document.objects if item.get("id") == sketch_id), None)
+                    if sketch is None:
+                        raise ValidationError("Loft section sketch is missing.")
+                    _, section = closed_profile(document.objects, sketch_id)
+                    group_profiles.append(section)
+                    group_offsets.append(sketch.get("section_offset"))
+                if not group_offsets or any(value != group_offsets[0] for value in group_offsets):
+                    raise ValidationError("Loft section group has inconsistent section offsets.")
+                sections.append(group_profiles)
+                offsets.append(group_offsets[0])
+            if any(len(group) != 1 for group in sections):
+                return self.kernel.create_multicontour_loft(sections, section_offsets=offsets)
+            return self.kernel.create_lofted_profiles(
+                [group[0] for group in sections], section_offsets=offsets,
+            )
         raise ValidationError("Unsupported sketch feature operation.")
 
     def _replace_sketch_profile(

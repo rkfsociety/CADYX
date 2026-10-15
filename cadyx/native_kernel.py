@@ -226,6 +226,37 @@ class NativeKernel:
                             coordinate_count=len(coordinates) - start,
                             edge_offset=len(edge_indices), edge_count=len(section_sizes))
                 edge_indices.extend(section_sizes)
+            elif kind == "ruled_shell":
+                patches = value.get("patches")
+                if not isinstance(patches, list) or len(patches) < 4:
+                    raise ValidationError("A ruled shell needs at least four paired surface patches.")
+                start = len(coordinates)
+                patch_sizes = []
+                for patch in patches:
+                    if not isinstance(patch, dict) or set(patch) != {"first", "second"}:
+                        raise ValidationError("Ruled shell patches need two point-array rails.")
+                    for key in ("first", "second"):
+                        rail = patch[key]
+                        if not isinstance(rail, list) or len(rail) < 2:
+                            raise ValidationError("Ruled shell rails need at least two points.")
+                        patch_sizes.append(len(rail))
+                        coordinates.extend(coord for point in rail for coord in point)
+                edge_offset = len(edge_indices)
+                edge_indices.extend(patch_sizes)
+                node.update(type=11, amount=value["sewing_tolerance"],
+                            coordinate_offset=start, coordinate_count=len(coordinates) - start,
+                            edge_offset=edge_offset, edge_count=len(patch_sizes))
+            elif kind == "multicontour_loft":
+                branches = value.get("branches")
+                if not isinstance(branches, list) or len(branches) < 2:
+                    raise ValidationError("A multi-contour loft needs at least two segment solids.")
+                branch_nodes = [append(branch) for branch in branches]
+                edge_offset = len(edge_indices)
+                edge_indices.extend(branch_nodes)
+                nodes.append({"type": 10, "input_a": -1, "input_b": -1,
+                              "operation": 0, "plane": 1, "centered": 0, "amount": 0.0,
+                              "edge_offset": edge_offset, "edge_count": len(branch_nodes)})
+                return len(nodes) - 1
             elif kind == "swept_pipe":
                 node.update(type=1, plane=int(value["plane"] == "XZ"), amount=value["radius"],
                             coordinate_offset=len(coordinates), coordinate_count=len(value["path"]) * 2)

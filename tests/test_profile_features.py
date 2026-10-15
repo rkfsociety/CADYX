@@ -6,6 +6,7 @@ import unittest
 
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
+from cadyx.kernel import _loft_contour_signature, _match_loft_contours
 from cadyx.models import Document
 
 
@@ -19,6 +20,31 @@ class ProfileFeatureTests(unittest.TestCase):
 
     def command(self, value: dict) -> dict:
         return self.core.execute_command(self.project_id, self.lease_id, value)["history_entry"]["result"]
+
+    def test_ruled_shell_command_sews_six_patches_into_one_solid(self) -> None:
+        def rail(start, end):
+            return [list(start), list(end)]
+
+        x, y, z = 4.0, 3.0, 2.0
+        patches = [
+            {"first": rail((0, 0, 0), (x, 0, 0)), "second": rail((0, y, 0), (x, y, 0))},
+            {"first": rail((0, 0, z), (x, 0, z)), "second": rail((0, y, z), (x, y, z))},
+            {"first": rail((0, 0, 0), (x, 0, 0)), "second": rail((0, 0, z), (x, 0, z))},
+            {"first": rail((0, y, 0), (x, y, 0)), "second": rail((0, y, z), (x, y, z))},
+            {"first": rail((0, 0, 0), (0, y, 0)), "second": rail((0, 0, z), (0, y, z))},
+            {"first": rail((x, 0, 0), (x, y, 0)), "second": rail((x, 0, z), (x, y, z))},
+        ]
+        result = self.command({"type": "create_ruled_shell", "name": "Sewn ruled fixture",
+                               "patches": patches, "sewing_tolerance": 1e-3})
+        self.assertEqual(result["geometry"]["kind"], "ruled_shell")
+        self.assertAlmostEqual(result["geometry"]["volume"], 24.0, delta=1e-6)
+        topology = self.core.kernel.topology(result["geometry"])
+        self.assertTrue(topology["brep_valid"])
+        self.assertEqual(topology["topology"]["solid_count"], 1)
+        for actual, expected in zip(topology["bounds"]["min"], [0.0, 0.0, 0.0], strict=True):
+            self.assertAlmostEqual(actual, expected, delta=1e-6)
+        for actual, expected in zip(topology["bounds"]["max"], [x, y, z], strict=True):
+            self.assertAlmostEqual(actual, expected, delta=1e-6)
 
     def closed_sketch(self, name: str, points: list[tuple[float, float]], plane: str = "XZ") -> tuple[str, list[str]]:
         sketch_id = self.command({"type": "create_sketch", "name": name, "plane": plane})["sketch_id"]
@@ -100,6 +126,17 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertEqual(geometry["kind"], "lofted_profiles")
         self.assertGreater(geometry["volume"], 0)
         self.assertIsNone(self.core.kernel.validate(geometry))
+        from cadyx.sketches import closed_profile
+        legacy_sections = [closed_profile(model_document.objects, sketch_id)[1] for sketch_id in section_ids]
+        legacy_geometry = self.core.kernel.create_lofted_profiles(
+            legacy_sections, section_offsets=[-2.0, 0.0, 2.0], alignment="independent-start-v1",
+        )
+        legacy_geometry.pop("profile_alignment")
+        loft_body = next(item for item in model_document.objects if item["id"] == loft["body_id"])
+        loft_feature = next(item for item in model_document.objects if item["id"] == loft["feature_id"])
+        loft_body["geometry"] = loft_feature["geometry"] = legacy_geometry
+        self.core._validate_geometry(model_document)
+        loft_body["geometry"] = loft_feature["geometry"] = geometry
 
         shifted_sections = []
         for y, radius, sample_count in ((-2.0, 2.0, 16), (0.0, 3.0, 24), (2.0, 2.0, 32)):
@@ -140,6 +177,110 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertNotEqual(body["geometry"]["volume"], old_volume)
         fused_body = next(item for item in model_document.objects if item["id"] == fused["body_id"])
         self.assertNotEqual(fused_body["geometry"]["volume"], fused["geometry"]["volume"])
+        model_document.validate()
+        self.core._validate_geometry(model_document)
+
+    def test_loft_aligns_section_vertices_when_the_perimeter_anchor_moves(self) -> None:
+        base = [
+            {"x": -3.0, "y": 0.0}, {"x": -1.0, "y": -2.0}, {"x": 2.0, "y": -1.5},
+            {"x": 4.0, "y": 0.0}, {"x": 3.0, "y": 2.0}, {"x": 0.5, "y": 3.0},
+            {"x": -2.0, "y": 2.5},
+        ]
+        moved = [
+            {"x": point["x"] + 0.4, "y": point["y"] - 0.2}
+            for point in base[2:] + base[:2]
+        ]
+        normalized = self.core.kernel.create_lofted_profiles(
+            [base, moved], section_offsets=[0.0, 1.0],
+        )
+        first, second = normalized["sections"]
+        self.assertEqual(len(first), len(second))
+        from cadyx.kernel import _align_loft_profile
+        aligned = _align_loft_profile(moved, base)
+        self.assertLess(math.hypot(base[0]["x"] - aligned[0]["x"],
+                                   base[0]["y"] - aligned[0]["y"]), 1.0)
+        self.assertIsNone(self.core.kernel.validate(normalized))
+        self.assertEqual(normalized["profile_alignment"], "minimum-displacement-v2")
+        chained = self.core.kernel.create_lofted_profiles(
+            [base, moved], section_offsets=[0.0, 1.0], alignment="minimum-displacement-v1",
+        )
+        self.assertEqual(chained["profile_alignment"], "minimum-displacement-v1")
+        self.assertIsNone(self.core.kernel.validate(chained))
+        legacy = self.core.kernel.create_lofted_profiles(
+            [base, moved], section_offsets=[0.0, 1.0], alignment="independent-start-v1",
+        )
+        legacy.pop("profile_alignment")
+        self.assertIsNone(self.core.kernel.validate(legacy))
+
+    def test_multicontour_loft_fuses_split_and_merge_sections(self) -> None:
+        def circle(cx, radius, samples=32):
+            return [{"x": cx + radius * math.cos(math.tau * i / samples),
+                     "y": radius * math.sin(math.tau * i / samples)} for i in range(samples)]
+
+        geometry = self.core.kernel.create_multicontour_loft(
+            [[circle(0.0, 10.0)], [circle(-5.0, 4.0), circle(5.0, 4.0)], [circle(0.0, 10.0)]],
+            section_offsets=[0.0, 5.0, 10.0],
+        )
+        self.assertEqual(geometry["kind"], "multicontour_loft")
+        self.assertIsNone(self.core.kernel.validate(geometry))
+        topology = self.core.kernel.topology(geometry)
+        self.assertTrue(topology["brep_valid"])
+        self.assertEqual(topology["topology"]["solid_count"], 1)
+        self.assertGreaterEqual(topology["bounds"]["min"][0], -10.000001)
+        self.assertLessEqual(topology["bounds"]["max"][0], 10.000001)
+
+    def test_multicontour_pairing_tracks_spatial_contours_over_area(self) -> None:
+        def circle(cx, radius, samples=32):
+            points = [{"x": cx + radius * math.cos(math.tau * i / samples),
+                       "y": radius * math.sin(math.tau * i / samples)} for i in range(samples)]
+            area, center_x, center_y, _ = _loft_contour_signature(points)
+            return points, area, center_x, center_y
+
+        left = [circle(0.0, 10.0), circle(100.0, 5.0)]
+        right = [circle(4.0, 5.0), circle(96.0, 10.0)]
+        self.assertEqual(_match_loft_contours(left, right), [(0, 0), (1, 1)])
+
+    def test_update_loft_sections_persists_grouped_sketch_dependencies(self) -> None:
+        def circle(cx, radius, samples=16):
+            return [(cx + radius * math.cos(math.tau * i / samples),
+                     radius * math.sin(math.tau * i / samples)) for i in range(samples)]
+
+        sections = [
+            (0.0, [(0.0, 10.0)]),
+            (5.0, [(-5.0, 4.0), (5.0, 4.0)]),
+            (10.0, [(0.0, 10.0)]),
+        ]
+        groups = []
+        for offset, circles in sections:
+            sketch_ids = []
+            for center, radius in circles:
+                sketch_id, _ = self.closed_sketch(
+                    f"Сечение {offset}", circle(center, radius),
+                )
+                sketch_ids.append(sketch_id)
+            groups.append(sketch_ids)
+
+        document_data = self.core.inspect_project(self.project_id)["document"]
+        for group, (offset, _) in zip(groups, sections, strict=True):
+            sketch = next(item for item in document_data["objects"] if item["id"] == group[0])
+            sketch.update(section_normal_axis="Y", section_offset=offset)
+            for sketch_id in group[1:]:
+                next(item for item in document_data["objects"] if item["id"] == sketch_id).update(
+                    section_normal_axis="Y", section_offset=offset,
+                )
+        model_document = Document.from_dict(document_data)
+        feature = self.core.commands.execute(model_document, {
+            "type": "loft_sketches",
+            "sketch_ids":[groups[0][0], groups[1][0], groups[2][0]],
+            "name":"Editable split loft",
+        }, project_id=self.project_id)
+        result = self.core.commands.execute(model_document, {
+            "type": "update_loft_sections", "feature_id": feature["feature_id"],
+            "section_groups": groups,
+        }, project_id=self.project_id)
+        saved_feature = next(item for item in model_document.objects if item["id"] == feature["feature_id"])
+        self.assertEqual(saved_feature["parameters"]["section_sketch_groups"], groups)
+        self.assertEqual(result["geometry"]["kind"], "multicontour_loft")
         model_document.validate()
         self.core._validate_geometry(model_document)
 

@@ -114,26 +114,43 @@ class Document:
                 elif item.get("operation") == "loft_sketches":
                     source_sketch_ids = item.get("source_sketch_ids")
                     parameters = item.get("parameters")
+                    groups = parameters.get("section_sketch_groups", [[value] for value in source_sketch_ids]) \
+                        if isinstance(parameters, dict) and isinstance(source_sketch_ids, list) else None
                     if (not isinstance(source_sketch_ids, list) or not 2 <= len(source_sketch_ids) <= 64
                             or any(not isinstance(value, str) for value in source_sketch_ids)
                             or len(set(source_sketch_ids)) != len(source_sketch_ids)
                             or not isinstance(parameters, dict)
-                            or set(parameters) != {"section_sketch_ids", "section_offsets"}
-                            or parameters.get("section_sketch_ids") != source_sketch_ids):
+                            or set(parameters) not in ({"section_sketch_ids", "section_offsets"},
+                                                        {"section_sketch_ids", "section_offsets", "section_sketch_groups"})
+                            or parameters.get("section_sketch_ids") != source_sketch_ids
+                            or not isinstance(groups, list) or not 2 <= len(groups) <= 64
+                            or any(not isinstance(group, list) or not 1 <= len(group) <= 16
+                                   or any(not isinstance(value, str) for value in group) for group in groups)
+                            or [value for group in groups for value in group] != source_sketch_ids):
                         raise ValidationError("Loft feature section references are invalid.")
                     offsets = parameters["section_offsets"]
-                    if (not isinstance(offsets, list) or len(offsets) != len(source_sketch_ids)
+                    if (not isinstance(offsets, list) or len(offsets) != len(groups)
                             or any(isinstance(value, bool) or not isinstance(value, (int, float))
                                    or not math.isfinite(value) for value in offsets)
                             or any(right <= left for left, right in zip(offsets, offsets[1:]))):
                         raise ValidationError("Loft feature section offsets are invalid.")
-                    for sketch_id, offset in zip(source_sketch_ids, offsets, strict=True):
-                        typed_id(sketch_id, "sketch")
-                        sketch = by_id.get(sketch_id)
-                        if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != "XZ"
-                                or sketch.get("section_normal_axis") != "Y"
-                                or sketch.get("section_offset") != offset):
-                            raise ValidationError("Loft feature source sketch is missing or has changed section metadata.")
+                    for group, offset in zip(groups, offsets, strict=True):
+                        for sketch_id in group:
+                            typed_id(sketch_id, "sketch")
+                            sketch = by_id.get(sketch_id)
+                            if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != "XZ"
+                                    or sketch.get("section_normal_axis") != "Y"
+                                    or sketch.get("section_offset") != offset):
+                                raise ValidationError("Loft feature source sketch is missing or has changed section metadata.")
+                elif item.get("operation") == "create_ruled_shell":
+                    parameters = item.get("parameters")
+                    if (not isinstance(parameters, dict)
+                            or set(parameters) != {"patches", "sewing_tolerance"}
+                            or not isinstance(parameters.get("patches"), list)
+                            or isinstance(parameters.get("sewing_tolerance"), bool)
+                            or not isinstance(parameters.get("sewing_tolerance"), (int, float))
+                            or not math.isfinite(parameters["sewing_tolerance"])):
+                        raise ValidationError("Ruled shell feature parameters are invalid.")
                 elif item.get("operation") == "fillet_edges":
                     source_body_id = item.get("source_body_id")
                     typed_id(source_body_id, "body")

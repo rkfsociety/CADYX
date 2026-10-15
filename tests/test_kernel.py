@@ -9,6 +9,7 @@ from unittest.mock import patch
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
 from cadyx.kernel import OCPKernelAdapter, PrimitiveKernelAdapter
+from cadyx.native_kernel import NativeKernel
 
 
 class OCPKernelAdapterConformanceTests(unittest.TestCase):
@@ -108,6 +109,20 @@ class OCPKernelAdapterConformanceTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValidationError, "one connected solid"):
             self.kernel.fuse_profiles(base, separated)
+
+    def test_multicontour_fusion_can_join_disconnected_intermediate_parts(self) -> None:
+        def rectangle(x1, x2):
+            return [{"x": x1, "y": 0.0}, {"x": x2, "y": 0.0},
+                    {"x": x2, "y": 1.0}, {"x": x1, "y": 1.0}]
+
+        left = self.kernel.create_extruded_profile(rectangle(0.0, 1.0), plane="XY", depth=1.0)
+        right = self.kernel.create_extruded_profile(rectangle(3.0, 4.0), plane="XY", depth=1.0)
+        bridge = self.kernel.create_extruded_profile(rectangle(0.9, 3.1), plane="XY", depth=1.0)
+        result = NativeKernel().geometry_graph(
+            {"kind": "multicontour_loft", "branches": [left, right, bridge]}, topology=True,
+        )
+        self.assertTrue(result["brep_valid"])
+        self.assertEqual(result["topology"]["solid_count"], 1)
 
     def test_boolean_cut_subtracts_material_and_rejects_empty_or_split_results(self) -> None:
         base = self.kernel.create_box(width=20, height=20, depth=10)
