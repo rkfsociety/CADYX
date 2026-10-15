@@ -86,6 +86,8 @@ class CommandSystem:
             return self._create_profile_feature(document, command, kind, progress=progress)
         if kind == "fuse_bodies":
             return self._fuse_bodies(document, command, progress=progress)
+        if kind == "cut_bodies":
+            return self._cut_bodies(document, command, progress=progress)
         if kind == "sweep_sketch":
             return self._sweep_sketch(document, command, progress=progress)
         if kind == "fillet_edges":
@@ -773,6 +775,7 @@ class CommandSystem:
         if body is None:
             raise ValidationError("Box feature refers to a missing body.")
         body["geometry"] = geometry
+        self._rebuild_derived_features(document, {body["id"]}, progress=progress)
         return {"feature_id": feature_id, "parameter": parameter_name, "value": value, "geometry": geometry}
 
     def _create_metric_thread(
@@ -1021,7 +1024,7 @@ class CommandSystem:
             operation = feature.get("operation")
             if operation == "fillet_edges":
                 sources = {feature.get("source_body_id")}
-            elif operation == "fuse_bodies":
+            elif operation in {"fuse_bodies", "cut_bodies"}:
                 sources = {feature.get("base_body_id"), feature.get("tool_body_id")}
             else:
                 continue
@@ -1031,18 +1034,24 @@ class CommandSystem:
             if body is None or body.get("type") != "body":
                 raise ValidationError("Derived feature refers to a missing result body.")
             if progress is not None:
-                progress({"phase": "kernel_boolean_fuse" if operation == "fuse_bodies" else "kernel_fillet"})
+                progress({"phase": "kernel_boolean_fuse" if operation == "fuse_bodies" else
+                          "kernel_boolean_cut" if operation == "cut_bodies" else "kernel_fillet"})
             if operation == "fillet_edges":
                 source = by_id.get(feature.get("source_body_id"))
                 if source is None or source.get("type") != "body":
                     raise ValidationError("Fillet feature refers to a missing source body.")
                 geometry = self.kernel.create_fillet(source["geometry"],
                     edge_indices=feature["edge_indices"], radius=feature["parameters"]["radius"])
-            else:
+            elif operation == "fuse_bodies":
                 base, tool = by_id.get(feature.get("base_body_id")), by_id.get(feature.get("tool_body_id"))
                 if any(item is None or item.get("type") != "body" for item in (base, tool)):
                     raise ValidationError("Boolean fuse feature refers to a missing source body.")
                 geometry = self.kernel.fuse_profiles(base["geometry"], tool["geometry"])
+            else:
+                base, tool = by_id.get(feature.get("base_body_id")), by_id.get(feature.get("tool_body_id"))
+                if any(item is None or item.get("type") != "body" for item in (base, tool)):
+                    raise ValidationError("Boolean cut feature refers to a missing source body.")
+                geometry = self.kernel.cut_solids(base["geometry"], tool["geometry"])
             body["geometry"] = geometry
             feature["geometry"] = geometry
             rebuilt_bodies.add(body["id"])
@@ -1078,13 +1087,43 @@ class CommandSystem:
         return {"body_id": body_id, "feature_id": feature_id,
                 "base_body_id": base_id, "tool_body_id": tool_id, "geometry": geometry}
 
+    def _cut_bodies(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        base_id, tool_id = command.get("base_body_id"), command.get("tool_body_id")
+        if not isinstance(base_id, str) or not isinstance(tool_id, str) or base_id == tool_id:
+            raise ValidationError("cut_bodies needs two different body IDs.")
+        by_id = {item["id"]: item for item in document.objects}
+        base, tool = by_id.get(base_id), by_id.get(tool_id)
+        if any(item is None or item.get("type") != "body" for item in (base, tool)):
+            raise NotFoundError("One of the bodies to cut was not found.")
+        if base_id in self._consumed_body_ids(document) or tool_id in self._consumed_body_ids(document):
+            raise ValidationError("A body already consumed by a Boolean feature cannot be used again.")
+        name = command.get("name", "Модель с вырезом")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Cut body name must be a non-empty string of at most 120 characters.")
+        if progress is not None:
+            progress({"phase": "kernel_boolean_cut"})
+        geometry = self.kernel.cut_solids(base.get("geometry"), tool.get("geometry"))
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        document.objects.extend([
+            {"id": body_id, "type": "body", "name": name.strip(),
+             "feature_ids": [feature_id], "geometry": geometry},
+            {"id": feature_id, "type": "feature", "operation": "cut_bodies",
+             "body_id": body_id, "base_body_id": base_id, "tool_body_id": tool_id,
+             "parameters": {}, "geometry": geometry},
+        ])
+        return {"body_id": body_id, "feature_id": feature_id,
+                "base_body_id": base_id, "tool_body_id": tool_id, "geometry": geometry}
+
     @staticmethod
     def _consumed_body_ids(document: Document) -> set[str]:
         consumed: set[str] = set()
         for feature in document.objects:
             if feature.get("type") != "feature":
                 continue
-            if feature.get("operation") == "fuse_bodies":
+            if feature.get("operation") in {"fuse_bodies", "cut_bodies"}:
                 consumed.update((feature.get("base_body_id"), feature.get("tool_body_id")))
             elif feature.get("operation") in {
                 "fillet_edges", "resize_imported_thread", "transform_imported_brep",

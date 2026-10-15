@@ -128,14 +128,14 @@ class Document:
                         raise ValidationError("Imported B-rep feature must reference a different existing source body.")
                     if not isinstance(item.get("parameters"), dict):
                         raise ValidationError("Imported B-rep feature parameters are missing.")
-                elif item.get("operation") == "fuse_bodies":
+                elif item.get("operation") in {"fuse_bodies", "cut_bodies"}:
                     base_id, tool_id = item.get("base_body_id"), item.get("tool_body_id")
                     typed_id(base_id, "body")
                     typed_id(tool_id, "body")
                     if base_id == tool_id or item["body_id"] in {base_id, tool_id}:
-                        raise ValidationError("Boolean fuse must reference two different source bodies.")
+                        raise ValidationError("Boolean feature must reference two different source bodies.")
                     if any(by_id.get(source_id, {}).get("type") != "body" for source_id in (base_id, tool_id)):
-                        raise ValidationError("Boolean fuse must reference existing source bodies.")
+                        raise ValidationError("Boolean feature must reference existing source bodies.")
                 elif item.get("operation") == "import_step":
                     source = item.get("source")
                     if (not isinstance(source, dict)

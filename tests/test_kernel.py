@@ -84,6 +84,32 @@ class OCPKernelAdapterConformanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "one connected solid"):
             self.kernel.fuse_profiles(base, separated)
 
+    def test_boolean_cut_subtracts_material_and_rejects_empty_or_split_results(self) -> None:
+        base = self.kernel.create_box(width=20, height=20, depth=10)
+        tool = self.kernel.create_box(width=4, height=4, depth=12)
+        result = self.kernel.cut_solids(base, tool)
+        self.assertEqual(result["kind"], "cut_solids")
+        self.assertAlmostEqual(result["volume"], 3840)
+        topology = self.kernel.topology(result)
+        self.assertTrue(topology["brep_valid"])
+        self.assertEqual(topology["topology"]["solid_count"], 1)
+
+        with self.assertRaisesRegex(ValidationError, "one connected solid"):
+            splitter = self.kernel.create_extruded_profile(
+                [{"x": 9, "y": -1}, {"x": 11, "y": -1},
+                 {"x": 11, "y": 11}, {"x": 9, "y": 11}],
+                plane="XZ", depth=42, centered=True,
+            )
+            self.kernel.cut_solids(base, splitter)
+
+        with self.assertRaises(ValidationError):
+            outside = self.kernel.create_extruded_profile(
+                [{"x": 30, "y": 0}, {"x": 34, "y": 0},
+                 {"x": 34, "y": 10}, {"x": 30, "y": 10}],
+                plane="XZ", depth=42, centered=True,
+            )
+            self.kernel.cut_solids(base, outside)
+
     def test_tessellation_accepts_legacy_descriptor(self) -> None:
         legacy = PrimitiveKernelAdapter().create_box(width=2, height=3, depth=5)
         mesh = self.kernel.tessellate(legacy)

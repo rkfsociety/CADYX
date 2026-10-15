@@ -137,6 +137,32 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertEqual(step_check["source_solid_count"], 1)
         self.assertEqual(step_check["reimported_solid_count"], 1)
 
+    def test_cut_feature_is_editable_rebuildable_and_hidden_as_one_result(self) -> None:
+        base = self.command({"type": "create_box", "name": "Top", "width": 20, "height": 20, "depth": 10})
+        # The box's depth is global Z; an XY profile creates a vertical cutter.
+        sketch, _ = self.closed_sketch("Cutter", [(8, 8), (12, 8), (12, 12), (8, 12)], "XY")
+        cutter = self.command({"type": "extrude_sketch", "sketch_id": sketch,
+                               "name": "Through Cutter", "depth": 22, "centered": True})
+        cut = self.command({"type": "cut_bodies", "base_body_id": base["body_id"],
+                            "tool_body_id": cutter["body_id"], "name": "Top with Hole"})
+        self.assertAlmostEqual(cut["geometry"]["volume"], 3840)
+        self.assertEqual(cut["geometry"]["kind"], "cut_solids")
+        self.assertEqual(self.core.kernel.topology(cut["geometry"])["topology"]["solid_count"], 1)
+        rendered = [item["object_id"] for item in self.core.render_project(self.project_id)["objects"]
+                    if item["type"] == "body"]
+        self.assertEqual(rendered, [cut["body_id"]])
+        document = self.core.inspect_project(self.project_id)["document"]
+        self.assertEqual(Document.from_dict(document).to_dict(), document)
+        self.assertEqual(next(item for item in document["objects"]
+                              if item.get("id") == cut["feature_id"])["operation"], "cut_bodies")
+
+        self.command({"type": "set_parameter", "feature_id": base["feature_id"],
+                      "name": "width", "value": 21})
+        rebuilt = self.core.inspect_project(self.project_id)["document"]
+        result_body = next(item for item in rebuilt["objects"] if item["id"] == cut["body_id"])
+        self.assertAlmostEqual(result_body["geometry"]["volume"], 4040)
+        self.assertEqual(result_body["geometry"]["base"]["dimensions"]["width"], 21)
+
     def test_replacing_profile_rebuilds_feature_with_smooth_sampled_loop(self) -> None:
         original = [(31, 60), (42, 60), (52, 55), (60, 47), (65, 40), (60, 33),
                     (52, 25), (42, 20), (31, 20), (31, 26), (42, 26), (50, 29),

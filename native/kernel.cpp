@@ -2,6 +2,7 @@
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
@@ -731,6 +732,18 @@ TopoDS_Shape MakeFuse(const TopoDS_Shape& base, const TopoDS_Shape& tool) {
   return EnsureOneSolid(operation.Shape(), "Boolean fuse");
 }
 
+TopoDS_Shape MakeCut(const TopoDS_Shape& base, const TopoDS_Shape& tool) {
+  BRepAlgoAPI_Cut operation(base, tool);
+  operation.SetFuzzyValue(1e-7);
+  operation.Build();
+  if (!operation.IsDone()) {
+    std::ostringstream detail;
+    operation.DumpErrors(detail);
+    throw std::runtime_error("OCCT could not subtract the tool solid: " + detail.str());
+  }
+  return EnsureOneSolid(operation.Shape(), "Boolean cut");
+}
+
 TopoDS_Shape MakeMetricThread(double major_diameter, double pitch, double length, int handedness) {
   if (!std::isfinite(major_diameter) || !std::isfinite(pitch) || !std::isfinite(length)
       || major_diameter <= 0 || pitch <= 0 || length < pitch || length / pitch > 64
@@ -852,6 +865,12 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
             || static_cast<size_t>(node.input_a) >= i || static_cast<size_t>(node.input_b) >= i)
           throw std::runtime_error("Boolean fuse graph references must point to earlier operations.");
         shape = MakeFuse(shapes[node.input_a], shapes[node.input_b]);
+        break;
+      case 7:
+        if (node.input_a < 0 || node.input_b < 0
+            || static_cast<size_t>(node.input_a) >= i || static_cast<size_t>(node.input_b) >= i)
+          throw std::runtime_error("Boolean cut graph references must point to earlier operations.");
+        shape = MakeCut(shapes[node.input_a], shapes[node.input_b]);
         break;
       case 3:
         if (node.input_a < 0 || static_cast<size_t>(node.input_a) >= i)

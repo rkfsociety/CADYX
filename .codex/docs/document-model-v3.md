@@ -170,6 +170,13 @@ fuse/fillet results; imported triangle meshes are not B-rep inputs. The resultin
 `fused_solids` descriptor retains both source geometry descriptors and rebuilds
 when either source changes. Legacy `fused_profiles` descriptors remain supported.
 
+`cut_bodies` accepts `base_body_id`, `tool_body_id`, and optional `name`. The
+native OCCT Boolean cut subtracts the tool from the base and requires one valid
+remaining solid with positive volume. Both editable B-rep source descriptors
+are retained in the `cut_solids` feature graph, and the result rebuilds when
+either source changes. A tool that removes no material or splits the base into
+multiple solids is rejected atomically. Triangle meshes are not B-rep inputs.
+
 `GET /api/v1/agent/projects/{project_id}/topology?body_id=...` inspects a body's
 current unique B-rep edges for downstream edge selection. Each edge has a
 traversal `index`, length, center of mass, and curve type. Indices are valid for

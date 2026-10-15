@@ -124,3 +124,13 @@ class RenderingTests(unittest.TestCase):
         rendered = next(item for item in scene["objects"] if item["object_id"] == point)
         self.assertEqual(rendered["positions"], [2, 0, 7])
 
+    def test_sketch_is_hidden_after_its_profile_becomes_a_solid_feature(self):
+        sketch = self.command({"type": "create_sketch", "plane": "XY"})["sketch_id"]
+        self.command({"type": "add_sketch_polyline", "sketch_id": sketch, "closed": True,
+                      "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0},
+                                 {"x": 4, "y": 4}, {"x": 0, "y": 4}]})
+        self.command({"type": "extrude_sketch", "sketch_id": sketch, "depth": 2})
+
+        scene = self.core.render_project(self.project)
+        self.assertEqual([item["type"] for item in scene["objects"]], ["body"])
+

@@ -209,6 +209,8 @@ class NativeKernel:
                 coordinates.extend((value["major_diameter"], value["pitch"]))
             elif kind in {"fused_profiles", "fused_solids"}:
                 node.update(type=2, input_a=append(value["base"]), input_b=append(value["tool"]))
+            elif kind == "cut_solids":
+                node.update(type=7, input_a=append(value["base"]), input_b=append(value["tool"]))
             elif kind == "filleted_solid":
                 node.update(type=3, input_a=append(value["base"]), amount=value["radius"],
                             edge_offset=len(edge_indices), edge_count=len(value["edge_indices"]))

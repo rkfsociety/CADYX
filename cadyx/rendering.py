@@ -18,11 +18,17 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         for item in document.objects
         if item.get("type") == "feature"
         for source_id in ((item.get("base_body_id"), item.get("tool_body_id"))
-                          if item.get("operation") == "fuse_bodies"
+                          if item.get("operation") in {"fuse_bodies", "cut_bodies"}
                           else (item.get("source_body_id"),)
                           if item.get("operation") in {
                               "fillet_edges", "resize_imported_thread", "transform_imported_brep",
                           } else ())
+    }
+    feature_sketches = {
+        item.get("source_sketch_id")
+        for item in document.objects
+        if item.get("type") == "feature"
+        and item.get("operation") in {"extrude_sketch", "revolve_sketch", "sweep_sketch"}
     }
     bounds_min = [math.inf, math.inf, math.inf]
     bounds_max = [-math.inf, -math.inf, -math.inf]
@@ -35,6 +41,8 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
     for item in document.objects:
         kind = item["type"]
         if kind == "body" and item["id"] in consumed_bodies:
+            continue
+        if kind in {"point", "line", "circle"} and item.get("sketch_id") in feature_sketches:
             continue
         positions, triangles, lines, points = [], [], [], []
         if kind == "body" and item.get("geometry") is not None:

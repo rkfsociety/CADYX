@@ -27,6 +27,8 @@ class GeometryKernel(Protocol):
 
     def fuse_profiles(self, base: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]: ...
 
+    def cut_solids(self, base: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]: ...
+
     def create_swept_pipe(
         self, path: list[dict[str, float]], *, plane: str, radius: float,
     ) -> dict[str, Any]: ...
@@ -212,6 +214,15 @@ class OCCTKernelAdapter:
             "volume": result["volume"],
         }
 
+    def cut_solids(self, base: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]:
+        self.validate(base)
+        self.validate(tool)
+        result = NativeKernel().geometry_graph({"kind": "cut_solids", "base": base, "tool": tool})
+        if result["volume"] >= base["volume"] - max(1e-9, base["volume"] * 1e-12):
+            raise ValidationError("Boolean cut must remove material from the base solid.")
+        return {"kernel": self.kernel_id, "kind": "cut_solids", "base": base,
+                "tool": tool, "volume": result["volume"]}
+
     def create_swept_pipe(
         self, path: list[dict[str, float]], *, plane: str, radius: float,
     ) -> dict[str, Any]:
@@ -393,6 +404,9 @@ class OCCTKernelAdapter:
         if kernel_id == self.kernel_id and geometry.get("kind") == "fused_solids":
             self._validate_fused_geometry(geometry)
             return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "cut_solids":
+            self._validate_fused_geometry(geometry)
+            return
         if kernel_id == self.kernel_id and geometry.get("kind") == "swept_pipe":
             self._validate_swept_pipe_geometry(geometry)
             return
@@ -477,8 +491,8 @@ class OCCTKernelAdapter:
     def _validate_fused_geometry(self, geometry: dict[str, Any]) -> None:
         if (set(geometry) != {"kernel", "kind", "base", "tool", "volume"}
                 or geometry.get("kernel") != self.kernel_id
-                or geometry.get("kind") not in {"fused_profiles", "fused_solids"}):
-            raise ValidationError("Fused solid geometry descriptor is invalid.")
+                or geometry.get("kind") not in {"fused_profiles", "fused_solids", "cut_solids"}):
+            raise ValidationError("Boolean solid geometry descriptor is invalid.")
         base, tool = geometry.get("base"), geometry.get("tool")
         if not isinstance(base, dict) or not isinstance(tool, dict):
             raise ValidationError("Fused solid source geometries are invalid.")
@@ -604,6 +618,9 @@ class PrimitiveKernelAdapter:
 
     def fuse_profiles(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not fuse B-rep solids.")
+
+    def cut_solids(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise ValidationError("The primitive demo kernel does not cut B-rep solids.")
 
     def create_revolved_profile(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not build revolved B-reps.")
