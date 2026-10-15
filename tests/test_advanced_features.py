@@ -1,10 +1,13 @@
+import base64
 import unittest
+import zlib
 from unittest.mock import patch
 
 import cadyx  # installs the advanced command layer
+from cadyx import capabilities
+from cadyx.advanced_features import _raw_brep
 from cadyx.commands import CommandSystem
 from cadyx.models import Document
-from cadyx import capabilities
 
 
 class LoftKernel:
@@ -37,6 +40,19 @@ class AdvancedFeaturesTests(unittest.TestCase):
         self.assertTrue(result["body_id"].startswith("body:"))
         self.assertEqual(kernel.offsets, [0.0, 20.0])
         document.validate()
+
+    def test_imported_brep_decodes_without_native_export_round_trip(self):
+        raw = b"DBRep_DrawableShape\noptimized-path\n"
+        geometry = {
+            "kernel": "occt-v1",
+            "kind": "imported_brep",
+            "data": base64.b64encode(zlib.compress(raw)).decode("ascii"),
+            "volume": 1.0,
+            "brep_valid": True,
+        }
+        with patch("cadyx.advanced_features.NativeKernel") as native:
+            self.assertEqual(_raw_brep(geometry), raw)
+        native.assert_not_called()
 
     def test_shell_routes_to_native_and_persists_feature(self):
         system = CommandSystem(LoftKernel())

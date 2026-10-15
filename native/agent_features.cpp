@@ -215,6 +215,32 @@ API char* cadyx_agent_feature_brep(const unsigned char* data, size_t size, int o
   return nullptr;
 }
 
+// Measure a serialized B-rep directly so Python does not have to compress it,
+// reconstruct an imported_brep JSON node, and immediately decompress it again.
+API char* cadyx_brep_metrics(const unsigned char* data, size_t size,
+                             char* error, size_t capacity) noexcept {
+  try {
+    const TopoDS_Shape shape = OneSolid(ReadBrep(data, size), "B-rep metrics");
+    GProp_GProps properties;
+    BRepGProp::VolumeProperties(shape, properties);
+    const double volume = std::abs(properties.Mass());
+    if (!std::isfinite(volume) || volume <= 0.0)
+      throw std::runtime_error("OCCT returned an invalid B-rep volume.");
+    std::ostringstream json;
+    json.imbue(std::locale::classic());
+    json << std::setprecision(17) << "{\"volume\":" << volume << '}';
+    return CopyResult(json.str());
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString()
+        ? exception.GetMessageString() : "OCCT B-rep metrics failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown B-rep metrics failure.");
+  }
+  return nullptr;
+}
+
 // Complete face metadata and analytic edge/face data are emitted together so
 // Python can enrich semantic topology without parsing the same B-rep twice.
 API char* cadyx_agent_topology(const unsigned char* data, size_t size,

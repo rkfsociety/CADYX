@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import json
 import math
 import zlib
 from typing import Any
@@ -17,6 +18,7 @@ from .native_kernel import NativeKernel
 from .sketches import closed_profile
 
 _INSTALLED = False
+_MAX_BREP_BYTES = 64 * 1024 * 1024
 
 ADVANCED_CAPABILITIES = (
     {"type": "create_section_sketch", "description": "Create an editable XZ section sketch at a Y offset for direct loft authoring.", "required": ["offset"], "optional": ["name"], "constraints": ["offset is finite; resulting sketch is compatible with loft_sketches and loft_profiles."]},
@@ -70,13 +72,54 @@ def _body(document, body_id: Any) -> dict[str, Any]:
 
 
 def _raw_brep(geometry: dict[str, Any]) -> bytes:
+    """Return B-rep bytes without an OCCT export round-trip when already persisted."""
+    if isinstance(geometry, dict) and geometry.get("kind") == "imported_brep":
+        try:
+            compressed = base64.b64decode(geometry["data"], validate=True)
+            decoder = zlib.decompressobj()
+            restored = decoder.decompress(compressed, _MAX_BREP_BYTES + 1)
+            if (len(restored) > _MAX_BREP_BYTES or not decoder.eof
+                    or decoder.unused_data or decoder.unconsumed_tail):
+                raise ValueError("invalid compressed B-rep payload")
+        except (KeyError, TypeError, ValueError, zlib.error) as exc:
+            raise ValidationError("Imported B-rep data is invalid or exceeds the 64 MB limit.") from exc
+        if not restored:
+            raise ValidationError("Imported B-rep data is empty or exceeds the 64 MB limit.")
+        return restored
     brep, _metrics = NativeKernel().export_geometry(geometry)
     return brep
 
 
+def _raw_brep_volume(raw: bytes) -> float | None:
+    """Measure raw B-rep bytes directly when supported by the current runtime."""
+    native = NativeKernel()
+    library = native.library
+    if not hasattr(library, "cadyx_brep_metrics"):
+        return None
+    data = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
+    function = library.cadyx_brep_metrics
+    function.argtypes = [
+        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t,
+    ]
+    function.restype = ctypes.c_void_p
+    error = ctypes.create_string_buffer(2048)
+    result = function(data, len(raw), error, len(error))
+    if not result:
+        raise ValidationError(error.value.decode("utf-8", errors="replace"))
+    try:
+        payload = json.loads(ctypes.string_at(result))
+    finally:
+        library.cadyx_free(result)
+    volume = payload.get("volume") if isinstance(payload, dict) else None
+    if isinstance(volume, bool) or not isinstance(volume, (int, float)) or not math.isfinite(volume) or volume <= 0:
+        raise ValidationError("OCCT returned invalid B-rep metrics.")
+    return float(volume)
+
+
 def _wrap_brep(raw: bytes) -> dict[str, Any]:
-    if not raw or len(raw) > 64 * 1024 * 1024:
+    if not raw or len(raw) > _MAX_BREP_BYTES:
         raise ValidationError("Advanced OCCT operation returned an invalid B-rep payload.")
+    volume = _raw_brep_volume(raw)
     geometry = {
         "kernel": "occt-v1",
         "kind": "imported_brep",
@@ -84,8 +127,10 @@ def _wrap_brep(raw: bytes) -> dict[str, Any]:
         "volume": 1.0,
         "brep_valid": True,
     }
-    graph = NativeKernel().geometry_graph(geometry)
-    geometry["volume"] = graph["volume"]
+    if volume is None:
+        # Compatibility path for a runtime built before cadyx_brep_metrics.
+        volume = NativeKernel().geometry_graph(geometry)["volume"]
+    geometry["volume"] = volume
     return geometry
 
 
@@ -151,10 +196,11 @@ def _execute(self, document, command: dict[str, Any], *, progress=None, project_
         normalized_offsets = [_number(value, "section offset") for value in offsets]
         if any(right <= left for left, right in zip(normalized_offsets, normalized_offsets[1:])):
             raise ValidationError("Loft section offsets must be strictly increasing.")
+        by_id = {obj.get("id"): obj for obj in document.objects if isinstance(obj, dict)}
         sections = []
         for sketch_id in sketch_ids:
-            sketch = next((obj for obj in document.objects if obj.get("id") == sketch_id and obj.get("type") == "sketch"), None)
-            if sketch is None or sketch.get("plane") != "XZ":
+            sketch = by_id.get(sketch_id)
+            if sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != "XZ":
                 raise ValidationError("loft_profiles currently requires closed XZ section sketches.")
             _sketch, profile = closed_profile(document.objects, sketch_id)
             sections.append(profile)

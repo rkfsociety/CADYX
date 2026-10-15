@@ -6,6 +6,7 @@ import hashlib
 import json
 from typing import Any
 
+from .advanced_features import _raw_brep
 from .errors import ValidationError
 from .native_kernel import NativeKernel
 
@@ -116,7 +117,7 @@ def install() -> None:
     def topology(self, geometry):
         result = original(self, geometry)
         native = NativeKernel()
-        brep, _metrics = native.export_geometry(geometry)
+        brep = _raw_brep(geometry)
 
         details = _call_json(
             native,
