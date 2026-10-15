@@ -1516,6 +1516,9 @@ function objectSummary(item, objects = currentObjects) {
     const operation = item.operation;
     const parameters = item.parameters || {};
     const label = featureOperationLabels[operation] || "Операция";
+    if (operation === "revolve_sketch" && Number.isFinite(parameters.outer_diameter) && Number.isFinite(parameters.height)) {
+      return `Ø${formatNumber(parameters.outer_diameter)} × ${formatNumber(parameters.height)} мм`;
+    }
     if (operation === "resize_imported_thread") return `${formatNumber(parameters.major_diameter)} → ${formatNumber(parameters.major_diameter + parameters.diameter_delta)} мм`;
     if (operation === "transform_imported_brep") return `${formatNumber(parameters.angle_degrees)}° · ${parameters.translation?.map(formatNumber).join(", ") || ""} мм`;
     return `${label} · ${dimensionsText(parameters)}`;
@@ -1542,7 +1545,7 @@ function containsRevolvedProfile(geometry) {
       && (containsRevolvedProfile(geometry.base) || containsRevolvedProfile(geometry.tool));
 }
 
-const editableDimensionLabels = { width: "Ширина", height: "Высота", depth: "Глубина", major_diameter: "Диаметр", pitch: "Шаг", length: "Длина", angle_degrees: "Угол", radius: "Радиус" };
+const editableDimensionLabels = { width: "Ширина", height: "Высота", depth: "Глубина", outer_diameter: "Наружный диаметр", major_diameter: "Диаметр", pitch: "Шаг", length: "Длина", angle_degrees: "Угол", radius: "Радиус" };
 
 function editableDimensions(feature) {
   if (!feature || feature.type !== "feature") return null;
@@ -1550,7 +1553,7 @@ function editableDimensions(feature) {
     create_box: ["width", "height", "depth"],
     metric_thread: ["major_diameter", "pitch", "length"],
     extrude_sketch: ["depth"],
-    revolve_sketch: ["angle_degrees"],
+    revolve_sketch: ["outer_diameter", "height"],
     sweep_sketch: ["radius"],
     fillet_edges: ["radius"],
   })[feature.operation];

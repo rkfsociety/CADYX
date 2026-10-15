@@ -317,7 +317,11 @@ operation accepts one contour; holes and multi-contour profiles are not supporte
 The command stores an OCCT B-rep descriptor plus a feature that references its
 source sketch and operation parameter. Editing source points rebuilds the linked
 body in the same atomic command. `set_parameter` can change extrusion depth,
-revolution angle, sweep radius, or fillet radius. Removing a sketch used by a solid feature is rejected. Profile
+revolution angle, sweep radius, or fillet radius. Revolve features also store
+their profile's overall `outer_diameter` and `height`; `set_parameter` scales
+the closed XZ sketch in the radial or axial direction while preserving the
+revolution axis and bottom datum, then rebuilds the B-rep. The Geometry view
+shows these dimensions as editable inputs. Removing a sketch used by a solid feature is rejected. Profile
 constraints still check the supplied geometry and do not solve it. The OCCT
 adapter rebuilds and validates each saved solid and derives viewport triangles
 from the B-rep. These are solids, not triangle-mesh imports.

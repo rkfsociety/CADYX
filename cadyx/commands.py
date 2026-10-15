@@ -2077,11 +2077,37 @@ class CommandSystem:
                     value = command.get("value")
                     if type(value) is not bool:
                         raise ValidationError("centered must be a boolean.")
+                elif (feature["operation"] == "revolve_sketch"
+                      and parameter_name in {"outer_diameter", "height"}):
+                    value = _number(command.get("value"), parameter_name)
                 elif parameter_name == expected:
                     value = _number(command.get("value"), parameter_name)
                 else:
-                    raise ValidationError(f"Only the {expected} and centered parameters are supported for this feature.")
+                    supported = "angle_degrees, outer_diameter, and height" if feature["operation"] == "revolve_sketch" else "depth and centered"
+                    raise ValidationError(f"Only {supported} parameters are supported for this feature.")
                 parameters = dict(feature["parameters"])
+                if feature["operation"] == "revolve_sketch" and parameter_name in {"outer_diameter", "height"}:
+                    sketch_id = feature.get("source_sketch_id")
+                    sketch_points = [item for item in document.objects
+                                     if item.get("type") == "point" and item.get("sketch_id") == sketch_id]
+                    if len(sketch_points) < 3:
+                        raise ValidationError("Revolved profile has too few editable points.")
+                    old_value = parameters.get(parameter_name)
+                    if not isinstance(old_value, (int, float)) or isinstance(old_value, bool) or old_value <= 0:
+                        old_profile = closed_profile(document.objects, sketch_id)[1]
+                        old_value = (2.0 * max(point["x"] for point in old_profile)
+                                     if parameter_name == "outer_diameter" else
+                                     max(point["y"] for point in old_profile) - min(point["y"] for point in old_profile))
+                    if old_value <= 0:
+                        raise ValidationError(f"Revolved profile has no positive {parameter_name}.")
+                    scale = value / old_value
+                    if parameter_name == "outer_diameter":
+                        for point in sketch_points:
+                            point["x"] *= scale
+                    else:
+                        bottom = min(point["y"] for point in sketch_points)
+                        for point in sketch_points:
+                            point["y"] = bottom + (point["y"] - bottom) * scale
                 parameters[parameter_name] = value
                 if progress is not None:
                     progress({"phase": "prepare_profile"})
@@ -2206,6 +2232,9 @@ class CommandSystem:
             if angle > 360:
                 raise ValidationError("angle_degrees must be no greater than 360.")
             parameters["angle_degrees"] = angle
+            parameters["outer_diameter"] = max(point["x"] for point in profile) * 2.0
+            axial_values = [point["y"] for point in profile]
+            parameters["height"] = max(axial_values) - min(axial_values)
         if progress is not None:
             progress({"phase": "kernel_extrusion" if operation == "extrude_sketch" else "kernel_revolution"})
         geometry = self._profile_geometry(document, {
