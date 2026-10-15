@@ -224,6 +224,95 @@ class SketchDocumentTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.rejected(**command)
 
+    def test_rectangle_from_two_corners_is_closed(self):
+        result = self.command(type="add_sketch_rectangle_two_corners", sketch_id=self.sketch,
+                             x1=5, y1=7, x2=1, y2=2)
+        self.assertTrue(result["closed"])
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        self.assertEqual({(by_id[item]["x"], by_id[item]["y"]) for item in result["point_ids"]},
+                         {(1, 2), (5, 2), (5, 7), (1, 7)})
+        self.rejected(type="add_sketch_rectangle_two_corners", sketch_id=self.sketch,
+                      x1=0, y1=0, x2=0, y2=1)
+
+    def test_rectangle_from_center_is_closed(self):
+        result = self.command(type="add_sketch_rectangle_center", sketch_id=self.sketch,
+                             center_x=4, center_y=-2, width=6, height=4)
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        self.assertEqual({(by_id[item]["x"], by_id[item]["y"]) for item in result["point_ids"]},
+                         {(1, -4), (7, -4), (7, 0), (1, 0)})
+
+    def test_rectangle_from_three_points_checks_right_angle(self):
+        result = self.command(type="add_sketch_rectangle_three_points", sketch_id=self.sketch,
+                              points=[{"x": 0, "y": 4}, {"x": 0, "y": 0}, {"x": 3, "y": 0}])
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        self.assertEqual({(by_id[item]["x"], by_id[item]["y"]) for item in result["point_ids"]},
+                         {(0, 4), (0, 0), (3, 0), (3, 4)})
+        self.rejected(type="add_sketch_rectangle_three_points", sketch_id=self.sketch,
+                      points=[{"x": 0, "y": 2}, {"x": 0, "y": 0}, {"x": 3, "y": 1}])
+
+    def test_rotated_rectangle_uses_radian_safe_transform(self):
+        result = self.command(type="add_sketch_rotated_rectangle", sketch_id=self.sketch,
+                              center_x=10, center_y=20, width=4, height=2, angle_degrees=90)
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        corners = {(round(by_id[item]["x"], 8), round(by_id[item]["y"], 8)) for item in result["point_ids"]}
+        self.assertEqual(corners, {(11, 18), (11, 22), (9, 22), (9, 18)})
+
+    def test_parallelogram_from_three_points_closes_fourth_corner(self):
+        result = self.command(type="add_sketch_parallelogram", sketch_id=self.sketch,
+                              points=[{"x": 1, "y": 4}, {"x": 0, "y": 0}, {"x": 5, "y": 1}])
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        self.assertEqual({(by_id[item]["x"], by_id[item]["y"]) for item in result["point_ids"]},
+                         {(1, 4), (0, 0), (5, 1), (6, 5)})
+
+    def test_regular_polygon_supports_inscribed_and_circumscribed_radius(self):
+        for mode, radius in (("inscribed", 2), ("circumscribed", 2 / 3**0.5)):
+            result = self.command(type="add_sketch_regular_polygon", sketch_id=self.sketch,
+                                  center_x=3, center_y=4, side_count=3, radius=radius,
+                                  radius_mode=mode, rotation_degrees=30)
+            self.assertEqual(len(result["point_ids"]), 3)
+            self.assertEqual(len(result["line_ids"]), 3)
+        self.rejected(type="add_sketch_regular_polygon", sketch_id=self.sketch,
+                      center_x=0, center_y=0, side_count=2, radius=1)
+
+    def test_circle_from_center_and_diameter_preserves_exact_radius(self):
+        by_radius = self.command(type="add_sketch_circle", sketch_id=self.sketch, x=2, y=3, radius=4)
+        by_diameter = self.command(type="add_sketch_circle_diameter", sketch_id=self.sketch,
+                                   x=-2, y=1, diameter=8)
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        self.assertEqual(by_id[by_radius["circle_id"]]["radius"], 4)
+        self.assertEqual(by_id[by_id[by_diameter["circle_id"]]["center_id"]]["x"], -2)
+        self.assertEqual(by_id[by_diameter["circle_id"]]["radius"], 4)
+
+    def test_circle_from_two_points_uses_them_as_diameter_endpoints(self):
+        result = self.command(type="add_sketch_circle_two_points", sketch_id=self.sketch,
+                              first={"x": 0, "y": 0}, second={"x": 4, "y": 0})
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        center = by_id[by_id[result["circle_id"]]["center_id"]]
+        self.assertEqual((center["x"], center["y"], by_id[result["circle_id"]]["radius"]), (2, 0, 2))
+        self.rejected(type="add_sketch_circle_two_points", sketch_id=self.sketch,
+                      first={"x": 1, "y": 1}, second={"x": 1, "y": 1})
+
+    def test_circle_through_three_points_rejects_collinearity(self):
+        result = self.command(type="add_sketch_circle_three_points", sketch_id=self.sketch,
+                              first={"x": 100, "y": 100}, second={"x": 102, "y": 100},
+                              third={"x": 100, "y": 102})
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        circle = by_id[result["circle_id"]]
+        center = by_id[circle["center_id"]]
+        self.assertAlmostEqual(center["x"], 101)
+        self.assertAlmostEqual(center["y"], 101)
+        self.assertAlmostEqual(circle["radius"], 2**0.5)
+        self.rejected(type="add_sketch_circle_three_points", sketch_id=self.sketch,
+                      first={"x": 0, "y": 0}, second={"x": 1, "y": 0}, third={"x": 2, "y": 0})
+
     def test_load_rejects_unsatisfied_saved_constraint(self):
         self.constraint("horizontal", [self.line])
         project = json.loads(self.path.read_text())

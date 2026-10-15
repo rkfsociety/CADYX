@@ -1596,7 +1596,13 @@ function handleStreamEvent(type, event) {
           type: command.element_type === "point" ? "sketch-point" : "sketch-lines",
           durationMs: command.element_type === "circle" ? 700 : 460,
         };
-      } else if (["add_sketch_polyline", "add_sketch_rectangle", "add_sketch_involute_gear", "mirror_sketch_elements", "pattern_sketch_elements"].includes(command.type)) {
+      } else if ([
+        "add_sketch_polyline", "add_sketch_rectangle", "add_sketch_rectangle_two_corners",
+        "add_sketch_rectangle_center", "add_sketch_rectangle_three_points", "add_sketch_rotated_rectangle",
+        "add_sketch_parallelogram", "add_sketch_regular_polygon", "add_sketch_circle_diameter",
+        "add_sketch_circle_two_points", "add_sketch_circle_three_points", "add_sketch_involute_gear",
+        "mirror_sketch_elements", "pattern_sketch_elements",
+      ].includes(command.type)) {
         activeSketchId = command.sketch_id || activeSketchId;
         pendingViewportTransition = activeSketchId ? {
           projectId, sketchId: activeSketchId, allSketchLines: true,

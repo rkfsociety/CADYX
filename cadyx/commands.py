@@ -130,8 +130,14 @@ class CommandSystem:
             return self._add_sketch_involute_gear(document, command, progress=progress)
         if kind == "add_sketch_rectangle":
             return self._add_sketch_rectangle(document, command, progress=progress)
+        if kind in {"add_sketch_rectangle_two_corners", "add_sketch_rectangle_center",
+                    "add_sketch_rectangle_three_points", "add_sketch_rotated_rectangle",
+                    "add_sketch_parallelogram", "add_sketch_regular_polygon"}:
+            return self._add_sketch_polygon_tool(document, command, kind, progress=progress)
         if kind == "add_sketch_circle":
             return self._add_sketch_circle(document, command, progress=progress)
+        if kind in {"add_sketch_circle_diameter", "add_sketch_circle_two_points", "add_sketch_circle_three_points"}:
+            return self._add_sketch_circle_tool(document, command, kind, progress=progress)
         if kind == "mirror_sketch_elements":
             return self._mirror_sketch_elements(document, command, progress=progress)
         if kind == "pattern_sketch_elements":
@@ -265,6 +271,117 @@ class CommandSystem:
         points = [(x, y), (right, y), (right, top), (x, top)]
         return self._append_sketch_polyline(
             document, sketch, points, closed=True, operation="add_sketch_rectangle", progress=progress,
+        )
+
+    def _add_sketch_polygon_tool(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        kind: str,
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        if kind == "add_sketch_rectangle_two_corners":
+            x1, y1, x2, y2 = (
+                _finite_number(command.get(key), key) for key in ("x1", "y1", "x2", "y2")
+            )
+            points = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+        elif kind == "add_sketch_rectangle_center":
+            cx = _finite_number(command.get("center_x"), "Rectangle center x")
+            cy = _finite_number(command.get("center_y"), "Rectangle center y")
+            width, height = _number(command.get("width"), "width"), _number(command.get("height"), "height")
+            points = [(cx-width/2, cy-height/2), (cx+width/2, cy-height/2),
+                      (cx+width/2, cy+height/2), (cx-width/2, cy+height/2)]
+        elif kind in {"add_sketch_rectangle_three_points", "add_sketch_parallelogram"}:
+            values = command.get("points")
+            if not isinstance(values, list) or len(values) != 3:
+                raise ValidationError("Three-point geometry requires exactly three coordinate objects.")
+            points = [self._coordinate_pair(value, "Sketch point") for value in values]
+            first, corner, third = points
+            first_vector = (first[0]-corner[0], first[1]-corner[1])
+            second_vector = (third[0]-corner[0], third[1]-corner[1])
+            cross = first_vector[0]*second_vector[1] - first_vector[1]*second_vector[0]
+            if not math.isfinite(cross) or abs(cross) <= 1e-14:
+                raise ValidationError("Three-point geometry needs non-collinear points.")
+            fourth = (first[0]+third[0]-corner[0], first[1]+third[1]-corner[1])
+            if kind == "add_sketch_rectangle_three_points":
+                dot = first_vector[0]*second_vector[0] + first_vector[1]*second_vector[1]
+                scale = math.hypot(*first_vector) * math.hypot(*second_vector)
+                if not math.isfinite(dot) or abs(dot) > 1e-7 * max(1.0, scale):
+                    raise ValidationError("Rectangle sides defined by three points must be perpendicular.")
+            points = [first, corner, third, fourth]
+        elif kind == "add_sketch_rotated_rectangle":
+            cx = _finite_number(command.get("center_x"), "Rectangle center x")
+            cy = _finite_number(command.get("center_y"), "Rectangle center y")
+            width, height = _number(command.get("width"), "width"), _number(command.get("height"), "height")
+            angle = math.radians(_finite_number(command.get("angle_degrees"), "Rectangle angle"))
+            cosine, sine = math.cos(angle), math.sin(angle)
+            points = [(-width/2, -height/2), (width/2, -height/2),
+                      (width/2, height/2), (-width/2, height/2)]
+            points = [(cx+x*cosine-y*sine, cy+x*sine+y*cosine) for x, y in points]
+        else:
+            cx = _finite_number(command.get("center_x"), "Polygon center x")
+            cy = _finite_number(command.get("center_y"), "Polygon center y")
+            sides = command.get("side_count")
+            if type(sides) is not int or not 3 <= sides <= 512:
+                raise ValidationError("A regular polygon needs 3 to 512 sides.")
+            radius = _number(command.get("radius"), "radius")
+            radius_mode = command.get("radius_mode", "inscribed")
+            if radius_mode not in {"inscribed", "circumscribed"}:
+                raise ValidationError("radius_mode must be inscribed or circumscribed.")
+            if radius_mode == "circumscribed":
+                radius /= math.cos(math.pi / sides)
+            rotation = math.radians(_finite_number(command.get("rotation_degrees", 0), "Polygon rotation"))
+            points = [(cx + radius*math.cos(rotation + math.tau*index/sides),
+                       cy + radius*math.sin(rotation + math.tau*index/sides)) for index in range(sides)]
+        if any(not math.isfinite(value) for point in points for value in point):
+            raise ValidationError("Sketch coordinates must remain finite.")
+        return self._append_sketch_polyline(
+            document, sketch, points, closed=True, operation=kind, progress=progress,
+        )
+
+    def _add_sketch_circle_tool(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        kind: str,
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        if kind == "add_sketch_circle_diameter":
+            diameter = _number(command.get("diameter"), "diameter")
+            return self._add_sketch_circle(
+                document, {"sketch_id": command.get("sketch_id"), "x": command.get("x"),
+                           "y": command.get("y"), "radius": diameter / 2}, progress=progress,
+            )
+        if kind == "add_sketch_circle_two_points":
+            first = self._coordinate_pair(command.get("first"), "First circle point")
+            second = self._coordinate_pair(command.get("second"), "Second circle point")
+            cx, cy = first[0] / 2 + second[0] / 2, first[1] / 2 + second[1] / 2
+            radius = math.hypot(first[0] - second[0], first[1] - second[1]) / 2
+        else:
+            first = self._coordinate_pair(command.get("first"), "First circle point")
+            second = self._coordinate_pair(command.get("second"), "Second circle point")
+            third = self._coordinate_pair(command.get("third"), "Third circle point")
+            ax, ay = first
+            bx, by = second[0] - ax, second[1] - ay
+            cx, cy = third[0] - ax, third[1] - ay
+            determinant = 2 * (bx*cy - by*cx)
+            scale = max(math.hypot(bx, by), math.hypot(cx, cy), math.hypot(cx-bx, cy-by))
+            if not math.isfinite(determinant) or abs(determinant) <= 1e-14 * max(1.0, scale*scale):
+                raise ValidationError("Three circle points must be distinct and non-collinear.")
+            b2, c2 = bx*bx+by*by, cx*cx+cy*cy
+            offset_x = (b2*cy - c2*by) / determinant
+            offset_y = (bx*c2 - cx*b2) / determinant
+            center_x, center_y = ax + offset_x, ay + offset_y
+            cx, cy = center_x, center_y
+            radius = math.hypot(offset_x, offset_y)
+        if not all(math.isfinite(value) for value in (cx, cy, radius)) or radius <= 0:
+            raise ValidationError("Circle points must define a finite circle with positive radius.")
+        return self._add_sketch_circle(
+            document, {"sketch_id": command.get("sketch_id"), "x": cx, "y": cy, "radius": radius},
+            progress=progress,
         )
 
     def _add_sketch_circle(

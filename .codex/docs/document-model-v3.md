@@ -63,8 +63,24 @@ their respective human/agent edit leases. Results below appear inside
 - `add_sketch_rectangle`: `sketch_id`, lower-left `x` and `y`, positive `width`
   and `height`. Adds a closed four-sided profile as ordinary points and lines
   and returns their ids in one command.
+- `add_sketch_rectangle_two_corners`: `sketch_id`, opposite-corner `x1`, `y1`,
+  `x2`, `y2`; both sides must exceed 1e-7. `add_sketch_rectangle_center` uses
+  `center_x`, `center_y`, positive `width` and `height`.
+  `add_sketch_rectangle_three_points` takes `points` as three consecutive
+  `{x, y}` corners and checks perpendicular adjacent sides. `add_sketch_rotated_rectangle`
+  uses `center_x`, `center_y`, positive `width`/`height`, and `angle_degrees`.
+  `add_sketch_parallelogram` takes three consecutive non-collinear `{x, y}`
+  corners. `add_sketch_regular_polygon` uses `center_x`, `center_y`, integer
+  `side_count` (3–512), positive `radius`, optional `rotation_degrees` (default
+  0) and `radius_mode` (`inscribed` default or `circumscribed`). Each command
+  creates a closed point/line profile and returns its point and line ids.
 - `add_sketch_circle`: `sketch_id`, center `x` and `y`, and positive `radius`.
   Adds the center point and circle together and returns `point_id` and `circle_id`.
+- `add_sketch_circle_diameter`: `sketch_id`, center `x`/`y`, and positive
+  `diameter`. `add_sketch_circle_two_points` takes `first` and `second` `{x, y}`
+  coordinates as opposite ends of a diameter. `add_sketch_circle_three_points`
+  takes three distinct non-collinear coordinate objects. All create an exact
+  circle object and its center point, returning `point_id` and `circle_id`.
 - `mirror_sketch_elements`: `sketch_id`, non-empty `object_ids`, and `axis_start`
   / `axis_end` coordinate objects (`{x, y}`). Copies selected points, lines and
   circles reflected across the arbitrary in-plane axis; its endpoints must be
