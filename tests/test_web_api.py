@@ -244,6 +244,32 @@ class WebApiTests(unittest.TestCase):
         finally:
             self.core.events.unsubscribe(subscriber_id)
 
+    def test_project_listing_adopts_existing_directories_and_exposes_their_files(self) -> None:
+        directory = self.core.workspace.root / "imported-scans"
+        directory.mkdir()
+        source = directory / "scan.ply"
+        source.write_bytes(b"source mesh")
+
+        status, workspace = self.request("/api/v1/projects")
+
+        self.assertEqual(status, 200)
+        entry = next(item for item in workspace["projects"] if item["project"]["name"] == directory.name)
+        project_id = entry["project"]["id"]
+        self.assertEqual(entry["lock"]["state"], "FREE")
+        self.assertNotIn(directory.name, workspace["folders"])
+        self.assertEqual(source.read_bytes(), b"source mesh")
+
+        status, files = self.request(f"/api/v1/projects/{project_id}/files")
+
+        self.assertEqual(status, 200)
+        self.assertEqual([item["name"] for item in files["files"]], ["scan.ply"])
+        status, selected = self.request(
+            "/api/v1/agent/workspace/selection",
+            {"type": "folder", "folder_name": directory.name},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(selected["selection"], {"type": "folder", "folder_name": directory.name})
+
     def test_agent_dashboard_snapshot_contains_the_reported_russian_plan(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "Dashboard plan"})
         project_id = created["project"]["id"]

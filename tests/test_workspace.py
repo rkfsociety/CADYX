@@ -38,7 +38,54 @@ class ProjectWorkspaceTests(unittest.TestCase):
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "preserve")
         self.assertEqual(self.workspace.list_folder_projects(), ["Кружка"])
 
-    def test_legacy_uuid_folder_remains_readable_and_project_folder_is_not_a_generic_folder(self) -> None:
+    def test_listing_adopts_workspace_directories_without_replacing_their_files(self) -> None:
+        directory = self.root / "kobras1backcover"
+        directory.mkdir()
+        source = directory / "Merge_02_mesh.ply"
+        source.write_bytes(b"source mesh")
+        nested = directory / "references"
+        nested.mkdir()
+        (nested / "keep.txt").write_text("nested source", encoding="utf-8")
+
+        project = next(item for item in self.workspace.list() if item["name"] == directory.name)
+        project_id = project["id"]
+
+        self.assertEqual(project["document"]["objects"], [])
+        self.assertEqual((directory / ".cadyx-project-id").read_text(encoding="ascii").strip(), project_id)
+        self.assertEqual(source.read_bytes(), b"source mesh")
+        self.assertEqual((nested / "keep.txt").read_text(encoding="utf-8"), "nested source")
+        self.assertEqual(
+            [item["name"] for item in self.workspace.list_project_files(project_id)],
+            ["Merge_02_mesh.ply"],
+        )
+        self.assertEqual(
+            [item["name"] for item in self.workspace.list_folder_files(directory.name)],
+            ["Merge_02_mesh.ply"],
+        )
+        self.assertEqual(self.workspace.list_folder_projects(), [])
+        self.assertEqual(
+            next(item["id"] for item in self.workspace.list() if item["name"] == directory.name),
+            project_id,
+        )
+        self.assertEqual(
+            next(item["id"] for item in ProjectWorkspace(self.root).list() if item["name"] == directory.name),
+            project_id,
+        )
+        self.assertTrue(self.workspace.is_workspace_folder(directory.name))
+        with self.assertRaises(NotFoundError):
+            self.workspace.resolve_folder_file(directory.name, "project.json")
+
+    def test_listing_does_not_replace_a_non_cadyx_project_json_file(self) -> None:
+        directory = self.root / "unrecognized-data"
+        directory.mkdir()
+        project_file = directory / "project.json"
+        project_file.write_text("preserve", encoding="utf-8")
+
+        self.assertEqual(self.workspace.list(), [])
+        self.assertEqual(project_file.read_text(encoding="utf-8"), "preserve")
+        self.assertEqual(self.workspace.list_folder_projects(), [directory.name])
+
+    def test_legacy_uuid_folder_remains_readable_and_folder_api_hides_project_metadata(self) -> None:
         project = self.workspace.create("Старая кружка")
         named_directory = self.workspace._project_dir(project["id"])
         legacy_directory = self.root / project["id"]
@@ -47,8 +94,8 @@ class ProjectWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.workspace.load(project["id"])["name"], "Старая кружка")
         self.assertEqual([item["id"] for item in self.workspace.list()], [project["id"]])
         self.assertNotIn(project["id"], self.workspace.list_folder_projects())
-        with self.assertRaises(NotFoundError):
-            self.workspace.list_folder_files(project["id"])
+        self.assertEqual(self.workspace.list_folder_files(project["id"]), [])
+        self.assertTrue(self.workspace.is_workspace_folder(project["id"]))
 
     def test_project_file_resolver_accepts_only_direct_regular_files(self) -> None:
         project = self.workspace.create("STEP import")

@@ -107,7 +107,7 @@ class CadyxCore:
             folder_name = selection["folder_name"]
             if not isinstance(folder_name, str) or not folder_name.strip():
                 raise ValidationError("folder_name must be non-empty text.")
-            if folder_name not in self.workspace.list_folder_projects():
+            if not self.workspace.is_workspace_folder(folder_name):
                 raise NotFoundError("Workspace folder was not found.")
             selected = {"type": "folder", "folder_name": folder_name}
         else:

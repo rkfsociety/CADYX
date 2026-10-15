@@ -1,6 +1,6 @@
 # CADYX Project Format v1
 
-Every project lives at `projects/<project-name>/project.json`. The directory name is a filesystem-safe version of the display name, with a numeric suffix when a folder already exists. A local `.cadyx-project-id` marker keeps the stable UUID addressable even if `project.json` is damaged; the UUID remains the API and lease identity. Legacy `projects/<project-id>/` directories remain readable. The JSON document is UTF-8 and uses `format: "cadyx-project"` with `version: 1`.
+Every project lives at `projects/<project-name>/project.json`. Newly created projects use a filesystem-safe directory name, with a numeric suffix when a folder already exists. Existing workspace directories are adopted in place and keep their names. A local `.cadyx-project-id` marker keeps the stable UUID addressable even if `project.json` is damaged; the UUID remains the API and lease identity. Legacy `projects/<project-id>/` directories remain readable. The JSON document is UTF-8 and uses `format: "cadyx-project"` with `version: 1`.
 
 ```json
 {
@@ -21,6 +21,18 @@ Every project lives at `projects/<project-name>/project.json`. The directory nam
 ```
 
 The document and its successful command history are replaced together using a temporary file and an atomic filesystem replace. Edit leases are stored separately in a per-project `.cadyx-leases.sqlite3` runtime sidecar; live host sessions and leases are not serialized into `project.json`. See the [local multi-process lease contract](architecture.md#edit-leases) for lifecycle and backup restrictions. Unknown project or document versions are rejected rather than silently interpreted.
+
+## Existing workspace directories
+
+Project enumeration adopts each immediate, non-symlink directory that has no
+`project.json` and no conflicting `.cadyx-project-id` metadata. CADYX writes a
+new UUID marker and an empty project record in that same directory, using
+create-if-absent publication so existing files are preserved. A valid existing
+marker is reused if its project record is missing. Existing `project.json`
+files and invalid reserved metadata are never overwritten. Nested directories
+remain part of their parent project and are not enumerated as projects.
+Adopted directories appear in the project list, and their direct user files are
+available through the project file API.
 
 Agent stop fences and resumed-lease revision protection are stored separately
 in `.cadyx-agent.sqlite3`; they do not change the portable schema. See the
@@ -52,9 +64,11 @@ Migration preserves metadata, ids, geometry, references and existing history;
 it never adds a command or increments a revision. Reapplying migration to a
 current snapshot leaves its value unchanged.
 
-Reads, listings, lease operations and rejected commands do not rewrite legacy
-files. The next successful Core command under the current edit lease commits
-the migrated snapshot and its command/history change through the existing
-atomic save. A failed atomic replacement leaves the original file intact.
-There is no standalone migration write endpoint. Source CAD and scan files are
-outside migration scope. Older hosts are not guaranteed to read newer schemas.
+Reads, listings, lease operations and rejected commands do not rewrite existing
+project records for schema migration. Project listing can initialize an
+unregistered workspace directory as described above. The next successful Core
+command under the current edit lease commits the migrated snapshot and its
+command/history change through the existing atomic save. A failed atomic
+replacement leaves the original file intact. There is no standalone migration
+write endpoint. Source CAD and scan files are outside migration scope. Older
+hosts are not guaranteed to read newer schemas.

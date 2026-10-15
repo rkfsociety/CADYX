@@ -63,21 +63,25 @@ class ProjectWorkspace:
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
             raise ValidationError("Project name must be a non-empty string of at most 120 characters.")
         project_id = str(uuid4())
+        project = self._new_project_record(project_id, name.strip())
+        project_dir = self._create_project_directory(project["name"], project_id)
+        self._write_atomic(project_dir / "project.json", project)
+        self._remember_project_path(project_id, project_dir)
+        return project
+
+    @staticmethod
+    def _new_project_record(project_id: str, name: str) -> dict[str, Any]:
         now = utc_now()
-        project: dict[str, Any] = {
+        return {
             "format": "cadyx-project",
             "version": PROJECT_VERSION,
             "id": project_id,
-            "name": name.strip(),
+            "name": name,
             "created_at": now,
             "modified_at": now,
             "document": Document.create().to_dict(),
             "history": [],
         }
-        project_dir = self._create_project_directory(project["name"], project_id)
-        self._write_atomic(project_dir / "project.json", project)
-        self._remember_project_path(project_id, project_dir)
-        return project
 
     def load(self, project_id: str) -> dict[str, Any]:
         return self._load_project_from_directory(self._project_dir(project_id), project_id)
@@ -109,6 +113,8 @@ class ProjectWorkspace:
         for entry in self._project_directories():
             project_id = self._project_id_for_directory(entry)
             if project_id is None:
+                project_id = self._adopt_workspace_directory(entry)
+            if project_id is None:
                 continue
             if project_id in seen_ids:
                 raise ConflictError(
@@ -119,6 +125,30 @@ class ProjectWorkspace:
             projects.append(self._load_project_from_directory(entry, project_id))
         projects.sort(key=lambda item: (item["name"].casefold(), item["id"]))
         return projects
+
+    def _adopt_workspace_directory(self, directory: Path) -> str | None:
+        """Initialize an unclaimed top-level workspace directory without touching its files."""
+        project_file = directory / "project.json"
+        if project_file.exists() or project_file.is_symlink():
+            return self._project_id_for_directory(directory)
+
+        marker = directory / ".cadyx-project-id"
+        project_id = self._project_record_id(directory)
+        if project_id is None:
+            if marker.exists() or marker.is_symlink():
+                return None
+            project_id = str(uuid4())
+            if not self._write_new_file(marker, f"{project_id}\n".encode("ascii")):
+                project_id = self._project_record_id(directory)
+                if project_id is None:
+                    return None
+
+        project = self._new_project_record(project_id, directory.name)
+        encoded = (json.dumps(project, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
+        if not self._write_new_file(project_file, encoded):
+            return self._project_id_for_directory(directory)
+        self._remember_project_path(project_id, directory)
+        return project_id
 
     def list_folder_projects(self) -> list[str]:
         """Return direct workspace directories that do not contain a CADYX project record."""
@@ -134,7 +164,9 @@ class ProjectWorkspace:
         folder = self._workspace_folder_path(folder_name)
         files: list[dict[str, Any]] = []
         for entry in folder.iterdir():
-            if entry.name.startswith(".cadyx-tmp-") or entry.is_symlink() or not entry.is_file():
+            if (entry.name.startswith(".cadyx-tmp-")
+                    or self._is_internal_project_file(folder, entry.name)
+                    or entry.is_symlink() or not entry.is_file()):
                 continue
             try:
                 resolved = entry.resolve(strict=True)
@@ -237,7 +269,7 @@ class ProjectWorkspace:
         folder = self._workspace_folder_path(folder_name)
         if not self._is_single_path_segment(file_name):
             raise NotFoundError("Project file was not found.")
-        if file_name.startswith(".cadyx-tmp-"):
+        if file_name.startswith(".cadyx-tmp-") or self._is_internal_project_file(folder, file_name):
             raise NotFoundError("Project file was not found.")
         path = folder / file_name
         if path.is_symlink() or not path.is_file():
@@ -403,9 +435,14 @@ class ProjectWorkspace:
             raise NotFoundError("Project folder was not found.") from exc
         if resolved.parent != self.root:
             raise NotFoundError("Project folder was not found.")
-        if self._project_id_for_directory(resolved) is not None:
-            raise NotFoundError("Project folder was not found.")
         return resolved
+
+    def is_workspace_folder(self, folder_name: str) -> bool:
+        try:
+            self._workspace_folder_path(folder_name)
+        except NotFoundError:
+            return False
+        return True
 
     def _project_directories(self) -> list[Path]:
         directories: list[Path] = []
@@ -484,6 +521,11 @@ class ProjectWorkspace:
 
     def _is_project_directory(self, directory: Path) -> bool:
         return self._project_id_for_directory(directory) is not None
+
+    def _is_internal_project_file(self, directory: Path, file_name: str) -> bool:
+        return self._project_id_for_directory(directory) is not None and (
+            file_name == "project.json" or file_name.startswith(".cadyx-")
+        )
 
     def _create_project_directory(self, name: str, project_id: str) -> Path:
         base_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", name.strip())
@@ -572,6 +614,27 @@ class ProjectWorkspace:
                 os.fsync(stream.fileno())
             os.replace(temporary_path, path)
             temporary_path = None
+        finally:
+            if temporary_path and os.path.exists(temporary_path):
+                os.unlink(temporary_path)
+
+    @staticmethod
+    def _write_new_file(path: Path, contents: bytes) -> bool:
+        """Publish a new file atomically without replacing a concurrent or user file."""
+        temporary_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", dir=path.parent, prefix=".cadyx-tmp-", suffix=".tmp", delete=False,
+            ) as stream:
+                temporary_path = stream.name
+                stream.write(contents)
+                stream.flush()
+                os.fsync(stream.fileno())
+            try:
+                os.link(temporary_path, path)
+            except FileExistsError:
+                return False
+            return True
         finally:
             if temporary_path and os.path.exists(temporary_path):
                 os.unlink(temporary_path)
