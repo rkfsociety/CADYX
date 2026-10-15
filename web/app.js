@@ -311,7 +311,6 @@ function workspaceControlLockReason() {
 function updateWorkspaceControls() {
   const lockReason = workspaceControlLockReason();
   const available = lockReason === null;
-  const projectsAvailable = !projectAddressPinned || !agentWorkStatusConnected || !agentWorkActive;
   projectDetail.dataset.controlsLocked = String(!available);
   const status = $("#workspace-lock-status");
   status.hidden = available;
@@ -331,9 +330,9 @@ function updateWorkspaceControls() {
   document.querySelectorAll("#project-detail button").forEach((button) => {
     const filesUnavailable = button.dataset.workspaceView === "files" && !canOpenFilesView();
     const projectsNavigation = button.dataset.workspaceView === "projects";
-    button.disabled = (projectsNavigation ? !projectsAvailable : !available) || filesUnavailable;
+    button.disabled = (!projectsNavigation && !available) || filesUnavailable;
     if (button.dataset.workspaceView) {
-      button.title = projectsNavigation && projectsAvailable ? ""
+      button.title = projectsNavigation ? ""
         : lockReason || (filesUnavailable
         ? "Доступно, когда агент освободит панель и завершит текущую работу" : "");
     }
