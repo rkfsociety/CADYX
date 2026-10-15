@@ -162,3 +162,162 @@
   window.CadyxPlyPreview = { parse: parsePly };
 })();
 
+/* Compact-shell layout corrections. Kept here because this asset already runs on every workspace page. */
+(() => {
+  const style = document.createElement("style");
+  style.id = "cadyx-compact-layout-fixes";
+  style.textContent = `
+:root {
+  --cadyx-rail-width: 140px;
+  --cadyx-overlay-width: min(400px, calc(100% - 24px));
+}
+.workspace-navigation { gap: 4px; padding: 6px; }
+.nav-item {
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 58px;
+  padding: 8px 9px;
+}
+.nav-index { font-size: 10px; text-align: center; }
+.nav-copy { min-width: 0; }
+.nav-copy strong { font-size: 10px; letter-spacing: .02em; white-space: nowrap; }
+
+.workflow-panel .panel-heading { gap: 12px; }
+.workflow-panel .panel-heading > h2 {
+  flex: 0 0 auto;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+.workflow-heading-actions {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+  gap: 8px;
+}
+.workflow-heading-actions .panel-note {
+  min-width: 0;
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.primary-grid[data-view="overview"] .workflow-panel[data-complete="true"][data-collapsed="true"] {
+  grid-template-rows: 34px 38px 50px;
+}
+.primary-grid[data-view="overview"] .workflow-panel[data-complete="true"][data-collapsed="true"] .workflow-summary {
+  grid-template-columns: 56px minmax(0, 1fr);
+}
+.primary-grid[data-view="overview"] .workflow-panel[data-complete="true"][data-collapsed="true"] .workflow-eta,
+.primary-grid[data-view="overview"] .workflow-panel[data-complete="true"][data-collapsed="true"] .workflow-current-label {
+  display: none;
+}
+.primary-grid[data-view="overview"] .workflow-panel[data-complete="true"][data-collapsed="true"] .workflow-current {
+  gap: 4px;
+  padding: 6px 10px;
+  overflow: hidden;
+}
+.primary-grid[data-view="overview"] .workflow-panel[data-complete="true"][data-collapsed="true"] .workflow-action {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewport-footer { left: 88px; }
+.viewport-footer span:first-child {
+  flex: 0 1 300px;
+  min-width: 150px;
+  max-width: 300px;
+}
+.viewport-footer span:first-child strong { max-width: 225px; }
+
+@media (max-width: 1180px) {
+  :root {
+    --cadyx-rail-width: 120px;
+    --cadyx-overlay-width: min(370px, calc(100% - 20px));
+  }
+  .workspace-navigation { padding: 5px; }
+  .nav-item {
+    grid-template-columns: 22px minmax(0, 1fr);
+    justify-items: stretch;
+    gap: 6px;
+    min-height: 54px;
+    padding: 7px 6px;
+    text-align: left;
+  }
+  .nav-index { font-size: 9px; }
+  .nav-copy strong { font-size: 8px; }
+}
+
+@media (max-width: 760px) {
+  .project-detail { grid-template-columns: 68px minmax(0, 1fr); }
+  .nav-item {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    min-height: 48px;
+    padding: 5px 3px;
+    text-align: center;
+  }
+  .nav-copy strong {
+    font-size: 7px;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+  }
+  .viewport-footer { left: 70px; }
+}
+`;
+  document.head.appendChild(style);
+
+  window.addEventListener("DOMContentLoaded", () => {
+    const workflow = document.querySelector("#workflow-panel");
+    const workflowToggle = document.querySelector("#workflow-toggle");
+    const workflowProgress = document.querySelector("#workflow-progress");
+    const workflowName = document.querySelector("#workflow-name");
+    const agentState = document.querySelector("#agent-state");
+    if (!workflow || !workflowToggle) return;
+
+    const syncChevron = () => {
+      const collapsed = workflow.dataset.collapsed !== "false";
+      workflowToggle.textContent = collapsed ? "⌄" : "⌃";
+      workflowToggle.title = collapsed ? "Развернуть прогресс" : "Свернуть прогресс";
+      workflowToggle.setAttribute("aria-label", workflowToggle.title);
+      workflowToggle.setAttribute("aria-expanded", String(!collapsed));
+    };
+
+    const syncCompletion = () => {
+      const progress = Number(workflowProgress?.getAttribute("aria-valuenow"));
+      const complete = Number.isFinite(progress) && progress >= 100 && agentState?.dataset.state !== "running";
+      workflow.dataset.complete = String(complete);
+      if (complete) workflow.dataset.collapsed = "true";
+      if (workflowName) workflowName.title = workflowName.textContent?.trim() || "";
+      syncChevron();
+    };
+
+    new MutationObserver(syncChevron).observe(workflow, {
+      attributes: true,
+      attributeFilter: ["data-collapsed"],
+    });
+    if (workflowProgress) {
+      new MutationObserver(syncCompletion).observe(workflowProgress, {
+        attributes: true,
+        attributeFilter: ["aria-valuenow"],
+      });
+    }
+    if (agentState) {
+      new MutationObserver(syncCompletion).observe(agentState, {
+        attributes: true,
+        attributeFilter: ["data-state"],
+      });
+    }
+    if (workflowName) {
+      new MutationObserver(syncCompletion).observe(workflowName, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    }
+    workflowToggle.addEventListener("click", () => requestAnimationFrame(syncChevron));
+    syncCompletion();
+    syncChevron();
+  });
+})();
