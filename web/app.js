@@ -61,9 +61,9 @@ const modelViewer = window.CadyxViewport.createViewer($("#model-preview"), {
   showViewCube: true, wireframe: true, onRender: queueViewportSnapshot,
 });
 const orthographicViewers = [
-  { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: 0 } },
-  { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: Math.PI / 2, pitch: 0 } },
-  { viewer: window.CadyxViewport.createViewer($("#ortho-top"), { showCoordinateGizmo: false, showRotationAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: Math.PI / 2 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: 0 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: Math.PI / 2, pitch: 0 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-top"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: Math.PI / 2 } },
 ];
 orthographicViewers.forEach((view) => {
   view.viewer.setCamera({ ...view.camera, zoom: 1, projection: "orthographic" });
@@ -1701,6 +1701,24 @@ function animateModelCamera(change) {
 
 function handleStreamEvent(type, event) {
   const projectId = event.project_id;
+  if (type === "workspace.selection.changed" || type === "project.created") {
+    const selection = type === "project.created"
+      ? { type: "project", project_id: projectId }
+      : event.data || {};
+    const address = new URL(window.location.href);
+    if (selection.type === "project" && typeof selection.project_id === "string") {
+      address.searchParams.set("project_id", selection.project_id);
+      address.searchParams.delete("folder");
+    } else if (selection.type === "folder" && typeof selection.folder_name === "string") {
+      address.searchParams.delete("project_id");
+      address.searchParams.set("folder", selection.folder_name);
+    } else {
+      return;
+    }
+    address.searchParams.delete("view");
+    window.location.assign(`${address.pathname}${address.search}${address.hash}`);
+    return;
+  }
   if (type === "workspace.agent-work") {
     const data = event.data || {};
     applyAgentWorkLock(data.active, data.revision, data.project_ids);
@@ -1708,7 +1726,6 @@ function handleStreamEvent(type, event) {
     updateWorkspaceControls();
     return;
   }
-  if (type === "workspace.selection.changed" || type === "project.created") return;
   if (type === "project.deleted") {
     if (projectAddressPinned && projectId === selectedProjectId) window.location.assign("/");
     else scheduleWorkspaceRefresh();

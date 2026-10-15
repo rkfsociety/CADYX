@@ -323,8 +323,11 @@ class CommandSystem:
 
     @staticmethod
     def _remove_body(document: Document, command: dict[str, Any]) -> dict[str, Any]:
-        if not command.keys() <= {"type", "body_id"}:
+        if not command.keys() <= {"type", "body_id", "remove_source_file"}:
             raise ValidationError("Body removal contains unsupported fields.")
+        remove_source_file = command.get("remove_source_file", False)
+        if type(remove_source_file) is not bool:
+            raise ValidationError("remove_source_file must be a boolean.")
         body_id = command.get("body_id")
         if not isinstance(body_id, str):
             raise NotFoundError("Body to remove was not found.")
@@ -354,11 +357,35 @@ class CommandSystem:
             raise ValidationError("Body is referenced by other document objects and cannot be removed.")
 
         feature_ids = set(body.get("feature_ids", []))
+        source_file = None
+        if remove_source_file:
+            import_features = [
+                item for item in document.objects
+                if item.get("id") in feature_ids and item.get("operation") == "import_step"
+            ]
+            if len(import_features) != 1:
+                raise ValidationError("Removing a staged source file requires one imported STEP feature owned by this body.")
+            source_file = import_features[0].get("source", {}).get("file")
+            if not isinstance(source_file, str):
+                raise ValidationError("The imported STEP feature has no valid source filename.")
+            shared_source = any(
+                item.get("type") == "feature"
+                and item.get("operation") == "import_step"
+                and item.get("id") not in feature_ids
+                and item.get("source", {}).get("file") == source_file
+                for item in document.objects
+            )
+            if shared_source:
+                raise ValidationError("The STEP source file is still used by another imported body and cannot be removed.")
         document.objects[:] = [
             item for item in document.objects
             if item is not body and item.get("id") not in feature_ids
         ]
-        return {"body_id": body_id, "removed_feature_ids": sorted(feature_ids)}
+        return {
+            "body_id": body_id,
+            "removed_feature_ids": sorted(feature_ids),
+            **({"source_file_to_remove": source_file} if source_file else {}),
+        }
 
     def _create_sketch_from_section(
         self, document: Document, command: dict[str, Any], *,

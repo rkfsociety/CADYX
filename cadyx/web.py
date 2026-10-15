@@ -295,6 +295,10 @@ def make_request_handler(
                 if len(parts) == 4 and parts[:3] == ["api", "v1", "projects"]:
                     self._json(200, core.delete_project(parts[3]))
                     return
+                if (len(parts) == 7 and parts[:4] == ["api", "v1", "agent", "projects"]
+                        and parts[5] == "files"):
+                    self._json(200, core.remove_staged_project_step(parts[4], unquote(parts[6])))
+                    return
                 self._json(404, {"error": "NOT_FOUND", "message": "Route was not found."})
             except CadyxError as exc:
                 self._json(exc.http_status, exc.as_dict())

@@ -396,6 +396,19 @@ class ProjectWorkspace:
             "sha256": hashlib.sha256(content).hexdigest(),
         }
 
+    def remove_project_step(self, project_id: str, filename: str) -> dict[str, Any]:
+        """Remove one direct STEP reference file after its document dependency is cleared."""
+        if (not self._is_single_path_segment(filename)
+                or Path(filename).suffix.casefold() not in {".step", ".stp"}):
+            raise ValidationError("Only a direct .step or .stp reference file can be removed.")
+        path = self.resolve_project_file(project_id, filename)
+        try:
+            size = path.stat().st_size
+            path.unlink()
+        except OSError as exc:
+            raise ValidationError(f"STEP reference file could not be removed: {exc}.") from exc
+        return {"name": filename, "removed": True, "size": size}
+
     def workspace_revision_token(self) -> str:
         """Return a cheap token for project, folder and group-list changes."""
         entries: list[tuple[str, str, int, int]] = []

@@ -24,6 +24,7 @@ Use the `cadyx_*` MCP tools for every CADYX document operation: workspace select
 4. For a lost command response or interruption, inspect project revision, history, activity and lock before deciding what to do. The adapter never retries a mutation automatically. Use `cadyx_stop_agent_work` only for a lease owned by this MCP session; use `cadyx_resume_agent_work` only after the API confirms a safe state and with the current revision. Use `cadyx_recover_expired_lease` only when the API explicitly reports expiration; Core validates the saved state before release.
 5. Keep the viewer on the target project. Use API camera operations when a useful angle is needed. Inspect the final complete scene and image, not just the latest command: verify intended dimensions and datum, closed profiles, joins/intersections, number of solids and B-rep validity/topology where applicable. Distinguish imported triangle meshes from editable B-reps. Report only properties the API or measurements establish.
 6. After final verification, mark every dashboard phase completed and progress 100%. Confirm the project lock is `FREE` and the final activity has no running operation.
+7. For a reference-driven model built from scratch, treat the uploaded STEP as working input. Once the new model has been verified, remove the now-unreferenced imported reference body with `remove_body` and `remove_source_file: true`. Preserve the user's original source file and any exported deliverables.
 
 ## Scan reverse engineering
 

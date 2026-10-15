@@ -12,7 +12,7 @@ from typing import Any, Callable, Iterator
 from uuid import uuid4
 
 from .commands import CommandSystem
-from .errors import ConflictError, NotFoundError, ValidationError
+from .errors import CadyxError, ConflictError, NotFoundError, ValidationError
 from .events import EventBroker
 from .kernel import GeometryKernel, OCCTKernelAdapter
 from .lease import EditLeaseManager
@@ -93,6 +93,26 @@ class CadyxCore:
             ):
                 raise ConflictError("STEP files can only be staged in a free project with no running operation.", code="PROJECT_BUSY")
             return self.workspace.publish_project_step(project_id, filename, content)
+
+    def remove_staged_project_step(self, project_id: str, filename: str) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            lock = self.leases.snapshot(project_id)
+            activities, _ = self.events.activity_state_snapshot(project_id)
+            if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
+                item.get("state") == "running" for item in activities
+            ):
+                raise ConflictError("STEP references can only be removed from a free project with no running operation.", code="PROJECT_BUSY")
+            project = self.workspace.load(project_id)
+            document = Document.from_dict(project["document"])
+            still_used = any(
+                item.get("type") == "feature"
+                and item.get("operation") == "import_step"
+                and item.get("source", {}).get("file") == filename
+                for item in document.objects
+            )
+            if still_used:
+                raise ConflictError("The STEP file is still used by an imported body and cannot be removed.", code="FILE_IN_USE")
+            return self.workspace.remove_project_step(project_id, filename)
 
     def rename_project(self, project_id: str, name: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id):
@@ -685,6 +705,14 @@ class CadyxCore:
                 activity["phase"] = "save_document"
                 self._publish_activity(project_id, activity)
                 self.workspace.save(next_project)
+                staged_source = result.get("source_file_to_remove")
+                if staged_source:
+                    try:
+                        self.workspace.remove_project_step(project_id, staged_source)
+                        result["source_file_removed"] = True
+                    except CadyxError as cleanup_error:
+                        result["source_file_removed"] = False
+                        result["source_file_cleanup_error"] = str(cleanup_error)
                 self._remember_geometry_validation(project_id, document)
             except Exception as exc:
                 activity.update({"state": "failed", "error": str(exc)})

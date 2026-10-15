@@ -232,16 +232,23 @@ their respective human/agent edit leases. Results below appear inside
 - `remove_sketch_object`: `object_id`. No cascading deletion: a referenced object
   cannot be removed. Remove constraints, lines/circles, points, then the sketch
   as appropriate. Returns `object_id`.
-- `remove_body`: `body_id`. Removes the body's owned feature records from the
+- `remove_body`: `body_id`, optional `remove_source_file` (boolean, default
+  false). Removes the body's owned feature records from the
   current document only when no other document object references that body.
   Sketches and prior command-history entries remain. Returns the removed body
   and feature ids; export the body first when its standalone geometry must be
-  retained outside command history.
+  retained outside command history. Set `remove_source_file: true` only for a
+  temporary STEP reference; after saving the document, CADYX removes its staged
+  direct project file and leaves the original local source untouched. The
+  imported body must own exactly one `import_step` feature.
 - `import_step`: `file` names a direct `.step` or `.stp` file in the current
   CADYX project folder; optional `name` overrides the body name. It imports one
   solid through OCCT, stores its editable B-rep in the document, and returns the
   body/feature ids, source SHA-256 and byte length, and source geometry metrics.
-  The source file is preserved. Paths cannot leave the current project folder.
+  The source file is preserved during import. Paths cannot leave the current
+  project folder. For a temporary reconstruction reference, first remove its
+  unreferenced body with `remove_body` and `remove_source_file: true` to remove
+  its staged project copy after saving. The original local file is not affected.
 
 Example: create a sketch; add points at (0, 0) and (3, 0); add a line referencing
 their returned ids; add a horizontal constraint referencing the line id. Changing
@@ -430,6 +437,12 @@ MCP tool reads the supplied local regular file and transfers its bytes; the HTTP
 host does not accept or resolve arbitrary filesystem paths. A project can be
 created without changing the viewer selection using `select: false` on the Agent
 API project-creation route.
+
+`DELETE /api/v1/agent/projects/{id}/files/{name}` removes only a direct STEP
+reference file from a free project. Core rejects removal while the current
+document contains an `import_step` feature for that filename. The local
+`cadyx_remove_staged_step` tool invokes this route; use it only after the
+reference body has been removed and the rebuilt model verified.
 
 The source metrics include volume, surface area, bounding coordinates, unique
 solid/face/edge/vertex counts, B-rep validity, and whether OCCT repaired the shape

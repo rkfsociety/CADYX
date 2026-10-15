@@ -84,6 +84,7 @@
     showViewCube = false,
     showCoordinateGizmo = true,
     showRotationAxes = true,
+    showWorldAxes = true,
     wireframe = false,
     shaded = true,
     wireframeColor = "#69d9c4",
@@ -284,6 +285,7 @@
         wireframeColor, wireframeOpacity, dpr,
       );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale);
+      if (showWorldAxes) drawWorldAxes(project, radius, dpr);
       for (let index = 0; index < (geometry.lines || []).length; index += 2) {
         const a = geometry.lines[index], b = geometry.lines[index + 1];
         let startX = screenX[a], startY = screenY[a];
@@ -395,6 +397,52 @@
         context.fillText("Z · ось вращения", end[0] + 6 * dpr, end[1] - 2 * dpr);
         context.restore();
       }
+    }
+
+    function drawWorldAxes(project, radius, dpr) {
+      const origin = project(0, 0, 0);
+      const length = Math.max(radius * 1.25, 0.001);
+      const axes = [
+        { name: "X", color: "#ef827b", end: [length, 0, 0] },
+        { name: "Y", color: "#71d7bb", end: [0, length, 0] },
+        { name: "Z", color: "#8ecbff", end: [0, 0, length] },
+      ];
+      context.save();
+      context.globalAlpha = 0.7;
+      context.lineWidth = 1.3 * dpr;
+      context.setLineDash([7 * dpr, 5 * dpr]);
+      for (const axis of axes) {
+        const start = project(-axis.end[0], -axis.end[1], -axis.end[2]);
+        const end = project(...axis.end);
+        context.strokeStyle = axis.color;
+        context.fillStyle = axis.color;
+        context.beginPath();
+        context.moveTo(...start);
+        context.lineTo(...end);
+        context.stroke();
+        context.setLineDash([]);
+        context.font = `600 ${11 * dpr}px Segoe UI, Arial, sans-serif`;
+        context.textBaseline = "middle";
+        context.fillText(axis.name, end[0] + 5 * dpr, end[1] - 2 * dpr);
+        context.setLineDash([7 * dpr, 5 * dpr]);
+      }
+      context.setLineDash([]);
+      context.globalAlpha = 1;
+      context.fillStyle = "#f4f6f7";
+      context.beginPath();
+      context.arc(origin[0], origin[1], 3 * dpr, 0, Math.PI * 2);
+      context.fill();
+      context.font = `600 ${10 * dpr}px Segoe UI, Arial, sans-serif`;
+      context.textBaseline = "middle";
+      const label = "0, 0, 0";
+      const labelX = origin[0] + 7 * dpr;
+      const labelY = origin[1] - 10 * dpr;
+      const labelWidth = context.measureText(label).width;
+      context.fillStyle = "rgba(17, 20, 23, 0.84)";
+      context.fillRect(labelX - 3 * dpr, labelY - 7 * dpr, labelWidth + 6 * dpr, 14 * dpr);
+      context.fillStyle = "#f4f6f7";
+      context.fillText(label, labelX, labelY);
+      context.restore();
     }
 
     function drawCoordinateGizmo(width, height, dpr, orientation) {

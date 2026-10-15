@@ -20,7 +20,8 @@ The matching `GET /api/v1/projects/{id}/viewport.png` and
 `GET /api/v1/agent/projects/{id}/viewport.png` endpoints return the exact
 `image/png` frame drawn in the browser's main model canvas when a current
 browser frame is available. This includes the same camera, wireframe mode,
-rotation axis, coordinate gizmo, and grid. The browser publishes frames to
+rotation axis, global XYZ axes through the origin with a `0, 0, 0` marker,
+coordinate gizmo, and grid. The browser publishes frames to
 `POST /api/v1/agent/projects/{id}/viewport/snapshot`, tagged with the document
 revision; this is a read-only observation update, needs no edit lease, and is
 held in memory only. Frames are refreshed as the viewport renders, with uploads

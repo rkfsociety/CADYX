@@ -106,6 +106,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_list_project_files", "description": "List direct user files in a saved project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_read_project_file", "description": "Read a direct project file through the read-only Agent API; small images are returned as image content.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING}, ["project_id", "name"])},
     {"name": "cadyx_upload_project_step", "description": "Copy a local STEP file into a project through the Agent API without overwriting existing files or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
+    {"name": "cadyx_remove_staged_step", "description": "Remove an unused direct STEP reference file from a FREE project; CADYX preserves the original local source.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING}, ["project_id", "name"])},
     {"name": "cadyx_list_folder_files", "description": "List direct user files in a workspace folder.", "inputSchema": _schema({"folder_name": _STRING}, ["folder_name"])},
     {"name": "cadyx_read_folder_file", "description": "Read a direct workspace file through the read-only API; small images are returned as image content.", "inputSchema": _schema({"folder_name": _STRING, "name": _STRING}, ["folder_name", "name"])},
     {"name": "cadyx_inspect_topology", "description": "Inspect current editable B-rep edges before a fillet. Refresh topology after any upstream edit.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING}, ["project_id", "body_id"])},
@@ -187,6 +188,10 @@ class MCPApplication:
             content = source.read_bytes()
             path = self._project(args["project_id"], "/files/" + urllib.parse.quote(source.name, safe=""))
             raw, _ = self.api.request("POST", path, content)
+            return json.loads(raw.decode("utf-8"))
+        if name == "cadyx_remove_staged_step":
+            path = self._project(args["project_id"], "/files/" + urllib.parse.quote(args["name"], safe=""))
+            raw, _ = self.api.request("DELETE", path)
             return json.loads(raw.decode("utf-8"))
         if name == "cadyx_list_folder_files":
             folder = urllib.parse.quote(args["folder_name"], safe="")
