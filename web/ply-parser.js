@@ -61,6 +61,23 @@
     return { dataOffset: lineEnd + 1, vertex, face, littleEndian, format };
   }
 
+  function getColorReaders(properties) {
+    const names = [["red", "r"], ["green", "g"], ["blue", "b"]];
+    const readers = names.map((aliases) => {
+      const index = properties.findIndex((property) => !property.list && aliases.includes(property.name));
+      if (index < 0) return null;
+      return { index, type: properties[index].type };
+    });
+    return readers.every(Boolean) ? readers : null;
+  }
+
+  function normalizeColor(value, type) {
+    if (!Number.isFinite(value)) throw new Error("В PLY найдены некорректные цвета вершин.");
+    const scaled = (type === "float" || type === "float32" || type === "double" || type === "float64")
+      && value >= 0 && value <= 1 ? value * 255 : value;
+    return Math.round(Math.max(0, Math.min(255, scaled)));
+  }
+
   function triangulatePolygon(indices, positions, triangles) {
     const polygon = [];
     for (const index of indices) {
@@ -182,10 +199,12 @@
     if (vertex.properties.some((property) => property.list || !scalarTypes[property.type])) {
       throw new Error("Списки свойств вершин PLY не поддерживаются.");
     }
+    const colorReaders = getColorReaders(vertex.properties);
 
     const pointCloud = !face || face.count === 0;
     const previewVertexCount = pointCloud ? Math.min(vertex.count, MAX_PREVIEW_POINTS) : vertex.count;
     const positions = new Float32Array(previewVertexCount * 3);
+    const colors = colorReaders && pointCloud ? new Uint8Array(previewVertexCount * 3) : null;
     let cursor = dataOffset;
     for (let index = 0; index < vertex.count; index += 1) {
       const record = nextAsciiRecord(bytes, cursor);
@@ -206,6 +225,14 @@
         if (sampledOffset >= 0) positions[sampledOffset + axis] = previewValue;
         bounds.min[axis] = Math.min(bounds.min[axis], value);
         bounds.max[axis] = Math.max(bounds.max[axis], value);
+      }
+      if (colors) {
+        for (let channel = 0; channel < 3; channel += 1) {
+          const reader = colorReaders[channel];
+          const value = Number(record.values[reader.index]);
+          const color = normalizeColor(value, reader.type);
+          if (sampledOffset >= 0) colors[sampleIndex * 3 + channel] = color;
+        }
       }
     }
 
@@ -259,6 +286,7 @@
 
     return {
       positions,
+      colors,
       triangles: new Uint32Array(triangles),
       bounds,
       vertexCount: vertex.count,
@@ -276,6 +304,7 @@
     if (format === "ascii") return parseAsciiPly(bytes, dataOffset, vertex, face);
     const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     const offsets = { x: null, y: null, z: null };
+    const colorOffsets = { red: null, r: null, green: null, g: null, blue: null, b: null };
     let vertexStride = 0;
 
     for (const property of vertex.properties) {
@@ -283,6 +312,9 @@
       const scalar = scalarTypes[property.type];
       if (!scalar) throw new Error(`Неподдерживаемый тип PLY: ${property.type}.`);
       if (Object.hasOwn(offsets, property.name)) offsets[property.name] = { offset: vertexStride, type: property.type };
+      if (Object.hasOwn(colorOffsets, property.name)) {
+        colorOffsets[property.name] = { offset: vertexStride, type: property.type };
+      }
       vertexStride += scalar.size;
     }
     if (Object.values(offsets).some((item) => item === null)) throw new Error("У вершин PLY должны быть координаты x, y, z.");
@@ -293,6 +325,13 @@
     const pointCloud = !face || face.count === 0;
     const previewVertexCount = pointCloud ? Math.min(vertex.count, MAX_PREVIEW_POINTS) : vertex.count;
     const positions = new Float32Array(previewVertexCount * 3);
+    const colorProperties = [
+      colorOffsets.red || colorOffsets.r,
+      colorOffsets.green || colorOffsets.g,
+      colorOffsets.blue || colorOffsets.b,
+    ];
+    const colors = colorProperties.every(Boolean) && pointCloud
+      ? new Uint8Array(previewVertexCount * 3) : null;
     const coordinateReaders = ["x", "y", "z"].map((key) => ({
       offset: offsets[key].offset, read: scalarTypes[offsets[key].type].read,
     }));
@@ -313,6 +352,14 @@
         if (sampledOffset >= 0) positions[sampledOffset + axis] = previewValue;
         bounds.min[axis] = Math.min(bounds.min[axis], value);
         bounds.max[axis] = Math.max(bounds.max[axis], value);
+      }
+      if (colors) {
+        for (let channel = 0; channel < 3; channel += 1) {
+          const property = colorProperties[channel];
+          const value = scalarTypes[property.type].read(data, cursor + property.offset, littleEndian);
+          const color = normalizeColor(value, property.type);
+          if (sampledOffset >= 0) colors[sampleIndex * 3 + channel] = color;
+        }
       }
       cursor += vertexStride;
     }
@@ -368,6 +415,7 @@
 
     return {
       positions,
+      colors,
       triangles: new Uint32Array(triangles),
       bounds,
       vertexCount: vertex.count,
