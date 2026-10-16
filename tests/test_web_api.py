@@ -610,6 +610,13 @@ class WebApiTests(unittest.TestCase):
         with urlopen(self.base_url + "/", timeout=3) as response:
             self.assertEqual(response.status, 200)
             self.assertIn(b"CADYX", response.read())
+        with urlopen(self.base_url + "/scanner", timeout=3) as response:
+            scanner_page = response.read()
+            self.assertEqual(response.status, 200)
+            self.assertIn(b"scanner-camera.js?v=", scanner_page)
+        with urlopen(self.base_url + "/assets/scanner-camera.js", timeout=3) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn(b"yawDepth", response.read())
         with urlopen(self.base_url + "/assets/ply-parser.js", timeout=3) as response:
             self.assertEqual(response.status, 200)
             self.assertIn(b"window.CadyxPlyPreview", response.read())

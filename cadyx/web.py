@@ -25,7 +25,10 @@ _MAX_BODY_BYTES = 1_000_000
 _MAX_STEP_UPLOAD_BYTES = 64 * 1024 * 1024
 _MAX_VIEWPORT_SNAPSHOT_BYTES = 16 * 1024 * 1024
 _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
-_UI_ASSETS = ("index.html", "app.js", "style.css", "viewport.js", "ply-parser.js", "ply-preview.js", "favicon.svg")
+_UI_ASSETS = (
+    "index.html", "scanner.html", "app.js", "style.css", "viewport.js",
+    "ply-parser.js", "ply-preview.js", "scanner-camera.js", "favicon.svg",
+)
 _CLIENT_API_CONTRACT_VERSION = "viewport-snapshot-v1"
 _UI_ASSET_VERSION_LOCK = threading.Lock()
 _UI_ASSET_VERSION_CACHE: tuple[tuple[tuple[str, int, int], ...], str] | None = None
@@ -250,6 +253,9 @@ def make_request_handler(
                     return
                 if parsed.path == "/assets/viewport.js":
                     self._static("viewport.js", "text/javascript; charset=utf-8")
+                    return
+                if parsed.path == "/assets/scanner-camera.js":
+                    self._static("scanner-camera.js", "text/javascript; charset=utf-8")
                     return
                 if parsed.path == "/assets/ply-parser.js":
                     self._static("ply-parser.js", "text/javascript; charset=utf-8")
@@ -537,9 +543,13 @@ def make_request_handler(
 
         def _static(self, filename: str, content_type: str) -> None:
             data = (_WEB_ROOT / filename).read_bytes()
-            if filename == "index.html":
+            if filename in {"index.html", "scanner.html"}:
                 version = _ui_asset_version()
-                for asset in ("style.css", "viewport.js", "ply-preview.js", "app.js"):
+                assets = (
+                    ("style.css", "viewport.js", "ply-preview.js", "app.js")
+                    if filename == "index.html" else ("style.css", "scanner-camera.js")
+                )
+                for asset in assets:
                     reference = f'"/assets/{asset}"'.encode("ascii")
                     versioned = f'"/assets/{asset}?v={version}"'.encode("ascii")
                     data = data.replace(reference, versioned)

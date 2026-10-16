@@ -147,6 +147,7 @@
       <div class="scanner-hint"><strong>ЗАПУСК ЗАХВАТА</strong>Программа CaptureY16 должна обновлять файл прямого потока в рабочей папке. Кадры доступны только через локальный API CADYX.<br><br><code>--live-raw .revopoint-live.raw</code></div>
     </aside>
   </main>
+  <script src="/assets/scanner-camera.js"></script>
   <script>
     (() => {
       const canvas = document.querySelector("#depth");
@@ -189,6 +190,7 @@
         if (window.latestCloud) drawCloud(window.latestCloud);
       });
       cloudCanvas.addEventListener("pointerup", () => { drag = null; });
+      cloudCanvas.addEventListener("pointercancel", () => { drag = null; });
 
       async function loadCalibration() {
         const response = await fetch(`/api/v1/scanner/calibration?ts=${Date.now()}`, { cache: "no-store" });
@@ -205,15 +207,13 @@
         let cx = 0, cy = 0, cz = 0;
         for (const p of points) { cx += p[0]; cy += p[1]; cz += p[2]; }
         cx /= points.length; cy /= points.length; cz /= points.length;
-        const cyaw = Math.cos(yaw), syaw = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
         const projected = new Array(points.length);
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
         for (let i = 0; i < points.length; i++) {
           const dx = points[i][0] - cx, dy = points[i][1] - cy, dz = points[i][2] - cz;
-          const x = dx * cyaw - dy * syaw;
-          const y = (dx * syaw + dy * cyaw) * cp - dz * sp;
-          const z = (dx * syaw + dy * cyaw) * sp + dz * cp;
-          projected[i] = [x, y, z];
+          const point = window.rotateScannerPoint(dx, dy, dz, yaw, pitch);
+          projected[i] = point;
+          const [x, y, z] = point;
           minX = Math.min(minX, x); maxX = Math.max(maxX, x);
           minY = Math.min(minY, y); maxY = Math.max(maxY, y);
           minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);

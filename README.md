@@ -71,6 +71,7 @@ Multiple current hosts may share a workspace on the same local machine; see the 
 $nodeVersion = (Get-Content scripts/runtime-versions.json -Raw | ConvertFrom-Json).node.version
 $node = ".\.runtime\node-v$nodeVersion-win-x64\node.exe"
 & $node tests/test_viewport.cjs
+& $node tests/test_scanner_camera.cjs
 & $node tests/test_ply_preview.cjs
 ```
 
