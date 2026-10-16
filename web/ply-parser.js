@@ -1,6 +1,7 @@
 (() => {
   const MAX_PREVIEW_FACES = 36_000;
   const MAX_PREVIEW_POINTS = 24_000;
+  const asciiDecoder = new TextDecoder("ascii");
   const scalarTypes = {
     char: { size: 1, read: (view, offset) => view.getInt8(offset) },
     int8: { size: 1, read: (view, offset) => view.getInt8(offset) },
@@ -22,7 +23,7 @@
 
   function parseHeader(bytes) {
     const headerBytes = bytes.subarray(0, Math.min(bytes.length, 65_536));
-    const headerText = new TextDecoder("ascii").decode(headerBytes);
+    const headerText = asciiDecoder.decode(headerBytes);
     const marker = headerText.indexOf("end_header");
     if (marker < 0) throw new Error("Заголовок PLY не найден или слишком длинный.");
     const lineEnd = headerText.indexOf("\n", marker);
@@ -49,15 +50,15 @@
       }
     }
 
-    if (format !== "binary_little_endian" && format !== "binary_big_endian") {
-      throw new Error("Предпросмотр поддерживает только двоичные PLY-файлы.");
+    if (format !== "ascii" && format !== "binary_little_endian" && format !== "binary_big_endian") {
+      throw new Error("Формат PLY для предпросмотра не поддерживается.");
     }
     const littleEndian = format === "binary_little_endian";
     const vertex = elements[0];
     const face = elements[1]?.name === "face" ? elements[1] : null;
     if (!vertex || vertex.name !== "vertex") throw new Error("В PLY не найдены вершины.");
     if (elements.length > (face ? 2 : 1)) throw new Error("PLY содержит неподдерживаемые типы элементов.");
-    return { dataOffset: lineEnd + 1, vertex, face, littleEndian };
+    return { dataOffset: lineEnd + 1, vertex, face, littleEndian, format };
   }
 
   function triangulatePolygon(indices, positions, triangles) {
@@ -156,11 +157,123 @@
     triangles.push(polygon[remaining[0]], polygon[remaining[1]], polygon[remaining[2]]);
   }
 
+  function nextAsciiRecord(bytes, cursor) {
+    while (cursor < bytes.length) {
+      const start = cursor;
+      while (cursor < bytes.length && bytes[cursor] !== 10) cursor += 1;
+      let end = cursor;
+      if (end > start && bytes[end - 1] === 13) end -= 1;
+      const line = asciiDecoder.decode(bytes.subarray(start, end)).trim();
+      cursor += Number(cursor < bytes.length);
+      if (line) return { values: line.split(/\s+/), cursor };
+    }
+    throw new Error("Данные PLY обрезаны.");
+  }
+
+  function parseAsciiPly(bytes, dataOffset, vertex, face) {
+    const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+    const coordinateReaders = ["x", "y", "z"].map((name) => {
+      const index = vertex.properties.findIndex((property) => property.name === name);
+      if (index < 0 || vertex.properties[index].list || !scalarTypes[vertex.properties[index].type]) {
+        throw new Error("У вершин PLY должны быть координаты x, y, z.");
+      }
+      return { index, type: vertex.properties[index].type };
+    });
+    if (vertex.properties.some((property) => property.list || !scalarTypes[property.type])) {
+      throw new Error("Списки свойств вершин PLY не поддерживаются.");
+    }
+
+    const pointCloud = !face || face.count === 0;
+    const previewVertexCount = pointCloud ? Math.min(vertex.count, MAX_PREVIEW_POINTS) : vertex.count;
+    const positions = new Float32Array(previewVertexCount * 3);
+    let cursor = dataOffset;
+    for (let index = 0; index < vertex.count; index += 1) {
+      const record = nextAsciiRecord(bytes, cursor);
+      cursor = record.cursor;
+      if (record.values.length !== vertex.properties.length) throw new Error("Некорректная строка вершин PLY.");
+      const sampleIndex = Math.floor(index * previewVertexCount / vertex.count);
+      const previousSampleIndex = index > 0
+        ? Math.floor((index - 1) * previewVertexCount / vertex.count) : -1;
+      const sampledOffset = sampleIndex !== previousSampleIndex ? sampleIndex * 3 : -1;
+      for (let axis = 0; axis < 3; axis += 1) {
+        const reader = coordinateReaders[axis];
+        const value = Number(record.values[reader.index]);
+        if (!Number.isFinite(value)) throw new Error("В PLY найдены некорректные координаты.");
+        const previewValue = Math.fround(value);
+        if (!Number.isFinite(previewValue)) {
+          throw new Error("Координаты PLY слишком велики для предпросмотра.");
+        }
+        if (sampledOffset >= 0) positions[sampledOffset + axis] = previewValue;
+        bounds.min[axis] = Math.min(bounds.min[axis], value);
+        bounds.max[axis] = Math.max(bounds.max[axis], value);
+      }
+    }
+
+    const triangles = [];
+    let faceCount = 0;
+    if (face) {
+      if (!face.properties.some((property) => property.list && property.name === "vertex_indices")) {
+        throw new Error("В PLY не найдены индексы вершин граней.");
+      }
+      const faceStep = Math.max(1, Math.ceil(face.count / MAX_PREVIEW_FACES));
+      for (let faceIndex = 0; faceIndex < face.count; faceIndex += 1) {
+        const record = nextAsciiRecord(bytes, cursor);
+        cursor = record.cursor;
+        let valueIndex = 0;
+        for (const property of face.properties) {
+          if (property.list) {
+            const countType = scalarTypes[property.countType];
+            const itemType = scalarTypes[property.itemType];
+            if (!countType || !itemType || valueIndex >= record.values.length) {
+              throw new Error("Неподдерживаемое свойство граней PLY.");
+            }
+            const itemCount = Number(record.values[valueIndex++]);
+            if (!Number.isSafeInteger(itemCount) || itemCount < 0 || itemCount > vertex.count + 1
+                || itemCount > record.values.length - valueIndex) {
+              throw new Error("Некорректная грань в файле PLY.");
+            }
+            const samplePolygon = property.name === "vertex_indices" && faceIndex % faceStep === 0;
+            if (samplePolygon) {
+              const polygon = [];
+              for (let item = 0; item < itemCount; item += 1) {
+                const pointIndex = Number(record.values[valueIndex + item]);
+                if (!Number.isSafeInteger(pointIndex) || pointIndex < 0 || pointIndex >= vertex.count) {
+                  throw new Error("Грань PLY ссылается на отсутствующую вершину.");
+                }
+                polygon.push(pointIndex);
+              }
+              triangulatePolygon(polygon, positions, triangles);
+            }
+            valueIndex += itemCount;
+          } else {
+            if (!scalarTypes[property.type] || valueIndex >= record.values.length) {
+              throw new Error("Неподдерживаемое свойство граней PLY.");
+            }
+            valueIndex += 1;
+          }
+        }
+        if (valueIndex !== record.values.length) throw new Error("Некорректная строка граней PLY.");
+        faceCount += 1;
+      }
+    }
+
+    return {
+      positions,
+      triangles: new Uint32Array(triangles),
+      bounds,
+      vertexCount: vertex.count,
+      previewVertexCount,
+      faceCount,
+      previewFaceCount: triangles.length / 3,
+    };
+  }
+
   function parsePly(buffer) {
     const bytes = new Uint8Array(buffer);
     const data = new DataView(buffer);
-    const { dataOffset, vertex, face, littleEndian } = parseHeader(bytes);
+    const { dataOffset, vertex, face, littleEndian, format } = parseHeader(bytes);
     if (vertex.count === 0) throw new Error("В PLY нет вершин для предпросмотра.");
+    if (format === "ascii") return parseAsciiPly(bytes, dataOffset, vertex, face);
     const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     const offsets = { x: null, y: null, z: null };
     let vertexStride = 0;
