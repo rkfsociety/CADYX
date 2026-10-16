@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
@@ -64,6 +65,7 @@ internal static class Program
             int sweepSteps = 0;
             string monitorPath = null;
             int rotateAfterSeconds = -1;
+            ScanCaptureOptions scanCapture = null;
             if (operation == "rotate")
             {
                 if (args.Length != 2 || !double.TryParse(args[1], NumberStyles.Float,
@@ -108,16 +110,38 @@ internal static class Program
                     throw new ArgumentException("sweep cannot command more than 360 degrees of total rotation.");
                 monitorPath = args[3];
             }
+            else if (operation == "capture-sweep")
+            {
+                double expectedTilt, disparityScale;
+                if (args.Length != 10 || !Int32.TryParse(args[1], out sweepSteps) || sweepSteps != 12 ||
+                    !double.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out degrees) || degrees != 30.0 ||
+                    !double.TryParse(args[3], NumberStyles.Float, CultureInfo.InvariantCulture, out expectedTilt) ||
+                    !IsFinite(expectedTilt) || Math.Abs(expectedTilt) > 10.0 ||
+                    !double.TryParse(args[8], NumberStyles.Float, CultureInfo.InvariantCulture, out disparityScale) ||
+                    !IsFinite(disparityScale) || disparityScale <= 0.0)
+                    throw new ArgumentException("capture-sweep requires 12 poses at 30 degrees, an expected tilt within ±10 degrees, CSV, capture executable, output prefix, Q matrix, positive disparity scale, and live-frame path.");
+                monitorPath = args[4];
+                scanCapture = new ScanCaptureOptions {
+                    ExpectedTilt = expectedTilt,
+                    CaptureExecutable = args[5],
+                    OutputPrefix = args[6],
+                    CalibrationFile = args[7],
+                    DisparityScale = disparityScale,
+                    LiveRawFile = args[9],
+                };
+                if (!File.Exists(scanCapture.CaptureExecutable) || !File.Exists(scanCapture.CalibrationFile))
+                    throw new ArgumentException("CaptureY16.exe and Q.bin must exist before capture-sweep starts.");
+            }
             else if ((operation == "query" || operation == "zero" || operation == "stop") && args.Length != 1)
             {
                 throw new ArgumentException("query, zero and stop do not accept extra arguments.");
             }
-            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed" && operation != "tilt" && operation != "monitor" && operation != "sweep")
+            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed" && operation != "tilt" && operation != "monitor" && operation != "sweep" && operation != "capture-sweep")
             {
-                throw new ArgumentException("Operation must be query, zero, stop, speed, tilt, monitor, sweep, or rotate.");
+                throw new ArgumentException("Operation must be query, zero, stop, speed, tilt, monitor, sweep, capture-sweep, or rotate.");
             }
 
-            return RunAsync(operation, degrees, rotationPeriod, monitorSeconds, monitorPath, rotateAfterSeconds, sweepSteps).GetAwaiter().GetResult();
+            return RunAsync(operation, degrees, rotationPeriod, monitorSeconds, monitorPath, rotateAfterSeconds, sweepSteps, scanCapture).GetAwaiter().GetResult();
         }
         catch (Exception error)
         {
@@ -137,13 +161,14 @@ internal static class Program
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv>");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv> <rotate-delay-seconds> <degrees>");
         Console.WriteLine("TurntableController.exe sweep <steps> <degrees-per-step> <output.csv>   (one BLE connection; each step is verified before the next)");
+        Console.WriteLine("TurntableController.exe capture-sweep 12 30 <tilt> <poses.csv> <CaptureY16.exe> <output-prefix> <Q.bin> <scale> <live.raw>");
         Console.WriteLine("The app does not pair the turntable. It discovers the BLE device by its advertised FFE1 service,\n" +
                           "then confirms the GATT device name before sending any command.");
     }
 
     private static async Task<int> RunAsync(string operation, double degrees, double rotationPeriod,
                                             int monitorSeconds, string monitorPath, int rotateAfterSeconds,
-                                            int sweepSteps)
+                                            int sweepSteps, ScanCaptureOptions scanCapture)
     {
         using (Connection connection = await ConnectAsync())
         {
@@ -197,7 +222,7 @@ internal static class Program
                 return 0;
             }
 
-            if (operation == "sweep")
+            if (operation == "sweep" || operation == "capture-sweep")
             {
                 string fullPath = System.IO.Path.GetFullPath(monitorPath);
                 if (System.IO.File.Exists(fullPath))
@@ -212,11 +237,25 @@ internal static class Program
                     double currentAngle, currentTilt;
                     if (!TryAngle(initialRotation, out currentAngle) || !TryAngle(initialTilt, out currentTilt))
                         throw new InvalidOperationException("Could not read both table axes; no sweep command was sent.");
-                    if (Math.Abs(currentTilt) > 0.5)
-                        throw new InvalidOperationException("Turntable tilt must be within 0.5 degrees of zero before a rotation-only sweep.");
+                    double baselineTilt = currentTilt;
+                    double baselineAngle = currentAngle;
+                    if (operation == "sweep" && Math.Abs(baselineTilt) > 0.5)
+                        throw new InvalidOperationException("Rotation-only sweep requires zero tilt.");
+                    if (operation == "capture-sweep" && Math.Abs(baselineTilt - scanCapture.ExpectedTilt) > 0.5)
+                        throw new InvalidOperationException("Turntable tilt does not match the requested scan-pass tilt; no rotation command was sent.");
+                    if (operation == "capture-sweep" && Math.Abs(SignedAngleDelta(0, currentAngle)) > 1.0)
+                        throw new InvalidOperationException("Each capture-sweep must start at the rotation home position.");
                     WriteSweepRow(writer, 0, "baseline", 0, currentAngle, currentTilt, "", initialRotation, initialTilt);
                     Console.WriteLine("sweep baseline: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) +
                                       " deg, tilt=" + currentTilt.ToString("F1", CultureInfo.InvariantCulture) + " deg");
+                    if (operation == "capture-sweep")
+                    {
+                        string prefix = scanCapture.OutputPrefix + "_pose_000";
+                        WriteSweepRow(writer, 0, "capture_started", 0, currentAngle, currentTilt, prefix, initialRotation, initialTilt);
+                        CaptureY16Pose(scanCapture, prefix);
+                        WriteSweepRow(writer, 0, "capture_completed", 0, currentAngle, currentTilt, prefix, initialRotation, initialTilt);
+                        Console.WriteLine("captured pose 0/11: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) + " deg, tilt=" + currentTilt.ToString("F1", CultureInfo.InvariantCulture));
+                    }
 
                     for (int step = 1; step <= sweepSteps; ++step)
                     {
@@ -241,7 +280,7 @@ internal static class Program
                                 bool targetReached = Math.Abs(sweepMeasured - degrees) <= 1.0;
                                 WriteSweepRow(writer, step, targetReached ? "target_reached" : "telemetry",
                                     degrees, currentAngle, currentTilt, "", rotationResponse, tiltResponse);
-                                if (Math.Abs(currentTilt) > 0.5)
+                                if (Math.Abs(currentTilt - baselineTilt) > 0.5)
                                 {
                                     await SendAndReadAsync(connection, "+CT,STOP;");
                                     throw new InvalidOperationException("Turntable tilt changed during rotation; rotation was stopped.");
@@ -265,6 +304,20 @@ internal static class Program
                             await SendAndReadAsync(connection, "+CT,STOP;");
                             throw new InvalidOperationException("Sweep step " + step + " did not reach its target; no further move was issued.");
                         }
+                        if (operation == "capture-sweep" && step < sweepSteps)
+                        {
+                            string prefix = scanCapture.OutputPrefix + "_pose_" + step.ToString("D3", CultureInfo.InvariantCulture);
+                            WriteSweepRow(writer, step, "capture_started", degrees, currentAngle, currentTilt, prefix, "", "");
+                            CaptureY16Pose(scanCapture, prefix);
+                            WriteSweepRow(writer, step, "capture_completed", degrees, currentAngle, currentTilt, prefix, "", "");
+                            Console.WriteLine("captured pose " + step + "/11: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) + " deg, tilt=" + currentTilt.ToString("F1", CultureInfo.InvariantCulture));
+                        }
+                    }
+                    if (operation == "capture-sweep")
+                    {
+                        double finalAngle = await ReadAngleAsync(connection);
+                        if (Math.Abs(SignedAngleDelta(baselineAngle, finalAngle)) > 1.0)
+                            throw new InvalidOperationException("The final full-turn angle did not return to its starting position.");
                     }
                     Console.WriteLine("sweep completed: " + sweepSteps + " steps, commanded total=" +
                                       (sweepSteps * degrees).ToString("F1", CultureInfo.InvariantCulture) + " deg");
@@ -543,6 +596,72 @@ internal static class Program
             Csv(command), Csv(rotationResponse), Csv(tiltResponse),
         }));
         writer.Flush();
+    }
+
+    private sealed class ScanCaptureOptions
+    {
+        public double ExpectedTilt;
+        public string CaptureExecutable;
+        public string OutputPrefix;
+        public string CalibrationFile;
+        public double DisparityScale;
+        public string LiveRawFile;
+    }
+
+    private static void CaptureY16Pose(ScanCaptureOptions options, string prefix)
+    {
+        var start = new ProcessStartInfo {
+            FileName = options.CaptureExecutable,
+            Arguments = String.Join(" ", new[] {
+                "--out-prefix", prefix,
+                "--q-file", options.CalibrationFile,
+                "--disparity-scale", options.DisparityScale.ToString("R", CultureInfo.InvariantCulture),
+                "--frames", "1",
+                "--live-raw", options.LiveRawFile,
+            }.Select(QuoteWindowsArgument)),
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        using (Process process = Process.Start(start))
+        {
+            if (!process.WaitForExit(30000))
+            {
+                process.Kill();
+                throw new TimeoutException("CaptureY16 exceeded 30 seconds at " + prefix + ".");
+            }
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException("CaptureY16 failed at " + prefix + " with exit code " + process.ExitCode + ".");
+        }
+    }
+
+    private static string QuoteWindowsArgument(string value)
+    {
+        if (String.IsNullOrEmpty(value)) return "\"\"";
+        if (value.IndexOfAny(new[] { ' ', '\t', '\n', '\v', '\"' }) < 0) return value;
+        var result = new StringBuilder("\"");
+        int slashes = 0;
+        foreach (char character in value)
+        {
+            if (character == '\\') { slashes++; continue; }
+            if (character == '\"')
+            {
+                result.Append('\\', slashes * 2 + 1).Append('\"');
+                slashes = 0;
+                continue;
+            }
+            result.Append('\\', slashes).Append(character);
+            slashes = 0;
+        }
+        result.Append('\\', slashes * 2).Append('\"');
+        return result.ToString();
+    }
+
+    private static async Task<double> ReadAngleAsync(Connection connection)
+    {
+        string response = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
+        double angle;
+        if (!TryAngle(response, out angle)) throw new InvalidOperationException("Could not read the final turntable angle.");
+        return angle;
     }
 
     private static string Csv(string value)

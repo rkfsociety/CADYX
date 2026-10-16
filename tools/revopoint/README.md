@@ -166,3 +166,16 @@ Secure the object to the turntable, keep the scanner fixed, close Revo Scan, and
 ```
 
 The script returns the table to its home zero, captures at 0°, 30°, …, 330°, and homes the table again. It saves every raw frame, per-frame provisional PLY, calibration copy, and angle manifest in a new direct workspace folder. It does **not** register the twelve views or merge them into one mesh. The table center/axis and disparity scale still need validation before the views can form a trustworthy complete model.
+
+## Multi-tilt capture and registration status
+
+For the existing `Kobra S1 Back Cover` project, the multi-tilt script captures five full turns in this order: 0°, +5°, −5°, +10°, −10°. Each turn is sampled every 30° at stationary poses, producing 60 Y16 frames, provisional PLY views, metadata, and per-pass pose logs directly in that project. The object must be secured; tilt is constrained to ±10°. The script verifies tilt/rotation telemetry, preserves completed captures on failure, resumes a run by its UTC run ID, and homes both axes at completion. It refuses to create a second project or overwrite existing run files.
+
+```powershell
+$runId = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
+.\tools\revopoint\scan_tilt_series.ps1 -RunId $runId
+```
+
+Registration is a separate step and must not assume the table axis equals camera Z. The tilt axis is not calibrated in camera coordinates. The previous `fuse_multi_tilt_scan.py` experiment used an XY pivot and that Z-axis assumption for every pass; it produced a flat, invalid combined cloud and has been removed. An ICP check of the first adjacent pair converged to 4.8° for a commanded 30° move, showing a local planar match rather than a trustworthy pose estimate. Do not import that candidate as scan geometry. Its PLY/JSON artifacts remain in the project as failed diagnostic output; the bad CADYX body was removed while the original comparison body and all captured source frames were retained.
+
+The 2026-10-16 campaign `20261016T135207Z` saved all 60 poses and returned the table to zero. The old candidate's reference-directed alignment covered about 45% of the full reference points within 5 provisional Q-coordinate units. This only indicates partial coverage: the reference was assembled from views of multiple sides, and the captured views need not reproduce all of it. A usable workflow still needs 3D pose registration with independently validated overlap and closure checks before any merged cloud is displayed as a model.
