@@ -1,5 +1,5 @@
 [mcp_servers.cadyx]
-command = "python"
+command = ".runtime/python/python.exe"
 args = ["-m", "cadyx.mcp_server"]
 startup_timeout_sec = 20
 tool_timeout_sec = 600
