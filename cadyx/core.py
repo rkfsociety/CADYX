@@ -795,7 +795,10 @@ class CadyxCore:
             raise ValidationError("Thickness validation needs an existing body.")
         geometry = bodies[body_id]["geometry"]
         measured = self.kernel.sample_minimum_thickness(geometry, progress=progress)
-        metric_names = ("minimum_sampled_thickness", "mesh_deflection", "start_offset")
+        metric_names = (
+            "minimum_sampled_thickness", "median_sampled_thickness", "p10_sampled_thickness",
+            "mesh_deflection", "start_offset",
+        )
         metrics = {name: measured.get(name) for name in metric_names}
         if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
                for value in metrics.values()) or metrics["minimum_sampled_thickness"] <= 0:

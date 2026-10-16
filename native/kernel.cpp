@@ -2025,6 +2025,8 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
       }
     }
     const size_t sample_budget = std::min<size_t>(10000, triangle_count);
+    std::vector<double> sampled_thicknesses;
+    sampled_thicknesses.reserve(sample_budget);
     std::vector<size_t> face_sample_quotas(face_count, 0);
     if (active_faces.size() <= sample_budget) {
       for (size_t index : active_faces) face_sample_quotas[index] = 1;
@@ -2117,6 +2119,7 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
           if (std::isfinite(nearest)) {
             ++hits;
             const double thickness = nearest + start_offset;
+            sampled_thicknesses.push_back(thickness);
             if (thickness < minimum) {
               minimum = thickness;
               minimum_point = point;
@@ -2130,6 +2133,12 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
     }
     if (samples == 0 || hits == 0 || !std::isfinite(minimum))
       throw std::runtime_error("OCCT found no valid inward-normal thickness samples.");
+    std::sort(sampled_thicknesses.begin(), sampled_thicknesses.end());
+    const size_t middle_index = sampled_thicknesses.size() / 2;
+    const double median = sampled_thicknesses.size() % 2
+        ? sampled_thicknesses[middle_index]
+        : sampled_thicknesses[middle_index - 1] / 2.0 + sampled_thicknesses[middle_index] / 2.0;
+    const double p10 = sampled_thicknesses[(sampled_thicknesses.size() - 1) / 10];
     progress.SetPhase("completed");
     progress.Report(1.0, true);
     std::ostringstream result;
@@ -2138,6 +2147,8 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
            << "{\"minimum_sampled_thickness\":" << minimum
            << ",\"mesh_deflection\":" << mesh_deflection
            << ",\"start_offset\":" << start_offset
+           << ",\"median_sampled_thickness\":" << median
+           << ",\"p10_sampled_thickness\":" << p10
            << ",\"sample_count\":" << samples
            << ",\"hit_count\":" << hits
            << ",\"point\":[" << minimum_point.X() << ',' << minimum_point.Y() << ',' << minimum_point.Z() << ']'
