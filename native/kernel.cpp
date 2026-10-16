@@ -810,13 +810,46 @@ TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
   return builder.Shape();
 }
 
-Handle(Geom_BSplineCurve) MakePeriodicSplineCurve(const double* coordinates, size_t point_count,
-                                                   int plane) {
+Handle(NCollection_HArray1<double>) MakePeriodicSplineParameters(const double* coordinates,
+                                                                  size_t point_count) {
   if (!coordinates || point_count < 3
-      || point_count > static_cast<size_t>(std::numeric_limits<Standard_Integer>::max()))
+      || point_count >= static_cast<size_t>(std::numeric_limits<Standard_Integer>::max()))
+    throw std::runtime_error("A periodic spline needs at least 3 points within the OCCT index range.");
+  std::vector<double> segment_lengths;
+  segment_lengths.reserve(point_count);
+  double maximum_length = 0.0;
+  for (size_t i = 0; i < point_count; ++i) {
+    const size_t next = (i + 1) % point_count;
+    const double dx = coordinates[2 * next] - coordinates[2 * i];
+    const double dy = coordinates[2 * next + 1] - coordinates[2 * i + 1];
+    const double length = std::hypot(dx, dy);
+    if (!std::isfinite(length) || length <= 1e-9)
+      throw std::runtime_error("Periodic spline vertices must be distinct and numerically stable.");
+    segment_lengths.push_back(length);
+    maximum_length = std::max(maximum_length, length);
+  }
+  Handle(NCollection_HArray1<double>) parameters = new NCollection_HArray1<double>(
+      1, static_cast<Standard_Integer>(point_count + 1));
+  double cumulative = 0.0;
+  parameters->SetValue(1, cumulative);
+  for (size_t i = 0; i < point_count; ++i) {
+    cumulative += segment_lengths[i] / maximum_length;
+    if (!std::isfinite(cumulative) || cumulative <= parameters->Value(static_cast<Standard_Integer>(i + 1)))
+      throw std::runtime_error("Periodic spline parameter intervals are numerically unstable.");
+    parameters->SetValue(static_cast<Standard_Integer>(i + 2), cumulative);
+  }
+  return parameters;
+}
+
+Handle(Geom_BSplineCurve) MakePeriodicSplineCurve(const double* coordinates, size_t point_count,
+                                                   int plane,
+                                                   Handle(NCollection_HArray1<double>)& parameters) {
+  if (!coordinates || point_count < 3
+      || point_count >= static_cast<size_t>(std::numeric_limits<Standard_Integer>::max()))
     throw std::runtime_error("A periodic spline needs at least 3 points within the OCCT index range.");
   if (plane != 0 && plane != 1)
     throw std::runtime_error("A periodic spline needs a supported sketch plane.");
+  parameters = MakePeriodicSplineParameters(coordinates, point_count);
   Handle(NCollection_HArray1<gp_Pnt>) points = new NCollection_HArray1<gp_Pnt>(
       1, static_cast<Standard_Integer>(point_count));
   for (size_t i = 0; i < point_count; ++i) {
@@ -827,7 +860,7 @@ Handle(Geom_BSplineCurve) MakePeriodicSplineCurve(const double* coordinates, siz
     points->SetValue(static_cast<Standard_Integer>(i + 1),
                      plane == 0 ? gp_Pnt(x, y, 0) : gp_Pnt(x, 0, y));
   }
-  GeomAPI_Interpolate interpolator(points, true, 1e-9);
+  GeomAPI_Interpolate interpolator(points, parameters, true, 1e-9);
   interpolator.Perform();
   if (!interpolator.IsDone())
     throw std::runtime_error("OCCT could not interpolate the periodic B-spline.");
@@ -839,21 +872,36 @@ Handle(Geom_BSplineCurve) MakePeriodicSplineCurve(const double* coordinates, siz
 
 std::string PeriodicSplineSamplesJson(const double* coordinates, size_t point_count,
                                      size_t samples_per_span) {
-  if (samples_per_span == 0 || point_count > std::numeric_limits<size_t>::max() / samples_per_span)
+  if (samples_per_span == 0
+      || point_count > (std::numeric_limits<size_t>::max() - 1) / samples_per_span)
     throw std::runtime_error("Periodic spline sample count is outside the native size range.");
-  const Handle(Geom_BSplineCurve) curve = MakePeriodicSplineCurve(coordinates, point_count, 0);
+  Handle(NCollection_HArray1<double>) parameters;
+  const Handle(Geom_BSplineCurve) curve = MakePeriodicSplineCurve(coordinates, point_count, 0, parameters);
   const size_t sample_count = point_count * samples_per_span;
-  const double first = curve->FirstParameter();
-  const double last = curve->LastParameter();
   std::ostringstream output;
   output.imbue(std::locale::classic());
   output << std::setprecision(17) << "{\"points\":[";
-  for (size_t index = 0; index < sample_count; ++index) {
+  for (size_t index = 0; index <= sample_count; ++index) {
     if (index) output << ',';
-    const double parameter = first + (last - first) * static_cast<double>(index)
-                             / static_cast<double>(sample_count);
-    const gp_Pnt point = curve->Value(parameter);
-    output << "{\"x\":" << point.X() << ",\"y\":" << point.Y() << '}';
+    double parameter = parameters->Value(static_cast<Standard_Integer>(point_count + 1));
+    if (index < sample_count) {
+      const size_t span = index / samples_per_span;
+      const size_t step = index % samples_per_span;
+      const double span_start = parameters->Value(static_cast<Standard_Integer>(span + 1));
+      const double span_end = parameters->Value(static_cast<Standard_Integer>(span + 2));
+      parameter = span_start + (span_end - span_start)
+                                * static_cast<double>(step) / static_cast<double>(samples_per_span);
+    }
+    if (index == sample_count) {
+      output << "{\"x\":" << coordinates[0] << ",\"y\":" << coordinates[1] << '}';
+    } else if (index % samples_per_span == 0) {
+      const size_t vertex = index / samples_per_span;
+      output << "{\"x\":" << coordinates[2 * vertex]
+             << ",\"y\":" << coordinates[2 * vertex + 1] << '}';
+    } else {
+      const gp_Pnt point = curve->Value(parameter);
+      output << "{\"x\":" << point.X() << ",\"y\":" << point.Y() << '}';
+    }
   }
   output << "]}";
   return output.str();
@@ -1021,7 +1069,9 @@ TopoDS_Shape MakePeriodicSplineProfileShape(const double* coordinates, size_t po
   if (operation == 1 && (plane != 1 || amount > kFullTurn + 1e-9))
     throw std::runtime_error("Revolution requires an XZ profile and an angle up to 360 degrees.");
 
-  const Handle(Geom_BSplineCurve) curve = MakePeriodicSplineCurve(coordinates, point_count, plane);
+  Handle(NCollection_HArray1<double>) parameters;
+  const Handle(Geom_BSplineCurve) curve =
+      MakePeriodicSplineCurve(coordinates, point_count, plane, parameters);
   BRepBuilderAPI_MakeEdge edge_builder(curve);
   if (!edge_builder.IsDone()) throw std::runtime_error("OCCT could not create the periodic spline edge.");
   BRepBuilderAPI_MakeWire wire_builder;
@@ -1029,21 +1079,23 @@ TopoDS_Shape MakePeriodicSplineProfileShape(const double* coordinates, size_t po
   if (!wire_builder.IsDone()) throw std::runtime_error("OCCT could not close the periodic spline wire.");
 
   const size_t samples_per_span = 32;
-  if (point_count > std::numeric_limits<size_t>::max() / samples_per_span)
+  if (point_count > (std::numeric_limits<size_t>::max() - 1) / samples_per_span)
     throw std::runtime_error("Periodic spline profile exceeds the native sample range.");
   const size_t sample_count = point_count * samples_per_span;
-  const double first = curve->FirstParameter();
-  const double last = curve->LastParameter();
   double twice_area = 0.0;
-  gp_Pnt previous = curve->Value(first);
+  gp_Pnt previous = curve->Value(parameters->Value(1));
   for (size_t index = 0; index < point_count; ++index) {
     const double x = coordinates[2 * index];
     if (operation == 1 && x < -1e-7)
       throw std::runtime_error("Revolution profiles must stay on one side of the Z axis.");
   }
   for (size_t index = 1; index <= sample_count; ++index) {
-    const double parameter = first + (last - first) * static_cast<double>(index)
-                             / static_cast<double>(sample_count);
+    const size_t span = (index - 1) / samples_per_span;
+    const size_t step = (index - 1) % samples_per_span + 1;
+    const double span_start = parameters->Value(static_cast<Standard_Integer>(span + 1));
+    const double span_end = parameters->Value(static_cast<Standard_Integer>(span + 2));
+    const double parameter = span_start + (span_end - span_start)
+                                          * static_cast<double>(step) / static_cast<double>(samples_per_span);
     const gp_Pnt current = curve->Value(parameter);
     const double x = current.X();
     const double y = plane == 0 ? current.Y() : current.Z();

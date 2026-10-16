@@ -104,8 +104,6 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
             for point in sampled:
                 positions.extend(sketch_position(item["sketch_id"], point["x"], point["y"]))
             lines = [index for step in range(len(sampled) - 1) for index in (step, step + 1)]
-            if item.get("mode") == "closed" and len(sampled) > 2:
-                lines.extend([len(sampled) - 1, 0])
         else:
             continue
         for offset in range(0, len(positions), 3):
