@@ -145,29 +145,53 @@ Options ParseOptions(int argc, wchar_t** argv) {
 
 bool IsY16(REFGUID subtype);
 ComPtr<IMFActivate> FindDepthCamera();
+std::wstring GetFriendlyName(IMFActivate* activation);
 
 void ListNativeModes() {
-    ComPtr<IMFActivate> activation = FindDepthCamera();
-    ComPtr<IMFMediaSource> source;
-    CheckHr(activation->ActivateObject(IID_PPV_ARGS(&source)), "Activate depth camera");
-    ComPtr<IMFSourceReader> reader;
-    CheckHr(MFCreateSourceReaderFromMediaSource(source.Get(), nullptr, &reader), "Create mode-list reader");
-    for (DWORD i = 0; i < 64; ++i) {
-        ComPtr<IMFMediaType> type;
-        const HRESULT hr = reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, i, &type);
-        if (hr == MF_E_NO_MORE_TYPES) break;
-        CheckHr(hr, "Enumerate native media type");
-        GUID subtype{}; UINT32 width = 0, height = 0; UINT32 numerator = 0, denominator = 0;
-        CheckHr(type->GetGUID(MF_MT_SUBTYPE, &subtype), "Read media subtype");
-        CheckHr(MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &width, &height), "Read media dimensions");
-        const HRESULT rate_hr = MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, &numerator, &denominator);
-        std::wcout << L"mode " << i << L": " << width << L"x" << height << L", subtype="
-                   << subtype.Data1 << L", fps=";
-        if (SUCCEEDED(rate_hr) && denominator) std::wcout << static_cast<double>(numerator) / denominator;
-        else std::wcout << L"unknown";
-        std::wcout << (IsY16(subtype) ? L", Y16" : L"") << L"\n";
+    ComPtr<IMFAttributes> attributes;
+    CheckHr(MFCreateAttributes(&attributes, 1), "Create mode-list attributes");
+    CheckHr(attributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+                                MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID),
+            "Set video-capture source type");
+    IMFActivate** devices = nullptr;
+    UINT32 count = 0;
+    CheckHr(MFEnumDeviceSources(attributes.Get(), &devices, &count), "Enumerate video cameras");
+    bool listed = false;
+    try {
+        for (UINT32 device_index = 0; device_index < count; ++device_index) {
+            const std::wstring name = GetFriendlyName(devices[device_index]);
+            if (name.rfind(L"DepthCam", 0) != 0 && name.rfind(L"RGBCam", 0) != 0) continue;
+            listed = true;
+            ComPtr<IMFMediaSource> source;
+            CheckHr(devices[device_index]->ActivateObject(IID_PPV_ARGS(&source)), "Activate camera for mode listing");
+            ComPtr<IMFSourceReader> reader;
+            CheckHr(MFCreateSourceReaderFromMediaSource(source.Get(), nullptr, &reader), "Create mode-list reader");
+            std::wcout << L"Camera: " << name << L"\n";
+            for (DWORD mode = 0; mode < 64; ++mode) {
+                ComPtr<IMFMediaType> type;
+                const HRESULT hr = reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, mode, &type);
+                if (hr == MF_E_NO_MORE_TYPES) break;
+                CheckHr(hr, "Enumerate native media type");
+                GUID subtype{}; UINT32 width = 0, height = 0; UINT32 numerator = 0, denominator = 0;
+                CheckHr(type->GetGUID(MF_MT_SUBTYPE, &subtype), "Read media subtype");
+                CheckHr(MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &width, &height), "Read media dimensions");
+                const HRESULT rate_hr = MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, &numerator, &denominator);
+                std::wcout << L"mode " << mode << L": " << width << L"x" << height << L", subtype="
+                           << subtype.Data1 << L", fps=";
+                if (SUCCEEDED(rate_hr) && denominator) std::wcout << static_cast<double>(numerator) / denominator;
+                else std::wcout << L"unknown";
+                std::wcout << (IsY16(subtype) ? L", Y16" : L"") << L"\n";
+            }
+            source->Shutdown();
+        }
+    } catch (...) {
+        for (UINT32 i = 0; i < count; ++i) if (devices[i]) devices[i]->Release();
+        CoTaskMemFree(devices);
+        throw;
     }
-    source->Shutdown();
+    for (UINT32 i = 0; i < count; ++i) if (devices[i]) devices[i]->Release();
+    CoTaskMemFree(devices);
+    if (!listed) throw std::runtime_error("Neither a DepthCam nor an RGBCam UVC device was found.");
 }
 
 bool IsY16(REFGUID subtype) {

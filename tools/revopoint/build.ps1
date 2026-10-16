@@ -50,6 +50,15 @@ if ($LASTEXITCODE -ne 0) {
     throw "CaptureY16 compilation failed with exit code $LASTEXITCODE"
 }
 
+$rgbSource = Join-Path $toolRoot 'capture_rgb.cpp'
+$rgbObject = Join-Path $buildRoot 'capture_rgb.obj'
+$rgbExe = Join-Path $buildRoot 'CaptureRgb.exe'
+& cl.exe /nologo /EHsc /std:c++17 /utf-8 "/Fo$rgbObject" "/Fe$rgbExe" $rgbSource `
+    /link mf.lib mfreadwrite.lib mfplat.lib mfuuid.lib ole32.lib
+if ($LASTEXITCODE -ne 0) {
+    throw "CaptureRgb compilation failed with exit code $LASTEXITCODE"
+}
+
 $turntableSource = Join-Path $toolRoot 'turntable.cs'
 $turntableExe = Join-Path $buildRoot 'TurntableController.exe'
 & $csc /nologo /platform:x64 "/out:$turntableExe" "/reference:$windowsWinmd" `
@@ -59,4 +68,5 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Output "Built: $captureExe"
+Write-Output "Built: $rgbExe"
 Write-Output "Built: $turntableExe"

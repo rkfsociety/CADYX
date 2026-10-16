@@ -65,6 +65,8 @@ List the camera's advertised native modes with:
 
 The connected camera advertises Y16 at 640×400, 1280×800, and 640×800, each with nominal 5, 10, and 15 fps modes. Earlier explicit 640×400 selections at nominal 5, 10, and 15 fps each delivered about 4.6 fps by Media Foundation timestamps in 40-frame runs. Later measurements were inconsistent; see below. The direct UVC path has not demonstrated a stable 10 fps, and these checks do not measure Revo Scan's complete capture pipeline.
 
+The same Windows enumeration exposes an `RGBCam` interface with 1280×800 MJPG and NV12 modes at nominal 10, 15, 20, and 30 fps. `CaptureRgb.exe` can request either advertised format directly. On 2026-10-16, both formats were selected at nominal 10 fps, but neither returned a sample within a 12-second watchdog window; no image was produced. This confirms mode enumeration only, not a working RGB stream. The exact vendor marker detector is unknown. A local detector should first acquire images, find bright reflective blobs, reject non-circular candidates, refine each center to subpixel precision (for example, an ellipse/circle fit), and associate centers across frames using the table angle. Converting image centers into table-space coordinates additionally needs the camera calibration/depth for those pixels and a calibrated table axis; no marker coordinates have yet been measured.
+
 For timestamp-only measurements of other native modes (without applying the 640×400 calibration to them), use `--measure-only` with explicit dimensions:
 
 ```powershell
