@@ -43,7 +43,7 @@ Optional:
 - `normal_axis`: `Y` (default) or `Z`.
 - `join_tolerance`: endpoint welding tolerance; default is derived from scan bounds.
 - `simplify_tolerance`: closed-contour RDP tolerance, default `0`.
-- `max_points`: 16–4096 points per contour, default `512`. Longer loops are arc-length resampled.
+- `max_points`: at least 16 points per contour, default `512`. Longer loops are arc-length resampled when this value is lower than the source contour's point count.
 - `max_contours`: optional positive count for explicitly limiting generated sketches; omitted means keep every eligible contour. When a limit is supplied, largest enclosed areas are kept first.
 - `min_area`, `min_perimeter`: non-negative noise filters.
 - `name`: sketch name prefix.
