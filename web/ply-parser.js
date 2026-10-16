@@ -24,11 +24,25 @@
   function parseHeader(bytes) {
     const headerBytes = bytes.subarray(0, Math.min(bytes.length, 65_536));
     const headerText = asciiDecoder.decode(headerBytes);
-    const marker = headerText.indexOf("end_header");
-    if (marker < 0) throw new Error("Заголовок PLY не найден или слишком длинный.");
-    const lineEnd = headerText.indexOf("\n", marker);
-    if (lineEnd < 0) throw new Error("В заголовке PLY отсутствует конец строки.");
-    const header = headerText.slice(0, marker).split(/\r?\n/);
+    const firstLineEnd = headerText.indexOf("\n");
+    if (firstLineEnd < 0 || headerText.slice(0, firstLineEnd).trim() !== "ply") {
+      throw new Error("Файл не содержит корректный заголовок PLY.");
+    }
+    let headerEnd = -1;
+    let dataOffset = -1;
+    for (let lineStart = 0; lineStart < headerText.length;) {
+      const lineEnd = headerText.indexOf("\n", lineStart);
+      if (lineEnd < 0) break;
+      const line = headerText.slice(lineStart, lineEnd).replace(/\r$/, "").trim();
+      if (line === "end_header") {
+        headerEnd = lineStart;
+        dataOffset = lineEnd + 1;
+        break;
+      }
+      lineStart = lineEnd + 1;
+    }
+    if (headerEnd < 0) throw new Error("Заголовок PLY не найден или слишком длинный.");
+    const header = headerText.slice(0, headerEnd).split(/\r?\n/);
     let format = null;
     let current = null;
     const elements = [];
@@ -64,7 +78,7 @@
     }
     const vertex = vertexElements[0];
     const face = faceIndices.length ? elements[1] : null;
-    return { dataOffset: lineEnd + 1, vertex, face, littleEndian, format };
+    return { dataOffset, vertex, face, littleEndian, format };
   }
 
   function getColorReaders(properties) {
