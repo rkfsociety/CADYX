@@ -81,8 +81,9 @@ also shows front/right/top projections of the same validated viewport
 geometry. Orthographic wireframes include view-dependent silhouette edges so
 smooth revolved walls remain outlined in
 front and side views. Scene geometry metrics remain in the
-viewport footer. Object selection remains available in the Geometry view; object
-properties are not shown in a separate panel. Files is navigation item 06 and
+viewport footer. Object selection remains available in the Geometry view;
+selecting a feature shows its dimensions without overlaying tessellation edges.
+Object properties are not shown in a separate panel. Files is navigation item 06 and
 lists direct user files in the active project through `GET /api/v1/projects/{id}/files`;
 selected files are served from the corresponding `/files/{name}` route. The tab
 is enabled only when `GET /api/v1/updates?project_id={id}` reports
