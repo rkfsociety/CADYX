@@ -99,6 +99,8 @@
     let geometry = null;
     let cameraOrientation = cameraMatrixFromYawPitch(0.68, 0.38);
     let zoom = 1;
+    let cameraPanX = 0;
+    let cameraPanY = 0;
     let drag = null;
     let camera = new Float64Array(0);
     let screenX = new Float64Array(0);
@@ -260,7 +262,8 @@
         const z = worldZ - center[2];
         const right = cameraOrientation[0] * x + cameraOrientation[1] * y + cameraOrientation[2] * z;
         const up = cameraOrientation[6] * x + cameraOrientation[7] * y + cameraOrientation[8] * z;
-        return [width / 2 + right * scale, height / 2 - up * scale];
+        return [width / 2 + right * scale + cameraPanX * dpr,
+          height / 2 - up * scale + cameraPanY * dpr];
       };
       for (let index = 0; index < positions.length; index += 3) {
         let worldX = positions[index];
@@ -288,8 +291,8 @@
         camera[index] = right;
         camera[index + 1] = up;
         camera[index + 2] = depth;
-        screenX[vertex] = width / 2 + right * scale;
-        screenY[vertex] = height / 2 - up * scale;
+        screenX[vertex] = width / 2 + right * scale + cameraPanX * dpr;
+        screenY[vertex] = height / 2 - up * scale + cameraPanY * dpr;
       }
 
       if (showWorldAxes) drawWorldAxes(project, radius, dpr);
@@ -380,7 +383,8 @@
         const z = worldZ - center[2];
         const right = cameraOrientation[0] * x + cameraOrientation[1] * y + cameraOrientation[2] * z;
         const up = cameraOrientation[6] * x + cameraOrientation[7] * y + cameraOrientation[8] * z;
-        return [width / 2 + right * scale, height / 2 - up * scale];
+        return [width / 2 + right * scale + cameraPanX * dpr,
+          height / 2 - up * scale + cameraPanY * dpr];
       };
       const targetSpacing = 34 / scale;
       const magnitude = 10 ** Math.floor(Math.log10(targetSpacing));
@@ -989,20 +993,36 @@
     }
 
     canvas.addEventListener("pointerdown", (event) => {
-      drag = { point: trackballPoint(event.clientX, event.clientY, canvas.getBoundingClientRect()) };
+      if (event.button === 1) {
+        event.preventDefault();
+        drag = { type: "pan", clientX: event.clientX, clientY: event.clientY };
+      } else if (event.button === 0) {
+        drag = { type: "orbit", point: trackballPoint(event.clientX, event.clientY, canvas.getBoundingClientRect()) };
+      } else {
+        return;
+      }
       canvas.setPointerCapture(event.pointerId);
       canvas.classList.add("dragging");
+      canvas.style.cursor = "grabbing";
     });
     canvas.addEventListener("pointermove", (event) => {
       if (!drag) return;
+      if (drag.type === "pan") {
+        cameraPanX += event.clientX - drag.clientX;
+        cameraPanY += event.clientY - drag.clientY;
+        drag = { type: "pan", clientX: event.clientX, clientY: event.clientY };
+        scheduleCameraRender();
+        return;
+      }
       const nextPoint = trackballPoint(event.clientX, event.clientY, canvas.getBoundingClientRect());
       cameraOrientation = multiplyMatrices(rotationBetween(drag.point, nextPoint), cameraOrientation);
-      drag = { point: nextPoint };
+      drag = { type: "orbit", point: nextPoint };
       scheduleCameraRender();
     });
     const stopDrag = () => {
       drag = null;
       canvas.classList.remove("dragging");
+      canvas.style.removeProperty("cursor");
     };
     canvas.addEventListener("pointerup", stopDrag);
     canvas.addEventListener("pointercancel", stopDrag);
@@ -1020,17 +1040,25 @@
     function resetView() {
       cameraOrientation = cameraMatrixFromYawPitch(0.68, 0.38);
       zoom = 1;
+      cameraPanX = 0;
+      cameraPanY = 0;
     }
 
     return {
       fit() { resetView(); render(); },
       createSnapshotBlob,
-      getCamera() { return { orientation: cameraOrientation.slice(), zoom, projection: "orthographic" }; },
+      getCamera() {
+        return { orientation: cameraOrientation.slice(), zoom, panX: cameraPanX, panY: cameraPanY, projection: "orthographic" };
+      },
       setCamera(value) {
         if (!value || !Number.isFinite(value.zoom) || value.zoom < 0.25 || value.zoom > 5
-            || value.projection !== "orthographic") {
+            || value.projection !== "orthographic"
+            || value.panX !== undefined && !Number.isFinite(value.panX)
+            || value.panY !== undefined && !Number.isFinite(value.panY)) {
           throw new Error("Invalid orthographic camera.");
         }
+        if (value.panX !== undefined) cameraPanX = value.panX;
+        if (value.panY !== undefined) cameraPanY = value.panY;
         if (value.orientation !== undefined) {
           if (!isRotationMatrix(value.orientation)) throw new Error("Invalid orthographic camera.");
           cameraOrientation = Array.from(value.orientation);
