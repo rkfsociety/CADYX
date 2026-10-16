@@ -6,7 +6,7 @@ import copy
 import math
 import threading
 from collections import OrderedDict
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterator
 from uuid import uuid4
@@ -94,6 +94,25 @@ class CadyxCore:
                 raise ConflictError("STEP files can only be staged in a free project with no running operation.", code="PROJECT_BUSY")
             return self.workspace.publish_project_step(project_id, filename, content)
 
+    def copy_project_files(self, target_project_id: str, source_project_id: str) -> dict[str, Any]:
+        if target_project_id == source_project_id:
+            raise ValidationError("Source and target projects must be different.")
+        with ExitStack() as stack:
+            for project_id in sorted((target_project_id, source_project_id)):
+                stack.enter_context(self._project_lifecycle_lock(project_id))
+                stack.enter_context(self._project_guard(project_id))
+            for project_id in (target_project_id, source_project_id):
+                lock = self.leases.snapshot(project_id)
+                activities, _ = self.events.activity_state_snapshot(project_id)
+                if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
+                    item.get("state") == "running" for item in activities
+                ):
+                    raise ConflictError(
+                        "Both projects must be free with no running operation before files can be copied.",
+                        code="PROJECT_BUSY",
+                    )
+            return self.workspace.copy_project_files(source_project_id, target_project_id)
+
     def remove_staged_project_step(self, project_id: str, filename: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
             lock = self.leases.snapshot(project_id)
@@ -113,6 +132,20 @@ class CadyxCore:
             if still_used:
                 raise ConflictError("The STEP file is still used by an imported body and cannot be removed.", code="FILE_IN_USE")
             return self.workspace.remove_project_step(project_id, filename)
+
+    def prune_project_files(self, project_id: str, keep_files: list[str]) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            lock = self.leases.snapshot(project_id)
+            activities, _ = self.events.activity_state_snapshot(project_id)
+            if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
+                item.get("state") == "running" for item in activities
+            ):
+                raise ConflictError("Project files can only be pruned from a free project with no running operation.", code="PROJECT_BUSY")
+            project = self.workspace.load(project_id)
+            document = Document.from_dict(project["document"])
+            if document.objects:
+                raise ConflictError("Clear model geometry through the Command System before pruning project files.", code="FILE_IN_USE")
+            return self.workspace.prune_project_files(project_id, keep_files)
 
     def rename_project(self, project_id: str, name: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id):

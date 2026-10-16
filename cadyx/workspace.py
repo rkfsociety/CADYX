@@ -359,6 +359,144 @@ class ProjectWorkspace:
         files.sort(key=lambda item: item["name"].casefold())
         return files
 
+    def copy_project_files(self, source_project_id: str, target_project_id: str) -> dict[str, Any]:
+        """Copy user files recursively between projects without copying project state or overwriting."""
+        if source_project_id == target_project_id:
+            raise ValidationError("Source and target projects must be different.")
+        source_root = self._project_dir(source_project_id)
+        target_root = self._project_dir(target_project_id)
+        files: list[tuple[Path, Path, int]] = []
+        for source in sorted(source_root.rglob("*"), key=lambda item: item.as_posix().casefold()):
+            relative = source.relative_to(source_root)
+            if any(part.startswith(".cadyx-") for part in relative.parts) or relative == Path("project.json"):
+                continue
+            if source.is_symlink():
+                raise ValidationError(f"Project merge does not copy symbolic links: {relative.as_posix()}.")
+            if source.is_dir():
+                continue
+            if not source.is_file():
+                continue
+            resolved = source.resolve(strict=True)
+            if source_root not in resolved.parents:
+                raise ValidationError(f"Project file escapes its source directory: {relative.as_posix()}.")
+            destination = target_root / relative
+            files.append((source, destination, resolved.stat().st_size))
+
+        for source, destination, _ in files:
+            current = target_root
+            for part in destination.parent.relative_to(target_root).parts:
+                current = current / part
+                if current.exists() or current.is_symlink():
+                    if current.is_symlink() or not current.is_dir():
+                        raise ConflictError(
+                            f"Project merge destination is not a safe directory: {current.relative_to(target_root).as_posix()}.",
+                            code="ARTIFACT_CONFLICT",
+                        )
+            if destination.exists() or destination.is_symlink():
+                raise ConflictError(
+                    f"Project merge would overwrite {destination.relative_to(target_root).as_posix()}; no files were copied.",
+                    code="ARTIFACT_CONFLICT",
+                )
+
+        created_directories: list[Path] = []
+        copied: list[Path] = []
+        manifest: list[dict[str, Any]] = []
+        try:
+            for source, destination, size in files:
+                missing: list[Path] = []
+                parent = destination.parent
+                while parent != target_root and not parent.exists():
+                    missing.append(parent)
+                    parent = parent.parent
+                for directory in reversed(missing):
+                    directory.mkdir()
+                    created_directories.append(directory)
+                digest = hashlib.sha256()
+                temporary: Path | None = None
+                try:
+                    with source.open("rb") as input_stream, tempfile.NamedTemporaryFile(
+                        mode="wb", prefix=".cadyx-tmp-merge-", dir=destination.parent, delete=False,
+                    ) as output_stream:
+                        temporary = Path(output_stream.name)
+                        while chunk := input_stream.read(1024 * 1024):
+                            output_stream.write(chunk)
+                            digest.update(chunk)
+                        output_stream.flush()
+                        os.fsync(output_stream.fileno())
+                    os.link(temporary, destination)
+                    copied.append(destination)
+                finally:
+                    if temporary is not None:
+                        temporary.unlink(missing_ok=True)
+                manifest.append({
+                    "path": destination.relative_to(target_root).as_posix(),
+                    "size": size,
+                    "sha256": digest.hexdigest(),
+                })
+        except Exception:
+            for destination in reversed(copied):
+                destination.unlink(missing_ok=True)
+            for directory in reversed(created_directories):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+            raise
+        return {"source_project_id": source_project_id, "target_project_id": target_project_id,
+                "file_count": len(manifest), "files": manifest}
+
+    def prune_project_files(self, project_id: str, keep_files: list[str]) -> dict[str, Any]:
+        """Remove project user files outside an explicit direct-file allowlist."""
+        root = self._project_dir(project_id)
+        if not keep_files or any(not self._is_single_path_segment(name) for name in keep_files):
+            raise ValidationError("keep_files must contain direct project filenames only.")
+        if len(set(keep_files)) != len(keep_files):
+            raise ValidationError("keep_files must not contain duplicates.")
+        keep = set(keep_files)
+        entries = sorted(root.rglob("*"), key=lambda item: item.as_posix().casefold())
+        for name in keep:
+            retained = root / name
+            if retained.is_symlink() or not retained.is_file():
+                raise NotFoundError(f"Required project source file was not found: {name}.")
+        files: list[Path] = []
+        for entry in entries:
+            relative = entry.relative_to(root)
+            if any(part.startswith(".cadyx-") for part in relative.parts) or relative == Path("project.json"):
+                continue
+            if entry.is_symlink():
+                raise ValidationError(f"Refusing to prune a project containing a symbolic link: {relative.as_posix()}.")
+            if entry.is_dir():
+                continue
+            if not entry.is_file():
+                continue
+            if relative.parts == (entry.name,) and entry.name in keep:
+                continue
+            resolved = entry.resolve(strict=True)
+            if root not in resolved.parents:
+                raise ValidationError(f"Project file escapes its directory: {relative.as_posix()}.")
+            files.append(entry)
+        removed: list[str] = []
+        for path in files:
+            relative = path.relative_to(root).as_posix()
+            path.unlink()
+            removed.append(relative)
+        for directory in sorted((p for p in entries if p.is_dir() and not p.is_symlink()),
+                                key=lambda p: len(p.parts), reverse=True):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        retained = []
+        for name in sorted(keep):
+            path = root / name
+            digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                while chunk := stream.read(1024 * 1024):
+                    digest.update(chunk)
+            retained.append({"path": name, "size": path.stat().st_size, "sha256": digest.hexdigest()})
+        return {"project_id": project_id, "removed_count": len(removed), "removed": removed,
+                "retained": retained}
+
     def publish_project_step(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
         """Atomically add one STEP source file without replacing project data."""
         if (not self._is_single_path_segment(filename)

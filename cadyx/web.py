@@ -381,6 +381,16 @@ def make_request_handler(
                     raise ValidationError("Project rename requires only a name field.")
                 self._json(200, core.rename_project(project_id, body["name"]))
                 return
+            if agent_api and len(parts) == 2 and parts[1] == "copy-files":
+                if body is None or set(body) != {"source_project_id"}:
+                    raise ValidationError("Project file copy requires only source_project_id.")
+                self._json(201, core.copy_project_files(project_id, body["source_project_id"]))
+                return
+            if agent_api and len(parts) == 2 and parts[1] == "prune-files":
+                if body is None or set(body) != {"keep_files"} or not isinstance(body["keep_files"], list):
+                    raise ValidationError("Project file pruning requires only a keep_files array.")
+                self._json(200, core.prune_project_files(project_id, body["keep_files"]))
+                return
             if agent_api and len(parts) == 2 and parts[1] == "dashboard":
                 if body is None:
                     raise ValidationError("A JSON request body is required.")

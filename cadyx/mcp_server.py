@@ -136,6 +136,9 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_select_resource", "description": "Select an existing project or workspace folder through the Agent API.", "inputSchema": _schema({"type": {"enum": ["project", "folder"]}, "project_id": _STRING, "folder_name": _STRING}, ["type"])},
     {"name": "cadyx_create_project", "description": "Create a project; set select=false to leave the current viewer selection unchanged.", "inputSchema": _schema({"name": {"type": "string", "minLength": 1, "maxLength": 120}, "select": {"type": "boolean"}}, ["name"])},
     {"name": "cadyx_rename_project", "description": "Rename and move a FREE project folder through the Agent API while preserving its identity and model history.", "inputSchema": _schema({"project_id": _STRING, "name": {"type": "string", "minLength": 1, "maxLength": 120}}, ["project_id", "name"])},
+    {"name": "cadyx_copy_project_files", "description": "Copy user files recursively from one FREE project into another through the Agent API, without copying project metadata or overwriting files.", "inputSchema": _schema({"target_project_id": _STRING, "source_project_id": _STRING}, ["target_project_id", "source_project_id"])},
+    {"name": "cadyx_prune_project_files", "description": "Remove user files recursively from an empty FREE project, retaining only the named direct source files.", "inputSchema": _schema({"project_id": _STRING, "keep_files": {"type": "array", "items": _STRING, "minItems": 1}}, ["project_id", "keep_files"])},
+    {"name": "cadyx_delete_project", "description": "Delete a FREE project through the Agent API after its needed data has been preserved elsewhere.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_inspect_project", "description": "Read the saved model, revision, command history and lock state without acquiring a lease.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_capabilities", "description": "Discover supported Agent API routes, model commands, parameter names, documented constraints and error meanings.", "inputSchema": _schema()},
     {"name": "cadyx_list_project_files", "description": "List direct user files in a saved project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
@@ -204,6 +207,20 @@ class MCPApplication:
             return self.api.post("/api/v1/agent/projects", {"name": args.get("name"), "select": select})
         if name == "cadyx_rename_project":
             return self.api.post(self._project(args["project_id"], "/rename"), {"name": args["name"]})
+        if name == "cadyx_copy_project_files":
+            return self.api.post(
+                self._project(args["target_project_id"], "/copy-files"),
+                {"source_project_id": args["source_project_id"]},
+            )
+        if name == "cadyx_prune_project_files":
+            return self.api.post(
+                self._project(args["project_id"], "/prune-files"),
+                {"keep_files": args["keep_files"]},
+            )
+        if name == "cadyx_delete_project":
+            path = "/api/v1/projects/" + urllib.parse.quote(args["project_id"], safe="")
+            raw, _ = self.api.request("DELETE", path)
+            return json.loads(raw.decode("utf-8"))
         if name == "cadyx_inspect_project":
             return self.api.get(self._project(args["project_id"]))
         if name == "cadyx_capabilities":
