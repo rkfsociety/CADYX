@@ -605,7 +605,7 @@ def open_path(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[
     splines = [item for item in owned if item.get("type") == "spline"
                and not item.get("construction", False)]
     if any(item.get("type") not in {"point", "line", "spline"} for item in owned):
-        raise ValidationError("A sweep path needs 3 to 512 points and no other sketch geometry.")
+        raise ValidationError("A sweep path needs at least 3 points and no other sketch geometry.")
 
     by_id = {item["id"]: item for item in objects}
     point_ids = {item["id"] for item in owned
@@ -617,8 +617,8 @@ def open_path(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[
         if point_ids != set(spline["point_ids"]):
             raise ValidationError("Every point in a spline sweep sketch must belong to its spline.")
         return sketch["plane"], spline_sample_points(spline, by_id, samples_per_span=4)
-    if len(splines) or not 2 <= len(lines) <= 511:
-        raise ValidationError("A sweep path needs one open spline or a line chain with 3 to 512 points.")
+    if len(splines) or len(lines) < 2:
+        raise ValidationError("A sweep path needs one open spline or a line chain with at least 3 points.")
 
     adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for line in lines:

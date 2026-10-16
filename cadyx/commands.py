@@ -2583,8 +2583,8 @@ class CommandSystem:
         if sketch is None:
             raise NotFoundError("Sketch was not found.")
         coordinates = command.get("points")
-        if not isinstance(coordinates, list) or not 3 <= len(coordinates) <= 512:
-            raise ValidationError("A replacement sweep path needs 3 to 512 points.")
+        if not isinstance(coordinates, list) or len(coordinates) < 3:
+            raise ValidationError("A replacement sweep path needs at least 3 points.")
         points: list[tuple[float, float]] = []
         for point in coordinates:
             if not isinstance(point, dict) or set(point) != {"x", "y"}:

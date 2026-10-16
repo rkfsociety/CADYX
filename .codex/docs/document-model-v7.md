@@ -70,13 +70,13 @@ their respective human/agent edit leases. Results below appear inside
 - `add_sketch_element`: `sketch_id`, `element_type` (point, line or circle),
   and that element's fields from the table. Returns `object_id`.
 - `add_sketch_polyline`: `sketch_id`, `points` (`{x, y}` coordinates), and
-  optional `closed` (default `false`). Adds one open chain of 2–512 points, or
+  optional `closed` (default `false`). Adds one open chain of at least 2 points, or
   one closed polygon of at least 3 points, in a single command. Adjacent points,
   including the closing pair for a polygon, must be more than 1e-7 apart.
   Returns the created `point_ids`, `line_ids`, and `closed` state. These are
   ordinary point and line objects in the document.
 - `add_sketch_line_chain`: `sketch_id`, `points` (`{x, y}` coordinates).
-  Adds one open chain of 2–512 points; use `add_sketch_polyline` when a closed
+  Adds one open chain of at least 2 points; use `add_sketch_polyline` when a closed
   profile is required.
 - `add_sketch_rectangle`: `sketch_id`, lower-left `x` and `y`, positive `width`
   and `height`. Adds a closed four-sided profile as ordinary points and lines
@@ -320,7 +320,7 @@ and profile representations. Interpolating splines remain defined by their
 ordered interpolated points and are sampled at 24 segments per span for display
 and profile use. Control-point B-splines use the same per-span display/profile
 sampling; Bezier curves use 24 segments over the full curve. Sweep paths use
-four samples per span to respect the kernel's 512-point bound.
+four samples per span when converting sketch splines to OCCT path points.
 Profile line loops support at least 3 edges. Each
 operation accepts one contour; holes and multi-contour profiles are not supported.
 
@@ -342,7 +342,7 @@ at least 3 finite `{x, y}` points; sketches with circles or constraints are
 rejected. Editing a sketch also rebuilds downstream derived solid features.
 
 `replace_sketch_path` replaces a point-and-line sketch with one open connected
-chain. It accepts `sketch_id` and 3–512 finite `{x, y}` points, creates one line
+chain. It accepts `sketch_id` and at least 3 finite `{x, y}` points, creates one line
 between each adjacent pair, and animates the path while it is drawn. A path sketch
 cannot contain branches, loops, circles, or constraints.
 

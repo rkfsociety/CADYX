@@ -952,8 +952,10 @@ TopoDS_Shape MakeClosedSplineProfileShape(const double* coordinates, size_t poin
 }
 
 TopoDS_Shape MakePipeShape(const double* coordinates, size_t point_count, int plane, double radius) {
-  if (!coordinates || point_count < 3 || point_count > 512)
-    throw std::runtime_error("A sweep path needs between 3 and 512 points.");
+  if (!coordinates || point_count < 3)
+    throw std::runtime_error("A sweep path needs at least 3 points.");
+  if (point_count > static_cast<size_t>(std::numeric_limits<Standard_Integer>::max()))
+    throw std::runtime_error("Sweep path exceeds the OCCT point index range.");
   if ((plane != 0 && plane != 1) || !std::isfinite(radius) || radius <= 0)
     throw std::runtime_error("A pipe needs a supported sketch plane and a positive radius.");
   NCollection_Array1<gp_Pnt> points(1, static_cast<Standard_Integer>(point_count));

@@ -608,8 +608,8 @@ class OCCTKernelAdapter:
     def create_swept_pipe(
         self, path: list[dict[str, float]], *, plane: str, radius: float,
     ) -> dict[str, Any]:
-        if plane not in {"XY", "XZ"} or not isinstance(path, list) or not 3 <= len(path) <= 512:
-            raise ValidationError("A pipe path needs 3 to 512 points on an XY or XZ sketch.")
+        if plane not in {"XY", "XZ"} or not isinstance(path, list) or len(path) < 3:
+            raise ValidationError("A pipe path needs at least 3 points on an XY or XZ sketch.")
         normalized: list[dict[str, float]] = []
         for point in path:
             if not isinstance(point, dict) or set(point) != {"x", "y"}:
