@@ -459,10 +459,10 @@ class CommandSystem:
         closed = command.get("closed", False)
         if not isinstance(closed, bool):
             raise ValidationError("closed must be a boolean.")
-        minimum, maximum = (3, 4096) if closed else (2, 512)
-        if not isinstance(coordinates, list) or not minimum <= len(coordinates) <= maximum:
+        minimum = 3 if closed else 2
+        if not isinstance(coordinates, list) or len(coordinates) < minimum:
             shape = "closed polygon" if closed else "polyline"
-            raise ValidationError(f"A {shape} needs between {minimum} and {maximum} points.")
+            raise ValidationError(f"A {shape} needs at least {minimum} points.")
 
         points: list[tuple[float, float]] = []
         for point in coordinates:
@@ -2535,8 +2535,8 @@ class CommandSystem:
         if sketch is None:
             raise NotFoundError("Sketch was not found.")
         coordinates = command.get("points")
-        if not isinstance(coordinates, list) or not 3 <= len(coordinates) <= 4096:
-            raise ValidationError("A replacement profile needs between 3 and 4096 points.")
+        if not isinstance(coordinates, list) or len(coordinates) < 3:
+            raise ValidationError("A replacement profile needs at least 3 points.")
         points: list[tuple[float, float]] = []
         for point in coordinates:
             if not isinstance(point, dict) or set(point) != {"x", "y"}:

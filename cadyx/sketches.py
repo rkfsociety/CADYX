@@ -478,8 +478,8 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
             for index in range(128)
         ]
     edges = lines + arcs + ellipse_arcs + splines
-    if circles or ellipses or len(edges) < 3 or len(edges) > 4096:
-        raise ValidationError("A profile operation needs one closed line/arc loop with 3 to 4096 edges.")
+    if circles or ellipses or len(edges) < 3:
+        raise ValidationError("A profile operation needs one closed line/arc loop with at least 3 edges.")
 
     by_id = {item["id"]: item for item in objects}
     adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)

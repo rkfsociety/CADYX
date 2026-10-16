@@ -111,8 +111,8 @@ def _box_dimensions(width: Any, height: Any, depth: Any) -> dict[str, float]:
 def _profile_values(profile: Any, plane: Any) -> tuple[list[dict[str, float]], int]:
     if plane not in {"XY", "XZ"}:
         raise ValidationError("Profile plane must be XY or XZ.")
-    if not isinstance(profile, list) or not 3 <= len(profile) <= 4096:
-        raise ValidationError("A profile needs between 3 and 4096 points.")
+    if not isinstance(profile, list) or len(profile) < 3:
+        raise ValidationError("A profile needs at least 3 points.")
     normalized = []
     for point in profile:
         if not isinstance(point, dict) or set(point) != {"x", "y"}:

@@ -738,8 +738,8 @@ StlExportResult ExportStl(const unsigned char* data, size_t size,
 
 TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
                               int operation, int plane, double amount, bool centered) {
-  if (!coordinates || point_count < 3 || point_count > 4096)
-    throw std::runtime_error("A profile needs between 3 and 4096 points.");
+  if (!coordinates || point_count < 3)
+    throw std::runtime_error("A profile needs at least 3 points.");
   if ((operation != 0 && operation != 1) || (plane != 0 && plane != 1))
     throw std::runtime_error("Unsupported profile operation or sketch plane.");
   if (!std::isfinite(amount) || amount <= 0)

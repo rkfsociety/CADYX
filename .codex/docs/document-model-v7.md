@@ -71,7 +71,7 @@ their respective human/agent edit leases. Results below appear inside
   and that element's fields from the table. Returns `object_id`.
 - `add_sketch_polyline`: `sketch_id`, `points` (`{x, y}` coordinates), and
   optional `closed` (default `false`). Adds one open chain of 2–512 points, or
-  one closed polygon of 3–4096 points, in a single command. Adjacent points,
+  one closed polygon of at least 3 points, in a single command. Adjacent points,
   including the closing pair for a polygon, must be more than 1e-7 apart.
   Returns the created `point_ids`, `line_ids`, and `closed` state. These are
   ordinary point and line objects in the document.
@@ -321,7 +321,7 @@ ordered interpolated points and are sampled at 24 segments per span for display
 and profile use. Control-point B-splines use the same per-span display/profile
 sampling; Bezier curves use 24 segments over the full curve. Sweep paths use
 four samples per span to respect the kernel's 512-point bound.
-Profile line loops support 3–4096 edges. Each
+Profile line loops support at least 3 edges. Each
 operation accepts one contour; holes and multi-contour profiles are not supported.
 
 The command stores an OCCT B-rep descriptor plus a feature that references its
@@ -338,7 +338,7 @@ from the B-rep. These are solids, not triangle-mesh imports.
 
 `replace_sketch_profile` replaces the point/line loop of a selected sketch and
 atomically rebuilds its dependent profile features. It accepts `sketch_id` and
-3–4096 finite `{x, y}` points; sketches with circles or constraints are
+at least 3 finite `{x, y}` points; sketches with circles or constraints are
 rejected. Editing a sketch also rebuilds downstream derived solid features.
 
 `replace_sketch_path` replaces a point-and-line sketch with one open connected
