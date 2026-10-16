@@ -253,6 +253,11 @@ their respective human/agent edit leases. Results below appear inside
   temporary STEP reference; after saving the document, CADYX removes its staged
   direct project file and leaves the original local source untouched. The
   imported body must own exactly one `import_step` feature.
+- `remove_objects`: `object_ids`, a non-empty array of unique body, feature,
+  sketch, or sketch-element IDs. Removes the supplied group in one atomic
+  command only when no retained object refers to any member. Include dependent
+  features and sketch elements in the same group when removing a complete old
+  feature chain. Project files and command history are preserved.
 - `clear_model`: removes every document model object in one atomic command,
   preserving the document identity, project directory, command history, and
   staged project files. Use when the user explicitly requests a clean model;

@@ -111,6 +111,8 @@ class CommandSystem:
             return self._cut_bodies(document, command, progress=progress)
         if kind == "remove_body":
             return self._remove_body(document, command)
+        if kind == "remove_objects":
+            return self._remove_objects(document, command)
         if kind == "clear_model":
             if command.keys() != {"type"}:
                 raise ValidationError("clear_model does not accept additional fields.")
@@ -413,6 +415,39 @@ class CommandSystem:
             "removed_feature_ids": sorted(feature_ids),
             **({"source_file_to_remove": source_file} if source_file else {}),
         }
+
+    @staticmethod
+    def _remove_objects(document: Document, command: dict[str, Any]) -> dict[str, Any]:
+        if command.keys() != {"type", "object_ids"}:
+            raise ValidationError("remove_objects requires only object_ids.")
+        object_ids = command.get("object_ids")
+        if (not isinstance(object_ids, list) or not object_ids
+                or any(not isinstance(value, str) or not value for value in object_ids)
+                or len(set(object_ids)) != len(object_ids)):
+            raise ValidationError("object_ids must be a non-empty list of unique object IDs.")
+        by_id = {item["id"]: item for item in document.objects}
+        missing = [value for value in object_ids if value not in by_id]
+        if missing:
+            raise NotFoundError(f"Objects to remove were not found: {', '.join(missing)}")
+        allowed_types = {"body", "feature", "sketch", "point", "line", "circle", "ellipse", "spline", "constraint"}
+        unsupported = [value for value in object_ids if by_id[value].get("type") not in allowed_types]
+        if unsupported:
+            raise ValidationError(f"Objects cannot be removed with remove_objects: {', '.join(unsupported)}")
+        removed = set(object_ids)
+
+        def references_removed(value: Any) -> bool:
+            if isinstance(value, dict):
+                return any(references_removed(child) for key, child in value.items() if key != "id")
+            if isinstance(value, list):
+                return any(references_removed(child) for child in value)
+            return isinstance(value, str) and value in removed
+
+        external = [item["id"] for item in document.objects
+                    if item["id"] not in removed and references_removed(item)]
+        if external:
+            raise ValidationError(f"Objects are still referenced by retained objects: {', '.join(external)}")
+        document.objects[:] = [item for item in document.objects if item["id"] not in removed]
+        return {"removed_object_ids": object_ids, "removed_count": len(object_ids)}
 
     def _create_sketch_from_section(
         self, document: Document, command: dict[str, Any], *,
