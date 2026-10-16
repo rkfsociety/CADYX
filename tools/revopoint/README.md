@@ -49,6 +49,12 @@ The arguments are monitor duration, CSV path, delay before the relative turn, an
 
 The frame UTC timestamps and angle samples can be joined by linear interpolation. Verified synchronized run: 120 captured frames all received an interpolated table pose spanning 0°–30°; derived per-frame rows are saved as `capture_frame_poses.csv`. This is suitable for per-frame rigid rotation estimates when the turntable axis and pivot are calibrated. The Q-matrix disparity scale and turntable axis/pivot remain unvalidated, so the pose table alone does not establish an accurate fused full model.
 
+## Experimental 360° fusion result
+
+The twelve 30° raw captures were reprojected and tested with a candidate Z-axis rotation and overlap-fitted pivot. A candidate transform of −30° per commanded +30° step around approximately `[28.8, -5.4]` in current Q coordinates gave 81–94% adjacent-pair nearest-neighbor overlap within 5 coordinate units. The pivot and sign are empirical estimates, not mechanical calibration. A voxel-deduplicated PLY and its JSON provenance are saved as `approx_fused_candidate.ply` and `approx_fused_candidate.json` beside the source frames.
+
+CADYX reconstructed the candidate to 24,641 vertices and 49,979 triangles. Visual inspection shows an overly broad, nearly planar Poisson sheet with a noisy dense center; this mesh is a diagnostic artifact and is not a verified complete model. The raw disparity scale, mechanical axis/pivot, object support/removal and reconstruction quality need further work before the fusion can be accepted.
+
 List the camera's advertised native modes with:
 
 ```powershell
