@@ -13,7 +13,7 @@ from .sketches import closed_profile
 _INSTALLED = False
 
 CAPABILITIES = (
-    {"type": "create_sketch_from_body_section", "description": "Extract closed planar contours from any editable B-rep body into editable sketches.", "required": ["body_id", "normal_axis", "offset"], "optional": ["max_points", "name"], "constraints": ["normal_axis is X, Y or Z; open/branched sections are rejected by the native sectioner."]},
+    {"type": "create_sketch_from_body_section", "description": "Extract closed planar contours from any editable B-rep body into editable sketches.", "required": ["body_id", "normal_axis", "offset"], "optional": ["max_points", "name"], "constraints": ["normal_axis is X, Y or Z; max_points is at least 16 total samples (default 2048); open/branched sections are rejected by the native sectioner."]},
     {"type": "pad_sketch_to_body", "description": "Extrude a closed sketch and fuse it into an existing body.", "required": ["body_id", "sketch_id", "depth"], "optional": ["centered", "name"], "constraints": ["Pad must intersect the source body and final result must remain one solid."]},
     {"type": "rib_from_sketch", "description": "Create an additive rib from a thin closed sketch profile and fuse it into a body.", "required": ["body_id", "sketch_id", "depth"], "optional": ["centered", "name"], "constraints": ["Use a thin closed rib profile; result must fuse into one solid."]},
     {"type": "pocket_sketch", "description": "Extrude a closed sketch as a cutting tool and subtract it from an existing body.", "required": ["body_id", "sketch_id", "depth"], "optional": ["centered", "name"], "constraints": ["Pocket must remove material and final result must remain one solid."]},
@@ -59,8 +59,8 @@ def _execute(self, document, command, *, progress=None):
             raise ValidationError("normal_axis must be X, Y or Z.")
         offset = _number(command.get("offset"), "offset")
         max_points = command.get("max_points", 2048)
-        if type(max_points) is not int or not 16 <= max_points <= 4096:
-            raise ValidationError("max_points must be an integer from 16 to 4096.")
+        if type(max_points) is not int or max_points < 16:
+            raise ValidationError("max_points must be an integer of at least 16.")
         native = NativeKernel()
         brep = _raw_brep(source["geometry"])
         result = native.section_profile(brep, normal_axis=axis, offset=offset, max_points=max_points)

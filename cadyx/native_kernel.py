@@ -442,8 +442,8 @@ class NativeKernel:
         if normal_axis not in axes:
             raise ValidationError("Section normal axis must be X, Y or Z.")
         if (isinstance(max_points, bool) or not isinstance(max_points, int)
-                or not 16 <= max_points <= 4096):
-            raise ValidationError("Section sample limit must be between 16 and 4096 points.")
+                or max_points < 16 or max_points > ctypes.c_size_t(-1).value):
+            raise ValidationError("Section sample limit must be at least 16 and fit the native size type.")
         source = (ctypes.c_ubyte * len(brep)).from_buffer_copy(brep)
         error = ctypes.create_string_buffer(1024)
         result = self.library.cadyx_section_profile(

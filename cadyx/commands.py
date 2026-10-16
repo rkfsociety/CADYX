@@ -419,8 +419,8 @@ class CommandSystem:
             raise ValidationError("normal_axis must be X, Y or Z.")
         offset = _finite_number(command.get("offset"), "Section plane offset")
         max_points = command.get("max_points", 2048)
-        if type(max_points) is not int or not 16 <= max_points <= 4096:
-            raise ValidationError("max_points must be an integer between 16 and 4096.")
+        if type(max_points) is not int or max_points < 16:
+            raise ValidationError("max_points must be an integer of at least 16.")
         name = command.get("name", f"Сечение {axis}={offset:g}")
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
             raise ValidationError("Sketch name must be a non-empty string of at most 120 characters.")

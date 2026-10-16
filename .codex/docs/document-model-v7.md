@@ -355,8 +355,8 @@ points or the radius change. The command transition progressively reveals the
 pipe along the path.
 
 `create_sketch_from_section` accepts an imported STEP B-rep `body_id`, a plane
-`normal_axis` (`X`, `Y` or `Z`), an `offset`, optional `max_points` (16–4096,
-default 2048 total samples across all contours), and optional `name`. OCCT
+`normal_axis` (`X`, `Y` or `Z`), an `offset`, optional `max_points` (at least
+16, default 2048 total samples across all contours), and optional `name`. OCCT
 intersects the exact B-rep with the plane and returns every closed, non-zero-area
 contour as a separate editable polyline sketch. Open or branched section
 boundaries are rejected. The source B-rep is preserved. These polylines are

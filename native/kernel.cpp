@@ -520,8 +520,7 @@ std::string ImportStepJson(const unsigned char* data, size_t size) {
 std::string SectionProfileJson(const unsigned char* data, size_t size, int normal_axis,
                                double offset, size_t max_points) {
   const TopoDS_Shape source = ReadImportedBrep(data, size);
-  if (!std::isfinite(offset) || normal_axis < 0 || normal_axis > 2
-      || max_points < 16 || max_points > 4096)
+  if (!std::isfinite(offset) || normal_axis < 0 || normal_axis > 2 || max_points < 16)
     throw std::runtime_error("Section plane or profile sampling limit is invalid.");
   const gp_Dir normal = normal_axis == 0 ? gp_Dir(1, 0, 0)
       : normal_axis == 1 ? gp_Dir(0, 1, 0) : gp_Dir(0, 0, 1);
@@ -580,11 +579,14 @@ std::string SectionProfileJson(const unsigned char* data, size_t size, int norma
   }
   double total_length = 0;
   for (const auto& edge : edges) total_length += edge.length;
+  if (!std::isfinite(total_length) || total_length <= 0)
+    throw std::runtime_error("Section boundary has an invalid total length.");
   if (edges.size() > max_points)
     throw std::runtime_error("Section has more boundary edges than the requested sample limit.");
   std::vector<std::vector<gp_Pnt>> profiles;
   profiles.reserve(loops.size());
   const size_t remaining_samples = max_points - edges.size();
+  size_t additional_samples_used = 0;
   for (const auto& ordered : loops) {
     std::vector<gp_Pnt> points;
     for (const auto& item : ordered) {
@@ -594,8 +596,13 @@ std::string SectionProfileJson(const unsigned char* data, size_t size, int norma
       const double last = curve.LastParameter();
       if (!std::isfinite(first) || !std::isfinite(last) || !(last > first))
         throw std::runtime_error("Section edge has unsupported parameter bounds.");
-      const size_t segments = 1 + static_cast<size_t>(std::floor(
-          static_cast<double>(remaining_samples) * edge.length / total_length));
+      const double proportional_samples =
+          static_cast<double>(remaining_samples) * edge.length / total_length;
+      const size_t remaining_budget = remaining_samples - additional_samples_used;
+      const size_t additional_segments = proportional_samples >= static_cast<double>(remaining_budget)
+          ? remaining_budget : static_cast<size_t>(std::floor(proportional_samples));
+      additional_samples_used += additional_segments;
+      const size_t segments = 1 + additional_segments;
       for (size_t sample = 0; sample < segments; ++sample) {
         const double ratio = static_cast<double>(sample) / segments;
         const double parameter = item.second ? last - (last - first) * ratio
