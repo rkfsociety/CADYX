@@ -817,15 +817,9 @@ function renderProjectCard(entry) {
   card.dataset.active = String(active);
   card.setAttribute("role", "listitem");
 
-  const heading = document.createElement("div");
-  heading.className = "workspace-project-card-heading";
-  const name = document.createElement("h3");
-  name.textContent = project.name;
-  name.title = project.name;
   const state = document.createElement("span");
   state.className = "workspace-project-state";
-  state.textContent = active ? "АКТИВНЫЙ РЕСУРС" : projectAvailable ? "ГОТОВ К ОТКРЫТИЮ" : "ПАНЕЛЬ ЗАНЯТА";
-  heading.append(name, state);
+  state.textContent = active ? "Текущий проект" : projectAvailable ? "Готов к открытию" : "Панель занята";
 
   const thumbnail = document.createElement("div");
   thumbnail.className = "workspace-project-thumbnail";
@@ -838,19 +832,48 @@ function renderProjectCard(entry) {
     image.remove();
     thumbnail.classList.add("unavailable");
   }, { once: true });
-  thumbnail.append(image);
+  thumbnail.append(image, state);
+
+  const heading = document.createElement("div");
+  heading.className = "workspace-project-card-heading";
+  const name = document.createElement("h3");
+  name.textContent = project.name;
+  name.title = project.name;
+  heading.append(name);
+
+  const more = document.createElement("details");
+  more.className = "workspace-project-menu";
+  const moreButton = document.createElement("summary");
+  moreButton.textContent = "⋮";
+  moreButton.setAttribute("aria-label", `Действия с проектом «${project.name}»`);
+  moreButton.title = "Действия с проектом";
+  const morePopover = document.createElement("div");
+  morePopover.className = "workspace-project-menu-popover";
+  const remove = document.createElement("button");
+  remove.className = "workspace-project-delete";
+  remove.type = "button";
+  remove.textContent = "Удалить проект";
+  remove.disabled = !projectAvailable;
+  remove.setAttribute("aria-label", `Удалить проект «${project.name}»`);
+  remove.addEventListener("click", () => deleteProject(project.id, project.name));
+  morePopover.append(remove);
+  more.append(moreButton, morePopover);
+  heading.append(more);
 
   const meta = document.createElement("div");
   meta.className = "workspace-project-meta";
   const modified = document.createElement("span");
-  modified.textContent = "ИЗМЕНЁН";
+  modified.className = "workspace-project-modified";
+  modified.setAttribute("aria-label", "Дата изменения");
+  modified.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13H4V6a1 1 0 0 1 1-1Z"/></svg>';
   const modifiedAt = Date.parse(project.modified_at || "");
-  const modifiedValue = document.createElement("strong");
-  modifiedValue.textContent = Number.isFinite(modifiedAt)
-    ? projectDateFormat.format(new Date(modifiedAt)) : "—";
+  const modifiedValue = document.createElement("time");
+  if (Number.isFinite(modifiedAt)) modifiedValue.dateTime = new Date(modifiedAt).toISOString();
+  modifiedValue.textContent = Number.isFinite(modifiedAt) ? projectDateFormat.format(new Date(modifiedAt)) : "—";
   modified.append(modifiedValue);
   const projectId = document.createElement("span");
-  projectId.textContent = "ID";
+  projectId.className = "workspace-project-id";
+  projectId.append(document.createTextNode("ID "));
   const projectIdValue = document.createElement("strong");
   projectIdValue.textContent = project.id.slice(0, 8).toUpperCase();
   projectId.append(projectIdValue);
@@ -863,14 +886,19 @@ function renderProjectCard(entry) {
   open.href = `/?project_id=${encodeURIComponent(project.id)}`;
   open.target = "_blank";
   open.rel = "noopener";
-  open.textContent = "ОТКРЫТЬ ПРОЕКТ";
-  const remove = document.createElement("button");
-  remove.className = "button workspace-project-delete";
-  remove.type = "button";
-  remove.textContent = "УДАЛИТЬ";
-  remove.disabled = !projectAvailable;
-  remove.setAttribute("aria-label", `Удалить проект «${project.name}»`);
-  remove.addEventListener("click", () => deleteProject(project.id, project.name));
+  open.setAttribute("aria-label", `Открыть проект «${project.name}» в новой вкладке`);
+  open.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7h6l2 2h9v10h-17V7Zm0 0V5h6l2 2"/></svg><span>Открыть проект</span>';
+
+  const folderMenu = document.createElement("details");
+  folderMenu.className = "workspace-project-folder-menu";
+  const folderButton = document.createElement("summary");
+  folderButton.textContent = "⌄";
+  folderButton.setAttribute("aria-label", `Переместить проект «${project.name}» в папку`);
+  folderButton.title = "Папка проекта";
+  const folderPopover = document.createElement("div");
+  folderPopover.className = "workspace-project-folder-popover";
+  const folderLabel = document.createElement("label");
+  folderLabel.textContent = "Папка проекта";
   const groupSelect = document.createElement("select");
   groupSelect.className = "workspace-project-group-select";
   groupSelect.setAttribute("aria-label", `Папка проекта «${project.name}»`);
@@ -887,8 +915,10 @@ function renderProjectCard(entry) {
   }
   groupSelect.value = entry.group_id || "";
   groupSelect.addEventListener("change", () => setProjectGroup(project.id, groupSelect.value));
-  actions.append(open, groupSelect, remove);
-  card.append(heading, thumbnail, meta, actions);
+  folderPopover.append(folderLabel, groupSelect);
+  folderMenu.append(folderButton, folderPopover);
+  actions.append(open, folderMenu);
+  card.append(thumbnail, heading, meta, actions);
   return card;
 }
 
@@ -913,20 +943,36 @@ $("#projects-sort").addEventListener("change", (event) => {
   projectSort = event.currentTarget.value;
   renderProjects();
 });
+$("#projects-search").addEventListener("input", renderProjects);
+function setProjectsLayout(layout) {
+  const gridLayout = layout === "grid";
+  projectsPanel.dataset.layout = gridLayout ? "grid" : "list";
+  $("#projects-grid-view").setAttribute("aria-pressed", String(gridLayout));
+  $("#projects-list-view").setAttribute("aria-pressed", String(!gridLayout));
+}
+$("#projects-grid-view").addEventListener("click", () => setProjectsLayout("grid"));
+$("#projects-list-view").addEventListener("click", () => setProjectsLayout("list"));
 
 function renderProjects() {
   const list = $("#projects-list");
   list.replaceChildren();
   $("#projects-count").textContent = integerFormat.format(projects.length);
-  $("#projects-empty").hidden = projects.length > 0;
+  const query = $("#projects-search").value.trim().toLocaleLowerCase("ru-RU");
+  const visibleProjects = projects.filter((entry) => !query
+    || entry.project.name.toLocaleLowerCase("ru-RU").includes(query));
+  const empty = $("#projects-empty");
+  empty.hidden = visibleProjects.length > 0;
+  empty.textContent = projects.length && query
+    ? "По запросу ничего не найдено."
+    : "В рабочей области пока нет сохранённых проектов.";
   const grouped = new Map(projectGroups.map((group) => [group.id, { group, entries: [] }]));
   const ungrouped = [];
-  for (const entry of projects) {
+  for (const entry of visibleProjects) {
     const section = grouped.get(entry.group_id);
     if (section) section.entries.push(entry);
     else ungrouped.push(entry);
   }
-  if (ungrouped.length) renderProjectGroup("БЕЗ ПАПКИ", null, ungrouped);
+  if (ungrouped.length) renderProjectGroup("Без папки", null, ungrouped);
   const sortedGroups = [...grouped.values()].sort((left, right) =>
     left.group.name.localeCompare(right.group.name, "ru", { sensitivity: "base" }));
   for (const { group, entries } of sortedGroups) renderProjectGroup(group.name, group.id, entries);

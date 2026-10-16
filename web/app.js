@@ -28,7 +28,92 @@
 .primary-grid[data-view=overview] #object-panel{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}.cad3-overlay{position:absolute;z-index:6;inset:0;width:100%;height:100%;pointer-events:none}.project-detail[data-cad-tool=select] #model-preview{cursor:crosshair}.project-detail[data-cad-tool=orbit] #model-preview{cursor:grab}.project-detail[data-v2-selection=true] .model-panel:after{display:none!important}.cad-v2-selection-chip{display:none!important}
 .cad3-tool{display:flex;align-items:center;gap:6px;height:30px;padding:0 8px;border:1px solid transparent;border-radius:4px;background:transparent;color:#a8b3b9;font:9px var(--mono)}.cad3-tool svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7}.cad3-tool[data-on=true]{border-color:#83431d;color:var(--accent);background:#3a1b0d}.cad3-tool:disabled{opacity:.35}.cad3-views{position:relative}.cad3-views summary{list-style:none;cursor:pointer}.cad3-views #viewport-camera-presets{position:absolute;top:36px;left:0;display:grid!important;grid-template-columns:repeat(4,32px);padding:5px;border:1px solid var(--line);border-radius:5px;background:#0d1419;box-shadow:0 8px 24px #0008}.cad3-views:not([open]) #viewport-camera-presets{display:none!important}.viewport-mode-button{min-width:128px!important}
 @media(max-width:920px){.primary-grid[data-view=overview]>.inspector-column{display:none!important}}
-@media(max-width:680px){:root{--cadyx-rail-width:48px;--cadyx-tree-width:52px}.project-detail{grid-template-columns:48px 52px minmax(0,1fr)!important}.project-detail[data-tree-collapsed=true]{grid-template-columns:48px 48px minmax(0,1fr)!important}.cad3-rail{gap:4px;padding:8px 4px}.cad3-rail button{width:36px;height:36px}}`;
+body:has(#primary-grid[data-view="projects"]) .topbar{grid-template-columns:auto minmax(0,1fr) auto!important;grid-template-areas:"brand project sync"!important;gap:0;padding-right:22px!important}
+body:has(#primary-grid[data-view="projects"]) .topbar-project{justify-self:end;min-width:max-content;gap:12px;padding:0;border:0}
+body:has(#primary-grid[data-view="projects"]) .topbar-project>.project-light,body:has(#primary-grid[data-view="projects"]) .topbar-project>.topbar-project-copy{display:none!important}
+body:has(#primary-grid[data-view="projects"]) #workspace-navigation{position:fixed!important;z-index:24;top:0;left:248px;width:max-content;height:58px;min-height:58px;align-items:stretch;gap:0;overflow:visible;padding:0;background:transparent;border:0;grid-column:auto!important}
+body:has(#primary-grid[data-view="projects"]) #workspace-navigation .nav-item{width:auto;min-width:0;height:58px;min-height:58px;justify-content:center;padding:0 18px;border:0;border-bottom:3px solid transparent;border-radius:0;background:transparent;text-decoration:none}
+body:has(#primary-grid[data-view="projects"]) #workspace-navigation .nav-copy strong{color:#c8d0d5;font:600 12px/1.2 var(--ui-font);letter-spacing:0;text-transform:none;white-space:nowrap}
+body:has(#primary-grid[data-view="projects"]) #workspace-navigation .nav-item:hover:not(:disabled) .nav-copy strong{color:#fff}
+body:has(#primary-grid[data-view="projects"]) #workspace-navigation a[href="/scanner"]{border-bottom-color:var(--accent)}
+body:has(#primary-grid[data-view="projects"]) .project-detail{grid-template-rows:0 minmax(0,1fr) var(--cadyx-ai-height)!important}
+body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary-grid[data-view="projects"]) .project-main{grid-row:2!important}
+.brand{gap:9px}
+.brand-mark{display:block;width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+#projects-panel{grid-template-rows:auto minmax(0,1fr) auto!important;border:0;border-radius:0!important;background:transparent}
+.projects-page-heading{display:flex;min-width:0;align-items:end;justify-content:space-between;gap:22px;padding:24px 24px 14px}
+.projects-title-block{display:grid;min-width:220px;gap:3px}
+.projects-eyebrow{color:var(--muted);font:12px/1.3 var(--ui-font)}
+.projects-title-block h2{display:flex;align-items:center;gap:14px;margin:0;color:#f2f5f6;font:700 34px/1.12 var(--ui-font);letter-spacing:-.025em}
+.projects-count{display:inline-grid;min-width:32px;height:32px;place-items:center;padding:0 8px;border:1px solid var(--line);border-radius:9px;background:#151e25;color:var(--muted);font:600 14px var(--ui-font);letter-spacing:0}
+.projects-toolbar{display:flex;min-width:0;align-items:center;justify-content:flex-end;gap:10px}
+.projects-toolbar label:not(.visually-hidden){color:var(--muted);font:12px/1.2 var(--ui-font);letter-spacing:0;white-space:nowrap}
+.projects-toolbar input{width:clamp(190px,22vw,315px);height:44px;min-width:0;padding:0 14px;border:1px solid #2e3b44;border-radius:9px;background:#101920;color:var(--text);font:13px var(--ui-font)}
+.projects-toolbar input::placeholder{color:#8d9ba3}
+.projects-toolbar input:focus{border-color:#70818d;outline:2px solid #71828b25;outline-offset:1px}
+.projects-toolbar select{width:clamp(130px,12vw,165px);height:42px;max-width:none;padding:0 12px;border:1px solid #2e3b44;border-radius:9px;background:#101920;color:var(--text);font:12px var(--ui-font)}
+.projects-layout-toggle{display:flex;align-items:center;gap:2px;padding:3px;border:1px solid #2e3b44;border-radius:9px;background:#101920}
+.projects-layout-button{display:grid;width:38px;height:34px;place-items:center;padding:7px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
+.projects-layout-button[aria-pressed="true"]{border-color:#8a461e;background:#3a1b0d;color:var(--accent);box-shadow:0 0 14px #ff741722}
+.projects-layout-button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.projects-create-group{height:42px;min-height:42px;padding:0 17px;border-color:#ff7628;border-radius:9px;background:linear-gradient(180deg,#ff7a2e,#f45d12);box-shadow:0 4px 16px #ff681d21;color:#1b120e;font:700 12px var(--ui-font);white-space:nowrap}
+.projects-create-group:hover:not(:disabled){border-color:#ff9a5e;background:#ff8a43;color:#17100c}
+.projects-list{align-content:start;grid-template-columns:minmax(0,1fr);gap:18px;overflow:auto;padding:6px 24px 24px}
+.project-group{gap:11px}
+.project-group-heading{gap:9px;padding:0 0 10px;border-bottom:1px solid #26333c;color:#c2ccd1;font:600 12px var(--ui-font);letter-spacing:0;text-transform:none}
+.project-group-heading span{color:var(--dim);font:11px var(--ui-font)}
+.project-group-cards{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.workspace-project-card{position:relative;grid-template-rows:208px auto auto auto;gap:13px;min-width:0;padding:13px;border:1px solid #26343e;border-radius:12px;background:linear-gradient(145deg,#121c23,#0f171d);box-shadow:0 8px 24px #0002;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}
+.workspace-project-card:hover{border-color:#596b74;box-shadow:0 14px 32px #0004;transform:translateY(-1px)}
+.workspace-project-card[data-active="true"]{border-color:#a85e32;background:linear-gradient(145deg,#201912,#12171b);box-shadow:0 0 0 1px #ff742718,0 10px 28px #0004}
+.workspace-project-thumbnail{position:relative;min-height:0;height:208px;border:1px solid #26343d;border-radius:9px;background-color:#0a1217;background-image:linear-gradient(#26323838 1px,transparent 1px),linear-gradient(90deg,#26323838 1px,transparent 1px),radial-gradient(ellipse at 50% 78%,#1c39302b,transparent 58%);background-size:20px 20px,20px 20px,auto}
+.workspace-project-thumbnail img{width:100%;height:100%;object-fit:contain}
+.workspace-project-thumbnail.unavailable::after{color:#aab5bb;content:"Предпросмотр недоступен";font:12px var(--ui-font);letter-spacing:0}
+.workspace-project-state{position:absolute;top:10px;right:10px;align-self:auto;padding:6px 10px;border:1px solid #34444d;border-radius:8px;background:#101a20eF;color:#e2e9ec;font:600 11px var(--ui-font);letter-spacing:0;box-shadow:0 4px 12px #0004}
+.workspace-project-state::before{display:inline-block;width:8px;height:8px;margin-right:7px;border-radius:50%;background:#64df83;box-shadow:0 0 8px #64df8355;content:""}
+.workspace-project-card[data-active="true"] .workspace-project-state{border-color:#8e5732;color:#ffbd91}
+.workspace-project-card[data-active="true"] .workspace-project-state::before{background:var(--accent);box-shadow:0 0 8px #ff874055}
+.workspace-project-card-heading{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:9px;min-height:28px}
+.workspace-project-card h3{color:#f0f3f4;font:650 16px/1.3 var(--ui-font);letter-spacing:-.01em;overflow-wrap:anywhere}
+.workspace-project-menu{position:relative;z-index:2}
+.workspace-project-menu summary,.workspace-project-folder-menu summary{display:grid;width:36px;height:36px;place-items:center;border:1px solid transparent;border-radius:8px;background:transparent;color:#aab7be;font:700 22px/1 var(--ui-font);list-style:none;cursor:pointer}
+.workspace-project-menu summary::-webkit-details-marker,.workspace-project-folder-menu summary::-webkit-details-marker{display:none}
+.workspace-project-menu summary:hover,.workspace-project-menu[open] summary,.workspace-project-folder-menu summary:hover,.workspace-project-folder-menu[open] summary{border-color:var(--line);background:#18232a;color:#fff}
+.workspace-project-menu-popover{position:absolute;top:calc(100% + 5px);right:0;z-index:8;min-width:170px;padding:5px;border:1px solid #34434b;border-radius:9px;background:#111a20;box-shadow:0 12px 28px #0008}
+.workspace-project-delete{width:100%;min-height:36px;padding:7px 10px;border:0;border-radius:6px;background:transparent;color:#f19b92;font:12px var(--ui-font);text-align:left;cursor:pointer}
+.workspace-project-delete:hover:not(:disabled){background:#2a1718;color:#ffb1aa}
+.workspace-project-delete:disabled{opacity:.43;cursor:not-allowed}
+.workspace-project-meta{display:flex;min-height:32px;align-items:center;justify-content:flex-start;gap:12px;padding-top:9px;border-top:1px solid #26333b;color:#aebbc2;font:12px var(--ui-font)}
+.workspace-project-modified{display:inline-flex;min-width:0;align-items:center;gap:9px;white-space:nowrap}
+.workspace-project-modified svg{width:17px;height:17px;flex:0 0 auto;fill:none;stroke:#9fb0ba;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.workspace-project-id{overflow:hidden;padding-left:12px;border-left:1px solid #40505a;color:#9dabb3;text-overflow:ellipsis;white-space:nowrap}
+.workspace-project-id strong{color:#c7d0d5;font:12px var(--ui-font);letter-spacing:.02em}
+.workspace-project-actions{display:flex;align-items:stretch;gap:10px}
+.workspace-project-open{display:flex;min-width:0;min-height:42px;flex:1;justify-content:center;gap:10px;padding:8px 12px;border-color:#ff7628;border-radius:9px;background:linear-gradient(180deg,#ff7a2e,#f45d12);box-shadow:0 4px 15px #ff681d20;color:#1b120e;font:700 12px var(--ui-font);white-space:nowrap}
+.workspace-project-open:hover{border-color:#ff9a5e;background:#ff8a43;color:#17100c}
+.workspace-project-open svg{width:18px;height:18px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.workspace-project-open:focus-visible,.workspace-project-folder-menu summary:focus-visible,.workspace-project-menu summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.workspace-project-folder-menu{position:relative;z-index:2;flex:0 0 auto}
+.workspace-project-folder-menu summary{width:48px;height:42px;border-color:#34434b;border-radius:9px;background:#111a20;font-size:20px}
+.workspace-project-folder-popover{position:absolute;right:0;bottom:calc(100% + 7px);z-index:8;display:grid;width:220px;gap:7px;padding:11px;border:1px solid #34434b;border-radius:9px;background:#111a20;box-shadow:0 12px 28px #0008}
+.workspace-project-folder-popover label{color:var(--muted);font:12px var(--ui-font)}
+.workspace-project-group-select{width:100%;min-height:38px;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:#0b1217;color:var(--text);font:12px var(--ui-font)}
+.workspace-project-group-select:disabled{opacity:.43;cursor:not-allowed}
+#projects-panel[data-layout="list"] .project-group-cards{grid-template-columns:minmax(0,1fr)}
+#projects-panel[data-layout="list"] .workspace-project-card{grid-template-columns:minmax(190px,260px) minmax(0,1fr) auto;grid-template-rows:auto auto minmax(40px,1fr);align-items:center;gap:8px 16px;padding:12px}
+#projects-panel[data-layout="list"] .workspace-project-thumbnail{grid-column:1;grid-row:1/4;height:150px}
+#projects-panel[data-layout="list"] .workspace-project-card-heading{grid-column:2;grid-row:1;align-self:end}
+#projects-panel[data-layout="list"] .workspace-project-meta{grid-column:2;grid-row:2;align-self:start}
+#projects-panel[data-layout="list"] .workspace-project-actions{grid-column:3;grid-row:1/4;min-width:190px;flex-direction:column}
+#projects-panel[data-layout="list"] .workspace-project-folder-menu summary{width:100%;height:36px}
+#projects-panel[data-layout="list"] .workspace-project-folder-menu summary::after{content:"Папка";font:12px var(--ui-font)}
+.projects-empty{align-self:center;justify-self:center;margin:0;padding:28px;color:var(--muted);font:14px var(--ui-font);text-align:center}
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:1380px){.project-group-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.projects-page-heading{align-items:flex-start;flex-direction:column}.projects-toolbar{width:100%;justify-content:flex-start}.projects-toolbar input{flex:1}}
+@media(max-width:1040px){body:has(#primary-grid[data-view="projects"]) #workspace-navigation{left:220px}body:has(#primary-grid[data-view="projects"]) #workspace-navigation .nav-item{padding:0 11px}.project-group-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.projects-toolbar{flex-wrap:wrap}}
+@media(max-width:760px){.project-group-cards{grid-template-columns:minmax(0,1fr)}.projects-page-heading{padding:18px 14px 10px}.projects-list{padding:6px 14px 16px}.projects-toolbar select{width:145px}.projects-create-group{margin-left:auto}#projects-panel[data-layout="list"] .workspace-project-card{grid-template-columns:minmax(110px,34%) minmax(0,1fr);grid-template-rows:auto auto auto}.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-thumbnail{grid-column:1;grid-row:1/4;height:140px}.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-card-heading,.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-meta{grid-column:2}.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-actions{grid-column:2;grid-row:3;min-width:0;flex-direction:row}}
+@media(max-width:680px){:root{--cadyx-rail-width:48px;--cadyx-tree-width:52px}.project-detail{grid-template-columns:48px 52px minmax(0,1fr)!important}.project-detail[data-tree-collapsed=true]{grid-template-columns:48px 48px minmax(0,1fr)!important}.cad3-rail{gap:4px;padding:8px 4px}.cad3-rail button{width:36px;height:36px}}
+`;
     document.head.appendChild(style);
     if(!$('.cad3-headrail')){const h=document.createElement('div');h.className='cad3-headrail';h.innerHTML=I.model;$('.topbar')?.prepend(h)}
     if(!$('.cad3-rail')){const r=document.createElement('nav');r.className='cad3-rail';r.setAttribute('aria-label','Основная навигация');r.innerHTML=`<button data-view="geometry" title="Геометрия">${I.model}</button><button data-view="files" title="Файлы">${I.files}</button><button data-view="projects" title="Проекты">${I.projects}</button><button data-view="activity" title="Активность">${I.activity}</button>`;detail.prepend(r);const syncRail=()=>{$$('[data-view]',r).forEach(b=>{const view=b.dataset.view,src=nav.querySelector(`[data-workspace-view="${view}"]`),active=view===(grid.dataset.view||'overview');b.setAttribute('aria-label',b.title);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');b.dataset.on=String(active);b.disabled=!src||src.disabled})};r.addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b||b.disabled)return;nav.querySelector(`[data-workspace-view="${b.dataset.view}"]`)?.click()});new MutationObserver(syncRail).observe(grid,{attributes:true,attributeFilter:['data-view']});new MutationObserver(syncRail).observe(nav,{subtree:true,attributes:true,attributeFilter:['disabled','aria-current']});syncRail()}

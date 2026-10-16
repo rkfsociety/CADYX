@@ -629,7 +629,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   <body>
     <header class="topbar">
       <div class="topbar-start">
-        <a id="brand-link" class="brand" href="/" aria-label="CADYX — проекты"><span>CADYX</span></a>
+        <a id="brand-link" class="brand" href="/" aria-label="CADYX — проекты"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.7 21 7.8v8.4l-9 5.1-9-5.1V7.8l9-5.1Z M3 7.8l9 5.1 9-5.1M12 12.9v8.4"/></svg><span>CADYX</span></a>
       </div>
       <div class="topbar-sync">
         <span id="api-light" class="project-light" role="status" aria-label="Состояние подключения не подтверждено" title="Состояние подключения не подтверждено"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 18h10a4 4 0 0 0 .4-8A6 6 0 0 0 6.1 8.5 4.5 4.5 0 0 0 7 18Z"></path></svg></span>
@@ -663,14 +663,14 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
           <aside class="section-sidebar">
             <div class="sidebar-heading"><p class="section-label">РАБОЧАЯ ОБЛАСТЬ</p><h2>Навигация</h2></div>
             <nav id="workspace-navigation" class="workspace-navigation" aria-label="Рабочая область">
-              <button class="nav-item" type="button" data-workspace-view="overview" aria-current="page"><span class="nav-index">01</span><span class="nav-copy"><strong>ОБЗОР</strong><small>Проект и модель</small></span></button>
-              <button class="nav-item" type="button" data-workspace-view="geometry"><span class="nav-index">02</span><span class="nav-copy"><strong>ГЕОМЕТРИЯ</strong><small>Объекты модели</small></span></button>
-              <button id="analysis-nav" class="nav-item" type="button" data-workspace-view="analysis"><span class="nav-index">03</span><span class="nav-copy"><strong>АНАЛИЗ</strong><small>Сравнение с оригиналом</small></span></button>
-              <button class="nav-item" type="button" data-workspace-view="manufacturing"><span class="nav-index">04</span><span class="nav-copy"><strong>ПРОИЗВОДСТВО</strong><small>Подготовка производства</small></span></button>
-              <button class="nav-item" type="button" data-workspace-view="activity"><span class="nav-index">05</span><span class="nav-copy"><strong>АКТИВНОСТЬ</strong><small>Состояние агента</small></span></button>
-              <a class="nav-item" href="/scanner" target="_blank" rel="noopener"><span class="nav-index">08</span><span class="nav-copy"><strong>СКАНЕР · ПОТОК ГЛУБИНЫ</strong><small>Текущий кадр</small></span></a>
-              <button id="files-nav" class="nav-item" type="button" data-workspace-view="files" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">06</span><span class="nav-copy"><strong>ФАЙЛЫ</strong><small>Файлы проекта</small></span></button>
-              <button id="projects-nav" class="nav-item" type="button" data-workspace-view="projects" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">07</span><span class="nav-copy"><strong>ПРОЕКТЫ</strong><small>Сохранённые проекты</small></span></button>
+              <button class="nav-item" type="button" data-workspace-view="overview" aria-current="page"><span class="nav-index">01</span><span class="nav-copy"><strong>Обзор</strong><small>Проект и модель</small></span></button>
+              <button class="nav-item" type="button" data-workspace-view="geometry"><span class="nav-index">02</span><span class="nav-copy"><strong>Геометрия</strong><small>Объекты модели</small></span></button>
+              <button id="analysis-nav" class="nav-item" type="button" data-workspace-view="analysis"><span class="nav-index">03</span><span class="nav-copy"><strong>Анализ</strong><small>Сравнение с оригиналом</small></span></button>
+              <button class="nav-item" type="button" data-workspace-view="manufacturing"><span class="nav-index">04</span><span class="nav-copy"><strong>Производство</strong><small>Подготовка производства</small></span></button>
+              <button class="nav-item" type="button" data-workspace-view="activity"><span class="nav-index">05</span><span class="nav-copy"><strong>Активность</strong><small>Состояние агента</small></span></button>
+              <a class="nav-item" href="/scanner" target="_blank" rel="noopener"><span class="nav-index">08</span><span class="nav-copy"><strong>Сканер – поток глубины</strong><small>Текущий кадр</small></span></a>
+              <button id="files-nav" class="nav-item" type="button" data-workspace-view="files" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">06</span><span class="nav-copy"><strong>Файлы</strong><small>Файлы проекта</small></span></button>
+              <button id="projects-nav" class="nav-item" type="button" data-workspace-view="projects" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">07</span><span class="nav-copy"><strong>Проекты</strong><small>Сохранённые проекты</small></span></button>
             </nav>
             <p id="workspace-lock-status" class="workspace-lock-status" role="status" aria-live="polite" hidden></p>
             <div class="sidebar-project"><span class="section-label">АКТИВНЫЙ РЕСУРС</span><strong id="sidebar-project-name">—</strong></div>
@@ -735,7 +735,19 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 
               <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" tabindex="-1"><div class="panel-heading"><h2 id="comparison-title">СРАВНЕНИЕ С ОРИГИНАЛОМ</h2><span id="comparison-metrics" class="panel-note"></span></div><div class="comparison-stage"><p id="comparison-description" class="comparison-description" hidden>Оригинал показан контуром · результат — поверхностью.</p><p id="comparison-empty" class="comparison-empty">Для этого проекта пока нет данных сравнения.</p><canvas id="comparison-preview" class="comparison-preview" aria-label="Совмещённые оригинал и изменённая модель" hidden></canvas></div><section class="validation-records" aria-labelledby="validation-records-title"><div class="validation-records-heading"><h3 id="validation-records-title">СОХРАНЁННЫЕ ПРОВЕРКИ</h3><span id="validation-records-status" role="status" aria-live="polite"></span><span id="validation-records-count">0</span></div><div id="validation-records-list" class="validation-records-list" role="list" aria-label="Результаты инженерных проверок"><p id="validation-records-empty" class="validation-records-empty">Сохранённых результатов пока нет.</p></div></section></section>
               <section id="manufacturing-panel" class="panel manufacturing-panel" aria-labelledby="manufacturing-title" hidden><div class="panel-heading"><h2 id="manufacturing-title">ПОДГОТОВКА ПРОИЗВОДСТВА</h2></div><div class="manufacturing-empty"><span class="empty-cube" aria-hidden="true">⌁</span><p>Данные для производства пока не подготовлены.</p><small>Для этого проекта пока нет траекторий инструмента или плана обработки.</small></div></section>
-              <section id="projects-panel" class="panel projects-panel" aria-labelledby="projects-title" hidden><div class="panel-heading"><div><span class="panel-index">07</span><h2 id="projects-title">ПРОЕКТЫ</h2></div><div class="projects-toolbar"><label for="projects-sort">СОРТИРОВКА</label><select id="projects-sort" aria-label="Сортировка проектов"><option value="name">По имени</option><option value="modified-desc">Сначала недавно изменённые</option><option value="modified-asc">Сначала давно изменённые</option></select><button id="create-project-group" class="button" type="button">НОВАЯ ПАПКА</button><span id="projects-count" class="subtle-count" title="Количество проектов">0</span></div></div><div id="projects-list" class="projects-list" role="list" aria-label="Сохранённые проекты" tabindex="-1"></div><p id="projects-empty" class="projects-empty" hidden>В рабочей области пока нет сохранённых проектов.</p></section>
+              <section id="projects-panel" class="panel projects-panel" data-layout="grid" aria-labelledby="projects-title" hidden>
+                <div class="projects-page-heading">
+                  <div class="projects-title-block"><span class="projects-eyebrow">Проекты</span><h2 id="projects-title">Все проекты <span id="projects-count" class="projects-count">0</span></h2></div>
+                  <div class="projects-toolbar">
+                    <label class="visually-hidden" for="projects-search">Поиск проектов</label><input id="projects-search" type="search" placeholder="Поиск проектов…" autocomplete="off">
+                    <label for="projects-sort">Сортировка:</label><select id="projects-sort" aria-label="Сортировка проектов"><option value="name">По имени</option><option value="modified-desc">Сначала недавно изменённые</option><option value="modified-asc">Сначала давно изменённые</option></select>
+                    <div class="projects-layout-toggle" role="group" aria-label="Вид проектов"><button id="projects-grid-view" class="projects-layout-button" type="button" aria-label="Показать сеткой" aria-pressed="true" title="Сетка"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></button><button id="projects-list-view" class="projects-layout-button" type="button" aria-label="Показать списком" aria-pressed="false" title="Список"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h11M9 12h11M9 19h11M4 5h.01M4 12h.01M4 19h.01"/></svg></button></div>
+                    <button id="create-project-group" class="button projects-create-group" type="button">Новая папка</button>
+                  </div>
+                </div>
+                <div id="projects-list" class="projects-list" role="list" aria-label="Сохранённые проекты" tabindex="-1"></div>
+                <p id="projects-empty" class="projects-empty" hidden>В рабочей области пока нет сохранённых проектов.</p>
+              </section>
             </div>
           </div>
         </div>
