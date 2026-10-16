@@ -47,7 +47,7 @@ For a timestamped angle trace with an in-session turn command, use:
 
 The arguments are monitor duration, CSV path, delay before the relative turn, and turn angle. The command keeps a single BLE connection, records UTC rotation and tilt samples, and sends the turn itself on that connection. In a 120-frame live capture the controller recorded 88 angle samples and observed 0°→30°. The table was homed to 0° after capture. Tilt control was tested across the supported range: target +30° reported +29.2°, −30° reported −30.0°, and the zero command restored both axes to 0°. `+QR,TILTVALUE;` reads the current tilt; `+QR,TILTANGLE;` reports the supported range instead.
 
-The frame UTC timestamps and angle samples can be joined by linear interpolation. Verified synchronized run: 120 captured frames all received an interpolated table pose spanning 0°–30°; derived per-frame rows are saved as `capture_frame_poses.csv`. This is suitable for per-frame rigid rotation estimates when the turntable axis and pivot are calibrated. The Q-matrix disparity scale and turntable axis/pivot remain unvalidated, so the pose table alone does not establish an accurate fused full model.
+The frame UTC timestamps and angle samples can be joined by linear interpolation. Verified synchronized run: 120 captured frames all received an interpolated table pose spanning 0°–30°; derived per-frame rows are saved as `capture_frame_poses.csv`. The monitor CSV also records tilt from `+QR,TILTVALUE;`. This is suitable for per-frame rigid pose estimates when the turntable axes/pivot are calibrated. The Q-matrix disparity scale and mechanical axes remain unvalidated, so the pose table alone does not establish an accurate fused full model.
 
 ## Experimental 360° fusion result
 
@@ -63,7 +63,7 @@ List the camera's advertised native modes with:
 & .\tools\revopoint\build\CaptureY16.exe --list-modes
 ```
 
-The connected camera advertises Y16 at 640×400, 1280×800, and 640×800, each with nominal 5, 10, and 15 fps modes. Explicit 640×400 selections at nominal 5, 10, and 15 fps each delivered about 4.6 fps by Media Foundation timestamps in 40-frame runs. Other resolutions remain unmeasured. The direct UVC path therefore does not meet the 10 fps target in the tested mode; this does not measure Revo Scan's complete proprietary capture pipeline.
+The connected camera advertises Y16 at 640×400, 1280×800, and 640×800, each with nominal 5, 10, and 15 fps modes. Explicit 640×400 selections at nominal 5, 10, and 15 fps each delivered about 4.6 fps by Media Foundation timestamps in 40-frame runs. Other resolutions remain unmeasured. The direct UVC path therefore does not meet the MINI's published 10 fps maximum in the tested mode; this does not measure Revo Scan's complete capture pipeline.
 
 The raw-to-disparity scale `256` is a provisional value from the first live capture. It has not been validated against a known object dimension, so treat the PLY scale as unverified. The utility captures one camera pose; it does not track motion, align multiple frames, fuse a full scan, or create a watertight mesh. The scanner's exact product model is not established by its generic USB camera names.
 
