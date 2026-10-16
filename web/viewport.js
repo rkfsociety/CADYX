@@ -947,24 +947,36 @@
           const pixelX = Math.floor(x), pixelY = Math.floor(y);
           let visible = true;
           if (depthBuffer && pixelX >= 0 && pixelX < width && pixelY >= 0 && pixelY < height) {
-            const sampleX = pixelX + 0.5, sampleY = pixelY + 0.5;
-            const projectedFraction = lengthSquared
-              ? Math.max(0, Math.min(1, ((sampleX - x0) * dx + (sampleY - y0) * dy) / lengthSquared))
+            let closestDepthError = Infinity;
+            const centerX = pixelX + 0.5, centerY = pixelY + 0.5;
+            const centerFraction = lengthSquared
+              ? Math.max(0, Math.min(1, ((centerX - x0) * dx + (centerY - y0) * dy) / lengthSquared))
               : fraction;
-            const lineDepth = startDepth + (endDepth - startDepth) * projectedFraction;
-            let surfaceDepth = depthBuffer[pixelY * width + pixelX];
-            if (surfaceDepth === -Infinity) {
+            const centerLineDepth = startDepth + (endDepth - startDepth) * centerFraction;
+            const centerSurfaceDepth = depthBuffer[pixelY * width + pixelX];
+            if (centerSurfaceDepth !== -Infinity) {
+              closestDepthError = Math.abs(centerLineDepth - centerSurfaceDepth);
+            }
+            if (closestDepthError > depthTolerance) {
               for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
-                const neighborY = pixelY + offsetY;
-                if (neighborY < 0 || neighborY >= height) continue;
+                const sampleY = pixelY + offsetY;
+                if (sampleY < 0 || sampleY >= height) continue;
                 for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
-                  const neighborX = pixelX + offsetX;
-                  if (neighborX < 0 || neighborX >= width) continue;
-                  surfaceDepth = Math.max(surfaceDepth, depthBuffer[neighborY * width + neighborX]);
+                  if (offsetX === 0 && offsetY === 0) continue;
+                  const sampleX = pixelX + offsetX;
+                  if (sampleX < 0 || sampleX >= width) continue;
+                  const surfaceDepth = depthBuffer[sampleY * width + sampleX];
+                  if (surfaceDepth === -Infinity) continue;
+                  const neighborX = sampleX + 0.5, neighborY = sampleY + 0.5;
+                  const projectedFraction = lengthSquared
+                    ? Math.max(0, Math.min(1, ((neighborX - x0) * dx + (neighborY - y0) * dy) / lengthSquared))
+                    : fraction;
+                  const lineDepth = startDepth + (endDepth - startDepth) * projectedFraction;
+                  closestDepthError = Math.min(closestDepthError, Math.abs(lineDepth - surfaceDepth));
                 }
               }
             }
-            visible = lineDepth + depthTolerance >= surfaceDepth;
+            visible = closestDepthError <= depthTolerance;
           }
           if (visible) {
             if (!runStart) runStart = [x, y];
