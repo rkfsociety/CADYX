@@ -800,8 +800,13 @@ class CadyxCore:
             "mesh_deflection", "start_offset",
         )
         metrics = {name: measured.get(name) for name in metric_names}
-        if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
-               for value in metrics.values()) or metrics["minimum_sampled_thickness"] <= 0:
+        if (
+            any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+                for value in metrics.values())
+            or metrics["minimum_sampled_thickness"] <= 0
+            or not (metrics["minimum_sampled_thickness"] <= metrics["p10_sampled_thickness"]
+                    <= metrics["median_sampled_thickness"])
+        ):
             raise ValidationError("OCCT returned invalid wall-thickness sampling metrics.")
         sample_count, hit_count = measured.get("sample_count"), measured.get("hit_count")
         if (type(sample_count) is not int or type(hit_count) is not int
