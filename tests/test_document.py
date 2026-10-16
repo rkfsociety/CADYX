@@ -253,8 +253,6 @@ class SketchDocumentTests(unittest.TestCase):
             {"type": "pattern_sketch_elements", "sketch_id": self.sketch, "object_ids": [self.line],
              "mode": "linear", "count": 2, "offset_x": 0, "offset_y": 0},
             {"type": "pattern_sketch_elements", "sketch_id": self.sketch, "object_ids": [self.line],
-             "mode": "linear", "count": 65, "offset_x": 1, "offset_y": 0},
-            {"type": "pattern_sketch_elements", "sketch_id": self.sketch, "object_ids": [self.line],
              "mode": "circular", "count": 3, "center_x": 0, "center_y": 0, "angle_step_degrees": 180},
             {"type": "pattern_sketch_elements", "sketch_id": self.sketch, "object_ids": [self.line],
              "mode": "unknown", "count": 2},
@@ -263,6 +261,21 @@ class SketchDocumentTests(unittest.TestCase):
         ]:
             with self.subTest(command=command):
                 self.rejected(**command)
+
+    def test_linear_sketch_pattern_accepts_more_than_64_instances(self):
+        result = self.command(
+            type="pattern_sketch_elements", sketch_id=self.sketch, object_ids=[self.line],
+            mode="linear", count=65, offset_x=1, offset_y=0,
+        )
+        self.assertEqual(result["instance_count"], 65)
+        document = self.core.inspect_project(self.project)["document"]
+        by_id = {item["id"]: item for item in document["objects"]}
+        patterned_points = [by_id[object_id] for object_id in result["point_ids"]]
+        self.assertEqual(len(patterned_points), 128)
+        self.assertEqual(
+            {(point["x"], point["y"]) for point in patterned_points},
+            {(x, 0) for x in range(1, 65)} | {(x + 3, 0) for x in range(1, 65)},
+        )
 
     def test_rectangle_from_two_corners_is_closed(self):
         result = self.command(type="add_sketch_rectangle_two_corners", sketch_id=self.sketch,
