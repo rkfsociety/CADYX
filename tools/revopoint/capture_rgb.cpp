@@ -31,6 +31,8 @@ constexpr UINT32 kNv12FourCc = 0x3231564E;
 
 struct Options {
     std::filesystem::path output_prefix;
+    std::filesystem::path ready_file;
+    std::filesystem::path stop_file;
     int frame_count = 1;
     int requested_fps = 30;
     UINT32 requested_subtype = kMjpgFourCc;
@@ -107,13 +109,15 @@ Options ParseOptions(int argc, wchar_t** argv) {
         const std::wstring arg(argv[i]);
         if (arg == L"--help" || arg == L"-h") {
             std::cout << "Capture frames from the Revopoint RGBCam UVC interface.\n"
-                      << "Usage: CaptureRgb.exe --out-prefix PATH [--frames N] [--fps 30|20|15|10] [--format mjpg|nv12]\n";
+                      << "Usage: CaptureRgb.exe --out-prefix PATH [--frames N] [--fps 30|20|15|10] [--format mjpg|nv12] [--ready-file PATH] [--stop-file PATH]\n";
             std::exit(0);
         }
         if (i + 1 >= argc) throw std::runtime_error("Missing value after a command-line option.");
         const std::wstring value(argv[++i]);
         try {
             if (arg == L"--out-prefix") options.output_prefix = value;
+            else if (arg == L"--ready-file") options.ready_file = value;
+            else if (arg == L"--stop-file") options.stop_file = value;
             else if (arg == L"--frames") options.frame_count = std::stoi(value);
             else if (arg == L"--fps") options.requested_fps = std::stoi(value);
             else if (arg == L"--format") {
@@ -145,7 +149,27 @@ void WriteNewFile(const std::filesystem::path& path, const std::vector<BYTE>& by
     if (!out) throw std::runtime_error("Could not finish output: " + path.string());
 }
 
+void SignalReady(const std::filesystem::path& path) {
+    if (path.empty()) return;
+    if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) throw std::runtime_error("Could not create the first-frame ready signal.");
+    const char ready[] = "first RGB frame received\n";
+    DWORD written = 0;
+    const BOOL success = WriteFile(file, ready, static_cast<DWORD>(sizeof(ready) - 1), &written, nullptr);
+    CloseHandle(file);
+    if (!success || written != sizeof(ready) - 1) {
+        DeleteFileW(path.c_str());
+        throw std::runtime_error("Could not write the first-frame ready signal.");
+    }
+}
+
 int Run(const Options& options) {
+    if (!options.ready_file.empty() && std::filesystem::exists(options.ready_file))
+        throw std::runtime_error("Ready signal already exists; refusing to overwrite it.");
+    if (!options.stop_file.empty() && std::filesystem::exists(options.stop_file))
+        throw std::runtime_error("Stop signal already exists; refusing to start a stopped capture.");
     ComPtr<IMFActivate> activation = FindRgbCamera();
     ComPtr<IMFMediaSource> source;
     CheckHr(activation->ActivateObject(IID_PPV_ARGS(&source)), "Activate RGBCam");
@@ -185,7 +209,9 @@ int Run(const Options& options) {
     if (!csv) throw std::runtime_error("Could not create timestamp CSV.");
     csv << "index,mf_timestamp_100ns,utc_epoch_us,bytes\n";
 
+    int capturedFrames = 0;
     for (int frame = 0; frame < options.frame_count; ++frame) {
+        if (frame > 0 && !options.stop_file.empty() && std::filesystem::exists(options.stop_file)) break;
         DWORD streamIndex = 0, flags = 0;
         LONGLONG timestamp = 0;
         ComPtr<IMFSample> sample;
@@ -236,8 +262,11 @@ int Run(const Options& options) {
             std::chrono::system_clock::now().time_since_epoch()).count();
         csv << frame << ',' << timestamp << ',' << utc << ',' << bytes.size() << '\n';
         csv.flush();
+        capturedFrames = frame + 1;
+        if (frame == 0) SignalReady(options.ready_file);
         std::wcout << L"Frame " << frame << L": " << imagePath.wstring() << L" (" << bytes.size() << L" bytes)\n";
     }
+    std::cout << "Captured " << capturedFrames << " RGB frames.\n";
     source->Shutdown();
     return 0;
 }

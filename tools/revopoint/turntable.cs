@@ -61,6 +61,7 @@ internal static class Program
             double degrees = 0;
             double rotationPeriod = 0;
             int monitorSeconds = 0;
+            int sweepSteps = 0;
             string monitorPath = null;
             int rotateAfterSeconds = -1;
             if (operation == "rotate")
@@ -97,16 +98,26 @@ internal static class Program
                     Math.Abs(degrees) < 0.1 || Math.Abs(degrees) > MaxDegreesPerCommand))
                     throw new ArgumentException("monitor rotation requires delay < duration and degrees from -30 to 30.");
             }
+            else if (operation == "sweep")
+            {
+                if (args.Length != 4 || !Int32.TryParse(args[1], out sweepSteps) || sweepSteps < 1 || sweepSteps > 360 ||
+                    !double.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out degrees) ||
+                    !IsFinite(degrees) || Math.Abs(degrees) < 0.1 || Math.Abs(degrees) > MaxDegreesPerCommand)
+                    throw new ArgumentException("sweep requires 1–360 steps, each from -30 to 30 degrees, and a CSV output path.");
+                if (Math.Abs(degrees * sweepSteps) > 360.0)
+                    throw new ArgumentException("sweep cannot command more than 360 degrees of total rotation.");
+                monitorPath = args[3];
+            }
             else if ((operation == "query" || operation == "zero" || operation == "stop") && args.Length != 1)
             {
                 throw new ArgumentException("query, zero and stop do not accept extra arguments.");
             }
-            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed" && operation != "tilt" && operation != "monitor")
+            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed" && operation != "tilt" && operation != "monitor" && operation != "sweep")
             {
-                throw new ArgumentException("Operation must be query, zero, speed, tilt, monitor, or rotate.");
+                throw new ArgumentException("Operation must be query, zero, stop, speed, tilt, monitor, sweep, or rotate.");
             }
 
-            return RunAsync(operation, degrees, rotationPeriod, monitorSeconds, monitorPath, rotateAfterSeconds).GetAwaiter().GetResult();
+            return RunAsync(operation, degrees, rotationPeriod, monitorSeconds, monitorPath, rotateAfterSeconds, sweepSteps).GetAwaiter().GetResult();
         }
         catch (Exception error)
         {
@@ -125,12 +136,14 @@ internal static class Program
         Console.WriteLine("TurntableController.exe stop");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv>");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv> <rotate-delay-seconds> <degrees>");
+        Console.WriteLine("TurntableController.exe sweep <steps> <degrees-per-step> <output.csv>   (one BLE connection; each step is verified before the next)");
         Console.WriteLine("The app does not pair the turntable. It discovers the BLE device by its advertised FFE1 service,\n" +
                           "then confirms the GATT device name before sending any command.");
     }
 
     private static async Task<int> RunAsync(string operation, double degrees, double rotationPeriod,
-                                            int monitorSeconds, string monitorPath, int rotateAfterSeconds)
+                                            int monitorSeconds, string monitorPath, int rotateAfterSeconds,
+                                            int sweepSteps)
     {
         using (Connection connection = await ConnectAsync())
         {
@@ -180,6 +193,81 @@ internal static class Program
                         }
                         await Task.Delay(50);
                     }
+                }
+                return 0;
+            }
+
+            if (operation == "sweep")
+            {
+                string fullPath = System.IO.Path.GetFullPath(monitorPath);
+                if (System.IO.File.Exists(fullPath))
+                    throw new InvalidOperationException("Sweep output already exists; refusing to overwrite: " + fullPath);
+                string directory = System.IO.Path.GetDirectoryName(fullPath);
+                if (!String.IsNullOrEmpty(directory)) System.IO.Directory.CreateDirectory(directory);
+                using (var writer = new System.IO.StreamWriter(fullPath, false, new UTF8Encoding(false)))
+                {
+                    writer.WriteLine("utc,step_index,event,target_delta_degrees,angle_degrees,tilt_degrees,command,rotation_response,tilt_response");
+                    string initialRotation = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
+                    string initialTilt = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
+                    double currentAngle, currentTilt;
+                    if (!TryAngle(initialRotation, out currentAngle) || !TryAngle(initialTilt, out currentTilt))
+                        throw new InvalidOperationException("Could not read both table axes; no sweep command was sent.");
+                    if (Math.Abs(currentTilt) > 0.5)
+                        throw new InvalidOperationException("Turntable tilt must be within 0.5 degrees of zero before a rotation-only sweep.");
+                    WriteSweepRow(writer, 0, "baseline", 0, currentAngle, currentTilt, "", initialRotation, initialTilt);
+                    Console.WriteLine("sweep baseline: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) +
+                                      " deg, tilt=" + currentTilt.ToString("F1", CultureInfo.InvariantCulture) + " deg");
+
+                    for (int step = 1; step <= sweepSteps; ++step)
+                    {
+                        double sweepBefore = currentAngle;
+                        string command = "+CT,TURNANGLE=" + degrees.ToString("F1", CultureInfo.InvariantCulture) + ";";
+                        string commandReply = await SendAndReadAsync(connection, command);
+                        WriteSweepRow(writer, step, "command_sent", degrees, sweepBefore, currentTilt, command, commandReply, "");
+                        Console.WriteLine("sweep step " + step + "/" + sweepSteps + ": " + command + " => " + commandReply);
+
+                        bool reached = false;
+                        DateTime sweepDeadline = DateTime.UtcNow.AddSeconds(10.0 + Math.Abs(degrees) * 90.0 / 360.0);
+                        while (DateTime.UtcNow < sweepDeadline)
+                        {
+                            string rotationResponse = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
+                            string tiltResponse = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
+                            double angle, tilt;
+                            if (TryAngle(rotationResponse, out angle) && TryAngle(tiltResponse, out tilt))
+                            {
+                                currentAngle = angle;
+                                currentTilt = tilt;
+                                double sweepMeasured = SignedAngleDelta(sweepBefore, currentAngle);
+                                bool targetReached = Math.Abs(sweepMeasured - degrees) <= 1.0;
+                                WriteSweepRow(writer, step, targetReached ? "target_reached" : "telemetry",
+                                    degrees, currentAngle, currentTilt, "", rotationResponse, tiltResponse);
+                                if (Math.Abs(currentTilt) > 0.5)
+                                {
+                                    await SendAndReadAsync(connection, "+CT,STOP;");
+                                    throw new InvalidOperationException("Turntable tilt changed during rotation; rotation was stopped.");
+                                }
+                                if (targetReached)
+                                {
+                                    reached = true;
+                                    Console.WriteLine("step " + step + " reached: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) +
+                                                      " deg, measured delta=" + sweepMeasured.ToString("F1", CultureInfo.InvariantCulture) + " deg");
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                WriteSweepRow(writer, step, "unreadable_telemetry", degrees, Double.NaN, Double.NaN,
+                                    "", rotationResponse, tiltResponse);
+                            }
+                        }
+                        if (!reached)
+                        {
+                            await SendAndReadAsync(connection, "+CT,STOP;");
+                            throw new InvalidOperationException("Sweep step " + step + " did not reach its target; no further move was issued.");
+                        }
+                    }
+                    Console.WriteLine("sweep completed: " + sweepSteps + " steps, commanded total=" +
+                                      (sweepSteps * degrees).ToString("F1", CultureInfo.InvariantCulture) + " deg");
                 }
                 return 0;
             }
@@ -439,6 +527,27 @@ internal static class Program
         var bytes = new byte[reader.UnconsumedBufferLength];
         reader.ReadBytes(bytes);
         return Encoding.ASCII.GetString(bytes).Replace("\r", "").Replace("\n", "");
+    }
+
+    private static void WriteSweepRow(System.IO.StreamWriter writer, int step, string eventName,
+                                      double targetDelta, double angle, double tilt, string command,
+                                      string rotationResponse, string tiltResponse)
+    {
+        writer.WriteLine(String.Join(",", new[] {
+            DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+            step.ToString(CultureInfo.InvariantCulture),
+            Csv(eventName),
+            targetDelta.ToString("F2", CultureInfo.InvariantCulture),
+            IsFinite(angle) ? angle.ToString("F2", CultureInfo.InvariantCulture) : "",
+            IsFinite(tilt) ? tilt.ToString("F2", CultureInfo.InvariantCulture) : "",
+            Csv(command), Csv(rotationResponse), Csv(tiltResponse),
+        }));
+        writer.Flush();
+    }
+
+    private static string Csv(string value)
+    {
+        return "\"" + (value ?? "").Replace("\"", "\"\"") + "\"";
     }
 
     private static bool TryAngle(string response, out double angle)

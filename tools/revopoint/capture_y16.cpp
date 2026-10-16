@@ -34,6 +34,8 @@ struct Options {
     UINT32 width = 640;
     UINT32 height = 400;
     std::filesystem::path live_raw_path;
+    std::filesystem::path ready_file;
+    std::filesystem::path stop_file;
     bool list_modes = false;
     bool measure_only = false;
 };
@@ -84,6 +86,8 @@ void PrintUsage() {
               << "Usage: CaptureY16.exe --out-prefix PATH --q-file PATH --disparity-scale NUMBER [--frames N]\n"
               << "       [--fps 5|10|15] [--width 640|1280] [--height 400|800]\n"
               << "       CaptureY16.exe --out-prefix PATH --frames N --fps 5|10|15 --width W --height H --measure-only\n"
+              << "       Optional --ready-file PATH is created after the first valid frame is received.\n"
+              << "       Optional --stop-file PATH ends a burst after the next valid frame.\n"
               << "       CaptureY16.exe --list-modes\n"
               << "The scale is explicit because the raw-to-disparity mapping is not calibrated yet.\n";
 }
@@ -126,6 +130,10 @@ Options ParseOptions(int argc, wchar_t** argv) {
             catch (...) { throw std::runtime_error("--height must be 400 or 800."); }
         } else if (argument == L"--live-raw") {
             options.live_raw_path = value;
+        } else if (argument == L"--ready-file") {
+            options.ready_file = value;
+        } else if (argument == L"--stop-file") {
+            options.stop_file = value;
         } else {
             throw std::runtime_error("Unknown command-line option.");
         }
@@ -265,7 +273,9 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
                                                         std::vector<DWORD>& sample_flags,
                                                         std::vector<DWORD>& empty_sample_flags,
                                                         std::size_t& null_sample_count,
-                                                        const std::filesystem::path& live_raw_path) {
+                                                        const std::filesystem::path& live_raw_path,
+                                                        const std::filesystem::path& ready_file,
+                                                        const std::filesystem::path& stop_file) {
     ComPtr<IMFActivate> activation = FindDepthCamera();
     ComPtr<IMFMediaSource> source;
     CheckHr(activation->ActivateObject(IID_PPV_ARGS(&source)), "Activate depth camera");
@@ -306,7 +316,8 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
 
     const std::size_t raw_bytes = static_cast<std::size_t>(requested_width) * requested_height * sizeof(std::uint16_t);
     std::vector<std::vector<std::uint8_t>> frames;
-    while (static_cast<int>(frames.size()) < frame_count) {
+    while (static_cast<int>(frames.size()) < frame_count &&
+           (frames.empty() || stop_file.empty() || !std::filesystem::exists(stop_file))) {
         DWORD stream_index = 0;
         DWORD flags = 0;
         LONGLONG timestamp = 0;
@@ -356,6 +367,21 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
                 Sleep(10);
             }
             if (!published) throw std::runtime_error("Could not atomically publish live frame file.");
+        }
+        if (frames.size() == 1 && !ready_file.empty()) {
+            if (!ready_file.parent_path().empty()) std::filesystem::create_directories(ready_file.parent_path());
+            HANDLE file = CreateFileW(ready_file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+                throw std::runtime_error("Could not create the first-frame ready signal.");
+            const char ready[] = "first Y16 frame received\n";
+            DWORD written = 0;
+            const BOOL success = WriteFile(file, ready, static_cast<DWORD>(sizeof(ready) - 1), &written, nullptr);
+            CloseHandle(file);
+            if (!success || written != sizeof(ready) - 1) {
+                DeleteFileW(ready_file.c_str());
+                throw std::runtime_error("Could not write the first-frame ready signal.");
+            }
         }
     }
     return frames;
@@ -521,6 +547,10 @@ void SaveBurst(const Options& options, const std::vector<std::vector<std::uint8_
 int wmain(int argc, wchar_t** argv) {
     try {
         const Options options = ParseOptions(argc, argv);
+        if (!options.ready_file.empty() && std::filesystem::exists(options.ready_file))
+            throw std::runtime_error("Ready signal already exists; refusing to overwrite it.");
+        if (!options.stop_file.empty() && std::filesystem::exists(options.stop_file))
+            throw std::runtime_error("Stop signal already exists; refusing to start a stopped capture.");
         MediaFoundationRuntime runtime;
         if (options.list_modes) { ListNativeModes(); return 0; }
         std::array<double, 16> q{};
@@ -534,7 +564,7 @@ int wmain(int argc, wchar_t** argv) {
         const auto frames = CaptureY16Frames(options.frame_count, options.requested_fps,
                                              options.width, options.height, timestamps, utc_epoch_us,
                                              sample_flags, empty_sample_flags, null_sample_count,
-                                             options.live_raw_path);
+                                             options.live_raw_path, options.ready_file, options.stop_file);
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         if (!options.measure_only) {
             const auto& raw = frames.front();
