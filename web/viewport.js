@@ -153,17 +153,29 @@
 
     function buildFeatureEdges(positions, triangles) {
       const vertexCount = positions.length / 3;
+      const canonicalVertices = new Uint32Array(vertexCount);
+      const canonicalByPosition = new Map();
+      for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+        const offset = vertex * 3;
+        const key = `${positions[offset]},${positions[offset + 1]},${positions[offset + 2]}`;
+        let canonical = canonicalByPosition.get(key);
+        if (canonical === undefined) {
+          canonical = canonicalByPosition.size;
+          canonicalByPosition.set(key, canonical);
+        }
+        canonicalVertices[vertex] = canonical;
+      }
+      const canonicalVertexCount = canonicalByPosition.size;
       const edges = new Map();
-      const creaseCosine = Math.cos(Math.PI / 18);
+      const creaseCosine = Math.cos(Math.PI / 6);
       const addEdge = (start, end, normalX, normalY, normalZ, faceIndex) => {
-        const low = Math.min(start, end), high = Math.max(start, end);
-        const key = low * vertexCount + high;
+        const canonicalStart = canonicalVertices[start], canonicalEnd = canonicalVertices[end];
+        const low = Math.min(canonicalStart, canonicalEnd), high = Math.max(canonicalStart, canonicalEnd);
+        const key = low * canonicalVertexCount + high;
         const edge = edges.get(key);
         if (!edge) {
-          edges.set(key, {
-            start: low, end: high, normalX, normalY, normalZ,
-            firstFace: faceIndex, secondFace: -1, count: 1, crease: false,
-          });
+          edges.set(key, { start, end, normalX, normalY, normalZ,
+            firstFace: faceIndex, secondFace: -1, count: 1, crease: false });
           return;
         }
         const cosine = edge.normalX * normalX + edge.normalY * normalY + edge.normalZ * normalZ;
@@ -284,7 +296,7 @@
         triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
-        wireframeColor, wireframeOpacity, dpr,
+        wireframeColor, wireframeOpacity, dpr, 0.75 / scale,
       );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale, geometry.colors);
       if (showWorldAxes) drawWorldAxes(project, radius, dpr);
@@ -739,7 +751,7 @@
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
       vertexNormals, orientation, faceNormals, featureEdges, silhouetteCandidates, colors, triangleColors,
       showWireframe, shaded,
-      wireframeColor, wireframeOpacity, dpr) {
+      wireframeColor, wireframeOpacity, dpr, depthTolerance) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
       const smooth = vertexNormals && (!transition || progress >= 1);
@@ -809,7 +821,9 @@
       }
 
       const visibleFaces = faceOrder.subarray(0, visibleCount);
-      if (shaded && !rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors, triangleColors)) {
+      const depthBufferValid = shaded
+        && rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors, triangleColors);
+      if (shaded && !depthBufferValid) {
         visibleFaces.sort((left, right) => faceRecords[left * 8 + 6] - faceRecords[right * 8 + 6]);
         for (const face of visibleFaces) {
           const offset = face * 8;
@@ -854,6 +868,60 @@
           context.fill();
         }
       }
+      const depthBuffer = depthBufferValid ? meshDepth : null;
+      const width = canvas.width, height = canvas.height;
+      const drawEdge = (start, end) => {
+        const startOffset = start * 3, endOffset = end * 3;
+        const x0 = screenX[start], y0 = screenY[start];
+        const x1 = screenX[end], y1 = screenY[end];
+        const dx = x1 - x0, dy = y1 - y0;
+        const lengthSquared = dx * dx + dy * dy;
+        const steps = Math.max(1, Math.ceil(Math.sqrt(lengthSquared)));
+        const startDepth = camera[startOffset + 2], endDepth = camera[endOffset + 2];
+        let runStart = null, runEnd = null;
+        const flushVisibleRun = () => {
+          if (!runStart) return;
+          if (Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]) > 0.5) {
+            context.moveTo(runStart[0], runStart[1]);
+            context.lineTo(runEnd[0], runEnd[1]);
+          }
+          runStart = null;
+          runEnd = null;
+        };
+        for (let step = 0; step <= steps; step += 1) {
+          const fraction = step / steps;
+          const x = x0 + dx * fraction, y = y0 + dy * fraction;
+          const pixelX = Math.floor(x), pixelY = Math.floor(y);
+          let visible = true;
+          if (depthBuffer && pixelX >= 0 && pixelX < width && pixelY >= 0 && pixelY < height) {
+            const sampleX = pixelX + 0.5, sampleY = pixelY + 0.5;
+            const projectedFraction = lengthSquared
+              ? Math.max(0, Math.min(1, ((sampleX - x0) * dx + (sampleY - y0) * dy) / lengthSquared))
+              : fraction;
+            const lineDepth = startDepth + (endDepth - startDepth) * projectedFraction;
+            let surfaceDepth = depthBuffer[pixelY * width + pixelX];
+            if (surfaceDepth === -Infinity) {
+              for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+                const neighborY = pixelY + offsetY;
+                if (neighborY < 0 || neighborY >= height) continue;
+                for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+                  const neighborX = pixelX + offsetX;
+                  if (neighborX < 0 || neighborX >= width) continue;
+                  surfaceDepth = Math.max(surfaceDepth, depthBuffer[neighborY * width + neighborX]);
+                }
+              }
+            }
+            visible = lineDepth + depthTolerance >= surfaceDepth;
+          }
+          if (visible) {
+            if (!runStart) runStart = [x, y];
+            runEnd = [x, y];
+          } else {
+            flushVisibleRun();
+          }
+        }
+        flushVisibleRun();
+      };
       if (showWireframe && featureEdges?.length) {
         context.save();
         context.strokeStyle = wireframeColor;
@@ -864,9 +932,7 @@
           context.beginPath();
           const end = Math.min(featureEdges.length, start + edgesPerPath * 2);
           for (let index = start; index < end; index += 2) {
-            const a = featureEdges[index], b = featureEdges[index + 1];
-            context.moveTo(screenX[a], screenY[a]);
-            context.lineTo(screenX[b], screenY[b]);
+            drawEdge(featureEdges[index], featureEdges[index + 1]);
           }
           context.stroke();
         }
@@ -892,8 +958,7 @@
           const secondFace = faceFacing[silhouetteCandidates[index + 3]];
           if (firstFace === secondFace || firstFace === 0 && secondFace === 0) continue;
           const start = silhouetteCandidates[index], end = silhouetteCandidates[index + 1];
-          context.moveTo(screenX[start], screenY[start]);
-          context.lineTo(screenX[end], screenY[end]);
+          drawEdge(start, end);
         }
         context.stroke();
         context.restore();

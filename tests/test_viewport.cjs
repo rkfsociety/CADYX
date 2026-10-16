@@ -237,6 +237,59 @@ for (const path of strokedPaths) {
 }
 assert.ok(sideContourXs.has(178) && sideContourXs.has(422),
   "Side orthographic view draws both smooth vertical cylinder silhouettes");
+const splitSquareViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false,
+});
+splitSquareViewer.load({
+  positions: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0],
+  triangles: [0, 1, 2, 3, 4, 5], lines: [], points: [],
+  bounds: { min: [0, 0, 0], max: [1, 1, 0] },
+});
+assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 4,
+  "Coincident mesh vertices share adjacency so a coplanar triangulation diagonal is hidden");
+splitSquareViewer.load({
+  positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0],
+  triangles: [0, 1, 2, 3, 4, 5], lines: [], points: [],
+  bounds: { min: [0, 0, 0], max: [1, 1, 1] },
+});
+assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 5,
+  "Coincident vertices preserve a real crease between perpendicular faces");
+const facetedCylinderViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false,
+});
+const facetedCylinderPositions = [], facetedCylinderTriangles = [];
+function addFacetedCylinderTriangle(a, b, c) {
+  const start = facetedCylinderPositions.length / 3;
+  facetedCylinderPositions.push(...a, ...b, ...c);
+  facetedCylinderTriangles.push(start, start + 1, start + 2);
+}
+const facetedCylinderSegments = 16;
+for (let index = 0; index < facetedCylinderSegments; index += 1) {
+  const angle = index * Math.PI * 2 / facetedCylinderSegments;
+  const nextAngle = (index + 1) * Math.PI * 2 / facetedCylinderSegments;
+  const lower = (theta) => [Math.cos(theta), Math.sin(theta), 0];
+  const upper = (theta) => [Math.cos(theta), Math.sin(theta), 2];
+  addFacetedCylinderTriangle(lower(angle), lower(nextAngle), upper(nextAngle));
+  addFacetedCylinderTriangle(lower(angle), upper(nextAngle), upper(angle));
+}
+facetedCylinderViewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
+facetedCylinderViewer.load({
+  positions: facetedCylinderPositions, triangles: facetedCylinderTriangles, lines: [], points: [],
+  bounds: { min: [-1, -1, 0], max: [1, 1, 2] },
+});
+assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 36,
+  "A coarse smooth cylinder keeps its silhouette and end boundaries without tessellation seams");
+const hiddenEdgeViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true,
+});
+hiddenEdgeViewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
+hiddenEdgeViewer.load({
+  positions: [-1, -1, 0, 1, -1, 0, 0, -1, 2, -1, 1, 0, 1, 1, 0, 0, 1, 2],
+  triangles: [0, 1, 2, 3, 4, 5], lines: [], points: [],
+  bounds: { min: [-1, -1, 0], max: [1, 1, 2] },
+}, { reset: false });
+assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 3,
+  "Edges on a fully occluded rear face are hidden behind the front face");
 const sweepPath = Array.from({ length: 512 }, (_, index) => ({ x: index / 511, y: 0 }));
 viewer.load({
   positions: [0, 0, 0, 0.5, 0, 1, 0.5, 0, 0, 1, 0, 1],

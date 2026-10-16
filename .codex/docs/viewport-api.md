@@ -44,7 +44,11 @@ OCCT B-rep triangles come from native tessellation, including face location
 transforms and outward winding. Viewport-only tessellation uses an absolute
 linear deflection of 0.16 document units to keep camera orbit responsive; this
 is a display approximation and does not alter the exact editable B-rep or
-exports. Editable OCCT solids include boxes, closed-profile extrusions and
+exports. In the shaded browser view, edge overlays join triangles whose vertex
+coordinates coincide, suppress facet seams below a 30-degree crease angle, and
+use the shaded depth buffer so rear edges do not draw through front faces.
+Active sketch lines and points remain overlays and are not hidden-line tested.
+Editable OCCT solids include boxes, closed-profile extrusions and
 revolutions, swept pipes, Boolean fuses, fillets, and external metric threads.
 Generated involute spur gears render as ordinary XY sketch linework until
 extruded through the profile-feature command. Imported scans remain validated
