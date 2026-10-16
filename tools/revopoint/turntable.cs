@@ -81,6 +81,12 @@ internal static class Program
                     throw new ArgumentException("speed requires seconds per rotation from 18 to 90.");
                 }
             }
+            else if (operation == "tilt")
+            {
+                if (args.Length != 2 || !double.TryParse(args[1], NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out degrees) || !IsFinite(degrees) || Math.Abs(degrees) > 30.0)
+                    throw new ArgumentException("tilt requires a target angle from -30 to 30 degrees.");
+            }
             else if (operation == "monitor")
             {
                 if ((args.Length != 3 && args.Length != 5) || !Int32.TryParse(args[1], out monitorSeconds) || monitorSeconds < 1 || monitorSeconds > 300)
@@ -95,9 +101,9 @@ internal static class Program
             {
                 throw new ArgumentException("query, zero and stop do not accept extra arguments.");
             }
-            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed" && operation != "monitor")
+            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed" && operation != "tilt" && operation != "monitor")
             {
-                throw new ArgumentException("Operation must be query, zero, speed <seconds-per-rotation>, rotate <degrees>, or stop.");
+                throw new ArgumentException("Operation must be query, zero, speed, tilt, monitor, or rotate.");
             }
 
             return RunAsync(operation, degrees, rotationPeriod, monitorSeconds, monitorPath, rotateAfterSeconds).GetAwaiter().GetResult();
@@ -114,6 +120,7 @@ internal static class Program
         Console.WriteLine("TurntableController.exe query");
         Console.WriteLine("TurntableController.exe zero");
         Console.WriteLine("TurntableController.exe speed <seconds-per-rotation>   (18–90 seconds)");
+        Console.WriteLine("TurntableController.exe tilt <degrees>   (-30–30 degrees)");
         Console.WriteLine("TurntableController.exe rotate <degrees>   (one bounded relative move, max 30 degrees)");
         Console.WriteLine("TurntableController.exe stop");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv>");
@@ -130,7 +137,7 @@ internal static class Program
             await EnableNotificationsAsync(connection);
             if (operation == "query")
             {
-                foreach (string command in new[] { "+QT,CHANGEANGLE;", "+QR,TILTANGLE;", "+QT,TURNSPEED;", "+QR,TILTSPEED;" })
+                foreach (string command in new[] { "+QT,CHANGEANGLE;", "+QR,TILTVALUE;", "+QT,TURNSPEED;", "+QR,TILTSPEED;" })
                 {
                     Console.WriteLine(command + " => " + await SendAndReadAsync(connection, command));
                 }
@@ -142,7 +149,7 @@ internal static class Program
                 string fullPath = System.IO.Path.GetFullPath(monitorPath);
                 using (var writer = new System.IO.StreamWriter(fullPath, false, new UTF8Encoding(false)))
                 {
-                    writer.WriteLine("utc,angle_degrees,raw_response");
+                    writer.WriteLine("utc,angle_degrees,tilt_degrees,rotation_response,tilt_response");
                     var monitorDeadline = DateTime.UtcNow.AddSeconds(monitorSeconds);
                     var monitorTimer = Stopwatch.StartNew();
                     int sample = 0;
@@ -159,12 +166,15 @@ internal static class Program
                             moveSent = true;
                         }
                         string response = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
-                        double angle;
+                        string tiltResponse = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
+                        double angle, tilt;
                         DateTime observedAt = DateTime.UtcNow;
-                        if (TryAngle(response, out angle))
+                        if (TryAngle(response, out angle) && TryAngle(tiltResponse, out tilt))
                         {
                             writer.WriteLine(observedAt.ToString("o", CultureInfo.InvariantCulture) + "," +
-                                angle.ToString("F2", CultureInfo.InvariantCulture) + ",\"" + response.Replace("\"", "\"\"") + "\"");
+                                angle.ToString("F2", CultureInfo.InvariantCulture) + "," +
+                                tilt.ToString("F2", CultureInfo.InvariantCulture) + ",\"" + response.Replace("\"", "\"\"") + "\",\"" +
+                                tiltResponse.Replace("\"", "\"\"") + "\"");
                             writer.Flush();
                             if (sample++ % 5 == 0) Console.WriteLine(observedAt.ToString("o") + " angle=" + angle.ToString("F1", CultureInfo.InvariantCulture));
                         }
@@ -189,6 +199,31 @@ internal static class Program
                 return 0;
             }
 
+            if (operation == "tilt")
+            {
+                string tiltBeforeText = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
+                double tiltBefore;
+                if (!TryAngle(tiltBeforeText, out tiltBefore))
+                    throw new InvalidOperationException("Could not read current tilt angle; no tilt command was sent.");
+                Console.WriteLine("tilt before: " + tiltBefore.ToString("F1", CultureInfo.InvariantCulture) + " deg");
+                string command = "+CR,TILTVALUE=" + degrees.ToString("F1", CultureInfo.InvariantCulture) + ";";
+                Console.WriteLine(command + " => " + await SendAndReadAsync(connection, command));
+                DateTime tiltDeadline = DateTime.UtcNow.AddSeconds(30);
+                double tiltAfter = Double.NaN;
+                while (DateTime.UtcNow < tiltDeadline)
+                {
+                    await Task.Delay(300);
+                    string response = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
+                    if (TryAngle(response, out tiltAfter) && Math.Abs(tiltAfter - degrees) <= 1.0)
+                    {
+                        Console.WriteLine("tilt after: " + tiltAfter.ToString("F1", CultureInfo.InvariantCulture) + " deg");
+                        return 0;
+                    }
+                }
+                Console.Error.WriteLine("Tilt did not reach the requested angle within 30 s.");
+                return 1;
+            }
+
             if (operation == "zero")
             {
                 string zeroBaselineText = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
@@ -197,25 +232,36 @@ internal static class Program
                 {
                     throw new InvalidOperationException("Could not read the current angle; zero command was not sent.");
                 }
+                string tiltBaselineText = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
+                double tiltBaseline;
+                if (!TryAngle(tiltBaselineText, out tiltBaseline))
+                {
+                    throw new InvalidOperationException("Could not read the current tilt; zero commands were not sent.");
+                }
                 Console.WriteLine("angle before zero: " + zeroBaseline.ToString("F1", CultureInfo.InvariantCulture) + " deg");
+                Console.WriteLine("tilt before zero: " + tiltBaseline.ToString("F1", CultureInfo.InvariantCulture) + " deg");
                 string reply = await SendAndReadAsync(connection, "+CT,TOZERO;");
                 Console.WriteLine("+CT,TOZERO; => " + reply);
+                string tiltReply = await SendAndReadAsync(connection, "+CR,TOZERO;");
+                Console.WriteLine("+CR,TOZERO; => " + tiltReply);
                 for (int attempt = 0; attempt < 30; ++attempt)
                 {
                     await Task.Delay(1000);
                     string currentText = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
-                    double current;
-                    if (TryAngle(currentText, out current))
+                    string currentTiltText = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
+                    double current, currentTilt;
+                    if (TryAngle(currentText, out current) && TryAngle(currentTiltText, out currentTilt))
                     {
                         double normalized = SignedAngleDelta(0, current);
-                        if (Math.Abs(normalized) <= 0.5)
+                        if (Math.Abs(normalized) <= 0.5 && Math.Abs(currentTilt) <= 0.5)
                         {
                             Console.WriteLine("angle after zero: " + normalized.ToString("F1", CultureInfo.InvariantCulture) + " deg");
+                            Console.WriteLine("tilt after zero: " + currentTilt.ToString("F1", CultureInfo.InvariantCulture) + " deg");
                             return 0;
                         }
                     }
                 }
-                Console.Error.WriteLine("Table did not report zero within 30 checks; no automatic retry was sent.");
+                Console.Error.WriteLine("Rotation or tilt did not report zero within 30 checks; no automatic retry was sent.");
                 return 1;
             }
 
