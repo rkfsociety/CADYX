@@ -611,9 +611,12 @@ class CadyxCore:
         distance = measured.get("minimum_distance")
         deflection = measured.get("deflection")
         inner_solution = measured.get("inner_solution")
+        intersection_volume = measured.get("intersection_volume")
         if (type(distance) not in (int, float) or not math.isfinite(distance) or distance < 0
                 or type(deflection) not in (int, float) or not math.isfinite(deflection) or deflection <= 0
                 or type(inner_solution) is not bool
+                or type(intersection_volume) not in (int, float)
+                or not math.isfinite(intersection_volume) or intersection_volume < 0
                 or type(measured.get("solution_count")) is not int or measured["solution_count"] < 1):
             raise ValidationError("OCCT returned invalid solid-clearance metrics.")
         witness_points = {}
@@ -626,9 +629,16 @@ class CadyxCore:
         distance_lower = max(0.0, distance - deflection)
         distance_upper = distance + deflection
         required_after_tolerance = max(0.0, required - allowed_tolerance)
-        if inner_solution or distance_upper < required_after_tolerance:
+        volume_resolution = deflection ** 3
+        if inner_solution or intersection_volume > volume_resolution:
+            interference_status = "interfering"
+        elif intersection_volume > 0 or distance <= deflection:
+            interference_status = "touching_or_indeterminate"
+        else:
+            interference_status = "separate"
+        if interference_status == "interfering" or distance_upper < required_after_tolerance:
             status = "fail"
-        elif distance > deflection and distance_lower >= required_after_tolerance:
+        elif interference_status == "separate" and distance_lower >= required_after_tolerance:
             status = "pass"
         else:
             status = "untested"
@@ -649,6 +659,9 @@ class CadyxCore:
             "tolerance": allowed_tolerance,
             "deflection": deflection,
             "inner_solution": inner_solution,
+            "interference_method": "OCCT_BRepAlgoAPI_Common",
+            "intersection_volume": intersection_volume,
+            "interference_status": interference_status,
             **witness_points,
             "status": status,
         }

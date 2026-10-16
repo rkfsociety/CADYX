@@ -427,14 +427,17 @@ It does not acquire an edit lease or change the document.
 distinct valid OCCT solid bodies against a requested minimum surface distance.
 Supply `first_body_id`, `second_body_id`, `expected_revision`,
 `minimum_clearance`, and an allowed shortfall `tolerance`, all lengths in model
-units. The result includes the OCCT minimum distance, witness points, a distance
-interval from the calculation deflection, combined geometry hash, and `pass`,
-`fail`, or `untested` status. A pass requires the interval's lower bound to meet
-the requested clearance after tolerance; a fail means containment or even the
-interval's upper bound is below that threshold. Other cases are `untested`.
-This keeps near-zero results from claiming that touching and partial
-interference have been distinguished. Triangle meshes are unsupported. This
-check does not acquire an edit lease or change the document.
+units. The result includes the OCCT minimum distance and witness points, a
+distance interval from the calculation deflection, intersection volume and
+method, interference classification, combined geometry hash, and `pass`,
+`fail`, or `untested` clearance status. `interference_status` is `interfering`
+when the common solid volume exceeds the deflection-based volume resolution,
+`separate` when the solids have a positive distance above deflection, and
+`touching_or_indeterminate` otherwise. A clearance pass requires separate
+solids and the interval's lower bound to meet the requested clearance after
+tolerance. Interference or an upper bound below that threshold fails; other
+cases are `untested`. Triangle meshes are unsupported. This check does not
+acquire an edit lease or change the document.
 
 `fillet_edges` accepts `body_id`, 1–128 distinct `edge_indices`, a positive
 `radius`, and optional `name`. It creates a new body with an OCCT rolling-edge

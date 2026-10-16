@@ -1474,6 +1474,16 @@ API char* cadyx_brep_distance(const unsigned char* first_data, size_t first_size
     if (!distance.IsDone()) distance.Perform();
     if (!distance.IsDone() || distance.NbSolution() < 1)
       throw std::runtime_error("OCCT could not compute minimum distance between the solids.");
+    BRepAlgoAPI_Common common(first, second);
+    common.SetFuzzyValue(deflection);
+    common.SetRunParallel(true);
+    common.Build();
+    if (!common.IsDone())
+      throw std::runtime_error("OCCT could not classify solid interference.");
+    const TopoDS_Shape common_shape = common.Shape();
+    const double intersection_volume = common_shape.IsNull() ? 0.0 : ShapeVolume(common_shape);
+    if (!std::isfinite(intersection_volume) || intersection_volume < 0)
+      throw std::runtime_error("OCCT returned an invalid solid intersection volume.");
     const double value = distance.Value();
     if (!std::isfinite(value) || value < 0)
       throw std::runtime_error("OCCT returned an invalid solid distance.");
@@ -1485,6 +1495,7 @@ API char* cadyx_brep_distance(const unsigned char* first_data, size_t first_size
            << "{\"minimum_distance\":" << value
            << ",\"deflection\":" << deflection
            << ",\"inner_solution\":" << (distance.InnerSolution() ? "true" : "false")
+           << ",\"intersection_volume\":" << intersection_volume
            << ",\"solution_count\":" << distance.NbSolution()
            << ",\"point_on_first\":[" << first_point.X() << ',' << first_point.Y() << ',' << first_point.Z() << ']'
            << ",\"point_on_second\":[" << second_point.X() << ',' << second_point.Y() << ',' << second_point.Z() << "]}";
