@@ -215,7 +215,12 @@ def main() -> int:
     parser.add_argument("--iterations", type=int, default=40000,
                         help="Deterministic RANSAC hypotheses (default: 40000)")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--suffix", default="",
+                        help="Optional filename suffix, for example _2, preserving earlier outputs")
     args = parser.parse_args()
+    if args.suffix and (not args.suffix.startswith("_") or
+                        any(not character.isalnum() and character != "_" for character in args.suffix)):
+        parser.error("--suffix must start with '_' and contain only letters, digits, and underscores")
 
     points = read_csv(args.map)
     map_xyz = [[float(row[key]) for key in ("x", "y", "z")] for row in points]
@@ -275,8 +280,8 @@ def main() -> int:
             "status": "candidate",
         })
     detections.sort(key=lambda row: (row["mkf_id"], row["track_id"]))
-    csv_path = args.capture / "marker_map_registration.csv"
-    json_path = args.capture / "marker_map_registration.json"
+    csv_path = args.capture / f"marker_map_registration{args.suffix}.csv"
+    json_path = args.capture / f"marker_map_registration{args.suffix}.json"
     if csv_path.exists() or json_path.exists():
         raise FileExistsError("Marker-map registration outputs already exist; preserve them and choose another capture folder.")
     with csv_path.open("x", newline="", encoding="utf-8") as stream:
