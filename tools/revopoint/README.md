@@ -27,7 +27,7 @@ $outPrefix = Join-Path $PWD 'projects\revopoint_probe\frame'
 
 The command writes `frame.raw`, `frame.ply`, and `frame.json` side by side. It refuses to overwrite any of them. The raw file contains one 640×400 little-endian Y16 frame. The PLY is a single-frame point cloud reprojected through `Q.bin`.
 
-For a continuous capture-rate measurement, add `--frames 120`. The camera stays open for the sequence; the utility saves the packed frames to `frame_burst.raw`, records Media Foundation timestamps in `frame_timestamps.csv`, and reports both timestamp-derived and wall-clock rates. The PLY remains a preview of the first frame. On the connected device, a 120-frame run produced 4.53 fps by media timestamps; this is a measured result for the selected 640×400 Y16 UVC mode, not the vendor's complete scan pipeline.
+For a continuous capture-rate measurement, add `--frames 120`. The camera stays open for the sequence; the utility saves the packed frames to `frame_burst.raw`, records Media Foundation timestamps, elapsed stream time and UTC arrival time in `frame_timestamps.csv`, and reports both timestamp-derived and wall-clock rates. The PLY remains a preview of the first frame. On the connected device, a 120-frame run produced about 4.53 fps by media timestamps; this is a measured result for the selected 640×400 Y16 UVC mode, not the vendor's complete scan pipeline.
 
 To show the live depth image in CADYX, start a capture with `--live-raw` pointing at the CADYX workspace root's `.revopoint-live.raw`, then open `/scanner` in the CADYX web app. The capture updates this fixed-size file atomically after each received frame; the authenticated page polls the corresponding read-only API route and draws a depth grayscale preview. Example when the workspace root is the repository's `projects` folder:
 
@@ -45,7 +45,9 @@ For a timestamped angle trace with an in-session turn command, use:
 & .\tools\revopoint\build\TurntableController.exe monitor 24 (Join-Path $PWD 'projects\angles.csv') 3 30
 ```
 
-The arguments are monitor duration, CSV path, delay before the relative turn, and turn angle. The command keeps a single BLE connection, records UTC angle samples, and sends the turn itself on that connection. In a 120-frame live capture the controller recorded 88 angle samples, observed the table move from `-360°` (equivalent to 0°) through `-345.5°` to `-330°` (30°), and then remain there. The table was homed to 0° after capture. This provides time-correlated table telemetry, though frame CSVs still need UTC arrival timestamps before exact frame-to-angle pose assignment.
+The arguments are monitor duration, CSV path, delay before the relative turn, and turn angle. The command keeps a single BLE connection, records UTC angle samples, and sends the turn itself on that connection. In a 120-frame live capture the controller recorded 88 angle samples, observed the table move from `-360°` (equivalent to 0°) through `-345.5°` to `-330°` (30°), and then remain there. The table was homed to 0° after capture.
+
+The frame UTC timestamps and angle samples can be joined by linear interpolation. Verified synchronized run: 120 captured frames all received an interpolated table pose spanning 0°–30°; derived per-frame rows are saved as `capture_frame_poses.csv`. This is suitable for per-frame rigid rotation estimates when the turntable axis and pivot are calibrated. The Q-matrix disparity scale and turntable axis/pivot remain unvalidated, so the pose table alone does not establish an accurate fused full model.
 
 List the camera's advertised native modes with:
 

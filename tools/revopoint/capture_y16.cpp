@@ -226,6 +226,7 @@ ComPtr<IMFActivate> FindDepthCamera() {
 
 std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int requested_fps,
                                                         std::vector<LONGLONG>& timestamps,
+                                                        std::vector<std::int64_t>& utc_epoch_us,
                                                         const std::filesystem::path& live_raw_path) {
     ComPtr<IMFActivate> activation = FindDepthCamera();
     ComPtr<IMFMediaSource> source;
@@ -293,6 +294,8 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
             throw std::runtime_error("Y16 buffer size was not 640x400x2 bytes; refusing to guess row stride.");
         }
         timestamps.push_back(timestamp);
+        utc_epoch_us.push_back(std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
         frames.push_back(std::move(result));
         if (!live_raw_path.empty()) {
             if (!live_raw_path.parent_path().empty()) std::filesystem::create_directories(live_raw_path.parent_path());
@@ -300,8 +303,17 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
             { std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
               out.write(reinterpret_cast<const char*>(frames.back().data()), static_cast<std::streamsize>(frames.back().size()));
               if (!out) throw std::runtime_error("Could not update live frame file."); }
-            if (!MoveFileExW(temporary.c_str(), live_raw_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-                throw std::runtime_error("Could not atomically publish live frame file.");
+            bool published = false;
+            for (int attempt = 0; attempt < 20; ++attempt) {
+                if (MoveFileExW(temporary.c_str(), live_raw_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                    published = true;
+                    break;
+                }
+                const DWORD error = GetLastError();
+                if (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION) break;
+                Sleep(10);
+            }
+            if (!published) throw std::runtime_error("Could not atomically publish live frame file.");
         }
     }
     return frames;
@@ -430,7 +442,8 @@ void SaveOutputs(const Options& options, const std::vector<std::uint8_t>& raw,
 }
 
 void SaveBurst(const Options& options, const std::vector<std::vector<std::uint8_t>>& frames,
-               const std::vector<LONGLONG>& timestamps, double elapsed_seconds) {
+               const std::vector<LONGLONG>& timestamps, const std::vector<std::int64_t>& utc_epoch_us,
+               double elapsed_seconds) {
     if (frames.size() <= 1) return;
     auto raw_path = options.output_prefix; raw_path += L"_burst.raw";
     auto csv_path = options.output_prefix; csv_path += L"_timestamps.csv";
@@ -439,9 +452,10 @@ void SaveBurst(const Options& options, const std::vector<std::vector<std::uint8_
             out.write(reinterpret_cast<const char*>(frame.data()), static_cast<std::streamsize>(frame.size()));
     });
     WriteNewFile(csv_path, [&](std::ofstream& out) {
-        out << "index,mf_timestamp_100ns,elapsed_seconds\n" << std::fixed << std::setprecision(6);
+        out << "index,mf_timestamp_100ns,elapsed_seconds,utc_epoch_us\n" << std::fixed << std::setprecision(6);
         for (std::size_t i = 0; i < frames.size(); ++i)
-            out << i << ',' << timestamps[i] << ',' << (timestamps[i] - timestamps[0]) / 10000000.0 << '\n';
+            out << i << ',' << timestamps[i] << ',' << (timestamps[i] - timestamps[0]) / 10000000.0
+                << ',' << utc_epoch_us[i] << '\n';
     });
     const double timestamp_span = frames.size() > 1
         ? static_cast<double>(timestamps.back() - timestamps.front()) / 10000000.0 : 0.0;
@@ -460,8 +474,9 @@ int wmain(int argc, wchar_t** argv) {
         if (options.list_modes) { ListNativeModes(); return 0; }
         const auto q = ReadQMatrix(options.q_file);
         std::vector<LONGLONG> timestamps;
+        std::vector<std::int64_t> utc_epoch_us;
         const auto started = std::chrono::steady_clock::now();
-        const auto frames = CaptureY16Frames(options.frame_count, options.requested_fps, timestamps,
+        const auto frames = CaptureY16Frames(options.frame_count, options.requested_fps, timestamps, utc_epoch_us,
                                              options.live_raw_path);
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         const auto& raw = frames.front();
@@ -470,7 +485,7 @@ int wmain(int argc, wchar_t** argv) {
             throw std::runtime_error("Fewer than 100 valid points were reconstructed; no output was published.");
         }
         SaveOutputs(options, raw, points);
-        SaveBurst(options, frames, timestamps, elapsed);
+        SaveBurst(options, frames, timestamps, utc_epoch_us, elapsed);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Capture failed: " << error.what() << "\n";
