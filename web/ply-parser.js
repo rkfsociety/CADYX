@@ -237,17 +237,25 @@
     }
 
     const triangles = [];
+    const triangleColors = [];
     let faceCount = 0;
     if (face) {
       if (!face.properties.some((property) => property.list && property.name === "vertex_indices")) {
         throw new Error("В PLY не найдены индексы вершин граней.");
       }
+      const faceColorReaders = getColorReaders(face.properties);
+      const faceColorChannels = faceColorReaders
+        ? new Map(faceColorReaders.map((reader, channel) => [reader.index, channel])) : null;
       const faceStep = Math.max(1, Math.ceil(face.count / MAX_PREVIEW_FACES));
       for (let faceIndex = 0; faceIndex < face.count; faceIndex += 1) {
         const record = nextAsciiRecord(bytes, cursor);
         cursor = record.cursor;
+        const sampleFace = faceIndex % faceStep === 0;
+        const triangleStart = triangles.length;
+        const faceColor = [0, 0, 0];
         let valueIndex = 0;
-        for (const property of face.properties) {
+        for (let propertyIndex = 0; propertyIndex < face.properties.length; propertyIndex += 1) {
+          const property = face.properties[propertyIndex];
           if (property.list) {
             const countType = scalarTypes[property.countType];
             const itemType = scalarTypes[property.itemType];
@@ -259,7 +267,7 @@
                 || itemCount > record.values.length - valueIndex) {
               throw new Error("Некорректная грань в файле PLY.");
             }
-            const samplePolygon = property.name === "vertex_indices" && faceIndex % faceStep === 0;
+            const samplePolygon = property.name === "vertex_indices" && sampleFace;
             if (samplePolygon) {
               const polygon = [];
               for (let item = 0; item < itemCount; item += 1) {
@@ -276,10 +284,18 @@
             if (!scalarTypes[property.type] || valueIndex >= record.values.length) {
               throw new Error("Неподдерживаемое свойство граней PLY.");
             }
+            const channel = faceColorChannels?.get(propertyIndex);
+            if (channel !== undefined) {
+              faceColor[channel] = normalizeColor(Number(record.values[valueIndex]), property.type);
+            }
             valueIndex += 1;
           }
         }
         if (valueIndex !== record.values.length) throw new Error("Некорректная строка граней PLY.");
+        const addedTriangles = (triangles.length - triangleStart) / 3;
+        if (faceColorChannels && addedTriangles) {
+          for (let triangle = 0; triangle < addedTriangles; triangle += 1) triangleColors.push(...faceColor);
+        }
         faceCount += 1;
       }
     }
@@ -287,6 +303,7 @@
     return {
       positions,
       colors,
+      triangleColors: triangleColors.length ? new Uint8Array(triangleColors) : null,
       triangles: new Uint32Array(triangles),
       bounds,
       vertexCount: vertex.count,
@@ -364,16 +381,24 @@
     }
 
     const triangles = [];
+    const triangleColors = [];
     let faceCount = 0;
     if (face) {
       const indexList = face.properties.find((property) => property.list && property.name === "vertex_indices");
       if (!indexList) throw new Error("В PLY не найдены индексы вершин граней.");
+      const faceColorReaders = getColorReaders(face.properties);
+      const faceColorChannels = faceColorReaders
+        ? new Map(faceColorReaders.map((reader, channel) => [reader.index, channel])) : null;
       const countScalar = scalarTypes[indexList.countType];
       const itemScalar = scalarTypes[indexList.itemType];
       if (!countScalar || !itemScalar) throw new Error("Неподдерживаемый тип индексов граней PLY.");
       const faceStep = Math.max(1, Math.ceil(face.count / MAX_PREVIEW_FACES));
       for (let faceIndex = 0; faceIndex < face.count; faceIndex += 1) {
-        for (const property of face.properties) {
+        const sampleFace = faceIndex % faceStep === 0;
+        const triangleStart = triangles.length;
+        const faceColor = [0, 0, 0];
+        for (let propertyIndex = 0; propertyIndex < face.properties.length; propertyIndex += 1) {
+          const property = face.properties[propertyIndex];
           if (property.list) {
             const countReader = scalarTypes[property.countType];
             const itemReader = scalarTypes[property.itemType];
@@ -386,7 +411,7 @@
             }
             const listBytes = itemCount * itemReader.size;
             if (listBytes > buffer.byteLength - cursor) throw new Error("Данные граней PLY обрезаны.");
-            const samplePolygon = property.name === "vertex_indices" && faceIndex % faceStep === 0;
+            const samplePolygon = property.name === "vertex_indices" && sampleFace;
             if (!samplePolygon) {
               cursor += listBytes;
               continue;
@@ -405,8 +430,17 @@
             const scalar = scalarTypes[property.type];
             if (!scalar) throw new Error(`Неподдерживаемый тип PLY: ${property.type}.`);
             if (scalar.size > buffer.byteLength - cursor) throw new Error("Данные граней PLY обрезаны.");
+            const channel = faceColorChannels?.get(propertyIndex);
+            if (channel !== undefined) {
+              const value = scalar.read(data, cursor, littleEndian);
+              faceColor[channel] = normalizeColor(value, property.type);
+            }
             cursor += scalar.size;
           }
+        }
+        const addedTriangles = (triangles.length - triangleStart) / 3;
+        if (faceColorChannels && addedTriangles) {
+          for (let triangle = 0; triangle < addedTriangles; triangle += 1) triangleColors.push(...faceColor);
         }
         faceCount += 1;
       }
@@ -415,6 +449,7 @@
     return {
       positions,
       colors,
+      triangleColors: triangleColors.length ? new Uint8Array(triangleColors) : null,
       triangles: new Uint32Array(triangles),
       bounds,
       vertexCount: vertex.count,

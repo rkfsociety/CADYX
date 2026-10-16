@@ -281,7 +281,7 @@
       if (triangles.length) renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
-        geometry.silhouetteCandidates, geometry.colors, wireframe, shaded,
+        geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
         wireframeColor, wireframeOpacity, dpr,
       );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale, geometry.colors);
@@ -538,7 +538,8 @@
       context.restore();
     }
 
-    function rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors = null) {
+    function rasterizeShadedMesh(visibleFaces, triangles, camera, progress,
+      colors = null, triangleColors = null) {
       if (!meshLayerContext || !canvas.width || !canvas.height) return false;
       const width = canvas.width, height = canvas.height;
       if (meshLayer.width !== width || meshLayer.height !== height || !meshImage) {
@@ -590,7 +591,7 @@
           && second >= vertexRange[0] && second < vertexRange[1]
           && third >= vertexRange[0] && third < vertexRange[1];
 
-        if (!colors) {
+        if (!colors && !triangleColors) {
           const steel = Math.round(78 + brightness * 85);
           let red = Math.round(steel * 0.94), blue = Math.round(steel * 1.08), green = steel;
           if (forming && progress < 1) {
@@ -627,6 +628,7 @@
         }
 
         const color0 = first * 3, color1 = second * 3, color2 = third * 3;
+        const faceColor = face * 3;
 
         for (let y = minY; y <= maxY; y += 1) {
           let w0 = rowW0, w1 = rowW1, w2 = rowW2;
@@ -637,9 +639,15 @@
               if (depth + 1e-7 >= meshDepth[pixelIndex]) {
                 meshDepth[pixelIndex] = depth;
                 const byteIndex = pixelIndex * 4;
-                let pixelRed = Math.round((colors[color0] * w0 + colors[color1] * w1 + colors[color2] * w2) * brightness);
-                let pixelGreen = Math.round((colors[color0 + 1] * w0 + colors[color1 + 1] * w1 + colors[color2 + 1] * w2) * brightness);
-                let pixelBlue = Math.round((colors[color0 + 2] * w0 + colors[color1 + 2] * w1 + colors[color2 + 2] * w2) * brightness);
+                let pixelRed = triangleColors
+                  ? Math.round(triangleColors[faceColor] * brightness)
+                  : Math.round((colors[color0] * w0 + colors[color1] * w1 + colors[color2] * w2) * brightness);
+                let pixelGreen = triangleColors
+                  ? Math.round(triangleColors[faceColor + 1] * brightness)
+                  : Math.round((colors[color0 + 1] * w0 + colors[color1 + 1] * w1 + colors[color2 + 1] * w2) * brightness);
+                let pixelBlue = triangleColors
+                  ? Math.round(triangleColors[faceColor + 2] * brightness)
+                  : Math.round((colors[color0 + 2] * w0 + colors[color1 + 2] * w1 + colors[color2 + 2] * w2) * brightness);
                 if (forming && progress < 1) {
                   const glow = (1 - progress) * 0.38;
                   pixelRed = Math.round(pixelRed + (112 - pixelRed) * glow);
@@ -669,7 +677,8 @@
     }
 
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
-      vertexNormals, orientation, faceNormals, featureEdges, silhouetteCandidates, colors, showWireframe, shaded,
+      vertexNormals, orientation, faceNormals, featureEdges, silhouetteCandidates, colors, triangleColors,
+      showWireframe, shaded,
       wireframeColor, wireframeOpacity, dpr) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
@@ -740,7 +749,7 @@
       }
 
       const visibleFaces = faceOrder.subarray(0, visibleCount);
-      if (shaded && !rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors)) {
+      if (shaded && !rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors, triangleColors)) {
         visibleFaces.sort((left, right) => faceRecords[left * 8 + 6] - faceRecords[right * 8 + 6]);
         for (const face of visibleFaces) {
           const offset = face * 8;
@@ -749,13 +758,20 @@
           const second = triangles[face * 3 + 1];
           const third = triangles[face * 3 + 2];
           const steel = Math.round(78 + brightness * 85);
-          let red = colors
+          const faceColor = face * 3;
+          let red = triangleColors
+            ? Math.round(triangleColors[faceColor] * brightness)
+            : colors
             ? Math.round((colors[first * 3] + colors[second * 3] + colors[third * 3]) / 3 * brightness)
             : Math.round(steel * 0.94);
-          let blue = colors
+          let blue = triangleColors
+            ? Math.round(triangleColors[faceColor + 2] * brightness)
+            : colors
             ? Math.round((colors[first * 3 + 2] + colors[second * 3 + 2] + colors[third * 3 + 2]) / 3 * brightness)
             : Math.round(steel * 1.08);
-          let finalGreen = colors
+          let finalGreen = triangleColors
+            ? Math.round(triangleColors[faceColor + 1] * brightness)
+            : colors
             ? Math.round((colors[first * 3 + 1] + colors[second * 3 + 1] + colors[third * 3 + 1]) / 3 * brightness)
             : steel;
           const vertexRange = transition?.vertexRange;
