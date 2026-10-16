@@ -845,20 +845,14 @@ window.addEventListener("DOMContentLoaded", () => {
   inspectorTabs.setAttribute("role", "tablist");
   inspectorTabs.innerHTML = `
     <button class="cad-inspector-tab" type="button" data-cad-inspector="properties" role="tab" aria-selected="true">Свойства</button>
-    <button class="cad-inspector-tab" type="button" data-cad-inspector="comments" role="tab" aria-selected="false">Комментарии</button>
     <button class="cad-inspector-tab" type="button" data-cad-inspector="history" role="tab" aria-selected="false">История</button>`;
-  const commentsPane = document.createElement("section");
-  commentsPane.id = "cad-comments-pane";
-  commentsPane.className = "cad-inspector-pane";
-  commentsPane.hidden = true;
-  commentsPane.innerHTML = `<h3>Комментарии</h3><div class="cad-placeholder-card"><p>Контекстные комментарии к элементу модели, грани или ребру будут отображаться здесь.</p></div>`;
   const historyPane = document.createElement("section");
   historyPane.id = "cad-history-pane";
   historyPane.className = "cad-inspector-pane";
   historyPane.hidden = true;
   historyPane.innerHTML = `<h3>История</h3><div id="cad-history-items" class="cad-history-items"></div>`;
   inspector.prepend(inspectorTabs);
-  inspector.append(commentsPane, historyPane);
+  inspector.append(historyPane);
 
   const syncHistoryPane = () => {
     const target = historyPane.querySelector("#cad-history-items");
@@ -884,7 +878,6 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const setInspectorTab = (name) => {
     inspectorTabs.querySelectorAll(".cad-inspector-tab").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.cadInspector === name)));
-    commentsPane.hidden = name !== "comments";
     historyPane.hidden = name !== "history";
     const objectPanel = document.querySelector("#object-panel");
     if (objectPanel) objectPanel.style.visibility = name === "properties" ? "visible" : "hidden";
