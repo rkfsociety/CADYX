@@ -44,6 +44,15 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(self.legacy, original)
         self.assertEqual(Document.from_dict(original["document"]).to_dict(), expected["document"])
 
+    def test_project_migration_deep_copies_nested_document_once(self):
+        original = copy.deepcopy(self.legacy)
+        with patch("cadyx.migrations.deepcopy", wraps=copy.deepcopy) as clone:
+            migrated = migrate_project(self.legacy)
+
+        self.assertEqual(clone.call_count, 1)
+        migrated["document"]["objects"][0]["geometry"]["width"] = 99
+        self.assertEqual(self.legacy, original)
+
     def test_reads_failed_commands_and_failed_save_preserve_bytes(self):
         before = self.path.read_bytes()
         self.assertEqual(self.core.workspace.load(self.id)["document"]["version"], 7)

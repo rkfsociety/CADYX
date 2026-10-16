@@ -71,13 +71,14 @@ _PROJECT_STEPS: dict[int, Callable[[dict[str, Any]], None]] = {}
 
 
 def _migrate(value: Any, *, kind: str, current: int,
-             steps: dict[int, Callable[[dict[str, Any]], None]]) -> dict[str, Any]:
+             steps: dict[int, Callable[[dict[str, Any]], None]],
+             copy_value: bool = True) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValidationError(f"The saved {kind} must be an object.")
     version = value.get("version")
     if type(version) is not int or not 1 <= version <= current:
         raise ValidationError(f"Unsupported {kind} version: {version!r}.")
-    migrated = deepcopy(value)
+    migrated = deepcopy(value) if copy_value else value
     while version < current:
         step = steps.get(version)
         if step is None:
@@ -89,11 +90,21 @@ def _migrate(value: Any, *, kind: str, current: int,
     return migrated
 
 
-def migrate_document(value: Any) -> dict[str, Any]:
-    """Return the current schema snapshot; domain validation follows in Document."""
+def _migrate_document(value: Any, *, copy_value: bool) -> dict[str, Any]:
     if isinstance(value, dict) and not {"id", "revision", "objects"} <= value.keys():
         raise ValidationError("Saved document requires id, revision and objects.")
-    return _migrate(value, kind="document", current=DOCUMENT_VERSION, steps=_DOCUMENT_STEPS)
+    return _migrate(
+        value,
+        kind="document",
+        current=DOCUMENT_VERSION,
+        steps=_DOCUMENT_STEPS,
+        copy_value=copy_value,
+    )
+
+
+def migrate_document(value: Any) -> dict[str, Any]:
+    """Return the current schema snapshot; domain validation follows in Document."""
+    return _migrate_document(value, copy_value=True)
 
 
 def migrate_project(value: Any) -> dict[str, Any]:
@@ -101,5 +112,7 @@ def migrate_project(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict) or value.get("format") != "cadyx-project":
         raise ValidationError("Unsupported project format.")
     migrated = _migrate(value, kind="project", current=PROJECT_VERSION, steps=_PROJECT_STEPS)
-    migrated["document"] = migrate_document(migrated.get("document"))
+    # The project migration already deep-copied the entire nested document.
+    # Migrate that owned copy in place instead of cloning large B-rep/mesh payloads again.
+    migrated["document"] = _migrate_document(migrated.get("document"), copy_value=False)
     return migrated
