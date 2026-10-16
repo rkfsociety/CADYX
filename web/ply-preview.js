@@ -523,6 +523,9 @@ function renderCurrentProgress(dashboard, value, lock = null) {
   const progressPhaseLabels = {
     measure_distance: "Измеряет минимальный зазор",
     classify_interference: "Классифицирует пересечение",
+    triangulate_surface: "Строит сетку поверхности",
+    prepare_samples: "Подготавливает выборку толщины",
+    sample_surface_triangles: "Измеряет толщину стенки",
   };
   const progressTask = Number.isFinite(progressPercent) && progressPhaseLabels[runningActivity?.phase]
     ? { title: progressPhaseLabels[runningActivity.phase], state: "in_progress" }
