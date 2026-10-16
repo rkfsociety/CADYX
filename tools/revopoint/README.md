@@ -29,6 +29,12 @@ The command writes `frame.raw`, `frame.ply`, and `frame.json` side by side. It r
 
 For a continuous capture-rate measurement, add `--frames 120`. The camera stays open for the sequence; the utility saves the packed frames to `frame_burst.raw`, records Media Foundation timestamps in `frame_timestamps.csv`, and reports both timestamp-derived and wall-clock rates. The PLY remains a preview of the first frame. On the connected device, a 120-frame run produced 4.53 fps by media timestamps; this is a measured result for the selected 640×400 Y16 UVC mode, not the vendor's complete scan pipeline.
 
+To show the live depth image in CADYX, start a capture with `--live-raw` pointing at the CADYX workspace root's `.revopoint-live.raw`, then open `/scanner` in the CADYX web app. The capture updates this fixed-size file atomically after each received frame; the authenticated page polls the corresponding read-only API route and draws a depth grayscale preview. Example when the workspace root is the repository's `projects` folder:
+
+```powershell
+& .\tools\revopoint\build\CaptureY16.exe --out-prefix (Join-Path $PWD 'projects\live_preview\capture') --q-file (Join-Path $env:LOCALAPPDATA 'RevoScan5\cameraparam\Q.bin') --disparity-scale 256 --frames 1000 --fps 15 --live-raw (Join-Path $PWD 'projects\.revopoint-live.raw')
+```
+
 List the camera's advertised native modes with:
 
 ```powershell

@@ -75,6 +75,22 @@ def make_request_handler(
                 if parsed.path == "/api/v1/events":
                     self._stream_events(parse_qs(parsed.query).get("project_id", [None])[0])
                     return
+                if parsed.path == "/api/v1/scanner/live-frame":
+                    frame_path = core.workspace.root / ".revopoint-live.raw"
+                    if not frame_path.is_file() or frame_path.stat().st_size != 640 * 400 * 2:
+                        self._json(404, {"error": "NO_LIVE_FRAME", "message": "Live scanner frame is not available."})
+                        return
+                    payload = frame_path.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-CADYX-Frame-Width", "640")
+                    self.send_header("X-CADYX-Frame-Height", "400")
+                    self.send_header("X-CADYX-Frame-Mtime", str(frame_path.stat().st_mtime_ns))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
                 if parsed.path == "/api/v1/updates":
                     query = parse_qs(parsed.query)
                     project_id = query.get("project_id", [None])[0]
@@ -208,6 +224,9 @@ def make_request_handler(
                     return
                 if parsed.path == "/":
                     self._static("index.html", "text/html; charset=utf-8")
+                    return
+                if parsed.path == "/scanner":
+                    self._static("scanner.html", "text/html; charset=utf-8")
                     return
                 if parsed.path == "/favicon.svg":
                     self._static("favicon.svg", "image/svg+xml")

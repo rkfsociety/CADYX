@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CADYX — Revopoint Live</title>
+  <style>
+    :root{color-scheme:dark;font:14px system-ui;background:#0b1114;color:#dce9e9}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;grid-template-rows:56px 1fr;background:radial-gradient(ellipse at 50% 20%,#132126,#0b1114 70%)}header{display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid #26383d;font:12px ui-monospace,monospace;letter-spacing:.12em}a{color:#9ad7cb;text-decoration:none}main{display:grid;place-content:center;gap:14px;padding:20px}.screen{width:min(90vw,960px);aspect-ratio:8/5;background:#070b0d;border:1px solid #294149;box-shadow:0 20px 80px #0008;display:grid;place-items:center}canvas{width:100%;height:100%;object-fit:contain;image-rendering:pixelated}.status{display:flex;justify-content:space-between;color:#98aaad;font:12px ui-monospace,monospace}.status strong{color:#70e2c1;font-weight:500}#state[data-live=false]{color:#e6b86d}
+  </style>
+</head>
+<body>
+  <header><a href="/">CADYX</a><span>REV OPOINT · LIVE DEPTH</span><span id="state" data-live="false">ОЖИДАНИЕ КАДРА</span></header>
+  <main><div class="screen"><canvas id="depth" width="640" height="400"></canvas></div><div class="status"><span id="rate">— fps</span><span>Y16 · 640×400 · градации глубины</span><span id="age">—</span></div></main>
+  <script>
+    (()=>{const canvas=document.querySelector('#depth'),ctx=canvas.getContext('2d',{alpha:false}),state=document.querySelector('#state'),rate=document.querySelector('#rate'),age=document.querySelector('#age'),image=ctx.createImageData(640,400);let lastMtime='',lastArrival=0,intervals=[];
+      async function poll(){try{const response=await fetch('/api/v1/scanner/live-frame?ts='+Date.now(),{cache:'no-store'});if(!response.ok)throw Error(response.status===404?'Нет кадра. Запустите CaptureY16 с --live-raw <workspace>\\.revopoint-live.raw.':`HTTP ${response.status}`);const mtime=response.headers.get('X-CADYX-Frame-Mtime');if(mtime!==lastMtime){const raw=new Uint8Array(await response.arrayBuffer());if(raw.length!==640*400*2)throw Error('Размер кадра Y16 не совпадает.');let min=65535,max=0;for(let i=0;i<raw.length;i+=2){const v=raw[i]|raw[i+1]<<8;if(v>0&&v<min)min=v;if(v>max)max=v;}const span=Math.max(1,max-min);for(let p=0;p<640*400;p++){const v=raw[p*2]|raw[p*2+1]<<8;const g=v?Math.max(0,Math.min(255,Math.round((v-min)*255/span))):0;const j=p*4;image.data[j]=g;image.data[j+1]=Math.round(g*.96);image.data[j+2]=Math.min(255,g+12);image.data[j+3]=255;}ctx.putImageData(image,0,0);const now=performance.now();if(lastArrival)intervals.push(now-lastArrival);if(intervals.length>30)intervals.shift();lastArrival=now;lastMtime=mtime;rate.textContent=(1000/(intervals.reduce((a,b)=>a+b,0)/Math.max(1,intervals.length))).toFixed(1)+' fps';state.textContent='ПОТОК АКТИВЕН';state.dataset.live='true';age.textContent='кадр '+new Date().toLocaleTimeString();} }catch(error){state.textContent=error.message;state.dataset.live='false';}finally{setTimeout(poll,150)}}poll();})();
+  </script>
+</body>
+</html>
