@@ -743,6 +743,16 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(responses[0], responses[1])
         self.assertEqual(before, self.core.inspect_project(project_id))
 
+    def test_project_thumbnail_uses_wide_server_frame(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "Thumbnail"})
+        project_id = created["project"]["id"]
+        with urlopen(
+            f"{self.base_url}/api/v1/projects/{project_id}/viewport.png?thumbnail=1", timeout=3,
+        ) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers.get("X-CADYX-Viewport-Source"), "server-thumbnail")
+            self.assertEqual(struct.unpack(">II", response.read()[16:24]), (960, 480))
+
     def test_agent_scene_image_falls_back_when_browser_snapshot_is_stale(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "Stale browser image"})
         project_id = created["project"]["id"]

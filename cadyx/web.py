@@ -195,7 +195,11 @@ def make_request_handler(
                         query.get("modified_body_id", [None])[0]))
                     return
                 if len(parts) == 5 and parts[:3] == prefix and parts[4] == "viewport.png":
-                    encoded, source, revision = core.render_project_png_with_source(parts[3])
+                    if parse_qs(parsed.query).get("thumbnail") == ["1"]:
+                        encoded, revision = core.render_project_thumbnail_png(parts[3])
+                        source = "server-thumbnail"
+                    else:
+                        encoded, source, revision = core.render_project_png_with_source(parts[3])
                     self._png(200, encoded, extra_headers=(
                         ("X-CADYX-Viewport-Source", source),
                         ("X-CADYX-Document-Revision", str(revision)),

@@ -58,7 +58,7 @@ class CadyxCore:
         self._validated_document_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
         self._document_validation_locks: dict[tuple[str, str], threading.Lock] = {}
         self._scene_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
-        self._png_cache: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+        self._png_cache: OrderedDict[tuple[str, str, int, int, int], bytes] = OrderedDict()
         self._viewport_snapshot_guard = threading.RLock()
         self._viewport_snapshots: OrderedDict[str, tuple[int, bytes]] = OrderedDict()
         self._viewport_snapshot_bytes = 0
@@ -440,24 +440,49 @@ class CadyxCore:
                 self._scene_cache.move_to_end(key)
         return key, cached_scene
 
-    def _render_project_png_server(self, project_id: str) -> bytes:
+    def _render_project_png_server(
+        self, project_id: str, *, width: int = 960, height: int = 720, margin: int = 56,
+    ) -> bytes:
         key, scene = self._scene_for_project(project_id)
+        cache_key = (*key, width, height, margin)
         with self._geometry_cache_guard:
-            cached_png = self._png_cache.get(key)
+            cached_png = self._png_cache.get(cache_key)
             if cached_png is not None:
-                self._png_cache.move_to_end(key)
+                self._png_cache.move_to_end(cache_key)
                 return cached_png
-        encoded = render_scene_png(scene)
+        encoded = render_scene_png(scene, width=width, height=height, margin=margin)
         with self._geometry_cache_guard:
-            cached_png = self._png_cache.get(key)
+            cached_png = self._png_cache.get(cache_key)
             if cached_png is not None:
-                self._png_cache.move_to_end(key)
+                self._png_cache.move_to_end(cache_key)
                 return cached_png
-            self._png_cache[key] = encoded
-            self._png_cache.move_to_end(key)
+            self._png_cache[cache_key] = encoded
+            self._png_cache.move_to_end(cache_key)
             while len(self._png_cache) > 8:
                 self._png_cache.popitem(last=False)
         return encoded
+
+    def render_project_thumbnail_png(self, project_id: str) -> tuple[bytes, int]:
+        """Render a deterministic wide frame fitted for project cards."""
+        key, scene = self._scene_for_project(project_id)
+        width, height, margin = 960, 480, 56
+        cache_key = (*key, width, height, margin)
+        with self._geometry_cache_guard:
+            cached_png = self._png_cache.get(cache_key)
+            if cached_png is not None:
+                self._png_cache.move_to_end(cache_key)
+                return cached_png, scene["revision"]
+        encoded = render_scene_png(scene, width=width, height=height, margin=margin)
+        with self._geometry_cache_guard:
+            cached_png = self._png_cache.get(cache_key)
+            if cached_png is not None:
+                self._png_cache.move_to_end(cache_key)
+                return cached_png, scene["revision"]
+            self._png_cache[cache_key] = encoded
+            self._png_cache.move_to_end(cache_key)
+            while len(self._png_cache) > 8:
+                self._png_cache.popitem(last=False)
+        return encoded, scene["revision"]
 
     def publish_viewport_snapshot(self, project_id: str, revision: int, encoded: bytes) -> dict[str, int]:
         if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:

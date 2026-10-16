@@ -133,9 +133,8 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
             "projection": "orthographic", "bounds": bounds, "objects": objects}
 
 
-def render_scene_png(scene: dict) -> bytes:
+def render_scene_png(scene: dict, *, width: int = 960, height: int = 720, margin: int = 56) -> bytes:
     """Rasterize the shared scene for direct visual inspection by API clients."""
-    width, height, margin = 960, 720, 56
     right = (1 / math.sqrt(2), 1 / math.sqrt(2), 0)
     up = (-1 / math.sqrt(6), 1 / math.sqrt(6), 2 / math.sqrt(6))
     toward_camera = (1 / math.sqrt(3), -1 / math.sqrt(3), 1 / math.sqrt(3))

@@ -165,6 +165,13 @@ class RenderingTests(unittest.TestCase):
         pixel_offset = 360 * (width * 3 + 1) + 1 + 480 * 3
         self.assertNotEqual(raw[pixel_offset:pixel_offset + 3], bytes((20, 25, 28)))
 
+    def test_thumbnail_png_uses_wide_card_aspect_ratio(self):
+        image = render_scene_png({"objects": []}, width=960, height=480)
+        self.assertEqual(struct.unpack(">II", image[16:24]), (960, 480))
+        thumbnail, revision = self.core.render_project_thumbnail_png(self.project)
+        self.assertEqual(struct.unpack(">II", thumbnail[16:24]), (960, 480))
+        self.assertEqual(revision, 0)
+
     def test_empty_and_sketch_scene_and_parameter_refresh(self):
         self.assertIsNone(self.core.render_project(self.project)["bounds"])
         sketch = self.command({"type": "create_sketch"})["sketch_id"]

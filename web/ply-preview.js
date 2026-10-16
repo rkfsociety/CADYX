@@ -824,7 +824,7 @@ function renderProjectCard(entry) {
   const thumbnail = document.createElement("div");
   thumbnail.className = "workspace-project-thumbnail";
   const image = document.createElement("img");
-  image.src = `/api/v1/projects/${encodeURIComponent(project.id)}/viewport.png`;
+  image.src = `/api/v1/projects/${encodeURIComponent(project.id)}/viewport.png?thumbnail=1`;
   image.alt = `Миниатюра проекта «${project.name}»`;
   image.loading = "lazy";
   image.decoding = "async";
