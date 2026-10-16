@@ -64,6 +64,9 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         if kind == "body" and item.get("geometry") is not None:
             mesh = kernel.tessellate(item["geometry"])
             positions, triangles = mesh["positions"], mesh["triangles"]
+            edge_vertex_offset = len(positions) // 3
+            positions.extend(mesh.get("edge_positions", []))
+            lines = [edge_vertex_offset + index for index in mesh.get("edge_lines", [])]
         elif kind == "point":
             positions = sketch_position(item["sketch_id"], item["x"], item["y"])
             points = [0]

@@ -22,6 +22,7 @@
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <GCPnts_QuasiUniformDeflection.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
@@ -55,9 +56,10 @@
 #include <NCollection_HArray1.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopExp.hxx>
-#include <NCollection_IndexedMap.hxx>
+#include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_List.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
+#include <NCollection_IndexedMap.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Face.hxx>
@@ -162,6 +164,34 @@ const char* CurveName(GeomAbs_CurveType type) {
   return "other";
 }
 
+gp_Vec FaceNormalNearPoint(const TopoDS_Face& face, const gp_Pnt& point) {
+  TopLoc_Location location;
+  const auto triangulation = BRep_Tool::Triangulation(face, location);
+  if (triangulation.IsNull()) return gp_Vec();
+  double closest = std::numeric_limits<double>::infinity();
+  gp_Vec nearest_normal;
+  for (int index = 1; index <= triangulation->NbTriangles(); ++index) {
+    int first, second, third;
+    triangulation->Triangle(index).Get(first, second, third);
+    const gp_Pnt a = triangulation->Node(first).Transformed(location.Transformation());
+    const gp_Pnt b = triangulation->Node(second).Transformed(location.Transformation());
+    const gp_Pnt c = triangulation->Node(third).Transformed(location.Transformation());
+    const gp_Pnt center((a.X() + b.X() + c.X()) / 3.0,
+                        (a.Y() + b.Y() + c.Y()) / 3.0,
+                        (a.Z() + b.Z() + c.Z()) / 3.0);
+    const double distance = center.SquareDistance(point);
+    if (distance >= closest) continue;
+    gp_Vec normal(a, b);
+    normal.Cross(gp_Vec(a, c));
+    if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+    if (normal.SquareMagnitude() <= 1e-24) continue;
+    closest = distance;
+    nearest_normal = normal;
+  }
+  if (nearest_normal.SquareMagnitude() > 1e-24) nearest_normal.Normalize();
+  return nearest_normal;
+}
+
 std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
                       bool allow_invalid_import = false) {
   if (shape.IsNull()) throw std::runtime_error("OCCT returned a null shape.");
@@ -214,6 +244,8 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
     if (!mesher.IsDone()) throw std::runtime_error("OCCT could not tessellate the solid.");
     std::vector<double> positions;
     std::vector<size_t> triangles;
+    std::vector<double> edge_positions;
+    std::vector<size_t> edge_lines;
     for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
       const TopoDS_Face face = TopoDS::Face(explorer.Current());
       TopLoc_Location location;
@@ -235,10 +267,69 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
       }
     }
     if (triangles.empty()) throw std::runtime_error("OCCT returned an empty mesh.");
+    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>
+        edge_faces;
+    TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+    for (int edge_index = 1; edge_index <= edge_faces.Extent(); ++edge_index) {
+      const TopoDS_Edge edge = TopoDS::Edge(edge_faces.FindKey(edge_index));
+      if (BRep_Tool::Degenerated(edge)) continue;
+      const auto ancestors = edge_faces.FindFromKey(edge);
+      bool seam = false;
+      for (NCollection_List<TopoDS_Shape>::Iterator face_iterator(ancestors);
+           face_iterator.More(); face_iterator.Next()) {
+        if (BRep_Tool::IsClosed(edge, TopoDS::Face(face_iterator.Value()))) {
+          seam = true;
+          break;
+        }
+      }
+      if (seam) continue;
+
+      BRepAdaptor_Curve curve(edge);
+      const double first = curve.FirstParameter();
+      const double last = curve.LastParameter();
+      if (!std::isfinite(first) || !std::isfinite(last) || first == last) continue;
+      const gp_Pnt midpoint = curve.Value(first + (last - first) * 0.5);
+      std::vector<gp_Vec> adjacent_normals;
+      for (NCollection_List<TopoDS_Shape>::Iterator face_iterator(ancestors);
+           face_iterator.More(); face_iterator.Next()) {
+        const gp_Vec normal = FaceNormalNearPoint(TopoDS::Face(face_iterator.Value()), midpoint);
+        if (normal.SquareMagnitude() > 1e-24) adjacent_normals.push_back(normal);
+      }
+      bool sharp = adjacent_normals.size() < 2;
+      constexpr double kFeatureAngleCosine = 0.8660254037844386;
+      for (size_t first_normal = 0; first_normal < adjacent_normals.size() && !sharp; ++first_normal) {
+        for (size_t second_normal = first_normal + 1;
+             second_normal < adjacent_normals.size(); ++second_normal) {
+          if (adjacent_normals[first_normal].Dot(adjacent_normals[second_normal])
+              < kFeatureAngleCosine) {
+            sharp = true;
+            break;
+          }
+        }
+      }
+      if (!sharp) continue;
+      GCPnts_QuasiUniformDeflection samples(curve, 0.16);
+      if (!samples.IsDone() || samples.NbPoints() < 2)
+        throw std::runtime_error("OCCT could not sample a B-rep edge for the viewport.");
+      size_t previous = 0;
+      for (int index = 1; index <= samples.NbPoints(); ++index) {
+        const gp_Pnt point = curve.Value(samples.Parameter(index));
+        if (!std::isfinite(point.X()) || !std::isfinite(point.Y()) || !std::isfinite(point.Z()))
+          throw std::runtime_error("OCCT returned a non-finite B-rep edge vertex.");
+        const size_t current = edge_positions.size() / 3;
+        edge_positions.insert(edge_positions.end(), {point.X(), point.Y(), point.Z()});
+        if (index > 1) edge_lines.insert(edge_lines.end(), {previous, current});
+        previous = current;
+      }
+    }
     json << ",\"positions\":[";
     for (size_t i = 0; i < positions.size(); ++i) json << (i ? "," : "") << positions[i];
     json << "],\"triangles\":[";
     for (size_t i = 0; i < triangles.size(); ++i) json << (i ? "," : "") << triangles[i];
+    json << "],\"edge_positions\":[";
+    for (size_t i = 0; i < edge_positions.size(); ++i) json << (i ? "," : "") << edge_positions[i];
+    json << "],\"edge_lines\":[";
+    for (size_t i = 0; i < edge_lines.size(); ++i) json << (i ? "," : "") << edge_lines[i];
     json << "]";
   }
   if (topology) {

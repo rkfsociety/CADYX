@@ -406,7 +406,7 @@ class OCCTKernelAdapter:
             return tessellate_mesh_geometry(geometry)
         self.validate(geometry)
         result = NativeKernel().geometry_graph(geometry, mesh=True)
-        return {key: result[key] for key in ("positions", "triangles")}
+        return {key: result[key] for key in ("positions", "triangles", "edge_positions", "edge_lines")}
 
     def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]:
         dimensions = _box_dimensions(width, height, depth)

@@ -300,7 +300,8 @@
       );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale, geometry.colors);
       if (showWorldAxes) drawWorldAxes(project, radius, dpr);
-      for (let index = 0; index < (geometry.lines || []).length; index += 2) {
+      const directLineCount = geometry.type === "body" ? 0 : (geometry.lines || []).length;
+      for (let index = 0; index < directLineCount; index += 2) {
         const a = geometry.lines[index], b = geometry.lines[index + 1];
         let startX = screenX[a], startY = screenY[a];
         let endX = screenX[b], endY = screenY[b];
@@ -1059,11 +1060,20 @@
           meshEdges = buildFeatureEdges(value.positions, sourceTriangles);
           meshEdgesCache.set(sourceTriangles, meshEdges);
         }
+        const explicitBodyEdges = value.type === "body" ? Uint32Array.from(value.lines || []) : null;
+        const transitionRange = nextTransition?.vertexRange;
+        let meshVertexCount = 0;
+        for (const vertex of sourceTriangles) meshVertexCount = Math.max(meshVertexCount, vertex + 1);
+        const animatedTransition = transitionRange && explicitBodyEdges?.length
+          && transitionRange[1] === meshVertexCount
+          ? { ...nextTransition, vertexRange: [transitionRange[0], value.positions.length / 3] }
+          : nextTransition;
         geometry = {
           ...value,
           orbitCenter,
           fitRadius: fitRadiusFromPositions(value.positions, fitCenter),
-          ...meshEdges,
+          featureEdges: explicitBodyEdges || meshEdges.featureEdges,
+          silhouetteCandidates: meshEdges.silhouetteCandidates,
           vertexNormals: smoothShading
             ? value.vertexNormals?.length === value.positions.length
               ? value.vertexNormals : buildVertexNormals(value.positions, value.triangles || [])
@@ -1071,8 +1081,8 @@
           faceNormals: smoothShading ? null : buildFaceNormals(value.positions, value.triangles || []),
         };
         vertexLight = geometry.vertexNormals ? new Float32Array(geometry.vertexNormals.length / 3) : new Float32Array(0);
-        transition = nextTransition ? {
-          ...nextTransition,
+        transition = animatedTransition ? {
+          ...animatedTransition,
           startedAt: performance.now(),
           durationMs: Math.max(1, nextTransition.durationMs || 500),
         } : null;
