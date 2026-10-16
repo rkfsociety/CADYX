@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import ctypes
+import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from cadyx.errors import NotFoundError
 from cadyx.workspace import ProjectWorkspace
@@ -113,6 +117,28 @@ class ProjectWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.workspace.list(), [])
         self.assertEqual(project_file.read_text(encoding="utf-8"), "preserve")
         self.assertEqual(self.workspace.list_folder_projects(), [directory.name])
+
+    def test_atomic_save_retries_a_transient_windows_file_lock(self) -> None:
+        target = self.root / "retry.json"
+        target.write_text('{"old": true}', encoding="utf-8")
+        original_replace = os.replace
+        calls = 0
+
+        def replace_with_transient_lock(source: str, destination: str) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise ctypes.WinError(5)
+            original_replace(source, destination)
+
+        with patch(
+            "cadyx.workspace.os.replace",
+            side_effect=replace_with_transient_lock,
+        ) as replace:
+            ProjectWorkspace._write_atomic(target, {"new": True})
+
+        self.assertEqual(replace.call_count, 2)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"new": True})
 
     def test_legacy_uuid_folder_remains_readable_and_folder_api_hides_project_metadata(self) -> None:
         project = self.workspace.create("Старая кружка")

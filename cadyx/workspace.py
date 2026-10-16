@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -851,7 +852,17 @@ class ProjectWorkspace:
                 stream.write(encoded)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary_path, path)
+            for attempt in range(5):
+                try:
+                    os.replace(temporary_path, path)
+                    break
+                except PermissionError as exc:
+                    # Windows can briefly deny replacement while another
+                    # process opens the project file. Keep the old document
+                    # intact and retry only known sharing/access violations.
+                    if getattr(exc, "winerror", None) not in {5, 32, 33} or attempt == 4:
+                        raise
+                    time.sleep(0.05 * (2 ** attempt))
             temporary_path = None
         finally:
             if temporary_path and os.path.exists(temporary_path):

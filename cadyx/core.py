@@ -459,12 +459,15 @@ class CadyxCore:
             snapshot = self._viewport_snapshots.get(project_id)
             if snapshot is not None:
                 if snapshot[0] != scene["revision"]:
-                    raise ConflictError(
-                        "Waiting for the browser viewport to render the current project revision.",
-                        code="VIEWPORT_SNAPSHOT_STALE",
-                    )
-                self._viewport_snapshots.move_to_end(project_id)
-                return snapshot[1], "browser", scene["revision"]
+                    # A previous browser frame is not a valid image of the
+                    # current document. Treat it as unavailable until the
+                    # browser publishes the new revision; the server renderer
+                    # can still provide a correct current image immediately.
+                    self._viewport_snapshots.pop(project_id)
+                    self._viewport_snapshot_bytes -= len(snapshot[1])
+                else:
+                    self._viewport_snapshots.move_to_end(project_id)
+                    return snapshot[1], "browser", scene["revision"]
         return self._render_project_png_server(project_id), "server-fallback", scene["revision"]
 
     def render_project_png(self, project_id: str) -> bytes:

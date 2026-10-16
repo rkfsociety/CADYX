@@ -30,9 +30,9 @@ browser canvas backing size. Responses identify their origin through
 `X-CADYX-Viewport-Source` (`browser` or `server-fallback`) and the source
 revision through `X-CADYX-Document-Revision`. If no browser frame has arrived,
 the API retains the standalone 960×720 isometric server render as a fallback.
-If a stored browser frame belongs to an older document revision, the endpoint
-returns `409 VIEWPORT_SNAPSHOT_STALE` until the browser publishes a current
-frame. Both read routes return the same bytes for a given request state.
+If a stored browser frame belongs to an older document revision, it is discarded
+and the endpoint returns the current server-rendered image while the browser
+catches up. Both read routes return the same bytes for a given request state.
 
 The response has `version: 1`, document `revision`, `coordinate_system: "XYZ"`,
 `projection: "orthographic"`, `bounds` (`min`/`max` XYZ triples, or null when

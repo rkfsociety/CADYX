@@ -733,6 +733,26 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(responses[0], responses[1])
         self.assertEqual(before, self.core.inspect_project(project_id))
 
+    def test_agent_scene_image_falls_back_when_browser_snapshot_is_stale(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Stale browser image"})
+        project_id = created["project"]["id"]
+        old_revision = self.core.inspect_project(project_id)["document"]["revision"]
+        old_image = self.core._render_project_png_server(project_id)
+        self.core.publish_viewport_snapshot(project_id, old_revision, old_image)
+
+        lease = self.core.acquire_lease(project_id, "agent", "stale-image-test")
+        self.core.execute_command(project_id, lease["lease_id"], {
+            "type": "create_box", "width": 2, "height": 3, "depth": 5,
+        })
+
+        with urlopen(
+            f"{self.base_url}/api/v1/agent/projects/{project_id}/viewport.png", timeout=3,
+        ) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers.get("X-CADYX-Viewport-Source"), "server-fallback")
+            self.assertEqual(response.headers.get("X-CADYX-Document-Revision"), str(old_revision + 1))
+            self.assertEqual(response.read()[:8], b"\x89PNG\r\n\x1a\n")
+
     def test_agent_stop_resume_revision_contract(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Stop API"})
         project = created["project"]["id"]
