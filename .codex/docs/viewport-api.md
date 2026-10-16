@@ -83,6 +83,9 @@ smooth revolved walls remain outlined in
 front and side views. Scene geometry metrics remain in the
 viewport footer. Object selection remains available in the Geometry view;
 selecting a feature shows its dimensions without overlaying tessellation edges.
+When the document revision changes, tree selection follows the latest visible
+feature so its result dimensions stay attached to the current modeling action;
+manual selection remains in effect until the next revision.
 Object properties are not shown in a separate panel. Files is navigation item 06 and
 lists direct user files in the active project through `GET /api/v1/projects/{id}/files`;
 selected files are served from the corresponding `/files/{name}` route. The tab
