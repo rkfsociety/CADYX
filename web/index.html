@@ -304,32 +304,9 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   gap: 0;
   background: #090e12;
 }
-.primary-grid[data-view="overview"] { grid-template-columns: minmax(0, 1fr) var(--cadyx-inspector-width); gap: 0; }
+.primary-grid[data-view="overview"] { grid-template-columns: minmax(0, 1fr); gap: 0; }
 .primary-grid[data-view="overview"] > .model-panel { grid-column: 1; grid-row: 1; }
-.primary-grid[data-view="overview"] > .inspector-column {
-  grid-column: 2;
-  grid-row: 1;
-  position: relative;
-  display: grid;
-  width: auto;
-  max-height: none;
-  grid-template-rows: 46px minmax(0, 1fr);
-  overflow: hidden;
-  border-left: 1px solid var(--line);
-  background: #0c1217;
-  pointer-events: auto;
-}
-.primary-grid[data-view="overview"] > .inspector-column > :not(#object-panel):not(.cad-inspector-tabs):not(.cad-inspector-pane) { display: none !important; }
-.primary-grid[data-view="overview"] #object-panel[hidden] { display: grid !important; }
-.primary-grid[data-view="overview"] #object-panel {
-  grid-row: 2;
-  min-height: 0;
-  grid-template-rows: 42px minmax(0, 1fr) auto auto;
-  overflow: hidden;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
+.primary-grid[data-view="overview"] > .inspector-column { display: none; }
 .cad-inspector-tabs {
   grid-row: 1;
   display: flex;
