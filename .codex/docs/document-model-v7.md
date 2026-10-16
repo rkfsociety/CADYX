@@ -442,12 +442,28 @@ During the synchronous request, `agent.activity` events expose OCCT progress in
 `progress_percent` and the `measure_distance` and `classify_interference`
 phases. OCCT's distance and common-volume algorithms contribute 55% and 45%
 of the reported operation progress, respectively.
-Both validation POST routes accept optional `persist` (default `false`). When
+All validation POST routes accept optional `persist` (default `false`). When
 true, CADYX stores the result as an immutable record in the project's
 `.cadyx-validations.sqlite3` sidecar; this does not increment the document
 revision. `GET /api/v1/agent/projects/{project_id}/validations?limit=50` returns
 the newest records, with `limit` from 1 to 200. Records retain the exact result,
 revision, and geometry hash used by the check and are removed with the project.
+
+`POST /api/v1/agent/projects/{project_id}/validations/preservation` compares two
+distinct valid OCCT solid bodies at the requested `expected_revision`. Supply
+`reference_body_id`, `candidate_body_id`, `maximum_lost_volume`, and `tolerance`;
+the two volume inputs use model units cubed. The result reports common
+(`preserved_volume`), reference-only (`lost_volume`), and candidate-only
+(`added_volume`) material, plus an estimated lost-volume range and volume
+balance errors. It reports the OCCT length deflection and its estimated volume
+resolution. The range estimates Boolean-operation sensitivity from deflection
+and surface area; it is not a guaranteed error bound. `pass` means
+measured loss is within the allowed volume beyond that estimated resolution,
+`fail` means it exceeds the limit beyond that resolution, and `untested` marks
+an estimated range overlapping the limit or an inconsistent volume balance.
+Optional `persist: true` stores the result in the
+validation record sidecar described above. This is a volume-overlap check; it
+does not certify local surface deviation or geometric equivalence.
 
 `fillet_edges` accepts `body_id`, 1–128 distinct `edge_indices`, a positive
 `radius`, and optional `name`. It creates a new body with an OCCT rolling-edge

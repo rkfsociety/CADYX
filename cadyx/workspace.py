@@ -262,7 +262,7 @@ class ProjectWorkspace:
         self.load(project_id)
         if not isinstance(kind, str) or not kind:
             raise ValidationError("Validation record kind is invalid.")
-        if kind not in {"body_dimensions", "body_clearance"}:
+        if kind not in {"body_dimensions", "body_clearance", "body_preservation"}:
             raise ValidationError("Validation record kind is unsupported.")
         if not isinstance(result, dict) or type(result.get("revision")) is not int:
             raise ValidationError("Validation result cannot be recorded.")

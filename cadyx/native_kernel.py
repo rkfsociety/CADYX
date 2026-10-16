@@ -96,6 +96,12 @@ class NativeKernel:
                         ctypes.c_char_p, ctypes.c_size_t,
                     ]
                     library.cadyx_brep_distance.restype = ctypes.c_void_p
+                    library.cadyx_brep_preservation.argtypes = [
+                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                        ctypes.c_char_p, ctypes.c_size_t,
+                    ]
+                    library.cadyx_brep_preservation.restype = ctypes.c_void_p
                     library.cadyx_step_export.argtypes = [
                         ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
                         ctypes.POINTER(ctypes.c_size_t), ctypes.c_char_p, ctypes.c_size_t,
@@ -216,6 +222,20 @@ class NativeKernel:
             callback = _PROGRESS_CALLBACK(report)
         result = self.library.cadyx_brep_distance(
             first_buffer, len(first), second_buffer, len(second), callback, None, error, len(error),
+        )
+        if not result:
+            raise ValidationError(error.value.decode("utf-8", errors="replace"))
+        try:
+            return json.loads(ctypes.string_at(result).decode("utf-8"))
+        finally:
+            self.library.cadyx_free(result)
+
+    def brep_preservation(self, reference, candidate):
+        reference_buffer = self._export_brep_buffer(reference)
+        candidate_buffer = self._export_brep_buffer(candidate)
+        error = ctypes.create_string_buffer(1024)
+        result = self.library.cadyx_brep_preservation(
+            reference_buffer, len(reference), candidate_buffer, len(candidate), error, len(error),
         )
         if not result:
             raise ValidationError(error.value.decode("utf-8", errors="replace"))

@@ -1549,3 +1549,68 @@ API char* cadyx_brep_distance(const unsigned char* first_data, size_t first_size
   }
   return nullptr;
 }
+
+API char* cadyx_brep_preservation(const unsigned char* reference_data, size_t reference_size,
+                                 const unsigned char* candidate_data, size_t candidate_size,
+                                 char* error, size_t capacity) noexcept {
+  try {
+    const TopoDS_Solid reference = ExtractSingleSolid(ReadImportedBrep(reference_data, reference_size));
+    const TopoDS_Solid candidate = ExtractSingleSolid(ReadImportedBrep(candidate_data, candidate_size));
+    if (!BRepCheck_Analyzer(reference).IsValid() || !BRepCheck_Analyzer(candidate).IsValid())
+      throw std::runtime_error("Preservation validation requires valid closed solids.");
+    constexpr double deflection = 1e-7;
+    BRepAlgoAPI_Common common(reference, candidate);
+    common.SetFuzzyValue(deflection);
+    common.SetRunParallel(true);
+    common.Build();
+    if (!common.IsDone()) throw std::runtime_error("OCCT could not compute the preserved solid volume.");
+    BRepAlgoAPI_Cut lost(reference, candidate);
+    lost.SetFuzzyValue(deflection);
+    lost.SetRunParallel(true);
+    lost.Build();
+    if (!lost.IsDone()) throw std::runtime_error("OCCT could not compute the removed solid volume.");
+    BRepAlgoAPI_Cut added(candidate, reference);
+    added.SetFuzzyValue(deflection);
+    added.SetRunParallel(true);
+    added.Build();
+    if (!added.IsDone()) throw std::runtime_error("OCCT could not compute the added solid volume.");
+
+    const double reference_volume = ShapeVolume(reference);
+    const double candidate_volume = ShapeVolume(candidate);
+    const TopoDS_Shape common_shape = common.Shape();
+    const TopoDS_Shape lost_shape = lost.Shape();
+    const TopoDS_Shape added_shape = added.Shape();
+    const double preserved_volume = common_shape.IsNull() ? 0.0 : ShapeVolume(common_shape);
+    const double lost_volume = lost_shape.IsNull() ? 0.0 : ShapeVolume(lost_shape);
+    const double added_volume = added_shape.IsNull() ? 0.0 : ShapeVolume(added_shape);
+    GProp_GProps reference_surface;
+    GProp_GProps candidate_surface;
+    BRepGProp::SurfaceProperties(reference, reference_surface);
+    BRepGProp::SurfaceProperties(candidate, candidate_surface);
+    const double volume_resolution = deflection * std::max(reference_surface.Mass(), candidate_surface.Mass());
+    for (const double metric : {reference_volume, candidate_volume, preserved_volume,
+                                lost_volume, added_volume, volume_resolution}) {
+      if (!std::isfinite(metric) || metric < 0)
+        throw std::runtime_error("OCCT returned invalid solid-preservation metrics.");
+    }
+    std::ostringstream result;
+    result.imbue(std::locale::classic());
+    result << std::setprecision(17)
+           << "{\"deflection\":" << deflection
+           << ",\"reference_volume\":" << reference_volume
+           << ",\"candidate_volume\":" << candidate_volume
+           << ",\"preserved_volume\":" << preserved_volume
+           << ",\"lost_volume\":" << lost_volume
+           << ",\"added_volume\":" << added_volume
+           << ",\"estimated_volume_resolution\":" << volume_resolution << '}';
+    return CopyResult(result.str());
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString()
+        ? exception.GetMessageString() : "OCCT solid-preservation validation failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown native preservation failure.");
+  }
+  return nullptr;
+}

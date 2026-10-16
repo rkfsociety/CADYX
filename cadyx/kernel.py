@@ -76,6 +76,10 @@ class GeometryKernel(Protocol):
         progress: Callable[[str, float], None] | None = None,
     ) -> dict[str, Any]: ...
 
+    def compare_preserved_volume(
+        self, reference: dict[str, Any], candidate: dict[str, Any],
+    ) -> dict[str, Any]: ...
+
     def validate(self, geometry: dict[str, Any]) -> None: ...
 
     def tessellate(self, geometry: dict[str, Any]) -> dict[str, Any]: ...
@@ -747,6 +751,19 @@ class OCCTKernelAdapter:
         second_brep, _ = native.export_geometry(second)
         return native.minimum_brep_distance(first_brep, second_brep, progress=progress)
 
+    def compare_preserved_volume(
+        self, reference: dict[str, Any], candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        if any(isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1"
+               for geometry in (reference, candidate)):
+            raise ValidationError("Preserved-volume validation requires editable OCCT B-rep bodies, not triangle meshes.")
+        self.validate(reference)
+        self.validate(candidate)
+        native = NativeKernel()
+        reference_brep, _ = native.export_geometry(reference)
+        candidate_brep, _ = native.export_geometry(candidate)
+        return native.brep_preservation(reference_brep, candidate_brep)
+
     def validate(self, geometry: dict[str, Any]) -> None:
         try:
             descriptor = json.dumps(geometry, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1050,6 +1067,11 @@ class PrimitiveKernelAdapter:
         progress: Callable[[str, float], None] | None = None,
     ) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not measure solid clearance.")
+
+    def compare_preserved_volume(
+        self, reference: dict[str, Any], candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        raise ValidationError("The primitive demo kernel does not measure preserved solid volume.")
 
     def create_extruded_profile(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not build extruded B-reps.")

@@ -678,6 +678,91 @@ class CadyxCore:
     def list_validation_records(self, project_id: str, *, limit: int = 50) -> dict[str, Any]:
         return {"records": self.workspace.list_validation_records(project_id, limit=limit)}
 
+    def validate_body_preservation(
+        self, project_id: str, reference_body_id: str, candidate_body_id: str,
+        expected_revision: Any, maximum_lost_volume: Any, tolerance: Any,
+        *, persist: bool = False,
+    ) -> dict[str, Any]:
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        self._check_revision(document, expected_revision)
+        if type(persist) is not bool:
+            raise ValidationError("persist must be a boolean.")
+        if (not isinstance(reference_body_id, str) or not reference_body_id
+                or not isinstance(candidate_body_id, str) or not candidate_body_id
+                or reference_body_id == candidate_body_id):
+            raise ValidationError("Preservation validation needs two distinct body ids.")
+
+        def nonnegative_volume(value: Any, name: str) -> float:
+            message = f"{name} must be a finite non-negative volume."
+            if type(value) not in (int, float):
+                raise ValidationError(message)
+            try:
+                normalized = float(value)
+            except (OverflowError, ValueError):
+                raise ValidationError(message) from None
+            if not math.isfinite(normalized) or normalized < 0:
+                raise ValidationError(message)
+            return normalized
+
+        maximum_lost = nonnegative_volume(maximum_lost_volume, "maximum_lost_volume")
+        allowed_tolerance = nonnegative_volume(tolerance, "tolerance")
+        bodies = {item["id"]: item for item in document.objects if item.get("type") == "body"}
+        if reference_body_id not in bodies or candidate_body_id not in bodies:
+            raise ValidationError("Preservation validation needs two existing bodies.")
+        reference = bodies[reference_body_id]["geometry"]
+        candidate = bodies[candidate_body_id]["geometry"]
+        measured = self.kernel.compare_preserved_volume(reference, candidate)
+        deflection = measured.get("deflection")
+        if (type(deflection) not in (int, float) or not math.isfinite(deflection)
+                or deflection <= 0):
+            raise ValidationError("OCCT returned an invalid preservation deflection.")
+        metric_names = (
+            "reference_volume", "candidate_volume", "preserved_volume", "lost_volume",
+            "added_volume", "estimated_volume_resolution",
+        )
+        metrics = {name: measured.get(name) for name in metric_names}
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+               for value in metrics.values()):
+            raise ValidationError("OCCT returned invalid preserved-volume metrics.")
+        reference_error = abs(metrics["reference_volume"]
+                              - metrics["preserved_volume"] - metrics["lost_volume"])
+        candidate_error = abs(metrics["candidate_volume"]
+                               - metrics["preserved_volume"] - metrics["added_volume"])
+        threshold = max(0.0, maximum_lost - allowed_tolerance)
+        resolution = metrics["estimated_volume_resolution"]
+        lost_lower = max(0.0, metrics["lost_volume"] - resolution)
+        lost_upper = metrics["lost_volume"] + resolution
+        if max(reference_error, candidate_error) > resolution:
+            status = "untested"
+        elif lost_upper <= threshold or (threshold == 0 and metrics["lost_volume"] <= resolution):
+            status = "pass"
+        elif lost_lower > threshold:
+            status = "fail"
+        else:
+            status = "untested"
+        geometry_hash = geometry_sha256({
+            "reference": {"body_id": reference_body_id, "geometry": reference},
+            "candidate": {"body_id": candidate_body_id, "geometry": candidate},
+        })
+        result = {
+            "body_ids": {"reference": reference_body_id, "candidate": candidate_body_id},
+            "revision": document.revision,
+            "geometry_sha256": geometry_hash,
+            "method": "OCCT_BRepAlgoAPI_Common+Cut",
+            "coordinate_frame": "global_xyz",
+            "units": "model_units^3",
+            "deflection": deflection,
+            "deflection_units": "model_units",
+            **metrics,
+            "maximum_lost_volume": maximum_lost,
+            "tolerance": allowed_tolerance,
+            "estimated_lost_volume_range": [lost_lower, lost_upper],
+            "volume_balance_error": {"reference": reference_error, "candidate": candidate_error},
+            "status": status,
+        }
+        return self._maybe_persist_validation(project_id, "body_preservation", result, persist)
+
     def _maybe_persist_validation(
         self, project_id: str, kind: str, result: dict[str, Any], persist: bool,
     ) -> dict[str, Any]:

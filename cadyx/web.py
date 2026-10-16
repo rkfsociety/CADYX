@@ -427,6 +427,26 @@ def make_request_handler(
                 )
                 self._json(200, result)
                 return
+            if agent_api and len(parts) == 3 and parts[1:] == ["validations", "preservation"]:
+                required = {
+                    "reference_body_id", "candidate_body_id", "expected_revision",
+                    "maximum_lost_volume", "tolerance",
+                }
+                if body is None or not required.issubset(body) or set(body) - required - {"persist"}:
+                    raise ValidationError(
+                        "Preservation validation requires reference_body_id, candidate_body_id, "
+                        "expected_revision, maximum_lost_volume, and tolerance."
+                    )
+                result = core.observe_agent_operation(
+                    project_id, "Проверяет сохранённый объём тела",
+                    lambda: core.validate_body_preservation(
+                        project_id, body["reference_body_id"], body["candidate_body_id"],
+                        body["expected_revision"], body["maximum_lost_volume"], body["tolerance"],
+                        persist=body.get("persist", False),
+                    ),
+                )
+                self._json(200, result)
+                return
             if agent_api and len(parts) == 2 and parts[1] == "rename":
                 if body is None or set(body) != {"name"}:
                     raise ValidationError("Project rename requires only a name field.")
