@@ -190,7 +190,11 @@
         const property = coordinateReaders[axis];
         const value = property.read(data, cursor + property.offset);
         if (!Number.isFinite(value)) throw new Error("В PLY найдены некорректные координаты.");
-        if (sampledOffset >= 0) positions[sampledOffset + axis] = value;
+        const previewValue = Math.fround(value);
+        if (!Number.isFinite(previewValue)) {
+          throw new Error("Координаты PLY слишком велики для предпросмотра.");
+        }
+        if (sampledOffset >= 0) positions[sampledOffset + axis] = previewValue;
         bounds.min[axis] = Math.min(bounds.min[axis], value);
         bounds.max[axis] = Math.max(bounds.max[axis], value);
       }
