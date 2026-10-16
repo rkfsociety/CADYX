@@ -71,7 +71,7 @@ Measured empty-table sweep on 2026-10-16: requested 10 fps; 570 Y16 frames and 5
 
 This run demonstrates over 10 fps from both direct UVC streams during a full table revolution on this setup. It does not validate the depth-to-metric scale, exact 2D-to-MKF marker correspondence, camera/table axis calibration, or a complete object mesh. Earlier short mode tests on the same PC reported substantially lower rates; verify performance for each capture environment.
 
-In the same empty-table run, the first 640×400 Y16 frame contained 1,259 non-zero pixels; the existing threshold-1 connected-region finder reported five regions with its default size limits. A single direct Y16 frame therefore does not expose the full 34-point reflector map as separate bright components. The RGB sequence provides more visible candidates, but their exact correspondence to the MKF points still needs to be solved.
+The scanner's field of view covers only part of the turntable at once. In the same empty-table run, the first 640×400 Y16 frame contained 1,259 non-zero pixels; the existing threshold-1 connected-region finder reported five regions with its default size limits. A single frame therefore cannot provide the full 34-point reflector map. Build the map by accumulating detections across the full rotation and associating each observation with the measured table angle; exact correspondence to the MKF points still needs to be solved.
 
 ## Experimental 360° fusion result
 
