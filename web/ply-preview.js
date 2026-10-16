@@ -1557,6 +1557,7 @@ async function refreshDetail() {
   }
   if (renderedSceneKey !== key) {
     const positions = [], bodyPositions = [], triangles = [], lines = [], points = [], rotationAxes = [];
+    const bodyLineRanges = [];
     let targetFound = false;
     for (const object of scene.objects) {
       const source = objectsById.get(object.object_id);
@@ -1570,6 +1571,9 @@ async function refreshDetail() {
       }
       for (const index of object.triangles) triangles.push(index + offset);
       for (const index of object.lines) lines.push(index + offset);
+      if (source?.type === "body" && object.lines.length) {
+        bodyLineRanges.push({ start: lineOffset, end: lineOffset + object.lines.length });
+      }
       for (const index of object.points) points.push(index + offset);
       if (source?.type === "body" && containsRevolvedProfile(source.geometry)) {
         let minZ = Infinity, maxZ = -Infinity;
@@ -1607,7 +1611,7 @@ async function refreshDetail() {
       bounds.max = [0, 0, 0];
     }
     if (!targetFound) transition = null;
-    const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes };
+    const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes, bodyLineRanges };
     modelViewer.load(viewportGeometry, {
       reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition, smoothShading: true,
     });

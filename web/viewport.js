@@ -301,7 +301,12 @@
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale, geometry.colors);
       if (showWorldAxes) drawWorldAxes(project, radius, dpr);
       const directLineCount = geometry.type === "body" ? 0 : (geometry.lines || []).length;
+      let bodyLineRangeIndex = 0;
       for (let index = 0; index < directLineCount; index += 2) {
+        while (bodyLineRangeIndex < (geometry.bodyLineRanges || []).length
+          && index >= geometry.bodyLineRanges[bodyLineRangeIndex].end) bodyLineRangeIndex += 1;
+        const bodyLineRange = geometry.bodyLineRanges?.[bodyLineRangeIndex];
+        if (bodyLineRange && index >= bodyLineRange.start && index < bodyLineRange.end) continue;
         const a = geometry.lines[index], b = geometry.lines[index + 1];
         let startX = screenX[a], startY = screenY[a];
         let endX = screenX[b], endY = screenY[b];
@@ -1061,6 +1066,9 @@
           meshEdgesCache.set(sourceTriangles, meshEdges);
         }
         const explicitBodyEdges = value.type === "body" ? Uint32Array.from(value.lines || []) : null;
+        const rangedBodyEdges = value.bodyLineRanges?.length
+          ? Uint32Array.from(value.bodyLineRanges.flatMap(({ start, end }) => value.lines.slice(start, end)))
+          : null;
         const transitionRange = nextTransition?.vertexRange;
         let meshVertexCount = 0;
         for (const vertex of sourceTriangles) meshVertexCount = Math.max(meshVertexCount, vertex + 1);
@@ -1072,7 +1080,7 @@
           ...value,
           orbitCenter,
           fitRadius: fitRadiusFromPositions(value.positions, fitCenter),
-          featureEdges: explicitBodyEdges || meshEdges.featureEdges,
+          featureEdges: explicitBodyEdges || rangedBodyEdges || meshEdges.featureEdges,
           silhouetteCandidates: meshEdges.silhouetteCandidates,
           vertexNormals: smoothShading
             ? value.vertexNormals?.length === value.positions.length
