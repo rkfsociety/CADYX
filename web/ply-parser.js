@@ -204,7 +204,7 @@
     const pointCloud = !face || face.count === 0;
     const previewVertexCount = pointCloud ? Math.min(vertex.count, MAX_PREVIEW_POINTS) : vertex.count;
     const positions = new Float32Array(previewVertexCount * 3);
-    const colors = colorReaders && pointCloud ? new Uint8Array(previewVertexCount * 3) : null;
+    const colors = colorReaders ? new Uint8Array(previewVertexCount * 3) : null;
     let cursor = dataOffset;
     for (let index = 0; index < vertex.count; index += 1) {
       const record = nextAsciiRecord(bytes, cursor);
@@ -330,8 +330,7 @@
       colorOffsets.green || colorOffsets.g,
       colorOffsets.blue || colorOffsets.b,
     ];
-    const colors = colorProperties.every(Boolean) && pointCloud
-      ? new Uint8Array(previewVertexCount * 3) : null;
+    const colors = colorProperties.every(Boolean) ? new Uint8Array(previewVertexCount * 3) : null;
     const coordinateReaders = ["x", "y", "z"].map((key) => ({
       offset: offsets[key].offset, read: scalarTypes[offsets[key].type].read,
     }));
