@@ -1,6 +1,6 @@
 # Revopoint tools for Windows
 
-These small command-line tools exercise the scanner and dual-axis turntable through Windows APIs. They do not use the paid Revopoint SDK.
+These small command-line tools exercise the scanner and dual-axis turntable through Windows APIs. They do not use the paid Revopoint SDK or require Revo Scan to run. The device calibration files used by the tools are bundled in `tools/revopoint/calibration/`; they were copied from `%LOCALAPPDATA%\RevoScan5\cameraparam` on the connected scanner PC so the same hardware setup can be used from another checkout. This calibration bundle is specific to that scanner; it is not a universal MINI calibration.
 
 ## Build
 
@@ -17,7 +17,7 @@ The build uses the installed Visual Studio C++ Build Tools, Windows SDK, and .NE
 Close Revo Scan before capturing so it does not hold the depth camera. The Q matrix must come from the same scanner calibration. Revo Scan 5 stores it at:
 
 ```powershell
-$qFile = Join-Path $env:LOCALAPPDATA 'RevoScan5\cameraparam\Q.bin'
+$qFile = Join-Path $PWD 'tools\revopoint\calibration\Q.bin'
 $outPrefix = Join-Path $PWD 'projects\revopoint_probe\frame'
 & .\tools\revopoint\build\CaptureY16.exe `
     --out-prefix $outPrefix `
@@ -32,7 +32,7 @@ For a continuous capture-rate measurement, add `--frames 120`. The camera stays 
 To show the live depth image in CADYX, start a capture with `--live-raw` pointing at the CADYX workspace root's `.revopoint-live.raw`, then open `/scanner` in the CADYX web app. The capture updates this fixed-size file atomically after each received frame; the authenticated page polls the corresponding read-only API route and draws a depth grayscale preview. Example when the workspace root is the repository's `projects` folder:
 
 ```powershell
-& .\tools\revopoint\build\CaptureY16.exe --out-prefix (Join-Path $PWD 'projects\live_preview\capture') --q-file (Join-Path $env:LOCALAPPDATA 'RevoScan5\cameraparam\Q.bin') --disparity-scale 256 --frames 1000 --fps 15 --live-raw (Join-Path $PWD 'projects\.revopoint-live.raw')
+& .\tools\revopoint\build\CaptureY16.exe --out-prefix (Join-Path $PWD 'projects\live_preview\capture') --q-file (Join-Path $PWD 'tools\revopoint\calibration\Q.bin') --disparity-scale 256 --frames 1000 --fps 15 --live-raw (Join-Path $PWD 'projects\.revopoint-live.raw')
 ```
 
 ## Live capture with turntable movement

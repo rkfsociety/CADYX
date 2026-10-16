@@ -7,7 +7,7 @@ param(
     [ValidateScript({ $_ -gt 0 })]
     [double]$DisparityScale,
 
-    [string]$CalibrationFile = (Join-Path $env:LOCALAPPDATA 'RevoScan5\cameraparam\Q.bin')
+    [string]$CalibrationFile = (Join-Path $PSScriptRoot 'calibration\Q.bin')
 )
 
 $ErrorActionPreference = 'Stop'
