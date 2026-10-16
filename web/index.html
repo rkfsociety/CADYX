@@ -10,25 +10,26 @@
     <style id="cadyx-cad-reference-ui">
 /* CADYX CAD-style shell based on the approved dark/orange reference. */
 :root {
-  --accent: #ff7417;
-  --agent: #ff7417;
-  --canvas: #090d11;
-  --surface: #0e1419;
-  --surface-soft: #121920;
-  --surface-hover: #182128;
-  --line: #29323a;
-  --line-soft: #1c252c;
-  --text: #e8edf0;
-  --muted: #a7b0b7;
-  --dim: #6f7b84;
-  --cadyx-tree-width: clamp(240px, 17vw, 292px);
-  --cadyx-inspector-width: clamp(300px, 21vw, 370px);
+  --accent: #ff8740;
+  --agent: #63d2ae;
+  --canvas: #0c1116;
+  --surface: #111920;
+  --surface-soft: #172129;
+  --surface-hover: #202b32;
+  --line: #2a373f;
+  --line-soft: #202a31;
+  --text: #edf1f3;
+  --muted: #b1bcc2;
+  --dim: #849199;
+  --ui-font: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
+  --cadyx-tree-width: clamp(228px, 16.5vw, 280px);
+  --cadyx-inspector-width: clamp(310px, 22vw, 380px);
   --cadyx-tabs-height: 50px;
   --cadyx-ai-height: 58px;
 }
 
 html, body { background: var(--canvas); }
-body { color: var(--text); }
+body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 
 .topbar {
   z-index: 20;
@@ -57,7 +58,7 @@ body { color: var(--text); }
 .document-title {
   max-width: min(46vw, 620px);
   color: #eef2f4;
-  font: 600 13px/1.2 var(--mono);
+  font: 600 14px/1.3 var(--ui-font);
 }
 .project-id-copy-row {
   position: absolute;
@@ -93,20 +94,20 @@ body { color: var(--text); }
 .header-revision .topbar-label { display: none; }
 .header-revision strong { color: var(--muted); font: 11px var(--mono); }
 .agent-owner-chip {
-  min-height: 28px;
-  padding: 4px 10px;
+  min-height: 32px;
+  padding: 5px 11px;
   border: 1px solid #6c3a1d;
-  border-radius: 5px;
-  color: #ff9854;
+  border-radius: 6px;
+  color: #ffad73;
   background: #22140c;
-  font: 700 10px var(--mono);
+  font: 700 11px var(--mono);
   letter-spacing: .05em;
 }
 .agent-owner-chip[data-state="running"] {
-  border-color: #9b4818;
-  color: #ff8a3a;
-  background: #291408;
-  box-shadow: 0 0 18px #ff741714;
+  border-color: #347c66;
+  color: var(--agent);
+  background: #10241f;
+  box-shadow: 0 0 18px #63d2ae14;
 }
 .agent-owner-chip[data-state="warning"] { border-color: #7a5a2b; color: var(--warning); background: #20180d; }
 .agent-owner-chip[data-state="failed"] { border-color: #744044; color: var(--danger); background: #201012; }
@@ -143,7 +144,7 @@ body { color: var(--text); }
   overflow: hidden;
   padding: 0 60px;
   border-bottom: 1px solid var(--line);
-  background: #0b1116;
+  background: #0e151b;
 }
 .nav-item {
   display: flex;
@@ -167,7 +168,7 @@ body { color: var(--text); }
 .nav-item[aria-current="page"]::before { display: none; }
 .nav-index, .nav-copy small { display: none; }
 .nav-copy { display: block; }
-.nav-copy strong { color: #c8d0d5; font: 600 12px var(--mono); letter-spacing: 0; text-transform: none; }
+.nav-copy strong { color: #c8d0d5; font: 600 12px var(--ui-font); letter-spacing: .01em; text-transform: none; }
 .nav-item[aria-current="page"] .nav-copy strong { color: var(--accent); }
 .nav-item[data-workspace-view="geometry"],
 .nav-item[data-workspace-view="activity"],
@@ -214,10 +215,10 @@ body { color: var(--text); }
   padding: 0 16px;
   border-bottom: 1px solid var(--line-soft);
 }
-.cad-tree-heading strong { color: #e7ecef; font: 600 13px var(--mono); }
+.cad-tree-heading strong { color: #e7ecef; font: 600 14px var(--ui-font); }
 .cad-tree-collapse {
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
@@ -228,14 +229,14 @@ body { color: var(--text); }
 .cad-tree-search { padding: 7px 10px; }
 .cad-tree-search input {
   width: 100%;
-  height: 30px;
+  height: 34px;
   padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 6px;
   outline: 0;
   background: #0b1217;
   color: var(--text);
-  font: 10px var(--mono);
+  font: 11px var(--ui-font);
 }
 .cad-tree-search input:focus { border-color: #8a461e; box-shadow: 0 0 0 1px #ff741722; }
 .cad-tree-scroll { min-height: 0; overflow: auto; padding: 5px 8px 18px; }
@@ -251,13 +252,13 @@ body { color: var(--text); }
   grid-template-columns: 18px 20px minmax(0, 1fr);
   align-items: center;
   gap: 5px;
-  min-height: 31px;
-  padding: 4px 7px;
+  min-height: 34px;
+  padding: 5px 8px;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: 5px;
   background: transparent;
   color: var(--muted);
-  font: 10px/1.25 var(--mono);
+  font: 11px/1.35 var(--ui-font);
   text-align: left;
 }
 .cad-tree-root-row { color: #e4eaed; font-weight: 650; }
@@ -269,7 +270,7 @@ body { color: var(--text); }
 .cad-tree-chevron { color: #89949b; font-size: 10px; text-align: center; }
 .cad-tree-icon { color: var(--accent); font-size: 13px; text-align: center; }
 .cad-tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cad-tree-empty { margin: 12px 8px; color: var(--dim); font: 9px/1.5 var(--mono); }
+.cad-tree-empty { margin: 12px 8px; color: var(--dim); font: 11px/1.5 var(--ui-font); }
 .section-sidebar[data-collapsed="true"] { width: 48px; }
 .section-sidebar[data-collapsed="true"] .cad-tree-search,
 .section-sidebar[data-collapsed="true"] .cad-tree-scroll,
@@ -334,7 +335,7 @@ body { color: var(--text); }
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--muted);
-  font: 10px var(--mono);
+  font: 600 11px var(--ui-font);
   cursor: pointer;
 }
 .cad-inspector-tab:hover { color: #e2e8eb; background: #ffffff04; }
@@ -413,23 +414,23 @@ body { color: var(--text); }
 .viewport-mode-button,
 .viewport-fit-button,
 .viewport-four-views-button {
-  min-height: 30px;
-  height: 30px;
+  min-height: 34px;
+  height: 34px;
   border-color: transparent;
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
   color: #a8b3b9;
 }
-.viewport-icon-button { width: 30px; }
+.viewport-icon-button { width: 34px; }
 .viewport-icon-button:hover:not(:disabled),
 .viewport-mode-button:hover:not(:disabled),
 .viewport-fit-button:hover:not(:disabled),
-.viewport-four-views-button:hover:not(:disabled) { border-color: #634027; color: #ff9653; background: #ff74170a; }
+.viewport-four-views-button:hover:not(:disabled) { border-color: #9b6038; color: #ffad73; background: #26190f; }
 .viewport-icon-button[aria-pressed="true"],
-.viewport-four-views-button[aria-pressed="true"] { border-color: #83431d; color: var(--accent); background: #3a1b0d; }
+.viewport-four-views-button[aria-pressed="true"] { border-color: #9b6038; color: var(--accent); background: #26190f; }
 .viewport-toolbar-divider { height: 22px; background: #303a41; }
 .viewport-mode-button { padding: 3px 10px; }
-.viewport-fit-button, .viewport-four-views-button { width: 31px; padding: 3px; }
+.viewport-fit-button, .viewport-four-views-button { width: 34px; padding: 6px; }
 .viewport-fit-button .toolbar-label,
 .viewport-four-views-button .toolbar-label { display: none; }
 .viewport-mode-button .toolbar-label { font-size: 8px; }
@@ -489,14 +490,16 @@ body { color: var(--text); }
   border-radius: 999px;
   color: #ff9552;
   background: #211309;
-  font-size: 9px;
+  font-size: 10px;
   white-space: nowrap;
 }
+#workflow-panel .agent-state[data-state="running"] { border-color: #347c66; color: var(--agent); background: #10241f; }
+#workflow-panel .agent-state[data-state="completed"] { border-color: #347c66; color: var(--success); background: #10241f; }
 #workflow-panel .workflow-current-label { display: none; }
 #workflow-panel .workflow-action {
   overflow: hidden;
   color: #dfe6e9;
-  font: 600 10px/1.3 var(--mono);
+  font: 600 12px/1.35 var(--ui-font);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -514,7 +517,7 @@ body { color: var(--text); }
 #workflow-panel .workflow-progress { grid-column: 1; height: 7px; border-radius: 999px; background: #273139; }
 #workflow-panel .workflow-progress i { background: linear-gradient(90deg, #ff6911, #ff923f); box-shadow: 0 0 12px #ff741733; }
 #workflow-panel .workflow-percent { grid-column: 2; grid-row: 1; min-width: 42px; color: #f2f4f5; font: 700 11px var(--mono); }
-#workflow-panel .workflow-eta { grid-column: 3; grid-row: 1; min-width: 94px; color: var(--muted); font: 9px var(--mono); }
+#workflow-panel .workflow-eta { grid-column: 3; grid-row: 1; min-width: 94px; color: var(--muted); font: 10px var(--mono); }
 #workflow-panel::after {
   order: 3;
   padding-left: 14px;
@@ -549,7 +552,7 @@ body { color: var(--text); }
 .primary-grid[data-view="projects"] { grid-template-columns: minmax(0, 1fr); }
 .primary-grid[data-view="analysis"] > #comparison-panel,
 .primary-grid[data-view="manufacturing"] > #manufacturing-panel,
-.primary-grid[data-view="projects"] > #projects-panel { border-radius: 0; }
+.primary-grid[data-view="projects"] > #projects-panel { border-radius: 8px; }
 
 @media (max-width: 1180px) {
   :root { --cadyx-tree-width: 220px; --cadyx-inspector-width: 300px; }
@@ -655,9 +658,9 @@ body { color: var(--text); }
                       <button class="viewport-icon-button" type="button" data-camera-preset="top" aria-label="Вид сверху" title="Вид сверху" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Z M3 8v8l9 5 9-5V8M12 13v8"/></svg></button>
                     </div>
                     <span class="viewport-toolbar-divider" aria-hidden="true"></span>
-                    <button id="viewport-four-views" class="button viewport-four-views-button" type="button" aria-label="Показать четыре вида" title="Показать четыре вида" aria-pressed="false"><span class="viewport-mode-icon" aria-hidden="true">⊞</span><span class="toolbar-label">4 ВИДА</span></button>
-                    <button id="viewport-wireframe" class="button viewport-mode-button" type="button" aria-label="Скрыть рёбра сетки" title="Скрыть рёбра сетки" aria-pressed="true"><span class="viewport-mode-icon" aria-hidden="true">▧</span><span id="viewport-mode-label" class="toolbar-label">ЗАТЕНЕНИЕ + РЁБРА</span></button>
-                    <button id="viewport-fit" class="button viewport-fit-button" type="button" aria-label="Вписать модель в область просмотра" title="Вписать модель в область просмотра"><span class="viewport-mode-icon" aria-hidden="true">⌖</span><span class="toolbar-label">ВПИСАТЬ МОДЕЛЬ</span></button>
+                    <button id="viewport-four-views" class="button viewport-four-views-button" type="button" aria-label="Показать четыре вида" title="Показать четыре вида" aria-pressed="false"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></span><span class="toolbar-label">4 ВИДА</span></button>
+                    <button id="viewport-wireframe" class="button viewport-mode-button" type="button" aria-label="Скрыть рёбра сетки" title="Скрыть рёбра сетки" aria-pressed="true"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3ZM4 7.5l8 4.7 8-4.7M12 12.2V21"/></svg></span><span id="viewport-mode-label" class="toolbar-label">ЗАТЕНЕНИЕ + РЁБРА</span></button>
+                    <button id="viewport-fit" class="button viewport-fit-button" type="button" aria-label="Вписать модель в область просмотра" title="Вписать модель в область просмотра"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 4H4v4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 9 4 4M15 9l5-5M15 15l5 5M9 15l-5 5"/></svg></span><span class="toolbar-label">ВПИСАТЬ МОДЕЛЬ</span></button>
                   </div>
                 </div>
                 <div class="viewport" id="viewport">
