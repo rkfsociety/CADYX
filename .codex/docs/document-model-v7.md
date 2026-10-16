@@ -562,7 +562,8 @@ Agent command endpoint under that project's edit lease:
     "target_triangles": 30000,
     "outlier_neighbors": 20,
     "outlier_std_ratio": 2.0,
-    "poisson_depth": 8
+    "poisson_depth": 8,
+    "poisson_density_quantile": 0.01
   }
 }
 ```
@@ -589,14 +590,18 @@ parameters, and counts, not a second mesh copy.
 
 The defaults are `voxel_size=0.75` in the source's coordinate units,
 `target_triangles=30000`, `outlier_neighbors=20`, `outlier_std_ratio=2.0`, and
-`poisson_depth=8`. `voxel_size` and `target_triangles` apply to both input kinds;
-the outlier and Poisson settings apply to point clouds. `set_scan_parameter`
+`poisson_depth=8`, and `poisson_density_quantile=0.01`. `voxel_size` and
+`target_triangles` apply to both input kinds; the outlier and Poisson settings
+apply to point clouds. After Poisson reconstruction, vertices below the chosen
+density quantile are removed with their incident triangles; this trims weakly
+supported extrapolated surfaces. Set the quantile to `0` to preserve the full
+Poisson result. `set_scan_parameter`
 accepts `feature_id`, `name`, and `value` to rebuild from the unchanged source.
 Editable parameters are bounded: voxel size 0.00001–10000, target triangles
 100–100000, outlier neighbors 4–128, outlier standard ratio 0.1–5, and Poisson
-depth 5–9. The CPU processor caps itself at four threads and downsamples point
-clouds to at most 100,000 points; input PLYs are limited to 512 MiB, 2 million
-vertices, and 5 million faces. The processor is the hash-pinned CPU Open3D
+depth 5–9, density quantile 0–0.5. The CPU processor caps itself at four
+threads and downsamples point clouds to at most 100,000 points; input PLYs are
+limited to 512 MiB, 2 million vertices, and 5 million faces. The processor is the hash-pinned CPU Open3D
 0.20.0 SDK behind a native C ABI bridge, so it does not depend on CADYX's Python
 ABI. See [runtime setup](../../README.md#run-locally).
 

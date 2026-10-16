@@ -172,6 +172,7 @@ std::shared_ptr<TriangleMesh> ReconstructPointCloud(const std::string& filename,
                                                     int outlier_neighbors,
                                                     double outlier_std_ratio,
                                                     int poisson_depth,
+                                                    double poisson_density_quantile,
                                                     uint32_t& input_vertices,
                                                     float& effective_voxel_size,
                                                     ProgressCallback progress) {
@@ -225,8 +226,21 @@ std::shared_ptr<TriangleMesh> ReconstructPointCloud(const std::string& filename,
             legacy_cloud, static_cast<size_t>(poisson_depth), 0.0f, 1.1f,
             false, static_cast<int>(ProcessingThreads()));
     auto mesh = std::move(std::get<0>(reconstruction));
+    auto densities = std::move(std::get<1>(reconstruction));
     if (!mesh || mesh->triangles_.empty()) {
         throw std::runtime_error("Open3D could not reconstruct a surface from this point cloud.");
+    }
+    if (poisson_density_quantile > 0.0 && !densities.empty()) {
+        const size_t quantile_index = static_cast<size_t>(poisson_density_quantile * (densities.size() - 1));
+        auto quantile = densities;
+        std::nth_element(quantile.begin(), quantile.begin() + quantile_index, quantile.end());
+        const double cutoff = quantile[quantile_index];
+        std::vector<bool> remove_mask(densities.size());
+        for (size_t i = 0; i < densities.size(); ++i) remove_mask[i] = densities[i] < cutoff;
+        mesh->RemoveVerticesByMask(remove_mask);
+        if (mesh->triangles_.empty()) {
+            throw std::runtime_error("Poisson density cropping removed the entire reconstructed surface.");
+        }
     }
     ReportProgress(progress, 7);
     if (mesh->triangles_.size() > static_cast<size_t>(target_triangles)) {
@@ -253,6 +267,7 @@ API void* cadyx_scan_process(const char* filename,
                              int outlier_neighbors,
                              double outlier_std_ratio,
                              int poisson_depth,
+                             double poisson_density_quantile,
                              ProgressCallback progress,
                              size_t* output_size,
                              char* error,
@@ -266,7 +281,8 @@ API void* cadyx_scan_process(const char* filename,
         target_triangles < 100 || target_triangles > 100000 ||
         outlier_neighbors < 4 || outlier_neighbors > 128 ||
         !std::isfinite(outlier_std_ratio) || outlier_std_ratio < 0.1 || outlier_std_ratio > 5.0 ||
-        poisson_depth < 5 || poisson_depth > 9) {
+        poisson_depth < 5 || poisson_depth > 9 ||
+        !std::isfinite(poisson_density_quantile) || poisson_density_quantile < 0.0 || poisson_density_quantile > 0.5) {
         SetError(error, error_capacity, "Scan processing parameters are outside supported limits.");
         return nullptr;
     }
@@ -289,7 +305,7 @@ API void* cadyx_scan_process(const char* filename,
             source_kind = 2;
             mesh = ReconstructPointCloud(filename, voxel_size, target_triangles,
                                          outlier_neighbors, outlier_std_ratio,
-                                         poisson_depth, input_vertices,
+                                         poisson_depth, poisson_density_quantile, input_vertices,
                                          effective_voxel_size, progress);
         }
         ReportProgress(progress, 8);

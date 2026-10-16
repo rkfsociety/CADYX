@@ -95,6 +95,11 @@ class ScanGeometryTests(unittest.TestCase):
         for value in (True, 1.5, 99, 100001):
             with self.subTest(value=value), self.assertRaises(ValidationError):
                 normalize_scan_parameters({"target_triangles": value})
+        for value in (True, -0.01, 0.51, float("inf"), "0.1"):
+            with self.subTest(density_quantile=value), self.assertRaises(ValidationError):
+                normalize_scan_parameters({"poisson_density_quantile": value})
+        self.assertEqual(normalize_scan_parameters({"poisson_density_quantile": 0.05})[
+            "poisson_density_quantile"], 0.05)
 
     def test_editable_mesh_exports_as_binary_little_endian_ply(self):
         geometry, metadata = geometry_from_native_buffer(_native_mesh_buffer())

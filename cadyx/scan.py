@@ -18,6 +18,7 @@ DEFAULT_SCAN_PARAMETERS = {
     "outlier_neighbors": 20,
     "outlier_std_ratio": 2.0,
     "poisson_depth": 8,
+    "poisson_density_quantile": 0.01,
 }
 _MAX_PLY_BYTES = 512 * 1024 * 1024
 _MAX_PLY_HEADER_BYTES = 64 * 1024
@@ -52,6 +53,12 @@ def normalize_scan_parameters(value: Any) -> dict[str, float | int]:
             not math.isfinite(float(outlier_std_ratio)) or not 0.1 <= float(outlier_std_ratio) <= 5):
         raise ValidationError("outlier_std_ratio must be finite and between 0.1 and 5.")
     result["outlier_std_ratio"] = float(outlier_std_ratio)
+
+    density_quantile = result["poisson_density_quantile"]
+    if (isinstance(density_quantile, bool) or not isinstance(density_quantile, (int, float)) or
+            not math.isfinite(float(density_quantile)) or not 0.0 <= float(density_quantile) <= 0.5):
+        raise ValidationError("poisson_density_quantile must be finite and between 0 and 0.5.")
+    result["poisson_density_quantile"] = float(density_quantile)
     return result
 
 
