@@ -73,12 +73,14 @@
     if (vertexElements.length !== 1 || elements[0] !== vertexElements[0]) {
       throw new Error("В PLY должен быть ровно один элемент вершин, расположенный первым.");
     }
-    if (faceIndices.length > 1 || faceIndices.some((index) => index !== 1)) {
-      throw new Error("В PLY грани должны идти сразу после вершин.");
+    if (faceIndices.length > 1 || faceIndices.some((index) => index === 0)) {
+      throw new Error("В PLY грани должны идти после вершин.");
     }
     const vertex = vertexElements[0];
-    const face = faceIndices.length ? elements[1] : null;
-    return { dataOffset, vertex, face, littleEndian, format };
+    const faceIndex = faceIndices[0] ?? -1;
+    const face = faceIndex >= 0 ? elements[faceIndex] : null;
+    const elementsBeforeFace = face ? elements.slice(1, faceIndex) : [];
+    return { dataOffset, vertex, face, elementsBeforeFace, littleEndian, format };
   }
 
   function getColorReaders(properties) {
@@ -226,7 +228,65 @@
     throw new Error("Данные PLY обрезаны.");
   }
 
-  function parseAsciiPly(bytes, dataOffset, vertex, face) {
+  function skipAsciiElement(bytes, cursor, element) {
+    for (let recordIndex = 0; recordIndex < element.count; recordIndex += 1) {
+      const record = nextAsciiRecord(bytes, cursor);
+      cursor = record.cursor;
+      let valueIndex = 0;
+      for (const property of element.properties) {
+        if (property.list) {
+          const countType = scalarTypes[property.countType];
+          const itemType = scalarTypes[property.itemType];
+          if (!countType || !itemType || valueIndex >= record.values.length) {
+            throw new Error("Неподдерживаемое свойство элемента PLY.");
+          }
+          const itemCount = Number(record.values[valueIndex++]);
+          if (!Number.isSafeInteger(itemCount) || itemCount < 0 || itemCount > record.values.length - valueIndex) {
+            throw new Error("Некорректная запись элемента PLY.");
+          }
+          valueIndex += itemCount;
+        } else {
+          if (!scalarTypes[property.type] || valueIndex >= record.values.length) {
+            throw new Error("Неподдерживаемое свойство элемента PLY.");
+          }
+          valueIndex += 1;
+        }
+      }
+      if (valueIndex !== record.values.length) throw new Error("Некорректная запись элемента PLY.");
+    }
+    return cursor;
+  }
+
+  function skipBinaryElement(buffer, data, cursor, element, littleEndian) {
+    for (let recordIndex = 0; recordIndex < element.count; recordIndex += 1) {
+      for (const property of element.properties) {
+        if (property.list) {
+          const countType = scalarTypes[property.countType];
+          const itemType = scalarTypes[property.itemType];
+          if (!countType || !itemType || countType.size > buffer.byteLength - cursor) {
+            throw new Error("Неподдерживаемое свойство элемента PLY.");
+          }
+          const itemCount = countType.read(data, cursor, littleEndian);
+          cursor += countType.size;
+          if (!Number.isSafeInteger(itemCount) || itemCount < 0
+              || itemCount > Math.floor((buffer.byteLength - cursor) / itemType.size)) {
+            throw new Error("Некорректная или обрезанная запись элемента PLY.");
+          }
+          cursor += itemCount * itemType.size;
+        } else {
+          const scalar = scalarTypes[property.type];
+          if (!scalar) throw new Error("Неподдерживаемое свойство элемента PLY.");
+          if (scalar.size > buffer.byteLength - cursor) {
+            throw new Error("Данные элемента PLY обрезаны.");
+          }
+          cursor += scalar.size;
+        }
+      }
+    }
+    return cursor;
+  }
+
+  function parseAsciiPly(bytes, dataOffset, vertex, face, elementsBeforeFace) {
     const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     const coordinateReaders = ["x", "y", "z"].map((name) => {
       const index = vertex.properties.findIndex((property) => property.name === name);
@@ -287,6 +347,8 @@
         }
       }
     }
+
+    for (const element of elementsBeforeFace) cursor = skipAsciiElement(bytes, cursor, element);
 
     const triangles = [];
     const triangleColors = [];
@@ -369,9 +431,9 @@
   function parsePly(buffer) {
     const bytes = new Uint8Array(buffer);
     const data = new DataView(buffer);
-    const { dataOffset, vertex, face, littleEndian, format } = parseHeader(bytes);
+    const { dataOffset, vertex, face, elementsBeforeFace, littleEndian, format } = parseHeader(bytes);
     if (vertex.count === 0) throw new Error("В PLY нет вершин для предпросмотра.");
-    if (format === "ascii") return parseAsciiPly(bytes, dataOffset, vertex, face);
+    if (format === "ascii") return parseAsciiPly(bytes, dataOffset, vertex, face, elementsBeforeFace);
     const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     const offsets = { x: null, y: null, z: null };
     const colorOffsets = { red: null, r: null, green: null, g: null, blue: null, b: null };
@@ -454,6 +516,10 @@
         }
       }
       cursor += vertexStride;
+    }
+
+    for (const element of elementsBeforeFace) {
+      cursor = skipBinaryElement(buffer, data, cursor, element, littleEndian);
     }
 
     const triangles = [];
