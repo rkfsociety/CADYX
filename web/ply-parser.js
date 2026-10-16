@@ -57,6 +57,102 @@
     return { dataOffset: lineEnd + 1, vertex, face };
   }
 
+  function triangulatePolygon(indices, positions, triangles) {
+    const polygon = [];
+    for (const index of indices) {
+      if (polygon[polygon.length - 1] !== index) polygon.push(index);
+    }
+    if (polygon.length > 1 && polygon[0] === polygon[polygon.length - 1]) polygon.pop();
+    if (polygon.length < 3) return;
+    if (polygon.length === 3) {
+      triangles.push(...polygon);
+      return;
+    }
+
+    let normalX = 0, normalY = 0, normalZ = 0;
+    for (let index = 0; index < polygon.length; index += 1) {
+      const current = polygon[index] * 3;
+      const next = polygon[(index + 1) % polygon.length] * 3;
+      const x = positions[current], y = positions[current + 1], z = positions[current + 2];
+      const nextX = positions[next], nextY = positions[next + 1], nextZ = positions[next + 2];
+      normalX += (y - nextY) * (z + nextZ);
+      normalY += (z - nextZ) * (x + nextX);
+      normalZ += (x - nextX) * (y + nextY);
+    }
+    const droppedAxis = Math.abs(normalX) > Math.abs(normalY)
+      ? (Math.abs(normalX) > Math.abs(normalZ) ? 0 : 2)
+      : (Math.abs(normalY) > Math.abs(normalZ) ? 1 : 2);
+    const projected = polygon.map((index) => {
+      const offset = index * 3;
+      if (droppedAxis === 0) return [positions[offset + 1], positions[offset + 2]];
+      if (droppedAxis === 1) return [positions[offset], positions[offset + 2]];
+      return [positions[offset], positions[offset + 1]];
+    });
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const point of projected) {
+      minX = Math.min(minX, point[0]);
+      maxX = Math.max(maxX, point[0]);
+      minY = Math.min(minY, point[1]);
+      maxY = Math.max(maxY, point[1]);
+    }
+    const extent = Math.max(maxX - minX, maxY - minY);
+    const epsilon = Math.max(Number.MIN_VALUE, extent * extent * 1e-12);
+    const cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1])
+      - (b[1] - a[1]) * (c[0] - a[0]);
+
+    let winding = 0, convex = true;
+    for (let index = 0; index < projected.length; index += 1) {
+      const turn = cross(projected[(index + projected.length - 1) % projected.length],
+        projected[index], projected[(index + 1) % projected.length]);
+      if (Math.abs(turn) <= epsilon) continue;
+      const sign = Math.sign(turn);
+      if (winding && winding !== sign) convex = false;
+      winding = sign;
+    }
+    if (!winding) return;
+    if (convex) {
+      for (let index = 1; index + 1 < polygon.length; index += 1) {
+        triangles.push(polygon[0], polygon[index], polygon[index + 1]);
+      }
+      return;
+    }
+
+    const orientation = Math.sign(projected.reduce((area, point, index) => {
+      const next = projected[(index + 1) % projected.length];
+      return area + point[0] * next[1] - next[0] * point[1];
+    }, 0));
+    if (!orientation) return;
+    const remaining = polygon.map((_, index) => index);
+    while (remaining.length > 3) {
+      let clipped = false;
+      for (let position = 0; position < remaining.length; position += 1) {
+        const previous = remaining[(position + remaining.length - 1) % remaining.length];
+        const current = remaining[position];
+        const next = remaining[(position + 1) % remaining.length];
+        const a = projected[previous], b = projected[current], c = projected[next];
+        if (orientation * cross(a, b, c) <= epsilon) continue;
+        let containsVertex = false;
+        for (const candidate of remaining) {
+          if (candidate === previous || candidate === current || candidate === next) continue;
+          const point = projected[candidate];
+          if (orientation * cross(a, b, point) >= -epsilon
+              && orientation * cross(b, c, point) >= -epsilon
+              && orientation * cross(c, a, point) >= -epsilon) {
+            containsVertex = true;
+            break;
+          }
+        }
+        if (containsVertex) continue;
+        triangles.push(polygon[previous], polygon[current], polygon[next]);
+        remaining.splice(position, 1);
+        clipped = true;
+        break;
+      }
+      if (!clipped) throw new Error("Не удалось триангулировать грань PLY.");
+    }
+    triangles.push(polygon[remaining[0]], polygon[remaining[1]], polygon[remaining[2]]);
+  }
+
   function parsePly(buffer) {
     const bytes = new Uint8Array(buffer);
     const data = new DataView(buffer);
@@ -123,21 +219,16 @@
               cursor += listBytes;
               continue;
             }
-            let first = null;
-            let previous = null;
+            const polygon = [];
             for (let item = 0; item < itemCount; item += 1) {
               const index = itemReader.read(data, cursor);
               if (!Number.isSafeInteger(index) || index < 0 || index >= vertex.count) {
                 throw new Error("Грань PLY ссылается на отсутствующую вершину.");
               }
-              if (item === 0) first = previous = index;
-              else if (item === 1) previous = index;
-              else {
-                triangles.push(first, previous, index);
-                previous = index;
-              }
+              polygon.push(index);
               cursor += itemReader.size;
             }
+            triangulatePolygon(polygon, positions, triangles);
           } else {
             const scalar = scalarTypes[property.type];
             if (!scalar) throw new Error(`Неподдерживаемый тип PLY: ${property.type}.`);
