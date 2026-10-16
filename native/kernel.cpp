@@ -1084,11 +1084,17 @@ TopoDS_Shape MakePeriodicSplineProfileShape(const double* coordinates, size_t po
   const size_t sample_count = point_count * samples_per_span;
   double twice_area = 0.0;
   gp_Pnt previous = curve->Value(parameters->Value(1));
+  double minimum_radius = std::numeric_limits<double>::infinity();
+  double maximum_radius = -std::numeric_limits<double>::infinity();
   for (size_t index = 0; index < point_count; ++index) {
     const double x = coordinates[2 * index];
-    if (operation == 1 && x < -1e-7)
-      throw std::runtime_error("Revolution profiles must stay on one side of the Z axis.");
+    minimum_radius = std::min(minimum_radius, x);
+    maximum_radius = std::max(maximum_radius, x);
   }
+  constexpr double axis_tolerance = 1e-7;
+  if (operation == 1 && minimum_radius < -axis_tolerance && maximum_radius > axis_tolerance)
+    throw std::runtime_error("Revolution profiles must stay on one side of the Z axis.");
+  const double radial_side = operation == 1 && maximum_radius < -axis_tolerance ? -1.0 : 1.0;
   for (size_t index = 1; index <= sample_count; ++index) {
     const size_t span = (index - 1) / samples_per_span;
     const size_t step = (index - 1) % samples_per_span + 1;
@@ -1100,10 +1106,8 @@ TopoDS_Shape MakePeriodicSplineProfileShape(const double* coordinates, size_t po
     const double x = current.X();
     const double y = plane == 0 ? current.Y() : current.Z();
     const double previous_y = plane == 0 ? previous.Y() : previous.Z();
-    if (operation == 1) {
-      if (x < -1e-7)
-        throw std::runtime_error("Revolution profiles must stay on one side of the Z axis.");
-    }
+    if (operation == 1 && radial_side * x < -axis_tolerance)
+      throw std::runtime_error("Revolution profiles must stay on one side of the Z axis.");
     twice_area += previous.X() * y - x * previous_y;
     previous = current;
   }

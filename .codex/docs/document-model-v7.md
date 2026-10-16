@@ -138,8 +138,9 @@ their respective human/agent edit leases. Results below appear inside
   `closed_periodic_bspline` marker so feature rebuilds and Boolean fuses retain
   the curve. Existing `closed_catmull_rom` descriptors remain readable and
   rebuild using their original cubic edge-chain implementation. An XZ profile
-  for revolution must stay on one side of the Z axis; a profile offset from the
-  axis creates a toroidal solid and need not touch the axis.
+  for revolution may lie on either side of the Z axis, but must not cross it; a
+  profile offset from the axis creates a toroidal solid and need not touch the
+  axis.
 - `add_sketch_spline_control_points`: `sketch_id`, at least 3 ordered `{x, y}`
   control points, and optional boolean `construction` (default false). Creates
   an open clamped uniform B-spline of degree `min(3, point_count - 1)`, with
