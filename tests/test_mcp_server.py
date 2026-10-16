@@ -63,6 +63,14 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(image["content"][1]["mimeType"], "image/png")
         self.assertTrue(image["content"][1]["data"])
 
+    def test_execute_command_schema_tracks_discovered_command_types(self) -> None:
+        tool = next(tool for tool in TOOLS if tool["name"] == "cadyx_execute_command")
+        command_schema = tool["inputSchema"]["properties"]["command"]
+        advertised_types = command_schema["properties"]["type"]["enum"]
+
+        self.assertEqual(set(advertised_types), {item["type"] for item in COMMAND_CAPABILITIES})
+        self.assertEqual(command_schema["required"], ["type"])
+
     def test_command_uses_expected_revision_and_releases_lease(self) -> None:
         project_id = self._create_project()
         first = self._tool_value("cadyx_execute_command", {
