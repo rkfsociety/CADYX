@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 
 #include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
@@ -13,6 +14,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -201,18 +203,35 @@ int Run(const Options& options) {
         CheckHr(buffer->Lock(&data, &maxLength, &currentLength), "Lock MJPG buffer");
         std::vector<BYTE> bytes(data, data + currentLength);
         buffer->Unlock();
-        if (options.requested_subtype == kMjpgFourCc &&
-            (bytes.size() < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8 ||
-             bytes[bytes.size() - 2] != 0xFF || bytes.back() != 0xD9)) {
-            throw std::runtime_error("RGBCam sample was not a complete JPEG frame.");
-        }
-
         std::wostringstream fileName;
         fileName << options.output_prefix.filename().wstring();
         if (options.frame_count > 1) fileName << L"_" << std::setw(4) << std::setfill(L'0') << frame;
-        fileName << (options.requested_subtype == kMjpgFourCc ? L".jpg" : L".nv12");
+        bool validJpeg = options.requested_subtype != kMjpgFourCc;
+        if (options.requested_subtype == kMjpgFourCc && bytes.size() >= 4 &&
+            bytes[0] == 0xFF && bytes[1] == 0xD8) {
+            const BYTE eoi[] = {0xFF, 0xD9};
+            const auto marker = std::search(bytes.begin() + 2, bytes.end(),
+                                             std::begin(eoi), std::end(eoi));
+            if (marker != bytes.end() - 1) {
+                bytes.resize(static_cast<std::size_t>(marker - bytes.begin()) + 2);
+                validJpeg = true;
+            }
+        }
+        fileName << (options.requested_subtype == kMjpgFourCc
+                         ? (validJpeg ? L".jpg" : L".invalid-mjpg.bin") : L".nv12");
         const auto imagePath = outputDirectory / fileName.str();
         WriteNewFile(imagePath, bytes);
+        if (!validJpeg) {
+            std::ostringstream detail;
+            detail << "RGBCam MJPG sample is not framed as a JPEG: " << bytes.size() << " bytes; prefix=";
+            for (std::size_t i = 0; i < std::min<std::size_t>(16, bytes.size()); ++i)
+                detail << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(bytes[i]);
+            detail << "; suffix=";
+            const std::size_t start = bytes.size() > 16 ? bytes.size() - 16 : 0;
+            for (std::size_t i = start; i < bytes.size(); ++i)
+                detail << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(bytes[i]);
+            throw std::runtime_error(detail.str());
+        }
         const auto utc = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         csv << frame << ',' << timestamp << ',' << utc << ',' << bytes.size() << '\n';

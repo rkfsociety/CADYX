@@ -59,6 +59,22 @@ if ($LASTEXITCODE -ne 0) {
     throw "CaptureRgb compilation failed with exit code $LASTEXITCODE"
 }
 
+$markerSource = Join-Path $toolRoot 'detect_markers.cs'
+$markerExe = Join-Path $buildRoot 'DetectMarkers.exe'
+& $csc /nologo /platform:x64 "/out:$markerExe" '/reference:System.Drawing.dll' $markerSource
+if ($LASTEXITCODE -ne 0) {
+    throw "DetectMarkers compilation failed with exit code $LASTEXITCODE"
+}
+
+$cameraControlSource = Join-Path $toolRoot 'camera_controls.cpp'
+$cameraControlObject = Join-Path $buildRoot 'camera_controls.obj'
+$cameraControlExe = Join-Path $buildRoot 'CameraControls.exe'
+& cl.exe /nologo /EHsc /std:c++17 /utf-8 "/Fo$cameraControlObject" "/Fe$cameraControlExe" $cameraControlSource `
+    /link strmiids.lib ole32.lib oleaut32.lib
+if ($LASTEXITCODE -ne 0) {
+    throw "CameraControls compilation failed with exit code $LASTEXITCODE"
+}
+
 $turntableSource = Join-Path $toolRoot 'turntable.cs'
 $turntableExe = Join-Path $buildRoot 'TurntableController.exe'
 & $csc /nologo /platform:x64 "/out:$turntableExe" "/reference:$windowsWinmd" `
@@ -69,4 +85,6 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Output "Built: $captureExe"
 Write-Output "Built: $rgbExe"
+Write-Output "Built: $markerExe"
+Write-Output "Built: $cameraControlExe"
 Write-Output "Built: $turntableExe"
