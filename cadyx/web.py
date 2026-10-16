@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import mimetypes
 import os
 import queue
+import struct
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -90,6 +92,18 @@ def make_request_handler(
                     self.send_header("X-CADYX-Frame-Mtime", str(frame_path.stat().st_mtime_ns))
                     self.end_headers()
                     self.wfile.write(payload)
+                    return
+                if parsed.path == "/api/v1/scanner/calibration":
+                    calibration_path = Path(__file__).resolve().parent.parent / "tools" / "revopoint" / "calibration" / "Q.bin"
+                    calibration = calibration_path.read_bytes()
+                    if len(calibration) != 64:
+                        raise RuntimeError("Revopoint Q calibration must contain 64 bytes.")
+                    matrix = struct.unpack("<16f", calibration)
+                    if not all(math.isfinite(value) for value in matrix):
+                        raise RuntimeError("Revopoint Q calibration contains a non-finite value.")
+                    self._json(200, {"width": 640, "height": 400, "matrix": matrix,
+                                     "disparity_scale": 256,
+                                     "disparity_scale_status": "provisional_unverified"})
                     return
                 if parsed.path == "/api/v1/updates":
                     query = parse_qs(parsed.query)

@@ -71,10 +71,14 @@
     .scanner-view { display: grid; min-width: 0; min-height: 0; grid-template-rows: 38px minmax(0, 1fr) 30px; overflow: hidden; }
     .scanner-view .panel-heading { min-height: 38px; }
     .scanner-view .panel-heading h1 { margin: 0; font: 12px var(--mono); font-weight: 500; letter-spacing: .05em; }
+    .scanner-modes { display: flex; gap: 5px; }
+    .scanner-modes button { padding: 5px 8px; border: 1px solid var(--line); border-radius: 3px; color: var(--muted); background: #0b1217; font: 9px var(--mono); cursor: pointer; }
+    .scanner-modes button[aria-pressed="true"] { border-color: #6c3a1d; color: #ff9854; background: #22140c; }
     .panel-note { color: var(--dim); font: 9px var(--mono); letter-spacing: .05em; }
     .scanner-stage { display: grid; min-width: 0; min-height: 0; place-items: center; padding: 14px; background-color: #080c10; background-image: linear-gradient(#182128 1px,transparent 1px),linear-gradient(90deg,#182128 1px,transparent 1px); background-size: 24px 24px; }
     .screen { display: grid; width: min(100%, 1120px); max-height: 100%; aspect-ratio: 8/5; place-items: center; overflow: hidden; background: transparent; }
     canvas { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+    canvas[hidden] { display: none; }
     .scanner-view-footer { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; padding: 0 10px; border-top: 1px solid var(--line-soft); color: var(--dim); font: 9px var(--mono); }
     .scanner-inspector { display: grid; min-height: 0; grid-template-rows: auto auto minmax(0, 1fr); align-content: start; gap: 10px; }
     .scanner-card { padding: 12px; }
@@ -120,22 +124,25 @@
   <main class="scanner-shell">
     <section class="panel scanner-view" aria-labelledby="scanner-title">
       <div class="panel-heading">
-        <div><h1 id="scanner-title">КАРТА ГЛУБИНЫ</h1></div>
-        <span class="panel-note">ПРЕДПРОСМОТР В РЕАЛЬНОМ ВРЕМЕНИ</span>
+        <div><h1 id="scanner-title">ТЕКУЩИЙ КАДР СКАНА</h1></div>
+        <div class="scanner-modes" role="group" aria-label="Режим предпросмотра">
+          <button id="depth-mode" type="button" aria-pressed="false">ГЛУБИНА</button>
+          <button id="cloud-mode" type="button" aria-pressed="true">3D-ТОЧКИ</button>
+        </div>
       </div>
-      <div class="scanner-stage"><div class="screen"><canvas id="depth" width="640" height="400" aria-label="Кадр глубины Revopoint"></canvas></div></div>
-      <div class="scanner-view-footer"><span>Y16 · 640×400</span><span id="age">ОЖИДАНИЕ</span><span>ПРОЕКЦИЯ Q.BIN · МАСШТАБ НЕ ПРОВЕРЕН</span></div>
+      <div class="scanner-stage"><div class="screen"><canvas id="depth" width="640" height="400" aria-label="Кадр глубины Revopoint" hidden></canvas><canvas id="cloud" width="640" height="400" aria-label="Облако точек текущего кадра Revopoint"></canvas></div></div>
+      <div class="scanner-view-footer"><span>Y16 · 640×400</span><span id="age">ОЖИДАНИЕ</span><span id="cloud-info">ТЕКУЩИЙ КАДР · Q.BIN · МАСШТАБ НЕ ПРОВЕРЕН</span></div>
     </section>
     <aside class="scanner-inspector" aria-label="Состояние захвата">
       <section class="panel scanner-card">
         <h2>СКОРОСТЬ ПОТОКА</h2>
         <div class="scanner-rate"><strong id="rate">—</strong><span>кадр/с</span></div>
-        <dl class="scanner-details"><dt>Формат</dt><dd>Y16</dd><dt>Разрешение</dt><dd>640×400</dd><dt>Обновление</dt><dd>150 мс</dd></dl>
+        <dl class="scanner-details"><dt>Формат</dt><dd>Y16</dd><dt>Разрешение</dt><dd>640×400</dd><dt>Опрос</dt><dd>80 мс</dd></dl>
       </section>
       <section class="panel scanner-card">
         <h2>ИСТОЧНИК</h2>
         <div class="panel-note">REV OPOINT DEPTHCAM</div>
-        <dl class="scanner-details"><dt>Калибровка</dt><dd>Q.bin</dd><dt>Геометрия</dt><dd>предварительная</dd></dl>
+        <dl class="scanner-details"><dt>Калибровка</dt><dd>Q.bin</dd><dt>Масштаб disparity</dt><dd>256 · гипотеза</dd><dt>Геометрия</dt><dd>кадр, без слияния</dd></dl>
       </section>
       <div class="scanner-hint"><strong>ЗАПУСК ЗАХВАТА</strong>Утилита CaptureY16 должна обновлять live-файл в workspace. Кадры доступны только локальному API CADYX.<br><br><code>--live-raw .revopoint-live.raw</code></div>
     </aside>
@@ -144,6 +151,8 @@
     (() => {
       const canvas = document.querySelector("#depth");
       const context = canvas.getContext("2d", { alpha: true });
+      const cloudCanvas = document.querySelector("#cloud");
+      const cloudContext = cloudCanvas.getContext("2d", { alpha: true });
       const frameCanvas = document.createElement("canvas");
       frameCanvas.width = 640;
       frameCanvas.height = 400;
@@ -151,20 +160,97 @@
       const state = document.querySelector("#state");
       const rate = document.querySelector("#rate");
       const age = document.querySelector("#age");
+      const cloudInfo = document.querySelector("#cloud-info");
+      const depthMode = document.querySelector("#depth-mode");
+      const cloudMode = document.querySelector("#cloud-mode");
       const image = context.createImageData(640, 400);
-      let lastMtime = "", lastArrival = 0, intervals = [];
+      let lastMtime = "", lastArrival = 0, intervals = [], qMatrix = null;
+      let yaw = .55, pitch = .55, drag = null;
+
+      function setMode(mode) {
+        const isCloud = mode === "cloud";
+        canvas.hidden = isCloud;
+        cloudCanvas.hidden = !isCloud;
+        depthMode.setAttribute("aria-pressed", String(!isCloud));
+        cloudMode.setAttribute("aria-pressed", String(isCloud));
+        document.querySelector("#scanner-title").textContent = isCloud ? "ОБЛАКО ТОЧЕК · ТЕКУЩИЙ КАДР" : "КАРТА ГЛУБИНЫ";
+      }
+      depthMode.addEventListener("click", () => setMode("depth"));
+      cloudMode.addEventListener("click", () => setMode("cloud"));
+      cloudCanvas.addEventListener("pointerdown", event => {
+        drag = { x: event.clientX, y: event.clientY };
+        cloudCanvas.setPointerCapture(event.pointerId);
+      });
+      cloudCanvas.addEventListener("pointermove", event => {
+        if (!drag) return;
+        yaw += (event.clientX - drag.x) * .008;
+        pitch = Math.max(-1.45, Math.min(1.45, pitch + (event.clientY - drag.y) * .008));
+        drag = { x: event.clientX, y: event.clientY };
+        if (window.latestCloud) drawCloud(window.latestCloud);
+      });
+      cloudCanvas.addEventListener("pointerup", () => { drag = null; });
+
+      async function loadCalibration() {
+        const response = await fetch(`/api/v1/scanner/calibration?ts=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) throw Error(`Калибровка Q.bin недоступна (HTTP ${response.status}).`);
+        const calibration = await response.json();
+        if (!Array.isArray(calibration.matrix) || calibration.matrix.length !== 16) throw Error("Формат Q.bin не распознан.");
+        qMatrix = calibration.matrix;
+      }
+
+      function drawCloud(points) {
+        const c = cloudContext;
+        c.clearRect(0, 0, 640, 400);
+        if (!points.length) return;
+        let cx = 0, cy = 0, cz = 0;
+        for (const p of points) { cx += p[0]; cy += p[1]; cz += p[2]; }
+        cx /= points.length; cy /= points.length; cz /= points.length;
+        const cyaw = Math.cos(yaw), syaw = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+        const projected = new Array(points.length);
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        for (let i = 0; i < points.length; i++) {
+          const dx = points[i][0] - cx, dy = points[i][1] - cy, dz = points[i][2] - cz;
+          const x = dx * cyaw - dy * syaw;
+          const y = (dx * syaw + dy * cyaw) * cp - dz * sp;
+          const z = (dx * syaw + dy * cyaw) * sp + dz * cp;
+          projected[i] = [x, y, z];
+          minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+          minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+        }
+        const spanX = Math.max(1e-6, maxX - minX), spanY = Math.max(1e-6, maxY - minY);
+        const scale = Math.min(590 / spanX, 350 / spanY);
+        const offsetX = 320 - (minX + maxX) * scale / 2, offsetY = 200 + (minY + maxY) * scale / 2;
+        const spanZ = Math.max(1e-6, maxZ - minZ);
+        for (const p of projected) {
+          const x = offsetX + p[0] * scale, y = offsetY - p[1] * scale;
+          const t = (p[2] - minZ) / spanZ;
+          c.fillStyle = `rgb(255,${Math.round(104 + 60 * t)},${Math.round(28 + 35 * t)})`;
+          c.fillRect(x, y, 2, 2);
+        }
+      }
 
       async function poll() {
         try {
+          if (!qMatrix) await loadCalibration();
           const response = await fetch(`/api/v1/scanner/live-frame?ts=${Date.now()}`, { cache: "no-store" });
           if (!response.ok) throw Error(response.status === 404
             ? "Нет кадра. Запустите CaptureY16 с --live-raw <workspace>\\.revopoint-live.raw."
             : `HTTP ${response.status}`);
           const mtime = response.headers.get("X-CADYX-Frame-Mtime");
+          const frameAgeMs = mtime ? Date.now() - Number(mtime) / 1e6 : Infinity;
+          const streamLive = Number.isFinite(frameAgeMs) && frameAgeMs <= 1000;
+          state.dataset.live = String(streamLive);
+          if (!streamLive) {
+            state.textContent = "ПОТОК ОСТАНОВЛЕН · ПОСЛЕДНИЙ КАДР";
+            rate.textContent = "—";
+            age.textContent = mtime ? `ВОЗРАСТ КАДРА ${(frameAgeMs / 1000).toFixed(1)} с` : "ОЖИДАНИЕ";
+          }
           if (mtime !== lastMtime) {
             const raw = new Uint8Array(await response.arrayBuffer());
             if (raw.length !== 640 * 400 * 2) throw Error("Размер кадра Y16 не совпадает.");
             let min = 65535, max = 0, left = 640, top = 400, right = -1, bottom = -1;
+            const points = [];
             for (let i = 0; i < raw.length; i += 2) {
               const value = raw[i] | raw[i + 1] << 8;
               if (value > 0) {
@@ -181,6 +267,16 @@
             const span = Math.max(1, max - min);
             for (let pixel = 0; pixel < 640 * 400; pixel++) {
               const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
+              if (value && (pixel % 2 === 0)) {
+                const x = pixel % 640, y = Math.floor(pixel / 640), d = value / 256;
+                const den = qMatrix[12] * x + qMatrix[13] * y + qMatrix[14] * d + qMatrix[15];
+                if (Number.isFinite(den) && Math.abs(den) > 1e-12) {
+                  const px = (qMatrix[0] * x + qMatrix[1] * y + qMatrix[2] * d + qMatrix[3]) / den;
+                  const py = (qMatrix[4] * x + qMatrix[5] * y + qMatrix[6] * d + qMatrix[7]) / den;
+                  const pz = (qMatrix[8] * x + qMatrix[9] * y + qMatrix[10] * d + qMatrix[11]) / den;
+                  if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) points.push([px, py, pz]);
+                }
+              }
               const gray = value ? Math.max(0, Math.min(255, Math.round((value - min) * 255 / span))) : 0;
               const offset = pixel * 4;
               image.data[offset] = gray;
@@ -195,24 +291,29 @@
             context.clearRect(0, 0, canvas.width, canvas.height);
             context.drawImage(frameCanvas, left, top, sourceWidth, sourceHeight,
               (canvas.width - drawWidth) / 2, (canvas.height - drawHeight) / 2, drawWidth, drawHeight);
+            window.latestCloud = points;
+            drawCloud(points);
+            cloudInfo.textContent = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · ТЕКУЩИЙ КАДР · МАСШТАБ НЕ ПРОВЕРЕН`;
             const now = performance.now();
             if (lastArrival) intervals.push(now - lastArrival);
             if (intervals.length > 30) intervals.shift();
             lastArrival = now;
             lastMtime = mtime;
-            rate.textContent = intervals.length
+            rate.textContent = streamLive && intervals.length
               ? (1000 / (intervals.reduce((sum, value) => sum + value, 0) / intervals.length)).toFixed(1)
               : "измерение…";
-            state.textContent = "ПОТОК АКТИВЕН";
-            state.dataset.live = "true";
-            age.textContent = `КАДР ${new Date().toLocaleTimeString()}`;
+            if (!streamLive) rate.textContent = "—";
+            if (streamLive) {
+              state.textContent = "ПОТОК АКТИВЕН";
+              age.textContent = `КАДР ${new Date().toLocaleTimeString()}`;
+            }
           }
         } catch (error) {
           state.textContent = error.message;
           state.dataset.live = "false";
           age.textContent = "ОЖИДАНИЕ";
         } finally {
-          setTimeout(poll, 150);
+          setTimeout(poll, 80);
         }
       }
       poll();
