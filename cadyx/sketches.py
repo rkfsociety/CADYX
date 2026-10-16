@@ -327,10 +327,10 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
                         raise ValidationError("Elliptical arc endpoints must lie on its analytic curve.")
         elif kind == "spline":
             point_ids = item.get("point_ids")
-            if (not isinstance(point_ids, list) or not 3 <= len(point_ids) <= 128
+            if (not isinstance(point_ids, list) or len(point_ids) < 3
                     or any(not isinstance(point_id, str) for point_id in point_ids)
                     or len(set(point_ids)) != len(point_ids)):
-                raise ValidationError("An interpolating spline needs 3 to 128 unique point references.")
+                raise ValidationError("An interpolating spline needs at least 3 unique point references.")
             mode = item.get("mode", "interpolating")
             if not isinstance(mode, str) or mode not in {
                 "interpolating", "closed", "control", "bezier", "bspline", "nurbs",

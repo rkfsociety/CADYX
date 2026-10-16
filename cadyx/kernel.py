@@ -142,7 +142,7 @@ def _profile_values(profile: Any, plane: Any) -> tuple[list[dict[str, float]], i
 
 
 def _spline_control_values(points: Any, plane: Any) -> list[dict[str, float]]:
-    if plane not in {"XY", "XZ"} or not isinstance(points, list) or not 3 <= len(points) <= 128:
+    if plane not in {"XY", "XZ"} or not isinstance(points, list) or len(points) < 3:
         raise ValidationError("Closed spline profile controls are invalid.")
     normalized = []
     for point in points:

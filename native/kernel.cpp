@@ -803,8 +803,8 @@ TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
 
 TopoDS_Shape MakeClosedSplineProfileShape(const double* coordinates, size_t point_count,
                                          int operation, int plane, double amount, bool centered) {
-  if (!coordinates || point_count < 3 || point_count > 128)
-    throw std::runtime_error("A closed spline profile needs between 3 and 128 control vertices.");
+  if (!coordinates || point_count < 3)
+    throw std::runtime_error("A closed spline profile needs at least 3 control vertices.");
   if ((operation != 0 && operation != 1) || (plane != 0 && plane != 1))
     throw std::runtime_error("Unsupported profile operation or sketch plane.");
   if (!std::isfinite(amount) || amount <= 0 || (centered && operation != 0))
@@ -850,6 +850,8 @@ TopoDS_Shape MakeClosedSplineProfileShape(const double* coordinates, size_t poin
 
   BRepBuilderAPI_MakeWire wire_builder;
   std::vector<Point2> sampled;
+  if (point_count > sampled.max_size() / 32)
+    throw std::runtime_error("Closed spline profile exceeds the supported geometry size.");
   sampled.reserve(point_count * 32);
   bool touches_axis = false;
   for (size_t segment = 0; segment < point_count; ++segment) {

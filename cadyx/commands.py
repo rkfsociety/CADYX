@@ -807,8 +807,8 @@ class CommandSystem:
     ) -> dict[str, Any]:
         sketch = self._find_sketch(document, command.get("sketch_id"))
         coordinates = command.get("points")
-        if not isinstance(coordinates, list) or not 3 <= len(coordinates) <= 128:
-            raise ValidationError("An interpolating spline needs 3 to 128 points.")
+        if not isinstance(coordinates, list) or len(coordinates) < 3:
+            raise ValidationError("An interpolating spline needs at least 3 points.")
         construction = command.get("construction", False)
         if type(construction) is not bool:
             raise ValidationError("Spline construction flag must be a boolean.")
@@ -870,8 +870,8 @@ class CommandSystem:
     ) -> dict[str, Any]:
         sketch = self._find_sketch(document, command.get("sketch_id"))
         samples = command.get("samples", 48)
-        if isinstance(samples, bool) or not isinstance(samples, int) or not 3 <= samples <= 128:
-            raise ValidationError("Curve samples must be an integer from 3 to 128.")
+        if isinstance(samples, bool) or not isinstance(samples, int) or samples < 3:
+            raise ValidationError("Curve samples must be an integer of at least 3.")
         if kind == "add_sketch_spiral":
             center = self._coordinate_pair(command.get("center"), "Spiral center")
             initial_radius = _finite_number(command.get("initial_radius"), "Initial radius")

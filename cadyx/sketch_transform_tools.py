@@ -124,8 +124,8 @@ def geometry_dependency_closure(objects: Sequence[dict], object_ids: Sequence[st
                 raise ValidationError("Ellipse radii must satisfy major_radius >= minor_radius > 1e-7.")
         elif kind == "spline":
             point_ids = item.get("point_ids")
-            if not isinstance(point_ids, list) or not 3 <= len(point_ids) <= 128:
-                raise ValidationError("A spline must reference between 3 and 128 control points.")
+            if not isinstance(point_ids, list) or len(point_ids) < 3:
+                raise ValidationError("A spline must reference at least 3 control points.")
             if any(not isinstance(point_id, str) for point_id in point_ids):
                 raise ValidationError("Spline control point references must be text IDs.")
             if len(set(point_ids)) != len(point_ids):

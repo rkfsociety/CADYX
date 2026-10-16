@@ -22,7 +22,7 @@ line, circle, ellipse, spline and constraint. Existing body/feature relationship
 | line | sketch_id, start_id, end_id, optional construction/extent | References two points; length must exceed 1e-7; extent is `segment` (default), `infinite`, or `centerline` |
 | circle | sketch_id, center_id, radius, optional start_id/end_id/sweep_radians | Exact full circle or signed partial circular arc; arc endpoints lie on the radius and match the sweep |
 | ellipse | sketch_id, center_x, center_y, major_radius, minor_radius, rotation_radians, optional start_id/end_id/start_angle_radians/sweep_radians | Exact analytic ellipse or signed partial arc; for an arc, endpoint references lie on the curve and match the signed parameter sweep |
-| spline | sketch_id, point_ids, optional mode/construction | Open centripetal Catmull–Rom interpolation (`interpolating`, default), open clamped uniform B-spline (`control` or `bspline`), polynomial Bezier (`bezier`), or rational B-spline (`nurbs`) from 3–128 ordered same-sketch points; NURBS also stores degree, knots and weights |
+| spline | sketch_id, point_ids, optional mode/construction | Open centripetal Catmull–Rom interpolation (`interpolating`, default), open clamped uniform B-spline (`control` or `bspline`), polynomial Bezier (`bezier`), or rational B-spline (`nurbs`) from at least 3 ordered same-sketch points; NURBS also stores degree, knots and weights |
 | constraint | sketch_id, kind, references, value | Explicit invariant checked on every load and command |
 
 Membership is defined by `sketch_id`, with no duplicated membership lists.
@@ -122,7 +122,7 @@ their respective human/agent edit leases. Results below appear inside
   minor radius; sweep must be non-zero and less than 360 degrees in magnitude.
   Stores the exact analytic arc and its two endpoint points, returning
   `ellipse_id`, `arc_id`, `ellipse_ids`, `point_ids`, and endpoint coordinates.
-- `add_sketch_spline`: `sketch_id`, 3–128 ordered `{x, y}` points, and optional
+- `add_sketch_spline`: `sketch_id`, at least 3 ordered `{x, y}` points, and optional
   boolean `construction` (default false). Adjacent points must be distinct. The
   open centripetal Catmull–Rom curve passes through every supplied point; its
   first and last points are the curve endpoints. The sketch stores stable point
@@ -131,11 +131,11 @@ their respective human/agent edit leases. Results below appear inside
   part of a closed profile and can be used as an open sweep path; control points
   are interpolated points, not a B-spline control polygon.
 - `add_sketch_closed_spline`: a periodic centripetal Catmull–Rom spline through
-  3–128 unique ordered vertices. It can be used alone as an extrusion profile,
+  at least 3 unique ordered vertices. It can be used alone as an extrusion profile,
   or as an XZ revolution profile. The OCCT B-rep preserves the curve as a closed
   chain of exact cubic B-spline edges; its geometry descriptor retains the
   source vertices so feature rebuilds and Boolean fuses preserve the curve.
-- `add_sketch_spline_control_points`: `sketch_id`, 3–128 ordered `{x, y}`
+- `add_sketch_spline_control_points`: `sketch_id`, at least 3 ordered `{x, y}`
   control points, and optional boolean `construction` (default false). Creates
   an open clamped uniform B-spline of degree `min(3, point_count - 1)`, with
   equally spaced interior knots. The curve passes through the first and last
@@ -148,22 +148,22 @@ their respective human/agent edit leases. Results below appear inside
   stores `mode: bezier` and evaluates one polynomial Bezier curve through the
   first and last control points. All intermediate points are controls and are
   generally not interpolated.
-- `add_sketch_nurbs`: `sketch_id`, 3–128 ordered `{x, y}` control points,
+- `add_sketch_nurbs`: `sketch_id`, at least 3 ordered `{x, y}` control points,
   degree, knot vector, one positive weight per control point, and optional
   construction flag. Stores the rational B-spline definition and samples it
   over each non-empty clamped knot span.
 - `add_sketch_spiral`: center, nonnegative initial radius and pitch per turn,
-  start/end angles in degrees, and 3–128 samples (default 48). Creates an
+  start/end angles in degrees, and at least 3 samples (default 48). Creates an
   Archimedean spiral using `r = initial_radius + pitch_per_turn * |angle| / 360°`
   and stores the sampled coordinates as an ordinary interpolating spline.
 - `add_sketch_parametric_curve`: serializable `x_expression` and `y_expression`,
-  parameter start/end, and 3–128 samples (default 48). Expressions use `t`,
+  parameter start/end, and at least 3 samples (default 48). Expressions use `t`,
   `pi`, `e`, arithmetic (including `^` for power), and one-argument
   `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sqrt`, `exp`, `log`, or `abs`.
   No Python evaluation is performed. The resulting samples are stored as an
   ordinary interpolating spline; the expressions are not retained in the
   document.
-- `add_sketch_coordinate_curve`: 3–128 ordered `{x, y}` coordinates and an
+- `add_sketch_coordinate_curve`: at least 3 ordered `{x, y}` coordinates and an
   optional construction flag. Creates an interpolating spline through each
   supplied coordinate.
 - `add_sketch_circle_tangent_to_line`: `sketch_id`, a same-sketch `line_id`,

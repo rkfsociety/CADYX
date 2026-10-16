@@ -291,8 +291,8 @@ class NativeKernel:
                     raise ValidationError("Unsupported profile curve descriptor.")
                 curved = value.get("profile_curve") == "closed_catmull_rom"
                 profile = value.get("profile_curve_points") if curved else value["profile"]
-                if curved and (not isinstance(profile, list) or not 3 <= len(profile) <= 128):
-                    raise ValidationError("A closed spline profile needs between 3 and 128 control vertices.")
+                if curved and (not isinstance(profile, list) or len(profile) < 3):
+                    raise ValidationError("A closed spline profile needs at least 3 control vertices.")
                 node.update(type=12 if curved else 0, operation=operation, plane=int(value["plane"] == "XZ"),
                             centered=int(value.get("centered", False)), amount=amount,
                             coordinate_offset=len(coordinates), coordinate_count=len(profile) * 2)
