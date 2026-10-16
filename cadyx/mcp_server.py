@@ -382,24 +382,20 @@ class MCPApplication:
     def _execute_command(self, project_id: str, expected_revision: int, command: dict[str, Any]) -> Any:
         if not isinstance(command, dict) or not isinstance(command.get("type"), str):
             raise ValueError("command must be an object with a string type.")
-        detail = self.api.get(self._project(project_id))
-        revision = detail["document"]["revision"]
-        if revision != expected_revision:
-            raise APIError(409, {"error": "REVISION_CONFLICT", "message": f"Expected revision {expected_revision}; current revision is {revision}. Inspect the project before editing."})
-        lock = detail["lock"]
         with self._lease_guard:
             resumed = self._resumed_leases.get(project_id)
         if resumed:
+            detail = self.api.get(self._project(project_id))
+            revision = detail["document"]["revision"]
+            if revision != expected_revision:
+                raise APIError(409, {"error": "REVISION_CONFLICT", "message": f"Expected revision {expected_revision}; current revision is {revision}. Inspect the project before editing."})
+            lock = detail["lock"]
             lease_id, resume_revision = resumed
             if expected_revision != resume_revision or lock.get("state") != "AI_LOCKED" or lock.get("lease", {}).get("lease_id") != lease_id:
                 raise APIError(409, {"error": "PROJECT_LOCKED", "message": "The validated resumed lease is no longer current; inspect the project and lock."})
             with self._lease_guard:
                 self._resumed_leases.pop(project_id, None)
         else:
-            if lock.get("recovery_required"):
-                raise APIError(409, {"error": "LEASE_RECOVERY_REQUIRED", "message": "The API reports an expired lease. Validate and recover it explicitly before editing."})
-            if lock.get("state") != "FREE":
-                raise APIError(409, {"error": "PROJECT_LOCKED", "message": f"Project lock is {lock.get('state')}; do not force or recover it."})
             lease_result = self.api.post(self._project(project_id, "/leases"), {"owner_id": self.owner_id})
             lease_id = lease_result["lease"]["lease_id"]
         with self._lease_guard:
