@@ -628,7 +628,7 @@ def make_request_handler(
             if filename in {"index.html", "scanner.html"}:
                 version = _ui_asset_version()
                 assets = (
-                    ("style.css", "viewport.js", "ply-preview.js", "app.js")
+                    ("style.css", "viewport.js", "ply-parser.js", "ply-preview.js", "app.js")
                     if filename == "index.html" else ("style.css", "scanner-camera.js")
                 )
                 for asset in assets:
