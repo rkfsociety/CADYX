@@ -111,8 +111,9 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 }
 .agent-owner-chip[data-state="warning"] { border-color: #7a5a2b; color: var(--warning); background: #20180d; }
 .agent-owner-chip[data-state="failed"] { border-color: #744044; color: var(--danger); background: #201012; }
-.topbar-sync .project-light { width: 7px; height: 7px; background: #5f6b73; box-shadow: none; }
-.topbar-sync .project-light.active { background: var(--accent); box-shadow: 0 0 10px #ff741777; }
+.topbar-sync .project-light { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; background: transparent; box-shadow: none; color: var(--dim); }
+.topbar-sync .project-light.active { background: transparent; box-shadow: none; color: var(--text); }
+.topbar-sync .project-light svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 .app-shell { height: calc(100vh - 58px); height: calc(100dvh - 58px); }
 .workspace { background: var(--canvas); }
@@ -598,7 +599,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
         <a id="brand-link" class="brand" href="/" aria-label="CADYX — проекты"><span>CADYX</span></a>
       </div>
       <div class="topbar-sync">
-        <span id="api-light" class="project-light" aria-hidden="true"></span>
+        <span id="api-light" class="project-light" role="status" aria-label="Состояние подключения не подтверждено" title="Состояние подключения не подтверждено"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 18h10a4 4 0 0 0 .4-8A6 6 0 0 0 6.1 8.5 4.5 4.5 0 0 0 7 18Z"></path></svg></span>
         <div class="topbar-project-copy">
           <span id="api-status-label" class="topbar-label">СВЯЗЬ С СЕРВЕРОМ…</span>
           <strong id="api-sync-time" class="document-title">—</strong>

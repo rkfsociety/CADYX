@@ -158,18 +158,20 @@ SSE. New projects remain automatically selected by `project.created` for API
 clients. The browser's Projects (07) view lists saved projects and opens each
 project in a separate tab; this does not change the process-local Agent API
 selection. Workspace-folder selection remains Agent API-only.
-The browser loads a model only when its address contains `project_id`; the root
-address stays on the empty workspace regardless of local storage or the
-process-wide Agent API selection. The empty workspace offers a project picker;
-opening a project creates a tab at `/?project_id=<project UUID>`. That address
-pins the tab's displayed project to that UUID and ignores process-wide selection
-and project-created SSE events, so separate tabs can keep different projects
+The browser loads a model when its address contains `project_id`. At an
+unqualified root address, the initial refresh reads the current host selection
+from the Agent API and pins an existing project or folder into the address;
+`?view=projects` explicitly opens the project chooser without restoring that
+selection. If the API has no valid current resource, the root opens Projects.
+Opening a project from Projects creates a tab at `/?project_id=<project UUID>`;
+folder selection uses `?folder=<folder name>`. A resource address pins the tab's
+displayed project or folder, so separate tabs can keep different resources
 visible. Project cards open their URL in a new tab even when the project is
 locked; the new tab can observe the last committed model while its controls
-remain disabled until the project is free. Project data and leases remain shared by project ID; the
-address isolates the viewer selection, not the edit lock. A tab opened without
-`project_id` remains available for navigation and viewing while agent work is
-active. A tab pinned to a project continues to disable controls while that
+remain disabled until the project is free. Project data and leases remain shared
+by project ID; the address isolates the viewer selection, not the edit lock. A
+tab opened at `?view=projects` remains available for navigation while agent work
+is active. A tab pinned to a project continues to disable controls while that
 project's lock or activity is not free.
 
 The Projects view also supports logical project groups. Group definitions and

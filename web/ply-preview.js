@@ -226,7 +226,9 @@ let agentWorkProjectIds = savedAgentWorkLock.projectIds;
 let agentWorkStatusConnected = false;
 const FOLDER_SELECTION_PREFIX = "folder:";
 const initialAddress = new URLSearchParams(window.location.search);
-const projectAddressPinned = initialAddress.has("project_id") && initialAddress.get("view") !== "projects";
+let projectAddressPinned = (initialAddress.has("project_id") || initialAddress.has("folder"))
+  && initialAddress.get("view") !== "projects";
+let workspaceSelectionRestoreAttempted = projectAddressPinned || initialAddress.get("view") === "projects";
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
 const folderInspector = $("#folder-inspector");
@@ -409,7 +411,10 @@ window.addEventListener("popstate", () => {
 });
 
 function readSelectedProject() {
-  return new URLSearchParams(window.location.search).get("project_id");
+  const address = new URLSearchParams(window.location.search);
+  const projectId = address.get("project_id");
+  const folderName = address.get("folder");
+  return projectId || (folderName ? `folder:${folderName}` : null);
 }
 
 function notify(message, isError = false) {
@@ -425,7 +430,11 @@ function formatNumber(value) {
 }
 
 function setApiConnectionStatus(online) {
-  $("#api-light").classList.toggle("active", online);
+  const label = online ? "Сервер CADYX на связи" : "Нет связи с сервером CADYX";
+  const indicator = $("#api-light");
+  indicator.classList.toggle("active", online);
+  indicator.setAttribute("aria-label", label);
+  indicator.title = label;
   $("#api-status-label").textContent = online ? "СЕРВЕР НА СВЯЗИ" : "НЕТ СВЯЗИ С СЕРВЕРОМ";
   if (online) {
     $("#api-sync-time").textContent = new Intl.DateTimeFormat("ru-RU", {
@@ -850,6 +859,40 @@ function workspaceSelectionExists(id) {
     && folders.includes(id.slice(FOLDER_SELECTION_PREFIX.length));
 }
 
+async function restoreCurrentWorkspaceSelection() {
+  if (workspaceSelectionRestoreAttempted) return;
+  workspaceSelectionRestoreAttempted = true;
+
+  let selection;
+  try {
+    ({ selection } = await api("/api/v1/agent/workspace/selection"));
+  } catch (error) {
+    workspaceSelectionRestoreAttempted = false;
+    console.warn("Unable to restore the active CADYX workspace selection.", error);
+    return;
+  }
+
+  let selectedResource = null;
+  if (selection?.type === "project" && typeof selection.project_id === "string") {
+    selectedResource = selection.project_id;
+  } else if (selection?.type === "folder" && typeof selection.folder_name === "string") {
+    selectedResource = `${FOLDER_SELECTION_PREFIX}${selection.folder_name}`;
+  }
+  if (!selectedResource || !workspaceSelectionExists(selectedResource)) return;
+
+  const address = new URL(window.location.href);
+  if (selectedResource.startsWith(FOLDER_SELECTION_PREFIX)) {
+    address.searchParams.delete("project_id");
+    address.searchParams.set("folder", selectedResource.slice(FOLDER_SELECTION_PREFIX.length));
+  } else {
+    address.searchParams.set("project_id", selectedResource);
+    address.searchParams.delete("folder");
+  }
+  address.searchParams.delete("view");
+  window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
+  projectAddressPinned = true;
+}
+
 function getSelectedFolder() {
   if (!selectedProjectId?.startsWith(FOLDER_SELECTION_PREFIX)) return null;
   const name = selectedProjectId.slice(FOLDER_SELECTION_PREFIX.length);
@@ -1095,6 +1138,8 @@ async function refreshWorkspacePass() {
   projects = response.projects;
   projectGroups = response.groups || [];
   folders = response.folders || [];
+
+  await restoreCurrentWorkspaceSelection();
 
   const previousSelection = selectedProjectId;
   const requestedSelection = projectAddressPinned
