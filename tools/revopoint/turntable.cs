@@ -60,6 +60,9 @@ internal static class Program
             string operation = args[0].ToLowerInvariant();
             double degrees = 0;
             double rotationPeriod = 0;
+            int monitorSeconds = 0;
+            string monitorPath = null;
+            int rotateAfterSeconds = -1;
             if (operation == "rotate")
             {
                 if (args.Length != 2 || !double.TryParse(args[1], NumberStyles.Float,
@@ -78,16 +81,26 @@ internal static class Program
                     throw new ArgumentException("speed requires seconds per rotation from 18 to 90.");
                 }
             }
+            else if (operation == "monitor")
+            {
+                if ((args.Length != 3 && args.Length != 5) || !Int32.TryParse(args[1], out monitorSeconds) || monitorSeconds < 1 || monitorSeconds > 300)
+                    throw new ArgumentException("monitor requires duration (1–300 s), CSV path, and optional rotate-delay plus degrees.");
+                monitorPath = args[2];
+                if (args.Length == 5 && (!Int32.TryParse(args[3], out rotateAfterSeconds) || rotateAfterSeconds < 0 || rotateAfterSeconds >= monitorSeconds ||
+                    !double.TryParse(args[4], NumberStyles.Float, CultureInfo.InvariantCulture, out degrees) || !IsFinite(degrees) ||
+                    Math.Abs(degrees) < 0.1 || Math.Abs(degrees) > MaxDegreesPerCommand))
+                    throw new ArgumentException("monitor rotation requires delay < duration and degrees from -30 to 30.");
+            }
             else if ((operation == "query" || operation == "zero" || operation == "stop") && args.Length != 1)
             {
                 throw new ArgumentException("query, zero and stop do not accept extra arguments.");
             }
-            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed")
+            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed" && operation != "monitor")
             {
                 throw new ArgumentException("Operation must be query, zero, speed <seconds-per-rotation>, rotate <degrees>, or stop.");
             }
 
-            return RunAsync(operation, degrees, rotationPeriod).GetAwaiter().GetResult();
+            return RunAsync(operation, degrees, rotationPeriod, monitorSeconds, monitorPath, rotateAfterSeconds).GetAwaiter().GetResult();
         }
         catch (Exception error)
         {
@@ -103,11 +116,14 @@ internal static class Program
         Console.WriteLine("TurntableController.exe speed <seconds-per-rotation>   (18–90 seconds)");
         Console.WriteLine("TurntableController.exe rotate <degrees>   (one bounded relative move, max 30 degrees)");
         Console.WriteLine("TurntableController.exe stop");
+        Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv>");
+        Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv> <rotate-delay-seconds> <degrees>");
         Console.WriteLine("The app does not pair the turntable. It discovers the BLE device by its advertised FFE1 service,\n" +
                           "then confirms the GATT device name before sending any command.");
     }
 
-    private static async Task<int> RunAsync(string operation, double degrees, double rotationPeriod)
+    private static async Task<int> RunAsync(string operation, double degrees, double rotationPeriod,
+                                            int monitorSeconds, string monitorPath, int rotateAfterSeconds)
     {
         using (Connection connection = await ConnectAsync())
         {
@@ -117,6 +133,43 @@ internal static class Program
                 foreach (string command in new[] { "+QT,CHANGEANGLE;", "+QR,TILTANGLE;", "+QT,TURNSPEED;", "+QR,TILTSPEED;" })
                 {
                     Console.WriteLine(command + " => " + await SendAndReadAsync(connection, command));
+                }
+                return 0;
+            }
+
+            if (operation == "monitor")
+            {
+                string fullPath = System.IO.Path.GetFullPath(monitorPath);
+                using (var writer = new System.IO.StreamWriter(fullPath, false, new UTF8Encoding(false)))
+                {
+                    writer.WriteLine("utc,angle_degrees,raw_response");
+                    var monitorDeadline = DateTime.UtcNow.AddSeconds(monitorSeconds);
+                    var monitorTimer = Stopwatch.StartNew();
+                    int sample = 0;
+                    bool moveSent = false;
+                    while (DateTime.UtcNow < monitorDeadline)
+                    {
+                        if (!moveSent && rotateAfterSeconds >= 0 && monitorTimer.Elapsed.TotalSeconds >= rotateAfterSeconds)
+                        {
+                            string monitorMove = "+CT,TURNANGLE=" + degrees.ToString("F1", CultureInfo.InvariantCulture) + ";";
+                            Console.WriteLine("issuing " + monitorMove);
+                            string reply = await SendAndReadAsync(connection, monitorMove);
+                            writer.WriteLine("# " + DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture) + " command " + monitorMove + " => " + reply);
+                            writer.Flush();
+                            moveSent = true;
+                        }
+                        string response = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
+                        double angle;
+                        DateTime observedAt = DateTime.UtcNow;
+                        if (TryAngle(response, out angle))
+                        {
+                            writer.WriteLine(observedAt.ToString("o", CultureInfo.InvariantCulture) + "," +
+                                angle.ToString("F2", CultureInfo.InvariantCulture) + ",\"" + response.Replace("\"", "\"\"") + "\"");
+                            writer.Flush();
+                            if (sample++ % 5 == 0) Console.WriteLine(observedAt.ToString("o") + " angle=" + angle.ToString("F1", CultureInfo.InvariantCulture));
+                        }
+                        await Task.Delay(50);
+                    }
                 }
                 return 0;
             }

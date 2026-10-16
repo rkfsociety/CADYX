@@ -37,7 +37,15 @@ To show the live depth image in CADYX, start a capture with `--live-raw` pointin
 
 ## Live capture with turntable movement
 
-The BLE controller can rotate while the UVC reader is active. A verified 90-frame run overlapped a 30° move: the table reported 0° before capture, the move completed in 2.27 s, the capture acquired 90 frames at 4.54 fps by Media Foundation timestamps, and the table was homed to 0° afterward. The open browser panel reported about 3 fps during the run, showing additional polling/rendering overhead. This confirms coarse time overlap, not per-frame table-angle synchronization; the current angle protocol query is not sampled alongside each frame. Registration, scale validation, and full-scan fusion remain outstanding.
+The BLE controller can rotate while the UVC reader is active. A verified 90-frame run overlapped a 30° move: the move completed in 2.27 s, the capture acquired 90 frames at 4.54 fps by Media Foundation timestamps, and the table was homed to 0° afterward. The open browser panel reported about 3 fps during the run, showing additional polling/rendering overhead. Registration, scale validation, and full-scan fusion remain outstanding.
+
+For a timestamped angle trace with an in-session turn command, use:
+
+```powershell
+& .\tools\revopoint\build\TurntableController.exe monitor 24 (Join-Path $PWD 'projects\angles.csv') 3 30
+```
+
+The arguments are monitor duration, CSV path, delay before the relative turn, and turn angle. The command keeps a single BLE connection, records UTC angle samples, and sends the turn itself on that connection. In a 120-frame live capture the controller recorded 88 angle samples, observed the table move from `-360°` (equivalent to 0°) through `-345.5°` to `-330°` (30°), and then remain there. The table was homed to 0° after capture. This provides time-correlated table telemetry, though frame CSVs still need UTC arrival timestamps before exact frame-to-angle pose assignment.
 
 List the camera's advertised native modes with:
 
