@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <cstdint>
 #include <filesystem>
@@ -33,6 +34,7 @@ struct Options {
     std::filesystem::path output_prefix;
     std::filesystem::path q_file;
     double disparity_scale = 0.0;
+    int frame_count = 1;
 };
 
 std::string Hresult(HRESULT hr);
@@ -77,8 +79,8 @@ void CheckHr(HRESULT hr, const char* action) {
 }
 
 void PrintUsage() {
-    std::cout << "Capture one 640x400 Y16 frame and reproject it through a supplied Q.bin.\n"
-              << "Usage: CaptureY16.exe --out-prefix PATH --q-file PATH --disparity-scale NUMBER\n"
+    std::cout << "Capture Y16 frames and reproject the first frame through a supplied Q.bin.\n"
+              << "Usage: CaptureY16.exe --out-prefix PATH --q-file PATH --disparity-scale NUMBER [--frames N]\n"
               << "The scale is explicit because the raw-to-disparity mapping is not calibrated yet.\n";
 }
 
@@ -104,12 +106,15 @@ Options ParseOptions(int argc, wchar_t** argv) {
             } catch (...) {
                 throw std::runtime_error("--disparity-scale must be a positive number.");
             }
+        } else if (argument == L"--frames") {
+            try { options.frame_count = std::stoi(value); }
+            catch (...) { throw std::runtime_error("--frames must be an integer from 1 to 1000."); }
         } else {
             throw std::runtime_error("Unknown command-line option.");
         }
     }
     if (options.output_prefix.empty() || options.q_file.empty() || options.disparity_scale <= 0.0 ||
-        !std::isfinite(options.disparity_scale)) {
+        !std::isfinite(options.disparity_scale) || options.frame_count < 1 || options.frame_count > 1000) {
         throw std::runtime_error("--out-prefix, --q-file and a positive --disparity-scale are required.");
     }
     return options;
@@ -179,7 +184,7 @@ ComPtr<IMFActivate> FindDepthCamera() {
     return selected;
 }
 
-std::vector<std::uint8_t> CaptureY16Frame() {
+std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, std::vector<LONGLONG>& timestamps) {
     ComPtr<IMFActivate> activation = FindDepthCamera();
     ComPtr<IMFMediaSource> source;
     CheckHr(activation->ActivateObject(IID_PPV_ARGS(&source)), "Activate depth camera");
@@ -218,7 +223,8 @@ std::vector<std::uint8_t> CaptureY16Frame() {
     CheckHr(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, y16_type.Get()),
             "Select native Y16 media type");
 
-    for (int i = 0; i < 30; ++i) {
+    std::vector<std::vector<std::uint8_t>> frames;
+    while (static_cast<int>(frames.size()) < frame_count) {
         DWORD stream_index = 0;
         DWORD flags = 0;
         LONGLONG timestamp = 0;
@@ -244,9 +250,10 @@ std::vector<std::uint8_t> CaptureY16Frame() {
         if (result.empty()) {
             throw std::runtime_error("Y16 buffer size was not 640x400x2 bytes; refusing to guess row stride.");
         }
-        return result;
+        timestamps.push_back(timestamp);
+        frames.push_back(std::move(result));
     }
-    throw std::runtime_error("Media Foundation returned no Y16 sample after 30 reads.");
+    return frames;
 }
 
 std::array<double, 16> ReadQMatrix(const std::filesystem::path& path) {
@@ -371,6 +378,28 @@ void SaveOutputs(const Options& options, const std::vector<std::uint8_t>& raw,
                << L"Metadata: " << metadata_path.wstring() << L"\n";
 }
 
+void SaveBurst(const Options& options, const std::vector<std::vector<std::uint8_t>>& frames,
+               const std::vector<LONGLONG>& timestamps, double elapsed_seconds) {
+    if (frames.size() <= 1) return;
+    auto raw_path = options.output_prefix; raw_path += L"_burst.raw";
+    auto csv_path = options.output_prefix; csv_path += L"_timestamps.csv";
+    WriteNewFile(raw_path, [&](std::ofstream& out) {
+        for (const auto& frame : frames)
+            out.write(reinterpret_cast<const char*>(frame.data()), static_cast<std::streamsize>(frame.size()));
+    });
+    WriteNewFile(csv_path, [&](std::ofstream& out) {
+        out << "index,mf_timestamp_100ns,elapsed_seconds\n" << std::fixed << std::setprecision(6);
+        for (std::size_t i = 0; i < frames.size(); ++i)
+            out << i << ',' << timestamps[i] << ',' << (timestamps[i] - timestamps[0]) / 10000000.0 << '\n';
+    });
+    const double timestamp_span = frames.size() > 1
+        ? static_cast<double>(timestamps.back() - timestamps.front()) / 10000000.0 : 0.0;
+    std::cout << "Burst: " << frames.size() << " frames in " << elapsed_seconds << " s ("
+              << frames.size() / elapsed_seconds << " fps wall-clock); MF timestamp rate "
+              << (timestamp_span > 0 ? (frames.size() - 1) / timestamp_span : 0) << " fps\n";
+    std::wcout << L"Burst raw: " << raw_path.wstring() << L"\nTimestamps: " << csv_path.wstring() << L"\n";
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -378,12 +407,17 @@ int wmain(int argc, wchar_t** argv) {
         const Options options = ParseOptions(argc, argv);
         MediaFoundationRuntime runtime;
         const auto q = ReadQMatrix(options.q_file);
-        const auto raw = CaptureY16Frame();
+        std::vector<LONGLONG> timestamps;
+        const auto started = std::chrono::steady_clock::now();
+        const auto frames = CaptureY16Frames(options.frame_count, timestamps);
+        const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        const auto& raw = frames.front();
         const auto points = Reproject(raw, q, options.disparity_scale);
         if (points.size() < 100) {
             throw std::runtime_error("Fewer than 100 valid points were reconstructed; no output was published.");
         }
         SaveOutputs(options, raw, points);
+        SaveBurst(options, frames, timestamps, elapsed);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Capture failed: " << error.what() << "\n";

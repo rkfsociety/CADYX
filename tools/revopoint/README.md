@@ -27,6 +27,8 @@ $outPrefix = Join-Path $PWD 'projects\revopoint_probe\frame'
 
 The command writes `frame.raw`, `frame.ply`, and `frame.json` side by side. It refuses to overwrite any of them. The raw file contains one 640×400 little-endian Y16 frame. The PLY is a single-frame point cloud reprojected through `Q.bin`.
 
+For a continuous capture-rate measurement, add `--frames 120`. The camera stays open for the sequence; the utility saves the packed frames to `frame_burst.raw`, records Media Foundation timestamps in `frame_timestamps.csv`, and reports both timestamp-derived and wall-clock rates. The PLY remains a preview of the first frame. On the connected device, a 120-frame run produced 4.53 fps by media timestamps; this is a measured result for the selected 640×400 Y16 UVC mode, not the vendor's complete scan pipeline.
+
 The raw-to-disparity scale `256` is a provisional value from the first live capture. It has not been validated against a known object dimension, so treat the PLY scale as unverified. The utility captures one camera pose; it does not track motion, align multiple frames, fuse a full scan, or create a watertight mesh. The scanner's exact product model is not established by its generic USB camera names.
 
 Keep each capture prefix unique. The original Y16 frame is preserved beside the derived PLY so later calibration work can use the same input.
