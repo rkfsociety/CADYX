@@ -142,11 +142,124 @@ def write_rows(path: Path, fieldnames: list[str], rows: list[dict[str, object]])
         writer.writerows(rows)
 
 
+def solve_three_by_three(matrix: list[list[float]], vector: list[float]) -> list[float]:
+    """Solve a small 3x3 system with pivoting; used by the trajectory fit."""
+    augmented = [row[:] + [value] for row, value in zip(matrix, vector)]
+    for column in range(3):
+        pivot = max(range(column, 3), key=lambda row: abs(augmented[row][column]))
+        if abs(augmented[pivot][column]) < 1e-12:
+            raise ValueError("Trajectory angle samples do not constrain a sinusoid fit.")
+        augmented[column], augmented[pivot] = augmented[pivot], augmented[column]
+        scale = augmented[column][column]
+        augmented[column] = [value / scale for value in augmented[column]]
+        for row in range(3):
+            if row == column:
+                continue
+            factor = augmented[row][column]
+            augmented[row] = [value - factor * pivot_value
+                              for value, pivot_value in zip(augmented[row], augmented[column])]
+    return [augmented[row][3] for row in range(3)]
+
+
+def fit_marker_trajectories(frame_candidates: list[tuple[float, list[dict[str, str]]]],
+                            min_y: float, max_track_gap: int, min_area: int,
+                            max_rms_px: float) -> list[dict[str, object]]:
+    """Associate larger tabletop blobs, then retain smooth angle-driven paths as candidates."""
+    tracks: list[dict[str, object]] = []
+    next_track_id = 1
+    for frame_index, (angle, candidates) in enumerate(frame_candidates):
+        assigned: set[int] = set()
+        eligible = [candidate for candidate in candidates
+                    if float(candidate["cy_px"]) >= min_y and int(candidate["area_px"]) >= min_area]
+        for candidate in sorted(eligible, key=lambda item: int(item["area_px"]), reverse=True):
+            cx, cy, area = float(candidate["cx_px"]), float(candidate["cy_px"]), int(candidate["area_px"])
+            matches: list[tuple[float, dict[str, object]]] = []
+            for track in tracks:
+                track_id = int(track["track_id"])
+                if track_id in assigned:
+                    continue
+                gap = frame_index - int(track["last_frame"])
+                if gap < 1 or gap > max_track_gap:
+                    continue
+                previous = track["observations"][-1]
+                previous_area = int(previous["area_px"])
+                area_ratio = max(area, previous_area) / max(1, min(area, previous_area))
+                if area_ratio > 3.0:
+                    continue
+                distance = math.hypot(cx - float(previous["cx_px"]), cy - float(previous["cy_px"]))
+                if distance > 16.0 * gap:
+                    continue
+                matches.append((distance + math.log(area_ratio) * 1.5, track))
+
+            observation = {"frame_index": frame_index, "angle_degrees": angle,
+                           "cx_px": cx, "cy_px": cy, "area_px": area}
+            if matches:
+                matches.sort(key=lambda item: item[0])
+                track = matches[0][1]
+                track["last_frame"] = frame_index
+                track["observations"].append(observation)
+                assigned.add(int(track["track_id"]))
+            else:
+                track_id = next_track_id
+                next_track_id += 1
+                tracks.append({"track_id": track_id, "last_frame": frame_index,
+                               "observations": [observation]})
+                assigned.add(track_id)
+
+    result: list[dict[str, object]] = []
+    for track in tracks:
+        observations = track["observations"]
+        angles = [float(row["angle_degrees"]) for row in observations]
+        xs = [float(row["cx_px"]) for row in observations]
+        ys = [float(row["cy_px"]) for row in observations]
+        angle_span = max(angles) - min(angles)
+        extent = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+        coefficients = [0.0] * 6
+        residuals = [0.0] * len(observations)
+        fit_rms = None
+        if len(observations) >= 3:
+            trig = [(1.0, math.cos(math.radians(angle)), math.sin(math.radians(angle)))
+                    for angle in angles]
+            matrix = [[sum(row[i] * row[j] for row in trig) for j in range(3)] for i in range(3)]
+            try:
+                x_coefficients = solve_three_by_three(matrix,
+                    [sum(row[i] * value for row, value in zip(trig, xs)) for i in range(3)])
+                y_coefficients = solve_three_by_three(matrix,
+                    [sum(row[i] * value for row, value in zip(trig, ys)) for i in range(3)])
+                coefficients = x_coefficients + y_coefficients
+                residuals = [math.hypot(x - sum(term * value for term, value in zip(row, x_coefficients)),
+                                        y - sum(term * value for term, value in zip(row, y_coefficients)))
+                             for row, x, y in zip(trig, xs, ys)]
+                fit_rms = math.sqrt(mean(value * value for value in residuals))
+            except ValueError:
+                pass
+
+        if len(observations) >= 10 and angle_span >= 45.0 and extent >= 8.0:
+            classification = "smooth_rotating_candidate" if fit_rms is not None and fit_rms <= max_rms_px else "poor_sinusoid_fit"
+        else:
+            classification = "short_or_static"
+        result.append({
+            "track_id": track["track_id"], "classification": classification,
+            "observations": len(observations), "first_frame": observations[0]["frame_index"],
+            "last_frame": observations[-1]["frame_index"], "angle_span_degrees": f"{angle_span:.3f}",
+            "mean_cx_px": f"{mean(xs):.3f}", "mean_cy_px": f"{mean(ys):.3f}",
+            "image_extent_px": f"{extent:.3f}",
+            "fit_rms_px": f"{fit_rms:.3f}" if fit_rms is not None else "",
+            "fit_p95_px": f"{percentile(residuals, 0.95):.3f}" if fit_rms is not None else "",
+            "cx_constant": f"{coefficients[0]:.6f}", "cx_cos": f"{coefficients[1]:.6f}",
+            "cx_sin": f"{coefficients[2]:.6f}", "cy_constant": f"{coefficients[3]:.6f}",
+            "cy_cos": f"{coefficients[4]:.6f}", "cy_sin": f"{coefficients[5]:.6f}",
+        })
+    return result
+
+
 def analyze(folder: Path, min_y: float, pair_tolerance_ms: float, max_track_gap: int,
-            suffix: str, threshold: int) -> dict[str, object]:
+            suffix: str, threshold: int, trajectory_min_area: int,
+            trajectory_max_rms_px: float) -> dict[str, object]:
     outputs = [folder / f"{stem}{suffix}{extension}" for stem, extension in (
         ("frame_pose_sync", ".csv"), ("marker_detections", ".csv"),
-        ("marker_tracks", ".csv"), ("sweep_analysis", ".json"))]
+        ("marker_tracks", ".csv"), ("marker_trajectories", ".csv"),
+        ("sweep_analysis", ".json"))]
     existing = [path.name for path in outputs if path.exists()]
     if existing:
         raise FileExistsError("Refusing to overwrite analysis output: " + ", ".join(existing))
@@ -171,6 +284,7 @@ def analyze(folder: Path, min_y: float, pair_tolerance_ms: float, max_track_gap:
     roi_counts: list[int] = []
     moving_counts: list[int] = []
     roi_frames_in_motion = 0
+    frame_candidates: list[tuple[float, list[dict[str, str]]]] = []
 
     for index, timestamp in enumerate(rgb):
         at = int(timestamp["utc_epoch_us"]) / 1_000_000
@@ -178,6 +292,7 @@ def analyze(folder: Path, min_y: float, pair_tolerance_ms: float, max_track_gap:
         tilt = interpolate(table_times, table_tilts, at)
         in_motion_window = sweep_start <= at <= sweep_end
         candidates = detect_candidates(folder, int(timestamp["index"]), threshold)
+        frame_candidates.append((angle, candidates))
         rgb_counts.append(len(candidates))
         roi = [candidate for candidate in candidates if float(candidate["cy_px"]) >= min_y]
         roi_counts.append(len(roi))
@@ -292,6 +407,12 @@ def analyze(folder: Path, min_y: float, pair_tolerance_ms: float, max_track_gap:
                            "track_id", "cx_px", "cy_px", "area_px", "on_table_roi"], detections_out)
     write_rows(outputs[2], ["track_id", "classification", "observations", "first_frame", "last_frame",
                            "mean_cx_px", "mean_cy_px", "image_extent_px", "table_angle_span_degrees"], track_out)
+    trajectory_rows = fit_marker_trajectories(frame_candidates, min_y, max_track_gap,
+                                               trajectory_min_area, trajectory_max_rms_px)
+    write_rows(outputs[3], ["track_id", "classification", "observations", "first_frame", "last_frame",
+                           "angle_span_degrees", "mean_cx_px", "mean_cy_px", "image_extent_px",
+                           "fit_rms_px", "fit_p95_px", "cx_constant", "cx_cos", "cx_sin",
+                           "cy_constant", "cy_cos", "cy_sin"], trajectory_rows)
 
     depth_rate = stream_rate(depth)
     rgb_rate = stream_rate(rgb)
@@ -327,16 +448,26 @@ def analyze(folder: Path, min_y: float, pair_tolerance_ms: float, max_track_gap:
         "moving_rgb_roi_candidate_count_mean": mean(moving_counts) if moving_counts else 0,
         "roi_min_y_px": min_y,
         "tracking": {
-            "method": "greedy nearest-centroid association, max 3-frame gap, up to 16 px per frame",
+            "method": f"greedy nearest-centroid association, max {max_track_gap}-frame gap, up to 16 px per frame",
             "track_count": len(track_out),
             "stable_in_image_tracks": sum(row["classification"] == "stable_in_image" for row in track_out),
             "moving_candidate_tracks": sum(row["classification"] == "moving_candidate_track" for row in track_out),
             "ambiguous_or_short_tracks": sum(row["classification"] == "ambiguous_or_short" for row in track_out),
             "limits": "Exploratory thresholded components; tracks are not verified reflector identities and are not matched to the MKF 3D map.",
         },
-        "outputs": [path.name for path in outputs[:3]],
+        "trajectory_analysis": {
+            "method": f"area-filtered tabletop candidates, greedy centroid association with max {max_track_gap}-frame gap, then cx,cy = constant + cos(angle) + sin(angle) fit",
+            "minimum_component_area_px": trajectory_min_area,
+            "maximum_fit_rms_px": trajectory_max_rms_px,
+            "minimum_observations": 10,
+            "minimum_angle_span_degrees": 45,
+            "minimum_image_extent_px": 8,
+            "smooth_rotating_candidates": sum(row["classification"] == "smooth_rotating_candidate" for row in trajectory_rows),
+            "limits": "Trajectory candidates are not confirmed marker identities and are not matched to MKF points.",
+        },
+        "outputs": [path.name for path in outputs],
     }
-    outputs[3].write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    outputs[4].write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return summary
 
 
@@ -348,15 +479,21 @@ def main() -> int:
     parser.add_argument("--max-track-gap", type=int, default=3)
     parser.add_argument("--suffix", default="", help="Optional safe suffix for separate analysis outputs.")
     parser.add_argument("--threshold", type=int, default=150, help="Grayscale threshold for the existing bright-component detector (1-254).")
+    parser.add_argument("--trajectory-min-area", type=int, default=100,
+                        help="Minimum bright-component area used by the angle-trajectory candidate tracker.")
+    parser.add_argument("--trajectory-max-rms-px", type=float, default=25,
+                        help="Maximum sinusoid-fit RMS in pixels for a smooth rotating candidate.")
     args = parser.parse_args()
     if (args.min_y_px < 0 or args.pair_tolerance_ms <= 0 or args.max_track_gap < 1 or
-            not re.fullmatch(r"[A-Za-z0-9_-]*", args.suffix) or not 1 <= args.threshold <= 254):
+            not re.fullmatch(r"[A-Za-z0-9_-]*", args.suffix) or not 1 <= args.threshold <= 254 or
+            args.trajectory_min_area < 1 or args.trajectory_max_rms_px <= 0):
         parser.error("ROI/timing values and threshold must be valid; suffix may contain only letters, digits, _ or -.")
     folder = args.capture_dir.resolve()
     if not folder.is_dir():
         parser.error("capture_dir must be an existing directory.")
     print(json.dumps(analyze(folder, args.min_y_px, args.pair_tolerance_ms,
-                             args.max_track_gap, args.suffix, args.threshold), indent=2))
+                             args.max_track_gap, args.suffix, args.threshold,
+                             args.trajectory_min_area, args.trajectory_max_rms_px), indent=2))
     return 0
 
 
