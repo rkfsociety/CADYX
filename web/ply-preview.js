@@ -503,11 +503,19 @@ function renderCurrentProgress(dashboard, value, lock = null) {
   const runningTask = tasks.find((task) => task.state === "running") || null;
   const phases = dashboard?.workflow?.phases || [];
   const activePhase = phases.find((phase) => phase.state === "in_progress") || null;
+  const progressPercent = Number(runningActivity?.progress_percent);
+  const progressPhaseLabels = {
+    measure_distance: "Измеряет минимальный зазор",
+    classify_interference: "Классифицирует пересечение",
+  };
+  const progressTask = Number.isFinite(progressPercent) && progressPhaseLabels[runningActivity?.phase]
+    ? { title: progressPhaseLabels[runningActivity.phase], state: "in_progress" }
+    : null;
   const isWorking = Boolean(runningActivity || agentLeaseActive || runningTask || activePhase);
   const state = isWorking ? "running"
     : activity?.state === "failed" ? "failed" : activity?.state === "completed" ? "completed" : "idle";
   const action = runningActivity?.action || (agentLeaseActive ? "Выполняет команду" : activity?.action) || "Действий пока нет";
-  const shownTask = runningTask || activePhase;
+  const shownTask = runningTask || activePhase || progressTask;
 
   $("#workflow-current").dataset.state = state;
   const agentState = $("#agent-state");
@@ -527,8 +535,10 @@ function renderCurrentProgress(dashboard, value, lock = null) {
     taskElement.textContent = shownTask.title;
     taskElement.title = shownTask.title;
     const isTask = tasks.includes(shownTask);
+    const isProgress = shownTask === progressTask;
     const shownState = shownTask.state;
-    taskState.textContent = isTask ? taskStateLabel(shownState) : phaseStateLabel(shownState);
+    taskState.textContent = isProgress ? `${Math.round(progressPercent)}%`
+      : isTask ? taskStateLabel(shownState) : phaseStateLabel(shownState);
     taskState.dataset.state = shownState;
     $("#workflow-task-label").textContent = isTask
       ? shownState === "running" ? "ТЕКУЩАЯ ЗАДАЧА" : "ПОСЛЕДНЯЯ ЗАДАЧА"

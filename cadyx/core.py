@@ -579,6 +579,7 @@ class CadyxCore:
     def validate_body_clearance(
         self, project_id: str, first_body_id: str, second_body_id: str,
         expected_revision: Any, minimum_clearance: Any, tolerance: Any,
+        *, progress: Callable[[str, float], None] | None = None,
     ) -> dict[str, Any]:
         project = self.workspace.load(project_id)
         document = Document.from_dict(project["document"])
@@ -607,7 +608,9 @@ class CadyxCore:
             raise ValidationError("Clearance validation needs two existing bodies.")
         first_geometry = bodies[first_body_id]["geometry"]
         second_geometry = bodies[second_body_id]["geometry"]
-        measured = self.kernel.minimum_distance(first_geometry, second_geometry)
+        measured = (self.kernel.minimum_distance(first_geometry, second_geometry)
+                    if progress is None else
+                    self.kernel.minimum_distance(first_geometry, second_geometry, progress=progress))
         distance = measured.get("minimum_distance")
         deflection = measured.get("deflection")
         inner_solution = measured.get("inner_solution")
@@ -714,7 +717,9 @@ class CadyxCore:
         self,
         project_id: str,
         action: str,
-        operation: Callable[[], Any],
+        operation: Callable[..., Any],
+        *,
+        reports_progress: bool = False,
     ) -> Any:
         """Expose an agent's read-only model inspection as a visual activity."""
         self.workspace.load(project_id)
@@ -735,7 +740,16 @@ class CadyxCore:
         activity["phase"] = "observe"
         self._publish_activity(project_id, activity)
         try:
-            result = operation()
+            def report_progress(phase: str, progress: float) -> None:
+                if (not isinstance(phase, str) or not phase
+                        or isinstance(progress, bool) or not isinstance(progress, (int, float))
+                        or not math.isfinite(progress) or not 0 <= progress <= 1):
+                    raise ValidationError("Agent operation reported invalid progress.")
+                activity["phase"] = phase
+                activity["progress_percent"] = round(progress * 100, 1)
+                self._publish_activity(project_id, activity)
+
+            result = operation(report_progress) if reports_progress else operation()
         except Exception as exc:
             activity.update({"state": "failed", "error": str(exc)})
             self._publish_activity(project_id, activity)

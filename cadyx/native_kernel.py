@@ -11,6 +11,10 @@ import zlib
 
 from .errors import ValidationError
 
+_PROGRESS_CALLBACK = ctypes.CFUNCTYPE(
+    None, ctypes.c_void_p, ctypes.c_char_p, ctypes.c_double,
+)
+
 
 class NativeKernel:
     _library = None
@@ -88,6 +92,7 @@ class NativeKernel:
                     library.cadyx_brep_distance.argtypes = [
                         ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
                         ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                        _PROGRESS_CALLBACK, ctypes.c_void_p,
                         ctypes.c_char_p, ctypes.c_size_t,
                     ]
                     library.cadyx_brep_distance.restype = ctypes.c_void_p
@@ -200,12 +205,17 @@ class NativeKernel:
     def export_geometry(self, geometry):
         return self._geometry_graph(geometry, export=True)
 
-    def minimum_brep_distance(self, first, second):
+    def minimum_brep_distance(self, first, second, *, progress=None):
         first_buffer = self._export_brep_buffer(first)
         second_buffer = self._export_brep_buffer(second)
         error = ctypes.create_string_buffer(1024)
+        callback = None
+        if progress is not None:
+            def report(_user_data, phase, percent):
+                progress(phase.decode("ascii", errors="replace"), percent)
+            callback = _PROGRESS_CALLBACK(report)
         result = self.library.cadyx_brep_distance(
-            first_buffer, len(first), second_buffer, len(second), error, len(error),
+            first_buffer, len(first), second_buffer, len(second), callback, None, error, len(error),
         )
         if not result:
             raise ValidationError(error.value.decode("utf-8", errors="replace"))

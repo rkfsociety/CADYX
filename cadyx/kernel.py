@@ -7,7 +7,7 @@ import base64
 import math
 import zlib
 from functools import lru_cache
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from .errors import ValidationError
 from .mesh_geometry import tessellate_mesh_geometry, validate_mesh_geometry
@@ -71,7 +71,10 @@ class GeometryKernel(Protocol):
 
     def metrics(self, geometry: dict[str, Any]) -> dict[str, Any]: ...
 
-    def minimum_distance(self, first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]: ...
+    def minimum_distance(
+        self, first: dict[str, Any], second: dict[str, Any], *,
+        progress: Callable[[str, float], None] | None = None,
+    ) -> dict[str, Any]: ...
 
     def validate(self, geometry: dict[str, Any]) -> None: ...
 
@@ -730,7 +733,10 @@ class OCCTKernelAdapter:
             "volume", "surface_area", "bounds", "topology", "brep_valid",
         )}
 
-    def minimum_distance(self, first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+    def minimum_distance(
+        self, first: dict[str, Any], second: dict[str, Any], *,
+        progress: Callable[[str, float], None] | None = None,
+    ) -> dict[str, Any]:
         if any(isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1"
                for geometry in (first, second)):
             raise ValidationError("Minimum solid clearance requires editable OCCT B-rep bodies, not triangle meshes.")
@@ -739,7 +745,7 @@ class OCCTKernelAdapter:
         native = NativeKernel()
         first_brep, _ = native.export_geometry(first)
         second_brep, _ = native.export_geometry(second)
-        return native.minimum_brep_distance(first_brep, second_brep)
+        return native.minimum_brep_distance(first_brep, second_brep, progress=progress)
 
     def validate(self, geometry: dict[str, Any]) -> None:
         try:
@@ -1039,7 +1045,10 @@ class PrimitiveKernelAdapter:
         if geometry != expected:
             raise ValidationError("Saved geometry descriptor is inconsistent.")
 
-    def minimum_distance(self, first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+    def minimum_distance(
+        self, first: dict[str, Any], second: dict[str, Any], *,
+        progress: Callable[[str, float], None] | None = None,
+    ) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not measure solid clearance.")
 
     def create_extruded_profile(self, *args: Any, **kwargs: Any) -> dict[str, Any]:

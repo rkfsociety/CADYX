@@ -407,10 +407,12 @@ def make_request_handler(
                     )
                 result = core.observe_agent_operation(
                     project_id, "Измеряет зазор между телами",
-                    lambda: core.validate_body_clearance(
+                    lambda progress: core.validate_body_clearance(
                         project_id, body["first_body_id"], body["second_body_id"],
                         body["expected_revision"], body["minimum_clearance"], body["tolerance"],
+                        progress=progress,
                     ),
+                    reports_progress=True,
                 )
                 self._json(200, result)
                 return

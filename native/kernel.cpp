@@ -24,6 +24,7 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
+#include <Message_ProgressIndicator.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
@@ -88,6 +89,32 @@ API const char* cadyx_kernel_version() noexcept { return OCC_VERSION_COMPLETE; }
 API void cadyx_free(char* value) noexcept { delete[] value; }
 
 namespace {
+using NativeProgressCallback = void (*)(void*, const char*, double);
+
+class NativeProgressIndicator final : public Message_ProgressIndicator {
+  DEFINE_STANDARD_RTTI_INLINE(NativeProgressIndicator, Message_ProgressIndicator)
+public:
+  NativeProgressIndicator(NativeProgressCallback callback, void* user_data)
+      : callback_(callback), user_data_(user_data) {}
+
+  void SetPhase(const char* phase) { phase_ = phase; }
+  void Report(double progress, bool force = false) {
+    if (callback_ && (force || progress - last_reported_ >= 0.01 || progress >= 1.0)) {
+      callback_(user_data_, phase_.c_str(), progress);
+      last_reported_ = progress;
+    }
+  }
+
+protected:
+  void Show(const Message_ProgressScope&, const bool) override { Report(GetPosition()); }
+
+private:
+  NativeProgressCallback callback_;
+  void* user_data_;
+  std::string phase_;
+  double last_reported_ = -1.0;
+};
+
 constexpr double kFullTurn = 6.28318530717958647692;
 constexpr size_t kStlDeviationSampleLimit = 64;
 constexpr size_t kMaxDeliveryBytes = 64 * 1024 * 1024;
@@ -1463,6 +1490,7 @@ API char* cadyx_fuse_profiles(
 
 API char* cadyx_brep_distance(const unsigned char* first_data, size_t first_size,
                               const unsigned char* second_data, size_t second_size,
+                              NativeProgressCallback progress_callback, void* progress_user_data,
                               char* error, size_t capacity) noexcept {
   try {
     const TopoDS_Solid first = ExtractSingleSolid(ReadImportedBrep(first_data, first_size));
@@ -1470,20 +1498,31 @@ API char* cadyx_brep_distance(const unsigned char* first_data, size_t first_size
     if (!BRepCheck_Analyzer(first).IsValid() || !BRepCheck_Analyzer(second).IsValid())
       throw std::runtime_error("Clearance measurement requires valid closed solids.");
     constexpr double deflection = 1e-7;
-    BRepExtrema_DistShapeShape distance(first, second, deflection);
-    if (!distance.IsDone()) distance.Perform();
-    if (!distance.IsDone() || distance.NbSolution() < 1)
+    BRepExtrema_DistShapeShape distance;
+    distance.LoadS1(first);
+    distance.LoadS2(second);
+    distance.SetDeflection(deflection);
+    NativeProgressIndicator progress(progress_callback, progress_user_data);
+    Message_ProgressScope whole(progress.Start(), "body_clearance", 100.0);
+    progress.SetPhase("measure_distance");
+    progress.Report(0.0, true);
+    const bool distance_done = distance.Perform(whole.Next(55.0));
+    if (!distance_done || !distance.IsDone() || distance.NbSolution() < 1)
       throw std::runtime_error("OCCT could not compute minimum distance between the solids.");
+    progress.SetPhase("classify_interference");
+    progress.Report(0.55, true);
     BRepAlgoAPI_Common common(first, second);
     common.SetFuzzyValue(deflection);
     common.SetRunParallel(true);
-    common.Build();
+    common.Build(whole.Next(45.0));
     if (!common.IsDone())
       throw std::runtime_error("OCCT could not classify solid interference.");
     const TopoDS_Shape common_shape = common.Shape();
     const double intersection_volume = common_shape.IsNull() ? 0.0 : ShapeVolume(common_shape);
     if (!std::isfinite(intersection_volume) || intersection_volume < 0)
       throw std::runtime_error("OCCT returned an invalid solid intersection volume.");
+    progress.SetPhase("completed");
+    progress.Report(1.0, true);
     const double value = distance.Value();
     if (!std::isfinite(value) || value < 0)
       throw std::runtime_error("OCCT returned an invalid solid distance.");

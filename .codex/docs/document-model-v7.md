@@ -438,6 +438,10 @@ solids and the interval's lower bound to meet the requested clearance after
 tolerance. Interference or an upper bound below that threshold fails; other
 cases are `untested`. Triangle meshes are unsupported. This check does not
 acquire an edit lease or change the document.
+During the synchronous request, `agent.activity` events expose OCCT progress in
+`progress_percent` and the `measure_distance` and `classify_interference`
+phases. OCCT's distance and common-volume algorithms contribute 55% and 45%
+of the reported operation progress, respectively.
 
 `fillet_edges` accepts `body_id`, 1–128 distinct `edge_indices`, a positive
 `radius`, and optional `name`. It creates a new body with an OCCT rolling-edge
