@@ -78,7 +78,8 @@ function Start-Capture {
         [string[]]$Arguments,
         [string]$Name
     )
-    return Start-Process -PassThru -NoNewWindow -FilePath $FilePath -ArgumentList $Arguments `
+    $argumentLine = (@($Arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+    return Start-Process -PassThru -NoNewWindow -FilePath $FilePath -ArgumentList $argumentLine `
         -WorkingDirectory $repoRoot `
         -RedirectStandardOutput (Join-Path $outputDirectory "$Name.stdout.txt") `
         -RedirectStandardError (Join-Path $outputDirectory "$Name.stderr.txt")

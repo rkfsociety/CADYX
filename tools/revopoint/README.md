@@ -71,6 +71,8 @@ Measured empty-table sweep on 2026-10-16: requested 10 fps; 570 Y16 frames and 5
 
 This run demonstrates over 10 fps from both direct UVC streams during a full table revolution on this setup. It does not validate the depth-to-metric scale, exact 2D-to-MKF marker correspondence, camera/table axis calibration, or a complete object mesh. Earlier short mode tests on the same PC reported substantially lower rates; verify performance for each capture environment.
 
+In the same empty-table run, the first 640×400 Y16 frame contained 1,259 non-zero pixels; the existing threshold-1 connected-region finder reported five regions with its default size limits. A single direct Y16 frame therefore does not expose the full 34-point reflector map as separate bright components. The RGB sequence provides more visible candidates, but their exact correspondence to the MKF points still needs to be solved.
+
 ## Experimental 360° fusion result
 
 The twelve 30° raw captures were reprojected and tested with a candidate Z-axis rotation and overlap-fitted pivot. A candidate transform of −30° per commanded +30° step around approximately `[28.8, -5.4]` in current Q coordinates gave 81–94% adjacent-pair nearest-neighbor overlap within 5 coordinate units. The pivot and sign are empirical estimates, not mechanical calibration. A voxel-deduplicated PLY and its JSON provenance are saved as `approx_fused_candidate.ply` and `approx_fused_candidate.json` beside the source frames.
