@@ -5,6 +5,7 @@ import base64
 import json
 import math
 import os
+from collections import OrderedDict
 from pathlib import Path
 from threading import Lock
 import zlib
@@ -14,6 +15,11 @@ from .errors import ValidationError
 _PROGRESS_CALLBACK = ctypes.CFUNCTYPE(
     None, ctypes.c_void_p, ctypes.c_char_p, ctypes.c_double,
 )
+_PERIODIC_SPLINE_CACHE_MAX_BYTES = 8 * 1024 * 1024
+_PERIODIC_SPLINE_CACHE_MAX_ENTRIES = 128
+_periodic_spline_cache: OrderedDict[tuple[bytes, int], tuple[bytes, int]] = OrderedDict()
+_periodic_spline_cache_bytes = 0
+_periodic_spline_cache_lock = Lock()
 
 
 class NativeKernel:
@@ -178,6 +184,8 @@ class NativeKernel:
             self.library.cadyx_free(result)
 
     def periodic_spline_samples(self, points, *, samples_per_span=24):
+        global _periodic_spline_cache_bytes
+
         max_index = (1 << (8 * ctypes.sizeof(ctypes.c_int) - 1)) - 1
         if (not isinstance(points, list) or len(points) < 3
                 or len(points) > max_index
@@ -199,6 +207,20 @@ class NativeKernel:
                     raise ValidationError("Periodic spline coordinates must be finite point pairs.")
                 coordinates.append(normalized)
         native_coordinates = (ctypes.c_double * len(coordinates))(*coordinates)
+        coordinate_key = ctypes.string_at(
+            ctypes.addressof(native_coordinates), ctypes.sizeof(native_coordinates),
+        )
+        cache_key = (coordinate_key, samples_per_span)
+        with _periodic_spline_cache_lock:
+            cached = _periodic_spline_cache.get(cache_key)
+            if cached is not None:
+                _periodic_spline_cache.move_to_end(cache_key)
+                payload = cached[0]
+            else:
+                payload = None
+        if payload is not None:
+            return json.loads(payload)["points"]
+
         error = ctypes.create_string_buffer(1024)
         result = self.library.cadyx_periodic_spline_samples(
             native_coordinates, len(points), samples_per_span, error, len(error),
@@ -206,9 +228,24 @@ class NativeKernel:
         if not result:
             raise ValidationError(error.value.decode("utf-8", errors="replace"))
         try:
-            return json.loads(ctypes.string_at(result))["points"]
+            payload = ctypes.string_at(result)
         finally:
             self.library.cadyx_free(result)
+        sampled_points = json.loads(payload)["points"]
+        cache_entry_bytes = len(coordinate_key) + len(payload) + 128
+        if cache_entry_bytes <= _PERIODIC_SPLINE_CACHE_MAX_BYTES:
+            with _periodic_spline_cache_lock:
+                previous = _periodic_spline_cache.pop(cache_key, None)
+                if previous is not None:
+                    _periodic_spline_cache_bytes -= previous[1]
+                while (_periodic_spline_cache
+                       and (_periodic_spline_cache_bytes + cache_entry_bytes > _PERIODIC_SPLINE_CACHE_MAX_BYTES
+                            or len(_periodic_spline_cache) >= _PERIODIC_SPLINE_CACHE_MAX_ENTRIES)):
+                    _, (_, removed_bytes) = _periodic_spline_cache.popitem(last=False)
+                    _periodic_spline_cache_bytes -= removed_bytes
+                _periodic_spline_cache[cache_key] = (payload, cache_entry_bytes)
+                _periodic_spline_cache_bytes += cache_entry_bytes
+        return sampled_points
 
     def fuse_profiles(self, base, tool, *, mesh=False):
         if base.get("profile_curve") or tool.get("profile_curve"):
