@@ -202,20 +202,17 @@ def _finite_coordinate(value: Any, name: str) -> float:
 
 
 def _ruled_patch_values(patches: Any) -> list[dict[str, list[list[float]]]]:
-    if not isinstance(patches, list) or not 4 <= len(patches) <= 4096:
-        raise ValidationError("Ruled shell needs between 4 and 4096 surface patches.")
-    normalized, total_points = [], 0
+    if not isinstance(patches, list) or len(patches) < 4:
+        raise ValidationError("Ruled shell needs at least 4 surface patches.")
+    normalized = []
     for patch in patches:
         if not isinstance(patch, dict) or set(patch) != {"first", "second"}:
             raise ValidationError("Each ruled patch needs exactly two rail point arrays.")
         rails = {}
         for key in ("first", "second"):
             points = patch[key]
-            if not isinstance(points, list) or not 2 <= len(points) <= 4096:
-                raise ValidationError("Each ruled rail needs between 2 and 4096 points.")
-            total_points += len(points)
-            if total_points > 131072:
-                raise ValidationError("Ruled shell is limited to 131072 input rail points.")
+            if not isinstance(points, list) or len(points) < 2:
+                raise ValidationError("Each ruled rail needs at least 2 points.")
             rail = []
             for point in points:
                 if not isinstance(point, list) or len(point) != 3:

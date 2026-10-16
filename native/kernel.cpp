@@ -1047,8 +1047,9 @@ TopoDS_Shape MakeLoftShape(const double* coordinates, const int* section_sizes,
 }
 
 TopoDS_Edge MakeRuledRail(const double* coordinates, size_t point_count) {
-  if (!coordinates || point_count < 2 || point_count > 4096)
-    throw std::runtime_error("A ruled rail needs between 2 and 4096 points.");
+  if (!coordinates || point_count < 2
+      || point_count > static_cast<size_t>(std::numeric_limits<Standard_Integer>::max()))
+    throw std::runtime_error("A ruled rail needs at least 2 points within the OCCT index range.");
   for (size_t i = 0; i < point_count * 3; ++i)
     if (!std::isfinite(coordinates[i]))
       throw std::runtime_error("Ruled rail coordinates must be finite.");
@@ -1074,9 +1075,9 @@ TopoDS_Edge MakeRuledRail(const double* coordinates, size_t point_count) {
 
 TopoDS_Shape MakeRuledSolid(const double* coordinates, size_t coordinate_count,
                             const int* patch_sizes, size_t patch_count, double tolerance) {
-  if (!coordinates || !patch_sizes || patch_count < 4 || patch_count > 4096
+  if (!coordinates || !patch_sizes || patch_count < 4
       || !std::isfinite(tolerance) || tolerance < 1e-7 || tolerance > 1.0)
-    throw std::runtime_error("Ruled shell needs 4 to 4096 patches and a sewing tolerance in [1e-7, 1].");
+    throw std::runtime_error("Ruled shell needs at least 4 patches and a sewing tolerance in [1e-7, 1].");
   BRepBuilderAPI_Sewing sewing(tolerance, true, true, true, false);
   size_t offset = 0;
   for (size_t patch = 0; patch < patch_count; ++patch) {

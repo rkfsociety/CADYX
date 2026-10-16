@@ -388,9 +388,10 @@ atomically. The feature retains ordered `source_sketch_ids` and
 sampled polygons, so both loft forms approximate the source STEP analytic or
 NURBS surfaces.
 
-`create_ruled_shell` builds a solid from 4–4096 ruled surface patches. Each
-patch has two 3D rails, with 2–4096 `[x,y,z]` samples per rail and a total input
-limit of 131072 rail points. OCCT interpolates each rail as a B-spline, creates
+`create_ruled_shell` builds a solid from at least four ruled surface patches.
+Each patch has two 3D rails with at least two `[x,y,z]` samples; a rail must fit
+the OCCT index range. There is no fixed aggregate rail-point ceiling. OCCT
+interpolates each rail as a B-spline, creates
 the ruled face with `BRepFill::Face`, sews the faces, checks for free or multiple
 edges, fixes shell orientation, and validates the resulting single solid.
 `sewing_tolerance` defaults to 0.001 mm and is bounded to 1e-7–1 mm. All patches
