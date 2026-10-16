@@ -511,8 +511,14 @@ function renderCurrentProgress(dashboard, value, lock = null) {
     && !lock.recovery_required;
   const tasks = dashboard?.tasks || [];
   const runningTask = tasks.find((task) => task.state === "running") || null;
-  const phases = dashboard?.workflow?.phases || [];
+  const workflow = dashboard?.workflow || null;
+  const phases = workflow?.phases || [];
   const activePhase = phases.find((phase) => phase.state === "in_progress") || null;
+  const completedWorkflowWithoutJournal = Boolean(
+    !activity && workflow && Number(workflow.progress_percent) === 100
+      && phases.length > 0 && phases.every((phase) => phase.state === "completed")
+      && tasks.every((task) => task.state === "completed"),
+  );
   const progressPercent = Number(runningActivity?.progress_percent);
   const progressPhaseLabels = {
     measure_distance: "Измеряет минимальный зазор",
@@ -523,8 +529,10 @@ function renderCurrentProgress(dashboard, value, lock = null) {
     : null;
   const isWorking = Boolean(runningActivity || agentLeaseActive || runningTask || activePhase);
   const state = isWorking ? "running"
-    : activity?.state === "failed" ? "failed" : activity?.state === "completed" ? "completed" : "idle";
-  const action = runningActivity?.action || (agentLeaseActive ? "Выполняет команду" : activity?.action) || "Действий пока нет";
+    : activity?.state === "failed" ? "failed"
+      : activity?.state === "completed" || completedWorkflowWithoutJournal ? "completed" : "idle";
+  const action = runningActivity?.action || (agentLeaseActive ? "Выполняет команду" : activity?.action)
+    || (completedWorkflowWithoutJournal ? workflow.title : "Действий пока нет");
   const shownTask = runningTask || activePhase || progressTask;
 
   $("#workflow-current").dataset.state = state;
@@ -533,7 +541,8 @@ function renderCurrentProgress(dashboard, value, lock = null) {
   agentState.textContent = state === "running" ? "В РАБОТЕ"
     : state === "failed" ? "ОШИБКА" : state === "completed" ? "ЗАВЕРШЕНО" : "ОЖИДАЕТ";
   $("#workflow-action-label").textContent = runningActivity || agentLeaseActive ? "ДЕЙСТВИЕ СЕЙЧАС"
-    : activity?.state === "failed" ? "ПОСЛЕДНЕЕ ДЕЙСТВИЕ · ОШИБКА" : "ПОСЛЕДНЕЕ ДЕЙСТВИЕ";
+    : activity?.state === "failed" ? "ПОСЛЕДНЕЕ ДЕЙСТВИЕ · ОШИБКА"
+      : completedWorkflowWithoutJournal ? "ЗАВЕРШЁННЫЙ ОТЧЁТ" : "ПОСЛЕДНЕЕ ДЕЙСТВИЕ";
   const actionElement = $("#activity-title");
   actionElement.textContent = action;
   actionElement.title = action;
