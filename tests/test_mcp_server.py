@@ -63,6 +63,18 @@ class CadyxMCPServerTests(unittest.TestCase):
             api_commands["create_box"]["parameter_schemas"],
             registry_commands["create_box"]["parameter_schemas"],
         )
+        self.assertEqual(
+            {
+                command_type: capability["parameter_schemas"]
+                for command_type, capability in api_commands.items()
+                if "parameter_schemas" in capability
+            },
+            {
+                command_type: capability["parameter_schemas"]
+                for command_type, capability in registry_commands.items()
+                if "parameter_schemas" in capability
+            },
+        )
         project_id = self._create_project()
         image = self.app.call_tool("cadyx_get_viewport_image", {"project_id": project_id})
         self.assertEqual([item["type"] for item in image["content"]], ["text", "image"])
@@ -76,6 +88,15 @@ class CadyxMCPServerTests(unittest.TestCase):
         branches_by_type = {
             branch["properties"]["type"]["enum"][0]: branch
             for branch in branches
+        }
+        coordinate_schema = {
+            "type": "object",
+            "properties": {"x": {"type": "number"}, "y": {"type": "number"}},
+            "required": ["x", "y"],
+            "additionalProperties": False,
+        }
+        spline_points_schema = {
+            "type": "array", "minItems": 3, "items": coordinate_schema,
         }
         expected_parameter_schemas = {
             "create_box": {
@@ -119,6 +140,75 @@ class CadyxMCPServerTests(unittest.TestCase):
                 "x": {"type": "number"},
                 "y": {"type": "number"},
                 "radius": {"type": "number", "exclusiveMinimum": 0},
+            },
+            **{
+                command_type: {
+                    "sketch_id": {"type": "string"},
+                    "start": coordinate_schema,
+                    "end": coordinate_schema,
+                }
+                for command_type in (
+                    "add_sketch_segment", "add_sketch_line", "add_sketch_infinite_line",
+                    "add_sketch_centerline", "add_sketch_construction_line",
+                )
+            },
+            **{
+                command_type: {
+                    "sketch_id": {"type": "string"},
+                    "points": spline_points_schema,
+                    "construction": {"type": "boolean"},
+                }
+                for command_type in (
+                    "add_sketch_spline", "add_sketch_closed_spline",
+                    "add_sketch_spline_control_points", "add_sketch_bspline",
+                    "add_sketch_bezier_curve",
+                )
+            },
+            "add_sketch_nurbs": {
+                "sketch_id": {"type": "string"},
+                "points": spline_points_schema,
+                "degree": {"type": "integer"},
+                "knots": {"type": "array", "items": {"type": "number"}},
+                "weights": {
+                    "type": "array", "items": {"type": "number", "exclusiveMinimum": 0},
+                },
+                "construction": {"type": "boolean"},
+            },
+            "add_sketch_ellipse": {
+                "sketch_id": {"type": "string"},
+                "major_axis_start": coordinate_schema,
+                "major_axis_end": coordinate_schema,
+                "minor_radius": {"type": "number", "exclusiveMinimum": 0},
+            },
+            "add_sketch_ellipse_center": {
+                "sketch_id": {"type": "string"},
+                "center": coordinate_schema,
+                "major_radius": {"type": "number", "exclusiveMinimum": 0},
+                "minor_radius": {"type": "number", "exclusiveMinimum": 0},
+                "rotation_degrees": {"type": "number"},
+            },
+            "add_sketch_ellipse_three_points": {
+                "sketch_id": {"type": "string"},
+                "center": coordinate_schema,
+                "major_axis_endpoint": coordinate_schema,
+                "minor_axis_endpoint": coordinate_schema,
+            },
+            "add_sketch_circle_diameter": {
+                "sketch_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "diameter": {"type": "number", "exclusiveMinimum": 0},
+            },
+            "add_sketch_circle_two_points": {
+                "sketch_id": {"type": "string"},
+                "first": coordinate_schema,
+                "second": coordinate_schema,
+            },
+            "add_sketch_arc_three_points": {
+                "sketch_id": {"type": "string"},
+                "start": coordinate_schema,
+                "through": coordinate_schema,
+                "end": coordinate_schema,
             },
             "extrude_sketch": {
                 "sketch_id": {"type": "string"},
