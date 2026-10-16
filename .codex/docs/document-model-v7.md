@@ -482,9 +482,12 @@ changes topology or makes the requested radius impossible, the dependent rebuild
 fails atomically and leaves the saved model unchanged.
 
 `linear_pattern_body`, `circular_pattern_body`, `hole`, and `boss` retain their
-source body and operation parameters. Editing a source sketch or an earlier
-feature rebuilds these dependent operations in document order. `set_parameter`
-can edit a circular pattern's `count`, `angle_step_degrees`, or `full_circle`,
+source body and operation parameters. Pattern counts must be at least two and
+fit the native integer representation; there is no fixed instance ceiling.
+OCCT fuses all pattern instances in one multi-argument Boolean operation.
+Editing a source sketch or an earlier feature rebuilds these dependent operations
+in document order. `set_parameter` can edit a linear pattern's `count` or
+`offset`, a circular pattern's `count`, `angle_step_degrees`, or `full_circle`,
 and a hole or boss's `diameter` or `depth`. A circular pattern with
 `full_circle: true` must use `angle_step_degrees = 360/count`; changing its
 count updates the step so the array remains distributed over one full

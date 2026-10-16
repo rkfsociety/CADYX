@@ -19,6 +19,7 @@ from .sketches import closed_profile
 
 _INSTALLED = False
 _MAX_BREP_BYTES = 64 * 1024 * 1024
+_MAX_PATTERN_COUNT = (1 << 31) - 1
 
 ADVANCED_CAPABILITIES = (
     {"type": "create_section_sketch", "description": "Create an editable XZ section sketch at a Y offset for direct loft authoring.", "required": ["offset"], "optional": ["name"], "constraints": ["offset is finite; resulting sketch is compatible with loft_sketches and loft_profiles."]},
@@ -29,8 +30,8 @@ ADVANCED_CAPABILITIES = (
     {"type": "variable_fillet_edges", "description": "Create a linear two-radius fillet on topology-selected edges.", "required": ["body_id", "edge_indices", "start_radius", "end_radius"], "optional": ["name"], "constraints": ["Refresh topology first; both radii must be positive."]},
     {"type": "draft_faces", "description": "Apply mold draft to selected faces around a neutral plane.", "required": ["body_id", "face_indices", "angle_degrees", "pull_direction", "neutral_origin", "neutral_normal"], "optional": ["name"], "constraints": ["Angle magnitude is below 89 degrees; vectors are XYZ arrays."]},
     {"type": "mirror_body", "description": "Mirror a solid across an arbitrary plane.", "required": ["body_id", "plane_origin", "plane_normal"], "optional": ["name"], "constraints": ["Plane normal must be non-zero."]},
-    {"type": "linear_pattern_body", "description": "Copy a body along a vector and fuse all instances into one solid.", "required": ["body_id", "count", "offset"], "optional": ["name"], "constraints": ["At least two instances; copies must fuse to one solid."]},
-    {"type": "circular_pattern_body", "description": "Copy a body around an axis and fuse all instances into one solid.", "required": ["body_id", "count", "axis_origin", "axis_direction", "angle_step_degrees"], "optional": ["name", "full_circle"], "constraints": ["At least two instances; copies must fuse to one solid. full_circle requires angle_step_degrees = 360/count and keeps the count editable as a full circular array."]},
+    {"type": "linear_pattern_body", "description": "Copy a body along a vector and fuse all instances into one solid.", "required": ["body_id", "count", "offset"], "optional": ["name"], "constraints": ["At least two instances; count must fit the native integer range; copies must fuse to one solid."]},
+    {"type": "circular_pattern_body", "description": "Copy a body around an axis and fuse all instances into one solid.", "required": ["body_id", "count", "axis_origin", "axis_direction", "angle_step_degrees"], "optional": ["name", "full_circle"], "constraints": ["At least two instances; count must fit the native integer range; copies must fuse to one solid. full_circle requires angle_step_degrees = 360/count and keeps the count editable as a full circular array."]},
     {"type": "hole", "description": "Cut a cylindrical hole from a body along an arbitrary axis.", "required": ["body_id", "origin", "axis", "diameter", "depth"], "optional": ["name"], "constraints": ["Diameter/depth positive; result remains one solid."]},
     {"type": "boss", "description": "Fuse a cylindrical boss to a body along an arbitrary axis.", "required": ["body_id", "origin", "axis", "diameter", "depth"], "optional": ["name"], "constraints": ["Diameter/depth positive; cylinder must intersect the body."]},
 )
@@ -60,6 +61,12 @@ def _indices(value: Any, name: str) -> list[int]:
             or len(set(value)) != len(value)):
         raise ValidationError(f"{name} must contain distinct non-negative topology indices.")
     return list(value)
+
+
+def _pattern_count(value: Any) -> int:
+    if type(value) is not int or value < 2 or value > _MAX_PATTERN_COUNT:
+        raise ValidationError("count must be an integer of at least 2 that fits the native integer range.")
+    return value
 
 
 def _body(document, body_id: Any) -> dict[str, Any]:
@@ -256,14 +263,12 @@ def _execute(self, document, command: dict[str, Any], *, progress=None, project_
         operation, values = 5, [*origin, *normal]
         parameters = {"plane_origin": origin, "plane_normal": normal}
     elif kind == "linear_pattern_body":
-        count = command.get("count")
-        if type(count) is not int or count < 2: raise ValidationError("count must be an integer of at least 2.")
+        count = _pattern_count(command.get("count"))
         offset = _vector(command.get("offset"), "offset", nonzero=True)
         operation, values = 6, [float(count), *offset]
         parameters = {"count": count, "offset": offset}
     elif kind == "circular_pattern_body":
-        count = command.get("count")
-        if type(count) is not int or count < 2: raise ValidationError("count must be an integer of at least 2.")
+        count = _pattern_count(command.get("count"))
         origin = _vector(command.get("axis_origin"), "axis_origin")
         axis = _vector(command.get("axis_direction"), "axis_direction", nonzero=True)
         step = _number(command.get("angle_step_degrees"), "angle_step_degrees", nonzero=True)

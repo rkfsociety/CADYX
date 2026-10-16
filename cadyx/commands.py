@@ -2170,16 +2170,19 @@ class CommandSystem:
                 feature["parameters"], feature["geometry"], body["geometry"] = parameters, geometry, geometry
                 self._rebuild_derived_features(document, {body["id"]}, progress=progress)
                 return {"feature_id": feature_id, "parameter": parameter_name, "value": value, "geometry": geometry}
-            if feature.get("operation") in {"circular_pattern_body", "hole", "boss"}:
+            if feature.get("operation") in {"linear_pattern_body", "circular_pattern_body", "hole", "boss"}:
                 operation = feature["operation"]
                 parameters = dict(feature.get("parameters", {}))
-                if operation == "circular_pattern_body" and parameter_name == "count":
-                    value = command.get("value")
-                    if type(value) is not int or value < 2:
-                        raise ValidationError("count must be an integer of at least 2.")
+                if operation in {"linear_pattern_body", "circular_pattern_body"} and parameter_name == "count":
+                    from .advanced_features import _pattern_count
+                    value = _pattern_count(command.get("value"))
                     parameters["count"] = value
-                    if parameters.get("full_circle") is True:
+                    if operation == "circular_pattern_body" and parameters.get("full_circle") is True:
                         parameters["angle_step_degrees"] = 360.0 / value
+                elif operation == "linear_pattern_body" and parameter_name == "offset":
+                    from .advanced_features import _vector
+                    value = _vector(command.get("value"), "offset", nonzero=True)
+                    parameters["offset"] = value
                 elif operation == "circular_pattern_body" and parameter_name == "full_circle":
                     value = command.get("value")
                     if type(value) is not bool:
@@ -2195,7 +2198,8 @@ class CommandSystem:
                     value = _number(command.get("value"), parameter_name, positive=True)
                     parameters[parameter_name] = value
                 else:
-                    supported = ("count, angle_step_degrees, and full_circle" if operation == "circular_pattern_body"
+                    supported = ("count and offset" if operation == "linear_pattern_body" else
+                                 "count, angle_step_degrees, and full_circle" if operation == "circular_pattern_body"
                                  else "diameter and depth")
                     raise ValidationError(f"Only {supported} parameters are supported for this feature.")
                 source = next((item for item in document.objects
@@ -2204,8 +2208,11 @@ class CommandSystem:
                              if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
                 if source is None or body is None:
                     raise ValidationError("Advanced feature refers to a missing source or result body.")
-                operation_id = {"circular_pattern_body": 7, "hole": 9, "boss": 10}[operation]
-                if operation == "circular_pattern_body":
+                operation_id = {"linear_pattern_body": 6, "circular_pattern_body": 7,
+                                "hole": 9, "boss": 10}[operation]
+                if operation == "linear_pattern_body":
+                    values = [float(parameters["count"]), *parameters["offset"]]
+                elif operation == "circular_pattern_body":
                     values = [float(parameters["count"]), *parameters["axis_origin"],
                               *parameters["axis_direction"], parameters["angle_step_degrees"]]
                 else:

@@ -11,6 +11,8 @@
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
+#include <BOPAlgo_Operation.hxx>
+#include <NCollection_List.hxx>
 #include <GeomAbs_JoinType.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -36,6 +38,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <limits>
 
 #define API extern "C" __declspec(dllexport)
 
@@ -119,8 +122,24 @@ gp_Dir Direction(const double* values, size_t count, size_t start, const char* n
   return gp_Dir(x, y, z);
 }
 
-TopoDS_Shape FuseChecked(const TopoDS_Shape& a, const TopoDS_Shape& b) {
-  BRepAlgoAPI_Fuse fuse(a, b);
+int PatternCount(const double* values, size_t value_count) {
+  const double count_value = Finite(values, value_count, 0, "Pattern count");
+  if (count_value < 2.0 || count_value > std::numeric_limits<int>::max()
+      || std::abs(count_value - std::round(count_value)) > 1e-9)
+    throw std::runtime_error("Pattern count must be an integer of at least 2 that fits the native integer range.");
+  return static_cast<int>(std::llround(count_value));
+}
+
+template <typename CopyShape>
+TopoDS_Shape FusePattern(const TopoDS_Shape& source, int count, CopyShape copy_shape) {
+  NCollection_List<TopoDS_Shape> arguments;
+  NCollection_List<TopoDS_Shape> tools;
+  arguments.Append(source);
+  for (int index = 1; index < count; ++index) tools.Append(copy_shape(index));
+  BRepAlgoAPI_Fuse fuse;
+  fuse.SetOperation(BOPAlgo_FUSE);
+  fuse.SetArguments(arguments);
+  fuse.SetTools(tools);
   fuse.Build();
   if (!fuse.IsDone()) throw std::runtime_error("OCCT pattern fuse failed.");
   return OneSolid(fuse.Shape(), "Pattern fuse");
@@ -216,36 +235,30 @@ API char* cadyx_advanced_brep(const unsigned char* data, size_t size, int operat
       result = Transform(source, transform);
     } else if (operation == 6) {
       if (value_count != 4) throw std::runtime_error("Linear pattern needs count and offset vector.");
-      const int count = static_cast<int>(std::llround(Finite(values, value_count, 0, "Pattern count")));
-      if (count < 2 || count > 64 || std::abs(values[0] - count) > 1e-9)
-        throw std::runtime_error("Pattern count must be an integer from 2 to 64.");
+      const int count = PatternCount(values, value_count);
       const gp_Vec step(Finite(values, value_count, 1, "Pattern offset"),
                         Finite(values, value_count, 2, "Pattern offset"),
                         Finite(values, value_count, 3, "Pattern offset"));
       if (step.Magnitude() <= 1e-9) throw std::runtime_error("Pattern offset must be non-zero.");
-      result = source;
-      for (int i = 1; i < count; ++i) {
+      result = FusePattern(source, count, [&](int index) {
         gp_Trsf transform;
-        transform.SetTranslation(step * static_cast<double>(i));
-        result = FuseChecked(result, Transform(source, transform));
-      }
+        transform.SetTranslation(step * static_cast<double>(index));
+        return Transform(source, transform);
+      });
     } else if (operation == 7) {
       if (value_count != 8) throw std::runtime_error("Circular pattern needs count, axis and angle step.");
-      const int count = static_cast<int>(std::llround(Finite(values, value_count, 0, "Pattern count")));
-      if (count < 2 || count > 64 || std::abs(values[0] - count) > 1e-9)
-        throw std::runtime_error("Pattern count must be an integer from 2 to 64.");
+      const int count = PatternCount(values, value_count);
       const gp_Pnt origin(Finite(values, value_count, 1, "Pattern axis origin"),
                           Finite(values, value_count, 2, "Pattern axis origin"),
                           Finite(values, value_count, 3, "Pattern axis origin"));
       const gp_Dir axis = Direction(values, value_count, 4, "Pattern axis");
       const double step = Finite(values, value_count, 7, "Pattern angle step") * 3.14159265358979323846 / 180.0;
       if (std::abs(step) <= 1e-12) throw std::runtime_error("Pattern angle step must be non-zero.");
-      result = source;
-      for (int i = 1; i < count; ++i) {
+      result = FusePattern(source, count, [&](int index) {
         gp_Trsf transform;
-        transform.SetRotation(gp_Ax1(origin, axis), step * static_cast<double>(i));
-        result = FuseChecked(result, Transform(source, transform));
-      }
+        transform.SetRotation(gp_Ax1(origin, axis), step * static_cast<double>(index));
+        return Transform(source, transform);
+      });
     } else if (operation == 8) {
       if (value_count != 2) throw std::runtime_error("Offset solid needs offset and tolerance.");
       const double offset = Finite(values, value_count, 0, "Offset");
