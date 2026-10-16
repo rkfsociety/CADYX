@@ -994,8 +994,8 @@ TopoDS_Shape MakePipeShape(const double* coordinates, size_t point_count, int pl
 
 TopoDS_Shape MakeLoftShape(const double* coordinates, const int* section_sizes,
                            size_t section_count, size_t coordinate_count) {
-  if (!coordinates || !section_sizes || section_count < 2 || section_count > 64)
-    throw std::runtime_error("A loft needs between 2 and 64 sketch sections.");
+  if (!coordinates || !section_sizes || section_count < 2)
+    throw std::runtime_error("A loft needs at least two sketch sections.");
   BRepOffsetAPI_ThruSections loft(true, false, 1e-6);
   size_t offset = 0;
   for (size_t section = 0; section < section_count; ++section) {
