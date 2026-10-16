@@ -1292,8 +1292,9 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
                              const int* edge_indices, size_t edge_count,
                              const unsigned char* brep_data, size_t brep_size,
                              bool& allow_invalid_import) {
-  if (!nodes || node_count == 0 || node_count > 1024)
-    throw std::runtime_error("A geometry graph needs between 1 and 1024 operations.");
+  constexpr size_t max_node_count = static_cast<size_t>(std::numeric_limits<int>::max()) + 1;
+  if (!nodes || node_count == 0 || node_count > max_node_count)
+    throw std::runtime_error("A geometry graph needs at least one operation and indices representable by the native bridge.");
   std::vector<TopoDS_Shape> shapes;
   shapes.reserve(node_count);
   for (size_t i = 0; i < node_count; ++i) {
