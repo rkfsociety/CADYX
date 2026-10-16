@@ -35,7 +35,7 @@
 
     const oldList=$('#cad-tree-features'),oldSearch=$('.cad-tree-search input');let list=oldList,search=oldSearch;if(oldList){list=oldList.cloneNode(false);oldList.replaceWith(list)}if(oldSearch){search=oldSearch.cloneNode(true);oldSearch.replaceWith(search)}
     const staticIcons=$$('.cad-tree-static-row .cad-tree-icon');if(staticIcons[0])staticIcons[0].innerHTML=I.origin;staticIcons.slice(1).forEach(x=>x.innerHTML=I.plane);const rootIcon=$('.cad-tree-root-row .cad-tree-icon');if(rootIcon)rootIcon.innerHTML=I.model;
-    let props=$('.cad3-props');if(!props){props=document.createElement('section');props.className='cad3-props';inspector.append(props)}
+    let props=$('.cad3-props');if(!props){props=document.createElement('section');props.className='cad3-props cad-inspector-pane';inspector.append(props)}
     const overlay=document.createElement('canvas');overlay.className='cad3-overlay';panel.append(overlay);
     const state={objects:[],byId:new Map(),scene:null,labels:new Map(),selected:null,tool:'select',rev:null,project:null};
     const opType=o=>meta[o?.operation]?.[0]||'Feature', opIcon=o=>I[meta[o?.operation]?.[1]||'model'];
