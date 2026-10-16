@@ -32,6 +32,7 @@
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <IMeshTools_Parameters.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepTools_ReShape.hxx>
 #include <Bnd_Box.hxx>
@@ -1991,10 +1992,18 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
       throw std::runtime_error("Thickness sampling requires non-degenerate solid bounds.");
     const double mesh_deflection = diagonal / 500.0;
     const double start_offset = std::max(Precision::Confusion() * 10.0, diagonal * 1e-8);
-    BRepMesh_IncrementalMesh mesher(solid, mesh_deflection, false, 0.25, true);
-    if (!mesher.IsDone()) throw std::runtime_error("OCCT could not triangulate the solid for thickness sampling.");
     NativeProgressIndicator progress(progress_callback, progress_user_data);
     Message_ProgressScope whole(progress.Start(), "wall_thickness_sampling", 100.0);
+    IMeshTools_Parameters mesh_parameters;
+    mesh_parameters.Deflection = mesh_deflection;
+    mesh_parameters.Angle = 0.25;
+    mesh_parameters.Relative = false;
+    mesh_parameters.InParallel = true;
+    progress.SetPhase("triangulate_surface");
+    BRepMesh_IncrementalMesh mesher(solid, mesh_parameters, whole.Next(25.0));
+    if (!mesher.IsDone()) throw std::runtime_error("OCCT could not triangulate the solid for thickness sampling.");
+    progress.SetPhase("prepare_samples");
+    progress.Report(0.25, true);
     IntCurvesFace_ShapeIntersector intersector;
     intersector.Load(solid, std::max(Precision::Confusion(), diagonal * 1e-9));
     BRepClass3d_SolidClassifier classifier(solid);
@@ -2058,6 +2067,7 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
         face_sample_quotas[active_faces[static_cast<size_t>(position)]] = 1;
       }
     }
+    progress.Report(0.30, true);
     size_t face_index = 0;
     for (TopExp_Explorer explorer(solid, TopAbs_FACE); explorer.More(); explorer.Next(), ++face_index) {
       const TopoDS_Face face = TopoDS::Face(explorer.Current());
@@ -2116,7 +2126,7 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
         }
       }
       progress.SetPhase("sample_surface_triangles");
-      progress.Report(face_count ? 0.95 * static_cast<double>(face_index + 1) / face_count : 0.95);
+      progress.Report(0.30 + (face_count ? 0.65 * static_cast<double>(face_index + 1) / face_count : 0.65));
     }
     if (samples == 0 || hits == 0 || !std::isfinite(minimum))
       throw std::runtime_error("OCCT found no valid inward-normal thickness samples.");
