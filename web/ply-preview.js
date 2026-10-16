@@ -455,7 +455,7 @@ function validationRecordSummary(record) {
     return `Потеряно ${formatNumber(result.lost_volume)} ${unit}³ · допустимо ${formatNumber(result.maximum_lost_volume)} ${unit}³`;
   }
   if (record?.kind === "body_thickness") {
-    return `Минимум ${formatNumber(result.minimum_sampled_thickness)} ${unit} · P10 ${formatNumber(result.p10_sampled_thickness)} ${unit} · нарушений ${formatNumber(result.violating_sample_count)} из ${formatNumber(result.hit_count)}`;
+    return `Минимум ${formatNumber(result.minimum_sampled_thickness)} ${unit} · P10 ${formatNumber(result.p10_sampled_thickness)} ${unit} · граней ${formatNumber(result.sampled_face_count)}/${formatNumber(result.face_count)} · нарушений ${formatNumber(result.violating_sample_count)} из ${formatNumber(result.hit_count)}`;
   }
   return "Сводка результата отсутствует";
 }

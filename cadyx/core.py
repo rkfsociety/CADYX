@@ -812,10 +812,14 @@ class CadyxCore:
             raise ValidationError("OCCT returned invalid wall-thickness sampling metrics.")
         sample_count, hit_count = measured.get("sample_count"), measured.get("hit_count")
         violating_sample_count = measured.get("violating_sample_count")
+        face_count, sampled_face_count = measured.get("face_count"), measured.get("sampled_face_count")
         if (type(sample_count) is not int or type(hit_count) is not int
                 or type(violating_sample_count) is not int
+                or type(face_count) is not int or type(sampled_face_count) is not int
                 or sample_count <= 0 or hit_count <= 0 or hit_count > sample_count
-                or violating_sample_count < 0 or violating_sample_count > hit_count):
+                or violating_sample_count < 0 or violating_sample_count > hit_count
+                or face_count <= 0 or sampled_face_count <= 0
+                or sampled_face_count > min(face_count, sample_count)):
             raise ValidationError("OCCT returned invalid wall-thickness sample counts.")
         for name in ("point", "opposite_point"):
             point = measured.get(name)
@@ -837,6 +841,8 @@ class CadyxCore:
             "units": "model_units",
             **metrics,
             "sample_count": sample_count,
+            "face_count": face_count,
+            "sampled_face_count": sampled_face_count,
             "hit_count": hit_count,
             "violating_sample_count": violating_sample_count,
             "minimum_thickness": required,

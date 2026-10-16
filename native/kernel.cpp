@@ -2013,7 +2013,8 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
     BRepClass3d_SolidClassifier classifier(solid);
     double minimum = std::numeric_limits<double>::infinity();
     gp_Pnt minimum_point, minimum_opposite;
-    size_t samples = 0, hits = 0, violating_samples = 0, face_count = 0, triangle_count = 0;
+    size_t samples = 0, hits = 0, violating_samples = 0, face_count = 0, sampled_face_count = 0,
+           triangle_count = 0;
     for (TopExp_Explorer count(solid, TopAbs_FACE); count.More(); count.Next()) ++face_count;
     std::vector<size_t> face_triangle_counts(face_count, 0);
     std::vector<size_t> active_faces;
@@ -2077,6 +2078,7 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
     size_t face_index = 0;
     for (TopExp_Explorer explorer(solid, TopAbs_FACE); explorer.More(); explorer.Next(), ++face_index) {
       const TopoDS_Face face = TopoDS::Face(explorer.Current());
+      bool sampled_face = false;
       TopLoc_Location location;
       const auto triangulation = BRep_Tool::Triangulation(face, location);
       if (!triangulation.IsNull()) {
@@ -2109,6 +2111,7 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
           }
           intersector.Perform(gp_Lin(start, inward), 0.0, diagonal * 2.0);
           ++samples;
+          sampled_face = true;
           if (!intersector.IsDone())
             throw std::runtime_error("OCCT ray intersection failed during thickness sampling.");
           double nearest = std::numeric_limits<double>::infinity();
@@ -2133,6 +2136,7 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
           }
         }
       }
+      if (sampled_face) ++sampled_face_count;
       progress.SetPhase("sample_surface_triangles");
       progress.Report(0.30 + (face_count ? 0.65 * static_cast<double>(face_index + 1) / face_count : 0.65));
     }
@@ -2155,6 +2159,8 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
            << ",\"median_sampled_thickness\":" << median
            << ",\"p10_sampled_thickness\":" << p10
            << ",\"sample_count\":" << samples
+           << ",\"face_count\":" << face_count
+           << ",\"sampled_face_count\":" << sampled_face_count
            << ",\"hit_count\":" << hits
            << ",\"violating_sample_count\":" << violating_samples
            << ",\"point\":[" << minimum_point.X() << ',' << minimum_point.Y() << ',' << minimum_point.Z() << ']'
