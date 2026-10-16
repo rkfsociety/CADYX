@@ -66,10 +66,23 @@ class CadyxMCPServerTests(unittest.TestCase):
     def test_execute_command_schema_tracks_discovered_command_types(self) -> None:
         tool = next(tool for tool in TOOLS if tool["name"] == "cadyx_execute_command")
         command_schema = tool["inputSchema"]["properties"]["command"]
-        advertised_types = command_schema["properties"]["type"]["enum"]
+        branches = command_schema["oneOf"]
+        branches_by_type = {
+            branch["properties"]["type"]["enum"][0]: branch
+            for branch in branches
+        }
 
-        self.assertEqual(set(advertised_types), {item["type"] for item in COMMAND_CAPABILITIES})
-        self.assertEqual(command_schema["required"], ["type"])
+        self.assertEqual(command_schema["type"], "object")
+        self.assertEqual(set(branches_by_type), {item["type"] for item in COMMAND_CAPABILITIES})
+        for capability in COMMAND_CAPABILITIES:
+            with self.subTest(command_type=capability["type"]):
+                branch = branches_by_type[capability["type"]]
+                properties = branch["properties"]
+                expected_fields = {
+                    "type", *capability.get("required", []), *capability.get("optional", []),
+                }
+                self.assertEqual(set(properties), expected_fields)
+                self.assertEqual(branch["required"], ["type"])
 
     def test_command_uses_expected_revision_and_releases_lease(self) -> None:
         project_id = self._create_project()

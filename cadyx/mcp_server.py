@@ -131,16 +131,21 @@ _STRING = {"type": "string", "minLength": 1}
 _NUMBER = {"type": "number"}
 _INTEGER = {"type": "integer", "minimum": 0}
 _OBJECT = {"type": "object"}
-_COMMAND = {
-    "type": "object",
-    "properties": {
-        "type": {
-            "type": "string",
-            "enum": [item["type"] for item in COMMAND_CAPABILITIES],
+_COMMAND = {"type": "object", "oneOf": [
+    {
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": [capability["type"]],
+            },
+            **{field: {} for field in [
+                *capability.get("required", []), *capability.get("optional", []),
+            ]},
         },
-    },
-    "required": ["type"],
-}
+        "required": ["type"],
+    }
+    for capability in COMMAND_CAPABILITIES
+]}
 TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_health", "description": "Check whether the local CADYX host is ready.", "inputSchema": _schema()},
     {"name": "cadyx_list_workspace", "description": "List saved CADYX projects and direct workspace folders with lock snapshots.", "inputSchema": _schema()},
