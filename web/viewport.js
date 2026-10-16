@@ -939,7 +939,10 @@
           orbitCenter,
           fitRadius: fitRadiusFromPositions(value.positions, fitCenter),
           ...meshEdges,
-          vertexNormals: smoothShading ? buildVertexNormals(value.positions, value.triangles || []) : null,
+          vertexNormals: smoothShading
+            ? value.vertexNormals?.length === value.positions.length
+              ? value.vertexNormals : buildVertexNormals(value.positions, value.triangles || [])
+            : null,
           faceNormals: smoothShading ? null : buildFaceNormals(value.positions, value.triangles || []),
         };
         vertexLight = geometry.vertexNormals ? new Float32Array(geometry.vertexNormals.length / 3) : new Float32Array(0);

@@ -1093,7 +1093,7 @@ async function previewResourceFile(context, file) {
     }
     const geometry = window.CadyxPlyPreview.parse(await response.arrayBuffer());
     if (request !== previewRequest || !isCurrentFileContext(context)) return;
-    plyViewer.load(geometry);
+    plyViewer.load(geometry, { smoothShading: Boolean(geometry.vertexNormals) });
     folderPreviewCanvas.hidden = false;
     folderPreviewPlaceholder.hidden = true;
     $("#folder-preview-info").textContent = geometry.faceCount

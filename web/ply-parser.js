@@ -91,6 +91,25 @@
     return readers.every(Boolean) ? readers : null;
   }
 
+  function getNormalReaders(properties) {
+    const names = [["nx", "normal_x"], ["ny", "normal_y"], ["nz", "normal_z"]];
+    const readers = names.map((aliases) => {
+      const index = properties.findIndex((property) => !property.list && aliases.includes(property.name));
+      if (index < 0) return null;
+      return { index, type: properties[index].type };
+    });
+    return readers.every(Boolean) ? readers : null;
+  }
+
+  function writeNormalizedVector(target, offset, x, y, z) {
+    const length = Math.hypot(x, y, z);
+    if (!Number.isFinite(length) || length <= Number.EPSILON) return false;
+    target[offset] = x / length;
+    target[offset + 1] = y / length;
+    target[offset + 2] = z / length;
+    return true;
+  }
+
   function normalizeColor(value, type) {
     if (!Number.isFinite(value)) throw new Error("В PLY найдены некорректные цвета вершин.");
     const scaled = (type === "float" || type === "float32" || type === "double" || type === "float64")
@@ -220,11 +239,14 @@
       throw new Error("Списки свойств вершин PLY не поддерживаются.");
     }
     const colorReaders = getColorReaders(vertex.properties);
+    const normalReaders = getNormalReaders(vertex.properties);
 
     const pointCloud = !face || face.count === 0;
     const previewVertexCount = pointCloud ? Math.min(vertex.count, MAX_PREVIEW_POINTS) : vertex.count;
     const positions = new Float32Array(previewVertexCount * 3);
     const colors = colorReaders ? new Uint8Array(previewVertexCount * 3) : null;
+    const vertexNormals = normalReaders && !pointCloud ? new Float32Array(previewVertexCount * 3) : null;
+    let normalsValid = Boolean(vertexNormals);
     let cursor = dataOffset;
     for (let index = 0; index < vertex.count; index += 1) {
       const record = nextAsciiRecord(bytes, cursor);
@@ -252,6 +274,16 @@
           const value = Number(record.values[reader.index]);
           const color = normalizeColor(value, reader.type);
           if (sampledOffset >= 0) colors[sampleIndex * 3 + channel] = color;
+        }
+      }
+      if (normalsValid) {
+        const x = Number(record.values[normalReaders[0].index]);
+        const y = Number(record.values[normalReaders[1].index]);
+        const z = Number(record.values[normalReaders[2].index]);
+        if (sampledOffset >= 0) {
+          normalsValid = writeNormalizedVector(vertexNormals, sampledOffset, x, y, z);
+        } else if (![x, y, z].every(Number.isFinite)) {
+          normalsValid = false;
         }
       }
     }
@@ -323,6 +355,7 @@
     return {
       positions,
       colors,
+      vertexNormals: normalsValid ? vertexNormals : null,
       triangleColors: triangleColors.length ? new Uint8Array(triangleColors) : null,
       triangles: new Uint32Array(triangles),
       bounds,
@@ -342,6 +375,7 @@
     const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     const offsets = { x: null, y: null, z: null };
     const colorOffsets = { red: null, r: null, green: null, g: null, blue: null, b: null };
+    const normalOffsets = { nx: null, normal_x: null, ny: null, normal_y: null, nz: null, normal_z: null };
     let vertexStride = 0;
 
     for (const property of vertex.properties) {
@@ -351,6 +385,9 @@
       if (Object.hasOwn(offsets, property.name)) offsets[property.name] = { offset: vertexStride, type: property.type };
       if (Object.hasOwn(colorOffsets, property.name)) {
         colorOffsets[property.name] = { offset: vertexStride, type: property.type };
+      }
+      if (Object.hasOwn(normalOffsets, property.name)) {
+        normalOffsets[property.name] = { offset: vertexStride, type: property.type };
       }
       vertexStride += scalar.size;
     }
@@ -368,6 +405,14 @@
       colorOffsets.blue || colorOffsets.b,
     ];
     const colors = colorProperties.every(Boolean) ? new Uint8Array(previewVertexCount * 3) : null;
+    const normalProperties = [
+      normalOffsets.nx || normalOffsets.normal_x,
+      normalOffsets.ny || normalOffsets.normal_y,
+      normalOffsets.nz || normalOffsets.normal_z,
+    ];
+    const vertexNormals = normalProperties.every(Boolean) && !pointCloud
+      ? new Float32Array(previewVertexCount * 3) : null;
+    let normalsValid = Boolean(vertexNormals);
     const coordinateReaders = ["x", "y", "z"].map((key) => ({
       offset: offsets[key].offset, read: scalarTypes[offsets[key].type].read,
     }));
@@ -395,6 +440,17 @@
           const value = scalarTypes[property.type].read(data, cursor + property.offset, littleEndian);
           const color = normalizeColor(value, property.type);
           if (sampledOffset >= 0) colors[sampleIndex * 3 + channel] = color;
+        }
+      }
+      if (normalsValid) {
+        const xProperty = normalProperties[0], yProperty = normalProperties[1], zProperty = normalProperties[2];
+        const x = scalarTypes[xProperty.type].read(data, cursor + xProperty.offset, littleEndian);
+        const y = scalarTypes[yProperty.type].read(data, cursor + yProperty.offset, littleEndian);
+        const z = scalarTypes[zProperty.type].read(data, cursor + zProperty.offset, littleEndian);
+        if (sampledOffset >= 0) {
+          normalsValid = writeNormalizedVector(vertexNormals, sampledOffset, x, y, z);
+        } else if (![x, y, z].every(Number.isFinite)) {
+          normalsValid = false;
         }
       }
       cursor += vertexStride;
@@ -469,6 +525,7 @@
     return {
       positions,
       colors,
+      vertexNormals: normalsValid ? vertexNormals : null,
       triangleColors: triangleColors.length ? new Uint8Array(triangleColors) : null,
       triangles: new Uint32Array(triangles),
       bounds,
