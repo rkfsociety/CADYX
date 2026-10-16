@@ -6,18 +6,18 @@
     int8: { size: 1, read: (view, offset) => view.getInt8(offset) },
     uchar: { size: 1, read: (view, offset) => view.getUint8(offset) },
     uint8: { size: 1, read: (view, offset) => view.getUint8(offset) },
-    short: { size: 2, read: (view, offset) => view.getInt16(offset, true) },
-    int16: { size: 2, read: (view, offset) => view.getInt16(offset, true) },
-    ushort: { size: 2, read: (view, offset) => view.getUint16(offset, true) },
-    uint16: { size: 2, read: (view, offset) => view.getUint16(offset, true) },
-    int: { size: 4, read: (view, offset) => view.getInt32(offset, true) },
-    int32: { size: 4, read: (view, offset) => view.getInt32(offset, true) },
-    uint: { size: 4, read: (view, offset) => view.getUint32(offset, true) },
-    uint32: { size: 4, read: (view, offset) => view.getUint32(offset, true) },
-    float: { size: 4, read: (view, offset) => view.getFloat32(offset, true) },
-    float32: { size: 4, read: (view, offset) => view.getFloat32(offset, true) },
-    double: { size: 8, read: (view, offset) => view.getFloat64(offset, true) },
-    float64: { size: 8, read: (view, offset) => view.getFloat64(offset, true) },
+    short: { size: 2, read: (view, offset, littleEndian) => view.getInt16(offset, littleEndian) },
+    int16: { size: 2, read: (view, offset, littleEndian) => view.getInt16(offset, littleEndian) },
+    ushort: { size: 2, read: (view, offset, littleEndian) => view.getUint16(offset, littleEndian) },
+    uint16: { size: 2, read: (view, offset, littleEndian) => view.getUint16(offset, littleEndian) },
+    int: { size: 4, read: (view, offset, littleEndian) => view.getInt32(offset, littleEndian) },
+    int32: { size: 4, read: (view, offset, littleEndian) => view.getInt32(offset, littleEndian) },
+    uint: { size: 4, read: (view, offset, littleEndian) => view.getUint32(offset, littleEndian) },
+    uint32: { size: 4, read: (view, offset, littleEndian) => view.getUint32(offset, littleEndian) },
+    float: { size: 4, read: (view, offset, littleEndian) => view.getFloat32(offset, littleEndian) },
+    float32: { size: 4, read: (view, offset, littleEndian) => view.getFloat32(offset, littleEndian) },
+    double: { size: 8, read: (view, offset, littleEndian) => view.getFloat64(offset, littleEndian) },
+    float64: { size: 8, read: (view, offset, littleEndian) => view.getFloat64(offset, littleEndian) },
   };
 
   function parseHeader(bytes) {
@@ -49,12 +49,15 @@
       }
     }
 
-    if (format !== "binary_little_endian") throw new Error("Предпросмотр поддерживает только двоичные PLY-файлы с порядком байтов от младшего к старшему.");
+    if (format !== "binary_little_endian" && format !== "binary_big_endian") {
+      throw new Error("Предпросмотр поддерживает только двоичные PLY-файлы.");
+    }
+    const littleEndian = format === "binary_little_endian";
     const vertex = elements[0];
     const face = elements[1]?.name === "face" ? elements[1] : null;
     if (!vertex || vertex.name !== "vertex") throw new Error("В PLY не найдены вершины.");
     if (elements.length > (face ? 2 : 1)) throw new Error("PLY содержит неподдерживаемые типы элементов.");
-    return { dataOffset: lineEnd + 1, vertex, face };
+    return { dataOffset: lineEnd + 1, vertex, face, littleEndian };
   }
 
   function triangulatePolygon(indices, positions, triangles) {
@@ -156,7 +159,7 @@
   function parsePly(buffer) {
     const bytes = new Uint8Array(buffer);
     const data = new DataView(buffer);
-    const { dataOffset, vertex, face } = parseHeader(bytes);
+    const { dataOffset, vertex, face, littleEndian } = parseHeader(bytes);
     if (vertex.count === 0) throw new Error("В PLY нет вершин для предпросмотра.");
     const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     const offsets = { x: null, y: null, z: null };
@@ -188,7 +191,7 @@
       const sampledOffset = sampleIndex !== previousSampleIndex ? sampleIndex * 3 : -1;
       for (let axis = 0; axis < 3; axis += 1) {
         const property = coordinateReaders[axis];
-        const value = property.read(data, cursor + property.offset);
+        const value = property.read(data, cursor + property.offset, littleEndian);
         if (!Number.isFinite(value)) throw new Error("В PLY найдены некорректные координаты.");
         const previewValue = Math.fround(value);
         if (!Number.isFinite(previewValue)) {
@@ -217,7 +220,7 @@
             const itemReader = scalarTypes[property.itemType];
             if (!countReader || !itemReader) throw new Error("Неподдерживаемое свойство граней PLY.");
             if (countReader.size > buffer.byteLength - cursor) throw new Error("Данные граней PLY обрезаны.");
-            const itemCount = countReader.read(data, cursor);
+            const itemCount = countReader.read(data, cursor, littleEndian);
             cursor += countReader.size;
             if (!Number.isSafeInteger(itemCount) || itemCount < 0 || itemCount > vertex.count + 1) {
               throw new Error("Некорректная грань в файле PLY.");
@@ -231,7 +234,7 @@
             }
             const polygon = [];
             for (let item = 0; item < itemCount; item += 1) {
-              const index = itemReader.read(data, cursor);
+              const index = itemReader.read(data, cursor, littleEndian);
               if (!Number.isSafeInteger(index) || index < 0 || index >= vertex.count) {
                 throw new Error("Грань PLY ссылается на отсутствующую вершину.");
               }
