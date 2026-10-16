@@ -60,9 +60,7 @@ def _point_triangle_distance_sq(point: list[float], a: tuple[float, float, float
 
 @dataclass(slots=True)
 class _TriangleRecord:
-    a: tuple[float, float, float]
-    b: tuple[float, float, float]
-    c: tuple[float, float, float]
+    offset: int
     low: tuple[float, float, float]
     high: tuple[float, float, float]
     center: tuple[float, float, float]
@@ -88,7 +86,7 @@ def _triangle_records(mesh: dict[str, list[float] | list[int]]) -> list[_Triangl
         low = tuple(min(vertex[axis] for vertex in vertices) for axis in range(3))
         high = tuple(max(vertex[axis] for vertex in vertices) for axis in range(3))
         center = tuple(sum(vertex[axis] for vertex in vertices) / 3.0 for axis in range(3))
-        records.append(_TriangleRecord(vertices[0], vertices[1], vertices[2], low, high, center))
+        records.append(_TriangleRecord(offset, low, high, center))
     if not records:
         raise ValidationError("Comparison target has no triangles.")
     return records
@@ -138,26 +136,35 @@ def _build_bvh(records: list[_TriangleRecord], start: int = 0, end: int | None =
         right=_build_bvh(records, middle, end),
     )
 
-def _nearest_sq(node: _BVHNode, point: list[float], best: float = math.inf) -> float:
+def _nearest_sq(node: _BVHNode, point: list[float], positions: list[float], triangles: list[int],
+                best: float = math.inf) -> float:
     if _bbox_distance_sq(point, node.low, node.high) >= best:
         return best
     if node.triangles is not None:
         for record in node.triangles:
             if _bbox_distance_sq(point, record.low, record.high) < best:
-                best = min(best, _point_triangle_distance_sq(point, record.a, record.b, record.c))
+                offset = record.offset
+                a_index, b_index, c_index = (triangles[offset + corner] * 3 for corner in range(3))
+                a = (float(positions[a_index]), float(positions[a_index + 1]), float(positions[a_index + 2]))
+                b = (float(positions[b_index]), float(positions[b_index + 1]), float(positions[b_index + 2]))
+                c = (float(positions[c_index]), float(positions[c_index + 1]), float(positions[c_index + 2]))
+                best = min(best, _point_triangle_distance_sq(point, a, b, c))
         return best
     assert node.left is not None and node.right is not None
     left_distance = _bbox_distance_sq(point, node.left.low, node.left.high)
     right_distance = _bbox_distance_sq(point, node.right.low, node.right.high)
     first, second = (node.left, node.right) if left_distance <= right_distance else (node.right, node.left)
-    best = _nearest_sq(first, point, best)
-    return _nearest_sq(second, point, best)
+    best = _nearest_sq(first, point, positions, triangles, best)
+    return _nearest_sq(second, point, positions, triangles, best)
 
 def _deviation(source_positions: list[float], target_mesh: dict[str, list[float] | list[int]],
                max_samples: int, tolerance: float | None) -> dict[str, Any]:
     points = _sample_points(source_positions, max_samples)
     bvh = _build_bvh(_triangle_records(target_mesh))
-    distances = [math.sqrt(max(0.0, _nearest_sq(bvh, point))) for point in points]
+    positions = target_mesh["positions"]
+    triangles = target_mesh["triangles"]
+    assert isinstance(positions, list) and isinstance(triangles, list)
+    distances = [math.sqrt(max(0.0, _nearest_sq(bvh, point, positions, triangles))) for point in points]
     ordered = sorted(distances)
     p95 = ordered[min(len(ordered) - 1, max(0, math.ceil(len(ordered) * 0.95) - 1))]
     result: dict[str, Any] = {
