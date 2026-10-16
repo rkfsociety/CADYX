@@ -110,6 +110,19 @@ class CommandSystem:
             return self._cut_bodies(document, command, progress=progress)
         if kind == "remove_body":
             return self._remove_body(document, command)
+        if kind == "clear_model":
+            if command.keys() != {"type"}:
+                raise ValidationError("clear_model does not accept additional fields.")
+            removed_object_count = len(document.objects)
+            removed_body_count = sum(item.get("type") == "body" for item in document.objects)
+            removed_sketch_count = sum(item.get("type") == "sketch" for item in document.objects)
+            document.objects.clear()
+            return {
+                "removed_object_count": removed_object_count,
+                "removed_body_count": removed_body_count,
+                "removed_sketch_count": removed_sketch_count,
+                "project_files_preserved": True,
+            }
         if kind == "sweep_sketch":
             return self._sweep_sketch(document, command, progress=progress)
         if kind == "fillet_edges":
@@ -1499,8 +1512,8 @@ class CommandSystem:
         sketch_id = command.get("sketch_id")
         sketch = self._find_sketch(document, sketch_id)
         count = command.get("count")
-        if type(count) is not int or not 2 <= count <= 64:
-            raise ValidationError("Pattern count must be an integer from 2 to 64, including the source.")
+        if type(count) is not int or count < 2:
+            raise ValidationError("Pattern count must be an integer of at least 2, including the source.")
         mode = command.get("mode")
         transforms: list[Callable[[float, float], tuple[float, float]]] = []
         if mode == "linear":
@@ -1790,6 +1803,9 @@ class CommandSystem:
         name = command.get("name", Path(filename).stem)
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
             raise ValidationError("STEP model name must be a non-empty string of at most 120 characters.")
+        show_in_preview = command.get("show_in_preview", True)
+        if type(show_in_preview) is not bool:
+            raise ValidationError("show_in_preview must be a boolean.")
         source_path = self.resolve_project_file(project_id, filename)
         source_size = source_path.stat().st_size
         if source_size > 64 * 1024 * 1024:
@@ -1816,6 +1832,7 @@ class CommandSystem:
                 "name": name.strip(),
                 "feature_ids": [feature_id],
                 "geometry": geometry,
+                "visible": show_in_preview,
             },
             {
                 "id": feature_id,
@@ -1831,6 +1848,7 @@ class CommandSystem:
             "feature_id": feature_id,
             "source": source_record,
             "metrics": metrics,
+            "visible": show_in_preview,
         }
 
     def _export_brep(
@@ -2150,6 +2168,55 @@ class CommandSystem:
                 feature["parameters"], feature["geometry"], body["geometry"] = parameters, geometry, geometry
                 self._rebuild_derived_features(document, {body["id"]}, progress=progress)
                 return {"feature_id": feature_id, "parameter": parameter_name, "value": value, "geometry": geometry}
+            if feature.get("operation") in {"circular_pattern_body", "hole", "boss"}:
+                operation = feature["operation"]
+                parameters = dict(feature.get("parameters", {}))
+                if operation == "circular_pattern_body" and parameter_name == "count":
+                    value = command.get("value")
+                    if type(value) is not int or value < 2:
+                        raise ValidationError("count must be an integer of at least 2.")
+                    parameters["count"] = value
+                    if parameters.get("full_circle") is True:
+                        parameters["angle_step_degrees"] = 360.0 / value
+                elif operation == "circular_pattern_body" and parameter_name == "full_circle":
+                    value = command.get("value")
+                    if type(value) is not bool:
+                        raise ValidationError("full_circle must be a boolean.")
+                    parameters["full_circle"] = value
+                    if value:
+                        parameters["angle_step_degrees"] = 360.0 / parameters["count"]
+                elif operation == "circular_pattern_body" and parameter_name == "angle_step_degrees":
+                    value = _number(command.get("value"), parameter_name, nonzero=True)
+                    parameters[parameter_name] = value
+                    parameters["full_circle"] = False
+                elif operation in {"hole", "boss"} and parameter_name in {"diameter", "depth"}:
+                    value = _number(command.get("value"), parameter_name, positive=True)
+                    parameters[parameter_name] = value
+                else:
+                    supported = ("count, angle_step_degrees, and full_circle" if operation == "circular_pattern_body"
+                                 else "diameter and depth")
+                    raise ValidationError(f"Only {supported} parameters are supported for this feature.")
+                source = next((item for item in document.objects
+                               if item.get("id") == feature.get("source_body_id") and item.get("type") == "body"), None)
+                body = next((item for item in document.objects
+                             if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+                if source is None or body is None:
+                    raise ValidationError("Advanced feature refers to a missing source or result body.")
+                operation_id = {"circular_pattern_body": 7, "hole": 9, "boss": 10}[operation]
+                if operation == "circular_pattern_body":
+                    values = [float(parameters["count"]), *parameters["axis_origin"],
+                              *parameters["axis_direction"], parameters["angle_step_degrees"]]
+                else:
+                    values = [*parameters["origin"], *parameters["axis"],
+                              parameters["diameter"], parameters["depth"]]
+                if progress is not None:
+                    progress({"phase": operation})
+                from .advanced_features import _advanced_native
+                geometry = _advanced_native(source["geometry"], operation_id, values)
+                feature["parameters"], feature["geometry"], body["geometry"] = parameters, geometry, geometry
+                self._rebuild_derived_features(document, {body["id"]}, progress=progress)
+                return {"feature_id": feature_id, "parameter": parameter_name,
+                        "value": value, "geometry": geometry}
             raise NotFoundError("Editable feature was not found.")
         if parameter_name not in {"width", "height", "depth"}:
             raise ValidationError("Only box width, height, and depth parameters are supported.")
@@ -2261,20 +2328,20 @@ class CommandSystem:
     ) -> dict[str, Any]:
         section_groups = command.get("section_groups")
         if section_groups is not None:
-            if (not isinstance(section_groups, list) or not 2 <= len(section_groups) <= 64
-                    or any(not isinstance(group, list) or not 1 <= len(group) <= 16
+            if (not isinstance(section_groups, list) or len(section_groups) < 2
+                    or any(not isinstance(group, list) or not group
                            or any(not isinstance(value, str) for value in group) for group in section_groups)):
-                raise ValidationError("Loft section_groups needs 2 to 64 stations with 1 to 16 sketch IDs each.")
+                raise ValidationError("Loft section_groups needs at least two stations with one or more sketch IDs each.")
             sketch_ids = [sketch_id for group in section_groups for sketch_id in group]
             if len(set(sketch_ids)) != len(sketch_ids):
                 raise ValidationError("Loft section_groups must contain unique sketch IDs.")
         else:
             sketch_ids = command.get("sketch_ids")
             section_groups = [[sketch_id] for sketch_id in sketch_ids] if isinstance(sketch_ids, list) else None
-        if (not isinstance(sketch_ids, list) or not 2 <= len(sketch_ids) <= 64
+        if (not isinstance(sketch_ids, list) or len(sketch_ids) < 2
                 or any(not isinstance(value, str) for value in sketch_ids)
                 or len(set(sketch_ids)) != len(sketch_ids)):
-            raise ValidationError("Loft needs 2 to 64 unique section sketch IDs.")
+            raise ValidationError("Loft needs at least two unique section sketch IDs.")
         name = command.get("name", "Loft")
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
             raise ValidationError("Feature name must be a non-empty string of at most 120 characters.")
@@ -2351,10 +2418,10 @@ class CommandSystem:
         if feature is None:
             raise NotFoundError("Loft feature was not found.")
         groups = command.get("section_groups")
-        if (not isinstance(groups, list) or not 2 <= len(groups) <= 64
-                or any(not isinstance(group, list) or not 1 <= len(group) <= 16
+        if (not isinstance(groups, list) or len(groups) < 2
+                or any(not isinstance(group, list) or not group
                        or any(not isinstance(sketch_id, str) for sketch_id in group) for group in groups)):
-            raise ValidationError("section_groups needs 2 to 64 stations with 1 to 16 sketch IDs each.")
+            raise ValidationError("section_groups needs at least two stations with one or more sketch IDs each.")
         flattened = [sketch_id for group in groups for sketch_id in group]
         if len(set(flattened)) != len(flattened):
             raise ValidationError("Loft section_groups must contain unique sketch IDs.")
@@ -2416,7 +2483,7 @@ class CommandSystem:
             return self.kernel.create_revolved_profile(profile, angle_degrees=parameters["angle_degrees"])
         if operation == "loft_sketches":
             sketch_ids = parameters.get("section_sketch_ids")
-            if (not isinstance(sketch_ids, list) or not 2 <= len(sketch_ids) <= 64
+            if (not isinstance(sketch_ids, list) or len(sketch_ids) < 2
                     or not isinstance(parameters.get("section_offsets"), list)):
                 raise ValidationError("Loft feature section references are invalid.")
             groups = parameters.get("section_sketch_groups", [[value] for value in sketch_ids])
@@ -2585,6 +2652,8 @@ class CommandSystem:
             operation = feature.get("operation")
             if operation == "fillet_edges":
                 sources = {feature.get("source_body_id")}
+            elif operation in {"linear_pattern_body", "circular_pattern_body", "hole", "boss"}:
+                sources = {feature.get("source_body_id")}
             elif operation in {"fuse_bodies", "cut_bodies"}:
                 sources = {feature.get("base_body_id"), feature.get("tool_body_id")}
             else:
@@ -2603,6 +2672,24 @@ class CommandSystem:
                     raise ValidationError("Fillet feature refers to a missing source body.")
                 geometry = self.kernel.create_fillet(source["geometry"],
                     edge_indices=feature["edge_indices"], radius=feature["parameters"]["radius"])
+            elif operation in {"linear_pattern_body", "circular_pattern_body", "hole", "boss"}:
+                source = by_id.get(feature.get("source_body_id"))
+                if source is None or source.get("type") != "body":
+                    raise ValidationError("Advanced feature refers to a missing source body.")
+                parameters = feature["parameters"]
+                if operation == "linear_pattern_body":
+                    operation_id = 6
+                    values = [float(parameters["count"]), *parameters["offset"]]
+                elif operation == "circular_pattern_body":
+                    operation_id = 7
+                    values = [float(parameters["count"]), *parameters["axis_origin"],
+                              *parameters["axis_direction"], parameters["angle_step_degrees"]]
+                else:
+                    operation_id = 9 if operation == "hole" else 10
+                    values = [*parameters["origin"], *parameters["axis"],
+                              parameters["diameter"], parameters["depth"]]
+                from .advanced_features import _advanced_native
+                geometry = _advanced_native(source["geometry"], operation_id, values)
             elif operation == "fuse_bodies":
                 base, tool = by_id.get(feature.get("base_body_id")), by_id.get(feature.get("tool_body_id"))
                 if any(item is None or item.get("type") != "body" for item in (base, tool)):

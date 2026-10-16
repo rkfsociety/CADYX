@@ -223,25 +223,54 @@ def _match_loft_contours(
 
     left_is_shorter = len(left) <= len(right)
     short, long = (left, right) if left_is_shorter else (right, left)
-
-    @lru_cache(maxsize=None)
-    def assign(index: int, used: int) -> tuple[float, tuple[int, ...]]:
-        if index == len(short):
-            return 0.0, ()
-        best_cost = math.inf
-        best_path: tuple[int, ...] = ()
-        for long_index, candidate in enumerate(long):
-            bit = 1 << long_index
-            if used & bit:
-                continue
-            pair_cost = cost(short[index], candidate)
-            tail_cost, tail_path = assign(index + 1, used | bit)
-            total = pair_cost + tail_cost
-            if total < best_cost:
-                best_cost, best_path = total, (long_index, *tail_path)
-        return best_cost, best_path
-
-    _, assignment = assign(0, 0)
+    # Rectangular Hungarian assignment keeps matching polynomial as contour
+    # counts grow, instead of the former bitmask search that scaled exponentially.
+    row_count, column_count = len(short), len(long)
+    costs = [[cost(source, target) for target in long] for source in short]
+    row_potentials = [0.0] * (row_count + 1)
+    column_potentials = [0.0] * (column_count + 1)
+    matched_row = [0] * (column_count + 1)
+    previous_column = [0] * (column_count + 1)
+    for row in range(1, row_count + 1):
+        matched_row[0] = row
+        current_column = 0
+        minimum_cost = [math.inf] * (column_count + 1)
+        visited = [False] * (column_count + 1)
+        while True:
+            visited[current_column] = True
+            current_row = matched_row[current_column]
+            delta = math.inf
+            next_column = 0
+            for column in range(1, column_count + 1):
+                if visited[column]:
+                    continue
+                reduced_cost = (costs[current_row - 1][column - 1]
+                                - row_potentials[current_row] - column_potentials[column])
+                if reduced_cost < minimum_cost[column]:
+                    minimum_cost[column] = reduced_cost
+                    previous_column[column] = current_column
+                if minimum_cost[column] < delta:
+                    delta = minimum_cost[column]
+                    next_column = column
+            for column in range(column_count + 1):
+                if visited[column]:
+                    row_potentials[matched_row[column]] += delta
+                    column_potentials[column] -= delta
+                else:
+                    minimum_cost[column] -= delta
+            current_column = next_column
+            if matched_row[current_column] == 0:
+                break
+        while True:
+            prior = previous_column[current_column]
+            matched_row[current_column] = matched_row[prior]
+            current_column = prior
+            if current_column == 0:
+                break
+    assignment = [0] * row_count
+    for column in range(1, column_count + 1):
+        if matched_row[column]:
+            assignment[matched_row[column] - 1] = column - 1
     pairs = ([(i, j) for i, j in enumerate(assignment)] if left_is_shorter
              else [(j, i) for i, j in enumerate(assignment)])
     matched_left = {i for i, _ in pairs}
@@ -366,9 +395,9 @@ class OCCTKernelAdapter:
         alignment: str = "minimum-displacement-v2",
         compute_volume: bool = True,
     ) -> dict[str, Any]:
-        if (not isinstance(sections, list) or not 2 <= len(sections) <= 64
+        if (not isinstance(sections, list) or len(sections) < 2
                 or not isinstance(section_offsets, list) or len(section_offsets) != len(sections)):
-            raise ValidationError("A loft needs 2 to 64 paired sketch sections and offsets.")
+            raise ValidationError("A loft needs at least two paired sketch sections and offsets.")
         if alignment not in {
                 "independent-start-v1", "minimum-displacement-v1", "minimum-displacement-v2"}:
             raise ValidationError("Loft profile alignment mode is unsupported.")
@@ -414,9 +443,9 @@ class OCCTKernelAdapter:
         compute_volume: bool = True,
     ) -> dict[str, Any]:
         """Build and fuse adjacent-station loft branches when section contour counts change."""
-        if (not isinstance(section_groups, list) or not 2 <= len(section_groups) <= 64
+        if (not isinstance(section_groups, list) or len(section_groups) < 2
                 or not isinstance(section_offsets, list) or len(section_offsets) != len(section_groups)):
-            raise ValidationError("A grouped loft needs 2 to 64 paired stations and offsets.")
+            raise ValidationError("A grouped loft needs at least two paired stations and offsets.")
         if type(compute_volume) is not bool:
             raise ValidationError("compute_volume must be a boolean.")
         offsets = [_finite_coordinate(value, "Loft section offset") for value in section_offsets]
@@ -425,8 +454,8 @@ class OCCTKernelAdapter:
 
         normalized_groups: list[list[tuple[list[dict[str, float]], float, float, float]]] = []
         for group in section_groups:
-            if not isinstance(group, list) or not 1 <= len(group) <= 16:
-                raise ValidationError("Each loft station needs 1 to 16 closed contour profiles.")
+            if not isinstance(group, list) or not group:
+                raise ValidationError("Each loft station needs one or more closed contour profiles.")
             normalized_group = []
             for section in group:
                 points, _ = _profile_values(section, "XZ")

@@ -181,8 +181,8 @@ class NativeKernel:
         return self._geometry_graph(geometry, mesh=mesh, topology=topology)
 
     def loft(self, sections):
-        if not isinstance(sections, list) or not 2 <= len(sections) <= 64:
-            raise ValidationError("A loft needs between 2 and 64 sketch sections.")
+        if not isinstance(sections, list) or len(sections) < 2:
+            raise ValidationError("A loft needs at least two sketch sections.")
         normalized = []
         for section in sections:
             if not isinstance(section, list) or len(section) < 3:

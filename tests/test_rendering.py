@@ -43,6 +43,56 @@ class RenderingTests(unittest.TestCase):
             volume += (a[0]*(b[1]*c[2]-b[2]*c[1]) + a[1]*(b[2]*c[0]-b[0]*c[2]) + a[2]*(b[0]*c[1]-b[1]*c[0])) / 6
         self.assertAlmostEqual(volume, 30)
 
+    def test_hidden_imported_reference_is_not_in_viewport_or_scene_bounds(self):
+        document = Document.create()
+        body_id = f"body:{uuid4()}"
+        document.objects = [{
+            "id": body_id,
+            "type": "body",
+            "name": "Reference STEP",
+            "feature_ids": [],
+            "geometry": self.core.kernel.create_box(width=2, height=3, depth=5),
+            "visible": False,
+        }]
+
+        scene = render_scene(document, self.core.kernel)
+
+        self.assertEqual(scene["objects"], [])
+        self.assertIsNone(scene["bounds"])
+
+    def test_body_visibility_flag_must_be_boolean(self):
+        document = Document.create()
+        document.objects = [{
+            "id": f"body:{uuid4()}",
+            "type": "body",
+            "name": "Reference STEP",
+            "feature_ids": [],
+            "geometry": self.core.kernel.create_box(width=2, height=3, depth=5),
+            "visible": "false",
+        }]
+
+        with self.assertRaisesRegex(ValidationError, "Body visible must be a boolean"):
+            document.validate()
+
+    def test_pattern_source_body_is_hidden_from_the_scene(self):
+        document = Document.create()
+        source_id, result_id = f"body:{uuid4()}", f"body:{uuid4()}"
+        feature_id = f"feature:{uuid4()}"
+        geometry = self.core.kernel.create_box(width=2, height=3, depth=5)
+        document.objects = [
+            {"id": source_id, "type": "body", "name": "Seed", "feature_ids": [],
+             "geometry": geometry},
+            {"id": result_id, "type": "body", "name": "Pattern", "feature_ids": [feature_id],
+             "geometry": geometry},
+            {"id": feature_id, "type": "feature", "body_id": result_id,
+             "source_body_id": source_id, "operation": "circular_pattern_body",
+             "parameters": {"count": 10}, "geometry": geometry},
+        ]
+
+        scene = render_scene(document, self.core.kernel)
+
+        self.assertEqual([item["object_id"] for item in scene["objects"]], [result_id])
+
     def test_viewport_scene_cache_reuses_same_revision_and_invalidates_after_edit(self):
         result = self.command({"type": "create_box", "width": 2, "height": 3, "depth": 5})
         first = self.core.render_project(self.project)

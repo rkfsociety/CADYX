@@ -71,6 +71,9 @@ class CadyxMCPServerTests(unittest.TestCase):
             "command": {"type": "create_box", "name": "Test box", "width": 10, "height": 8, "depth": 4},
         })
         self.assertEqual(first["revision"], 1)
+        self.assertEqual(first["command_result"]["document"]["object_counts"], {"body": 1, "feature": 1})
+        self.assertNotIn("objects", first["command_result"]["document"])
+        self.assertEqual(first["command_result"]["history_entry"]["result"]["body_id"].split(":", 1)[0], "body")
         detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
         self.assertEqual(detail["lock"]["state"], "FREE")
         self.assertEqual(detail["document"]["revision"], 1)

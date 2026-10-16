@@ -214,7 +214,7 @@ their respective human/agent edit leases. Results below appear inside
   copied. Returns the source closure ids and created point, line, circle,
   ellipse and object ids.
 - `pattern_sketch_elements`: `sketch_id`, non-empty `object_ids`, `mode`
-  (`linear` or `circular`), and `count` from 2 through 64 including the source.
+  (`linear` or `circular`), and `count` of at least 2 including the source.
   Linear mode uses `offset_x` / `offset_y` per instance. Circular mode uses
   `center_x`, `center_y` and `angle_step_degrees` per instance. It copies the
   the same point/line/circle/spline dependency closure as mirroring; ellipses are
@@ -241,6 +241,10 @@ their respective human/agent edit leases. Results below appear inside
   temporary STEP reference; after saving the document, CADYX removes its staged
   direct project file and leaves the original local source untouched. The
   imported body must own exactly one `import_step` feature.
+- `clear_model`: removes every document model object in one atomic command,
+  preserving the document identity, project directory, command history, and
+  staged project files. Use when the user explicitly requests a clean model;
+  it does not delete source files or the project itself.
 - `import_step`: `file` names a direct `.step` or `.stp` file in the current
   CADYX project folder; optional `name` overrides the body name. It imports one
   solid through OCCT, stores its editable B-rep in the document, and returns the
@@ -355,8 +359,9 @@ sample budget shared among all contours.
 
 `loft_sketches` accepts ordered `sketch_ids` for one contour per station or
 ordered `section_groups` for stations with multiple section contours, plus
-optional `name`. A group contains 1–16 XZ section sketches that share one finite
-`section_offset`; station offsets must strictly increase. `update_loft_sections`
+optional `name`. A group contains one or more XZ section sketches that share one finite
+`section_offset`; station offsets must strictly increase. Loft features have no
+fixed station or contour count limit. `update_loft_sections`
 replaces these groups on an existing loft feature atomically. Single-contour
 lofts equalize perimeter samples, normalize winding, then align cyclic starts by
 minimum sampled vertex displacement. The current
@@ -415,11 +420,21 @@ source B-rep, selected current edge indices, and radius. If an upstream edit
 changes topology or makes the requested radius impossible, the dependent rebuild
 fails atomically and leaves the saved model unchanged.
 
+`linear_pattern_body`, `circular_pattern_body`, `hole`, and `boss` retain their
+source body and operation parameters. Editing a source sketch or an earlier
+feature rebuilds these dependent operations in document order. `set_parameter`
+can edit a circular pattern's `count`, `angle_step_degrees`, or `full_circle`,
+and a hole or boss's `diameter` or `depth`. A circular pattern with
+`full_circle: true` must use `angle_step_degrees = 360/count`; changing its
+count updates the step so the array remains distributed over one full
+revolution. Pattern source bodies are intermediate history and are hidden from
+the viewport and object tree.
+
 Sweep sketches used by a feature and all inactive sketches are hidden from the
 user-facing tree and viewport. Fillet and fuse source bodies remain in document
 history for editing but are hidden from the viewport and object tree; only
 unconsumed results are displayed. Solid source-sketch edits rebuild downstream
-sweep, fillet, and fuse features in document order.
+sweep, pattern, hole/boss, fillet, and Boolean features in document order.
 
 ## STEP import and editable B-reps
 
@@ -430,6 +445,10 @@ viewport triangles are only a display tessellation. The project feature records
 the source filename, SHA-256, byte length, and source geometry metrics. The saved
 B-rep is self-contained and remains usable if the source file later moves. Source
 and serialized B-rep payloads are limited to 64 MiB each.
+Optional `show_in_preview` defaults to `true`; set it to `false` when importing
+a reference that must remain available for section analysis without appearing
+in the viewport or project thumbnail. Existing documents without an explicit
+body visibility flag remain visible.
 
 The Agent API can stage a local STEP source into a project with
 `POST /api/v1/agent/projects/{id}/files/{name}` using

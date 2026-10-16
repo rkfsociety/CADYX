@@ -45,7 +45,7 @@ SCAN_REVERSE_CAPABILITIES = (
         "required": ["body_id", "offsets"],
         "optional": ["normal_axis", "join_tolerance", "simplify_tolerance", "max_points", "max_contours", "min_area", "min_perimeter", "name"],
         "constraints": [
-            "offsets contains 1-64 strictly increasing finite stations.",
+            "offsets contains strictly increasing finite stations.",
             "Y-normal sections are directly compatible with loft_sketches, including multi-contour section_groups.",
         ],
     },
@@ -158,10 +158,11 @@ def _section_at(self, document, body: dict[str, Any], offset: float, options: di
             continue
         contours.append((points, metrics))
     contours.sort(key=lambda item: item[1]["area"], reverse=True)
-    dropped = max(0, len(contours) - options["max_contours"])
+    max_contours = options["max_contours"]
+    dropped = max(0, len(contours) - max_contours) if max_contours is not None else 0
     if dropped:
         rejected += dropped
-        contours = contours[:options["max_contours"]]
+        contours = contours[:max_contours]
     if not contours:
         raise ValidationError(f"Scan section at {offset:g} produced no closed contour after filtering.")
 
@@ -214,10 +215,10 @@ def _create_sections(self, document, command: dict[str, Any], *, progress=None, 
         offsets = [_finite(command.get("offset"), "offset")]
     else:
         raw_offsets = command.get("offsets")
-        if (not isinstance(raw_offsets, list) or not 1 <= len(raw_offsets) <= 64
+        if (not isinstance(raw_offsets, list) or not raw_offsets
                 or any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value))
                        for value in raw_offsets)):
-            raise ValidationError("offsets must contain 1 to 64 finite numbers.")
+            raise ValidationError("offsets must contain at least one finite number.")
         offsets = [float(value) for value in raw_offsets]
         if any(right <= left for left, right in zip(offsets, offsets[1:])):
             raise ValidationError("offsets must be strictly increasing.")

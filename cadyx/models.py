@@ -98,6 +98,8 @@ class Document:
 
         for item in self.objects:
             if item.get("type") == "body":
+                if "visible" in item and type(item["visible"]) is not bool:
+                    raise ValidationError("Body visible must be a boolean when provided.")
                 feature_ids = item.get("feature_ids", [])
                 if not isinstance(feature_ids, list):
                     raise ValidationError("Body feature_ids must be a list.")
@@ -135,15 +137,15 @@ class Document:
                     parameters = item.get("parameters")
                     groups = parameters.get("section_sketch_groups", [[value] for value in source_sketch_ids]) \
                         if isinstance(parameters, dict) and isinstance(source_sketch_ids, list) else None
-                    if (not isinstance(source_sketch_ids, list) or not 2 <= len(source_sketch_ids) <= 64
+                    if (not isinstance(source_sketch_ids, list) or len(source_sketch_ids) < 2
                             or any(not isinstance(value, str) for value in source_sketch_ids)
                             or len(set(source_sketch_ids)) != len(source_sketch_ids)
                             or not isinstance(parameters, dict)
                             or set(parameters) not in ({"section_sketch_ids", "section_offsets"},
                                                         {"section_sketch_ids", "section_offsets", "section_sketch_groups"})
                             or parameters.get("section_sketch_ids") != source_sketch_ids
-                            or not isinstance(groups, list) or not 2 <= len(groups) <= 64
-                            or any(not isinstance(group, list) or not 1 <= len(group) <= 16
+                            or not isinstance(groups, list) or len(groups) < 2
+                            or any(not isinstance(group, list) or not group
                                    or any(not isinstance(value, str) for value in group) for group in groups)
                             or [value for group in groups for value in group] != source_sketch_ids):
                         raise ValidationError("Loft feature section references are invalid.")

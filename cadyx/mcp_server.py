@@ -90,6 +90,41 @@ def _schema(properties: dict[str, Any] | None = None, required: list[str] | None
     return {"type": "object", "properties": properties or {}, "required": required or [], "additionalProperties": False}
 
 
+def _compact_command_value(value: Any, *, key: str | None = None) -> Any:
+    """Keep command results useful to an MCP caller without echoing model payloads."""
+    if isinstance(value, dict):
+        if key == "geometry":
+            return {name: value[name] for name in ("kernel", "kind", "volume", "plane") if name in value}
+        return {
+            name: _compact_command_value(item, key=name)
+            for name, item in value.items()
+            if name not in {"point_ids", "line_ids", "circle_ids", "positions", "triangles", "data"}
+        }
+    if isinstance(value, list):
+        return [_compact_command_value(item, key=key) for item in value]
+    return value
+
+
+def _compact_command_response(result: dict[str, Any]) -> dict[str, Any]:
+    document = result.get("document", {})
+    objects = document.get("objects", []) if isinstance(document, dict) else []
+    object_counts: dict[str, int] = {}
+    for item in objects if isinstance(objects, list) else []:
+        if isinstance(item, dict) and isinstance(item.get("type"), str):
+            object_counts[item["type"]] = object_counts.get(item["type"], 0) + 1
+    summary = {
+        "id": document.get("id"),
+        "version": document.get("version"),
+        "revision": document.get("revision"),
+        "object_count": len(objects) if isinstance(objects, list) else 0,
+        "object_counts": object_counts,
+    }
+    history_entry = result.get("history_entry")
+    if isinstance(history_entry, dict):
+        history_entry = _compact_command_value(history_entry)
+    return {"document": summary, "history_entry": history_entry}
+
+
 _STRING = {"type": "string", "minLength": 1}
 _NUMBER = {"type": "number"}
 _INTEGER = {"type": "integer", "minimum": 0}
@@ -220,7 +255,9 @@ class MCPApplication:
         if name == "cadyx_get_activity":
             return self.api.get(self._project(args["project_id"], "/activity"))
         if name == "cadyx_execute_command":
-            return self._execute_command(args["project_id"], args["expected_revision"], args["command"])
+            result = self._execute_command(args["project_id"], args["expected_revision"], args["command"])
+            result["command_result"] = _compact_command_response(result["command_result"])
+            return result
         if name == "cadyx_stop_agent_work":
             return self._stop_agent_work(args["project_id"])
         if name == "cadyx_resume_agent_work":

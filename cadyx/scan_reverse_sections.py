@@ -210,11 +210,11 @@ def _section_options(command: dict[str, Any], positions: list[float]) -> dict[st
     if simplify < 0:
         raise ValidationError("simplify_tolerance cannot be negative.")
     max_points = command.get("max_points", 512)
-    max_contours = command.get("max_contours", 16)
+    max_contours = command.get("max_contours")
     if type(max_points) is not int or not 16 <= max_points <= 4096:
         raise ValidationError("max_points must be an integer from 16 to 4096.")
-    if type(max_contours) is not int or not 1 <= max_contours <= 16:
-        raise ValidationError("max_contours must be an integer from 1 to 16.")
+    if max_contours is not None and (type(max_contours) is not int or max_contours < 1):
+        raise ValidationError("max_contours must be a positive integer when provided.")
     min_area = _finite(command.get("min_area", 0.0), "min_area")
     min_perimeter = _finite(command.get("min_perimeter", 0.0), "min_perimeter")
     if min_area < 0 or min_perimeter < 0:

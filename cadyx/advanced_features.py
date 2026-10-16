@@ -22,15 +22,15 @@ _MAX_BREP_BYTES = 64 * 1024 * 1024
 
 ADVANCED_CAPABILITIES = (
     {"type": "create_section_sketch", "description": "Create an editable XZ section sketch at a Y offset for direct loft authoring.", "required": ["offset"], "optional": ["name"], "constraints": ["offset is finite; resulting sketch is compatible with loft_sketches and loft_profiles."]},
-    {"type": "loft_profiles", "description": "Create an editable solid loft from ordered XZ section sketches without requiring STEP-derived section metadata.", "required": ["sketch_ids", "section_offsets"], "optional": ["name"], "constraints": ["2-64 closed XZ profiles; offsets strictly increase."]},
+    {"type": "loft_profiles", "description": "Create an editable solid loft from ordered XZ section sketches without requiring STEP-derived section metadata.", "required": ["sketch_ids", "section_offsets"], "optional": ["name"], "constraints": ["At least two closed XZ profiles; offsets strictly increase."]},
     {"type": "shell_body", "description": "Hollow a solid by removing selected faces and offsetting the remaining skin.", "required": ["body_id", "face_indices", "thickness"], "optional": ["tolerance", "name"], "constraints": ["Refresh topology first; thickness is signed and non-zero."]},
     {"type": "offset_body", "description": "Offset a complete solid skin by a signed distance.", "required": ["body_id", "offset"], "optional": ["tolerance", "name"], "constraints": ["Offset must be non-zero and result must remain one valid solid."]},
     {"type": "chamfer_edges", "description": "Chamfer topology-selected edges by a constant distance.", "required": ["body_id", "edge_indices", "distance"], "optional": ["name"], "constraints": ["Refresh topology first; distance must be positive."]},
     {"type": "variable_fillet_edges", "description": "Create a linear two-radius fillet on topology-selected edges.", "required": ["body_id", "edge_indices", "start_radius", "end_radius"], "optional": ["name"], "constraints": ["Refresh topology first; both radii must be positive."]},
     {"type": "draft_faces", "description": "Apply mold draft to selected faces around a neutral plane.", "required": ["body_id", "face_indices", "angle_degrees", "pull_direction", "neutral_origin", "neutral_normal"], "optional": ["name"], "constraints": ["Angle magnitude is below 89 degrees; vectors are XYZ arrays."]},
     {"type": "mirror_body", "description": "Mirror a solid across an arbitrary plane.", "required": ["body_id", "plane_origin", "plane_normal"], "optional": ["name"], "constraints": ["Plane normal must be non-zero."]},
-    {"type": "linear_pattern_body", "description": "Copy a body along a vector and fuse all instances into one solid.", "required": ["body_id", "count", "offset"], "optional": ["name"], "constraints": ["2-64 instances; copies must fuse to one solid."]},
-    {"type": "circular_pattern_body", "description": "Copy a body around an axis and fuse all instances into one solid.", "required": ["body_id", "count", "axis_origin", "axis_direction", "angle_step_degrees"], "optional": ["name"], "constraints": ["2-64 instances; copies must fuse to one solid."]},
+    {"type": "linear_pattern_body", "description": "Copy a body along a vector and fuse all instances into one solid.", "required": ["body_id", "count", "offset"], "optional": ["name"], "constraints": ["At least two instances; copies must fuse to one solid."]},
+    {"type": "circular_pattern_body", "description": "Copy a body around an axis and fuse all instances into one solid.", "required": ["body_id", "count", "axis_origin", "axis_direction", "angle_step_degrees"], "optional": ["name", "full_circle"], "constraints": ["At least two instances; copies must fuse to one solid. full_circle requires angle_step_degrees = 360/count and keeps the count editable as a full circular array."]},
     {"type": "hole", "description": "Cut a cylindrical hole from a body along an arbitrary axis.", "required": ["body_id", "origin", "axis", "diameter", "depth"], "optional": ["name"], "constraints": ["Diameter/depth positive; result remains one solid."]},
     {"type": "boss", "description": "Fuse a cylindrical boss to a body along an arbitrary axis.", "required": ["body_id", "origin", "axis", "diameter", "depth"], "optional": ["name"], "constraints": ["Diameter/depth positive; cylinder must intersect the body."]},
 )
@@ -189,10 +189,10 @@ def _execute(self, document, command: dict[str, Any], *, progress=None, project_
 
     if kind == "loft_profiles":
         sketch_ids, offsets = command.get("sketch_ids"), command.get("section_offsets")
-        if (not isinstance(sketch_ids, list) or not 2 <= len(sketch_ids) <= 64
+        if (not isinstance(sketch_ids, list) or len(sketch_ids) < 2
                 or len(set(sketch_ids)) != len(sketch_ids)
                 or not isinstance(offsets, list) or len(offsets) != len(sketch_ids)):
-            raise ValidationError("loft_profiles needs 2 to 64 unique sketch ids and matching offsets.")
+            raise ValidationError("loft_profiles needs at least two unique sketch ids and matching offsets.")
         normalized_offsets = [_number(value, "section offset") for value in offsets]
         if any(right <= left for left, right in zip(normalized_offsets, normalized_offsets[1:])):
             raise ValidationError("Loft section offsets must be strictly increasing.")
@@ -257,18 +257,24 @@ def _execute(self, document, command: dict[str, Any], *, progress=None, project_
         parameters = {"plane_origin": origin, "plane_normal": normal}
     elif kind == "linear_pattern_body":
         count = command.get("count")
-        if type(count) is not int or not 2 <= count <= 64: raise ValidationError("count must be an integer from 2 to 64.")
+        if type(count) is not int or count < 2: raise ValidationError("count must be an integer of at least 2.")
         offset = _vector(command.get("offset"), "offset", nonzero=True)
         operation, values = 6, [float(count), *offset]
         parameters = {"count": count, "offset": offset}
     elif kind == "circular_pattern_body":
         count = command.get("count")
-        if type(count) is not int or not 2 <= count <= 64: raise ValidationError("count must be an integer from 2 to 64.")
+        if type(count) is not int or count < 2: raise ValidationError("count must be an integer of at least 2.")
         origin = _vector(command.get("axis_origin"), "axis_origin")
         axis = _vector(command.get("axis_direction"), "axis_direction", nonzero=True)
         step = _number(command.get("angle_step_degrees"), "angle_step_degrees", nonzero=True)
+        full_circle = command.get("full_circle", False)
+        if type(full_circle) is not bool:
+            raise ValidationError("full_circle must be a boolean.")
+        if full_circle and not math.isclose(step, 360.0 / count, rel_tol=0.0, abs_tol=1e-9):
+            raise ValidationError("A full-circle pattern requires angle_step_degrees to equal 360/count.")
         operation, values = 7, [float(count), *origin, *axis, step]
-        parameters = {"count": count, "axis_origin": origin, "axis_direction": axis, "angle_step_degrees": step}
+        parameters = {"count": count, "axis_origin": origin, "axis_direction": axis,
+                      "angle_step_degrees": step, "full_circle": full_circle}
     elif kind in {"hole", "boss"}:
         origin = _vector(command.get("origin"), "origin")
         axis = _vector(command.get("axis"), "axis", nonzero=True)

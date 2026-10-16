@@ -23,6 +23,7 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
                           else (item.get("source_body_id"),)
                           if item.get("operation") in {
                               "fillet_edges", "resize_imported_thread", "transform_imported_brep",
+                              "linear_pattern_body", "circular_pattern_body", "hole", "boss",
                           } else ())
     }
     feature_sketches = {
@@ -53,6 +54,8 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
 
     for item in document.objects:
         kind = item["type"]
+        if kind == "body" and item.get("visible", True) is False:
+            continue
         if kind == "body" and item["id"] in consumed_bodies:
             continue
         if kind in {"point", "line", "circle", "ellipse", "spline"} and item.get("sketch_id") in feature_sketches:

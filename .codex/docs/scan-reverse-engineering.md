@@ -44,7 +44,7 @@ Optional:
 - `join_tolerance`: endpoint welding tolerance; default is derived from scan bounds.
 - `simplify_tolerance`: closed-contour RDP tolerance, default `0`.
 - `max_points`: 16–4096 points per contour, default `512`. Longer loops are arc-length resampled.
-- `max_contours`: 1–16, default `16`, largest enclosed areas first.
+- `max_contours`: optional positive count for explicitly limiting generated sketches; omitted means keep every eligible contour. When a limit is supplied, largest enclosed areas are kept first.
 - `min_area`, `min_perimeter`: non-negative noise filters.
 - `name`: sketch name prefix.
 
@@ -56,7 +56,7 @@ Each returned contour includes area, signed area, perimeter, centroid, 2D bounds
 
 ### `create_scan_sections`
 
-Batch form of the same operation. `offsets` contains 1–64 strictly increasing stations. The command returns:
+Batch form of the same operation. `offsets` contains any number of strictly increasing stations. The command returns:
 
 - `section_groups`: one sketch-id list per station, including multi-contour stations;
 - flattened `sketch_ids`;
