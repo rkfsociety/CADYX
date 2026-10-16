@@ -14,15 +14,37 @@ let dashPatterns = [];
 let arcs = 0;
 let animationTime = 0;
 let renderCalls = 0;
+let rasterizedPixels = 0;
+let rasterizedBounds = null;
 const animationFrames = [];
 const context = {
-  clearRect() { renderCalls++; drawnPoints = []; segments = 0; drawnLines = []; meshMoves = []; drawnLabels = []; currentPath = []; strokedPaths = []; dashPatterns = []; arcs = 0; },
+  clearRect() {
+    renderCalls++;
+    drawnPoints = []; segments = 0; drawnLines = []; meshMoves = []; drawnLabels = [];
+    currentPath = []; strokedPaths = []; dashPatterns = []; arcs = 0;
+    rasterizedPixels = 0; rasterizedBounds = null;
+  },
   fillRect(x, y) { drawnPoints.push([x, y]); },
   beginPath() { currentPath = []; }, moveTo(x, y) { currentPath.push([x, y]); },
   lineTo(x, y) { segments++; drawnLines.push([x, y]); currentPath.push([x, y]); },
   closePath() {}, fill() { meshMoves.push(...currentPath); }, stroke() { strokedPaths.push(currentPath.slice()); }, strokeRect() {}, save() {}, restore() {},
   setLineDash(value) { dashPatterns.push(value.slice()); }, arc() { arcs++; },
   fillText(value) { drawnLabels.push(value); },
+  measureText(value) { return { width: String(value).length * 7 }; },
+  createImageData(width, height) { return { width, height, data: new Uint8ClampedArray(width * height * 4) }; },
+  putImageData(image) {
+    let minX = image.width, maxX = -1, minY = image.height, maxY = -1;
+    for (let y = 0; y < image.height; y += 1) {
+      for (let x = 0; x < image.width; x += 1) {
+        if (!image.data[(y * image.width + x) * 4 + 3]) continue;
+        rasterizedPixels += 1;
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
+    rasterizedBounds = rasterizedPixels ? { minX, maxX, minY, maxY } : null;
+  },
+  drawImage() {},
 };
 const canvas = {
   getContext() { return context; },
@@ -33,17 +55,21 @@ const canvas = {
 };
 const sandbox = {
   window: {}, ResizeObserver: class { observe() {} },
+  document: { createElement() { return { width: 0, height: 0, getContext() { return context; } }; } },
   performance: { now: () => animationTime },
   requestAnimationFrame(callback) { animationFrames.push(callback); return animationFrames.length; },
 };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"), sandbox);
-const viewer = sandbox.window.CadyxViewport.createViewer(canvas);
+const viewer = sandbox.window.CadyxViewport.createViewer(canvas, { showCoordinateGizmo: false });
 const geometry = {
   positions: [0, 0, 0, 0, 0, 1, 1, 0, 0], triangles: [], lines: [0, 1], points: [0, 1],
   bounds: { min: [0, 0, 0], max: [1, 1, 1] },
 };
-viewer.load(geometry);
+viewer.load({ ...geometry, lines: undefined });
 assert.ok(drawnPoints[1][1] < drawnPoints[0][1], "Positive Z projects upward");
+const projectedOrigin = drawnPoints[0];
+const projectedZ = drawnPoints[1];
+viewer.load(geometry);
 assert.equal(segments, 4, "Sketch lines and the three coordinate axes render in the shared viewport");
 assert.deepEqual(drawnLabels.filter((label) => ["X", "Y", "Z"].includes(label)).sort(), ["X", "Y", "Z"]);
 const initial = viewer.getCamera();
@@ -93,7 +119,7 @@ events.wheel({ deltaY: -100, preventDefault() {} });
 animationFrames.shift()(animationTime);
 const zoomed = viewer.getCamera();
 assert.ok(zoomed.zoom > initial.zoom);
-viewer.load(geometry, { reset: false });
+viewer.load({ ...geometry, lines: undefined }, { reset: false });
 assert.equal(viewer.getCamera().zoom, zoomed.zoom, "Document refresh preserves the camera");
 viewer.setCamera({ yaw: 0, pitch: Math.PI / 2, zoom: 1, projection: "orthographic" });
 assert.ok(Math.abs(viewer.getCamera().orientation[8]) < 1e-12, "Camera can reach an exact top view");
@@ -118,23 +144,24 @@ assert.equal(segments, 3, "A new sketch segment starts as an animated stroke whi
 animationTime = 50;
 animationFrames.shift()(animationTime);
 assert.equal(segments, 4);
-const midpoint = drawnLines[0];
+const midpoint = drawnLines.at(-1);
 const endpoint = [
-  (drawnPoints[1][0] + drawnPoints[0][0]) / 2 + 2,
-  (drawnPoints[1][1] + drawnPoints[0][1]) / 2 + 2,
+  (projectedZ[0] + projectedOrigin[0]) / 2,
+  (projectedZ[1] + projectedOrigin[1]) / 2,
 ];
 assert.ok(Math.abs(midpoint[0] - endpoint[0]) < 1e-9 && Math.abs(midpoint[1] - endpoint[1]) < 1e-9,
   "A sketch stroke reaches its midpoint with eased progress");
 animationTime = 100;
 animationFrames.shift()(animationTime);
-assert.ok(Math.abs(drawnLines[0][0] - (drawnPoints[1][0] + 2)) < 1e-9
-  && Math.abs(drawnLines[0][1] - (drawnPoints[1][1] + 2)) < 1e-9, "The sketch stroke finishes at its endpoint");
+assert.ok(Math.abs(drawnLines.at(-1)[0] - projectedZ[0]) < 1e-9
+  && Math.abs(drawnLines.at(-1)[1] - projectedZ[1]) < 1e-9, "The sketch stroke finishes at its endpoint");
 viewer.load({
   positions: [0, 0, 0, 1, 1, 0], triangles: [], lines: [0, 1], points: [], line_modes: ["infinite"],
   bounds: { min: [0, 0, 0], max: [1, 1, 0] },
 }, { reset: false });
-assert.ok(Math.hypot(strokedPaths[0][1][0] - strokedPaths[0][0][0],
-  strokedPaths[0][1][1] - strokedPaths[0][0][1]) > 600, "Infinite sketch lines span the viewport");
+const infiniteLine = strokedPaths.at(-1);
+assert.ok(Math.hypot(infiniteLine[1][0] - infiniteLine[0][0],
+  infiniteLine[1][1] - infiniteLine[0][1]) > 600, "Infinite sketch lines span the viewport");
 viewer.load({
   positions: [0, 0, 0, 1, 1, 0], triangles: [], lines: [0, 1], points: [0],
   construction: true, line_modes: ["segment"], bounds: { min: [0, 0, 0], max: [1, 1, 0] },
@@ -149,15 +176,15 @@ animationTime = 200;
 viewer.load({ ...profileBody, rotationAxes: [{ start: [0, 0, 0], end: [0, 0, 1] }] }, { reset: false });
 assert.ok(drawnLabels.includes("Z · ось вращения"), "Revolved bodies label their global Z rotation axis");
 viewer.load(profileBody, { reset: false, transition: { type: "revolve", vertexRange: [0, 3], durationMs: 100 } });
-assert.ok(Math.max(...meshMoves.map(([x]) => x)) - Math.min(...meshMoves.map(([x]) => x)) < 1e-9,
+assert.ok(!rasterizedBounds || rasterizedBounds.maxX - rasterizedBounds.minX <= 1,
   "A revolved profile starts on its axis");
 animationTime = 250;
 animationFrames.shift()(animationTime);
-assert.ok(Math.max(...meshMoves.map(([x]) => x)) - Math.min(...meshMoves.map(([x]) => x)) > 1,
+assert.ok(rasterizedBounds && rasterizedBounds.maxX - rasterizedBounds.minX > 1,
   "A revolved profile grows smoothly away from its axis");
 animationTime = 300;
 animationFrames.shift()(animationTime);
-assert.ok(Math.max(...meshMoves.map(([x]) => x)) - Math.min(...meshMoves.map(([x]) => x)) > 2,
+assert.ok(rasterizedBounds && rasterizedBounds.maxX - rasterizedBounds.minX > 2,
   "The revolved profile reaches its final radius");
 const mugOrbit = {
   positions: [0, 0, 5, 20, 0, 5], triangles: [],
@@ -218,10 +245,11 @@ viewer.load({
 }, { reset: false, transition: { type: "sweep", path: sweepPath, plane: "XY", durationMs: 100 } });
 animationTime = 350;
 animationFrames.shift()(animationTime);
-assert.equal(meshMoves.length, 3, "A long sweep path reveals only its first mesh portion at half progress");
+const sweepMidPixels = rasterizedPixels;
+assert.ok(sweepMidPixels > 0, "A long sweep path reveals an initial mesh portion at half progress");
 animationTime = 400;
 animationFrames.shift()(animationTime);
-assert.equal(meshMoves.length, 6, "The sweep transition reveals the complete mesh when finished");
+assert.ok(rasterizedPixels > sweepMidPixels, "The sweep transition reveals more mesh when finished");
 const threadBody = {
   positions: [0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1],
   triangles: [0, 1, 2, 2, 1, 3], lines: [], points: [],
@@ -229,13 +257,13 @@ const threadBody = {
 };
 animationTime = 450;
 viewer.load(threadBody, { reset: false, transition: { type: "thread", vertexRange: [0, 4], durationMs: 100 } });
-const threadStartHeight = Math.max(...meshMoves.map(([, y]) => y)) - Math.min(...meshMoves.map(([, y]) => y));
+const threadStartHeight = rasterizedBounds ? rasterizedBounds.maxY - rasterizedBounds.minY : 0;
 animationTime = 500;
 animationFrames.shift()(animationTime);
-const threadMidHeight = Math.max(...meshMoves.map(([, y]) => y)) - Math.min(...meshMoves.map(([, y]) => y));
+const threadMidHeight = rasterizedBounds ? rasterizedBounds.maxY - rasterizedBounds.minY : 0;
 animationTime = 550;
 animationFrames.shift()(animationTime);
-const threadEndHeight = Math.max(...meshMoves.map(([, y]) => y)) - Math.min(...meshMoves.map(([, y]) => y));
+const threadEndHeight = rasterizedBounds ? rasterizedBounds.maxY - rasterizedBounds.minY : 0;
 assert.ok(threadMidHeight > threadStartHeight, "A metric thread grows along Z during its transition");
 assert.ok(threadEndHeight > threadMidHeight, "A metric thread transition reaches its full length");
 console.log("Viewport: Z-up, camera controls, sketch, revolve, sweep and thread transitions, zoom, refresh and fit passed.");

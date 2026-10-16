@@ -2,7 +2,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const sandbox = { window: {}, TextDecoder };
+const sandbox = {
+  window: { addEventListener() {} },
+  document: { createElement() { return {}; }, head: { appendChild() {} } },
+  TextDecoder,
+};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/ply-preview.js"), "utf8"), sandbox);
 const parse = sandbox.window.CadyxPlyPreview.parse;
 
