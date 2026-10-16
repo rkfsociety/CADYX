@@ -36,6 +36,7 @@ struct Options {
     double disparity_scale = 0.0;
     int frame_count = 1;
     int requested_fps = 15;
+    std::filesystem::path live_raw_path;
     bool list_modes = false;
 };
 
@@ -117,6 +118,8 @@ Options ParseOptions(int argc, wchar_t** argv) {
         } else if (argument == L"--fps") {
             try { options.requested_fps = std::stoi(value); }
             catch (...) { throw std::runtime_error("--fps must be 5, 10, or 15."); }
+        } else if (argument == L"--live-raw") {
+            options.live_raw_path = value;
         } else {
             throw std::runtime_error("Unknown command-line option.");
         }
@@ -222,7 +225,8 @@ ComPtr<IMFActivate> FindDepthCamera() {
 }
 
 std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int requested_fps,
-                                                        std::vector<LONGLONG>& timestamps) {
+                                                        std::vector<LONGLONG>& timestamps,
+                                                        const std::filesystem::path& live_raw_path) {
     ComPtr<IMFActivate> activation = FindDepthCamera();
     ComPtr<IMFMediaSource> source;
     CheckHr(activation->ActivateObject(IID_PPV_ARGS(&source)), "Activate depth camera");
@@ -290,6 +294,15 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
         }
         timestamps.push_back(timestamp);
         frames.push_back(std::move(result));
+        if (!live_raw_path.empty()) {
+            if (!live_raw_path.parent_path().empty()) std::filesystem::create_directories(live_raw_path.parent_path());
+            auto temporary = live_raw_path; temporary += L".tmp";
+            { std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+              out.write(reinterpret_cast<const char*>(frames.back().data()), static_cast<std::streamsize>(frames.back().size()));
+              if (!out) throw std::runtime_error("Could not update live frame file."); }
+            if (!MoveFileExW(temporary.c_str(), live_raw_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                throw std::runtime_error("Could not atomically publish live frame file.");
+        }
     }
     return frames;
 }
@@ -448,7 +461,8 @@ int wmain(int argc, wchar_t** argv) {
         const auto q = ReadQMatrix(options.q_file);
         std::vector<LONGLONG> timestamps;
         const auto started = std::chrono::steady_clock::now();
-        const auto frames = CaptureY16Frames(options.frame_count, options.requested_fps, timestamps);
+        const auto frames = CaptureY16Frames(options.frame_count, options.requested_fps, timestamps,
+                                             options.live_raw_path);
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         const auto& raw = frames.front();
         const auto points = Reproject(raw, q, options.disparity_scale);
