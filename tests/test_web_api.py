@@ -610,6 +610,9 @@ class WebApiTests(unittest.TestCase):
         with urlopen(self.base_url + "/", timeout=3) as response:
             self.assertEqual(response.status, 200)
             self.assertIn(b"CADYX", response.read())
+        with urlopen(self.base_url + "/assets/ply-parser.js", timeout=3) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn(b"window.CadyxPlyPreview", response.read())
 
     def test_automatic_update_snapshot_tracks_project_activity_and_folder_files(self) -> None:
         status, initial = self.request("/api/v1/updates")
