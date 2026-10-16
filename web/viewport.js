@@ -87,8 +87,8 @@
     showWorldAxes = true,
     wireframe = false,
     shaded = true,
-    wireframeColor = "#69d9c4",
-    wireframeOpacity = 0.46,
+    wireframeColor = "#8be7ef",
+    wireframeOpacity = 0.92,
     onRender = null,
   } = {}) {
     const context = canvas.getContext("2d", { alpha: true });
@@ -292,6 +292,8 @@
         screenY[vertex] = height / 2 - up * scale;
       }
 
+      if (showWorldAxes) drawWorldAxes(project, radius, dpr);
+      if (showRotationAxes) drawRotationAxes(geometry.rotationAxes || [], project, dpr);
       if (triangles.length) renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
@@ -299,7 +301,6 @@
         wireframeColor, wireframeOpacity, dpr, 0.75 / scale,
       );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale, geometry.colors);
-      if (showWorldAxes) drawWorldAxes(project, radius, dpr);
       const directLineCount = geometry.type === "body" ? 0 : (geometry.lines || []).length;
       let bodyLineRangeIndex = 0;
       for (let index = 0; index < directLineCount; index += 2) {
@@ -358,7 +359,6 @@
         }
       }
       context.globalAlpha = 1;
-      if (showRotationAxes) drawRotationAxes(geometry.rotationAxes || [], project, dpr);
       if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cameraOrientation);
       if (showViewCube) drawViewCube(width, dpr, cameraOrientation);
       onRender?.();
@@ -932,7 +932,7 @@
         context.save();
         context.strokeStyle = wireframeColor;
         context.globalAlpha = wireframeOpacity;
-        context.lineWidth = Math.max(0.65, 0.72 * dpr);
+        context.lineWidth = 1.25 * dpr;
         const edgesPerPath = 3500;
         for (let start = 0; start < featureEdges.length; start += edgesPerPath * 2) {
           context.beginPath();
@@ -957,7 +957,7 @@
         context.save();
         context.strokeStyle = wireframeColor;
         context.globalAlpha = wireframeOpacity;
-        context.lineWidth = Math.max(0.65, 0.72 * dpr);
+        context.lineWidth = 1.25 * dpr;
         context.beginPath();
         for (let index = 0; index < silhouetteCandidates.length; index += 4) {
           const firstFace = faceFacing[silhouetteCandidates[index + 2]];
