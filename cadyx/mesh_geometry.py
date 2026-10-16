@@ -127,6 +127,15 @@ def validate_mesh_geometry(geometry: dict[str, Any]) -> None:
     _decode_payload(geometry)
 
 
+def mesh_bounds(geometry: dict[str, Any]) -> dict[str, list[float]]:
+    """Return exact axis-aligned bounds of the stored float32 mesh vertices."""
+    positions, _ = _decode_payload(geometry)
+    return {
+        "min": [min(positions[axis::3]) for axis in range(3)],
+        "max": [max(positions[axis::3]) for axis in range(3)],
+    }
+
+
 def tessellate_mesh_geometry(geometry: dict[str, Any]) -> dict[str, list[int] | list[float]]:
     positions, triangles = _decode_payload(geometry)
     return {"positions": positions.tolist(), "triangles": triangles.tolist()}

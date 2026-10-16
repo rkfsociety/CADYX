@@ -12,11 +12,13 @@ from typing import Any, Callable, Iterator
 from uuid import uuid4
 
 from .commands import CommandSystem
+from .delivery import geometry_sha256
 from .errors import CadyxError, ConflictError, NotFoundError, ValidationError
 from .events import EventBroker
 from .kernel import GeometryKernel, OCCTKernelAdapter
 from .lease import EditLeaseManager
 from .models import Document, OwnerType
+from .mesh_geometry import mesh_bounds
 from .rendering import render_scene, render_scene_png
 from .scan import ScanProcessor
 from .workspace import ProjectWorkspace, utc_now
@@ -515,6 +517,64 @@ class CadyxCore:
             raise ValidationError("Topology inspection needs an existing body_id.")
         topology = self.kernel.topology(body["geometry"])
         return {"body_id": body_id, **topology}
+
+    def validate_body_dimensions(
+        self, project_id: str, body_id: str, expected_revision: Any,
+        expected_dimensions: Any, tolerance: Any,
+    ) -> dict[str, Any]:
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        self._check_revision(document, expected_revision)
+        if not isinstance(body_id, str) or not body_id:
+            raise ValidationError("body_id must be non-empty text.")
+        if not isinstance(expected_dimensions, dict) or set(expected_dimensions) != {"x", "y", "z"}:
+            raise ValidationError("expected_dimensions must contain exactly x, y, and z.")
+        def finite_number(value: Any, name: str, *, positive: bool) -> float:
+            message = f"{name} must be a finite {'positive' if positive else 'non-negative'} number."
+            if type(value) not in (int, float):
+                raise ValidationError(message)
+            try:
+                normalized = float(value)
+            except (OverflowError, ValueError):
+                raise ValidationError(message) from None
+            if not math.isfinite(normalized) or (normalized <= 0 if positive else normalized < 0):
+                raise ValidationError(message)
+            return normalized
+
+        normalized_tolerance = finite_number(tolerance, "tolerance", positive=False)
+        expected = {}
+        for axis, value in expected_dimensions.items():
+            expected[axis] = finite_number(value, f"expected_dimensions.{axis}", positive=True)
+        body = next((item for item in document.objects
+                     if item.get("id") == body_id and item.get("type") == "body"), None)
+        if body is None:
+            raise ValidationError("Dimension validation needs an existing body_id.")
+        geometry = body["geometry"]
+        if geometry.get("kernel") == "cadyx-mesh-v1":
+            bounds = mesh_bounds(geometry)
+        else:
+            bounds = self.kernel.metrics(geometry)["bounds"]
+        actual = {
+            axis: float(bounds["max"][index]) - float(bounds["min"][index])
+            for index, axis in enumerate(("x", "y", "z"))
+        }
+        checks = {
+            axis: {"expected": expected[axis], "actual": actual[axis],
+                   "absolute_error": abs(actual[axis] - expected[axis]),
+                   "status": "pass" if abs(actual[axis] - expected[axis]) <= normalized_tolerance else "fail"}
+            for axis in ("x", "y", "z")
+        }
+        return {
+            "body_id": body_id,
+            "revision": document.revision,
+            "geometry_sha256": geometry_sha256(geometry),
+            "method": "axis_aligned_bounding_box",
+            "coordinate_frame": "global_xyz",
+            "units": "model_units",
+            "tolerance": normalized_tolerance,
+            "status": "pass" if all(item["status"] == "pass" for item in checks.values()) else "fail",
+            "checks": checks,
+        }
 
     def rotate_view(
         self, project_id: str, *, yaw_delta: float, pitch_delta: float = 0.0,

@@ -412,6 +412,17 @@ traversal `index`, length, center of mass, and curve type. Indices are valid for
 that exact current topology and are not persistent names; inspect again after
 any upstream edit before selecting edges.
 
+`POST /api/v1/agent/projects/{project_id}/validations/dimensions` performs a
+read-only, revision-bound check of a body's axis-aligned bounding-box extents.
+Supply `body_id`, `expected_revision`, `expected_dimensions` with exactly `x`,
+`y`, and `z`, and a non-negative absolute `tolerance`; dimensions and tolerance
+use model units. The result includes the measured extents, per-axis absolute
+errors, overall and per-axis `pass`/`fail` status, the document revision, the
+`global_xyz` coordinate frame, and a SHA-256 of the canonical geometry descriptor. A stale revision returns
+`REVISION_CONFLICT`. This check validates bounding-box dimensions only; it does
+not establish oriented feature dimensions, wall thickness, clearance, or fit.
+It does not acquire an edit lease or change the document.
+
 `fillet_edges` accepts `body_id`, 1–128 distinct `edge_indices`, a positive
 `radius`, and optional `name`. It creates a new body with an OCCT rolling-edge
 fillet and can round the mug rim, base, or a fused handle junction.

@@ -382,6 +382,22 @@ def make_request_handler(
                 self._json(201, result)
                 return
             project_id = parts[0]
+            if agent_api and len(parts) == 3 and parts[1:] == ["validations", "dimensions"]:
+                if body is None or set(body) != {
+                    "body_id", "expected_revision", "expected_dimensions", "tolerance",
+                }:
+                    raise ValidationError(
+                        "Dimension validation requires body_id, expected_revision, expected_dimensions, and tolerance."
+                    )
+                result = core.observe_agent_operation(
+                    project_id, "Проверяет габариты тела",
+                    lambda: core.validate_body_dimensions(
+                        project_id, body["body_id"], body["expected_revision"],
+                        body["expected_dimensions"], body["tolerance"],
+                    ),
+                )
+                self._json(200, result)
+                return
             if agent_api and len(parts) == 2 and parts[1] == "rename":
                 if body is None or set(body) != {"name"}:
                     raise ValidationError("Project rename requires only a name field.")

@@ -148,6 +148,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_list_folder_files", "description": "List direct user files in a workspace folder.", "inputSchema": _schema({"folder_name": _STRING}, ["folder_name"])},
     {"name": "cadyx_read_folder_file", "description": "Read a direct workspace file through the read-only API; small images are returned as image content.", "inputSchema": _schema({"folder_name": _STRING, "name": _STRING}, ["folder_name", "name"])},
     {"name": "cadyx_inspect_topology", "description": "Inspect current editable B-rep edges before a fillet. Refresh topology after any upstream edit.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING}, ["project_id", "body_id"])},
+    {"name": "cadyx_validate_body_dimensions", "description": "Read-only axis-aligned bounding-box dimension check bound to an exact saved revision and geometry hash.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING, "expected_revision": _INTEGER, "expected_dimensions": {"type": "object", "properties": {"x": _NUMBER, "y": _NUMBER, "z": _NUMBER}, "required": ["x", "y", "z"], "additionalProperties": False}, "tolerance": {"type": "number", "minimum": 0}}, ["project_id", "body_id", "expected_revision", "expected_dimensions", "tolerance"])},
     {"name": "cadyx_get_viewport", "description": "Read validated viewport scene data for the saved project revision.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_get_viewport_image", "description": "Get the saved model's viewport PNG as an MCP image the model can inspect.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_move_camera", "description": "Animate the selected browser viewport camera; this does not mutate the CAD document.", "inputSchema": _schema({"project_id": _STRING, "yaw_delta": _NUMBER, "pitch_delta": _NUMBER, "zoom_factor": _NUMBER, "duration_ms": {"type": "integer", "minimum": 0, "maximum": 5000}}, ["project_id", "yaw_delta"])},
@@ -256,6 +257,13 @@ class MCPApplication:
             project_id = urllib.parse.quote(args["project_id"], safe="")
             body_id = urllib.parse.quote(args["body_id"], safe="")
             return self.api.get(f"/api/v1/agent/projects/{project_id}/topology?body_id={body_id}")
+        if name == "cadyx_validate_body_dimensions":
+            return self.api.post(self._project(args["project_id"], "/validations/dimensions"), {
+                "body_id": args["body_id"],
+                "expected_revision": args["expected_revision"],
+                "expected_dimensions": args["expected_dimensions"],
+                "tolerance": args["tolerance"],
+            })
         if name == "cadyx_get_viewport":
             return self.api.get(self._project(args["project_id"], "/viewport"))
         if name == "cadyx_get_viewport_image":
