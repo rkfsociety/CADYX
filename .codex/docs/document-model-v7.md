@@ -382,9 +382,11 @@ loft branches, pairs contours by minimum centroid distance with enclosed area as
 a secondary cue, duplicates the nearest spatial branch across a split or merge,
 and fuses all branches into one OCCT solid. This approximates split/merge sections,
 not exact topology tracking; inspect the result against its source because sampled
-contours do not preserve persistent surface identity. Grouped loft profiles are
-sampled to at most 128 points per contour. All sections remain editable and source sketch edits rebuild the feature
-atomically. The feature retains ordered `source_sketch_ids` and
+contours do not preserve persistent surface identity. Grouped loft matching uses
+the input profile vertices without a fixed sampling ceiling; each matched branch
+resamples its pair to a shared perimeter sample count for OCCT. All sections
+remain editable and source sketch edits rebuild the feature atomically. The
+feature retains ordered `source_sketch_ids` and
 `section_sketch_groups` when groups contain multiple contours. Sections are
 sampled polygons, so both loft forms approximate the source STEP analytic or
 NURBS surfaces.

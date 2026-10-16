@@ -505,7 +505,6 @@ class OCCTKernelAdapter:
             normalized_group = []
             for section in group:
                 points, _ = _profile_values(section, "XZ")
-                points = _resample_loft_profile(points, min(len(points), 128))
                 area, center_x, center_y, _ = _loft_contour_signature(points)
                 normalized_group.append((points, area, center_x, center_y))
             normalized_groups.append(normalized_group)
