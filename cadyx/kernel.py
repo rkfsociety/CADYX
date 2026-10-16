@@ -14,6 +14,9 @@ from .mesh_geometry import tessellate_mesh_geometry, validate_mesh_geometry
 from .native_kernel import NativeKernel
 
 
+_MAX_OCCT_THREAD_SECTIONS = (1 << 31) - 2
+
+
 class GeometryKernel(Protocol):
     def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]: ...
 
@@ -628,8 +631,15 @@ class OCCTKernelAdapter:
         major_diameter = _positive_amount(major_diameter, "major_diameter")
         pitch = _positive_amount(pitch, "pitch")
         length = _positive_amount(length, "length")
-        if length < pitch or length / pitch > 64:
-            raise ValidationError("Thread length must be at least one pitch and no more than 64 pitches.")
+        if length < pitch:
+            raise ValidationError("Thread length must be at least one pitch.")
+        center_span = length - 2.0 * (5.0 * pitch / 12.0)
+        section_count_value = (center_span / pitch) * 24.0
+        if not math.isfinite(section_count_value):
+            raise ValidationError("Thread length exceeds the section count representable by Open CASCADE.")
+        section_count = math.ceil(section_count_value)
+        if section_count > _MAX_OCCT_THREAD_SECTIONS:
+            raise ValidationError("Thread length exceeds the section count representable by Open CASCADE.")
         if major_diameter <= 1.226869 * pitch:
             raise ValidationError("major_diameter must leave a positive ISO metric thread minor diameter.")
         if not isinstance(handedness, str) or handedness not in {"right", "left"}:

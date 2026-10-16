@@ -1225,7 +1225,7 @@ TopoDS_Shape MakeCut(const TopoDS_Shape& base, const TopoDS_Shape& tool) {
 
 TopoDS_Shape MakeMetricThread(double major_diameter, double pitch, double length, int handedness) {
   if (!std::isfinite(major_diameter) || !std::isfinite(pitch) || !std::isfinite(length)
-      || major_diameter <= 0 || pitch <= 0 || length < pitch || length / pitch > 64
+      || major_diameter <= 0 || pitch <= 0 || length < pitch
       || (handedness != -1 && handedness != 1))
     throw std::runtime_error("Metric thread dimensions or handedness are outside the supported range.");
 
@@ -1257,9 +1257,12 @@ TopoDS_Shape MakeMetricThread(double major_diameter, double pitch, double length
   const double center_start = root_half_width;
   const double center_span = length - 2.0 * root_half_width;
   const double total_turns = center_span / pitch;
-  const size_t section_count = static_cast<size_t>(std::ceil(total_turns * 24.0));
-  if (section_count < 2 || section_count > 1600)
-    throw std::runtime_error("Metric thread loft exceeds the supported section count.");
+  const double section_count_value = std::ceil(total_turns * 24.0);
+  const double max_section_count = static_cast<double>(std::numeric_limits<Standard_Integer>::max() - 1);
+  if (!std::isfinite(section_count_value) || section_count_value < 2.0
+      || section_count_value > max_section_count)
+    throw std::runtime_error("Metric thread length exceeds the section count representable by Open CASCADE.");
+  const size_t section_count = static_cast<size_t>(section_count_value);
 
   const double pi = std::acos(-1.0);
   BRepOffsetAPI_ThruSections loft(true, false);

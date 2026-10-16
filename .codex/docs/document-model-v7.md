@@ -283,14 +283,15 @@ linked parametric gear feature. Profile shift, internal gears, helical gears,
 and cutter-generated root fillets are not represented.
 
 `create_metric_thread` accepts positive `major_diameter`, `pitch`, and `length`
-(at least one pitch and at most 64 pitches), optional `handedness` (`right` by
+(at least one pitch), optional `handedness` (`right` by
 default, or `left`) and optional `name`. It creates a single-start external ISO
 metric 60-degree thread as one editable OCCT solid, trims it to Z=0 through the
 requested length, and saves a `metric_thread` geometry descriptor with a linked
 feature. For the basic external profile, the minor diameter is
 `d3 = d - 1.226869P`; the rounded root approximates `R = sqrt(3)P/12` with
 eight segments per section corner. `set_parameter`
-can change `major_diameter`, `pitch`, `length`, or `handedness`; each edit rebuilds
+can change `major_diameter`, `pitch`, `length`, or `handedness`; length is limited
+only by the section count representable by Open CASCADE. Each edit rebuilds
 the B-rep atomically. Internal threads, multiple starts, tolerance classes and
 thread run-outs are not modeled. CADYX documents do not assign physical units;
 module, diameter and pitch use the document's coordinate units.
