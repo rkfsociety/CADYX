@@ -110,7 +110,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   letter-spacing: .05em;
 }
 .agent-owner-indicator { position: absolute; left: 8px; top: 50%; line-height: 1; transform: translateY(-50%); }
-.agent-owner-label { display: block; min-width: 2em; line-height: 1; text-align: center; }
+.agent-owner-label { position: absolute; left: 50%; top: 50%; line-height: 1; text-align: center; transform: translate(-50%, -50%); }
 .agent-owner-chip[data-state="running"] {
   border-color: #347c66;
   color: var(--agent);
