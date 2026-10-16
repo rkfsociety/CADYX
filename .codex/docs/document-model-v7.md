@@ -328,13 +328,21 @@ ordered interpolated points and are sampled at 24 segments per span for display
 and profile use. Control-point B-splines use the same per-span display/profile
 sampling; Bezier curves use 24 segments over the full curve. Sweep paths use
 four samples per span when converting sketch splines to OCCT path points.
-Profile line loops support at least 3 edges. Each
-operation accepts one contour; holes and multi-contour profiles are not supported.
+Profile line loops support at least 3 edges. `extrude_sketch` also accepts one
+outer contour with one or more fully enclosed inner contours; the inner contours
+are cut from the extrusion inside the same sketch-driven feature and the result
+must remain one solid. `pad_sketch_to_body` uses the same contour rule before
+fusing its extruded profile into the source body. Parallel XY/XZ sketch planes
+can be authored with `create_sketch` using the matching normal axis and a finite
+`section_offset`; sketch-driven pads honor that plane offset. Revolve and other
+profile operations retain their existing single-contour contracts.
 
 The command stores an OCCT B-rep descriptor plus a feature that references its
 source sketch and operation parameter. Editing source points rebuilds the linked
-body in the same atomic command. `set_parameter` can change extrusion depth,
-revolution angle, sweep radius, or fillet radius. Revolve features also store
+body in the same atomic command. `set_parameter` can change extrusion or fused
+pad depth, revolution angle, sweep radius, chamfer distance, or fillet radius.
+Changes to an upstream profile or pad rebuild dependent chamfers and fillets in
+document order. Revolve features also store
 their profile's overall `outer_diameter` and `height`; `set_parameter` scales
 the closed XZ sketch in the radial or axial direction while preserving the
 revolution axis and bottom datum, then rebuilds the B-rep. The Geometry view

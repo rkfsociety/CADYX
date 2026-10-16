@@ -18,7 +18,7 @@ from .kernel import GeometryKernel
 from .mesh_geometry import mesh_ply_bytes
 from .models import Document
 from .scan import DEFAULT_SCAN_PARAMETERS, ScanProcessor, normalize_scan_parameters
-from .sketches import closed_profile, closed_spline_profile, open_path
+from .sketches import closed_profile, closed_profiles, closed_spline_profile, open_path
 from .sketch_slot_tools import (
     build_arc_slot_from_center,
     build_arc_slot_three_points,
@@ -148,10 +148,21 @@ class CommandSystem:
             return self._add_sketch_sampled_curve(document, command, kind=kind, progress=progress)
         if kind == "create_sketch":
             sketch_id = f"sketch:{uuid4()}"
-            document.objects.append({
+            plane = command.get("plane", "XY")
+            if plane not in {"XY", "XZ"}:
+                raise ValidationError("Sketch plane must be XY or XZ.")
+            sketch = {
                 "id": sketch_id, "type": "sketch",
-                "name": command.get("name", "Sketch"), "plane": command.get("plane", "XY"),
-            })
+                "name": command.get("name", "Sketch"), "plane": plane,
+            }
+            if "section_normal_axis" in command or "section_offset" in command:
+                axis = command.get("section_normal_axis")
+                expected_axis = "Z" if plane == "XY" else "Y"
+                if axis != expected_axis or "section_offset" not in command:
+                    raise ValidationError(f"An offset {plane} sketch needs section_normal_axis={expected_axis} and section_offset.")
+                sketch["section_normal_axis"] = axis
+                sketch["section_offset"] = _finite_number(command.get("section_offset"), "Sketch plane offset")
+            document.objects.append(sketch)
             return {"sketch_id": sketch_id}
         if kind in {"add_sketch_point", "add_sketch_construction_point"}:
             sketch = self._find_sketch(document, command.get("sketch_id"))
@@ -2089,9 +2100,9 @@ class CommandSystem:
                 feature["parameters"], feature["geometry"], body["geometry"] = parameters, geometry, geometry
                 return {"feature_id": feature_id, "parameter": parameter_name,
                         "value": value, "geometry": geometry}
-            if feature.get("operation") in {"extrude_sketch", "revolve_sketch"}:
-                expected = "depth" if feature["operation"] == "extrude_sketch" else "angle_degrees"
-                if parameter_name == "centered" and feature["operation"] == "extrude_sketch":
+            if feature.get("operation") in {"extrude_sketch", "revolve_sketch", "pad_sketch_to_body"}:
+                expected = "angle_degrees" if feature["operation"] == "revolve_sketch" else "depth"
+                if parameter_name == "centered" and feature["operation"] in {"extrude_sketch", "pad_sketch_to_body"}:
                     value = command.get("value")
                     if type(value) is not bool:
                         raise ValidationError("centered must be a boolean.")
@@ -2101,7 +2112,8 @@ class CommandSystem:
                 elif parameter_name == expected:
                     value = _number(command.get("value"), parameter_name)
                 else:
-                    supported = "angle_degrees, outer_diameter, and height" if feature["operation"] == "revolve_sketch" else "depth and centered"
+                    supported = ("angle_degrees, outer_diameter, and height" if feature["operation"] == "revolve_sketch"
+                                 else "depth and centered")
                     raise ValidationError(f"Only {supported} parameters are supported for this feature.")
                 parameters = dict(feature["parameters"])
                 if feature["operation"] == "revolve_sketch" and parameter_name in {"outer_diameter", "height"}:
@@ -2152,6 +2164,21 @@ class CommandSystem:
                              if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
                 if body is None:
                     raise ValidationError("Sweep feature refers to a missing body.")
+                feature["parameters"], feature["geometry"], body["geometry"] = parameters, geometry, geometry
+                self._rebuild_derived_features(document, {body["id"]}, progress=progress)
+                return {"feature_id": feature_id, "parameter": parameter_name, "value": value, "geometry": geometry}
+            if feature.get("operation") == "chamfer_edges" and parameter_name == "distance":
+                value = _number(command.get("value"), "distance", positive=True)
+                parameters = dict(feature["parameters"])
+                parameters["distance"] = value
+                source = next((item for item in document.objects
+                               if item.get("id") == feature.get("source_body_id") and item.get("type") == "body"), None)
+                body = next((item for item in document.objects
+                             if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+                if source is None or body is None:
+                    raise ValidationError("Chamfer feature refers to a missing source or result body.")
+                from .advanced_features import _advanced_native
+                geometry = _advanced_native(source["geometry"], 2, [value], parameters["edge_indices"])
                 feature["parameters"], feature["geometry"], body["geometry"] = parameters, geometry, geometry
                 self._rebuild_derived_features(document, {body["id"]}, progress=progress)
                 return {"feature_id": feature_id, "parameter": parameter_name, "value": value, "geometry": geometry}
@@ -2293,8 +2320,13 @@ class CommandSystem:
         if progress is not None:
             progress({"phase": "prepare_profile"})
         spline_profile = closed_spline_profile(document.objects, sketch_id)
+        profiles = None
         if spline_profile is None:
-            plane, profile = closed_profile(document.objects, sketch_id)
+            if operation == "extrude_sketch":
+                plane, profiles = closed_profiles(document.objects, sketch_id)
+                profile = profiles[0]
+            else:
+                plane, profile = closed_profile(document.objects, sketch_id)
             curve_points = None
         else:
             plane, profile, curve_points = spline_profile
@@ -2320,7 +2352,7 @@ class CommandSystem:
             progress({"phase": "kernel_extrusion" if operation == "extrude_sketch" else "kernel_revolution"})
         geometry = self._profile_geometry(document, {
             "operation": operation, "source_sketch_id": sketch_id,
-        }, parameters, profile=profile, plane=plane, curve_points=curve_points)
+        }, parameters, profile=profile, plane=plane, curve_points=curve_points, profiles=profiles)
         if progress is not None:
             progress({"phase": "validate_result"})
         body_id = f"body:{uuid4()}"
@@ -2477,14 +2509,42 @@ class CommandSystem:
         self, document: Document, feature: dict[str, Any], parameters: dict[str, Any], *,
         profile: list[dict[str, float]] | None = None, plane: str | None = None,
         curve_points: list[dict[str, float]] | None = None,
+        profiles: list[list[dict[str, float]]] | None = None,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         source_sketch_id = feature.get("source_sketch_id") or parameters.get("source_sketch_id")
         operation = feature.get("operation")
+        if operation == "pad_sketch_to_body":
+            sketch = next((item for item in document.objects if item.get("id") == source_sketch_id
+                           and item.get("type") == "sketch"), None)
+            if sketch is None:
+                raise ValidationError("Pad feature source sketch is missing.")
+            plane, profiles = closed_profiles(document.objects, source_sketch_id)
+            depth = parameters["depth"]
+            centered = parameters.get("centered", False)
+            tool = (self.kernel.create_extruded_profile(profiles[0], plane=plane, depth=depth, centered=centered)
+                    if len(profiles) == 1 else
+                    self.kernel.create_extruded_profile_with_holes(profiles, plane=plane, depth=depth,
+                                                                   centered=centered))
+            axis = sketch.get("section_normal_axis")
+            offset = sketch.get("section_offset", 0.0)
+            if offset:
+                shift = [0.0, 0.0, 0.0]
+                shift[2 if plane == "XY" and axis == "Z" else 1] = offset
+                tool = self.kernel.translate_solid(tool, shift)
+            source_body = next((item for item in document.objects if item.get("id") == feature.get("source_body_id")
+                                and item.get("type") == "body"), None)
+            if source_body is None:
+                raise ValidationError("Pad feature source body is missing.")
+            return self.kernel.fuse_profiles(source_body["geometry"], tool)
         if operation != "loft_sketches" and (profile is None or plane is None):
             spline_profile = closed_spline_profile(document.objects, source_sketch_id)
             if spline_profile is None:
-                plane, profile = closed_profile(document.objects, source_sketch_id)
+                if operation == "extrude_sketch":
+                    plane, profiles = closed_profiles(document.objects, source_sketch_id)
+                    profile = profiles[0]
+                else:
+                    plane, profile = closed_profile(document.objects, source_sketch_id)
                 curve_points = None
             else:
                 plane, profile, curve_points = spline_profile
@@ -2495,6 +2555,11 @@ class CommandSystem:
                        "centered": parameters.get("centered", False)}
             if curve_points is not None:
                 options["curve_points"] = curve_points
+            elif profiles is not None and len(profiles) > 1:
+                return self.kernel.create_extruded_profile_with_holes(
+                    profiles, plane=plane, depth=parameters["depth"],
+                    centered=parameters.get("centered", False),
+                )
             return self.kernel.create_extruded_profile(profile, **options)
         if operation == "revolve_sketch":
             if progress is not None:
@@ -2641,7 +2706,7 @@ class CommandSystem:
             source_sketch_ids = feature.get("source_sketch_ids", [])
             if feature.get("source_sketch_id"):
                 source_sketch_ids = [feature["source_sketch_id"]]
-            if (feature.get("operation") not in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches"}
+            if (feature.get("operation") not in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches", "pad_sketch_to_body"}
                     or not changed_sketches.intersection(source_sketch_ids)):
                 continue
             if progress is not None:
@@ -2674,9 +2739,9 @@ class CommandSystem:
         features = [item for item in document.objects if item.get("type") == "feature"]
         for feature in features:
             operation = feature.get("operation")
-            if operation == "fillet_edges":
+            if operation in {"fillet_edges", "chamfer_edges"}:
                 sources = {feature.get("source_body_id")}
-            elif operation in {"linear_pattern_body", "circular_pattern_body", "hole", "boss"}:
+            elif operation in {"linear_pattern_body", "circular_pattern_body", "hole", "boss", "pad_sketch_to_body"}:
                 sources = {feature.get("source_body_id")}
             elif operation in {"fuse_bodies", "cut_bodies"}:
                 sources = {feature.get("base_body_id"), feature.get("tool_body_id")}
@@ -2696,6 +2761,15 @@ class CommandSystem:
                     raise ValidationError("Fillet feature refers to a missing source body.")
                 geometry = self.kernel.create_fillet(source["geometry"],
                     edge_indices=feature["edge_indices"], radius=feature["parameters"]["radius"])
+            elif operation == "chamfer_edges":
+                source = by_id.get(feature.get("source_body_id"))
+                if source is None or source.get("type") != "body":
+                    raise ValidationError("Chamfer feature refers to a missing source body.")
+                from .advanced_features import _advanced_native
+                geometry = _advanced_native(source["geometry"], 2,
+                    [feature["parameters"]["distance"]], feature["parameters"]["edge_indices"])
+            elif operation == "pad_sketch_to_body":
+                geometry = self._profile_geometry(document, feature, feature["parameters"], progress=progress)
             elif operation in {"linear_pattern_body", "circular_pattern_body", "hole", "boss"}:
                 source = by_id.get(feature.get("source_body_id"))
                 if source is None or source.get("type") != "body":

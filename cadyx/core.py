@@ -22,7 +22,7 @@ from .mesh_geometry import mesh_bounds
 from .rendering import render_scene, render_scene_png
 from .scan import ScanProcessor
 from .workspace import ProjectWorkspace, utc_now
-from .sketches import closed_profile, open_path
+from .sketches import closed_profile, closed_profiles, open_path
 
 
 class CadyxCore:
@@ -1252,6 +1252,7 @@ class CadyxCore:
                               else (item.get("source_body_id"),)
                               if item.get("operation") in {
                                   "fillet_edges", "resize_imported_thread", "transform_imported_brep",
+                                  "pad_sketch_to_body",
                               } else ())
         }
         for item in document.objects:
@@ -1263,6 +1264,31 @@ class CadyxCore:
             if geometry is not None and item.get("type") == "body" and item["id"] not in consumed_bodies:
                 self.kernel.validate(geometry)
             if item.get("type") != "feature":
+                continue
+            if item.get("operation") == "pad_sketch_to_body":
+                body = by_id.get(item.get("body_id"))
+                source = by_id.get(item.get("source_body_id"))
+                feature_geometry = item.get("geometry")
+                sketch_id = item.get("source_sketch_id")
+                sketch = by_id.get(sketch_id)
+                parameters = item.get("parameters")
+                if (body is None or source is None or sketch is None or sketch.get("type") != "sketch"
+                        or feature_geometry != body.get("geometry") or not isinstance(parameters, dict)):
+                    raise ValidationError("Pad feature geometry or source references are invalid.")
+                plane, profiles = closed_profiles(document.objects, sketch_id)
+                tool = (self.kernel.create_extruded_profile(
+                    profiles[0], plane=plane, depth=parameters["depth"], centered=parameters["centered"],
+                ) if len(profiles) == 1 else self.kernel.create_extruded_profile_with_holes(
+                    profiles, plane=plane, depth=parameters["depth"], centered=parameters["centered"],
+                ))
+                offset = sketch.get("section_offset", 0.0)
+                if offset:
+                    shift = [0.0, 0.0, 0.0]
+                    shift[2 if plane == "XY" and sketch.get("section_normal_axis") == "Z" else 1] = offset
+                    tool = self.kernel.translate_solid(tool, shift)
+                expected = self.kernel.fuse_profiles(source["geometry"], tool)
+                if expected != feature_geometry:
+                    raise ValidationError("Pad feature geometry is out of date with its source sketch or body.")
                 continue
             if item.get("operation") in {"fuse_bodies", "cut_bodies"}:
                 feature_geometry = item.get("geometry")
@@ -1462,11 +1488,23 @@ class CadyxCore:
             source_id = item.get("source_sketch_id")
             if body is None or feature_geometry != body.get("geometry"):
                 raise ValidationError("Profile feature geometry must match its body.")
-            plane, profile = closed_profile(document.objects, source_id)
             operation = item["operation"]
             parameters = item.get("parameters")
-            if not isinstance(feature_geometry, dict):
+            if not isinstance(feature_geometry, dict) or not isinstance(parameters, dict):
                 raise ValidationError("Profile feature geometry is missing.")
+            if operation == "extrude_sketch":
+                plane, profiles = closed_profiles(document.objects, source_id)
+                if len(profiles) > 1:
+                    expected = self.kernel.create_extruded_profile_with_holes(
+                        profiles, plane=plane, depth=parameters["depth"],
+                        centered=parameters.get("centered", False),
+                    )
+                    if expected != feature_geometry:
+                        raise ValidationError("Profile feature geometry is out of date with its source sketch or parameters.")
+                    continue
+                profile = profiles[0]
+            else:
+                plane, profile = closed_profile(document.objects, source_id)
             expected_kind = "extruded_profile" if operation == "extrude_sketch" else "revolved_profile"
             if not isinstance(parameters, dict):
                 raise ValidationError("Profile feature parameters are invalid.")

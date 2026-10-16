@@ -533,6 +533,78 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
     return plane, profile
 
 
+def closed_profiles(
+        objects: list[dict[str, Any]], sketch_id: str,
+) -> tuple[str, list[list[dict[str, float]]]]:
+    """Return the independent closed contours in one sketch, preserving each exact loop."""
+    sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
+    if sketch is None:
+        raise ValidationError("A profile operation needs an existing sketch.")
+    owned = [item for item in objects if item.get("sketch_id") == sketch_id and not item.get("construction", False)]
+    edges = [item for item in owned if item.get("type") == "line"
+             and item.get("extent", "segment") == "segment"]
+    edges.extend(item for item in owned if item.get("type") == "spline" and item.get("mode") != "closed")
+    edges.extend(item for item in owned if item.get("type") == "circle" and "sweep_radians" in item)
+    edges.extend(item for item in owned if item.get("type") == "ellipse" and "sweep_radians" in item)
+    standalone = [item for item in owned if item.get("type") == "circle" and "sweep_radians" not in item]
+    standalone.extend(item for item in owned if item.get("type") == "ellipse" and "sweep_radians" not in item)
+    closed_splines = [item for item in owned if item.get("type") == "spline" and item.get("mode") == "closed"]
+    if closed_splines:
+        if len(closed_splines) != 1 or edges or standalone:
+            raise ValidationError("A closed spline profile must be the only non-construction sketch geometry.")
+        raise ValidationError("Closed spline profiles require curve-capable geometry-kernel support.")
+
+    components: list[list[dict[str, Any]]] = [[item] for item in standalone]
+    if edges:
+        adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for edge in edges:
+            start_id, end_id = ((edge["point_ids"][0], edge["point_ids"][-1]) if edge["type"] == "spline"
+                                else (edge["start_id"], edge["end_id"]))
+            adjacency[start_id].append(edge)
+            adjacency[end_id].append(edge)
+        remaining = {edge["id"]: edge for edge in edges}
+        while remaining:
+            first = next(iter(remaining.values()))
+            start_id, end_id = ((first["point_ids"][0], first["point_ids"][-1]) if first["type"] == "spline"
+                                else (first["start_id"], first["end_id"]))
+            component, pending = [], [first]
+            seen_edges: set[str] = set()
+            while pending:
+                edge = pending.pop()
+                if edge["id"] in seen_edges:
+                    continue
+                seen_edges.add(edge["id"])
+                component.append(edge)
+                a, b = ((edge["point_ids"][0], edge["point_ids"][-1]) if edge["type"] == "spline"
+                        else (edge["start_id"], edge["end_id"]))
+                for vertex in (a, b):
+                    pending.extend(candidate for candidate in adjacency[vertex]
+                                   if candidate["id"] not in seen_edges)
+            for edge in component:
+                remaining.pop(edge["id"], None)
+            components.append(component)
+
+    by_id = {item["id"]: item for item in objects}
+    profiles = []
+    for component in components:
+        vertex_ids = set()
+        for edge in component:
+            if edge["type"] == "circle":
+                vertex_ids.update((edge.get("center_id"), edge.get("start_id"), edge.get("end_id")))
+            elif edge["type"] == "ellipse":
+                vertex_ids.update((edge.get("start_id"), edge.get("end_id")))
+            elif edge["type"] == "spline":
+                vertex_ids.update(edge.get("point_ids", []))
+            else:
+                vertex_ids.update((edge.get("start_id"), edge.get("end_id")))
+        subset = [sketch, *component, *(by_id[value] for value in vertex_ids if value in by_id)]
+        _plane, profile = closed_profile(subset, sketch_id)
+        profiles.append(profile)
+    if not profiles:
+        raise ValidationError("A profile operation needs at least one closed contour.")
+    return sketch["plane"], profiles
+
+
 def closed_spline_profile(
         objects: list[dict[str, Any]], sketch_id: str,
 ) -> tuple[str, list[dict[str, float]], list[dict[str, float]]] | None:

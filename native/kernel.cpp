@@ -1665,6 +1665,21 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
           throw std::runtime_error("Box graph operation needs three dimensions.");
         shape = BRepPrimAPI_MakeBox(points[0], points[1], points[2]).Shape();
         break;
+      case 14: {
+        if (!points || node.coordinate_count != 3 || !std::isfinite(points[0]) || !std::isfinite(points[1])
+            || !std::isfinite(points[2]) || points[2] <= 0 || !std::isfinite(node.amount) || node.amount <= 0
+            || (node.plane != 0 && node.plane != 1))
+          throw std::runtime_error("Analytic circular extrusion needs a finite center, positive radius/depth, and valid plane.");
+        const double start = node.centered ? -node.amount / 2.0 : 0.0;
+        const gp_Pnt origin = node.plane == 0 ? gp_Pnt(points[0], points[1], start)
+                                               : gp_Pnt(points[0], start, points[1]);
+        const gp_Dir direction = node.plane == 0 ? gp_Dir(0, 0, 1) : gp_Dir(0, 1, 0);
+        BRepPrimAPI_MakeCylinder builder(gp_Ax2(origin, direction), points[2], node.amount);
+        builder.Build();
+        if (!builder.IsDone()) throw std::runtime_error("OCCT could not extrude an analytic sketch circle.");
+        shape = builder.Shape();
+        break;
+      }
       case 5:
         if (!points || node.coordinate_count != 2)
           throw std::runtime_error("Metric thread graph operation needs a major diameter and pitch.");

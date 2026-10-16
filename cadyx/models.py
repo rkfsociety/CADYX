@@ -122,11 +122,24 @@ class Document:
                 )
                 if not body or body.get("type") != "body" or not isinstance(feature_ids, list) or not feature_is_linked:
                     raise ValidationError("Feature must reference a body that includes the feature id.")
-                if item.get("operation") in {"extrude_sketch", "revolve_sketch"}:
+                if item.get("operation") in {"extrude_sketch", "revolve_sketch", "pad_sketch_to_body"}:
                     source_sketch_id = item.get("source_sketch_id")
                     typed_id(source_sketch_id, "sketch")
                     if by_id.get(source_sketch_id, {}).get("type") != "sketch":
                         raise ValidationError("Profile feature must reference an existing source sketch.")
+                    if item.get("operation") == "pad_sketch_to_body":
+                        source_body_id = item.get("source_body_id")
+                        typed_id(source_body_id, "body")
+                        parameters = item.get("parameters")
+                        if (source_body_id == item["body_id"] or by_id.get(source_body_id, {}).get("type") != "body"
+                                or not isinstance(parameters, dict)
+                                or set(parameters) != {"sketch_id", "depth", "centered"}
+                                or parameters.get("sketch_id") != source_sketch_id
+                                or isinstance(parameters.get("depth"), bool)
+                                or not isinstance(parameters.get("depth"), (int, float))
+                                or not math.isfinite(parameters["depth"]) or parameters["depth"] <= 0
+                                or type(parameters.get("centered")) is not bool):
+                            raise ValidationError("Pad feature source references or parameters are invalid.")
                 elif item.get("operation") == "sweep_sketch":
                     source_sketch_id = item.get("source_sketch_id")
                     typed_id(source_sketch_id, "sketch")

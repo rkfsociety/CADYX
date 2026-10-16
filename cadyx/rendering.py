@@ -24,6 +24,7 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
                           if item.get("operation") in {
                               "fillet_edges", "resize_imported_thread", "transform_imported_brep",
                               "linear_pattern_body", "circular_pattern_body", "hole", "boss",
+                              "pad_sketch_to_body",
                           } else ())
     }
     feature_sketches = {
@@ -34,7 +35,8 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
             [item.get("source_sketch_id")] if item.get("source_sketch_id")
             else item.get("source_sketch_ids", [])
         )
-        if item.get("operation") in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches"}
+        if item.get("operation") in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches",
+                                      "pad_sketch_to_body"}
     }
     bounds_min = [math.inf, math.inf, math.inf]
     bounds_max = [-math.inf, -math.inf, -math.inf]

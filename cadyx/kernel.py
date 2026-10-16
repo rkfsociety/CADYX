@@ -25,6 +25,18 @@ class GeometryKernel(Protocol):
         curve_points: list[dict[str, float]] | None = None,
     ) -> dict[str, Any]: ...
 
+    def create_extruded_profile_with_holes(
+        self, profiles: list[list[dict[str, float]]], *, plane: str, depth: float,
+        centered: bool = False,
+    ) -> dict[str, Any]: ...
+
+    def create_extruded_circle(
+        self, center: dict[str, float], radius: float, *, plane: str, depth: float,
+        centered: bool = False,
+    ) -> dict[str, Any]: ...
+
+    def translate_solid(self, geometry: dict[str, Any], offset: list[float]) -> dict[str, Any]: ...
+
     def create_lofted_profiles(
         self, sections: list[list[dict[str, float]]], *, section_offsets: list[float],
     ) -> dict[str, Any]: ...
@@ -427,6 +439,93 @@ class OCCTKernelAdapter:
         return self._create_profile_geometry(profile, plane=plane, operation=0,
                                              amount=_positive_amount(depth, "depth"), centered=centered,
                                              curve_points=curve_points)
+
+    def create_extruded_profile_with_holes(
+        self, profiles: list[list[dict[str, float]]], *, plane: str, depth: float,
+        centered: bool = False,
+    ) -> dict[str, Any]:
+        if type(centered) is not bool or not isinstance(profiles, list) or len(profiles) < 2:
+            raise ValidationError("A multi-contour extrusion needs an outer contour and at least one hole.")
+        normalized = [_profile_values(profile, plane)[0] for profile in profiles]
+        def area(profile):
+            return sum(point["x"] * profile[(i + 1) % len(profile)]["y"]
+                       - profile[(i + 1) % len(profile)]["x"] * point["y"]
+                       for i, point in enumerate(profile))
+        outer_index = max(range(len(normalized)), key=lambda index: abs(area(normalized[index])))
+        outer = normalized[outer_index]
+        holes = [profile for index, profile in enumerate(normalized) if index != outer_index]
+        def inside(point, contour):
+            x, y, contained = point["x"], point["y"], False
+            for index, first in enumerate(contour):
+                second = contour[(index + 1) % len(contour)]
+                if (first["y"] > y) != (second["y"] > y):
+                    crossing = (second["x"] - first["x"]) * (y - first["y"]) / (second["y"] - first["y"]) + first["x"]
+                    if x < crossing:
+                        contained = not contained
+            return contained
+        if any(not all(inside(point, outer) for point in hole) for hole in holes):
+            raise ValidationError("Every inner profile contour must lie completely inside the outer contour.")
+        def circle(profile):
+            if len(profile) < 16:
+                return None
+            x = sum(point["x"] for point in profile) / len(profile)
+            y = sum(point["y"] for point in profile) / len(profile)
+            radii = [math.hypot(point["x"] - x, point["y"] - y) for point in profile]
+            radius = sum(radii) / len(radii)
+            if radius <= 1e-12 or max(radii) - min(radii) > max(1e-7, radius * 1e-6):
+                return None
+            return {"x": x, "y": y}, radius
+        amount = _positive_amount(depth, "depth")
+        outer_circle = circle(outer)
+        solid = (self.create_extruded_circle(outer_circle[0], outer_circle[1], plane=plane,
+                                             depth=amount, centered=centered) if outer_circle else
+                 self.create_extruded_profile(outer, plane=plane, depth=amount, centered=centered))
+        for hole in holes:
+            hole_circle = circle(hole)
+            tool = (self.create_extruded_circle(hole_circle[0], hole_circle[1], plane=plane,
+                                                depth=amount, centered=centered) if hole_circle else
+                    self.create_extruded_profile(hole, plane=plane, depth=amount, centered=centered))
+            solid = self.cut_solids(solid, tool)
+        geometry = {"kernel": self.kernel_id, "kind": "profile_with_holes", "plane": plane,
+                    "profile": outer, "holes": holes, "depth": amount, "solid": solid,
+                    "volume": solid["volume"]}
+        if centered:
+            geometry["centered"] = True
+        return geometry
+
+    def create_extruded_circle(
+        self, center: dict[str, float], radius: float, *, plane: str, depth: float,
+        centered: bool = False,
+    ) -> dict[str, Any]:
+        if plane not in {"XY", "XZ"} or type(centered) is not bool:
+            raise ValidationError("An analytic circular extrusion needs an XY or XZ plane and boolean centered state.")
+        if (not isinstance(center, dict) or set(center) != {"x", "y"}
+                or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                       or not math.isfinite(value) for value in center.values())):
+            raise ValidationError("Circle center must have finite x and y coordinates.")
+        radius = _positive_amount(radius, "radius")
+        depth = _positive_amount(depth, "depth")
+        geometry = {"kernel": self.kernel_id, "kind": "extruded_circle", "plane": plane,
+                    "center": {"x": float(center["x"]), "y": float(center["y"])},
+                    "radius": radius, "depth": depth,
+                    "volume": math.pi * radius * radius * depth}
+        if centered:
+            geometry["centered"] = True
+        return geometry
+
+    def translate_solid(self, geometry: dict[str, Any], offset: list[float]) -> dict[str, Any]:
+        self.validate(geometry)
+        if (not isinstance(offset, list) or len(offset) != 3
+                or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                       or not math.isfinite(value) for value in offset)):
+            raise ValidationError("A solid translation needs three finite coordinates.")
+        native = NativeKernel()
+        brep, metrics = native.export_geometry(geometry)
+        source = {"kernel": self.kernel_id, "kind": "imported_brep",
+                  "data": base64.b64encode(zlib.compress(brep, level=9)).decode("ascii"),
+                  "volume": metrics["volume"], "brep_valid": True}
+        return self.modify_imported_brep(source, operation="rigid_transform",
+                                         parameters=[0.0, 0.0, 1.0, 0.0, *offset])
 
     def create_revolved_profile(
         self, profile: list[dict[str, float]], *, angle_degrees: float,
@@ -856,6 +955,12 @@ class OCCTKernelAdapter:
         if kernel_id == self.kernel_id and geometry.get("kind") in {"extruded_profile", "revolved_profile"}:
             self._validate_profile_geometry(geometry)
             return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "profile_with_holes":
+            self._validate_profile_with_holes_geometry(geometry)
+            return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "extruded_circle":
+            self._validate_extruded_circle_geometry(geometry)
+            return
         if kernel_id == self.kernel_id and geometry.get("kind") == "lofted_profiles":
             self._validate_loft_geometry(geometry)
             return
@@ -965,6 +1070,53 @@ class OCCTKernelAdapter:
             )["volume"]
         if not math.isclose(saved_volume, actual, rel_tol=1e-12, abs_tol=1e-12):
             raise ValidationError("Saved geometry volume does not match the Open CASCADE solid.")
+
+    def _validate_profile_with_holes_geometry(self, geometry: dict[str, Any]) -> None:
+        if (set(geometry) not in ({"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume"},
+                                  {"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume", "centered"})
+                or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "profile_with_holes"
+                or not isinstance(geometry.get("holes"), list) or not geometry["holes"]
+                or not isinstance(geometry.get("solid"), dict)):
+            raise ValidationError("Multi-contour extrusion geometry is invalid.")
+        centered = geometry.get("centered", False)
+        if type(centered) is not bool:
+            raise ValidationError("centered must be a boolean.")
+        expected = self.create_extruded_profile_with_holes(
+            [geometry["profile"], *geometry["holes"]], plane=geometry["plane"],
+            depth=geometry["depth"], centered=centered,
+        )
+        comparable = dict(geometry)
+        expected.pop("volume", None)
+        comparable.pop("volume", None)
+        if expected != comparable:
+            raise ValidationError("Saved multi-contour extrusion does not match its source profiles.")
+
+    def _validate_extruded_circle_geometry(self, geometry: dict[str, Any]) -> None:
+        if (set(geometry) not in ({"kernel", "kind", "plane", "center", "radius", "depth", "volume"},
+                                  {"kernel", "kind", "plane", "center", "radius", "depth", "volume", "centered"})
+                or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "extruded_circle"
+                or geometry.get("plane") not in {"XY", "XZ"}):
+            raise ValidationError("Analytic circular extrusion geometry is invalid.")
+        center = geometry.get("center")
+        if (not isinstance(center, dict) or set(center) != {"x", "y"}
+                or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                       or not math.isfinite(value) for value in center.values())):
+            raise ValidationError("Analytic circular extrusion center is invalid.")
+        radius = _positive_amount(geometry["radius"], "radius")
+        depth = _positive_amount(geometry["depth"], "depth")
+        centered = geometry.get("centered", False)
+        if type(centered) is not bool:
+            raise ValidationError("centered must be a boolean.")
+        expected = self.create_extruded_circle(center, radius, plane=geometry["plane"], depth=depth,
+                                               centered=centered)
+        expected.pop("volume", None)
+        comparable = dict(geometry)
+        comparable.pop("volume", None)
+        if expected != comparable:
+            raise ValidationError("Analytic circular extrusion parameters do not match its saved geometry.")
+        actual = NativeKernel().geometry_graph(geometry)["volume"]
+        if not math.isclose(geometry["volume"], actual, rel_tol=1e-12, abs_tol=1e-12):
+            raise ValidationError("Saved analytic circular extrusion volume is invalid.")
 
     def _validate_fused_geometry(self, geometry: dict[str, Any]) -> None:
         if (set(geometry) != {"kernel", "kind", "base", "tool", "volume"}

@@ -355,9 +355,19 @@ class NativeKernel:
 
         def append(value):
             kind = value.get("kind")
+            if kind == "profile_with_holes":
+                return append(value["solid"])
             node = {"input_a": -1, "input_b": -1, "operation": 0, "plane": 1,
                     "centered": 0, "amount": 0.0, "edge_offset": len(edge_indices), "edge_count": 0}
-            if kind == "box":
+            if kind == "extruded_circle":
+                center = value.get("center")
+                if not isinstance(center, dict) or set(center) != {"x", "y"}:
+                    raise ValidationError("Analytic circular extrusion center is invalid.")
+                node.update(type=14, plane=int(value["plane"] == "XZ"),
+                            centered=int(value.get("centered", False)), amount=value["depth"],
+                            coordinate_offset=len(coordinates), coordinate_count=3)
+                coordinates.extend((center["x"], center["y"], value["radius"]))
+            elif kind == "box":
                 dimensions = value["dimensions"]
                 node.update(type=4, coordinate_offset=len(coordinates), coordinate_count=3)
                 coordinates.extend(dimensions[key] for key in ("width", "height", "depth"))

@@ -8,13 +8,13 @@ from uuid import uuid4
 from .advanced_features import _raw_brep
 from .errors import NotFoundError, ValidationError
 from .native_kernel import NativeKernel
-from .sketches import closed_profile
+from .sketches import closed_profile, closed_profiles
 
 _INSTALLED = False
 
 CAPABILITIES = (
     {"type": "create_sketch_from_body_section", "description": "Extract closed planar contours from any editable B-rep body into editable sketches.", "required": ["body_id", "normal_axis", "offset"], "optional": ["max_points", "name"], "constraints": ["normal_axis is X, Y or Z; max_points is at least 16 total samples (default 2048); open/branched sections are rejected by the native sectioner."]},
-    {"type": "pad_sketch_to_body", "description": "Extrude a closed sketch and fuse it into an existing body.", "required": ["body_id", "sketch_id", "depth"], "optional": ["centered", "name"], "constraints": ["Pad must intersect the source body and final result must remain one solid."]},
+    {"type": "pad_sketch_to_body", "description": "Extrude a sketch profile with optional inner contours and fuse it into an existing body.", "required": ["body_id", "sketch_id", "depth"], "optional": ["centered", "name"], "constraints": ["Additional closed contours inside the outer contour become holes; offset XY/XZ sketch planes are honored. Pad must intersect the source body and final result must remain one solid."]},
     {"type": "rib_from_sketch", "description": "Create an additive rib from a thin closed sketch profile and fuse it into a body.", "required": ["body_id", "sketch_id", "depth"], "optional": ["centered", "name"], "constraints": ["Use a thin closed rib profile; result must fuse into one solid."]},
     {"type": "pocket_sketch", "description": "Extrude a closed sketch as a cutting tool and subtract it from an existing body.", "required": ["body_id", "sketch_id", "depth"], "optional": ["centered", "name"], "constraints": ["Pocket must remove material and final result must remain one solid."]},
 )
@@ -38,13 +38,14 @@ def _body(document, value: Any) -> dict[str, Any]:
     return body
 
 
-def _feature(document, source, operation, geometry, parameters, name):
+def _feature(document, source, operation, geometry, parameters, name, *, source_sketch_id=None):
     body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
     label = name.strip() if isinstance(name, str) and name.strip() else operation.replace("_", " ").title()
     document.objects.extend([
         {"id": body_id, "type": "body", "name": label, "feature_ids": [feature_id], "geometry": geometry},
         {"id": feature_id, "type": "feature", "body_id": body_id, "operation": operation,
-         "source_body_id": source["id"], "parameters": parameters, "geometry": geometry},
+         "source_body_id": source["id"], "source_sketch_id": source_sketch_id,
+         "parameters": parameters, "geometry": geometry},
     ])
     return {"body_id": body_id, "feature_id": feature_id, "source_body_id": source["id"], "geometry": geometry}
 
@@ -88,14 +89,26 @@ def _execute(self, document, command, *, progress=None):
     sketch = next((item for item in document.objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
     if sketch is None:
         raise NotFoundError("Source sketch was not found.")
-    _saved_sketch, profile = closed_profile(document.objects, sketch_id)
+    if kind == "pad_sketch_to_body":
+        plane, profiles = closed_profiles(document.objects, sketch_id)
+    else:
+        plane, profile = closed_profile(document.objects, sketch_id)
+        profiles = [profile]
     depth = _number(command.get("depth"), "depth", positive=True)
     centered = command.get("centered", False)
     if type(centered) is not bool:
         raise ValidationError("centered must be a boolean.")
     if progress:
         progress({"phase": "build_tool_extrusion"})
-    tool = self.kernel.create_extruded_profile(profile, plane=sketch["plane"], depth=depth, centered=centered)
+    tool = (self.kernel.create_extruded_profile(profiles[0], plane=plane, depth=depth, centered=centered)
+            if len(profiles) == 1 else
+            self.kernel.create_extruded_profile_with_holes(profiles, plane=plane, depth=depth, centered=centered))
+    axis = sketch.get("section_normal_axis")
+    offset = sketch.get("section_offset", 0.0)
+    if offset:
+        shift = [0.0, 0.0, 0.0]
+        shift[2 if plane == "XY" and axis == "Z" else 1] = offset
+        tool = self.kernel.translate_solid(tool, shift)
     if kind in {"pad_sketch_to_body", "rib_from_sketch"}:
         geometry = self.kernel.fuse_profiles(source["geometry"], tool)
     elif kind == "pocket_sketch":
@@ -103,7 +116,8 @@ def _execute(self, document, command, *, progress=None):
     else:
         raise ValidationError(f"Unsupported manufacturing feature: {kind!r}.")
     parameters = {"sketch_id": sketch_id, "depth": depth, "centered": centered}
-    return _feature(document, source, kind, geometry, parameters, command.get("name"))
+    return _feature(document, source, kind, geometry, parameters, command.get("name"),
+                    source_sketch_id=sketch_id if kind == "pad_sketch_to_body" else None)
 
 
 def install() -> None:
