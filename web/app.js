@@ -55,8 +55,57 @@
     function projectSetup(){let viewer;try{viewer=modelViewer}catch{return null}const c=viewer?.getCamera?.();if(!c?.orientation||!state.scene)return null;const meshes=state.objects.filter(o=>o.type==='body').map(o=>sceneBody(o.id)).filter(Boolean);if(!meshes.length)return null;const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];for(const m of meshes)for(let i=0;i<m.positions.length;i+=3)for(let a=0;a<3;a++){min[a]=Math.min(min[a],m.positions[i+a]);max[a]=Math.max(max[a],m.positions[i+a])}const center=min.map((x,a)=>(x+max[a])/2);let radius=.001;for(const m of meshes)for(let i=0;i<m.positions.length;i+=3)radius=Math.max(radius,Math.hypot(m.positions[i]-center[0],m.positions[i+1]-center[1],m.positions[i+2]-center[2]));const W=canvas.width,H=canvas.height,scale=Math.min(W,H)*.43*c.zoom/radius,O=c.orientation;return{W,H,p:(x,y,z)=>{x-=center[0];y-=center[1];z-=center[2];return[W/2+(O[0]*x+O[1]*y+O[2]*z)*scale,H/2-(O[6]*x+O[7]*y+O[8]*z)*scale,O[3]*x+O[4]*y+O[5]*z]}}}
     function drawOverlay(){const dpr=Math.min(devicePixelRatio||1,2),rect=panel.getBoundingClientRect();overlay.width=Math.round(rect.width*dpr);overlay.height=Math.round(rect.height*dpr);const ctx=overlay.getContext('2d');ctx.clearRect(0,0,overlay.width,overlay.height);const o=state.byId.get(state.selected),body=bodyFor(o),m=sceneBody(body?.id),P=projectSetup();if(!m||!P)return;const pts=m.positions,tri=m.triangles||[];ctx.save();ctx.strokeStyle='#ff7417';ctx.globalAlpha=.82;ctx.lineWidth=1.25*dpr;ctx.beginPath();const faceStep=Math.max(1,Math.ceil(tri.length/3/6000));for(let f=0;f<tri.length/3;f+=faceStep){const a=tri[f*3],b=tri[f*3+1],c=tri[f*3+2];for(const [u,v] of [[a,b],[b,c],[c,a]]){const i=u*3,j=v*3,A=P.p(pts[i],pts[i+1],pts[i+2]),B=P.p(pts[j],pts[j+1],pts[j+2]);ctx.moveTo(A[0],A[1]);ctx.lineTo(B[0],B[1])}}ctx.stroke();const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];for(let i=0;i<pts.length;i+=3)for(let a=0;a<3;a++){min[a]=Math.min(min[a],pts[i+a]);max[a]=Math.max(max[a],pts[i+a])}const corners=[];for(const x of [min[0],max[0]])for(const y of [min[1],max[1]])for(const z of [min[2],max[2]])corners.push(P.p(x,y,z));ctx.font=`700 ${10*dpr}px ui-monospace,monospace`;ctx.fillStyle='#ffb27e';[0,1,2].forEach(a=>{const value=max[a]-min[a];if(value<=1e-6)return;const c0=corners.reduce((p,x)=>x[1]>p[1]?x:p,corners[0]);ctx.fillText(`${fmt(value)} mm`,c0[0]+8*dpr,c0[1]-(a*14+8)*dpr)});const dia=Number(o?.parameters?.outer_diameter??o?.parameters?.major_diameter);if(Number.isFinite(dia)){const top=corners.reduce((p,x)=>x[1]<p[1]?x:p,corners[0]);ctx.fillText(`Ø${fmt(dia)} mm`,top[0],top[1]-10*dpr)}ctx.restore()}
     let last='';requestAnimationFrame(function loop(){let c;try{c=modelViewer?.getCamera?.()}catch{}const r=panel.getBoundingClientRect(),sig=state.selected&&c?.orientation?`${state.rev}|${state.selected}|${r.width|0}|${r.height|0}|${c.zoom}|${c.orientation.join(',')}`:'';if(sig!==last){last=sig;drawOverlay()}requestAnimationFrame(loop)});
-    function inside(px,py,a,b,c){const v0=[c[0]-a[0],c[1]-a[1]],v1=[b[0]-a[0],b[1]-a[1]],v2=[px-a[0],py-a[1]],d00=v0[0]*v0[0]+v0[1]*v0[1],d01=v0[0]*v1[0]+v0[1]*v1[1],d02=v0[0]*v2[0]+v0[1]*v2[1],d11=v1[0]*v1[0]+v1[1]*v1[1],d12=v1[0]*v2[0]+v1[1]*v2[1],den=d00*d11-d01*d01;if(Math.abs(den)<1e-12)return false;const u=(d11*d02-d01*d12)/den,v=(d00*d12-d01*d02)/den;return u>=0&&v>=0&&u+v<=1}
-    function pick(e){const P=projectSetup(),rect=canvas.getBoundingClientRect();if(!P||!rect.width)return;const x=(e.clientX-rect.left)*canvas.width/rect.width,y=(e.clientY-rect.top)*canvas.height/rect.height,cons=consumed();let best=null;for(const body of state.objects.filter(o=>o.type==='body'&&!cons.has(o.id))){const m=sceneBody(body.id);if(!m?.triangles?.length)continue;const n=m.triangles.length/3,step=Math.max(1,Math.ceil(n/30000));for(let f=0;f<n;f+=step){const ids=[m.triangles[f*3],m.triangles[f*3+1],m.triangles[f*3+2]],p=ids.map(id=>{const i=id*3;return P.p(m.positions[i],m.positions[i+1],m.positions[i+2])});if(inside(x,y,p[0],p[1],p[2])){const z=(p[0][2]+p[1][2]+p[2][2])/3;if(!best||z>best.z)best={body,z}}}}if(best){const fid=[...(best.body.feature_ids||[])].reverse().find(id=>state.byId.get(id)?.type==='feature');if(fid)select(fid,true)}}
+    function triangleDepth(px, py, ax, ay, az, bx, by, bz, cx, cy, cz) {
+      const v0x = cx - ax, v0y = cy - ay;
+      const v1x = bx - ax, v1y = by - ay;
+      const v2x = px - ax, v2y = py - ay;
+      const d00 = v0x * v0x + v0y * v0y;
+      const d01 = v0x * v1x + v0y * v1y;
+      const d02 = v0x * v2x + v0y * v2y;
+      const d11 = v1x * v1x + v1y * v1y;
+      const d12 = v1x * v2x + v1y * v2y;
+      const denominator = d00 * d11 - d01 * d01;
+      if (Math.abs(denominator) < 1e-12) return null;
+      const u = (d11 * d02 - d01 * d12) / denominator;
+      const v = (d00 * d12 - d01 * d02) / denominator;
+      if (u < 0 || v < 0 || u + v > 1) return null;
+      return (1 - u - v) * az + v * bz + u * cz;
+    }
+    function pick(e) {
+      const projection = projectSetup(), rect = canvas.getBoundingClientRect();
+      if (!projection || !rect.width) return;
+      const x = (e.clientX - rect.left) * canvas.width / rect.width;
+      const y = (e.clientY - rect.top) * canvas.height / rect.height;
+      const consumedBodies = consumed();
+      let best = null;
+      for (const body of state.objects.filter(item => item.type === 'body' && !consumedBodies.has(item.id))) {
+        const mesh = sceneBody(body.id);
+        if (!mesh?.triangles?.length) continue;
+        const projected = new Float64Array(mesh.positions.length);
+        for (let vertex = 0; vertex < mesh.positions.length; vertex += 3) {
+          const point = projection.p(mesh.positions[vertex], mesh.positions[vertex + 1], mesh.positions[vertex + 2]);
+          projected[vertex] = point[0];
+          projected[vertex + 1] = point[1];
+          projected[vertex + 2] = point[2];
+        }
+        const triangles = mesh.triangles;
+        for (let face = 0; face < triangles.length; face += 3) {
+          const a = triangles[face] * 3, b = triangles[face + 1] * 3, c = triangles[face + 2] * 3;
+          const ax = projected[a], ay = projected[a + 1];
+          const bx = projected[b], by = projected[b + 1];
+          const cx = projected[c], cy = projected[c + 1];
+          if (x < Math.min(ax, bx, cx) || x > Math.max(ax, bx, cx)
+              || y < Math.min(ay, by, cy) || y > Math.max(ay, by, cy)) continue;
+          const depth = triangleDepth(x, y, ax, ay, projected[a + 2],
+            bx, by, projected[b + 2], cx, cy, projected[c + 2]);
+          if (depth !== null && (!best || depth > best.depth)) best = { body, depth };
+        }
+      }
+      if (!best) return;
+      const featureId = [...(best.body.feature_ids || [])].reverse()
+        .find(id => state.byId.get(id)?.type === 'feature');
+      if (featureId) select(featureId, true);
+    }
     let down=null;canvas.addEventListener('pointerdown',e=>{if(state.tool!=='select'||e.button!==0)return;e.preventDefault();e.stopImmediatePropagation();down=[e.clientX,e.clientY]},true);canvas.addEventListener('pointerup',e=>{if(state.tool!=='select'||!down)return;e.preventDefault();e.stopImmediatePropagation();if(Math.hypot(e.clientX-down[0],e.clientY-down[1])<6)pick(e);down=null},true);canvas.addEventListener('pointermove',e=>{if(state.tool==='select'&&down){e.preventDefault();e.stopImmediatePropagation()}},true);
     const toolbar=$('.model-toolbar'),presets=$('#viewport-camera-presets'),fit=$('#viewport-fit'),four=$('#viewport-four-views'),divider=$('.viewport-toolbar-divider'),display=$('#viewport-wireframe');if(toolbar&&presets&&fit&&four&&divider&&display){const sel=document.createElement('button'),orb=document.createElement('button');sel.className=orb.className='cad3-tool';sel.innerHTML=`${I.select}<span>Выбор</span>`;orb.innerHTML=`${I.orbit}<span>Орбита</span>`;const tool=t=>{state.tool=t;sel.dataset.on=String(t==='select');orb.dataset.on=String(t==='orbit');detail.dataset.cadTool=t};sel.onclick=()=>tool('select');orb.onclick=()=>tool('orbit');tool('select');fit.innerHTML=`${I.fit}<span class="toolbar-label">Вписать</span>`;fit.classList.add('cad3-tool');four.classList.add('cad3-tool');const views=document.createElement('details');views.className='cad3-views';views.innerHTML='<summary class="cad3-tool">Ракурсы ▾</summary>';views.append(presets);const ml=$('#viewport-mode-label');if(ml)ml.textContent='Затенение + рёбра';toolbar.replaceChildren(sel,orb,fit,four,divider,views,display)}
     function defaultSelection(){const cons=consumed(),b=[...state.objects].reverse().find(o=>o.type==='body'&&!cons.has(o.id));return [...(b?.feature_ids||[])].reverse().find(id=>state.byId.get(id)?.type==='feature')||[...state.objects].reverse().find(o=>o.type==='feature')?.id||null}
