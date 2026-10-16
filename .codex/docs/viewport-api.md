@@ -177,10 +177,14 @@ history of completed/failed actions without exposing future steps.
 
 `window.CadyxViewport.createViewer(canvas)` is shared with PLY preview and returns:
 
-- `load({positions, triangles, bounds, lines?, points?}, {reset = true, transition?})`;
+- `load({positions, triangles, bounds, lines?, points?, bodyTriangleRanges?}, {reset = true, transition?})`;
   omit lines/points for a PLY point cloud. Use `reset: false` on document refresh.
   Agent-created sketch and profile transitions are eased in the shared viewer;
   regular loads and PLY previews remain static unless a transition is supplied.
+- `setSelectedBody(bodyId)` highlights the visible faces of that body in the
+  shared preview. `bodyTriangleRanges` maps body IDs to triangle-index ranges;
+  highlight tint is depth-tested, so hidden faces are not drawn through the model.
+  Pass `null` to clear the highlight.
 - `render()` redraws after resize/visibility changes.
 - `fit()` resets orientation and zoom to fit all scene bounds.
 - `getCamera()` returns `{orientation, zoom, projection: "orthographic"}`;

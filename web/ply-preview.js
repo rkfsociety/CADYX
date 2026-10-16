@@ -1548,19 +1548,23 @@ async function refreshDetail() {
   }
   if (renderedSceneKey !== key) {
     const positions = [], bodyPositions = [], triangles = [], lines = [], points = [], rotationAxes = [];
-    const bodyLineRanges = [];
+    const bodyLineRanges = [], bodyTriangleRanges = [];
     let targetFound = false;
     for (const object of scene.objects) {
       const source = objectsById.get(object.object_id);
       if (source?.type !== "body" && source?.sketch_id !== visibleSketchId) continue;
       const offset = positions.length / 3;
       const lineOffset = lines.length;
+      const triangleStart = triangles.length / 3;
       const pointOffset = points.length;
       for (const value of object.positions) {
         positions.push(value);
         if (source?.type === "body") bodyPositions.push(value);
       }
       for (const index of object.triangles) triangles.push(index + offset);
+      if (source?.type === "body" && object.triangles.length) {
+        bodyTriangleRanges.push({ objectId: object.object_id, start: triangleStart, end: triangles.length / 3 });
+      }
       for (const index of object.lines) lines.push(index + offset);
       if (source?.type === "body" && object.lines.length) {
         bodyLineRanges.push({ start: lineOffset, end: lineOffset + object.lines.length });
@@ -1602,7 +1606,7 @@ async function refreshDetail() {
       bounds.max = [0, 0, 0];
     }
     if (!targetFound) transition = null;
-    const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes, bodyLineRanges };
+    const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes, bodyLineRanges, bodyTriangleRanges };
     modelViewer.load(viewportGeometry, {
       reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition, smoothShading: true,
     });

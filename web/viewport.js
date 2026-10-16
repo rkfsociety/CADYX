@@ -97,6 +97,7 @@
     let meshImage = null;
     let meshDepth = new Float32Array(0);
     let geometry = null;
+    let selectedBodyId = null;
     let cameraOrientation = cameraMatrixFromYawPitch(0.68, 0.38);
     let zoom = 1;
     let cameraPanX = 0;
@@ -302,6 +303,7 @@
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
         wireframeColor, wireframeOpacity, dpr, 0.75 / scale,
+        geometry.bodyTriangleRanges?.filter((range) => range.objectId === selectedBodyId) || [],
       );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale, geometry.colors);
       const directLineCount = geometry.type === "body" ? 0 : (geometry.lines || []).length;
@@ -621,7 +623,7 @@
     }
 
     function rasterizeShadedMesh(visibleFaces, triangles, camera, progress,
-      colors = null, triangleColors = null) {
+      colors = null, triangleColors = null, selectedRanges = []) {
       if (!meshLayerContext || !canvas.width || !canvas.height) return false;
       const width = canvas.width, height = canvas.height;
       if (meshLayer.width !== width || meshLayer.height !== height || !meshImage) {
@@ -753,6 +755,47 @@
         }
       }
 
+      if (selectedRanges.length) {
+        const selectedFaces = visibleFaces.filter((face) => selectedRanges.some((range) => face >= range.start && face < range.end));
+        for (const face of selectedFaces) {
+          const offset = face * 8;
+          const first = triangles[face * 3], second = triangles[face * 3 + 1], third = triangles[face * 3 + 2];
+          const x0 = faceRecords[offset], y0 = faceRecords[offset + 1];
+          const x1 = faceRecords[offset + 2], y1 = faceRecords[offset + 3];
+          const x2 = faceRecords[offset + 4], y2 = faceRecords[offset + 5];
+          const area = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+          if (Math.abs(area) < 1e-9) continue;
+          const minX = Math.max(0, Math.floor(Math.min(x0, x1, x2)));
+          const maxX = Math.min(width - 1, Math.ceil(Math.max(x0, x1, x2)));
+          const minY = Math.max(0, Math.floor(Math.min(y0, y1, y2)));
+          const maxY = Math.min(height - 1, Math.ceil(Math.max(y0, y1, y2)));
+          if (minX > maxX || minY > maxY) continue;
+          const inverseArea = 1 / area, sampleX = minX + 0.5, sampleY = minY + 0.5;
+          let rowW0 = ((x2 - x1) * (sampleY - y1) - (y2 - y1) * (sampleX - x1)) * inverseArea;
+          let rowW1 = ((x0 - x2) * (sampleY - y2) - (y0 - y2) * (sampleX - x2)) * inverseArea;
+          let rowW2 = 1 - rowW0 - rowW1;
+          const w0StepX = -(y2 - y1) * inverseArea, w1StepX = -(y0 - y2) * inverseArea;
+          const w2StepX = -w0StepX - w1StepX;
+          const w0StepY = (x2 - x1) * inverseArea, w1StepY = (x0 - x2) * inverseArea;
+          const w2StepY = -w0StepY - w1StepY;
+          const z0 = camera[first * 3 + 2], z1 = camera[second * 3 + 2], z2 = camera[third * 3 + 2];
+          for (let y = minY; y <= maxY; y += 1) {
+            let w0 = rowW0, w1 = rowW1, w2 = rowW2, pixelIndex = y * width + minX;
+            for (let x = minX; x <= maxX; x += 1) {
+              if (w0 >= -1e-7 && w1 >= -1e-7 && w2 >= -1e-7
+                  && z0 * w0 + z1 * w1 + z2 * w2 + 1e-7 >= meshDepth[pixelIndex]) {
+                const byteIndex = pixelIndex * 4, mix = 0.46;
+                pixels[byteIndex] = Math.round(pixels[byteIndex] * (1 - mix) + 255 * mix);
+                pixels[byteIndex + 1] = Math.round(pixels[byteIndex + 1] * (1 - mix) + 126 * mix);
+                pixels[byteIndex + 2] = Math.round(pixels[byteIndex + 2] * (1 - mix) + 38 * mix);
+              }
+              pixelIndex += 1; w0 += w0StepX; w1 += w1StepX; w2 += w2StepX;
+            }
+            rowW0 += w0StepY; rowW1 += w1StepY; rowW2 += w2StepY;
+          }
+        }
+      }
+
       meshLayerContext.putImageData(meshImage, 0, 0);
       context.drawImage(meshLayer, 0, 0);
       return true;
@@ -761,7 +804,7 @@
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
       vertexNormals, orientation, faceNormals, featureEdges, silhouetteCandidates, colors, triangleColors,
       showWireframe, shaded,
-      wireframeColor, wireframeOpacity, dpr, depthTolerance) {
+      wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = []) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
       const smooth = vertexNormals && (!transition || progress >= 1);
@@ -832,7 +875,7 @@
 
       const visibleFaces = faceOrder.subarray(0, visibleCount);
       const depthBufferValid = shaded
-        && rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors, triangleColors);
+        && rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors, triangleColors, selectedRanges);
       if (shaded && !depthBufferValid) {
         visibleFaces.sort((left, right) => faceRecords[left * 8 + 6] - faceRecords[right * 8 + 6]);
         for (const face of visibleFaces) {
@@ -1047,6 +1090,12 @@
     return {
       fit() { resetView(); render(); },
       createSnapshotBlob,
+      setSelectedBody(bodyId) {
+        const next = typeof bodyId === "string" ? bodyId : null;
+        if (selectedBodyId === next) return;
+        selectedBodyId = next;
+        render();
+      },
       getCamera() {
         return { orientation: cameraOrientation.slice(), zoom, panX: cameraPanX, panY: cameraPanY, projection: "orthographic" };
       },
