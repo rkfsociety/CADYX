@@ -1,6 +1,7 @@
 # CADYX Codex rules
 
 - Before any substantive work on CADYX—analysis, planning, code or documentation changes, reviews, recommendations, or commits—refresh project context from the current target branch/revision. Re-read `.codex/rules.md` and `.codex/memory.md`, inspect the files relevant to the task, and verify recent repository state/changes as needed. Treat prior-chat/model memory as potentially stale and never rely on it when the current repository state can be checked.
+- The CADYX web panel targets desktop PCs exclusively. Review and verify its layout at desktop sizes; tablet and phone layouts are out of scope unless the user changes this requirement.
 - Work directly on `main`. Do not create feature, staging, temporary, or work branches unless the user explicitly changes this policy. CADYX should normally have exactly one branch: `main`. If an accidental branch is created, fast-forward/merge its work into `main` and remove the extra branch.
 - When choosing or updating any dependency/runtime/tool version, use the newest stable release and verify it from its official source. Do not choose an older compatible release as a workaround: the user explicitly requires adapting or building the kernel when necessary. Never bypass dependency checks to claim compatibility. Reviewed versions and reproducible local setup live in `scripts/runtime-versions.json` and `scripts/setup-runtime.ps1`.
 
