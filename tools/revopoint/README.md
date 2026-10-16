@@ -53,7 +53,9 @@ The frame UTC timestamps and angle samples can be joined by linear interpolation
 
 The twelve 30° raw captures were reprojected and tested with a candidate Z-axis rotation and overlap-fitted pivot. A candidate transform of −30° per commanded +30° step around approximately `[28.8, -5.4]` in current Q coordinates gave 81–94% adjacent-pair nearest-neighbor overlap within 5 coordinate units. The pivot and sign are empirical estimates, not mechanical calibration. A voxel-deduplicated PLY and its JSON provenance are saved as `approx_fused_candidate.ply` and `approx_fused_candidate.json` beside the source frames.
 
-CADYX reconstructed the candidate to 24,641 vertices and 49,979 triangles. Visual inspection shows an overly broad, nearly planar Poisson sheet with a noisy dense center; this mesh is a diagnostic artifact and is not a verified complete model. The raw disparity scale, mechanical axis/pivot, object support/removal and reconstruction quality need further work before the fusion can be accepted.
+The initial CADYX reconstruction had 24,641 vertices and 49,979 triangles. Subsequent trials at higher triangle count and with density/outlier filtering still produce a thin plate-like result with isolated fragments; this is a diagnostic model, not a verified complete scan. The raw disparity scale, mechanical axis/pivot and coverage of occluded surfaces need validation before the fusion can be accepted.
+
+The mesh and source cloud have similar PCA eigenvalues for their thinnest dimension (14.1 vs. 15.6 coordinate-units²). This indicates the thin, plate-like shape is already present in the fused input, rather than being created only by Poisson reconstruction. It still does not prove the object itself is fully covered: the underside and occluded surfaces are not validated.
 
 List the camera's advertised native modes with:
 
