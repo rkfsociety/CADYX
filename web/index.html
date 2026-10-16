@@ -3,50 +3,76 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#0b1114">
+    <meta name="theme-color" content="#0c1116">
     <title>CADYX — Проекты</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/assets/style.css">
-    <style id="cadyx-compact-ui">
-/* CADYX compact viewport-first shell */
+    <style id="cadyx-cad-reference-ui">
+/* CADYX CAD-style shell based on the approved dark/orange reference. */
 :root {
-  --cadyx-rail-width: 108px;
-  --cadyx-shell-gap: 8px;
-  --cadyx-overlay-width: min(330px, calc(100% - 24px));
+  --accent: #ff7417;
+  --agent: #ff7417;
+  --canvas: #090d11;
+  --surface: #0e1419;
+  --surface-soft: #121920;
+  --surface-hover: #182128;
+  --line: #29323a;
+  --line-soft: #1c252c;
+  --text: #e8edf0;
+  --muted: #a7b0b7;
+  --dim: #6f7b84;
+  --cadyx-tree-width: clamp(240px, 17vw, 292px);
+  --cadyx-inspector-width: clamp(300px, 21vw, 370px);
+  --cadyx-tabs-height: 50px;
+  --cadyx-ai-height: 58px;
 }
 
+html, body { background: var(--canvas); }
+body { color: var(--text); }
+
 .topbar {
-  height: 56px;
-  grid-template-columns: auto minmax(250px, 1fr) auto auto;
-  grid-template-areas: "brand project sync end";
-  gap: 12px;
-  padding: 0 12px;
+  z-index: 20;
+  height: 58px;
+  grid-template-columns: auto minmax(220px, 1fr) auto auto;
+  grid-template-areas: "brand project end sync";
+  gap: 0;
+  padding: 0 18px 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #0d1419 0%, #0a1014 100%);
 }
-.topbar-start { grid-area: brand; }
-.topbar-project { grid-area: project; }
-.topbar-sync { grid-area: sync; }
-.topbar-end { grid-area: end; }
-.brand { font-size: 25px; letter-spacing: .09em; }
-.topbar-sync { gap: 7px; padding-left: 12px; }
-.topbar-sync .topbar-project-copy { gap: 1px; }
-.topbar-sync .document-title { display: none; }
-.topbar-project { gap: 9px; padding-left: 12px; }
-.topbar-project-copy { gap: 1px; }
-.topbar-project { position: relative; }
+.topbar-start { grid-area: brand; padding-right: 22px; border-right: 1px solid var(--line); }
+.topbar-project { grid-area: project; position: relative; gap: 0; padding-left: 22px; border: 0; }
+.topbar-end { grid-area: end; justify-content: flex-end; gap: 12px; }
+.topbar-sync { grid-area: sync; width: 28px; justify-content: center; gap: 0; margin-left: 12px; padding: 0; border: 0; }
+.brand {
+  color: var(--accent);
+  font-size: 27px;
+  font-weight: 760;
+  letter-spacing: .075em;
+}
+.topbar-project > .project-light,
+.topbar-project .topbar-label,
+.topbar-sync .topbar-project-copy,
+.readonly-badge { display: none; }
+.document-title {
+  max-width: min(46vw, 620px);
+  color: #eef2f4;
+  font: 600 13px/1.2 var(--mono);
+}
 .project-id-copy-row {
   position: absolute;
-  z-index: 10;
-  top: calc(100% - 2px);
-  left: 10px;
+  z-index: 30;
+  top: calc(100% + 10px);
+  left: 18px;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: max-content;
-  padding: 7px 8px;
+  padding: 8px;
   border: 1px solid var(--line);
-  border-radius: 3px;
-  background: #0b1114f2;
-  box-shadow: 0 10px 24px #00000055;
+  border-radius: 5px;
+  background: #0d1419f5;
+  box-shadow: 0 12px 30px #0008;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-4px);
@@ -54,251 +80,510 @@
 }
 .topbar-project:hover .project-id-copy-row,
 .topbar-project:focus-within .project-id-copy-row { opacity: 1; pointer-events: auto; transform: translateY(0); }
-.header-revision { min-width: 58px; padding-left: 11px; }
-.readonly-badge { padding: 4px 6px; }
-.agent-owner-chip {
-  display: inline-flex;
-  min-height: 24px;
+.header-revision {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 7px;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  color: var(--muted);
-  background: #0d1518;
-  font: 9px var(--mono);
-  letter-spacing: .06em;
-  white-space: nowrap;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 13px 0 0;
+  border: 0;
+  border-right: 1px solid var(--line);
+}
+.header-revision::before { content: "REV"; color: var(--dim); font: 10px var(--mono); letter-spacing: .08em; }
+.header-revision .topbar-label { display: none; }
+.header-revision strong { color: var(--muted); font: 11px var(--mono); }
+.agent-owner-chip {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid #6c3a1d;
+  border-radius: 5px;
+  color: #ff9854;
+  background: #22140c;
+  font: 700 10px var(--mono);
+  letter-spacing: .05em;
 }
 .agent-owner-chip[data-state="running"] {
-  border-color: #2d6658;
-  color: var(--agent);
-  background: #10211e;
-  box-shadow: 0 0 18px #45e1ba12;
+  border-color: #9b4818;
+  color: #ff8a3a;
+  background: #291408;
+  box-shadow: 0 0 18px #ff741714;
 }
-.agent-owner-chip[data-state="warning"] { border-color: #5a4930; color: var(--warning); }
-.agent-owner-chip[data-state="failed"] { border-color: #684145; color: var(--danger); }
+.agent-owner-chip[data-state="warning"] { border-color: #7a5a2b; color: var(--warning); background: #20180d; }
+.agent-owner-chip[data-state="failed"] { border-color: #744044; color: var(--danger); background: #201012; }
+.topbar-sync .project-light { width: 7px; height: 7px; background: #5f6b73; box-shadow: none; }
+.topbar-sync .project-light.active { background: var(--accent); box-shadow: 0 0 10px #ff741777; }
 
-.app-shell { height: calc(100vh - 56px); height: calc(100dvh - 56px); }
+.app-shell { height: calc(100vh - 58px); height: calc(100dvh - 58px); }
+.workspace { background: var(--canvas); }
+.empty-workspace .empty-mark { border-color: #6c3a1d; color: var(--accent); background: #16100c; }
+.empty-workspace .button { border-color: #81411a; color: #ff9b5a; }
+
 .project-detail {
-  grid-template-columns: var(--cadyx-rail-width) minmax(0, 1fr);
-  gap: var(--cadyx-shell-gap);
-  padding: var(--cadyx-shell-gap);
-}
-.section-sidebar { border-radius: 3px; }
-.workspace-navigation { gap: 3px; padding: 5px; }
-.nav-item {
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 5px;
-  min-height: 56px;
-  padding: 7px 6px;
-  border-radius: 2px;
-}
-.nav-index { font-size: 11px; color: var(--dim); }
-.nav-copy { gap: 0; }
-.nav-copy strong { font-size: 9px; letter-spacing: .03em; }
-.nav-copy small { display: none; }
-.workspace-lock-status { margin: 5px; padding: 7px; font-size: 8px; }
-
-.project-main, .primary-grid { position: relative; }
-.primary-grid[data-view="overview"] { grid-template-columns: minmax(0, 1fr); gap: 0; }
-.primary-grid[data-view="overview"] > .model-panel { grid-column: 1; grid-row: 1; }
-.primary-grid[data-view="overview"] > .inspector-column {
-  position: absolute;
-  z-index: 6;
-  top: 54px;
-  right: 12px;
-  width: var(--cadyx-overlay-width);
-  max-height: calc(100% - 66px);
-  display: block;
-  overflow: visible;
-  pointer-events: none;
-}
-.primary-grid[data-view="overview"] > .inspector-column > :not(#workflow-panel) { display: none; }
-.primary-grid[data-view="overview"] #workflow-panel {
+  position: relative;
+  display: grid;
   width: 100%;
-  pointer-events: auto;
-  border-color: #2a3e43;
-  background: #0d1518e8;
-  box-shadow: 0 12px 34px #00000052;
-  backdrop-filter: blur(10px);
-}
-.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] {
-  grid-template-rows: 34px 42px minmax(82px, auto);
-}
-.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="false"] {
-  height: min(520px, calc(100vh - 100px));
-  height: min(520px, calc(100dvh - 100px));
-}
-.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-history { display: none; }
-.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-summary {
-  grid-template-columns: 56px minmax(0, 1fr) auto;
-  padding: 3px 9px;
-}
-.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-percent { font-size: 19px; }
-.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-current { gap: 6px; padding: 8px 10px; }
-.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-action { font-size: 11px; line-height: 1.35; }
-.primary-grid[data-view="overview"] .workflow-panel[data-collapsed="true"] .workflow-task { display: none !important; }
-.workflow-heading-actions { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.workflow-collapse-button {
-  width: 25px;
-  height: 25px;
-  min-height: 25px;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: var(--cadyx-tree-width) minmax(0, 1fr);
+  grid-template-rows: var(--cadyx-tabs-height) minmax(0, 1fr) var(--cadyx-ai-height);
+  gap: 0;
   padding: 0;
+  background: #090e12;
+}
+
+/* Workspace tabs: Model / Analysis / Manufacturing. */
+.workspace-navigation {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-height: var(--cadyx-tabs-height);
+  overflow: hidden;
+  padding: 0 60px;
+  border-bottom: 1px solid var(--line);
+  background: #0b1116;
+}
+.nav-item {
+  display: flex;
+  width: auto;
+  min-width: 108px;
+  min-height: var(--cadyx-tabs-height);
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  text-align: center;
+}
+.nav-item:hover:not(:disabled) { background: #ffffff04; }
+.nav-item[aria-current="page"] {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, #ff74170a, #ff741704);
+}
+.nav-item[aria-current="page"]::before { display: none; }
+.nav-index, .nav-copy small { display: none; }
+.nav-copy { display: block; }
+.nav-copy strong { color: #c8d0d5; font: 600 12px var(--mono); letter-spacing: 0; text-transform: none; }
+.nav-item[aria-current="page"] .nav-copy strong { color: var(--accent); }
+.nav-item[data-workspace-view="geometry"],
+.nav-item[data-workspace-view="activity"],
+.nav-item[data-workspace-view="files"],
+.nav-item[data-workspace-view="projects"] { display: none; }
+
+/* Left CAD model tree. */
+.section-sidebar {
+  grid-column: 1;
+  grid-row: 2;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: linear-gradient(180deg, #0d1419 0%, #0a1014 100%);
+}
+.section-sidebar > .sidebar-heading,
+.section-sidebar > .sidebar-project { display: none !important; }
+.workspace-lock-status {
+  position: absolute;
+  z-index: 16;
+  top: calc(var(--cadyx-tabs-height) + 8px);
+  left: calc(var(--cadyx-tree-width) + 12px);
+  max-width: 420px;
+  margin: 0;
+  padding: 7px 9px;
+  border-color: #704d26;
+  background: #1c140bde;
+  font-size: 8px;
+}
+.cad-model-tree {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: 48px 42px minmax(0, 1fr);
+}
+.cad-tree-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.cad-tree-heading strong { color: #e7ecef; font: 600 13px var(--mono); }
+.cad-tree-collapse {
+  width: 26px;
+  height: 26px;
   border: 1px solid transparent;
-  border-radius: 2px;
+  border-radius: 4px;
   background: transparent;
   color: var(--dim);
-  font: 13px/1 var(--mono);
   cursor: pointer;
 }
-.workflow-collapse-button:hover:not(:disabled) { border-color: #2d5a50; color: var(--accent); background: #10211e; }
-.workflow-collapse-button:disabled { opacity: .35; cursor: default; }
-.primary-grid:not([data-view="overview"]) .workflow-collapse-button { display: none; }
+.cad-tree-collapse:hover { border-color: #59402e; color: var(--accent); background: #ff741709; }
+.cad-tree-search { padding: 7px 10px; }
+.cad-tree-search input {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  outline: 0;
+  background: #0b1217;
+  color: var(--text);
+  font: 10px var(--mono);
+}
+.cad-tree-search input:focus { border-color: #8a461e; box-shadow: 0 0 0 1px #ff741722; }
+.cad-tree-scroll { min-height: 0; overflow: auto; padding: 5px 8px 18px; }
+.cad-tree-root,
+.cad-tree-static,
+.cad-tree-features { display: grid; gap: 2px; }
+.cad-tree-root-row,
+.cad-tree-static-row,
+.cad-tree-feature {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 18px 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-height: 31px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font: 10px/1.25 var(--mono);
+  text-align: left;
+}
+.cad-tree-root-row { color: #e4eaed; font-weight: 650; }
+.cad-tree-static { margin-left: 18px; padding-left: 5px; border-left: 1px solid #273139; }
+.cad-tree-features { margin-top: 4px; }
+.cad-tree-feature { cursor: pointer; }
+.cad-tree-feature:hover { background: #ffffff06; color: #dce3e7; }
+.cad-tree-feature[data-selected="true"] { border-color: #6c3517; background: linear-gradient(90deg, #4a210f, #25150e); color: #fff; }
+.cad-tree-chevron { color: #89949b; font-size: 10px; text-align: center; }
+.cad-tree-icon { color: var(--accent); font-size: 13px; text-align: center; }
+.cad-tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cad-tree-empty { margin: 12px 8px; color: var(--dim); font: 9px/1.5 var(--mono); }
+.section-sidebar[data-collapsed="true"] { width: 48px; }
+.section-sidebar[data-collapsed="true"] .cad-tree-search,
+.section-sidebar[data-collapsed="true"] .cad-tree-scroll,
+.section-sidebar[data-collapsed="true"] .cad-tree-heading strong { display: none; }
+.section-sidebar[data-collapsed="true"] .cad-tree-heading { justify-content: center; padding: 0; }
+.project-detail[data-tree-collapsed="true"] { grid-template-columns: 48px minmax(0, 1fr); }
 
+/* Center + right CAD area. */
+.project-main {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.primary-grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) var(--cadyx-inspector-width);
+  gap: 0;
+  background: #090e12;
+}
+.primary-grid[data-view="overview"] { grid-template-columns: minmax(0, 1fr) var(--cadyx-inspector-width); gap: 0; }
+.primary-grid[data-view="overview"] > .model-panel { grid-column: 1; grid-row: 1; }
+.primary-grid[data-view="overview"] > .inspector-column {
+  grid-column: 2;
+  grid-row: 1;
+  position: relative;
+  display: grid;
+  width: auto;
+  max-height: none;
+  grid-template-rows: 46px minmax(0, 1fr);
+  overflow: hidden;
+  border-left: 1px solid var(--line);
+  background: #0c1217;
+  pointer-events: auto;
+}
+.primary-grid[data-view="overview"] > .inspector-column > :not(#object-panel):not(.cad-inspector-tabs):not(.cad-inspector-pane) { display: none !important; }
+.primary-grid[data-view="overview"] #object-panel[hidden] { display: grid !important; }
+.primary-grid[data-view="overview"] #object-panel {
+  grid-row: 2;
+  min-height: 0;
+  grid-template-rows: 42px minmax(0, 1fr) auto auto;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.cad-inspector-tabs {
+  grid-row: 1;
+  display: flex;
+  height: 46px;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+  background: #0e151a;
+}
+.cad-inspector-tab {
+  flex: 1 1 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: 10px var(--mono);
+  cursor: pointer;
+}
+.cad-inspector-tab:hover { color: #e2e8eb; background: #ffffff04; }
+.cad-inspector-tab[aria-selected="true"] { border-color: var(--accent); color: var(--accent); background: #ff741708; }
+.cad-inspector-pane {
+  grid-row: 2;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  color: var(--muted);
+  font: 10px/1.55 var(--mono);
+}
+.cad-inspector-pane[hidden] { display: none !important; }
+.cad-inspector-pane h3 { margin: 0 0 8px; color: var(--text); font: 600 12px var(--mono); }
+.cad-inspector-pane p { margin: 0; }
+.cad-placeholder-card { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 4px; background: #0a1115; }
+.cad-history-items { display: grid; gap: 7px; margin-top: 10px; }
+.cad-history-item { padding: 8px 9px; border-left: 2px solid #5b351f; background: #10171c; }
+
+.object-panel .panel-heading {
+  min-height: 42px;
+  padding: 0 13px;
+  border-bottom: 1px solid var(--line-soft);
+  background: #0d1419;
+}
+.object-panel .panel-index { display: none; }
+.object-panel .panel-heading h2 { color: #e6ecef; font: 600 11px var(--mono); }
+.geometry-table-scroll { min-height: 0; overflow: auto; }
+.geometry-table { width: 100%; font-family: var(--mono); }
+.geometry-table th { color: var(--dim); font-size: 8px; letter-spacing: .04em; }
+.geometry-table td { font-size: 9px; }
+.geometry-table tr:hover td { background: #ffffff04; }
+.geometry-table input { border-color: #313c44; background: #0a1116; }
+.geometry-table input:focus { border-color: #8a461e; }
+.geometry-status { border-color: #6c3a1d; color: #ff9b5d; background: #1c110a; }
+
+/* Viewport-first model canvas. */
 .model-panel {
   position: relative;
-  grid-template-rows: 42px minmax(0, 1fr);
-  border-radius: 3px;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #080d11;
 }
-.viewport-heading { min-height: 42px; padding: 0 10px; }
-.viewport-heading h2 { font-size: 13px; }
-.viewport-mode { font-size: 8px; }
-.model-toolbar { gap: 4px; }
-.viewport-toolbar-divider { height: 20px; }
-.viewport-icon-button { width: 27px; height: 27px; }
-.viewport-mode-button, .viewport-fit-button, .viewport-four-views-button { min-height: 27px; padding: 3px 7px; }
-.viewport-four-views-button[aria-pressed="true"] { border-color: #2d5a50; background: #10211e; color: var(--accent); }
-.viewport { min-height: 0; }
-.viewport-footer {
-  position: absolute;
-  z-index: 5;
-  left: 10px;
-  right: 10px;
-  bottom: 10px;
-  width: auto;
-  min-height: 28px;
-  gap: clamp(8px, 1.3vw, 18px);
-  padding: 0 9px;
-  border: 1px solid #26373db8;
-  border-radius: 3px;
-  background: #0a1013d9;
-  box-shadow: 0 7px 22px #00000038;
-  backdrop-filter: blur(7px);
-  pointer-events: none;
-}
-.viewport-footer::after {
-  margin-left: auto;
-  color: var(--dim);
-  content: "mm · Z-UP";
-  font: 9px var(--mono);
-  letter-spacing: .06em;
-}
-.viewport-footer span + span { padding-left: clamp(8px, 1vw, 13px); }
-
-.project-detail[data-ai-state="running"] .model-panel::before {
+.viewport { position: absolute; inset: 0; min-width: 0; min-height: 0; background: #080d11; }
+.viewport-heading {
   position: absolute;
   z-index: 8;
-  top: -1px;
-  left: 0;
-  width: 36%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--agent), transparent);
-  content: "";
-  pointer-events: none;
-  animation: cadyx-agent-scan 1.8s linear infinite;
-}
-@keyframes cadyx-agent-scan {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(280%); }
-}
-
-.primary-grid[data-four-views="true"] { display: block; }
-.primary-grid[data-four-views="true"] > .model-panel {
-  position: absolute;
-  z-index: 3;
-  inset: 0 calc(50% + 4px) calc(50% + 4px) 0;
+  top: 12px;
+  left: 12px;
   width: auto;
-  height: auto;
-}
-.primary-grid[data-four-views="true"] > .inspector-column { display: none; }
-.primary-grid[data-four-views="true"] > .orthographic-panel {
-  position: absolute;
-  z-index: 2;
-  inset: 0;
-  display: block;
+  min-height: 38px;
+  padding: 0;
   border: 0;
   background: transparent;
   pointer-events: none;
 }
-.primary-grid[data-four-views="true"] > .orthographic-panel > .panel-heading { display: none; }
-.primary-grid[data-four-views="true"] > .orthographic-panel > .orthographic-views {
-  display: grid;
-  width: 100%;
-  height: 100%;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  padding: 0;
+.viewport-heading > div:first-child { display: none; }
+.model-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid #313a42;
+  border-radius: 5px;
+  background: #0d1419e9;
+  box-shadow: 0 8px 24px #0006;
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
 }
-.primary-grid[data-four-views="true"] > .orthographic-panel > .orthographic-views::before {
-  grid-column: 1;
-  grid-row: 1;
+.viewport-camera-presets { gap: 3px; }
+.viewport-icon-button,
+.viewport-mode-button,
+.viewport-fit-button,
+.viewport-four-views-button {
+  min-height: 30px;
+  height: 30px;
+  border-color: transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #a8b3b9;
+}
+.viewport-icon-button { width: 30px; }
+.viewport-icon-button:hover:not(:disabled),
+.viewport-mode-button:hover:not(:disabled),
+.viewport-fit-button:hover:not(:disabled),
+.viewport-four-views-button:hover:not(:disabled) { border-color: #634027; color: #ff9653; background: #ff74170a; }
+.viewport-icon-button[aria-pressed="true"],
+.viewport-four-views-button[aria-pressed="true"] { border-color: #83431d; color: var(--accent); background: #3a1b0d; }
+.viewport-toolbar-divider { height: 22px; background: #303a41; }
+.viewport-mode-button { padding: 3px 10px; }
+.viewport-fit-button, .viewport-four-views-button { width: 31px; padding: 3px; }
+.viewport-fit-button .toolbar-label,
+.viewport-four-views-button .toolbar-label { display: none; }
+.viewport-mode-button .toolbar-label { font-size: 8px; }
+.viewport-footer { display: none; }
+.project-detail[data-ai-state="running"] .model-panel::before {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  left: 0;
+  width: 34%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
   content: "";
+  pointer-events: none;
+  animation: cadyx-agent-scan 1.9s linear infinite;
 }
-.primary-grid[data-four-views="true"] .ortho-view {
+@keyframes cadyx-agent-scan { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+
+/* AI activity becomes a CAD-style bottom status/timeline bar. */
+#workflow-panel {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  z-index: 14;
+  display: flex;
+  width: auto;
+  height: var(--cadyx-ai-height);
   min-width: 0;
   min-height: 0;
+  align-items: center;
+  gap: 18px;
   margin: 0;
+  padding: 0 18px;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: #0b1114;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: linear-gradient(180deg, #0d1419 0%, #0a1014 100%);
+  box-shadow: 0 -8px 24px #0003;
 }
+#workflow-panel > .panel-heading,
+#workflow-panel > .workflow-history { display: none !important; }
+#workflow-panel .workflow-current {
+  order: 1;
+  display: flex;
+  min-width: min(330px, 31vw);
+  max-width: 420px;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+#workflow-panel .workflow-agent-state { display: flex; align-items: center; gap: 7px; }
+#workflow-panel .agent-state {
+  padding: 5px 8px;
+  border: 1px solid #79401d;
+  border-radius: 999px;
+  color: #ff9552;
+  background: #211309;
+  font-size: 9px;
+  white-space: nowrap;
+}
+#workflow-panel .workflow-current-label { display: none; }
+#workflow-panel .workflow-action {
+  overflow: hidden;
+  color: #dfe6e9;
+  font: 600 10px/1.3 var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#workflow-panel .workflow-task { display: none !important; }
+#workflow-panel .workflow-summary {
+  order: 2;
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 0;
+}
+#workflow-panel .workflow-progress { grid-column: 1; height: 7px; border-radius: 999px; background: #273139; }
+#workflow-panel .workflow-progress i { background: linear-gradient(90deg, #ff6911, #ff923f); box-shadow: 0 0 12px #ff741733; }
+#workflow-panel .workflow-percent { grid-column: 2; grid-row: 1; min-width: 42px; color: #f2f4f5; font: 700 11px var(--mono); }
+#workflow-panel .workflow-eta { grid-column: 3; grid-row: 1; min-width: 94px; color: var(--muted); font: 9px var(--mono); }
+#workflow-panel::after {
+  order: 3;
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+  content: "mm  ·  Z-UP";
+  font: 9px var(--mono);
+  white-space: nowrap;
+}
+.workflow-collapse-button { display: none; }
+
+/* Four-view mode remains functional. */
+.primary-grid[data-four-views="true"] { display: block; }
+.primary-grid[data-four-views="true"] > .model-panel { position: absolute; z-index: 3; inset: 0 calc(50% + 4px) calc(50% + 4px) 0; width: auto; height: auto; }
+.primary-grid[data-four-views="true"] > .inspector-column { display: none; }
+.primary-grid[data-four-views="true"] > .orthographic-panel { position: absolute; z-index: 2; inset: 0; display: block; border: 0; background: transparent; pointer-events: none; }
+.primary-grid[data-four-views="true"] > .orthographic-panel > .panel-heading { display: none; }
+.primary-grid[data-four-views="true"] > .orthographic-panel > .orthographic-views { display: grid; width: 100%; height: 100%; grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-rows: repeat(2,minmax(0,1fr)); gap: 8px; padding: 0; }
+.primary-grid[data-four-views="true"] > .orthographic-panel > .orthographic-views::before { grid-column: 1; grid-row: 1; content: ""; }
+.primary-grid[data-four-views="true"] .ortho-view { min-width: 0; min-height: 0; margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 3px; background: #0b1114; }
 .primary-grid[data-four-views="true"] .ortho-view:nth-child(1) { grid-column: 2; grid-row: 1; }
 .primary-grid[data-four-views="true"] .ortho-view:nth-child(2) { grid-column: 1; grid-row: 2; }
 .primary-grid[data-four-views="true"] .ortho-view:nth-child(3) { grid-column: 2; grid-row: 2; }
 .primary-grid[data-four-views="true"] .ortho-canvas { width: 100%; height: calc(100% - 24px); }
-.primary-grid[data-four-views="true"] .ortho-view figcaption {
-  height: 24px;
-  padding: 5px 8px;
-  border-top: 1px solid var(--line-soft);
-  background: #0d1417;
-  color: var(--dim);
-  font: 8px var(--mono);
-  letter-spacing: .06em;
-}
+.primary-grid[data-four-views="true"] .ortho-view figcaption { height: 24px; padding: 5px 8px; border-top: 1px solid var(--line-soft); background: #0d1417; color: var(--dim); font: 8px var(--mono); letter-spacing: .06em; }
 
-.panel { border-radius: 3px; }
+/* Non-model workspaces still use the existing CADYX panels. */
+.primary-grid[data-view="analysis"],
+.primary-grid[data-view="manufacturing"],
+.primary-grid[data-view="activity"],
+.primary-grid[data-view="files"],
+.primary-grid[data-view="projects"] { grid-template-columns: minmax(0, 1fr); }
+.primary-grid[data-view="analysis"] > #comparison-panel,
+.primary-grid[data-view="manufacturing"] > #manufacturing-panel,
+.primary-grid[data-view="projects"] > #projects-panel { border-radius: 0; }
 
 @media (max-width: 1180px) {
-  :root { --cadyx-rail-width: 82px; }
-  .nav-item { grid-template-columns: 1fr; justify-items: center; min-height: 52px; text-align: center; }
-  .nav-index { font-size: 10px; }
-  .nav-copy strong { font-size: 8px; }
-  .topbar {
-    grid-template-columns: auto minmax(180px, 1fr) auto;
-    grid-template-areas: "brand project end";
-  }
+  :root { --cadyx-tree-width: 220px; --cadyx-inspector-width: 300px; }
+  .workspace-navigation { padding-left: 32px; }
+  .nav-item { min-width: 96px; padding: 0 14px; }
+  .viewport-mode-button .toolbar-label { display: none; }
+  .viewport-mode-button { width: 31px; padding: 3px; }
+  #workflow-panel .workflow-current { min-width: 220px; }
+}
+@media (max-width: 900px) {
+  :root { --cadyx-tree-width: 190px; --cadyx-inspector-width: 260px; }
   .topbar-sync { display: none; }
-  .viewport-mode { display: none; }
-  .toolbar-label { display: none; }
-  .viewport-mode-button, .viewport-fit-button, .viewport-four-views-button { width: 28px; padding: 3px; justify-content: center; }
-  .viewport-footer span:nth-child(3), .viewport-footer span:nth-child(4) { display: none; }
+  .topbar { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "brand project end"; }
+  .header-revision { display: none; }
+  .primary-grid[data-view="overview"] { grid-template-columns: minmax(0, 1fr); }
+  .primary-grid[data-view="overview"] > .inspector-column { display: none; }
+  #workflow-panel::after { display: none; }
 }
-
-@media (max-width: 760px) {
-  .topbar { grid-template-columns: auto minmax(0, 1fr) auto; }
-  .header-revision, .readonly-badge { display: none; }
-  .agent-owner-chip { font-size: 8px; }
-  .project-detail { grid-template-columns: 64px minmax(0, 1fr); padding: 5px; gap: 5px; }
-  .nav-copy strong { writing-mode: vertical-rl; transform: rotate(180deg); }
-  .primary-grid[data-view="overview"] > .inspector-column { top: 8px; right: 8px; width: min(290px, calc(100% - 16px)); }
-  .viewport-footer { left: 6px; right: 6px; bottom: 6px; }
-  .viewport-footer span:nth-child(n+3) { display: none; }
-  .viewport-footer::after { display: none; }
+@media (max-width: 680px) {
+  :root { --cadyx-tree-width: 52px; }
+  .project-detail { grid-template-columns: 52px minmax(0, 1fr); }
+  .section-sidebar .cad-tree-search,
+  .section-sidebar .cad-tree-scroll,
+  .section-sidebar .cad-tree-heading strong { display: none; }
+  .section-sidebar .cad-tree-heading { justify-content: center; padding: 0; }
+  .workspace-navigation { padding-left: 8px; }
+  .nav-item { min-width: 76px; padding: 0 8px; }
+  .brand { font-size: 21px; }
+  #workflow-panel { gap: 9px; padding: 0 10px; }
+  #workflow-panel .workflow-current { min-width: 120px; max-width: 38vw; }
+  #workflow-panel .agent-state { display: none; }
+  #workflow-panel .workflow-eta { display: none; }
+  #workflow-panel .workflow-summary { grid-template-columns: minmax(80px, 1fr) auto; gap: 8px; }
 }
-
 @media (prefers-reduced-motion: reduce) {
   .project-detail[data-ai-state="running"] .model-panel::before { animation: none; width: 100%; opacity: .65; }
 }
@@ -307,9 +592,7 @@
   <body>
     <header class="topbar">
       <div class="topbar-start">
-        <a id="brand-link" class="brand" href="/" aria-label="CADYX — проекты">
-          <span>CADYX</span>
-        </a>
+        <a id="brand-link" class="brand" href="/" aria-label="CADYX — проекты"><span>CADYX</span></a>
       </div>
       <div class="topbar-sync">
         <span id="api-light" class="project-light" aria-hidden="true"></span>
@@ -327,11 +610,8 @@
         </div>
       </div>
       <div class="topbar-end">
-        <div class="header-revision">
-          <span class="topbar-label">РЕВИЗИЯ</span>
-          <strong id="document-revision">—</strong>
-        </div>
-        <span id="agent-owner-chip" class="agent-owner-chip" data-state="idle">○ PROJECT FREE</span>
+        <div class="header-revision"><span class="topbar-label">РЕВИЗИЯ</span><strong id="document-revision">—</strong></div>
+        <span id="agent-owner-chip" class="agent-owner-chip" data-state="idle">○ AI</span>
         <span class="readonly-badge">ТОЛЬКО ЧТЕНИЕ</span>
       </div>
     </header>
@@ -347,38 +627,18 @@
 
         <div id="project-detail" class="project-detail" hidden>
           <aside class="section-sidebar">
-            <div class="sidebar-heading">
-              <p class="section-label">РАБОЧАЯ ОБЛАСТЬ</p>
-              <h2>Навигация</h2>
-            </div>
+            <div class="sidebar-heading"><p class="section-label">РАБОЧАЯ ОБЛАСТЬ</p><h2>Навигация</h2></div>
             <nav id="workspace-navigation" class="workspace-navigation" aria-label="Рабочая область">
-              <button class="nav-item" type="button" data-workspace-view="overview" aria-current="page">
-                <span class="nav-index">01</span><span class="nav-copy"><strong>ОБЗОР</strong><small>Проект и модель</small></span>
-              </button>
-              <button class="nav-item" type="button" data-workspace-view="geometry">
-                <span class="nav-index">02</span><span class="nav-copy"><strong>ГЕОМЕТРИЯ</strong><small>Объекты модели</small></span>
-              </button>
-              <button id="analysis-nav" class="nav-item" type="button" data-workspace-view="analysis">
-                <span class="nav-index">03</span><span class="nav-copy"><strong>АНАЛИЗ</strong><small>Сравнение с оригиналом</small></span>
-              </button>
-              <button class="nav-item" type="button" data-workspace-view="manufacturing">
-                <span class="nav-index">04</span><span class="nav-copy"><strong>ПРОИЗВОДСТВО</strong><small>Подготовка производства</small></span>
-              </button>
-              <button class="nav-item" type="button" data-workspace-view="activity">
-                <span class="nav-index">05</span><span class="nav-copy"><strong>АКТИВНОСТЬ</strong><small>Состояние агента</small></span>
-              </button>
-              <button id="files-nav" class="nav-item" type="button" data-workspace-view="files" disabled title="Доступно, когда агент освободит панель">
-                <span class="nav-index">06</span><span class="nav-copy"><strong>ФАЙЛЫ</strong><small>Файлы проекта</small></span>
-              </button>
-              <button id="projects-nav" class="nav-item" type="button" data-workspace-view="projects" disabled title="Доступно, когда агент освободит панель">
-                <span class="nav-index">07</span><span class="nav-copy"><strong>ПРОЕКТЫ</strong><small>Сохранённые проекты</small></span>
-              </button>
+              <button class="nav-item" type="button" data-workspace-view="overview" aria-current="page"><span class="nav-index">01</span><span class="nav-copy"><strong>ОБЗОР</strong><small>Проект и модель</small></span></button>
+              <button class="nav-item" type="button" data-workspace-view="geometry"><span class="nav-index">02</span><span class="nav-copy"><strong>ГЕОМЕТРИЯ</strong><small>Объекты модели</small></span></button>
+              <button id="analysis-nav" class="nav-item" type="button" data-workspace-view="analysis"><span class="nav-index">03</span><span class="nav-copy"><strong>АНАЛИЗ</strong><small>Сравнение с оригиналом</small></span></button>
+              <button class="nav-item" type="button" data-workspace-view="manufacturing"><span class="nav-index">04</span><span class="nav-copy"><strong>ПРОИЗВОДСТВО</strong><small>Подготовка производства</small></span></button>
+              <button class="nav-item" type="button" data-workspace-view="activity"><span class="nav-index">05</span><span class="nav-copy"><strong>АКТИВНОСТЬ</strong><small>Состояние агента</small></span></button>
+              <button id="files-nav" class="nav-item" type="button" data-workspace-view="files" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">06</span><span class="nav-copy"><strong>ФАЙЛЫ</strong><small>Файлы проекта</small></span></button>
+              <button id="projects-nav" class="nav-item" type="button" data-workspace-view="projects" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">07</span><span class="nav-copy"><strong>ПРОЕКТЫ</strong><small>Сохранённые проекты</small></span></button>
             </nav>
             <p id="workspace-lock-status" class="workspace-lock-status" role="status" aria-live="polite" hidden></p>
-            <div class="sidebar-project">
-              <span class="section-label">АКТИВНЫЙ РЕСУРС</span>
-              <strong id="sidebar-project-name">—</strong>
-            </div>
+            <div class="sidebar-project"><span class="section-label">АКТИВНЫЙ РЕСУРС</span><strong id="sidebar-project-name">—</strong></div>
           </aside>
 
           <div class="project-main">
@@ -388,65 +648,34 @@
                   <div><h2 id="model-title">3D-МОДЕЛЬ</h2><span class="viewport-mode">ОРТОГОНАЛЬНАЯ ПРОЕКЦИЯ</span></div>
                   <div class="model-toolbar" aria-label="Инструменты просмотра 3D-модели">
                     <div id="viewport-camera-presets" class="viewport-camera-presets" role="group" aria-label="Стандартные ракурсы">
-                      <button class="viewport-icon-button" type="button" data-camera-preset="isometric" aria-label="Изометрический вид" title="Изометрический вид" aria-pressed="true">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 8 4.5v9.3l-8 4.6-8-4.6V7.3l8-4.5Z M4.2 7.4 12 12l7.8-4.6M12 12v9"/></svg>
-                      </button>
-                      <button class="viewport-icon-button" type="button" data-camera-preset="front" aria-label="Вид спереди" title="Вид спереди" aria-pressed="false">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h14v15H5z M8 7.5h8v9H8z"/></svg>
-                      </button>
-                      <button class="viewport-icon-button" type="button" data-camera-preset="right" aria-label="Вид справа" title="Вид справа" aria-pressed="false">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 4.5 12 2v13L7 17.5v-13Z M7 4.5 4 6v13l3-1.5M19 6.5l-3 1.7v12.1"/></svg>
-                      </button>
-                      <button class="viewport-icon-button" type="button" data-camera-preset="top" aria-label="Вид сверху" title="Вид сверху" aria-pressed="false">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Z M3 8v8l9 5 9-5V8M12 13v8"/></svg>
-                      </button>
+                      <button class="viewport-icon-button" type="button" data-camera-preset="isometric" aria-label="Изометрический вид" title="Изометрический вид" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 8 4.5v9.3l-8 4.6-8-4.6V7.3l8-4.5Z M4.2 7.4 12 12l7.8-4.6M12 12v9"/></svg></button>
+                      <button class="viewport-icon-button" type="button" data-camera-preset="front" aria-label="Вид спереди" title="Вид спереди" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h14v15H5z M8 7.5h8v9H8z"/></svg></button>
+                      <button class="viewport-icon-button" type="button" data-camera-preset="right" aria-label="Вид справа" title="Вид справа" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 4.5 12 2v13L7 17.5v-13Z M7 4.5 4 6v13l3-1.5M19 6.5l-3 1.7v12.1"/></svg></button>
+                      <button class="viewport-icon-button" type="button" data-camera-preset="top" aria-label="Вид сверху" title="Вид сверху" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Z M3 8v8l9 5 9-5V8M12 13v8"/></svg></button>
                     </div>
                     <span class="viewport-toolbar-divider" aria-hidden="true"></span>
-                    <button id="viewport-four-views" class="button viewport-four-views-button" type="button" aria-label="Показать четыре вида" title="Показать четыре вида" aria-pressed="false">
-                      <span class="viewport-mode-icon" aria-hidden="true">⊞</span><span class="toolbar-label">4 ВИДА</span>
-                    </button>
-                    <button id="viewport-wireframe" class="button viewport-mode-button" type="button" aria-label="Скрыть рёбра сетки" title="Скрыть рёбра сетки" aria-pressed="true">
-                      <span class="viewport-mode-icon" aria-hidden="true">▧</span><span id="viewport-mode-label" class="toolbar-label">ЗАТЕНЕНИЕ + РЁБРА</span>
-                    </button>
-                    <button id="viewport-fit" class="button viewport-fit-button" type="button" aria-label="Вписать модель в область просмотра" title="Вписать модель в область просмотра">
-                      <span class="viewport-mode-icon" aria-hidden="true">⌖</span><span class="toolbar-label">ВПИСАТЬ МОДЕЛЬ</span>
-                    </button>
+                    <button id="viewport-four-views" class="button viewport-four-views-button" type="button" aria-label="Показать четыре вида" title="Показать четыре вида" aria-pressed="false"><span class="viewport-mode-icon" aria-hidden="true">⊞</span><span class="toolbar-label">4 ВИДА</span></button>
+                    <button id="viewport-wireframe" class="button viewport-mode-button" type="button" aria-label="Скрыть рёбра сетки" title="Скрыть рёбра сетки" aria-pressed="true"><span class="viewport-mode-icon" aria-hidden="true">▧</span><span id="viewport-mode-label" class="toolbar-label">ЗАТЕНЕНИЕ + РЁБРА</span></button>
+                    <button id="viewport-fit" class="button viewport-fit-button" type="button" aria-label="Вписать модель в область просмотра" title="Вписать модель в область просмотра"><span class="viewport-mode-icon" aria-hidden="true">⌖</span><span class="toolbar-label">ВПИСАТЬ МОДЕЛЬ</span></button>
                   </div>
                 </div>
                 <div class="viewport" id="viewport">
                   <canvas id="model-preview" class="model-preview ply-preview-canvas" aria-label="3D-модель и эскизы" hidden></canvas>
-                  <div id="viewport-empty" class="viewport-empty">
-                    <span class="empty-cube" aria-hidden="true">⬡</span>
-                    <p>Модель ещё не построена</p>
-                    <small>Здесь появится созданная деталь</small>
-                  </div>
+                  <div id="viewport-empty" class="viewport-empty"><span class="empty-cube" aria-hidden="true">⬡</span><p>Модель ещё не построена</p><small>Здесь появится созданная деталь</small></div>
                 </div>
                 <footer class="viewport-footer" aria-label="Сводка модели">
-                  <span>МОДЕЛЬ <strong id="viewport-model-name">—</strong></span>
-                  <span>ОБЪЕКТЫ <strong id="viewport-object-count">0</strong></span>
-                  <span>ВЕРШИНЫ <strong id="viewport-vertex-count">0</strong></span>
-                  <span>ГРАНИ <strong id="viewport-face-count">0</strong></span>
-                  <span>РЕВ. <strong id="viewport-revision">—</strong></span>
+                  <span>МОДЕЛЬ <strong id="viewport-model-name">—</strong></span><span>ОБЪЕКТЫ <strong id="viewport-object-count">0</strong></span><span>ВЕРШИНЫ <strong id="viewport-vertex-count">0</strong></span><span>ГРАНИ <strong id="viewport-face-count">0</strong></span><span>РЕВ. <strong id="viewport-revision">—</strong></span>
                 </footer>
               </section>
 
               <section id="folder-detail" class="folder-detail" hidden>
                 <section class="panel folder-files-panel" aria-labelledby="folder-files-title">
-                  <div class="panel-heading">
-                    <div><span class="panel-index">01</span><h2 id="folder-files-title">Содержимое папки</h2></div>
-                    <span id="folder-file-count" class="subtle-count">0</span>
-                  </div>
+                  <div class="panel-heading"><div><span class="panel-index">01</span><h2 id="folder-files-title">Содержимое папки</h2></div><span id="folder-file-count" class="subtle-count">0</span></div>
                   <div class="folder-files-layout">
                     <nav id="folder-file-list" class="folder-file-list" aria-label="Список файлов"></nav>
                     <div class="folder-preview-area">
-                      <div class="folder-preview-heading">
-                        <strong id="folder-preview-title">Предпросмотр</strong>
-                        <small id="folder-preview-info">Выберите файл проекта</small>
-                      </div>
-                      <div class="folder-preview-stage">
-                        <canvas id="ply-preview-canvas" class="ply-preview-canvas" aria-label="3D-предпросмотр файла PLY" hidden></canvas>
-                        <p id="folder-preview-placeholder" class="folder-preview-placeholder">Здесь появится предпросмотр файла</p>
-                      </div>
+                      <div class="folder-preview-heading"><strong id="folder-preview-title">Предпросмотр</strong><small id="folder-preview-info">Выберите файл проекта</small></div>
+                      <div class="folder-preview-stage"><canvas id="ply-preview-canvas" class="ply-preview-canvas" aria-label="3D-предпросмотр файла PLY" hidden></canvas><p id="folder-preview-placeholder" class="folder-preview-placeholder">Здесь появится предпросмотр файла</p></div>
                       <p class="folder-preview-hint">Перетаскивайте для поворота · колесо для масштаба · двойной щелчок сбрасывает ракурс.</p>
                     </div>
                   </div>
@@ -456,129 +685,41 @@
               <aside class="inspector-column" aria-label="Состояние и виды модели">
                 <section id="object-panel" class="panel object-panel" aria-labelledby="objects-title" hidden>
                   <div class="panel-heading"><div><span class="panel-index">02</span><h2 id="objects-title">ГЕОМЕТРИЯ МОДЕЛИ</h2></div></div>
-                  <div class="geometry-table-scroll">
-                    <table class="geometry-table">
-                      <thead><tr><th>Часть модели</th><th>Текущие размеры, мм</th><th>Желаемые размеры, мм</th></tr></thead>
-                      <tbody id="geometry-rows"></tbody>
-                    </table>
-                  </div>
+                  <div class="geometry-table-scroll"><table class="geometry-table"><thead><tr><th>Часть модели</th><th>Текущие размеры, мм</th><th>Желаемые размеры, мм</th></tr></thead><tbody id="geometry-rows"></tbody></table></div>
                   <p id="objects-empty" class="panel-empty">В этой модели пока нет объектов.</p>
                   <p id="geometry-status" class="geometry-status" role="status" aria-live="polite" hidden></p>
                 </section>
                 <section id="workflow-panel" class="panel workflow-panel" aria-labelledby="workflow-title" tabindex="-1">
                   <div class="panel-heading"><h2 id="workflow-title">ПРОГРЕСС</h2><div class="workflow-heading-actions"><span id="workflow-name" class="panel-note">РАБОТА НЕ НАЧАТА</span><button id="workflow-toggle" class="workflow-collapse-button" type="button" aria-expanded="false" aria-controls="workflow-current workflow-history" title="Развернуть прогресс" aria-label="Развернуть прогресс">+</button></div></div>
-                  <div class="workflow-summary">
-                    <strong id="workflow-percent" class="workflow-percent">—</strong>
-                    <div id="workflow-progress" class="workflow-progress" role="progressbar" aria-label="Прогресс выполнения" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-available="false"><i id="workflow-progress-bar"></i></div>
-                    <span id="workflow-eta" class="workflow-eta">ОСТАЛОСЬ —</span>
-                  </div>
-                  <div id="workflow-current" class="workflow-current" data-state="idle" aria-live="polite">
-                    <div class="workflow-agent-state">
-                      <span id="agent-state" class="agent-state" data-state="idle">ОЖИДАЕТ</span>
-                      <span id="workflow-action-label" class="workflow-current-label">ПОСЛЕДНЕЕ ДЕЙСТВИЕ</span>
-                    </div>
-                    <strong id="activity-title" class="workflow-action">Действий пока нет</strong>
-                    <div id="workflow-task-row" class="workflow-task" hidden>
-                      <span id="workflow-task-label" class="workflow-current-label">ТЕКУЩАЯ ЗАДАЧА</span>
-                      <strong id="workflow-current-task">Нет выполняемой задачи</strong>
-                      <span id="workflow-current-task-state" class="workflow-task-state"></span>
-                    </div>
-                  </div>
-                  <div id="workflow-history" class="workflow-history">
-                    <div class="workflow-history-heading">
-                      <span>ИСТОРИЯ ДЕЙСТВИЙ</span>
-                      <span id="workflow-history-count" class="workflow-current-label">0</span>
-                    </div>
-                    <ol id="workflow-history-list" class="workflow-history-list"></ol>
-                    <p id="workflow-history-empty" class="workflow-history-empty">Завершённые действия появятся здесь.</p>
-                  </div>
+                  <div class="workflow-summary"><strong id="workflow-percent" class="workflow-percent">—</strong><div id="workflow-progress" class="workflow-progress" role="progressbar" aria-label="Прогресс выполнения" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-available="false"><i id="workflow-progress-bar"></i></div><span id="workflow-eta" class="workflow-eta">ОСТАЛОСЬ —</span></div>
+                  <div id="workflow-current" class="workflow-current" data-state="idle" aria-live="polite"><div class="workflow-agent-state"><span id="agent-state" class="agent-state" data-state="idle">ОЖИДАЕТ</span><span id="workflow-action-label" class="workflow-current-label">ПОСЛЕДНЕЕ ДЕЙСТВИЕ</span></div><strong id="activity-title" class="workflow-action">Действий пока нет</strong><div id="workflow-task-row" class="workflow-task" hidden><span id="workflow-task-label" class="workflow-current-label">ТЕКУЩАЯ ЗАДАЧА</span><strong id="workflow-current-task">Нет выполняемой задачи</strong><span id="workflow-current-task-state" class="workflow-task-state"></span></div></div>
+                  <div id="workflow-history" class="workflow-history"><div class="workflow-history-heading"><span>ИСТОРИЯ ДЕЙСТВИЙ</span><span id="workflow-history-count" class="workflow-current-label">0</span></div><ol id="workflow-history-list" class="workflow-history-list"></ol><p id="workflow-history-empty" class="workflow-history-empty">Завершённые действия появятся здесь.</p></div>
                 </section>
-                <section class="panel orthographic-panel" aria-labelledby="orthographic-title">
-                  <div class="panel-heading"><h2 id="orthographic-title">ОРТОГОНАЛЬНЫЕ ВИДЫ</h2><span class="panel-note">ОДНА МОДЕЛЬ</span></div>
-                  <div class="orthographic-views">
-                    <figure class="ortho-view"><canvas id="ortho-front" class="ortho-canvas" aria-label="Вид модели спереди"></canvas><figcaption>СПЕРЕДИ</figcaption></figure>
-                    <figure class="ortho-view"><canvas id="ortho-right" class="ortho-canvas" aria-label="Вид модели справа"></canvas><figcaption>СПРАВА</figcaption></figure>
-                    <figure class="ortho-view"><canvas id="ortho-top" class="ortho-canvas" aria-label="Вид модели сверху"></canvas><figcaption>СВЕРХУ</figcaption></figure>
-                  </div>
-                </section>
-                <section id="folder-inspector" class="panel folder-inspector" aria-labelledby="folder-inspector-title" hidden>
-                  <div class="panel-heading">
-                    <h2 id="folder-inspector-title">СОДЕРЖИМОЕ ПАПКИ</h2>
-                    <span id="folder-inspector-count" class="panel-note">0 ФАЙЛОВ</span>
-                  </div>
-                  <div class="folder-inspector-content">
-                    <div class="folder-inspector-stat">
-                      <span>3D-МОДЕЛЕЙ</span>
-                      <strong id="folder-model-file-count">0</strong>
-                    </div>
-                    <div class="folder-inspector-file">
-                      <span>ВЫБРАННЫЙ ФАЙЛ</span>
-                      <strong id="folder-inspector-file-name">Не выбран</strong>
-                      <dl>
-                        <div><dt>ТИП</dt><dd id="folder-inspector-file-type">—</dd></div>
-                        <div><dt>РАЗМЕР</dt><dd id="folder-inspector-file-size">—</dd></div>
-                      </dl>
-                    </div>
-                  </div>
-                </section>
+                <section class="panel orthographic-panel" aria-labelledby="orthographic-title"><div class="panel-heading"><h2 id="orthographic-title">ОРТОГОНАЛЬНЫЕ ВИДЫ</h2><span class="panel-note">ОДНА МОДЕЛЬ</span></div><div class="orthographic-views"><figure class="ortho-view"><canvas id="ortho-front" class="ortho-canvas" aria-label="Вид модели спереди"></canvas><figcaption>СПЕРЕДИ</figcaption></figure><figure class="ortho-view"><canvas id="ortho-right" class="ortho-canvas" aria-label="Вид модели справа"></canvas><figcaption>СПРАВА</figcaption></figure><figure class="ortho-view"><canvas id="ortho-top" class="ortho-canvas" aria-label="Вид модели сверху"></canvas><figcaption>СВЕРХУ</figcaption></figure></div></section>
+                <section id="folder-inspector" class="panel folder-inspector" aria-labelledby="folder-inspector-title" hidden><div class="panel-heading"><h2 id="folder-inspector-title">СОДЕРЖИМОЕ ПАПКИ</h2><span id="folder-inspector-count" class="panel-note">0 ФАЙЛОВ</span></div><div class="folder-inspector-content"><div class="folder-inspector-stat"><span>3D-МОДЕЛЕЙ</span><strong id="folder-model-file-count">0</strong></div><div class="folder-inspector-file"><span>ВЫБРАННЫЙ ФАЙЛ</span><strong id="folder-inspector-file-name">Не выбран</strong><dl><div><dt>ТИП</dt><dd id="folder-inspector-file-type">—</dd></div><div><dt>РАЗМЕР</dt><dd id="folder-inspector-file-size">—</dd></div></dl></div></div></section>
               </aside>
-              <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" tabindex="-1">
-                <div class="panel-heading"><h2 id="comparison-title">СРАВНЕНИЕ С ОРИГИНАЛОМ</h2><span id="comparison-metrics" class="panel-note"></span></div>
-                <p id="comparison-description" class="comparison-description" hidden>Оригинал показан контуром · результат — поверхностью.</p>
-                <p id="comparison-empty" class="comparison-empty">Для этого проекта пока нет данных сравнения.</p>
-                <canvas id="comparison-preview" class="comparison-preview" aria-label="Совмещённые оригинал и изменённая модель" hidden></canvas>
-              </section>
-              <section id="manufacturing-panel" class="panel manufacturing-panel" aria-labelledby="manufacturing-title" hidden>
-                <div class="panel-heading"><h2 id="manufacturing-title">ПОДГОТОВКА ПРОИЗВОДСТВА</h2></div>
-                <div class="manufacturing-empty">
-                  <span class="empty-cube" aria-hidden="true">⌁</span>
-                  <p>Данные для производства пока не подготовлены.</p>
-                  <small>Для этого проекта пока нет траекторий инструмента или плана обработки.</small>
-                </div>
-              </section>
-              <section id="projects-panel" class="panel projects-panel" aria-labelledby="projects-title" hidden>
-                <div class="panel-heading">
-                  <div><span class="panel-index">07</span><h2 id="projects-title">ПРОЕКТЫ</h2></div>
-                  <div class="projects-toolbar">
-                    <label for="projects-sort">СОРТИРОВКА</label>
-                    <select id="projects-sort" aria-label="Сортировка проектов">
-                      <option value="name">По имени</option>
-                      <option value="modified-desc">Сначала недавно изменённые</option>
-                      <option value="modified-asc">Сначала давно изменённые</option>
-                    </select>
-                    <button id="create-project-group" class="button" type="button">НОВАЯ ПАПКА</button>
-                    <span id="projects-count" class="subtle-count" title="Количество проектов">0</span>
-                  </div>
-                </div>
-                <div id="projects-list" class="projects-list" role="list" aria-label="Сохранённые проекты" tabindex="-1"></div>
-                <p id="projects-empty" class="projects-empty" hidden>В рабочей области пока нет сохранённых проектов.</p>
-              </section>
+
+              <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" tabindex="-1"><div class="panel-heading"><h2 id="comparison-title">СРАВНЕНИЕ С ОРИГИНАЛОМ</h2><span id="comparison-metrics" class="panel-note"></span></div><p id="comparison-description" class="comparison-description" hidden>Оригинал показан контуром · результат — поверхностью.</p><p id="comparison-empty" class="comparison-empty">Для этого проекта пока нет данных сравнения.</p><canvas id="comparison-preview" class="comparison-preview" aria-label="Совмещённые оригинал и изменённая модель" hidden></canvas></section>
+              <section id="manufacturing-panel" class="panel manufacturing-panel" aria-labelledby="manufacturing-title" hidden><div class="panel-heading"><h2 id="manufacturing-title">ПОДГОТОВКА ПРОИЗВОДСТВА</h2></div><div class="manufacturing-empty"><span class="empty-cube" aria-hidden="true">⌁</span><p>Данные для производства пока не подготовлены.</p><small>Для этого проекта пока нет траекторий инструмента или плана обработки.</small></div></section>
+              <section id="projects-panel" class="panel projects-panel" aria-labelledby="projects-title" hidden><div class="panel-heading"><div><span class="panel-index">07</span><h2 id="projects-title">ПРОЕКТЫ</h2></div><div class="projects-toolbar"><label for="projects-sort">СОРТИРОВКА</label><select id="projects-sort" aria-label="Сортировка проектов"><option value="name">По имени</option><option value="modified-desc">Сначала недавно изменённые</option><option value="modified-asc">Сначала давно изменённые</option></select><button id="create-project-group" class="button" type="button">НОВАЯ ПАПКА</button><span id="projects-count" class="subtle-count" title="Количество проектов">0</span></div></div><div id="projects-list" class="projects-list" role="list" aria-label="Сохранённые проекты" tabindex="-1"></div><p id="projects-empty" class="projects-empty" hidden>В рабочей области пока нет сохранённых проектов.</p></section>
             </div>
           </div>
         </div>
       </main>
     </div>
 
-    <dialog id="project-group-dialog" class="project-group-dialog" aria-labelledby="project-group-dialog-title">
-      <form id="project-group-form">
-        <h2 id="project-group-dialog-title">НОВАЯ ПАПКА ПРОЕКТОВ</h2>
-        <label for="project-group-name">Название папки</label>
-        <input id="project-group-name" name="name" type="text" maxlength="80" required autocomplete="off">
-        <div class="project-group-dialog-actions">
-          <button id="cancel-project-group" class="button" type="button">ОТМЕНА</button>
-          <button class="button" type="submit">СОЗДАТЬ</button>
-        </div>
-      </form>
-    </dialog>
+    <dialog id="project-group-dialog" class="project-group-dialog" aria-labelledby="project-group-dialog-title"><form id="project-group-form"><h2 id="project-group-dialog-title">НОВАЯ ПАПКА ПРОЕКТОВ</h2><label for="project-group-name">Название папки</label><input id="project-group-name" name="name" type="text" maxlength="80" required autocomplete="off"><div class="project-group-dialog-actions"><button id="cancel-project-group" class="button" type="button">ОТМЕНА</button><button class="button" type="submit">СОЗДАТЬ</button></div></form></dialog>
 
     <p id="toast" class="toast" role="status" aria-live="polite"></p>
     <script src="/assets/viewport.js" defer></script>
     <script src="/assets/ply-preview.js" defer></script>
     <script src="/assets/app.js" defer></script>
-    <script id="cadyx-compact-ui-script">
+    <script id="cadyx-cad-reference-script">
 window.addEventListener("DOMContentLoaded", () => {
   const detail = document.querySelector("#project-detail");
   const grid = document.querySelector("#primary-grid");
+  const sidebar = document.querySelector(".section-sidebar");
+  const navigation = document.querySelector("#workspace-navigation");
   const inspector = document.querySelector(".inspector-column");
   const workflow = document.querySelector("#workflow-panel");
   const orthographic = document.querySelector(".orthographic-panel");
@@ -589,17 +730,168 @@ window.addEventListener("DOMContentLoaded", () => {
   const documentKind = document.querySelector("#document-kind");
   const lockStatus = document.querySelector("#workspace-lock-status");
   const agentState = document.querySelector("#agent-state");
+  const sourceProjectName = document.querySelector("#sidebar-project-name");
+  const geometryRows = document.querySelector("#geometry-rows");
 
-  if (!detail || !grid || !inspector || !workflow || !orthographic || !fourViewsButton || !workflowToggle || !ownerChip) return;
+  if (!detail || !grid || !sidebar || !navigation || !inspector || !workflow || !orthographic || !fourViewsButton || !workflowToggle || !ownerChip) return;
 
-  document.querySelectorAll("#workspace-navigation .nav-item").forEach((button) => {
-    const title = button.querySelector("strong")?.textContent?.trim();
-    const description = button.querySelector("small")?.textContent?.trim();
-    if (title && !button.disabled) button.title = description ? `${title} — ${description}` : title;
+  /* Promote workspace navigation to the CAD workspace tab bar. */
+  detail.prepend(navigation);
+  const workspaceLabels = { overview: "Model", analysis: "Analysis", manufacturing: "Manufacturing" };
+  navigation.querySelectorAll(".nav-item").forEach((button) => {
+    const title = workspaceLabels[button.dataset.workspaceView];
+    const strong = button.querySelector("strong");
+    if (title && strong) strong.textContent = title;
   });
 
+  /* Move the existing agent workflow to the persistent bottom status rail. */
+  detail.appendChild(workflow);
   workflow.dataset.collapsed = "true";
   workflowToggle.setAttribute("aria-expanded", "false");
+
+  /* Build the CAD model tree without duplicating CAD state: it mirrors the existing object rows. */
+  const tree = document.createElement("div");
+  tree.className = "cad-model-tree";
+  tree.innerHTML = `
+    <div class="cad-tree-heading">
+      <strong>Model Tree</strong>
+      <button class="cad-tree-collapse" type="button" title="Свернуть дерево модели" aria-label="Свернуть дерево модели">‹</button>
+    </div>
+    <div class="cad-tree-search"><input type="search" placeholder="Search features…" aria-label="Поиск по дереву модели"></div>
+    <div class="cad-tree-scroll">
+      <div class="cad-tree-root">
+        <div class="cad-tree-root-row"><span class="cad-tree-chevron">⌄</span><span class="cad-tree-icon">◆</span><span id="cad-tree-project-name" class="cad-tree-label">—</span></div>
+        <div class="cad-tree-static">
+          <div class="cad-tree-static-row"><span class="cad-tree-chevron">⌄</span><span class="cad-tree-icon">⌖</span><span class="cad-tree-label">Origin</span></div>
+          <div class="cad-tree-static-row"><span></span><span class="cad-tree-icon">□</span><span class="cad-tree-label">XY Plane</span></div>
+          <div class="cad-tree-static-row"><span></span><span class="cad-tree-icon">□</span><span class="cad-tree-label">XZ Plane</span></div>
+          <div class="cad-tree-static-row"><span></span><span class="cad-tree-icon">□</span><span class="cad-tree-label">YZ Plane</span></div>
+        </div>
+        <div id="cad-tree-features" class="cad-tree-features"></div>
+        <p id="cad-tree-empty" class="cad-tree-empty">Модель ещё не содержит отображаемых объектов.</p>
+      </div>
+    </div>`;
+  sidebar.prepend(tree);
+
+  const treeName = tree.querySelector("#cad-tree-project-name");
+  const featureList = tree.querySelector("#cad-tree-features");
+  const treeEmpty = tree.querySelector("#cad-tree-empty");
+  const treeSearch = tree.querySelector("input[type='search']");
+  const collapseTree = tree.querySelector(".cad-tree-collapse");
+
+  const syncProjectName = () => { treeName.textContent = sourceProjectName?.textContent?.trim() || "—"; };
+  syncProjectName();
+  if (sourceProjectName) new MutationObserver(syncProjectName).observe(sourceProjectName, { childList: true, characterData: true, subtree: true });
+
+  const iconForLabel = (label) => {
+    const value = label.toLowerCase();
+    if (value.includes("sketch") || value.includes("эскиз")) return "▱";
+    if (value.includes("hole") || value.includes("отвер")) return "⊙";
+    if (value.includes("fillet") || value.includes("скруг")) return "◔";
+    if (value.includes("thread") || value.includes("резьб")) return "≋";
+    if (value.includes("pattern") || value.includes("массив")) return "✣";
+    if (value.includes("mirror") || value.includes("зерк")) return "◫";
+    if (value.includes("cut") || value.includes("pocket")) return "▣";
+    return "⬡";
+  };
+
+  let selectedTreeIndex = -1;
+  const renderTreeFeatures = () => {
+    if (!geometryRows) return;
+    const query = treeSearch.value.trim().toLowerCase();
+    const rows = [...geometryRows.querySelectorAll("tr")];
+    featureList.replaceChildren();
+    let shown = 0;
+    rows.forEach((row, index) => {
+      const firstCell = row.querySelector("td");
+      const label = (firstCell?.textContent || row.textContent || "").replace(/\s+/g, " ").trim();
+      if (!label || (query && !label.toLowerCase().includes(query))) return;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "cad-tree-feature";
+      button.dataset.selected = String(index === selectedTreeIndex);
+      button.innerHTML = `<span class="cad-tree-chevron">›</span><span class="cad-tree-icon">${iconForLabel(label)}</span><span class="cad-tree-label"></span>`;
+      button.querySelector(".cad-tree-label").textContent = label;
+      button.addEventListener("click", () => {
+        selectedTreeIndex = index;
+        featureList.querySelectorAll(".cad-tree-feature").forEach((item) => { item.dataset.selected = "false"; });
+        button.dataset.selected = "true";
+        const target = row.querySelector("button, input, [role='button']") || row;
+        target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      featureList.appendChild(button);
+      shown += 1;
+    });
+    treeEmpty.hidden = shown > 0;
+  };
+  treeSearch.addEventListener("input", renderTreeFeatures);
+  if (geometryRows) new MutationObserver(renderTreeFeatures).observe(geometryRows, { childList: true, subtree: true, characterData: true });
+  renderTreeFeatures();
+
+  collapseTree.addEventListener("click", () => {
+    const collapsed = sidebar.dataset.collapsed !== "true";
+    sidebar.dataset.collapsed = String(collapsed);
+    detail.dataset.treeCollapsed = String(collapsed);
+    collapseTree.textContent = collapsed ? "›" : "‹";
+    collapseTree.title = collapsed ? "Развернуть дерево модели" : "Свернуть дерево модели";
+    requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+  });
+
+  /* Context inspector tabs. Properties use the existing editable geometry UI. */
+  const inspectorTabs = document.createElement("div");
+  inspectorTabs.className = "cad-inspector-tabs";
+  inspectorTabs.setAttribute("role", "tablist");
+  inspectorTabs.innerHTML = `
+    <button class="cad-inspector-tab" type="button" data-cad-inspector="properties" role="tab" aria-selected="true">Properties</button>
+    <button class="cad-inspector-tab" type="button" data-cad-inspector="comments" role="tab" aria-selected="false">Comments</button>
+    <button class="cad-inspector-tab" type="button" data-cad-inspector="history" role="tab" aria-selected="false">History</button>`;
+  const commentsPane = document.createElement("section");
+  commentsPane.id = "cad-comments-pane";
+  commentsPane.className = "cad-inspector-pane";
+  commentsPane.hidden = true;
+  commentsPane.innerHTML = `<h3>Comments</h3><div class="cad-placeholder-card"><p>Контекстные комментарии к feature, грани или ребру будут отображаться здесь.</p></div>`;
+  const historyPane = document.createElement("section");
+  historyPane.id = "cad-history-pane";
+  historyPane.className = "cad-inspector-pane";
+  historyPane.hidden = true;
+  historyPane.innerHTML = `<h3>History</h3><div id="cad-history-items" class="cad-history-items"></div>`;
+  inspector.prepend(inspectorTabs);
+  inspector.append(commentsPane, historyPane);
+
+  const syncHistoryPane = () => {
+    const target = historyPane.querySelector("#cad-history-items");
+    const rows = [...document.querySelectorAll("#workflow-history-list > li")];
+    target.replaceChildren();
+    if (!rows.length) {
+      const empty = document.createElement("div");
+      empty.className = "cad-placeholder-card";
+      empty.textContent = "История действий агента пока пуста.";
+      target.appendChild(empty);
+      return;
+    }
+    rows.slice(-24).reverse().forEach((row) => {
+      const item = document.createElement("div");
+      item.className = "cad-history-item";
+      item.textContent = row.textContent.replace(/\s+/g, " ").trim();
+      target.appendChild(item);
+    });
+  };
+  const historySource = document.querySelector("#workflow-history-list");
+  if (historySource) new MutationObserver(syncHistoryPane).observe(historySource, { childList: true, subtree: true, characterData: true });
+  syncHistoryPane();
+
+  const setInspectorTab = (name) => {
+    inspectorTabs.querySelectorAll(".cad-inspector-tab").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.cadInspector === name)));
+    commentsPane.hidden = name !== "comments";
+    historyPane.hidden = name !== "history";
+    const objectPanel = document.querySelector("#object-panel");
+    if (objectPanel) objectPanel.style.visibility = name === "properties" ? "visible" : "hidden";
+    if (name === "history") syncHistoryPane();
+  };
+  inspectorTabs.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-cad-inspector]");
+    if (button) setInspectorTab(button.dataset.cadInspector);
+  });
 
   const renderWorkflowToggle = () => {
     const collapsed = workflow.dataset.collapsed !== "false";
@@ -608,85 +900,44 @@ window.addEventListener("DOMContentLoaded", () => {
     workflowToggle.setAttribute("aria-label", workflowToggle.title);
     workflowToggle.setAttribute("aria-expanded", String(!collapsed));
   };
-
-  const setWorkflowCollapsed = (collapsed) => {
-    workflow.dataset.collapsed = String(Boolean(collapsed));
-    renderWorkflowToggle();
-  };
-
+  const setWorkflowCollapsed = (collapsed) => { workflow.dataset.collapsed = String(Boolean(collapsed)); renderWorkflowToggle(); };
   const requestViewerLayout = () => {
     window.dispatchEvent(new Event("resize"));
     requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
   };
-
   const setFourViews = (enabled) => {
     const next = Boolean(enabled) && grid.dataset.view === "overview";
     grid.dataset.fourViews = String(next);
     fourViewsButton.setAttribute("aria-pressed", String(next));
     fourViewsButton.title = next ? "Вернуться к одному 3D-виду" : "Показать четыре вида";
     fourViewsButton.setAttribute("aria-label", fourViewsButton.title);
-
-    if (next) {
-      grid.appendChild(orthographic);
-    } else if (orthographic.parentElement !== inspector) {
-      inspector.appendChild(orthographic);
-    }
+    if (next) grid.appendChild(orthographic);
+    else if (orthographic.parentElement !== inspector) inspector.appendChild(orthographic);
     requestViewerLayout();
   };
-
-  workflowToggle.addEventListener("click", () => {
-    if (workflowToggle.disabled) return;
-    setWorkflowCollapsed(workflow.dataset.collapsed === "false");
-  });
-
-  fourViewsButton.addEventListener("click", () => {
-    if (fourViewsButton.disabled) return;
-    setFourViews(fourViewsButton.getAttribute("aria-pressed") !== "true");
-  });
+  workflowToggle.addEventListener("click", () => { if (!workflowToggle.disabled) setWorkflowCollapsed(workflow.dataset.collapsed === "false"); });
+  fourViewsButton.addEventListener("click", () => { if (!fourViewsButton.disabled) setFourViews(fourViewsButton.getAttribute("aria-pressed") !== "true"); });
 
   const syncShellState = () => {
     const locked = detail.dataset.controlsLocked === "true";
     const reason = lockStatus?.textContent?.trim() || "";
     const state = agentState?.dataset.state || "idle";
     const hasProject = !detail.hidden;
-
-    let label = "○ PROJECT FREE";
+    let label = "○ AI";
     let chipState = "idle";
     let aiState = "idle";
-
-    if (!hasProject) {
-      label = "○ NO PROJECT";
-    } else if (locked && /ИИ-АГЕНТ|АГЕНТ РАБОТАЕТ/.test(reason)) {
-      label = "● AI EDITING";
-      chipState = "running";
-      aiState = "running";
-    } else if (locked && /ВОССТАНОВЛЕНИЕ/.test(reason)) {
-      label = "! RECOVERY";
-      chipState = "failed";
-      aiState = "failed";
-    } else if (locked) {
-      label = "◌ PANEL LOCKED";
-      chipState = "warning";
-      aiState = "warning";
-    } else if (state === "failed") {
-      label = "! AGENT ISSUE";
-      chipState = "failed";
-      aiState = "failed";
-    } else if (state === "running") {
-      label = "● AI EDITING";
-      chipState = "running";
-      aiState = "running";
-    }
-
+    if (!hasProject) label = "○ AI";
+    else if (locked && /ИИ-АГЕНТ|АГЕНТ РАБОТАЕТ/.test(reason)) { label = "● AI"; chipState = "running"; aiState = "running"; }
+    else if (locked && /ВОССТАНОВЛЕНИЕ/.test(reason)) { label = "! AI"; chipState = "failed"; aiState = "failed"; }
+    else if (locked) { label = "◌ AI"; chipState = "warning"; aiState = "warning"; }
+    else if (state === "failed") { label = "! AI"; chipState = "failed"; aiState = "failed"; }
+    else if (state === "running") { label = "● AI"; chipState = "running"; aiState = "running"; }
     ownerChip.textContent = label;
     ownerChip.dataset.state = chipState;
     detail.dataset.aiState = aiState;
-
     fourViewsButton.disabled = locked;
     workflowToggle.disabled = locked;
-    if (copyProjectIdButton) {
-      copyProjectIdButton.disabled = locked || !hasProject || documentKind?.textContent?.trim() !== "ПРОЕКТ";
-    }
+    if (copyProjectIdButton) copyProjectIdButton.disabled = locked || !hasProject || documentKind?.textContent?.trim() !== "ПРОЕКТ";
     if (locked && grid.dataset.fourViews === "true") setFourViews(false);
   };
 
@@ -694,14 +945,13 @@ window.addEventListener("DOMContentLoaded", () => {
   stateObserver.observe(detail, { attributes: true, attributeFilter: ["hidden", "data-controls-locked"] });
   if (lockStatus) stateObserver.observe(lockStatus, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
   if (agentState) stateObserver.observe(agentState, { attributes: true, attributeFilter: ["data-state"], childList: true, characterData: true, subtree: true });
-
-  const viewObserver = new MutationObserver(() => {
-    if (grid.dataset.view !== "overview" && grid.dataset.fourViews === "true") setFourViews(false);
-  });
+  const viewObserver = new MutationObserver(() => { if (grid.dataset.view !== "overview" && grid.dataset.fourViews === "true") setFourViews(false); });
   viewObserver.observe(grid, { attributes: true, attributeFilter: ["data-view"] });
 
   renderWorkflowToggle();
   syncShellState();
+  syncHistoryPane();
+  requestViewerLayout();
 });
     </script>
   </body>
