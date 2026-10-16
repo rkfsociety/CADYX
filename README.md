@@ -99,6 +99,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - `resize_imported_thread` and `transform_imported_brep` to modify and align imported OCCT B-reps; see the [imported B-rep feature contract](.codex/docs/document-model-v7.md#step-import-and-editable-b-reps)
 - `GET /api/v1/agent/projects/{id}/topology?body_id=...` to inspect current B-rep edges before selecting fillets; edge indices must be refreshed after upstream edits
 - `import_scan` and `set_scan_parameter` commands for PLY-to-mesh reconstruction; see the [scan command contract](.codex/docs/document-model-v7.md#scan-import-and-editable-triangle-meshes)
+- Experimental Windows-only Revopoint tools capture UVC Y16 frames, write provisional Q-reprojected PLY files, and query/control the dual-axis turntable over BLE; see the [tool guide](tools/revopoint/README.md) for 30° capture and calibration limits.
 - `POST /api/v1/agent/projects/{id}/viewport/camera` to animate the selected browser viewport from the Agent API; see the [viewport contract](.codex/docs/viewport-api.md)
 - `GET /api/v1/projects/{id}/activity` and its Agent API equivalent return the recent visual activity snapshots; `agent.activity` SSE events update them live
 - Dashboard reports are process-local, emit `agent.dashboard` SSE events, and are polled through the `dashboard_revision` in `/api/v1/updates`. Progress and ETA are estimates supplied by the agent; hardware telemetry is not currently available.
