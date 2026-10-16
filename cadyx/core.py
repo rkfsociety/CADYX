@@ -463,9 +463,9 @@ class CadyxCore:
         return encoded
 
     def render_project_thumbnail_png(self, project_id: str) -> tuple[bytes, int]:
-        """Render a deterministic wide frame fitted for project cards."""
+        """Render a compact 16:9 frame fitted for square project cards."""
         key, scene = self._scene_for_project(project_id)
-        width, height, margin = 960, 480, 56
+        width, height, margin = 480, 270, 28
         cache_key = (*key, width, height, margin)
         with self._geometry_cache_guard:
             cached_png = self._png_cache.get(cache_key)
