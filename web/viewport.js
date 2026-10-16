@@ -584,14 +584,49 @@
         const z2 = camera[third * 3 + 2];
 
         const brightness = faceRecords[offset + 7];
-        const steel = Math.round(78 + brightness * 85);
-        let red = Math.round(steel * 0.94), blue = Math.round(steel * 1.08), green = steel;
-        const color0 = first * 3, color1 = second * 3, color2 = third * 3;
         const vertexRange = transition?.vertexRange;
         const forming = vertexRange
           && first >= vertexRange[0] && first < vertexRange[1]
           && second >= vertexRange[0] && second < vertexRange[1]
           && third >= vertexRange[0] && third < vertexRange[1];
+
+        if (!colors) {
+          const steel = Math.round(78 + brightness * 85);
+          let red = Math.round(steel * 0.94), blue = Math.round(steel * 1.08), green = steel;
+          if (forming && progress < 1) {
+            const glow = (1 - progress) * 0.38;
+            red = Math.round(red + (112 - red) * glow);
+            green = Math.round(green + (218 - green) * glow);
+            blue = Math.round(blue + (236 - blue) * glow);
+          }
+          for (let y = minY; y <= maxY; y += 1) {
+            let w0 = rowW0, w1 = rowW1, w2 = rowW2;
+            let pixelIndex = y * width + minX;
+            for (let x = minX; x <= maxX; x += 1) {
+              if (w0 >= -1e-7 && w1 >= -1e-7 && w2 >= -1e-7) {
+                const depth = z0 * w0 + z1 * w1 + z2 * w2;
+                if (depth + 1e-7 >= meshDepth[pixelIndex]) {
+                  meshDepth[pixelIndex] = depth;
+                  const byteIndex = pixelIndex * 4;
+                  pixels[byteIndex] = red;
+                  pixels[byteIndex + 1] = green;
+                  pixels[byteIndex + 2] = blue;
+                  pixels[byteIndex + 3] = 255;
+                }
+              }
+              pixelIndex += 1;
+              w0 += w0StepX;
+              w1 += w1StepX;
+              w2 += w2StepX;
+            }
+            rowW0 += w0StepY;
+            rowW1 += w1StepY;
+            rowW2 += w2StepY;
+          }
+          continue;
+        }
+
+        const color0 = first * 3, color1 = second * 3, color2 = third * 3;
 
         for (let y = minY; y <= maxY; y += 1) {
           let w0 = rowW0, w1 = rowW1, w2 = rowW2;
@@ -602,15 +637,9 @@
               if (depth + 1e-7 >= meshDepth[pixelIndex]) {
                 meshDepth[pixelIndex] = depth;
                 const byteIndex = pixelIndex * 4;
-                let pixelRed = colors
-                  ? Math.round((colors[color0] * w0 + colors[color1] * w1 + colors[color2] * w2) * brightness)
-                  : red;
-                let pixelGreen = colors
-                  ? Math.round((colors[color0 + 1] * w0 + colors[color1 + 1] * w1 + colors[color2 + 1] * w2) * brightness)
-                  : green;
-                let pixelBlue = colors
-                  ? Math.round((colors[color0 + 2] * w0 + colors[color1 + 2] * w1 + colors[color2 + 2] * w2) * brightness)
-                  : blue;
+                let pixelRed = Math.round((colors[color0] * w0 + colors[color1] * w1 + colors[color2] * w2) * brightness);
+                let pixelGreen = Math.round((colors[color0 + 1] * w0 + colors[color1 + 1] * w1 + colors[color2 + 1] * w2) * brightness);
+                let pixelBlue = Math.round((colors[color0 + 2] * w0 + colors[color1 + 2] * w1 + colors[color2 + 2] * w2) * brightness);
                 if (forming && progress < 1) {
                   const glow = (1 - progress) * 0.38;
                   pixelRed = Math.round(pixelRed + (112 - pixelRed) * glow);
