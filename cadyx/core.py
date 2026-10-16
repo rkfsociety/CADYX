@@ -794,7 +794,9 @@ class CadyxCore:
         if body_id not in bodies:
             raise ValidationError("Thickness validation needs an existing body.")
         geometry = bodies[body_id]["geometry"]
-        measured = self.kernel.sample_minimum_thickness(geometry, progress=progress)
+        measured = self.kernel.sample_minimum_thickness(
+            geometry, minimum_thickness=required, tolerance=allowed_tolerance, progress=progress,
+        )
         metric_names = (
             "minimum_sampled_thickness", "median_sampled_thickness", "p10_sampled_thickness",
             "mesh_deflection", "start_offset",
@@ -809,8 +811,11 @@ class CadyxCore:
         ):
             raise ValidationError("OCCT returned invalid wall-thickness sampling metrics.")
         sample_count, hit_count = measured.get("sample_count"), measured.get("hit_count")
+        violating_sample_count = measured.get("violating_sample_count")
         if (type(sample_count) is not int or type(hit_count) is not int
-                or sample_count <= 0 or hit_count <= 0 or hit_count > sample_count):
+                or type(violating_sample_count) is not int
+                or sample_count <= 0 or hit_count <= 0 or hit_count > sample_count
+                or violating_sample_count < 0 or violating_sample_count > hit_count):
             raise ValidationError("OCCT returned invalid wall-thickness sample counts.")
         for name in ("point", "opposite_point"):
             point = measured.get(name)
@@ -819,8 +824,10 @@ class CadyxCore:
                 raise ValidationError("OCCT returned invalid wall-thickness witness points.")
         # A low sampled chord proves a local thin-wall condition; passing sparse
         # normal samples cannot prove a global minimum, so the other outcome is untested.
-        status = ("fail" if metrics["minimum_sampled_thickness"] + allowed_tolerance < required
-                  else "untested")
+        observed_violation = metrics["minimum_sampled_thickness"] + allowed_tolerance < required
+        if observed_violation != (violating_sample_count > 0):
+            raise ValidationError("OCCT returned inconsistent wall-thickness violation counts.")
+        status = "fail" if violating_sample_count else "untested"
         result = {
             "body_id": body_id,
             "revision": document.revision,
@@ -831,6 +838,7 @@ class CadyxCore:
             **metrics,
             "sample_count": sample_count,
             "hit_count": hit_count,
+            "violating_sample_count": violating_sample_count,
             "minimum_thickness": required,
             "tolerance": allowed_tolerance,
             "witness_points": {"surface": measured["point"], "opposite": measured["opposite_point"]},

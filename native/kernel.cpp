@@ -1977,9 +1977,13 @@ API char* cadyx_brep_preservation(const unsigned char* reference_data, size_t re
 }
 
 API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
+                              double minimum_thickness, double tolerance,
                               NativeProgressCallback progress_callback, void* progress_user_data,
                               char* error, size_t capacity) noexcept {
   try {
+    if (!std::isfinite(minimum_thickness) || minimum_thickness <= 0.0
+        || !std::isfinite(tolerance) || tolerance < 0.0)
+      throw std::runtime_error("Thickness threshold must be positive and tolerance non-negative.");
     const TopoDS_Solid solid = ExtractSingleSolid(ReadImportedBrep(data, size));
     if (!BRepCheck_Analyzer(solid).IsValid())
       throw std::runtime_error("Thickness sampling requires a valid closed solid.");
@@ -2009,7 +2013,7 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
     BRepClass3d_SolidClassifier classifier(solid);
     double minimum = std::numeric_limits<double>::infinity();
     gp_Pnt minimum_point, minimum_opposite;
-    size_t samples = 0, hits = 0, face_count = 0, triangle_count = 0;
+    size_t samples = 0, hits = 0, violating_samples = 0, face_count = 0, triangle_count = 0;
     for (TopExp_Explorer count(solid, TopAbs_FACE); count.More(); count.Next()) ++face_count;
     std::vector<size_t> face_triangle_counts(face_count, 0);
     std::vector<size_t> active_faces;
@@ -2120,6 +2124,7 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
             ++hits;
             const double thickness = nearest + start_offset;
             sampled_thicknesses.push_back(thickness);
+            if (thickness + tolerance < minimum_thickness) ++violating_samples;
             if (thickness < minimum) {
               minimum = thickness;
               minimum_point = point;
@@ -2151,6 +2156,7 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
            << ",\"p10_sampled_thickness\":" << p10
            << ",\"sample_count\":" << samples
            << ",\"hit_count\":" << hits
+           << ",\"violating_sample_count\":" << violating_samples
            << ",\"point\":[" << minimum_point.X() << ',' << minimum_point.Y() << ',' << minimum_point.Z() << ']'
            << ",\"opposite_point\":[" << minimum_opposite.X() << ',' << minimum_opposite.Y() << ',' << minimum_opposite.Z() << ']'
            << '}';

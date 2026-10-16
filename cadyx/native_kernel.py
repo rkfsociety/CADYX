@@ -115,6 +115,7 @@ class NativeKernel:
                     library.cadyx_brep_preservation.restype = ctypes.c_void_p
                     library.cadyx_brep_thickness.argtypes = [
                         ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                        ctypes.c_double, ctypes.c_double,
                         _PROGRESS_CALLBACK, ctypes.c_void_p,
                         ctypes.c_char_p, ctypes.c_size_t,
                     ]
@@ -327,7 +328,7 @@ class NativeKernel:
         finally:
             self.library.cadyx_free(result)
 
-    def brep_thickness(self, geometry, *, progress=None):
+    def brep_thickness(self, geometry, minimum_thickness, tolerance, *, progress=None):
         geometry_buffer = self._export_brep_buffer(geometry)
         error = ctypes.create_string_buffer(1024)
         callback = _PROGRESS_CALLBACK()
@@ -336,7 +337,8 @@ class NativeKernel:
                 progress(phase.decode("ascii", errors="replace"), percent)
             callback = _PROGRESS_CALLBACK(report)
         result = self.library.cadyx_brep_thickness(
-            geometry_buffer, len(geometry), callback, None, error, len(error),
+            geometry_buffer, len(geometry), minimum_thickness, tolerance,
+            callback, None, error, len(error),
         )
         if not result:
             raise ValidationError(error.value.decode("utf-8", errors="replace"))

@@ -87,6 +87,7 @@ class GeometryKernel(Protocol):
 
     def sample_minimum_thickness(
         self, geometry: dict[str, Any], *,
+        minimum_thickness: float, tolerance: float,
         progress: Callable[[str, float], None] | None = None,
     ) -> dict[str, Any]: ...
 
@@ -822,6 +823,7 @@ class OCCTKernelAdapter:
 
     def sample_minimum_thickness(
         self, geometry: dict[str, Any], *,
+        minimum_thickness: float, tolerance: float,
         progress: Callable[[str, float], None] | None = None,
     ) -> dict[str, Any]:
         if isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1":
@@ -829,7 +831,7 @@ class OCCTKernelAdapter:
         self.validate(geometry)
         native = NativeKernel()
         brep, _ = native.export_geometry(geometry)
-        return native.brep_thickness(brep, progress=progress)
+        return native.brep_thickness(brep, minimum_thickness, tolerance, progress=progress)
 
     def validate(self, geometry: dict[str, Any]) -> None:
         try:
@@ -1152,6 +1154,7 @@ class PrimitiveKernelAdapter:
 
     def sample_minimum_thickness(
         self, geometry: dict[str, Any], *,
+        minimum_thickness: float, tolerance: float,
         progress: Callable[[str, float], None] | None = None,
     ) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not measure solid wall thickness.")
