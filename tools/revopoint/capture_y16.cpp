@@ -238,6 +238,9 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
                                                         UINT32 requested_width, UINT32 requested_height,
                                                         std::vector<LONGLONG>& timestamps,
                                                         std::vector<std::int64_t>& utc_epoch_us,
+                                                        std::vector<DWORD>& sample_flags,
+                                                        std::vector<DWORD>& empty_sample_flags,
+                                                        std::size_t& null_sample_count,
                                                         const std::filesystem::path& live_raw_path) {
     ComPtr<IMFActivate> activation = FindDepthCamera();
     ComPtr<IMFMediaSource> source;
@@ -288,6 +291,8 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
                                    &timestamp, &sample),
                 "Read Y16 frame");
         if (!sample) {
+            ++null_sample_count;
+            empty_sample_flags.push_back(flags);
             continue;
         }
 
@@ -306,6 +311,7 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
             throw std::runtime_error("Y16 buffer size did not match the selected dimensions; refusing to guess row stride.");
         }
         timestamps.push_back(timestamp);
+        sample_flags.push_back(flags);
         utc_epoch_us.push_back(std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count());
         frames.push_back(std::move(result));
@@ -456,6 +462,8 @@ void SaveOutputs(const Options& options, const std::vector<std::uint8_t>& raw,
 
 void SaveBurst(const Options& options, const std::vector<std::vector<std::uint8_t>>& frames,
                const std::vector<LONGLONG>& timestamps, const std::vector<std::int64_t>& utc_epoch_us,
+               const std::vector<DWORD>& sample_flags, const std::vector<DWORD>& empty_sample_flags,
+               std::size_t null_sample_count,
                double elapsed_seconds) {
     if (frames.size() <= 1) return;
     auto raw_path = options.output_prefix; raw_path += L"_burst.raw";
@@ -465,16 +473,22 @@ void SaveBurst(const Options& options, const std::vector<std::vector<std::uint8_
             out.write(reinterpret_cast<const char*>(frame.data()), static_cast<std::streamsize>(frame.size()));
     });
     WriteNewFile(csv_path, [&](std::ofstream& out) {
-        out << "index,mf_timestamp_100ns,elapsed_seconds,utc_epoch_us\n" << std::fixed << std::setprecision(6);
+        out << "index,mf_timestamp_100ns,elapsed_seconds,utc_epoch_us,sample_flags\n" << std::fixed << std::setprecision(6);
         for (std::size_t i = 0; i < frames.size(); ++i)
             out << i << ',' << timestamps[i] << ',' << (timestamps[i] - timestamps[0]) / 10000000.0
-                << ',' << utc_epoch_us[i] << '\n';
+                << ',' << utc_epoch_us[i] << ',' << sample_flags[i] << '\n';
     });
     const double timestamp_span = frames.size() > 1
         ? static_cast<double>(timestamps.back() - timestamps.front()) / 10000000.0 : 0.0;
     std::cout << "Burst: " << frames.size() << " frames in " << elapsed_seconds << " s ("
               << frames.size() / elapsed_seconds << " fps wall-clock); MF timestamp rate "
               << (timestamp_span > 0 ? (frames.size() - 1) / timestamp_span : 0) << " fps\n";
+    std::cout << "ReadSample calls without a frame: " << null_sample_count << "\n";
+    if (!empty_sample_flags.empty()) {
+        std::cout << "No-frame flags:";
+        for (const DWORD flags : empty_sample_flags) std::cout << " 0x" << std::hex << flags << std::dec;
+        std::cout << "\n";
+    }
     std::wcout << L"Burst raw: " << raw_path.wstring() << L"\nTimestamps: " << csv_path.wstring() << L"\n";
 }
 
@@ -489,9 +503,13 @@ int wmain(int argc, wchar_t** argv) {
         if (!options.measure_only) q = ReadQMatrix(options.q_file);
         std::vector<LONGLONG> timestamps;
         std::vector<std::int64_t> utc_epoch_us;
+        std::vector<DWORD> sample_flags;
+        std::vector<DWORD> empty_sample_flags;
+        std::size_t null_sample_count = 0;
         const auto started = std::chrono::steady_clock::now();
         const auto frames = CaptureY16Frames(options.frame_count, options.requested_fps,
                                              options.width, options.height, timestamps, utc_epoch_us,
+                                             sample_flags, empty_sample_flags, null_sample_count,
                                              options.live_raw_path);
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         if (!options.measure_only) {
@@ -502,7 +520,8 @@ int wmain(int argc, wchar_t** argv) {
             }
             SaveOutputs(options, raw, points);
         }
-        SaveBurst(options, frames, timestamps, utc_epoch_us, elapsed);
+        SaveBurst(options, frames, timestamps, utc_epoch_us, sample_flags,
+                  empty_sample_flags, null_sample_count, elapsed);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Capture failed: " << error.what() << "\n";
