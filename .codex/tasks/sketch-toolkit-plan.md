@@ -97,7 +97,7 @@
 | SK-035 | Кривая Безье | add_sketch_bezier_curve | PASS · отдельная API/unit/render | pending | pending |
 | SK-036 | NURBS-кривая | add_sketch_nurbs | PASS · API round-trip + invalid input | pending | pending |
 | SK-037 | Интерполяционный сплайн | pending | distinct behavior not established | pending | pending |
-| SK-038 | Замкнутый сплайн | pending | evaluator only; no command or closed-profile kernel support | pending | pending |
+| SK-038 | Замкнутый сплайн | `add_sketch_closed_spline`; automated coverage pending | runtime smoke: extrusion, revolution, fuse, descriptor validation, and B-spline topology | pending | pending |
 | SK-039 | Парабола | pending | evaluator helper unit PASS | pending | pending |
 | SK-040 | Гипербола | pending | evaluator helper unit PASS | pending | pending |
 | SK-041 | Коническая кривая | pending | evaluator helper unit PASS | pending | pending |
