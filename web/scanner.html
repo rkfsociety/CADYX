@@ -144,6 +144,10 @@
     (() => {
       const canvas = document.querySelector("#depth");
       const context = canvas.getContext("2d", { alpha: true });
+      const frameCanvas = document.createElement("canvas");
+      frameCanvas.width = 640;
+      frameCanvas.height = 400;
+      const frameContext = frameCanvas.getContext("2d", { alpha: true });
       const state = document.querySelector("#state");
       const rate = document.querySelector("#rate");
       const age = document.querySelector("#age");
@@ -160,12 +164,20 @@
           if (mtime !== lastMtime) {
             const raw = new Uint8Array(await response.arrayBuffer());
             if (raw.length !== 640 * 400 * 2) throw Error("Размер кадра Y16 не совпадает.");
-            let min = 65535, max = 0;
+            let min = 65535, max = 0, left = 640, top = 400, right = -1, bottom = -1;
             for (let i = 0; i < raw.length; i += 2) {
               const value = raw[i] | raw[i + 1] << 8;
-              if (value > 0 && value < min) min = value;
-              if (value > max) max = value;
+              if (value > 0) {
+                const pixel = i >> 1, x = pixel % 640, y = Math.floor(pixel / 640);
+                if (value < min) min = value;
+                if (value > max) max = value;
+                if (x < left) left = x;
+                if (x > right) right = x;
+                if (y < top) top = y;
+                if (y > bottom) bottom = y;
+              }
             }
+            if (right < left || bottom < top) throw Error("В кадре нет валидной глубины.");
             const span = Math.max(1, max - min);
             for (let pixel = 0; pixel < 640 * 400; pixel++) {
               const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
@@ -176,7 +188,13 @@
               image.data[offset + 2] = Math.min(255, gray + 12);
               image.data[offset + 3] = value ? 255 : 0;
             }
-            context.putImageData(image, 0, 0);
+            frameContext.putImageData(image, 0, 0);
+            const sourceWidth = right - left + 1, sourceHeight = bottom - top + 1;
+            const scale = Math.min(canvas.width * .9 / sourceWidth, canvas.height * .9 / sourceHeight);
+            const drawWidth = sourceWidth * scale, drawHeight = sourceHeight * scale;
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            context.drawImage(frameCanvas, left, top, sourceWidth, sourceHeight,
+              (canvas.width - drawWidth) / 2, (canvas.height - drawHeight) / 2, drawWidth, drawHeight);
             const now = performance.now();
             if (lastArrival) intervals.push(now - lastArrival);
             if (intervals.length > 30) intervals.shift();
