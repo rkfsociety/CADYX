@@ -6,8 +6,9 @@ import math
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 from .errors import NotFoundError, ValidationError
@@ -1514,45 +1515,44 @@ class CommandSystem:
         sketch_id = command.get("sketch_id")
         sketch = self._find_sketch(document, sketch_id)
         count = command.get("count")
-        if type(count) is not int or count < 2:
+        if type(count) is not int or count < 2 or count > sys.maxsize:
             raise ValidationError("Pattern count must be an integer of at least 2, including the source.")
         mode = command.get("mode")
-        transforms: list[Callable[[float, float], tuple[float, float]]] = []
         if mode == "linear":
             offset_x = _finite_number(command.get("offset_x"), "Pattern x offset")
             offset_y = _finite_number(command.get("offset_y"), "Pattern y offset")
             if math.hypot(offset_x, offset_y) <= 1e-7:
                 raise ValidationError("Linear pattern offset must be non-zero.")
-            transforms = [
+            transforms = (
                 (lambda x, y, step=index: (x + offset_x * step, y + offset_y * step))
                 for index in range(1, count)
-            ]
+            )
         elif mode == "circular":
             center_x = _finite_number(command.get("center_x"), "Pattern center x")
             center_y = _finite_number(command.get("center_y"), "Pattern center y")
             step_degrees = _finite_number(command.get("angle_step_degrees"), "Pattern angle step")
             if math.isclose(step_degrees % 360, 0, rel_tol=0, abs_tol=1e-10):
                 raise ValidationError("Circular pattern angle step must not repeat the source position.")
-            stepped_degrees = [step_degrees * index for index in range(1, count)]
-            if any(not math.isfinite(angle) for angle in stepped_degrees):
-                raise ValidationError("Circular pattern angles must remain finite.")
-            angles = [math.radians(angle) for angle in stepped_degrees]
-            normalized = [0.0, *(round(angle % math.tau, 12) for angle in angles)]
-            if len(set(normalized)) != len(normalized):
-                raise ValidationError("Circular pattern would create overlapping repeated instances.")
-            transforms = [
+            normalized = {0.0}
+            for index in range(1, count):
+                degrees = step_degrees * index
+                if not math.isfinite(degrees):
+                    raise ValidationError("Circular pattern angles must remain finite.")
+                normalized_angle = round(math.radians(degrees) % math.tau, 12)
+                if normalized_angle in normalized:
+                    raise ValidationError("Circular pattern would create overlapping repeated instances.")
+                normalized.add(normalized_angle)
+            transforms = (
                 (lambda x, y, angle=angle: (
                     center_x + (x - center_x) * math.cos(angle) - (y - center_y) * math.sin(angle),
                     center_y + (x - center_x) * math.sin(angle) + (y - center_y) * math.cos(angle),
                 ))
-                for angle in angles
-            ]
+                for angle in (math.radians(step_degrees * index) for index in range(1, count))
+            )
         else:
             raise ValidationError("Pattern mode must be linear or circular.")
 
         source = self._sketch_geometry_closure(document, sketch_id, command.get("object_ids"))
-        if len(source) * len(transforms) > 4096:
-            raise ValidationError("Pattern would create more than 4096 sketch objects.")
         if progress is not None:
             progress({"phase": "pattern_sketch_elements"})
         return self._copy_sketch_geometry(document, sketch, source, transforms, progress=progress)
@@ -1567,8 +1567,8 @@ class CommandSystem:
     def _sketch_geometry_closure(
         document: Document, sketch_id: str, object_ids: Any,
     ) -> list[dict[str, Any]]:
-        if not isinstance(object_ids, list) or not object_ids or len(object_ids) > 4096:
-            raise ValidationError("object_ids must contain between 1 and 4096 sketch geometry ids.")
+        if not isinstance(object_ids, list) or not object_ids:
+            raise ValidationError("object_ids must contain at least one sketch geometry id.")
         if any(not isinstance(object_id, str) for object_id in object_ids) or len(set(object_ids)) != len(object_ids):
             raise ValidationError("object_ids must contain unique text ids.")
         by_id = {item["id"]: item for item in document.objects}
@@ -1582,8 +1582,6 @@ class CommandSystem:
             if object_id in included:
                 continue
             included.add(object_id)
-            if len(included) > 4096:
-                raise ValidationError("Selected sketch geometry exceeds 4096 objects including dependencies.")
             if item["type"] == "line":
                 pending.extend((item["start_id"], item["end_id"]))
             elif item["type"] == "circle":
@@ -1601,7 +1599,7 @@ class CommandSystem:
         document: Document,
         sketch: dict[str, Any],
         source: list[dict[str, Any]],
-        transforms: list[Callable[[float, float], tuple[float, float]]],
+        transforms: Iterable[Callable[[float, float], tuple[float, float]]],
         *,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:

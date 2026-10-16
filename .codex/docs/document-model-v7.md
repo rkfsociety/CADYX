@@ -224,9 +224,10 @@ their respective human/agent edit leases. Results below appear inside
   `center_x`, `center_y` and `angle_step_degrees` per instance. It copies the
   the same point/line/circle/spline dependency closure as mirroring; ellipses are
   transformed analytically. Constraints are not copied. A linear offset must
-  exceed 1e-7; repeated circular positions and
-  results over 4096 created objects are rejected. The response groups created
-  ids by object type and reports the source closure and total instance count.
+  exceed 1e-7 and repeated circular positions are rejected. There is no fixed
+  copy-count ceiling; available memory and document storage bound the resulting
+  geometry. The response groups created ids by object type and reports the
+  source closure and total instance count.
 - `add_sketch_constraint`: `sketch_id`, `kind`, ordered `references`, and `value`
   for distance/radius. Returns `constraint_id`.
 - `update_sketch_elements`: non-empty `updates` list of
