@@ -225,6 +225,7 @@ const FOLDER_SELECTION_PREFIX = "folder:";
 const initialAddress = new URLSearchParams(window.location.search);
 let projectAddressPinned = (initialAddress.has("project_id") || initialAddress.has("folder"))
   && initialAddress.get("view") !== "projects";
+const projectsChooserPinned = initialAddress.get("view") === "projects";
 let workspaceSelectionRestoreAttempted = projectAddressPinned || initialAddress.get("view") === "projects";
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
@@ -1548,22 +1549,31 @@ async function refreshDetail() {
   }
   if (renderedSceneKey !== key) {
     const positions = [], bodyPositions = [], triangles = [], lines = [], points = [], rotationAxes = [];
-    const bodyLineRanges = [], bodyTriangleRanges = [];
+    const bodyLineRanges = [], bodyTriangleRanges = [], featureTriangleRanges = [], overlayTriangleRanges = [];
     let targetFound = false;
     for (const object of scene.objects) {
       const source = objectsById.get(object.object_id);
-      if (source?.type !== "body" && source?.sketch_id !== visibleSketchId) continue;
+      if (source?.type !== "body" && object.type !== "feature_overlay" && source?.sketch_id !== visibleSketchId) continue;
       const offset = positions.length / 3;
       const lineOffset = lines.length;
       const triangleStart = triangles.length / 3;
       const pointOffset = points.length;
       for (const value of object.positions) {
         positions.push(value);
-        if (source?.type === "body") bodyPositions.push(value);
+        if (source?.type === "body" && object.type === "body") bodyPositions.push(value);
       }
       for (const index of object.triangles) triangles.push(index + offset);
-      if (source?.type === "body" && object.triangles.length) {
+      if (source?.type === "body" && object.type === "body" && object.triangles.length) {
         bodyTriangleRanges.push({ objectId: object.object_id, start: triangleStart, end: triangles.length / 3 });
+      }
+      if (object.type === "feature_overlay" && object.triangles.length) {
+        overlayTriangleRanges.push({ start: triangleStart, end: triangles.length / 3 });
+      }
+      if (object.triangles.length) {
+        for (const range of object.feature_face_ranges || []) {
+          featureTriangleRanges.push({ featureId: range.feature_id, start: triangleStart + range.start,
+            end: triangleStart + range.end });
+        }
       }
       for (const index of object.lines) lines.push(index + offset);
       if (source?.type === "body" && object.lines.length) {
@@ -1606,7 +1616,8 @@ async function refreshDetail() {
       bounds.max = [0, 0, 0];
     }
     if (!targetFound) transition = null;
-    const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes, bodyLineRanges, bodyTriangleRanges };
+    const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes,
+      bodyLineRanges, bodyTriangleRanges, featureTriangleRanges, overlayTriangleRanges };
     modelViewer.load(viewportGeometry, {
       reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition, smoothShading: true,
     });
@@ -1917,6 +1928,7 @@ function animateModelCamera(change) {
 }
 
 function handleStreamEvent(type, event) {
+  if (type === "workspace.selection.changed" && (projectAddressPinned || projectsChooserPinned)) return;
   const projectId = event.project_id;
   if (type === "workspace.selection.changed" || type === "project.created") {
     const selection = type === "project.created"

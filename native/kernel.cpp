@@ -193,7 +193,8 @@ gp_Vec FaceNormalNearPoint(const TopoDS_Face& face, const gp_Pnt& point) {
 }
 
 std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
-                      bool allow_invalid_import = false) {
+                      bool allow_invalid_import = false,
+                      const std::vector<int>* generated_face_indices = nullptr) {
   if (shape.IsNull()) throw std::runtime_error("OCCT returned a null shape.");
   const bool brep_valid = BRepCheck_Analyzer(shape).IsValid();
   if (!brep_valid && !allow_invalid_import)
@@ -244,6 +245,7 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
     if (!mesher.IsDone()) throw std::runtime_error("OCCT could not tessellate the solid.");
     std::vector<double> positions;
     std::vector<size_t> triangles;
+    std::vector<std::pair<size_t, size_t>> face_triangle_ranges;
     std::vector<double> edge_positions;
     std::vector<size_t> edge_lines;
     for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
@@ -265,6 +267,8 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
         if (face.Orientation() == TopAbs_REVERSED) std::swap(b, c);
         triangles.insert(triangles.end(), {offset+a-1, offset+b-1, offset+c-1});
       }
+      face_triangle_ranges.emplace_back((triangles.size() - static_cast<size_t>(triangulation->NbTriangles()) * 3) / 3,
+                                        triangles.size() / 3);
     }
     if (triangles.empty()) throw std::runtime_error("OCCT returned an empty mesh.");
     NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher>
@@ -331,6 +335,19 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
     json << "],\"edge_lines\":[";
     for (size_t i = 0; i < edge_lines.size(); ++i) json << (i ? "," : "") << edge_lines[i];
     json << "]";
+    json << ",\"face_triangle_ranges\":[";
+    for (size_t i = 0; i < face_triangle_ranges.size(); ++i) {
+      if (i) json << ",";
+      json << "{\"face_index\":" << i << ",\"start\":" << face_triangle_ranges[i].first
+           << ",\"end\":" << face_triangle_ranges[i].second << "}";
+    }
+    json << "]";
+    if (generated_face_indices) {
+      json << ",\"generated_face_indices\":[";
+      for (size_t i = 0; i < generated_face_indices->size(); ++i)
+        json << (i ? "," : "") << (*generated_face_indices)[i];
+      json << "]";
+    }
   }
   if (topology) {
     json << ",\"edges\":[";
@@ -1403,7 +1420,8 @@ TopoDS_Solid ExtractSingleSolid(const TopoDS_Shape& shape) {
   return solid;
 }
 
-TopoDS_Shape MakeFillet(const TopoDS_Shape& source, const int* edge_indices, size_t edge_count, double radius) {
+TopoDS_Shape MakeFillet(const TopoDS_Shape& source, const int* edge_indices, size_t edge_count, double radius,
+                        std::vector<int>* generated_face_indices = nullptr) {
   if (!edge_indices || edge_count == 0 || !std::isfinite(radius) || radius <= 0)
     throw std::runtime_error("Fillet needs selected edges and a positive radius.");
   EnsureOneSolid(source, "Fillet");
@@ -1424,7 +1442,25 @@ TopoDS_Shape MakeFillet(const TopoDS_Shape& source, const int* edge_indices, siz
   }
   operation.Build();
   if (!operation.IsDone()) throw std::runtime_error("OCCT could not create the requested edge fillet.");
-  return EnsureOneSolid(operation.Shape(), "Fillet");
+  const TopoDS_Shape result = EnsureOneSolid(operation.Shape(), "Fillet");
+  if (generated_face_indices) {
+    generated_face_indices->clear();
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> result_faces;
+    TopExp::MapShapes(result, TopAbs_FACE, result_faces);
+    for (size_t i = 0; i < edge_count; ++i) {
+      const TopoDS_Edge source_edge = TopoDS::Edge(mapped_edges.FindKey(edge_indices[i] + 1));
+      const auto generated = operation.Generated(source_edge);
+      for (NCollection_List<TopoDS_Shape>::Iterator it(generated); it.More(); it.Next()) {
+        const TopoDS_Shape& face = it.Value();
+        if (face.ShapeType() == TopAbs_FACE && result_faces.Contains(face))
+          generated_face_indices->push_back(result_faces.FindIndex(face) - 1);
+      }
+    }
+    std::sort(generated_face_indices->begin(), generated_face_indices->end());
+    generated_face_indices->erase(std::unique(generated_face_indices->begin(), generated_face_indices->end()),
+                                  generated_face_indices->end());
+  }
+  return result;
 }
 
 TopoDS_Shape MakeFuse(const TopoDS_Shape& base, const TopoDS_Shape& tool) {
@@ -1571,7 +1607,8 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
                              const double* coordinates, size_t coordinate_count,
                              const int* edge_indices, size_t edge_count,
                              const unsigned char* brep_data, size_t brep_size,
-                             bool& allow_invalid_import) {
+                             bool& allow_invalid_import,
+                             std::vector<int>* generated_face_indices = nullptr) {
   constexpr size_t max_node_count = static_cast<size_t>(std::numeric_limits<int>::max()) + 1;
   if (!nodes || node_count == 0 || node_count > max_node_count)
     throw std::runtime_error("A geometry graph needs at least one operation and indices representable by the native bridge.");
@@ -1658,7 +1695,8 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
       case 3:
         if (node.input_a < 0 || static_cast<size_t>(node.input_a) >= i)
           throw std::runtime_error("Fillet graph reference must point to an earlier operation.");
-        shape = MakeFillet(shapes[node.input_a], edges, node.edge_count, node.amount);
+        shape = MakeFillet(shapes[node.input_a], edges, node.edge_count, node.amount,
+                           generated_face_indices);
         break;
       case 4:
         if (!points || node.coordinate_count != 3)
@@ -1703,9 +1741,10 @@ std::string BuildGraphJson(const OperationNode* nodes, size_t node_count,
                            const unsigned char* brep_data, size_t brep_size,
                            int mesh, int topology) {
   bool allow_invalid_import = false;
+  std::vector<int> generated_face_indices;
   const TopoDS_Shape shape = BuildGraphShape(nodes, node_count, coordinates, coordinate_count,
-      edge_indices, edge_count, brep_data, brep_size, allow_invalid_import);
-  return ShapeJson(shape, mesh, topology, allow_invalid_import);
+      edge_indices, edge_count, brep_data, brep_size, allow_invalid_import, &generated_face_indices);
+  return ShapeJson(shape, mesh, topology, allow_invalid_import, &generated_face_indices);
 }
 
 struct GeometryExportResult {

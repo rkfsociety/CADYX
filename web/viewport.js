@@ -98,6 +98,7 @@
     let meshDepth = new Float32Array(0);
     let geometry = null;
     let selectedBodyId = null;
+    let selectedFeatureId = null;
     let cameraOrientation = cameraMatrixFromYawPitch(0.68, 0.38);
     let zoom = 1;
     let cameraPanX = 0;
@@ -303,7 +304,10 @@
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
         wireframeColor, wireframeOpacity, dpr, 0.75 / scale,
-        geometry.bodyTriangleRanges?.filter((range) => range.objectId === selectedBodyId) || [],
+        selectedFeatureId
+          ? geometry.featureTriangleRanges?.filter((range) => range.featureId === selectedFeatureId) || []
+          : geometry.bodyTriangleRanges?.filter((range) => range.objectId === selectedBodyId) || [],
+        geometry.overlayTriangleRanges || [],
       );
       else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale, geometry.colors);
       const directLineCount = geometry.type === "body" ? 0 : (geometry.lines || []).length;
@@ -623,7 +627,8 @@
     }
 
     function rasterizeShadedMesh(visibleFaces, triangles, camera, progress,
-      colors = null, triangleColors = null, selectedRanges = []) {
+      colors = null, triangleColors = null, selectedRanges = [], overlayRanges = []) {
+      const isOverlayFace = (face) => overlayRanges.some((range) => face >= range.start && face < range.end);
       if (!meshLayerContext || !canvas.width || !canvas.height) return false;
       const width = canvas.width, height = canvas.height;
       if (meshLayer.width !== width || meshLayer.height !== height || !meshImage) {
@@ -637,6 +642,7 @@
       pixels.fill(0);
 
       for (const face of visibleFaces) {
+        if (isOverlayFace(face)) continue;
         const offset = face * 8;
         const first = triangles[face * 3];
         const second = triangles[face * 3 + 1];
@@ -786,7 +792,8 @@
                 const depth = z0 * w0 + z1 * w1 + z2 * w2;
                 // meshDepth is Float32; account for its rounding when overlaying selected faces.
                 const depthEpsilon = Math.max(1, Math.abs(depth)) * 2e-7;
-                if (depth + depthEpsilon >= meshDepth[pixelIndex]) {
+                if ((!isOverlayFace(face) || Number.isFinite(meshDepth[pixelIndex]))
+                    && depth + depthEpsilon >= meshDepth[pixelIndex]) {
                   const byteIndex = pixelIndex * 4, mix = 0.46;
                   pixels[byteIndex] = Math.round(pixels[byteIndex] * (1 - mix) + 255 * mix);
                   pixels[byteIndex + 1] = Math.round(pixels[byteIndex + 1] * (1 - mix) + 126 * mix);
@@ -808,7 +815,7 @@
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
       vertexNormals, orientation, faceNormals, featureEdges, silhouetteCandidates, colors, triangleColors,
       showWireframe, shaded,
-      wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = []) {
+      wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = [], overlayRanges = []) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
       const smooth = vertexNormals && (!transition || progress >= 1);
@@ -879,10 +886,13 @@
 
       const visibleFaces = faceOrder.subarray(0, visibleCount);
       const depthBufferValid = shaded
-        && rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors, triangleColors, selectedRanges);
+        && rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors, triangleColors,
+          selectedRanges, overlayRanges);
       if (shaded && !depthBufferValid) {
         visibleFaces.sort((left, right) => faceRecords[left * 8 + 6] - faceRecords[right * 8 + 6]);
         for (const face of visibleFaces) {
+          if (overlayRanges.some((range) => face >= range.start && face < range.end)
+              && !selectedRanges.some((range) => face >= range.start && face < range.end)) continue;
           const offset = face * 8;
           const brightness = faceRecords[offset + 7];
           const first = triangles[face * 3];
@@ -1108,8 +1118,16 @@
       createSnapshotBlob,
       setSelectedBody(bodyId) {
         const next = typeof bodyId === "string" ? bodyId : null;
-        if (selectedBodyId === next) return;
+        if (selectedBodyId === next && selectedFeatureId === null) return;
         selectedBodyId = next;
+        selectedFeatureId = null;
+        render();
+      },
+      setSelectedFeature(featureId) {
+        const next = typeof featureId === "string" ? featureId : null;
+        if (selectedFeatureId === next && selectedBodyId === null) return;
+        selectedFeatureId = next;
+        selectedBodyId = null;
         render();
       },
       getCamera() {

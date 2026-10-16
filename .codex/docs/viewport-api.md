@@ -177,7 +177,7 @@ history of completed/failed actions without exposing future steps.
 
 `window.CadyxViewport.createViewer(canvas)` is shared with PLY preview and returns:
 
-- `load({positions, triangles, bounds, lines?, points?, bodyTriangleRanges?}, {reset = true, transition?})`;
+- `load({positions, triangles, bounds, lines?, points?, bodyTriangleRanges?, featureTriangleRanges?}, {reset = true, transition?})`;
   omit lines/points for a PLY point cloud. Use `reset: false` on document refresh.
   Agent-created sketch and profile transitions are eased in the shared viewer;
   regular loads and PLY previews remain static unless a transition is supplied.
@@ -185,6 +185,11 @@ history of completed/failed actions without exposing future steps.
   shared preview. `bodyTriangleRanges` maps body IDs to triangle-index ranges;
   highlight tint is depth-tested, so hidden faces are not drawn through the model.
   Pass `null` to clear the highlight.
+- `setSelectedFeature(featureId)` highlights only OCCT-generated faces associated
+  with the selected fillet or chamfer feature. `featureTriangleRanges` maps feature
+  IDs to triangle-index ranges. Consumed edge-feature faces can be supplied through
+  `overlayTriangleRanges`; the renderer depth-tests them against the visible mesh
+  and keeps them out of the normal shaded pass.
 - `render()` redraws after resize/visibility changes.
 - `fit()` resets orientation and zoom to fit all scene bounds.
 - `getCamera()` returns `{orientation, zoom, projection: "orthographic"}`;

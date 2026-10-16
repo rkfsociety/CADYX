@@ -545,6 +545,13 @@ def _render_scene_without_consumed_sources(document: Document, kernel: Any):
         for item in document.objects
         if item.get("type") == "feature" and item.get("operation") in _SOURCE_RESULT_OPERATIONS
     }
+    # Retain the source shapes used to regenerate edge-feature face metadata.
+    # The canonical renderer consumes them from the visible scene itself.
+    hidden.difference_update(
+        item.get("source_body_id")
+        for item in document.objects
+        if item.get("type") == "feature" and item.get("operation") in {"fillet_edges", "chamfer_edges"}
+    )
     hidden.discard(None)
     if not hidden:
         return _ORIGINAL_RENDER(document, kernel)

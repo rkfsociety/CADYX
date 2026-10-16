@@ -24,7 +24,7 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
                           if item.get("operation") in {
                               "fillet_edges", "resize_imported_thread", "transform_imported_brep",
                               "linear_pattern_body", "circular_pattern_body", "hole", "boss",
-                              "pad_sketch_to_body",
+                              "pad_sketch_to_body", "chamfer_edges",
                           } else ())
     }
     feature_sketches = {
@@ -38,6 +38,37 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         if item.get("operation") in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches",
                                       "pad_sketch_to_body"}
     }
+    feature_by_body = {item.get("body_id"): item for item in document.objects
+                       if item.get("type") == "feature" and item.get("body_id")}
+    feature_face_cache = {}
+
+    def selected_feature_faces(body: dict, mesh: dict) -> set[int]:
+        feature = feature_by_body.get(body["id"])
+        feature_id = feature.get("id") if feature else None
+        if feature_id in feature_face_cache:
+            return feature_face_cache[feature_id]
+        face_ids = mesh.get("selected_face_indices")
+        if not face_ids and feature and feature.get("operation") in {
+            "fillet_edges", "variable_fillet_edges", "chamfer_edges",
+        }:
+            source = by_id.get(feature.get("source_body_id"))
+            parameters = feature.get("parameters", {})
+            if source and source.get("geometry"):
+                if feature["operation"] == "fillet_edges":
+                    derived = kernel.create_fillet(source["geometry"],
+                        edge_indices=parameters.get("edge_indices", []), radius=parameters.get("radius"))
+                else:
+                    from .advanced_features import _advanced_native
+                    operation, values = (4, [parameters.get("start_radius"), parameters.get("end_radius")]) \
+                        if feature["operation"] == "variable_fillet_edges" \
+                        else (2, [parameters.get("distance")])
+                    derived = _advanced_native(source["geometry"], operation, values,
+                                               parameters.get("edge_indices", []))
+                face_ids = kernel.tessellate(derived).get("selected_face_indices", [])
+        result = {index for index in face_ids or [] if type(index) is int and index >= 0}
+        if feature_id:
+            feature_face_cache[feature_id] = result
+        return result
     bounds_min = [math.inf, math.inf, math.inf]
     bounds_max = [-math.inf, -math.inf, -math.inf]
     has_coordinates = False
@@ -59,13 +90,47 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         if kind == "body" and item.get("visible", True) is False:
             continue
         if kind == "body" and item["id"] in consumed_bodies:
+            geometry = item.get("geometry")
+            feature_id = next(iter(item.get("feature_ids", [])), None)
+            if geometry is None or not feature_id:
+                continue
+            mesh = kernel.tessellate(geometry)
+            selected_faces = selected_feature_faces(item, mesh)
+            ranges = [face_range for face_range in mesh.get("face_triangle_ranges", [])
+                      if face_range["face_index"] in selected_faces]
+            if not ranges:
+                continue
+            remap, overlay_positions, overlay_triangles = {}, [], []
+            for face_range in ranges:
+                for triangle_index in range(face_range["start"], face_range["end"]):
+                    for source_index in mesh["triangles"][triangle_index * 3:triangle_index * 3 + 3]:
+                        target_index = remap.get(source_index)
+                        if target_index is None:
+                            target_index = len(overlay_positions) // 3
+                            remap[source_index] = target_index
+                            overlay_positions.extend(mesh["positions"][source_index * 3:source_index * 3 + 3])
+                        overlay_triangles.append(target_index)
+            if overlay_triangles:
+                objects.append({"object_id": item["id"], "type": "feature_overlay",
+                                "positions": overlay_positions, "triangles": overlay_triangles,
+                                "lines": [], "points": [],
+                                "feature_face_ranges": [{"feature_id": feature_id, "start": 0,
+                                                         "end": len(overlay_triangles) // 3}]})
             continue
         if kind in {"point", "line", "circle", "ellipse", "spline"} and item.get("sketch_id") in feature_sketches:
             continue
         positions, triangles, lines, points = [], [], [], []
+        feature_face_ranges = []
         if kind == "body" and item.get("geometry") is not None:
             mesh = kernel.tessellate(item["geometry"])
             positions, triangles = mesh["positions"], mesh["triangles"]
+            selected_faces = selected_feature_faces(item, mesh)
+            feature_id = next(iter(item.get("feature_ids", [])), None)
+            feature_face_ranges = [
+                {"feature_id": feature_id, "start": face_range["start"], "end": face_range["end"]}
+                for face_range in mesh.get("face_triangle_ranges", [])
+                if feature_id and face_range["face_index"] in selected_faces
+            ]
             edge_vertex_offset = len(positions) // 3
             positions.extend(mesh.get("edge_positions", []))
             lines = [edge_vertex_offset + index for index in mesh.get("edge_lines", [])]
@@ -124,6 +189,8 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         scene_item = {"object_id": item["id"], "type": kind,
                       "positions": positions, "triangles": triangles,
                       "lines": lines, "points": points}
+        if feature_face_ranges:
+            scene_item["feature_face_ranges"] = feature_face_ranges
         if kind in {"point", "line", "spline"}:
             scene_item["construction"] = item.get("construction", False)
         if kind == "line":
@@ -149,6 +216,8 @@ def render_scene_png(scene: dict, *, width: int = 960, height: int = 720, margin
     has_projected = False
 
     for item in scene["objects"]:
+        if item.get("type") == "feature_overlay":
+            continue
         projected_vertices = []
         positions = item["positions"]
         for index in range(0, len(positions), 3):

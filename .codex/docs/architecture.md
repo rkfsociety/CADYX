@@ -163,6 +163,9 @@ unqualified root address, the initial refresh reads the current host selection
 from the Agent API and pins an existing project or folder into the address;
 `?view=projects` explicitly opens the project chooser without restoring that
 selection. If the API has no valid current resource, the root opens Projects.
+Explicit `project_id`, `folder`, and `view=projects` routes remain pinned across
+SSE workspace-selection events; only an explicit navigation action or a newly
+created project can change the address.
 Opening a project from Projects creates a tab at `/?project_id=<project UUID>`;
 folder selection uses `?folder=<folder name>`. A resource address pins the tab's
 displayed project or folder, so separate tabs can keep different resources

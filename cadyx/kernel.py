@@ -418,7 +418,12 @@ class OCCTKernelAdapter:
             return tessellate_mesh_geometry(geometry)
         self.validate(geometry)
         result = NativeKernel().geometry_graph(geometry, mesh=True)
-        return {key: result[key] for key in ("positions", "triangles", "edge_positions", "edge_lines")}
+        mesh = {key: result[key] for key in (
+            "positions", "triangles", "edge_positions", "edge_lines", "face_triangle_ranges",
+        )}
+        selected_faces = geometry.get("selected_face_indices", result.get("generated_face_indices", []))
+        mesh["selected_face_indices"] = selected_faces if isinstance(selected_faces, list) else []
+        return mesh
 
     def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]:
         dimensions = _box_dimensions(width, height, depth)
@@ -1213,12 +1218,19 @@ class OCCTKernelAdapter:
         self._same_saved_volume(geometry, rebuilt["volume"])
 
     def _validate_imported_brep_geometry(self, geometry: dict[str, Any]) -> None:
-        if (set(geometry) != {"kernel", "kind", "data", "volume", "brep_valid"}
+        allowed = {"kernel", "kind", "data", "volume", "brep_valid", "selected_face_indices"}
+        required = {"kernel", "kind", "data", "volume", "brep_valid"}
+        if (not set(geometry) <= allowed or not required <= set(geometry)
                 or geometry.get("kernel") != self.kernel_id
                 or geometry.get("kind") != "imported_brep"
                 or not isinstance(geometry.get("data"), str)
                 or type(geometry.get("brep_valid")) is not bool):
             raise ValidationError("Imported B-rep geometry descriptor is invalid.")
+        selected_faces = geometry.get("selected_face_indices", [])
+        if (not isinstance(selected_faces, list)
+                or any(type(index) is not int or index < 0 for index in selected_faces)
+                or len(set(selected_faces)) != len(selected_faces)):
+            raise ValidationError("Imported B-rep selected-face metadata is invalid.")
         actual = NativeKernel().geometry_graph(geometry)
         self._same_saved_volume(geometry, actual["volume"])
         if actual["brep_valid"] != geometry["brep_valid"]:

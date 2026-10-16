@@ -39,6 +39,7 @@
 #include <stdexcept>
 #include <string>
 #include <limits>
+#include <vector>
 
 #define API extern "C" __declspec(dllexport)
 
@@ -167,10 +168,12 @@ TopoDS_Shape Transform(const TopoDS_Shape& source, const gp_Trsf& transform) {
 API char* cadyx_advanced_brep(const unsigned char* data, size_t size, int operation,
                               const double* values, size_t value_count,
                               const int* indices, size_t index_count,
-                              size_t* output_size, char* error, size_t capacity) noexcept {
+                              size_t* output_size, char* generated_faces_json, size_t generated_faces_capacity,
+                              char* error, size_t capacity) noexcept {
   try {
     const TopoDS_Shape source = OneSolid(ReadBrep(data, size), "Advanced operation input");
     TopoDS_Shape result;
+    std::vector<int> generated_face_indices;
 
     if (operation == 1) {
       if (value_count != 2 || index_count == 0 || !indices)
@@ -196,6 +199,19 @@ API char* cadyx_advanced_brep(const unsigned char* data, size_t size, int operat
       maker.Build();
       if (!maker.IsDone()) throw std::runtime_error("OCCT chamfer operation failed.");
       result = maker.Shape();
+      const TopoDS_Shape chamfered = OneSolid(result, "Chamfer");
+      TopTools_IndexedMapOfShape faces;
+      TopExp::MapShapes(chamfered, TopAbs_FACE, faces);
+      for (size_t i = 0; i < index_count; ++i) {
+        const auto generated = maker.Generated(EdgeAt(source, indices[i]));
+        for (NCollection_List<TopoDS_Shape>::Iterator it(generated); it.More(); it.Next()) {
+          if (it.Value().ShapeType() == TopAbs_FACE && faces.Contains(it.Value()))
+            generated_face_indices.push_back(faces.FindIndex(it.Value()) - 1);
+        }
+      }
+      std::sort(generated_face_indices.begin(), generated_face_indices.end());
+      generated_face_indices.erase(std::unique(generated_face_indices.begin(), generated_face_indices.end()),
+                                   generated_face_indices.end());
     } else if (operation == 3) {
       if (value_count != 10 || index_count == 0 || !indices)
         throw std::runtime_error("Draft needs angle, pull direction, neutral plane and face indices.");
@@ -224,6 +240,19 @@ API char* cadyx_advanced_brep(const unsigned char* data, size_t size, int operat
       maker.Build();
       if (!maker.IsDone()) throw std::runtime_error("OCCT variable fillet operation failed.");
       result = maker.Shape();
+      const TopoDS_Shape filleted = OneSolid(result, "Variable fillet");
+      TopTools_IndexedMapOfShape faces;
+      TopExp::MapShapes(filleted, TopAbs_FACE, faces);
+      for (size_t i = 0; i < index_count; ++i) {
+        const auto generated = maker.Generated(EdgeAt(source, indices[i]));
+        for (NCollection_List<TopoDS_Shape>::Iterator it(generated); it.More(); it.Next()) {
+          if (it.Value().ShapeType() == TopAbs_FACE && faces.Contains(it.Value()))
+            generated_face_indices.push_back(faces.FindIndex(it.Value()) - 1);
+        }
+      }
+      std::sort(generated_face_indices.begin(), generated_face_indices.end());
+      generated_face_indices.erase(std::unique(generated_face_indices.begin(), generated_face_indices.end()),
+                                   generated_face_indices.end());
     } else if (operation == 5) {
       if (value_count != 6) throw std::runtime_error("Mirror needs plane origin and normal.");
       const gp_Pnt origin(Finite(values, value_count, 0, "Mirror origin"),
@@ -294,7 +323,21 @@ API char* cadyx_advanced_brep(const unsigned char* data, size_t size, int operat
       throw std::runtime_error("Unsupported advanced OCCT operation.");
     }
 
-    return Serialize(OneSolid(result, "Advanced operation"), output_size);
+    result = OneSolid(result, "Advanced operation");
+    if (operation == 2 || operation == 4) {
+      if (!generated_faces_json || generated_faces_capacity == 0)
+        throw std::runtime_error("Chamfer face metadata buffer is required.");
+      std::ostringstream face_json;
+      face_json << '[';
+      for (size_t i = 0; i < generated_face_indices.size(); ++i)
+        face_json << (i ? "," : "") << generated_face_indices[i];
+      face_json << ']';
+      const std::string face_value = face_json.str();
+      if (face_value.size() >= generated_faces_capacity)
+        throw std::runtime_error("Chamfer face metadata exceeds the supported buffer.");
+      std::memcpy(generated_faces_json, face_value.c_str(), face_value.size() + 1);
+    }
+    return Serialize(result, output_size);
   } catch (const Standard_Failure& failure) {
     CopyError(error, capacity, failure.GetMessageString() ? failure.GetMessageString() : "OCCT advanced operation failed.");
   } catch (const std::exception& exc) {

@@ -152,6 +152,7 @@ def _advanced_native(geometry: dict[str, Any], operation: int, values: list[floa
         ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
         ctypes.POINTER(ctypes.c_int), ctypes.c_size_t,
         ctypes.POINTER(ctypes.c_size_t), ctypes.c_char_p, ctypes.c_size_t,
+        ctypes.c_char_p, ctypes.c_size_t,
     ]
     function.restype = ctypes.c_void_p
     brep = _raw_brep(geometry)
@@ -160,13 +161,17 @@ def _advanced_native(geometry: dict[str, Any], operation: int, values: list[floa
     selected = indices or []
     native_indices = (ctypes.c_int * len(selected))(*selected) if selected else None
     size = ctypes.c_size_t()
+    generated_faces = ctypes.create_string_buffer(64 * 1024)
     error = ctypes.create_string_buffer(2048)
     result = function(data, len(brep), operation, numbers, len(values), native_indices, len(selected),
-                      ctypes.byref(size), error, len(error))
+                      ctypes.byref(size), generated_faces, len(generated_faces), error, len(error))
     if not result:
         raise ValidationError(error.value.decode("utf-8", errors="replace"))
     try:
-        return _wrap_brep(bytes(ctypes.string_at(result, size.value)))
+        result_geometry = _wrap_brep(bytes(ctypes.string_at(result, size.value)))
+        if operation in {2, 4}:
+            result_geometry["selected_face_indices"] = json.loads(generated_faces.value)
+        return result_geometry
     finally:
         library.cadyx_free(result)
 
