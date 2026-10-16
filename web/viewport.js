@@ -782,12 +782,16 @@
           for (let y = minY; y <= maxY; y += 1) {
             let w0 = rowW0, w1 = rowW1, w2 = rowW2, pixelIndex = y * width + minX;
             for (let x = minX; x <= maxX; x += 1) {
-              if (w0 >= -1e-7 && w1 >= -1e-7 && w2 >= -1e-7
-                  && z0 * w0 + z1 * w1 + z2 * w2 + 1e-7 >= meshDepth[pixelIndex]) {
-                const byteIndex = pixelIndex * 4, mix = 0.46;
-                pixels[byteIndex] = Math.round(pixels[byteIndex] * (1 - mix) + 255 * mix);
-                pixels[byteIndex + 1] = Math.round(pixels[byteIndex + 1] * (1 - mix) + 126 * mix);
-                pixels[byteIndex + 2] = Math.round(pixels[byteIndex + 2] * (1 - mix) + 38 * mix);
+              if (w0 >= -1e-7 && w1 >= -1e-7 && w2 >= -1e-7) {
+                const depth = z0 * w0 + z1 * w1 + z2 * w2;
+                // meshDepth is Float32; account for its rounding when overlaying selected faces.
+                const depthEpsilon = Math.max(1, Math.abs(depth)) * 2e-7;
+                if (depth + depthEpsilon >= meshDepth[pixelIndex]) {
+                  const byteIndex = pixelIndex * 4, mix = 0.46;
+                  pixels[byteIndex] = Math.round(pixels[byteIndex] * (1 - mix) + 255 * mix);
+                  pixels[byteIndex + 1] = Math.round(pixels[byteIndex + 1] * (1 - mix) + 126 * mix);
+                  pixels[byteIndex + 2] = Math.round(pixels[byteIndex + 2] * (1 - mix) + 38 * mix);
+                }
               }
               pixelIndex += 1; w0 += w0StepX; w1 += w1StepX; w2 += w2StepX;
             }
