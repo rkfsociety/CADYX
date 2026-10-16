@@ -63,7 +63,15 @@ List the camera's advertised native modes with:
 & .\tools\revopoint\build\CaptureY16.exe --list-modes
 ```
 
-The connected camera advertises Y16 at 640×400, 1280×800, and 640×800, each with nominal 5, 10, and 15 fps modes. Explicit 640×400 selections at nominal 5, 10, and 15 fps each delivered about 4.6 fps by Media Foundation timestamps in 40-frame runs. Other resolutions remain unmeasured. The direct UVC path therefore does not meet the MINI's published 10 fps maximum in the tested mode; this does not measure Revo Scan's complete capture pipeline.
+The connected camera advertises Y16 at 640×400, 1280×800, and 640×800, each with nominal 5, 10, and 15 fps modes. Earlier explicit 640×400 selections at nominal 5, 10, and 15 fps each delivered about 4.6 fps by Media Foundation timestamps in 40-frame runs. Later measurements were inconsistent; see below. The direct UVC path has not demonstrated a stable 10 fps, and these checks do not measure Revo Scan's complete capture pipeline.
+
+For timestamp-only measurements of other native modes (without applying the 640×400 calibration to them), use `--measure-only` with explicit dimensions:
+
+```powershell
+& .\tools\revopoint\build\CaptureY16.exe --out-prefix (Join-Path $PWD 'projects\revopoint_rate\1280x800') --frames 40 --fps 10 --width 1280 --height 800 --measure-only
+```
+
+Additional live measurements on 2026-10-16 were inconsistent with the earlier 640×400 runs: 1280×800 at nominal 15 and 10 fps each delivered 0.69 fps by Media Foundation timestamps over 40 frames; a 640×400 nominal 15 fps recheck delivered 1.85 fps, with uneven timestamp gaps. A 640×800 nominal 10 fps attempt did not produce its first 40 frames within about 150 seconds and was stopped; treat that mode as unverified, not as a measured zero rate. Raw bursts and timestamp CSVs are retained under `projects/revopoint_mode_rate_20261016/`. These results show the direct-reader rate is not stable enough to claim 10 fps. The cause of the rate change is unknown, and Revo Scan's proprietary pipeline is still unmeasured.
 
 The raw-to-disparity scale `256` is a provisional value from the first live capture. It has not been validated against a known object dimension, so treat the PLY scale as unverified. The utility captures one camera pose; it does not track motion, align multiple frames, fuse a full scan, or create a watertight mesh. The scanner's exact product model is not established by its generic USB camera names.
 

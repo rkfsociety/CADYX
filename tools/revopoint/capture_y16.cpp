@@ -25,19 +25,17 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 
-constexpr UINT32 kWidth = 640;
-constexpr UINT32 kHeight = 400;
-constexpr std::size_t kPixelCount = static_cast<std::size_t>(kWidth) * kHeight;
-constexpr std::size_t kRawBytes = kPixelCount * sizeof(std::uint16_t);
-
 struct Options {
     std::filesystem::path output_prefix;
     std::filesystem::path q_file;
     double disparity_scale = 0.0;
     int frame_count = 1;
     int requested_fps = 15;
+    UINT32 width = 640;
+    UINT32 height = 400;
     std::filesystem::path live_raw_path;
     bool list_modes = false;
+    bool measure_only = false;
 };
 
 std::string Hresult(HRESULT hr);
@@ -84,7 +82,8 @@ void CheckHr(HRESULT hr, const char* action) {
 void PrintUsage() {
     std::cout << "Capture Y16 frames and reproject the first frame through a supplied Q.bin.\n"
               << "Usage: CaptureY16.exe --out-prefix PATH --q-file PATH --disparity-scale NUMBER [--frames N]\n"
-              << "       [--fps 5|10|15]\n"
+              << "       [--fps 5|10|15] [--width 640|1280] [--height 400|800]\n"
+              << "       CaptureY16.exe --out-prefix PATH --frames N --fps 5|10|15 --width W --height H --measure-only\n"
               << "       CaptureY16.exe --list-modes\n"
               << "The scale is explicit because the raw-to-disparity mapping is not calibrated yet.\n";
 }
@@ -98,6 +97,7 @@ Options ParseOptions(int argc, wchar_t** argv) {
             std::exit(0);
         }
         if (argument == L"--list-modes") { options.list_modes = true; continue; }
+        if (argument == L"--measure-only") { options.measure_only = true; continue; }
         if (i + 1 >= argc) {
             throw std::runtime_error("Missing value after a command-line option.");
         }
@@ -118,6 +118,12 @@ Options ParseOptions(int argc, wchar_t** argv) {
         } else if (argument == L"--fps") {
             try { options.requested_fps = std::stoi(value); }
             catch (...) { throw std::runtime_error("--fps must be 5, 10, or 15."); }
+        } else if (argument == L"--width") {
+            try { options.width = static_cast<UINT32>(std::stoul(value)); }
+            catch (...) { throw std::runtime_error("--width must be 640 or 1280."); }
+        } else if (argument == L"--height") {
+            try { options.height = static_cast<UINT32>(std::stoul(value)); }
+            catch (...) { throw std::runtime_error("--height must be 400 or 800."); }
         } else if (argument == L"--live-raw") {
             options.live_raw_path = value;
         } else {
@@ -125,10 +131,14 @@ Options ParseOptions(int argc, wchar_t** argv) {
         }
     }
     if (options.list_modes) return options;
-    if (options.output_prefix.empty() || options.q_file.empty() || options.disparity_scale <= 0.0 ||
-        !std::isfinite(options.disparity_scale) || options.frame_count < 1 || options.frame_count > 1000 ||
+    if (options.output_prefix.empty() || (!options.measure_only && (options.q_file.empty() || options.disparity_scale <= 0.0 ||
+        !std::isfinite(options.disparity_scale))) || options.frame_count < 1 || options.frame_count > 1000 ||
+        !((options.width == 640 && (options.height == 400 || options.height == 800)) ||
+          (options.width == 1280 && options.height == 800)) ||
+        (options.measure_only && options.frame_count < 2) ||
+        (!options.measure_only && (options.width != 640 || options.height != 400)) ||
         (options.requested_fps != 5 && options.requested_fps != 10 && options.requested_fps != 15)) {
-        throw std::runtime_error("--out-prefix, --q-file and a positive --disparity-scale are required.");
+        throw std::runtime_error("Invalid output, dimensions, frame count, FPS, or reprojection arguments.");
     }
     return options;
 }
@@ -225,6 +235,7 @@ ComPtr<IMFActivate> FindDepthCamera() {
 }
 
 std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int requested_fps,
+                                                        UINT32 requested_width, UINT32 requested_height,
                                                         std::vector<LONGLONG>& timestamps,
                                                         std::vector<std::int64_t>& utc_epoch_us,
                                                         const std::filesystem::path& live_raw_path) {
@@ -257,15 +268,16 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
         CheckHr(MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &width, &height), "Read media dimensions");
         UINT32 rate_num = 0, rate_den = 0;
         const HRESULT rate_hr = MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, &rate_num, &rate_den);
-        if (IsY16(subtype) && width == kWidth && height == kHeight && SUCCEEDED(rate_hr) && rate_den &&
+        if (IsY16(subtype) && width == requested_width && height == requested_height && SUCCEEDED(rate_hr) && rate_den &&
             std::abs(static_cast<double>(rate_num) / rate_den - requested_fps) < 0.1) y16_type = type;
     }
     if (!y16_type) {
-        throw std::runtime_error("DepthCam does not expose the requested 640x400 Y16 frame-rate mode.");
+        throw std::runtime_error("DepthCam does not expose the requested Y16 dimensions and frame-rate mode.");
     }
     CheckHr(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, y16_type.Get()),
             "Select native Y16 media type");
 
+    const std::size_t raw_bytes = static_cast<std::size_t>(requested_width) * requested_height * sizeof(std::uint16_t);
     std::vector<std::vector<std::uint8_t>> frames;
     while (static_cast<int>(frames.size()) < frame_count) {
         DWORD stream_index = 0;
@@ -286,12 +298,12 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
         DWORD current_length = 0;
         CheckHr(buffer->Lock(&data, &maximum_length, &current_length), "Lock Y16 buffer");
         std::vector<std::uint8_t> result;
-        if (current_length == kRawBytes) {
+        if (current_length == raw_bytes) {
             result.assign(data, data + current_length);
         }
         buffer->Unlock();
         if (result.empty()) {
-            throw std::runtime_error("Y16 buffer size was not 640x400x2 bytes; refusing to guess row stride.");
+            throw std::runtime_error("Y16 buffer size did not match the selected dimensions; refusing to guess row stride.");
         }
         timestamps.push_back(timestamp);
         utc_epoch_us.push_back(std::chrono::duration_cast<std::chrono::microseconds>(
@@ -344,13 +356,14 @@ std::array<double, 16> ReadQMatrix(const std::filesystem::path& path) {
 }
 
 std::vector<std::array<double, 3>> Reproject(const std::vector<std::uint8_t>& raw,
+                                            UINT32 width, UINT32 height,
                                             const std::array<double, 16>& q,
                                             double disparity_scale) {
     std::vector<std::array<double, 3>> points;
-    points.reserve(kPixelCount);
-    for (UINT32 y = 0; y < kHeight; ++y) {
-        for (UINT32 x = 0; x < kWidth; ++x) {
-            const std::size_t offset = (static_cast<std::size_t>(y) * kWidth + x) * 2;
+    points.reserve(static_cast<std::size_t>(width) * height);
+    for (UINT32 y = 0; y < height; ++y) {
+        for (UINT32 x = 0; x < width; ++x) {
+            const std::size_t offset = (static_cast<std::size_t>(y) * width + x) * 2;
             const std::uint16_t pixel = static_cast<std::uint16_t>(raw[offset] | (raw[offset + 1] << 8));
             if (pixel == 0) {
                 continue;
@@ -424,8 +437,8 @@ void SaveOutputs(const Options& options, const std::vector<std::uint8_t>& raw,
         output << std::fixed << std::setprecision(12)
                << "{\n"
                << "  \"camera\": \"DepthCam\",\n"
-               << "  \"width\": " << kWidth << ",\n"
-               << "  \"height\": " << kHeight << ",\n"
+               << "  \"width\": " << options.width << ",\n"
+               << "  \"height\": " << options.height << ",\n"
                << "  \"raw_format\": \"Y16 little-endian\",\n"
                << "  \"raw_file\": \"" << raw_path.filename().string() << "\",\n"
                << "  \"ply_file\": \"" << ply_path.filename().string() << "\",\n"
@@ -472,19 +485,23 @@ int wmain(int argc, wchar_t** argv) {
         const Options options = ParseOptions(argc, argv);
         MediaFoundationRuntime runtime;
         if (options.list_modes) { ListNativeModes(); return 0; }
-        const auto q = ReadQMatrix(options.q_file);
+        std::array<double, 16> q{};
+        if (!options.measure_only) q = ReadQMatrix(options.q_file);
         std::vector<LONGLONG> timestamps;
         std::vector<std::int64_t> utc_epoch_us;
         const auto started = std::chrono::steady_clock::now();
-        const auto frames = CaptureY16Frames(options.frame_count, options.requested_fps, timestamps, utc_epoch_us,
+        const auto frames = CaptureY16Frames(options.frame_count, options.requested_fps,
+                                             options.width, options.height, timestamps, utc_epoch_us,
                                              options.live_raw_path);
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-        const auto& raw = frames.front();
-        const auto points = Reproject(raw, q, options.disparity_scale);
-        if (points.size() < 100) {
-            throw std::runtime_error("Fewer than 100 valid points were reconstructed; no output was published.");
+        if (!options.measure_only) {
+            const auto& raw = frames.front();
+            const auto points = Reproject(raw, options.width, options.height, q, options.disparity_scale);
+            if (points.size() < 100) {
+                throw std::runtime_error("Fewer than 100 valid points were reconstructed; no output was published.");
+            }
+            SaveOutputs(options, raw, points);
         }
-        SaveOutputs(options, raw, points);
         SaveBurst(options, frames, timestamps, utc_epoch_us, elapsed);
         return 0;
     } catch (const std::exception& error) {
