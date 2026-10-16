@@ -2066,17 +2066,10 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
       if (!triangulation.IsNull()) {
         const size_t face_triangle_count = static_cast<size_t>(triangulation->NbTriangles());
         const size_t face_sample_quota = face_sample_quotas[face_index];
-        size_t selected_in_face = 0;
-        size_t next_triangle = face_sample_quota
-            ? face_triangle_count / (2 * face_sample_quota) : face_triangle_count;
-        for (int triangle_index = 1; triangle_index <= triangulation->NbTriangles(); ++triangle_index) {
-          const size_t local_triangle_index = static_cast<size_t>(triangle_index - 1);
-          if (local_triangle_index != next_triangle) continue;
-          ++selected_in_face;
-          if (selected_in_face < face_sample_quota) {
-            next_triangle = ((2 * selected_in_face + 1) * face_triangle_count)
-                          / (2 * face_sample_quota);
-          }
+        for (size_t sample_index = 0; sample_index < face_sample_quota; ++sample_index) {
+          const size_t local_triangle_index = ((2 * sample_index + 1) * face_triangle_count)
+                                           / (2 * face_sample_quota);
+          const int triangle_index = static_cast<int>(local_triangle_index + 1);
           int a, b, c;
           triangulation->Triangle(triangle_index).Get(a, b, c);
           const gp_Pnt pa = triangulation->Node(a).Transformed(location.Transformation());
