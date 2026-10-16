@@ -138,9 +138,10 @@ _COMMAND = {"type": "object", "oneOf": [
                 "type": "string",
                 "enum": [capability["type"]],
             },
-            **{field: {} for field in [
-                *capability.get("required", []), *capability.get("optional", []),
-            ]},
+            **{
+                field: capability.get("parameter_schemas", {}).get(field, {})
+                for field in [*capability.get("required", []), *capability.get("optional", [])]
+            },
         },
         "required": ["type"],
     }

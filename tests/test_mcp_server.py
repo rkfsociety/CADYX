@@ -57,6 +57,12 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual({tool["name"] for tool in listed["result"]["tools"]}, {tool["name"] for tool in TOOLS})
         capabilities = self._tool_value("cadyx_capabilities")
         self.assertEqual({item["type"] for item in capabilities["commands"]}, {item["type"] for item in COMMAND_CAPABILITIES})
+        api_commands = {item["type"]: item for item in capabilities["commands"]}
+        registry_commands = {item["type"]: item for item in COMMAND_CAPABILITIES}
+        self.assertEqual(
+            api_commands["create_box"]["parameter_schemas"],
+            registry_commands["create_box"]["parameter_schemas"],
+        )
         project_id = self._create_project()
         image = self.app.call_tool("cadyx_get_viewport_image", {"project_id": project_id})
         self.assertEqual([item["type"] for item in image["content"]], ["text", "image"])
@@ -71,9 +77,71 @@ class CadyxMCPServerTests(unittest.TestCase):
             branch["properties"]["type"]["enum"][0]: branch
             for branch in branches
         }
+        expected_parameter_schemas = {
+            "create_box": {
+                "width": {"type": "number", "exclusiveMinimum": 0},
+                "height": {"type": "number", "exclusiveMinimum": 0},
+                "depth": {"type": "number", "exclusiveMinimum": 0},
+                "name": {"type": "string"},
+            },
+            "create_sketch": {
+                "name": {"type": "string"},
+                "plane": {"type": "string", "enum": ["XY", "XZ"]},
+            },
+            "add_sketch_point": {
+                "sketch_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+            },
+            "add_sketch_polyline": {
+                "sketch_id": {"type": "string"},
+                "points": {
+                    "type": "array",
+                    "minItems": 2,
+                    "items": {
+                        "type": "object",
+                        "properties": {"x": {"type": "number"}, "y": {"type": "number"}},
+                        "required": ["x", "y"],
+                        "additionalProperties": False,
+                    },
+                },
+                "closed": {"type": "boolean"},
+            },
+            "add_sketch_rectangle": {
+                "sketch_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "width": {"type": "number", "exclusiveMinimum": 0},
+                "height": {"type": "number", "exclusiveMinimum": 0},
+            },
+            "add_sketch_circle": {
+                "sketch_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "radius": {"type": "number", "exclusiveMinimum": 0},
+            },
+            "extrude_sketch": {
+                "sketch_id": {"type": "string"},
+                "depth": {"type": "number", "exclusiveMinimum": 0},
+                "name": {"type": "string"},
+                "centered": {"type": "boolean"},
+            },
+            "revolve_sketch": {
+                "sketch_id": {"type": "string"},
+                "name": {"type": "string"},
+                "angle_degrees": {"type": "number", "exclusiveMinimum": 0, "maximum": 360},
+            },
+        }
 
         self.assertEqual(command_schema["type"], "object")
         self.assertEqual(set(branches_by_type), {item["type"] for item in COMMAND_CAPABILITIES})
+        capabilities_by_type = {item["type"]: item for item in COMMAND_CAPABILITIES}
+        for command_type, schemas in expected_parameter_schemas.items():
+            with self.subTest(parameter_schemas=command_type):
+                self.assertEqual(capabilities_by_type[command_type].get("parameter_schemas"), schemas)
+                properties = branches_by_type[command_type]["properties"]
+                for field, schema in schemas.items():
+                    self.assertEqual(properties[field], schema)
         for capability in COMMAND_CAPABILITIES:
             with self.subTest(command_type=capability["type"]):
                 branch = branches_by_type[capability["type"]]
