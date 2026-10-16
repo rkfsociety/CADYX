@@ -34,8 +34,8 @@ def involute_spur_gear_profile(
     module_value = _finite_number(module, "module")
     if module_value <= 0:
         raise ValidationError("module must be finite and positive.")
-    if type(tooth_count) is not int or not 3 <= tooth_count <= 128:
-        raise ValidationError("tooth_count must be an integer from 3 to 128.")
+    if type(tooth_count) is not int or tooth_count < 3:
+        raise ValidationError("tooth_count must be an integer of at least 3.")
 
     pressure_degrees = _finite_number(pressure_angle_degrees, "pressure_angle_degrees")
     if not 5.0 <= pressure_degrees <= 45.0:
@@ -54,10 +54,15 @@ def involute_spur_gear_profile(
     if backlash_value < 0 or backlash_value >= math.pi * module_value / 2:
         raise ValidationError("backlash must be non-negative and less than half the circular pitch.")
 
-    pitch_radius = module_value * tooth_count / 2.0
-    base_radius = pitch_radius * math.cos(pressure)
-    tip_radius = module_value * (tooth_count / 2.0 + 1.0)
-    root_radius = module_value * (tooth_count / 2.0 - 1.25)
+    try:
+        pitch_radius = module_value * tooth_count / 2.0
+        base_radius = pitch_radius * math.cos(pressure)
+        tip_radius = module_value * (tooth_count / 2.0 + 1.0)
+        root_radius = module_value * (tooth_count / 2.0 - 1.25)
+    except OverflowError as exc:
+        raise ValidationError("Gear dimensions must remain finite for this tooth count and module.") from exc
+    if not all(math.isfinite(value) for value in (pitch_radius, base_radius, tip_radius, root_radius)):
+        raise ValidationError("Gear dimensions must remain finite for this tooth count and module.")
     if root_radius <= 0 or tip_radius <= base_radius:
         raise ValidationError("Gear dimensions do not leave a usable involute tooth profile.")
 
@@ -120,8 +125,8 @@ def involute_spur_gear_profile(
         for step in range(1, root_segments):
             append_polar(root_radius, right_angle + (next_left - right_angle) * step / root_segments)
 
-    if len(points) < 3 or len(points) > 4096:
-        raise ValidationError("Generated gear profile must contain between 3 and 4096 points.")
+    if len(points) < 3:
+        raise ValidationError("Generated gear profile must contain at least 3 points.")
     if any(not math.isfinite(value) for point in points for value in point):
         raise ValidationError("Generated gear coordinates must be finite.")
 

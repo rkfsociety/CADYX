@@ -269,7 +269,7 @@ and references preserved.
 ## Engineering profiles
 
 `add_sketch_involute_gear` accepts an empty `XY` `sketch_id`, positive `module`,
-integer `tooth_count` from 3 to 128, `pressure_angle_degrees` from 5 through 45
+integer `tooth_count` of at least 3, `pressure_angle_degrees` from 5 through 45
 (default 20), optional `center_x`/`center_y`, `rotation_degrees`, and non-negative
 `backlash` less than half the circular pitch. The minimum tooth count is checked
 against the rack-undercut limit for the selected pressure angle. It adds one
