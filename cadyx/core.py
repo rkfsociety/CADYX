@@ -623,14 +623,15 @@ class CadyxCore:
                     or any(type(value) not in (int, float) or not math.isfinite(value) for value in point)):
                 raise ValidationError("OCCT returned invalid solid-clearance witness points.")
             witness_points[name] = [float(value) for value in point]
-        if inner_solution:
+        distance_lower = max(0.0, distance - deflection)
+        distance_upper = distance + deflection
+        required_after_tolerance = max(0.0, required - allowed_tolerance)
+        if inner_solution or distance_upper < required_after_tolerance:
             status = "fail"
-        elif distance <= deflection:
-            status = "untested"
-        elif distance + allowed_tolerance >= required:
+        elif distance > deflection and distance_lower >= required_after_tolerance:
             status = "pass"
         else:
-            status = "fail"
+            status = "untested"
         geometry_hash = geometry_sha256({
             "first": {"body_id": first_body_id, "geometry": first_geometry},
             "second": {"body_id": second_body_id, "geometry": second_geometry},
@@ -644,6 +645,7 @@ class CadyxCore:
             "units": "model_units",
             "minimum_clearance": required,
             "measured_distance": distance,
+            "distance_interval": [distance_lower, distance_upper],
             "tolerance": allowed_tolerance,
             "deflection": deflection,
             "inner_solution": inner_solution,
