@@ -3,17 +3,202 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>CADYX — Revopoint Live</title>
+  <meta name="theme-color" content="#090d11">
+  <title>CADYX — Сканер</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/assets/style.css">
   <style>
-    :root{color-scheme:dark;font:14px system-ui;background:#0b1114;color:#dce9e9}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;grid-template-rows:56px 1fr;background:radial-gradient(ellipse at 50% 20%,#132126,#0b1114 70%)}header{display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid #26383d;font:12px ui-monospace,monospace;letter-spacing:.12em}a{color:#9ad7cb;text-decoration:none}main{display:grid;place-content:center;gap:14px;padding:20px}.screen{width:min(90vw,960px);aspect-ratio:8/5;background:#070b0d;border:1px solid #294149;box-shadow:0 20px 80px #0008;display:grid;place-items:center}canvas{width:100%;height:100%;object-fit:contain;image-rendering:pixelated}.status{display:flex;justify-content:space-between;color:#98aaad;font:12px ui-monospace,monospace}.status strong{color:#70e2c1;font-weight:500}#state[data-live=false]{color:#e6b86d}
+    :root {
+      --accent: #ff7417;
+      --agent: #ff7417;
+      --canvas: #090d11;
+      --surface: #0e1419;
+      --surface-soft: #121920;
+      --line: #29323a;
+      --line-soft: #1c252c;
+      --text: #e8edf0;
+      --muted: #a7b0b7;
+      --dim: #6f7b84;
+      --scanner-header-height: 58px;
+    }
+
+    html, body { width: 100%; height: 100%; min-width: 320px; overflow: hidden; background: var(--canvas); }
+    body { display: grid; grid-template-rows: var(--scanner-header-height) minmax(0, 1fr); color: var(--text); }
+    .topbar {
+      height: var(--scanner-header-height);
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas: "brand project end";
+      gap: 0;
+      padding: 0 18px 0 20px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #0d1419 0%, #0a1014 100%);
+    }
+    .topbar-start { grid-area: brand; padding-right: 22px; border-right: 1px solid var(--line); }
+    .topbar-project { grid-area: project; min-width: 0; padding-left: 22px; border: 0; }
+    .topbar-end { grid-area: end; gap: 10px; }
+    .brand { color: var(--accent); font-size: 27px; font-weight: 760; letter-spacing: .075em; }
+    .document-title { color: #eef2f4; font: 600 12px/1.3 var(--mono); letter-spacing: .04em; }
+    .project-short-id { color: var(--dim); font: 9px/1.2 var(--mono); letter-spacing: .06em; }
+    .project-light { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--dim); }
+    .project-light.active { background: var(--accent); box-shadow: 0 0 12px #ff741766; }
+    .scanner-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 28px;
+      padding: 4px 9px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--muted);
+      background: #0b1217;
+      font: 9px var(--mono);
+      letter-spacing: .04em;
+      white-space: nowrap;
+    }
+    .scanner-state::before { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); content: ""; }
+    .scanner-state[data-live="true"] { border-color: #6c3a1d; color: #ff9854; background: #22140c; }
+    .scanner-state[data-live="true"]::before { background: var(--accent); box-shadow: 0 0 8px #ff741766; }
+    .scanner-state[data-live="false"] { color: var(--warning); }
+    .scanner-shell {
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-columns: minmax(0, 1fr) clamp(220px, 20vw, 300px);
+      gap: 10px;
+      padding: 10px;
+      background: var(--canvas);
+    }
+    .scanner-view { display: grid; min-width: 0; min-height: 0; grid-template-rows: 38px minmax(0, 1fr) 30px; overflow: hidden; }
+    .scanner-view .panel-heading { min-height: 38px; }
+    .scanner-view .panel-heading h1 { margin: 0; font: 12px var(--mono); font-weight: 500; letter-spacing: .05em; }
+    .panel-note { color: var(--dim); font: 9px var(--mono); letter-spacing: .05em; }
+    .scanner-stage { display: grid; min-width: 0; min-height: 0; place-items: center; padding: 14px; background-color: #080c10; background-image: linear-gradient(#182128 1px,transparent 1px),linear-gradient(90deg,#182128 1px,transparent 1px); background-size: 24px 24px; }
+    .screen { display: grid; width: min(100%, 1120px); max-height: 100%; aspect-ratio: 8/5; place-items: center; overflow: hidden; border: 1px solid #303941; border-radius: 3px; background: #05080b; box-shadow: 0 16px 42px #0008; }
+    canvas { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+    .scanner-view-footer { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; padding: 0 10px; border-top: 1px solid var(--line-soft); color: var(--dim); font: 9px var(--mono); }
+    .scanner-inspector { display: grid; min-height: 0; grid-template-rows: auto auto minmax(0, 1fr); align-content: start; gap: 10px; }
+    .scanner-card { padding: 12px; }
+    .scanner-card h2 { margin: 0 0 10px; color: #eef2f4; font: 10px var(--mono); font-weight: 600; letter-spacing: .07em; }
+    .scanner-rate { display: flex; align-items: baseline; gap: 8px; }
+    .scanner-rate strong { color: var(--accent); font: 600 28px/1 var(--mono); }
+    .scanner-rate span { color: var(--dim); font: 9px var(--mono); }
+    .scanner-details { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 12px 0 0; font: 9px var(--mono); }
+    .scanner-details dt { color: var(--dim); }
+    .scanner-details dd { margin: 0; color: var(--muted); text-align: right; }
+    .scanner-hint { align-self: start; padding: 12px; border: 1px solid var(--line); border-radius: 4px; background: #0b1217; color: var(--muted); font: 10px/1.55 var(--mono); }
+    .scanner-hint strong { display: block; margin-bottom: 7px; color: #dce3e7; font-size: 9px; letter-spacing: .06em; }
+    .scanner-hint code { color: #ff9854; overflow-wrap: anywhere; }
+    @media (max-width: 760px) {
+      .topbar { padding: 0 10px; }
+      .topbar-start { padding-right: 10px; }
+      .topbar-project { padding-left: 10px; }
+      .scanner-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; overflow: auto; }
+      .scanner-inspector { grid-template-columns: 1fr 1fr; grid-template-rows: auto; }
+      .scanner-state { max-width: 42vw; overflow: hidden; text-overflow: ellipsis; }
+    }
+    @media (max-width: 480px) {
+      .document-title { font-size: 10px; }
+      .project-short-id, .scanner-inspector .panel-note { display: none; }
+      .scanner-inspector { grid-template-columns: 1fr; }
+      .scanner-stage { padding: 5px; }
+      .screen { width: 100%; }
+    }
   </style>
 </head>
 <body>
-  <header><a href="/">CADYX</a><span>REV OPOINT · LIVE DEPTH</span><span id="state" data-live="false">ОЖИДАНИЕ КАДРА</span></header>
-  <main><div class="screen"><canvas id="depth" width="640" height="400"></canvas></div><div class="status"><span id="rate">— fps</span><span>Y16 · 640×400 · градации глубины</span><span id="age">—</span></div></main>
+  <header class="topbar">
+    <div class="topbar-start"><a class="brand" href="/">CADYX</a></div>
+    <div class="topbar-project">
+      <span class="project-light active" aria-hidden="true"></span>
+      <div class="topbar-project-copy"><span class="document-title">REV OPOINT · LIVE DEPTH</span><span class="project-short-id">Y16 / 640×400</span></div>
+    </div>
+    <div class="topbar-end">
+      <span id="state" class="scanner-state" data-live="false">ОЖИДАНИЕ КАДРА</span>
+      <a class="button" href="/">В CADYX</a>
+    </div>
+  </header>
+  <main class="scanner-shell">
+    <section class="panel scanner-view" aria-labelledby="scanner-title">
+      <div class="panel-heading">
+        <div><h1 id="scanner-title">КАРТА ГЛУБИНЫ</h1></div>
+        <span class="panel-note">ПРЕДПРОСМОТР В РЕАЛЬНОМ ВРЕМЕНИ</span>
+      </div>
+      <div class="scanner-stage"><div class="screen"><canvas id="depth" width="640" height="400" aria-label="Кадр глубины Revopoint"></canvas></div></div>
+      <div class="scanner-view-footer"><span>Y16 · 640×400</span><span id="age">ОЖИДАНИЕ</span><span>ПРОЕКЦИЯ Q.BIN · МАСШТАБ НЕ ПРОВЕРЕН</span></div>
+    </section>
+    <aside class="scanner-inspector" aria-label="Состояние захвата">
+      <section class="panel scanner-card">
+        <h2>СКОРОСТЬ ПОТОКА</h2>
+        <div class="scanner-rate"><strong id="rate">—</strong><span>кадр/с</span></div>
+        <dl class="scanner-details"><dt>Формат</dt><dd>Y16</dd><dt>Разрешение</dt><dd>640×400</dd><dt>Обновление</dt><dd>150 мс</dd></dl>
+      </section>
+      <section class="panel scanner-card">
+        <h2>ИСТОЧНИК</h2>
+        <div class="panel-note">REV OPOINT DEPTHCAM</div>
+        <dl class="scanner-details"><dt>Калибровка</dt><dd>Q.bin</dd><dt>Геометрия</dt><dd>предварительная</dd></dl>
+      </section>
+      <div class="scanner-hint"><strong>ЗАПУСК ЗАХВАТА</strong>Утилита CaptureY16 должна обновлять live-файл в workspace. Кадры доступны только локальному API CADYX.<br><br><code>--live-raw .revopoint-live.raw</code></div>
+    </aside>
+  </main>
   <script>
-    (()=>{const canvas=document.querySelector('#depth'),ctx=canvas.getContext('2d',{alpha:false}),state=document.querySelector('#state'),rate=document.querySelector('#rate'),age=document.querySelector('#age'),image=ctx.createImageData(640,400);let lastMtime='',lastArrival=0,intervals=[];
-      async function poll(){try{const response=await fetch('/api/v1/scanner/live-frame?ts='+Date.now(),{cache:'no-store'});if(!response.ok)throw Error(response.status===404?'Нет кадра. Запустите CaptureY16 с --live-raw <workspace>\\.revopoint-live.raw.':`HTTP ${response.status}`);const mtime=response.headers.get('X-CADYX-Frame-Mtime');if(mtime!==lastMtime){const raw=new Uint8Array(await response.arrayBuffer());if(raw.length!==640*400*2)throw Error('Размер кадра Y16 не совпадает.');let min=65535,max=0;for(let i=0;i<raw.length;i+=2){const v=raw[i]|raw[i+1]<<8;if(v>0&&v<min)min=v;if(v>max)max=v;}const span=Math.max(1,max-min);for(let p=0;p<640*400;p++){const v=raw[p*2]|raw[p*2+1]<<8;const g=v?Math.max(0,Math.min(255,Math.round((v-min)*255/span))):0;const j=p*4;image.data[j]=g;image.data[j+1]=Math.round(g*.96);image.data[j+2]=Math.min(255,g+12);image.data[j+3]=255;}ctx.putImageData(image,0,0);const now=performance.now();if(lastArrival)intervals.push(now-lastArrival);if(intervals.length>30)intervals.shift();lastArrival=now;lastMtime=mtime;rate.textContent=intervals.length?(1000/(intervals.reduce((a,b)=>a+b,0)/intervals.length)).toFixed(1)+' fps':'измерение…';state.textContent='ПОТОК АКТИВЕН';state.dataset.live='true';age.textContent='кадр '+new Date().toLocaleTimeString();} }catch(error){state.textContent=error.message;state.dataset.live='false';}finally{setTimeout(poll,150)}}poll();})();
+    (() => {
+      const canvas = document.querySelector("#depth");
+      const context = canvas.getContext("2d", { alpha: false });
+      const state = document.querySelector("#state");
+      const rate = document.querySelector("#rate");
+      const age = document.querySelector("#age");
+      const image = context.createImageData(640, 400);
+      let lastMtime = "", lastArrival = 0, intervals = [];
+
+      async function poll() {
+        try {
+          const response = await fetch(`/api/v1/scanner/live-frame?ts=${Date.now()}`, { cache: "no-store" });
+          if (!response.ok) throw Error(response.status === 404
+            ? "Нет кадра. Запустите CaptureY16 с --live-raw <workspace>\\.revopoint-live.raw."
+            : `HTTP ${response.status}`);
+          const mtime = response.headers.get("X-CADYX-Frame-Mtime");
+          if (mtime !== lastMtime) {
+            const raw = new Uint8Array(await response.arrayBuffer());
+            if (raw.length !== 640 * 400 * 2) throw Error("Размер кадра Y16 не совпадает.");
+            let min = 65535, max = 0;
+            for (let i = 0; i < raw.length; i += 2) {
+              const value = raw[i] | raw[i + 1] << 8;
+              if (value > 0 && value < min) min = value;
+              if (value > max) max = value;
+            }
+            const span = Math.max(1, max - min);
+            for (let pixel = 0; pixel < 640 * 400; pixel++) {
+              const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
+              const gray = value ? Math.max(0, Math.min(255, Math.round((value - min) * 255 / span))) : 0;
+              const offset = pixel * 4;
+              image.data[offset] = gray;
+              image.data[offset + 1] = Math.round(gray * .96);
+              image.data[offset + 2] = Math.min(255, gray + 12);
+              image.data[offset + 3] = 255;
+            }
+            context.putImageData(image, 0, 0);
+            const now = performance.now();
+            if (lastArrival) intervals.push(now - lastArrival);
+            if (intervals.length > 30) intervals.shift();
+            lastArrival = now;
+            lastMtime = mtime;
+            rate.textContent = intervals.length
+              ? (1000 / (intervals.reduce((sum, value) => sum + value, 0) / intervals.length)).toFixed(1)
+              : "измерение…";
+            state.textContent = "ПОТОК АКТИВЕН";
+            state.dataset.live = "true";
+            age.textContent = `КАДР ${new Date().toLocaleTimeString()}`;
+          }
+        } catch (error) {
+          state.textContent = error.message;
+          state.dataset.live = "false";
+          age.textContent = "ОЖИДАНИЕ";
+        } finally {
+          setTimeout(poll, 150);
+        }
+      }
+      poll();
+    })();
   </script>
 </body>
 </html>
