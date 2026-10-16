@@ -88,12 +88,21 @@ class Document:
             seen.add(object_id)
 
         by_id = {item["id"]: item for item in self.objects}
+        body_feature_ids: dict[str, set[str]] = {}
+        for item in self.objects:
+            if item.get("type") != "body":
+                continue
+            feature_ids = item.get("feature_ids", [])
+            if isinstance(feature_ids, list) and all(isinstance(feature_id, str) for feature_id in feature_ids):
+                body_feature_ids[item["id"]] = set(feature_ids)
+
         for item in self.objects:
             if item.get("type") == "body":
                 feature_ids = item.get("feature_ids", [])
                 if not isinstance(feature_ids, list):
                     raise ValidationError("Body feature_ids must be a list.")
-                if len(set(feature_id for feature_id in feature_ids if isinstance(feature_id, str))) != len(feature_ids):
+                feature_id_set = body_feature_ids.get(item["id"])
+                if feature_id_set is None or len(feature_id_set) != len(feature_ids):
                     raise ValidationError("Body feature_ids must be unique strings.")
                 for feature_id in feature_ids:
                     feature = by_id.get(feature_id)
@@ -102,7 +111,14 @@ class Document:
             elif item.get("type") == "feature":
                 typed_id(item.get("body_id"), "body")
                 body = by_id.get(item.get("body_id"))
-                if not body or body.get("type") != "body" or not isinstance(body.get("feature_ids", []), list) or item["id"] not in body.get("feature_ids", []):
+                feature_ids = body.get("feature_ids", []) if body else []
+                feature_id_set = body_feature_ids.get(item.get("body_id"))
+                feature_is_linked = (
+                    item["id"] in feature_id_set
+                    if feature_id_set is not None
+                    else item["id"] in feature_ids
+                )
+                if not body or body.get("type") != "body" or not isinstance(feature_ids, list) or not feature_is_linked:
                     raise ValidationError("Feature must reference a body that includes the feature id.")
                 if item.get("operation") in {"extrude_sketch", "revolve_sketch"}:
                     source_sketch_id = item.get("source_sketch_id")

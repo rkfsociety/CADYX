@@ -246,7 +246,7 @@ class EventBroker:
                     "revision": revision,
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
-                dashboards = {**self._agent_dashboards, project_id: copy.deepcopy(dashboard)}
+                dashboards = {**self._agent_dashboards, project_id: dashboard}
                 work_revision = self._agent_work_revision + 1
 
             self._persist_agent_dashboards(dashboards, work_revision)
@@ -271,12 +271,13 @@ class EventBroker:
                         except queue.Empty:
                             pass
                     subscriber.put_nowait(item)
+                active_project_ids = self._agent_work_project_ids_locked()
                 work_item = ProjectEvent(
                     id=self._next_id,
                     event="workspace.agent-work",
                     project_id=None,
-                    data={"active": self._agent_work_active_locked(), "revision": work_revision,
-                          "project_ids": self._agent_work_project_ids_locked()},
+                    data={"active": bool(active_project_ids), "revision": work_revision,
+                          "project_ids": active_project_ids},
                     occurred_at=dashboard["updated_at"],
                 )
                 self._next_id += 1
