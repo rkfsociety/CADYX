@@ -93,15 +93,6 @@ $("#viewport-camera-presets").addEventListener("click", (event) => {
 });
 $("#model-preview").addEventListener("pointerdown", () => setCameraPresetState(null));
 $("#model-preview").addEventListener("wheel", () => setCameraPresetState(null), { passive: true });
-$("#viewport-wireframe").addEventListener("click", (event) => {
-  const button = event.currentTarget;
-  const enabled = button.getAttribute("aria-pressed") !== "true";
-  modelViewer.setWireframe(enabled);
-  button.setAttribute("aria-pressed", String(enabled));
-  button.setAttribute("aria-label", enabled ? "Скрыть рёбра сетки" : "Показать рёбра сетки");
-  button.title = enabled ? "Скрыть рёбра сетки" : "Показать рёбра сетки";
-  $("#viewport-mode-label").textContent = enabled ? "ЗАТЕНЕНИЕ + РЁБРА" : "ЗАТЕНЕНИЕ";
-});
 let cameraAnimationId = 0;
 let renderedSceneKey = null;
 let renderedSceneProjectId = null;

@@ -420,7 +420,6 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 }
 .viewport-camera-presets { gap: 3px; }
 .viewport-icon-button,
-.viewport-mode-button,
 .viewport-fit-button,
 .viewport-four-views-button {
   min-height: 34px;
@@ -432,17 +431,14 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 }
 .viewport-icon-button { width: 34px; }
 .viewport-icon-button:hover:not(:disabled),
-.viewport-mode-button:hover:not(:disabled),
 .viewport-fit-button:hover:not(:disabled),
 .viewport-four-views-button:hover:not(:disabled) { border-color: #9b6038; color: #ffad73; background: #26190f; }
 .viewport-icon-button[aria-pressed="true"],
 .viewport-four-views-button[aria-pressed="true"] { border-color: #9b6038; color: var(--accent); background: #26190f; }
 .viewport-toolbar-divider { height: 22px; background: #303a41; }
-.viewport-mode-button { padding: 3px 10px; }
 .viewport-fit-button, .viewport-four-views-button { width: 34px; padding: 6px; }
 .viewport-fit-button .toolbar-label,
 .viewport-four-views-button .toolbar-label { display: none; }
-.viewport-mode-button .toolbar-label { font-size: 8px; }
 .viewport-footer { display: none; }
 .project-detail[data-ai-state="running"] .model-panel::before {
   position: absolute;
@@ -600,8 +596,6 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   :root { --cadyx-tree-width: 220px; --cadyx-inspector-width: 300px; }
   .workspace-navigation { padding-left: 32px; }
   .nav-item { min-width: 96px; padding: 0 14px; }
-  .viewport-mode-button .toolbar-label { display: none; }
-  .viewport-mode-button { width: 31px; padding: 3px; }
   #workflow-panel .workflow-current { min-width: 220px; }
 }
 @media (max-width: 900px) {
@@ -698,7 +692,6 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                     </div>
                     <span class="viewport-toolbar-divider" aria-hidden="true"></span>
                     <button id="viewport-four-views" class="button viewport-four-views-button" type="button" aria-label="Показать четыре вида" title="Показать четыре вида" aria-pressed="false"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></span><span class="toolbar-label">4 ВИДА</span></button>
-                    <button id="viewport-wireframe" class="button viewport-mode-button" type="button" aria-label="Скрыть рёбра сетки" title="Скрыть рёбра сетки" aria-pressed="true"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3ZM4 7.5l8 4.7 8-4.7M12 12.2V21"/></svg></span><span id="viewport-mode-label" class="toolbar-label">ЗАТЕНЕНИЕ + РЁБРА</span></button>
                     <button id="viewport-fit" class="button viewport-fit-button" type="button" aria-label="Вписать модель в область просмотра" title="Вписать модель в область просмотра"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 4H4v4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 9 4 4M15 9l5-5M15 15l5 5M9 15l-5 5"/></svg></span><span class="toolbar-label">ВПИСАТЬ МОДЕЛЬ</span></button>
                   </div>
                 </div>

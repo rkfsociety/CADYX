@@ -1052,10 +1052,6 @@
         zoom = Math.max(0.25, Math.min(5, zoom * zoomFactor));
         render();
       },
-      setWireframe(value) {
-        wireframe = Boolean(value);
-        render();
-      },
       load(value, { reset = true, transition: nextTransition = null, smoothShading = false } = {}) {
         const orbitCenter = orbitCenterFor(value);
         const fitCenter = orbitCenter || value.bounds.min.map((min, axis) => min / 2 + value.bounds.max[axis] / 2);

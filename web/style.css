@@ -181,8 +181,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .viewport-icon-button:hover, .viewport-icon-button[aria-pressed="true"] { border-color: #9b6038; background: #26190f; color: #ffad73; }
 .viewport-icon-button svg { display: block; width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
 .viewport-toolbar-divider { width: 1px; height: 24px; margin: 0 2px; background: var(--line); }
-.viewport-mode-button, .viewport-fit-button { display: inline-flex; align-items: center; gap: 6px; min-height: 29px; padding: 4px 8px; white-space: nowrap; }
-.viewport-mode-button[aria-pressed="true"] { border-color: #9b6038; background: #26190f; color: #ffad73; }
+.viewport-fit-button { display: inline-flex; align-items: center; gap: 6px; min-height: 29px; padding: 4px 8px; white-space: nowrap; }
 .viewport-mode-icon { display: grid; width: 16px; height: 16px; place-items: center; color: var(--accent); }
 .viewport-mode-icon svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
 .toolbar-label { font-size: 9px; }
@@ -399,7 +398,7 @@ button.object-row.selected { border-color: #9b6038; background: #ff874012; }
   .viewport-icon-button { width: 25px; height: 27px; padding: 4px; }
   .viewport-icon-button svg { width: 15px; height: 15px; }
   .viewport-toolbar-divider { margin: 0 1px; }
-  .viewport-mode-button, .viewport-fit-button { gap: 0; padding: 4px 5px; }
+  .viewport-fit-button { gap: 0; padding: 4px 5px; }
   .toolbar-label { display: none; }
 }
 
