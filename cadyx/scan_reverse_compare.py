@@ -93,16 +93,50 @@ def _triangle_records(mesh: dict[str, list[float] | list[int]]) -> list[_Triangl
         raise ValidationError("Comparison target has no triangles.")
     return records
 
-def _build_bvh(records: list[_TriangleRecord]) -> _BVHNode:
-    low = tuple(min(record.low[axis] for record in records) for axis in range(3))
-    high = tuple(max(record.high[axis] for record in records) for axis in range(3))
-    if len(records) <= 12:
-        return _BVHNode(low, high, triangles=records)
+def _select_median(records: list[_TriangleRecord], start: int, end: int, axis: int) -> int:
+    middle = start + (end - start) // 2
+    low, high = start, end
+    while low < high:
+        pivot_index = low + (high - low) // 2
+        pivot = sorted((records[low].center[axis], records[pivot_index].center[axis],
+                        records[high - 1].center[axis]))[1]
+        less, current, greater = low, low, high
+        while current < greater:
+            center = records[current].center[axis]
+            if center < pivot:
+                records[less], records[current] = records[current], records[less]
+                less += 1
+                current += 1
+            elif center > pivot:
+                greater -= 1
+                records[current], records[greater] = records[greater], records[current]
+            else:
+                current += 1
+        if middle < less:
+            high = less
+        elif middle >= greater:
+            low = greater
+        else:
+            break
+    return middle
+
+
+def _build_bvh(records: list[_TriangleRecord], start: int = 0, end: int | None = None) -> _BVHNode:
+    if end is None:
+        end = len(records)
+    count = end - start
+    low = tuple(min(records[index].low[axis] for index in range(start, end)) for axis in range(3))
+    high = tuple(max(records[index].high[axis] for index in range(start, end)) for axis in range(3))
+    if count <= 12:
+        return _BVHNode(low, high, triangles=records[start:end])
     spans = [high[axis] - low[axis] for axis in range(3)]
     axis = max(range(3), key=spans.__getitem__)
-    records.sort(key=lambda record: record.center[axis])
-    middle = len(records) // 2
-    return _BVHNode(low, high, left=_build_bvh(records[:middle]), right=_build_bvh(records[middle:]))
+    middle = _select_median(records, start, end, axis)
+    return _BVHNode(
+        low, high,
+        left=_build_bvh(records, start, middle),
+        right=_build_bvh(records, middle, end),
+    )
 
 def _nearest_sq(node: _BVHNode, point: list[float], best: float = math.inf) -> float:
     if _bbox_distance_sq(point, node.low, node.high) >= best:
