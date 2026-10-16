@@ -49,7 +49,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopExp.hxx>
 #include <NCollection_IndexedMap.hxx>
-#include <TopTools_ListOfShape.hxx>
+#include <NCollection_List.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
@@ -996,8 +996,8 @@ TopoDS_Shape MakeFusePartsBatch(const std::vector<TopoDS_Shape>& shapes,
                                 const int* shape_indices, size_t shape_count) {
   if (!shape_indices || shape_count < 2)
     throw std::runtime_error("Multi-contour loft fusion needs at least two branch solids.");
-  TopTools_ListOfShape arguments;
-  TopTools_ListOfShape tools;
+  NCollection_List<TopoDS_Shape> arguments;
+  NCollection_List<TopoDS_Shape> tools;
   arguments.Append(shapes[static_cast<size_t>(shape_indices[0])]);
   for (size_t i = 1; i < shape_count; ++i)
     tools.Append(shapes[static_cast<size_t>(shape_indices[i])]);
