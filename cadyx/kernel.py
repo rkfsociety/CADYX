@@ -558,7 +558,7 @@ class OCCTKernelAdapter:
         else:
             curve_points = _spline_control_values(curve_points, plane)
             descriptor = {"kind": "extruded_profile" if operation == 0 else "revolved_profile",
-                          "profile": normalized, "profile_curve": "closed_catmull_rom",
+                          "profile": normalized, "profile_curve": "closed_periodic_bspline",
                           "profile_curve_points": curve_points, "plane": plane, "centered": centered}
             descriptor["depth" if operation == 0 else "angle_degrees"] = (
                 amount if operation == 0 else angle_degrees)
@@ -571,7 +571,7 @@ class OCCTKernelAdapter:
             "volume": result["volume"],
         }
         if curve_points is not None:
-            geometry["profile_curve"] = "closed_catmull_rom"
+            geometry["profile_curve"] = "closed_periodic_bspline"
             geometry["profile_curve_points"] = curve_points
         if operation == 0:
             geometry["depth"] = amount
@@ -920,7 +920,8 @@ class OCCTKernelAdapter:
         expected_fields = {"kernel", "kind", "plane", "profile", "volume", amount_field}
         if kind == "extruded_profile" and "centered" in geometry:
             expected_fields.add("centered")
-        curved = geometry.get("profile_curve") == "closed_catmull_rom"
+        curve_type = geometry.get("profile_curve")
+        curved = curve_type in {"closed_catmull_rom", "closed_periodic_bspline"}
         if curved:
             expected_fields.update({"profile_curve", "profile_curve_points"})
         if set(geometry) != expected_fields or geometry.get("kernel") != OCCTKernelAdapter.kernel_id:

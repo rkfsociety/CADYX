@@ -36,6 +36,7 @@
 #include <BRepTools_ReShape.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
+#include <GeomAPI_Interpolate.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
@@ -50,6 +51,7 @@
 #include <Geom_BSplineCurve.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <NCollection_Array1.hxx>
+#include <NCollection_HArray1.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopExp.hxx>
 #include <NCollection_IndexedMap.hxx>
@@ -808,6 +810,55 @@ TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
   return builder.Shape();
 }
 
+Handle(Geom_BSplineCurve) MakePeriodicSplineCurve(const double* coordinates, size_t point_count,
+                                                   int plane) {
+  if (!coordinates || point_count < 3
+      || point_count > static_cast<size_t>(std::numeric_limits<Standard_Integer>::max()))
+    throw std::runtime_error("A periodic spline needs at least 3 points within the OCCT index range.");
+  if (plane != 0 && plane != 1)
+    throw std::runtime_error("A periodic spline needs a supported sketch plane.");
+  Handle(NCollection_HArray1<gp_Pnt>) points = new NCollection_HArray1<gp_Pnt>(
+      1, static_cast<Standard_Integer>(point_count));
+  for (size_t i = 0; i < point_count; ++i) {
+    const double x = coordinates[2 * i];
+    const double y = coordinates[2 * i + 1];
+    if (!std::isfinite(x) || !std::isfinite(y))
+      throw std::runtime_error("Periodic spline coordinates must be finite.");
+    points->SetValue(static_cast<Standard_Integer>(i + 1),
+                     plane == 0 ? gp_Pnt(x, y, 0) : gp_Pnt(x, 0, y));
+  }
+  GeomAPI_Interpolate interpolator(points, true, 1e-9);
+  interpolator.Perform();
+  if (!interpolator.IsDone())
+    throw std::runtime_error("OCCT could not interpolate the periodic B-spline.");
+  const Handle(Geom_BSplineCurve) curve = interpolator.Curve();
+  if (curve.IsNull() || !curve->IsPeriodic() || !curve->IsClosed())
+    throw std::runtime_error("OCCT did not produce a closed periodic B-spline.");
+  return curve;
+}
+
+std::string PeriodicSplineSamplesJson(const double* coordinates, size_t point_count,
+                                     size_t samples_per_span) {
+  if (samples_per_span == 0 || point_count > std::numeric_limits<size_t>::max() / samples_per_span)
+    throw std::runtime_error("Periodic spline sample count is outside the native size range.");
+  const Handle(Geom_BSplineCurve) curve = MakePeriodicSplineCurve(coordinates, point_count, 0);
+  const size_t sample_count = point_count * samples_per_span;
+  const double first = curve->FirstParameter();
+  const double last = curve->LastParameter();
+  std::ostringstream output;
+  output.imbue(std::locale::classic());
+  output << std::setprecision(17) << "{\"points\":[";
+  for (size_t index = 0; index < sample_count; ++index) {
+    if (index) output << ',';
+    const double parameter = first + (last - first) * static_cast<double>(index)
+                             / static_cast<double>(sample_count);
+    const gp_Pnt point = curve->Value(parameter);
+    output << "{\"x\":" << point.X() << ",\"y\":" << point.Y() << '}';
+  }
+  output << "]}";
+  return output.str();
+}
+
 TopoDS_Shape MakeClosedSplineProfileShape(const double* coordinates, size_t point_count,
                                          int operation, int plane, double amount, bool centered) {
   if (!coordinates || point_count < 3)
@@ -958,6 +1009,69 @@ TopoDS_Shape MakeClosedSplineProfileShape(const double* coordinates, size_t poin
   BRepPrimAPI_MakeRevol builder(face, gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), amount, true);
   builder.Build();
   if (!builder.IsDone()) throw std::runtime_error("OCCT could not revolve the closed spline profile.");
+  return builder.Shape();
+}
+
+TopoDS_Shape MakePeriodicSplineProfileShape(const double* coordinates, size_t point_count,
+                                           int operation, int plane, double amount, bool centered) {
+  if ((operation != 0 && operation != 1) || (plane != 0 && plane != 1))
+    throw std::runtime_error("Unsupported profile operation or sketch plane.");
+  if (!std::isfinite(amount) || amount <= 0 || (centered && operation != 0))
+    throw std::runtime_error("Operation amount must be finite and positive.");
+  if (operation == 1 && (plane != 1 || amount > kFullTurn + 1e-9))
+    throw std::runtime_error("Revolution requires an XZ profile and an angle up to 360 degrees.");
+
+  const Handle(Geom_BSplineCurve) curve = MakePeriodicSplineCurve(coordinates, point_count, plane);
+  BRepBuilderAPI_MakeEdge edge_builder(curve);
+  if (!edge_builder.IsDone()) throw std::runtime_error("OCCT could not create the periodic spline edge.");
+  BRepBuilderAPI_MakeWire wire_builder;
+  wire_builder.Add(edge_builder.Edge());
+  if (!wire_builder.IsDone()) throw std::runtime_error("OCCT could not close the periodic spline wire.");
+
+  const size_t samples_per_span = 32;
+  if (point_count > std::numeric_limits<size_t>::max() / samples_per_span)
+    throw std::runtime_error("Periodic spline profile exceeds the native sample range.");
+  const size_t sample_count = point_count * samples_per_span;
+  const double first = curve->FirstParameter();
+  const double last = curve->LastParameter();
+  double twice_area = 0.0;
+  gp_Pnt previous = curve->Value(first);
+  for (size_t index = 0; index < point_count; ++index) {
+    const double x = coordinates[2 * index];
+    if (operation == 1 && x < -1e-7)
+      throw std::runtime_error("Revolution profiles must stay on one side of the Z axis.");
+  }
+  for (size_t index = 1; index <= sample_count; ++index) {
+    const double parameter = first + (last - first) * static_cast<double>(index)
+                             / static_cast<double>(sample_count);
+    const gp_Pnt current = curve->Value(parameter);
+    const double x = current.X();
+    const double y = plane == 0 ? current.Y() : current.Z();
+    const double previous_y = plane == 0 ? previous.Y() : previous.Z();
+    if (operation == 1) {
+      if (x < -1e-7)
+        throw std::runtime_error("Revolution profiles must stay on one side of the Z axis.");
+    }
+    twice_area += previous.X() * y - x * previous_y;
+    previous = current;
+  }
+  if (!std::isfinite(twice_area) || std::abs(twice_area) <= 1e-12)
+    throw std::runtime_error("Profile area must be non-zero.");
+  BRepBuilderAPI_MakeFace face_builder(wire_builder.Wire());
+  if (!face_builder.IsDone()) throw std::runtime_error("OCCT could not make a face from the periodic spline.");
+  const TopoDS_Face face = face_builder.Face();
+  if (!BRepCheck_Analyzer(face).IsValid())
+    throw std::runtime_error("The periodic spline does not form a valid planar face.");
+  if (operation == 0) {
+    const gp_Vec direction = plane == 0 ? gp_Vec(0, 0, amount) : gp_Vec(0, amount, 0);
+    BRepPrimAPI_MakePrism builder(face, direction, true, true);
+    builder.Build();
+    if (!builder.IsDone()) throw std::runtime_error("OCCT could not extrude the periodic spline profile.");
+    return builder.Shape();
+  }
+  BRepPrimAPI_MakeRevol builder(face, gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), amount, true);
+  builder.Build();
+  if (!builder.IsDone()) throw std::runtime_error("OCCT could not revolve the periodic spline profile.");
   return builder.Shape();
 }
 
@@ -1344,6 +1458,12 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
         shape = MakeClosedSplineProfileShape(points, node.coordinate_count / 2, node.operation,
                                              node.plane, node.amount, node.centered != 0);
         break;
+      case 13:
+        if (node.coordinate_count % 2 != 0)
+          throw std::runtime_error("Periodic spline profile coordinates must be paired x/y values.");
+        shape = MakePeriodicSplineProfileShape(points, node.coordinate_count / 2, node.operation,
+                                               node.plane, node.amount, node.centered != 0);
+        break;
       case 1:
         if (node.coordinate_count % 2 != 0)
           throw std::runtime_error("Sweep graph coordinates must be paired x/y values.");
@@ -1635,6 +1755,22 @@ API char* cadyx_profile(const double* coordinates, size_t point_count, int opera
     CopyError(error, capacity, exception.what());
   } catch (...) {
     CopyError(error, capacity, "Unknown native kernel failure.");
+  }
+  return nullptr;
+}
+
+API char* cadyx_periodic_spline_samples(const double* coordinates, size_t point_count,
+                                       size_t samples_per_span,
+                                       char* error, size_t capacity) noexcept {
+  try {
+    return CopyResult(PeriodicSplineSamplesJson(coordinates, point_count, samples_per_span));
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString()
+        ? exception.GetMessageString() : "OCCT periodic spline sampling failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown periodic spline sampling failure.");
   }
   return nullptr;
 }

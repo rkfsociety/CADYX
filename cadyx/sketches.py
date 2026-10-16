@@ -53,7 +53,7 @@ def spline_sample_points(item: dict[str, Any], by_id: dict[str, dict[str, Any]],
     if mode == "nurbs":
         return _nurbs_sample_points(points, item, samples_per_span)
     if mode == "closed":
-        return _closed_interpolating_sample_points(points, samples_per_span)
+        return _periodic_bspline_sample_points(points, samples_per_span)
     result = [dict(x=points[0][0], y=points[0][1])]
 
     def mix(a: tuple[float, float], b: tuple[float, float], ratio: float) -> tuple[float, float]:
@@ -87,44 +87,12 @@ def spline_sample_points(item: dict[str, Any], by_id: dict[str, dict[str, Any]],
     return result
 
 
-def _closed_interpolating_sample_points(
+def _periodic_bspline_sample_points(
         points: list[tuple[float, float]], samples_per_span: int) -> list[dict[str, float]]:
-    """Sample a periodic centripetal Catmull-Rom curve through unique vertices."""
-    result = [dict(x=points[0][0], y=points[0][1])]
+    """Sample the OCCT periodic B-spline through unique interpolation vertices."""
+    from .native_kernel import NativeKernel
 
-    def mix(a: tuple[float, float], b: tuple[float, float], ratio: float) -> tuple[float, float]:
-        return a[0] + (b[0] - a[0]) * ratio, a[1] + (b[1] - a[1]) * ratio
-
-    def interval(a: tuple[float, float], b: tuple[float, float]) -> float:
-        value = math.sqrt(math.hypot(b[0] - a[0], b[1] - a[1]))
-        if not math.isfinite(value) or value <= 1e-12:
-            raise ValidationError("Closed spline vertices must be distinct and numerically stable.")
-        return value
-
-    for segment in range(len(points)):
-        p1 = points[segment]
-        p2 = points[(segment + 1) % len(points)]
-        p0 = points[(segment - 1) % len(points)]
-        p3 = points[(segment + 2) % len(points)]
-        t0 = 0.0
-        t1 = t0 + interval(p0, p1)
-        t2 = t1 + interval(p1, p2)
-        t3 = t2 + interval(p2, p3)
-        for step in range(1, samples_per_span + 1):
-            if step == samples_per_span:
-                sampled = p2
-            else:
-                t = t1 + (t2 - t1) * step / samples_per_span
-                a1 = mix(p0, p1, (t - t0) / (t1 - t0))
-                a2 = mix(p1, p2, (t - t1) / (t2 - t1))
-                a3 = mix(p2, p3, (t - t2) / (t3 - t2))
-                b1 = mix(a1, a2, (t - t0) / (t2 - t0))
-                b2 = mix(a2, a3, (t - t1) / (t3 - t1))
-                sampled = mix(b1, b2, (t - t1) / (t2 - t1))
-            if not all(math.isfinite(value) for value in sampled):
-                raise ValidationError("Closed spline interpolation must remain finite.")
-            result.append({"x": sampled[0], "y": sampled[1]})
-    return result
+    return NativeKernel().periodic_spline_samples(points, samples_per_span=samples_per_span)
 
 
 def _bezier_sample_points(points: list[tuple[float, float]], samples_per_span: int) -> list[dict[str, float]]:

@@ -130,11 +130,16 @@ their respective human/agent edit leases. Results below appear inside
   `spline_id`, `point_ids`, `point_count`, and `closed: false`. A spline can form
   part of a closed profile and can be used as an open sweep path; control points
   are interpolated points, not a B-spline control polygon.
-- `add_sketch_closed_spline`: a periodic centripetal Catmull–Rom spline through
-  at least 3 unique ordered vertices. It can be used alone as an extrusion profile,
-  or as an XZ revolution profile. The OCCT B-rep preserves the curve as a closed
-  chain of exact cubic B-spline edges; its geometry descriptor retains the
-  source vertices so feature rebuilds and Boolean fuses preserve the curve.
+- `add_sketch_closed_spline`: an OCCT periodic B-spline interpolated through at
+  least 3 unique ordered vertices. The first point is the periodic junction; do
+  not repeat it at the end. It can be used alone as an extrusion profile or as
+  an XZ revolution profile. Sketch preview and the resulting B-rep sample the
+  same OCCT curve. Its geometry descriptor stores the source vertices and
+  `closed_periodic_bspline` marker so feature rebuilds and Boolean fuses retain
+  the curve. Existing `closed_catmull_rom` descriptors remain readable and
+  rebuild using their original cubic edge-chain implementation. An XZ profile
+  for revolution must stay on one side of the Z axis; a profile offset from the
+  axis creates a toroidal solid and need not touch the axis.
 - `add_sketch_spline_control_points`: `sketch_id`, at least 3 ordered `{x, y}`
   control points, and optional boolean `construction` (default false). Creates
   an open clamped uniform B-spline of degree `min(3, point_count - 1)`, with

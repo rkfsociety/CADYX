@@ -45,6 +45,11 @@ class NativeKernel:
                         ctypes.c_char_p, ctypes.c_size_t,
                     ]
                     library.cadyx_profile.restype = ctypes.c_void_p
+                    library.cadyx_periodic_spline_samples.argtypes = [
+                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_size_t,
+                        ctypes.c_char_p, ctypes.c_size_t,
+                    ]
+                    library.cadyx_periodic_spline_samples.restype = ctypes.c_void_p
                     library.cadyx_fuse_profiles.argtypes = [
                         ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_int,
                         ctypes.c_int, ctypes.c_double, ctypes.c_int,
@@ -172,6 +177,39 @@ class NativeKernel:
         finally:
             self.library.cadyx_free(result)
 
+    def periodic_spline_samples(self, points, *, samples_per_span=24):
+        max_index = (1 << (8 * ctypes.sizeof(ctypes.c_int) - 1)) - 1
+        if (not isinstance(points, list) or len(points) < 3
+                or len(points) > max_index
+                or isinstance(samples_per_span, bool) or not isinstance(samples_per_span, int)
+                or samples_per_span < 1 or samples_per_span > ctypes.c_size_t(-1).value):
+            raise ValidationError("Periodic spline samples need at least 3 points and a positive sample count.")
+        coordinates = []
+        for point in points:
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                raise ValidationError("Periodic spline coordinates must be finite point pairs.")
+            for value in point:
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValidationError("Periodic spline coordinates must be finite point pairs.")
+                try:
+                    normalized = float(value)
+                except OverflowError as exc:
+                    raise ValidationError("Periodic spline coordinates must be finite point pairs.") from exc
+                if not math.isfinite(normalized):
+                    raise ValidationError("Periodic spline coordinates must be finite point pairs.")
+                coordinates.append(normalized)
+        native_coordinates = (ctypes.c_double * len(coordinates))(*coordinates)
+        error = ctypes.create_string_buffer(1024)
+        result = self.library.cadyx_periodic_spline_samples(
+            native_coordinates, len(points), samples_per_span, error, len(error),
+        )
+        if not result:
+            raise ValidationError(error.value.decode("utf-8", errors="replace"))
+        try:
+            return json.loads(ctypes.string_at(result))["points"]
+        finally:
+            self.library.cadyx_free(result)
+
     def fuse_profiles(self, base, tool, *, mesh=False):
         if base.get("profile_curve") or tool.get("profile_curve"):
             return self._geometry_graph({"kind": "fused_profiles", "base": base, "tool": tool}, mesh=mesh)
@@ -287,13 +325,16 @@ class NativeKernel:
             elif kind in {"extruded_profile", "revolved_profile"}:
                 operation = int(kind == "revolved_profile")
                 amount = value["depth"] if operation == 0 else math.radians(value["angle_degrees"])
-                if value.get("profile_curve") not in {None, "closed_catmull_rom"}:
+                profile_curve = value.get("profile_curve")
+                if profile_curve not in {None, "closed_catmull_rom", "closed_periodic_bspline"}:
                     raise ValidationError("Unsupported profile curve descriptor.")
-                curved = value.get("profile_curve") == "closed_catmull_rom"
+                curved = profile_curve in {"closed_catmull_rom", "closed_periodic_bspline"}
                 profile = value.get("profile_curve_points") if curved else value["profile"]
                 if curved and (not isinstance(profile, list) or len(profile) < 3):
                     raise ValidationError("A closed spline profile needs at least 3 control vertices.")
-                node.update(type=12 if curved else 0, operation=operation, plane=int(value["plane"] == "XZ"),
+                node_type = (12 if profile_curve == "closed_catmull_rom" else
+                             13 if profile_curve == "closed_periodic_bspline" else 0)
+                node.update(type=node_type, operation=operation, plane=int(value["plane"] == "XZ"),
                             centered=int(value.get("centered", False)), amount=amount,
                             coordinate_offset=len(coordinates), coordinate_count=len(profile) * 2)
                 for point in profile:
