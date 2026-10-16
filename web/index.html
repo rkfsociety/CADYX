@@ -34,16 +34,15 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .topbar {
   z-index: 20;
   height: 58px;
-  grid-template-columns: auto minmax(220px, 1fr) auto auto;
-  grid-template-areas: "brand project end sync";
+  grid-template-columns: auto minmax(220px, 1fr) auto;
+  grid-template-areas: "brand project sync";
   gap: 0;
   padding: 0 18px 0 20px;
   border-bottom: 1px solid var(--line);
   background: linear-gradient(180deg, #0d1419 0%, #0a1014 100%);
 }
 .topbar-start { grid-area: brand; padding-right: 22px; border-right: 1px solid var(--line); }
-.topbar-project { grid-area: project; position: relative; gap: 0; padding-left: 22px; border: 0; }
-.topbar-end { grid-area: end; justify-content: flex-end; gap: 12px; }
+.topbar-project { grid-area: project; position: relative; gap: 22px; padding-left: 22px; border: 0; }
 .topbar-sync { grid-area: sync; width: 28px; justify-content: center; gap: 0; margin-left: 12px; padding: 0; border: 0; }
 .brand {
   color: var(--accent);
@@ -55,6 +54,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .topbar-project .topbar-label,
 .topbar-sync .topbar-project-copy,
 .readonly-badge { display: none; }
+.topbar-project-copy { padding-right: 22px; border-right: 1px solid var(--line); }
 .document-title {
   max-width: min(46vw, 620px);
   color: #eef2f4;
@@ -86,7 +86,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   align-items: center;
   gap: 5px;
   min-width: 0;
-  padding: 0 13px 0 0;
+  padding: 0 22px 0 0;
   border: 0;
   border-right: 1px solid var(--line);
 }
@@ -565,7 +565,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 @media (max-width: 900px) {
   :root { --cadyx-tree-width: 190px; --cadyx-inspector-width: 260px; }
   .topbar-sync { display: none; }
-  .topbar { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "brand project end"; }
+  .topbar { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "brand project"; }
   .header-revision { display: none; }
   .primary-grid[data-view="overview"] { grid-template-columns: minmax(0, 1fr); }
   .primary-grid[data-view="overview"] > .inspector-column { display: none; }
@@ -611,11 +611,8 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
           <strong id="document-title" class="document-title">Выберите проект</strong>
           <div class="project-id-copy-row"><small id="project-short-id" class="project-short-id">—</small><button id="copy-project-id" class="copy-project-id" type="button" disabled title="Скопировать UUID проекта" aria-label="Скопировать UUID проекта">Копировать UUID</button></div>
         </div>
-      </div>
-      <div class="topbar-end">
         <div class="header-revision"><span class="topbar-label">РЕВИЗИЯ</span><strong id="document-revision">—</strong></div>
         <span id="agent-owner-chip" class="agent-owner-chip" data-state="idle">○ ИИ</span>
-        <span class="readonly-badge">ТОЛЬКО ЧТЕНИЕ</span>
       </div>
     </header>
 
