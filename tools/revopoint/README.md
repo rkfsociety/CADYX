@@ -89,6 +89,16 @@ The scanner's field of view covers only part of the turntable at once. In the sa
 
 The twelve 30° raw captures were reprojected and tested with a candidate Z-axis rotation and overlap-fitted pivot. A candidate transform of −30° per commanded +30° step around approximately `[28.8, -5.4]` in current Q coordinates gave 81–94% adjacent-pair nearest-neighbor overlap within 5 coordinate units. The pivot and sign are empirical estimates, not mechanical calibration. A voxel-deduplicated PLY and its JSON provenance are saved as `approx_fused_candidate.ply` and `approx_fused_candidate.json` beside the source frames.
 
+For a fresh `scan_360.ps1` folder, `fuse_turntable_scan.py` provides a repeatable diagnostic fusion without external Python packages:
+
+```powershell
+python .\tools\revopoint\fuse_turntable_scan.py .\projects\revopoint_model_scan
+```
+
+It reads each frame's measured table angle, estimates an XY pivot under a camera-Z-axis assumption, scores even-index adjacent pairs, reports odd-index pairs as held-out overlap, rotates all source clouds back to the first pose, and voxel-deduplicates them. It writes an experimental PLY and JSON next to the input data and refuses to overwrite existing outputs. The default pivot-fit stride is intentionally sparse for short runtimes; use `--match-stride` and the pivot-search options to trade runtime for sampling/search density. The reported overlap is a diagnostic, not an accuracy guarantee: the transform is not independently calibrated, Q coordinates have no verified physical scale, and incomplete occluded surfaces remain absent.
+
+On the 2026-10-16 current-setup capture, the default sparse fit estimated pivot `[31.2, -28.8, 0]` and achieved 70.3% training and 71.1% held-out point overlap within 5 Q units. This is weaker than the earlier manually tuned candidate (about 90% held-out under its different sampling procedure); treat the automatic result as a candidate for inspection, not a usable complete scan. The 12-view zero-tilt capture still misses substantial surfaces, so the next useful acquisition is a second secured-object pass at another tilt, followed by checking whether the added surfaces register consistently.
+
 The initial CADYX reconstruction had 24,641 vertices and 49,979 triangles. Subsequent trials at higher triangle count and with density/outlier filtering still produce a thin plate-like result with isolated fragments; this is a diagnostic model, not a verified complete scan. The raw disparity scale, mechanical axis/pivot and coverage of occluded surfaces need validation before the fusion can be accepted.
 
 The mesh and source cloud have similar PCA eigenvalues for their thinnest dimension (14.1 vs. 15.6 coordinate-units²). This indicates the thin, plate-like shape is already present in the fused input, rather than being created only by Poisson reconstruction. It still does not prove the object itself is fully covered: the underside and occluded surfaces are not validated.
