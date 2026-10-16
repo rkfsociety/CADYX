@@ -800,6 +800,157 @@ TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
   return builder.Shape();
 }
 
+TopoDS_Shape MakeClosedSplineProfileShape(const double* coordinates, size_t point_count,
+                                         int operation, int plane, double amount, bool centered) {
+  if (!coordinates || point_count < 3 || point_count > 128)
+    throw std::runtime_error("A closed spline profile needs between 3 and 128 control vertices.");
+  if ((operation != 0 && operation != 1) || (plane != 0 && plane != 1))
+    throw std::runtime_error("Unsupported profile operation or sketch plane.");
+  if (!std::isfinite(amount) || amount <= 0 || (centered && operation != 0))
+    throw std::runtime_error("Operation amount must be finite and positive.");
+  if (operation == 1 && (plane != 1 || amount > kFullTurn + 1e-9))
+    throw std::runtime_error("Revolution requires an XZ profile and an angle up to 360 degrees.");
+
+  using Point2 = std::array<double, 2>;
+  std::vector<Point2> input;
+  input.reserve(point_count);
+  for (size_t i = 0; i < point_count; ++i) {
+    Point2 point{coordinates[2 * i], coordinates[2 * i + 1]};
+    if (!std::isfinite(point[0]) || !std::isfinite(point[1]))
+      throw std::runtime_error("Profile coordinates must be finite.");
+    input.push_back(point);
+  }
+  auto mix = [](const Point2& a, const Point2& b, double t) -> Point2 {
+    return {a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t};
+  };
+  auto knot = [](const Point2& a, const Point2& b) -> double {
+    const double value = std::sqrt(std::hypot(b[0] - a[0], b[1] - a[1]));
+    if (!std::isfinite(value) || value <= 1e-12)
+      throw std::runtime_error("Closed spline vertices must be distinct and numerically stable.");
+    return value;
+  };
+  auto catmull = [&](size_t segment, double u) -> Point2 {
+    const Point2& p0 = input[(segment + point_count - 1) % point_count];
+    const Point2& p1 = input[segment];
+    const Point2& p2 = input[(segment + 1) % point_count];
+    const Point2& p3 = input[(segment + 2) % point_count];
+    const double t0 = 0.0;
+    const double t1 = t0 + knot(p0, p1);
+    const double t2 = t1 + knot(p1, p2);
+    const double t3 = t2 + knot(p2, p3);
+    const double t = t1 + (t2 - t1) * u;
+    const Point2 a1 = mix(p0, p1, (t - t0) / (t1 - t0));
+    const Point2 a2 = mix(p1, p2, (t - t1) / (t2 - t1));
+    const Point2 a3 = mix(p2, p3, (t - t2) / (t3 - t2));
+    const Point2 b1 = mix(a1, a2, (t - t0) / (t2 - t0));
+    const Point2 b2 = mix(a2, a3, (t - t1) / (t3 - t1));
+    return mix(b1, b2, (t - t1) / (t2 - t1));
+  };
+
+  BRepBuilderAPI_MakeWire wire_builder;
+  std::vector<Point2> sampled;
+  sampled.reserve(point_count * 32);
+  bool touches_axis = false;
+  for (size_t segment = 0; segment < point_count; ++segment) {
+    const Point2 p0 = catmull(segment, 0.0);
+    const Point2 p1 = catmull(segment, 1.0 / 3.0);
+    const Point2 p2 = catmull(segment, 2.0 / 3.0);
+    const Point2 p3 = catmull(segment, 1.0);
+    Point2 a{}, b{};
+    for (size_t axis = 0; axis < 2; ++axis) {
+      const double first = 27.0 * p1[axis] - 8.0 * p0[axis] - p3[axis];
+      const double second = 27.0 * p2[axis] - p0[axis] - 8.0 * p3[axis];
+      a[axis] = (2.0 * first - second) / 18.0;
+      b[axis] = (2.0 * second - first) / 18.0;
+      if (!std::isfinite(a[axis]) || !std::isfinite(b[axis]))
+        throw std::runtime_error("Closed spline interpolation must remain finite.");
+    }
+    if (operation == 1) {
+      const double cubic = -p0[0] + 3.0 * a[0] - 3.0 * b[0] + p3[0];
+      const double quadratic = 3.0 * (p0[0] - 2.0 * a[0] + b[0]);
+      const double linear = 3.0 * (a[0] - p0[0]);
+      std::array<double, 4> candidates{p0[0], p3[0], std::numeric_limits<double>::quiet_NaN(),
+                                       std::numeric_limits<double>::quiet_NaN()};
+      const double qa = 3.0 * cubic;
+      const double qb = 2.0 * quadratic;
+      if (std::abs(qa) <= 1e-15) {
+        if (std::abs(qb) > 1e-15) candidates[2] = -linear / qb;
+      } else {
+        const double discriminant = qb * qb - 4.0 * qa * linear;
+        if (discriminant >= 0.0 && std::isfinite(discriminant)) {
+          const double root = std::sqrt(discriminant);
+          candidates[2] = (-qb - root) / (2.0 * qa);
+          candidates[3] = (-qb + root) / (2.0 * qa);
+        }
+      }
+      double minimum_x = std::min(p0[0], p3[0]);
+      for (double u : candidates) {
+        if (std::isfinite(u) && u > 0.0 && u < 1.0) {
+          const double x = ((cubic * u + quadratic) * u + linear) * u + p0[0];
+          minimum_x = std::min(minimum_x, x);
+          if (std::abs(x) <= 1e-7) touches_axis = true;
+        }
+      }
+      if (std::abs(p0[0]) <= 1e-7 || std::abs(p3[0]) <= 1e-7) touches_axis = true;
+      if (minimum_x < -1e-7)
+        throw std::runtime_error("Revolution profiles must stay on one side of the Z axis.");
+    }
+    NCollection_Array1<gp_Pnt> poles(1, 4);
+    auto point3 = [plane](const Point2& p) {
+      return plane == 0 ? gp_Pnt(p[0], p[1], 0) : gp_Pnt(p[0], 0, p[1]);
+    };
+    poles.SetValue(1, point3(p0));
+    poles.SetValue(2, point3(a));
+    poles.SetValue(3, point3(b));
+    poles.SetValue(4, point3(p3));
+    NCollection_Array1<double> knots(1, 2);
+    knots.SetValue(1, 0.0);
+    knots.SetValue(2, 1.0);
+    NCollection_Array1<int> multiplicities(1, 2);
+    multiplicities.SetValue(1, 4);
+    multiplicities.SetValue(2, 4);
+    Handle(Geom_BSplineCurve) curve = new Geom_BSplineCurve(poles, knots, multiplicities, 3, false);
+    BRepBuilderAPI_MakeEdge edge(curve);
+    if (!edge.IsDone()) throw std::runtime_error("OCCT could not create a closed spline profile edge.");
+    wire_builder.Add(edge.Edge());
+    for (size_t step = 0; step < 32; ++step) {
+      const double u = static_cast<double>(step) / 32.0;
+      const double v = 1.0 - u;
+      Point2 point{
+        v*v*v*p0[0] + 3*v*v*u*a[0] + 3*v*u*u*b[0] + u*u*u*p3[0],
+        v*v*v*p0[1] + 3*v*v*u*a[1] + 3*v*u*u*b[1] + u*u*u*p3[1]};
+      sampled.push_back(point);
+    }
+  }
+  if (!wire_builder.IsDone()) throw std::runtime_error("OCCT could not close the spline profile wire.");
+  double twice_area = 0.0;
+  for (size_t i = 0; i < sampled.size(); ++i) {
+    const Point2& a = sampled[i];
+    const Point2& b = sampled[(i + 1) % sampled.size()];
+    twice_area += a[0] * b[1] - b[0] * a[1];
+  }
+  if (!std::isfinite(twice_area) || std::abs(twice_area) <= 1e-12)
+    throw std::runtime_error("Profile area must be non-zero.");
+  if (operation == 1 && !touches_axis)
+    throw std::runtime_error("Revolution profile must touch the Z axis to form a solid.");
+  BRepBuilderAPI_MakeFace face_builder(wire_builder.Wire());
+  if (!face_builder.IsDone()) throw std::runtime_error("OCCT could not make a face from the spline profile.");
+  const TopoDS_Face face = face_builder.Face();
+  if (!BRepCheck_Analyzer(face).IsValid())
+    throw std::runtime_error("The closed spline does not form a valid planar face.");
+  if (operation == 0) {
+    const gp_Vec direction = plane == 0 ? gp_Vec(0, 0, amount) : gp_Vec(0, amount, 0);
+    BRepPrimAPI_MakePrism builder(face, direction, true, true);
+    builder.Build();
+    if (!builder.IsDone()) throw std::runtime_error("OCCT could not extrude the closed spline profile.");
+    return builder.Shape();
+  }
+  BRepPrimAPI_MakeRevol builder(face, gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), amount, true);
+  builder.Build();
+  if (!builder.IsDone()) throw std::runtime_error("OCCT could not revolve the closed spline profile.");
+  return builder.Shape();
+}
+
 TopoDS_Shape MakePipeShape(const double* coordinates, size_t point_count, int plane, double radius) {
   if (!coordinates || point_count < 3 || point_count > 512)
     throw std::runtime_error("A sweep path needs between 3 and 512 points.");
@@ -1167,6 +1318,12 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
           throw std::runtime_error("Profile graph coordinates must be paired x/y values.");
         shape = MakeProfileShape(points, node.coordinate_count / 2, node.operation, node.plane,
                                  node.amount, node.centered != 0);
+        break;
+      case 12:
+        if (node.coordinate_count % 2 != 0)
+          throw std::runtime_error("Closed spline profile coordinates must be paired x/y values.");
+        shape = MakeClosedSplineProfileShape(points, node.coordinate_count / 2, node.operation,
+                                             node.plane, node.amount, node.centered != 0);
         break;
       case 1:
         if (node.coordinate_count % 2 != 0)

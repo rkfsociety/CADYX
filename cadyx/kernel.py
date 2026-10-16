@@ -19,6 +19,7 @@ class GeometryKernel(Protocol):
 
     def create_extruded_profile(
         self, profile: list[dict[str, float]], *, plane: str, depth: float, centered: bool = False,
+        curve_points: list[dict[str, float]] | None = None,
     ) -> dict[str, Any]: ...
 
     def create_lofted_profiles(
@@ -34,6 +35,7 @@ class GeometryKernel(Protocol):
 
     def create_revolved_profile(
         self, profile: list[dict[str, float]], *, angle_degrees: float,
+        curve_points: list[dict[str, float]] | None = None,
     ) -> dict[str, Any]: ...
 
     def fuse_profiles(self, base: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]: ...
@@ -137,6 +139,32 @@ def _profile_values(profile: Any, plane: Any) -> tuple[list[dict[str, float]], i
         raise ValidationError("Profile area must be non-zero.")
     plane_code = 0 if plane == "XY" else 1
     return normalized, plane_code
+
+
+def _spline_control_values(points: Any, plane: Any) -> list[dict[str, float]]:
+    if plane not in {"XY", "XZ"} or not isinstance(points, list) or not 3 <= len(points) <= 128:
+        raise ValidationError("Closed spline profile controls are invalid.")
+    normalized = []
+    for point in points:
+        if not isinstance(point, dict) or set(point) != {"x", "y"}:
+            raise ValidationError("Every closed spline control must contain x and y coordinates.")
+        values = {}
+        for name in ("x", "y"):
+            value = point[name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValidationError("Closed spline control coordinates must be finite numbers.")
+            try:
+                value = float(value)
+            except OverflowError as exc:
+                raise ValidationError("Closed spline control coordinates must be finite numbers.") from exc
+            if not math.isfinite(value):
+                raise ValidationError("Closed spline control coordinates must be finite numbers.")
+            values[name] = value
+        normalized.append(values)
+    if any(math.hypot(a["x"] - b["x"], a["y"] - b["y"]) <= 1e-12
+           for a, b in zip(normalized, normalized[1:] + normalized[:1])):
+        raise ValidationError("Closed spline control vertices must be distinct.")
+    return normalized
 
 
 def _positive_amount(value: Any, name: str, *, maximum: float | None = None) -> float:
@@ -391,18 +419,22 @@ class OCCTKernelAdapter:
 
     def create_extruded_profile(
         self, profile: list[dict[str, float]], *, plane: str, depth: float, centered: bool = False,
+        curve_points: list[dict[str, float]] | None = None,
     ) -> dict[str, Any]:
         if type(centered) is not bool:
             raise ValidationError("centered must be a boolean.")
         return self._create_profile_geometry(profile, plane=plane, operation=0,
-                                             amount=_positive_amount(depth, "depth"), centered=centered)
+                                             amount=_positive_amount(depth, "depth"), centered=centered,
+                                             curve_points=curve_points)
 
     def create_revolved_profile(
         self, profile: list[dict[str, float]], *, angle_degrees: float,
+        curve_points: list[dict[str, float]] | None = None,
     ) -> dict[str, Any]:
         angle = _positive_amount(angle_degrees, "angle_degrees", maximum=360.0)
         return self._create_profile_geometry(profile, plane="XZ", operation=1,
-                                             amount=math.radians(angle), angle_degrees=angle)
+                                             amount=math.radians(angle), angle_degrees=angle,
+                                             curve_points=curve_points)
 
     def create_lofted_profiles(
         self, sections: list[list[dict[str, float]]], *, section_offsets: list[float],
@@ -517,11 +549,21 @@ class OCCTKernelAdapter:
     def _create_profile_geometry(
         profile: list[dict[str, float]], *, plane: str, operation: int,
         amount: float, angle_degrees: float | None = None, centered: bool = False,
+        curve_points: list[dict[str, float]] | None = None,
     ) -> dict[str, Any]:
         normalized, _ = _profile_values(profile, plane)
         amount = _positive_amount(amount, "operation amount")
-        result = NativeKernel().profile(normalized, operation=operation,
-                                        plane=plane, amount=amount, centered=centered)
+        if curve_points is None:
+            result = NativeKernel().profile(normalized, operation=operation,
+                                            plane=plane, amount=amount, centered=centered)
+        else:
+            curve_points = _spline_control_values(curve_points, plane)
+            descriptor = {"kind": "extruded_profile" if operation == 0 else "revolved_profile",
+                          "profile": normalized, "profile_curve": "closed_catmull_rom",
+                          "profile_curve_points": curve_points, "plane": plane, "centered": centered}
+            descriptor["depth" if operation == 0 else "angle_degrees"] = (
+                amount if operation == 0 else angle_degrees)
+            result = NativeKernel().geometry_graph(descriptor)
         geometry = {
             "kernel": OCCTKernelAdapter.kernel_id,
             "kind": "extruded_profile" if operation == 0 else "revolved_profile",
@@ -529,6 +571,9 @@ class OCCTKernelAdapter:
             "profile": normalized,
             "volume": result["volume"],
         }
+        if curve_points is not None:
+            geometry["profile_curve"] = "closed_catmull_rom"
+            geometry["profile_curve_points"] = curve_points
         if operation == 0:
             geometry["depth"] = amount
             if centered:
@@ -869,6 +914,9 @@ class OCCTKernelAdapter:
         expected_fields = {"kernel", "kind", "plane", "profile", "volume", amount_field}
         if kind == "extruded_profile" and "centered" in geometry:
             expected_fields.add("centered")
+        curved = geometry.get("profile_curve") == "closed_catmull_rom"
+        if curved:
+            expected_fields.update({"profile_curve", "profile_curve_points"})
         if set(geometry) != expected_fields or geometry.get("kernel") != OCCTKernelAdapter.kernel_id:
             raise ValidationError("Profile geometry descriptor is invalid.")
         profile, _ = _profile_values(geometry["profile"], geometry["plane"])
@@ -896,9 +944,16 @@ class OCCTKernelAdapter:
             raise ValidationError("Saved geometry volume is invalid.") from exc
         if not math.isfinite(saved_volume) or saved_volume <= 0:
             raise ValidationError("Saved geometry volume is invalid.")
-        actual = NativeKernel().profile(
-            profile, operation=operation, plane=geometry["plane"], amount=amount, centered=centered,
-        )["volume"]
+        if curved:
+            _spline_control_values(geometry["profile_curve_points"], geometry["plane"])
+            graph = dict(geometry)
+            graph.pop("kernel", None)
+            graph.pop("volume", None)
+            actual = NativeKernel().geometry_graph(graph)["volume"]
+        else:
+            actual = NativeKernel().profile(
+                profile, operation=operation, plane=geometry["plane"], amount=amount, centered=centered,
+            )["volume"]
         if not math.isclose(saved_volume, actual, rel_tol=1e-12, abs_tol=1e-12):
             raise ValidationError("Saved geometry volume does not match the Open CASCADE solid.")
 

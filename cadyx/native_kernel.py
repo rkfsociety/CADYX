@@ -173,6 +173,8 @@ class NativeKernel:
             self.library.cadyx_free(result)
 
     def fuse_profiles(self, base, tool, *, mesh=False):
+        if base.get("profile_curve") or tool.get("profile_curve"):
+            return self._geometry_graph({"kind": "fused_profiles", "base": base, "tool": tool}, mesh=mesh)
         def arguments(geometry):
             kind = geometry.get("kind")
             if kind not in {"extruded_profile", "revolved_profile"}:
@@ -285,10 +287,26 @@ class NativeKernel:
             elif kind in {"extruded_profile", "revolved_profile"}:
                 operation = int(kind == "revolved_profile")
                 amount = value["depth"] if operation == 0 else math.radians(value["angle_degrees"])
-                node.update(type=0, operation=operation, plane=int(value["plane"] == "XZ"),
+                if value.get("profile_curve") not in {None, "closed_catmull_rom"}:
+                    raise ValidationError("Unsupported profile curve descriptor.")
+                curved = value.get("profile_curve") == "closed_catmull_rom"
+                profile = value.get("profile_curve_points") if curved else value["profile"]
+                if curved and (not isinstance(profile, list) or not 3 <= len(profile) <= 128):
+                    raise ValidationError("A closed spline profile needs between 3 and 128 control vertices.")
+                node.update(type=12 if curved else 0, operation=operation, plane=int(value["plane"] == "XZ"),
                             centered=int(value.get("centered", False)), amount=amount,
-                            coordinate_offset=len(coordinates), coordinate_count=len(value["profile"]) * 2)
-                coordinates.extend(coord for point in value["profile"] for coord in (point["x"], point["y"]))
+                            coordinate_offset=len(coordinates), coordinate_count=len(profile) * 2)
+                for point in profile:
+                    for coordinate in (point["x"], point["y"]):
+                        if isinstance(coordinate, bool) or not isinstance(coordinate, (int, float)):
+                            raise ValidationError("Profile coordinates must be finite numbers.")
+                        try:
+                            normalized = float(coordinate)
+                        except OverflowError as exc:
+                            raise ValidationError("Profile coordinates must be finite numbers.") from exc
+                        if not math.isfinite(normalized):
+                            raise ValidationError("Profile coordinates must be finite numbers.")
+                        coordinates.append(normalized)
             elif kind == "lofted_profiles":
                 section_sizes = []
                 start = len(coordinates)

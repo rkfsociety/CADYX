@@ -17,7 +17,7 @@ from .kernel import GeometryKernel
 from .mesh_geometry import mesh_ply_bytes
 from .models import Document
 from .scan import DEFAULT_SCAN_PARAMETERS, ScanProcessor, normalize_scan_parameters
-from .sketches import closed_profile, open_path
+from .sketches import closed_profile, closed_spline_profile, open_path
 from .sketch_slot_tools import (
     build_arc_slot_from_center,
     build_arc_slot_three_points,
@@ -241,6 +241,8 @@ class CommandSystem:
             return self._add_sketch_elliptical_arc(document, command, progress=progress)
         if kind == "add_sketch_spline":
             return self._add_sketch_spline(document, command, mode="interpolating", progress=progress)
+        if kind == "add_sketch_closed_spline":
+            return self._add_sketch_spline(document, command, mode="closed", progress=progress)
         if kind == "add_sketch_spline_control_points":
             return self._add_sketch_spline(document, command, mode="control", progress=progress)
         if kind == "add_sketch_bspline":
@@ -834,7 +836,7 @@ class CommandSystem:
         if progress is not None:
             progress({"phase": "add_sketch_spline"})
         return {"sketch_id": sketch["id"], "spline_id": spline_id,
-                "point_ids": point_ids, "point_count": len(point_ids), "closed": False,
+                "point_ids": point_ids, "point_count": len(point_ids), "closed": mode == "closed",
                 "mode": mode}
 
     def _add_sketch_nurbs(
@@ -2112,7 +2114,9 @@ class CommandSystem:
                         raise ValidationError("Revolved profile has too few editable points.")
                     old_value = parameters.get(parameter_name)
                     if not isinstance(old_value, (int, float)) or isinstance(old_value, bool) or old_value <= 0:
-                        old_profile = closed_profile(document.objects, sketch_id)[1]
+                        spline_profile = closed_spline_profile(document.objects, sketch_id)
+                        old_profile = (spline_profile[1] if spline_profile is not None
+                                       else closed_profile(document.objects, sketch_id)[1])
                         old_value = (2.0 * max(point["x"] for point in old_profile)
                                      if parameter_name == "outer_diameter" else
                                      max(point["y"] for point in old_profile) - min(point["y"] for point in old_profile))
@@ -2283,7 +2287,12 @@ class CommandSystem:
             raise ValidationError("Feature name must be a non-empty string of at most 120 characters.")
         if progress is not None:
             progress({"phase": "prepare_profile"})
-        plane, profile = closed_profile(document.objects, sketch_id)
+        spline_profile = closed_spline_profile(document.objects, sketch_id)
+        if spline_profile is None:
+            plane, profile = closed_profile(document.objects, sketch_id)
+            curve_points = None
+        else:
+            plane, profile, curve_points = spline_profile
         parameters: dict[str, Any] = {"source_sketch_id": sketch_id}
         if operation == "extrude_sketch":
             parameters["depth"] = _number(command.get("depth"), "depth")
@@ -2306,7 +2315,7 @@ class CommandSystem:
             progress({"phase": "kernel_extrusion" if operation == "extrude_sketch" else "kernel_revolution"})
         geometry = self._profile_geometry(document, {
             "operation": operation, "source_sketch_id": sketch_id,
-        }, parameters, profile=profile, plane=plane)
+        }, parameters, profile=profile, plane=plane, curve_points=curve_points)
         if progress is not None:
             progress({"phase": "validate_result"})
         body_id = f"body:{uuid4()}"
@@ -2462,25 +2471,35 @@ class CommandSystem:
     def _profile_geometry(
         self, document: Document, feature: dict[str, Any], parameters: dict[str, Any], *,
         profile: list[dict[str, float]] | None = None, plane: str | None = None,
+        curve_points: list[dict[str, float]] | None = None,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         source_sketch_id = feature.get("source_sketch_id") or parameters.get("source_sketch_id")
         operation = feature.get("operation")
         if operation != "loft_sketches" and (profile is None or plane is None):
-            plane, profile = closed_profile(document.objects, source_sketch_id)
+            spline_profile = closed_spline_profile(document.objects, source_sketch_id)
+            if spline_profile is None:
+                plane, profile = closed_profile(document.objects, source_sketch_id)
+                curve_points = None
+            else:
+                plane, profile, curve_points = spline_profile
         if operation == "extrude_sketch":
             if progress is not None:
                 progress({"phase": "kernel_extrusion"})
-            return self.kernel.create_extruded_profile(
-                profile, plane=plane, depth=parameters["depth"],
-                centered=parameters.get("centered", False),
-            )
+            options = {"plane": plane, "depth": parameters["depth"],
+                       "centered": parameters.get("centered", False)}
+            if curve_points is not None:
+                options["curve_points"] = curve_points
+            return self.kernel.create_extruded_profile(profile, **options)
         if operation == "revolve_sketch":
             if progress is not None:
                 progress({"phase": "kernel_revolution"})
             if plane != "XZ":
                 raise ValidationError("Revolution requires a sketch on the XZ plane.")
-            return self.kernel.create_revolved_profile(profile, angle_degrees=parameters["angle_degrees"])
+            options = {"angle_degrees": parameters["angle_degrees"]}
+            if curve_points is not None:
+                options["curve_points"] = curve_points
+            return self.kernel.create_revolved_profile(profile, **options)
         if operation == "loft_sketches":
             sketch_ids = parameters.get("section_sketch_ids")
             if (not isinstance(sketch_ids, list) or len(sketch_ids) < 2

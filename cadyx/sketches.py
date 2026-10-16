@@ -565,6 +565,35 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
     return plane, profile
 
 
+def closed_spline_profile(
+        objects: list[dict[str, Any]], sketch_id: str,
+) -> tuple[str, list[dict[str, float]], list[dict[str, float]]] | None:
+    """Return sampled geometry and source vertices for a sole periodic spline."""
+    sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
+    if sketch is None:
+        raise ValidationError("A profile operation needs an existing sketch.")
+    owned = [item for item in objects if item.get("sketch_id") == sketch_id]
+    splines = [item for item in owned if item.get("type") == "spline"
+               and not item.get("construction", False)]
+    closed_splines = [item for item in splines if item.get("mode") == "closed"]
+    if not closed_splines:
+        return None
+    lines = [item for item in owned if item.get("type") == "line"
+             and not item.get("construction", False) and item.get("extent", "segment") == "segment"]
+    curves = [item for item in owned if item.get("type") in {"circle", "ellipse"}
+              and not item.get("construction", False)]
+    if len(closed_splines) != 1 or len(splines) != 1 or lines or curves:
+        raise ValidationError("A closed spline profile must be the only non-construction sketch geometry.")
+    spline = closed_splines[0]
+    by_id = {item["id"]: item for item in objects}
+    controls = [{"x": number(by_id[point_id]["x"]), "y": number(by_id[point_id]["y"])}
+                for point_id in spline["point_ids"]]
+    sampled = spline_sample_points(spline, by_id)
+    if sampled[0] == sampled[-1]:
+        sampled.pop()
+    return sketch["plane"], sampled, controls
+
+
 def open_path(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[dict[str, float]]]:
     """Return sampled vertices from one interpolating spline or open line chain."""
     sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
