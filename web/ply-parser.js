@@ -174,17 +174,23 @@
     if (vertex.count > Math.floor((buffer.byteLength - dataOffset) / vertexStride)) {
       throw new Error("Данные вершин PLY обрезаны.");
     }
-    const positions = new Float32Array(vertex.count * 3);
+    const pointCloud = !face || face.count === 0;
+    const previewVertexCount = pointCloud ? Math.min(vertex.count, MAX_PREVIEW_POINTS) : vertex.count;
+    const positions = new Float32Array(previewVertexCount * 3);
     const coordinateReaders = ["x", "y", "z"].map((key) => ({
       offset: offsets[key].offset, read: scalarTypes[offsets[key].type].read,
     }));
     let cursor = dataOffset;
     for (let index = 0; index < vertex.count; index += 1) {
+      const sampleIndex = Math.floor(index * previewVertexCount / vertex.count);
+      const previousSampleIndex = index > 0
+        ? Math.floor((index - 1) * previewVertexCount / vertex.count) : -1;
+      const sampledOffset = sampleIndex !== previousSampleIndex ? sampleIndex * 3 : -1;
       for (let axis = 0; axis < 3; axis += 1) {
         const property = coordinateReaders[axis];
         const value = property.read(data, cursor + property.offset);
         if (!Number.isFinite(value)) throw new Error("В PLY найдены некорректные координаты.");
-        positions[index * 3 + axis] = value;
+        if (sampledOffset >= 0) positions[sampledOffset + axis] = value;
         bounds.min[axis] = Math.min(bounds.min[axis], value);
         bounds.max[axis] = Math.max(bounds.max[axis], value);
       }
@@ -245,6 +251,7 @@
       triangles: new Uint32Array(triangles),
       bounds,
       vertexCount: vertex.count,
+      previewVertexCount,
       faceCount,
       previewFaceCount: triangles.length / 3,
     };

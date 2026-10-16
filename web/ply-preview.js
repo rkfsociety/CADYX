@@ -1098,7 +1098,7 @@ async function previewResourceFile(context, file) {
     folderPreviewPlaceholder.hidden = true;
     $("#folder-preview-info").textContent = geometry.faceCount
       ? `${formatNumber(geometry.vertexCount)} вершин · ${formatNumber(geometry.faceCount)} граней · в сцене ${formatNumber(geometry.previewFaceCount)}`
-      : `${formatNumber(geometry.vertexCount)} точек · отображается до 24 000`;
+      : `${formatNumber(geometry.vertexCount)} точек · отображается ${formatNumber(geometry.previewVertexCount)}`;
   } catch (error) {
     if (request !== previewRequest || !isCurrentFileContext(context)) return;
     folderPreviewPlaceholder.hidden = false;
