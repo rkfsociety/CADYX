@@ -88,13 +88,14 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
 .workspace-project-modified svg{width:17px;height:17px;flex:0 0 auto;fill:none;stroke:#9fb0ba;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .workspace-project-id{overflow:hidden;padding-left:12px;border-left:1px solid #40505a;color:#9dabb3;text-overflow:ellipsis;white-space:nowrap}
 .workspace-project-id strong{color:#c7d0d5;font:12px var(--ui-font);letter-spacing:.02em}
-.workspace-project-actions{display:flex;align-items:stretch;gap:10px}
+.workspace-project-actions{display:flex;align-items:stretch;gap:8px}
 .workspace-project-open{display:flex;min-width:0;min-height:42px;flex:1;justify-content:center;gap:10px;padding:8px 12px;border-color:#ff7628;border-radius:9px;background:linear-gradient(180deg,#ff7a2e,#f45d12);box-shadow:0 4px 15px #ff681d20;color:#1b120e;font:700 12px var(--ui-font);white-space:nowrap}
 .workspace-project-open:hover{border-color:#ff9a5e;background:#ff8a43;color:#17100c}
 .workspace-project-open svg{width:18px;height:18px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .workspace-project-open:focus-visible,.workspace-project-folder-menu summary:focus-visible,.workspace-project-menu summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .workspace-project-folder-menu{position:relative;z-index:2;flex:0 0 auto}
-.workspace-project-folder-menu summary{width:48px;height:42px;border-color:#34434b;border-radius:9px;background:#111a20;font-size:20px}
+.workspace-project-folder-menu summary{width:42px;height:42px;border-color:#34434b;border-radius:9px;background:#111a20}
+.workspace-project-folder-menu summary svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .workspace-project-folder-popover{position:absolute;right:0;bottom:calc(100% + 7px);z-index:8;display:grid;width:220px;gap:7px;padding:11px;border:1px solid #34434b;border-radius:9px;background:#111a20;box-shadow:0 12px 28px #0008}
 .workspace-project-folder-popover label{color:var(--muted);font:12px var(--ui-font)}
 .workspace-project-group-select{width:100%;min-height:38px;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:#0b1217;color:var(--text);font:12px var(--ui-font)}
@@ -105,7 +106,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
 #projects-panel[data-layout="list"] .workspace-project-card-heading{grid-column:2;grid-row:1;align-self:end}
 #projects-panel[data-layout="list"] .workspace-project-meta{grid-column:2;grid-row:2;align-self:start}
 #projects-panel[data-layout="list"] .workspace-project-actions{grid-column:3;grid-row:1/4;min-width:190px;flex-direction:column}
-#projects-panel[data-layout="list"] .workspace-project-folder-menu summary{width:100%;height:36px}
+#projects-panel[data-layout="list"] .workspace-project-folder-menu summary{display:flex;width:100%;height:36px;justify-content:center;gap:8px}
 #projects-panel[data-layout="list"] .workspace-project-folder-menu summary::after{content:"Папка";font:12px var(--ui-font)}
 .projects-empty{align-self:center;justify-self:center;margin:0;padding:28px;color:var(--muted);font:14px var(--ui-font);text-align:center}
 .visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}

@@ -892,7 +892,7 @@ function renderProjectCard(entry) {
   const folderMenu = document.createElement("details");
   folderMenu.className = "workspace-project-folder-menu";
   const folderButton = document.createElement("summary");
-  folderButton.textContent = "⌄";
+  folderButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
   folderButton.setAttribute("aria-label", `Переместить проект «${project.name}» в папку`);
   folderButton.title = "Папка проекта";
   const folderPopover = document.createElement("div");
