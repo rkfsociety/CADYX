@@ -148,8 +148,9 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_list_folder_files", "description": "List direct user files in a workspace folder.", "inputSchema": _schema({"folder_name": _STRING}, ["folder_name"])},
     {"name": "cadyx_read_folder_file", "description": "Read a direct workspace file through the read-only API; small images are returned as image content.", "inputSchema": _schema({"folder_name": _STRING, "name": _STRING}, ["folder_name", "name"])},
     {"name": "cadyx_inspect_topology", "description": "Inspect current editable B-rep edges before a fillet. Refresh topology after any upstream edit.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING}, ["project_id", "body_id"])},
-    {"name": "cadyx_validate_body_dimensions", "description": "Read-only axis-aligned bounding-box dimension check bound to an exact saved revision and geometry hash.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING, "expected_revision": _INTEGER, "expected_dimensions": {"type": "object", "properties": {"x": _NUMBER, "y": _NUMBER, "z": _NUMBER}, "required": ["x", "y", "z"], "additionalProperties": False}, "tolerance": {"type": "number", "minimum": 0}}, ["project_id", "body_id", "expected_revision", "expected_dimensions", "tolerance"])},
-    {"name": "cadyx_validate_body_clearance", "description": "Read-only OCCT minimum-distance and common-volume check for two B-rep bodies, bound to expected_revision and a combined geometry hash; classifies separate, interfering, or touching_or_indeterminate and streams progress through agent.activity events.", "inputSchema": _schema({"project_id": _STRING, "first_body_id": _STRING, "second_body_id": _STRING, "expected_revision": _INTEGER, "minimum_clearance": {"type": "number", "minimum": 0}, "tolerance": {"type": "number", "minimum": 0}}, ["project_id", "first_body_id", "second_body_id", "expected_revision", "minimum_clearance", "tolerance"])},
+    {"name": "cadyx_validate_body_dimensions", "description": "Read-only axis-aligned bounding-box dimension check bound to an exact saved revision and geometry hash; optionally persist the result.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING, "expected_revision": _INTEGER, "expected_dimensions": {"type": "object", "properties": {"x": _NUMBER, "y": _NUMBER, "z": _NUMBER}, "required": ["x", "y", "z"], "additionalProperties": False}, "tolerance": {"type": "number", "minimum": 0}, "persist": {"type": "boolean"}}, ["project_id", "body_id", "expected_revision", "expected_dimensions", "tolerance"])},
+    {"name": "cadyx_validate_body_clearance", "description": "Read-only OCCT minimum-distance and common-volume check for two B-rep bodies, bound to expected_revision and a combined geometry hash; classifies interference, streams progress through agent.activity events, and can persist the result.", "inputSchema": _schema({"project_id": _STRING, "first_body_id": _STRING, "second_body_id": _STRING, "expected_revision": _INTEGER, "minimum_clearance": {"type": "number", "minimum": 0}, "tolerance": {"type": "number", "minimum": 0}, "persist": {"type": "boolean"}}, ["project_id", "first_body_id", "second_body_id", "expected_revision", "minimum_clearance", "tolerance"])},
+    {"name": "cadyx_list_validation_records", "description": "List recent durable validation records for a project without changing its document revision.", "inputSchema": _schema({"project_id": _STRING, "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, ["project_id"])},
     {"name": "cadyx_get_viewport", "description": "Read validated viewport scene data for the saved project revision.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_get_viewport_image", "description": "Get the saved model's viewport PNG as an MCP image the model can inspect.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_move_camera", "description": "Animate the selected browser viewport camera; this does not mutate the CAD document.", "inputSchema": _schema({"project_id": _STRING, "yaw_delta": _NUMBER, "pitch_delta": _NUMBER, "zoom_factor": _NUMBER, "duration_ms": {"type": "integer", "minimum": 0, "maximum": 5000}}, ["project_id", "yaw_delta"])},
@@ -264,6 +265,7 @@ class MCPApplication:
                 "expected_revision": args["expected_revision"],
                 "expected_dimensions": args["expected_dimensions"],
                 "tolerance": args["tolerance"],
+                "persist": args.get("persist", False),
             })
         if name == "cadyx_validate_body_clearance":
             return self.api.post(self._project(args["project_id"], "/validations/clearance"), {
@@ -272,7 +274,12 @@ class MCPApplication:
                 "expected_revision": args["expected_revision"],
                 "minimum_clearance": args["minimum_clearance"],
                 "tolerance": args["tolerance"],
+                "persist": args.get("persist", False),
             })
+        if name == "cadyx_list_validation_records":
+            project_id = urllib.parse.quote(args["project_id"], safe="")
+            limit = args.get("limit", 50)
+            return self.api.get(f"/api/v1/agent/projects/{project_id}/validations?limit={limit}")
         if name == "cadyx_get_viewport":
             return self.api.get(self._project(args["project_id"], "/viewport"))
         if name == "cadyx_get_viewport_image":

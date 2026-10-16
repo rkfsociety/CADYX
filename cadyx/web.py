@@ -180,6 +180,14 @@ def make_request_handler(
                 if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "dashboard":
                     self._json(200, core.agent_dashboard_snapshot(parts[4]))
                     return
+                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "validations":
+                    query = parse_qs(parsed.query)
+                    try:
+                        limit = int(query.get("limit", ["50"])[0])
+                    except ValueError as exc:
+                        raise ValidationError("Validation record limit must be an integer from 1 to 200.") from exc
+                    self._json(200, core.list_validation_records(parts[4], limit=limit))
+                    return
                 if len(parts) == len(comparison_prefix) + 2 and parts[:len(comparison_prefix)] == comparison_prefix and parts[-1] == "comparison":
                     query = parse_qs(parsed.query)
                     self._json(200, core.compare_bodies(parts[-2],
@@ -383,9 +391,10 @@ def make_request_handler(
                 return
             project_id = parts[0]
             if agent_api and len(parts) == 3 and parts[1:] == ["validations", "dimensions"]:
-                if body is None or set(body) != {
+                required = {
                     "body_id", "expected_revision", "expected_dimensions", "tolerance",
-                }:
+                }
+                if body is None or not required.issubset(body) or set(body) - required - {"persist"}:
                     raise ValidationError(
                         "Dimension validation requires body_id, expected_revision, expected_dimensions, and tolerance."
                     )
@@ -394,14 +403,16 @@ def make_request_handler(
                     lambda: core.validate_body_dimensions(
                         project_id, body["body_id"], body["expected_revision"],
                         body["expected_dimensions"], body["tolerance"],
+                        persist=body.get("persist", False),
                     ),
                 )
                 self._json(200, result)
                 return
             if agent_api and len(parts) == 3 and parts[1:] == ["validations", "clearance"]:
-                if body is None or set(body) != {
+                required = {
                     "first_body_id", "second_body_id", "expected_revision", "minimum_clearance", "tolerance",
-                }:
+                }
+                if body is None or not required.issubset(body) or set(body) - required - {"persist"}:
                     raise ValidationError(
                         "Clearance validation requires both body ids, expected_revision, minimum_clearance, and tolerance."
                     )
@@ -410,7 +421,7 @@ def make_request_handler(
                     lambda progress: core.validate_body_clearance(
                         project_id, body["first_body_id"], body["second_body_id"],
                         body["expected_revision"], body["minimum_clearance"], body["tolerance"],
-                        progress=progress,
+                        progress=progress, persist=body.get("persist", False),
                     ),
                     reports_progress=True,
                 )

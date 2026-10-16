@@ -442,6 +442,12 @@ During the synchronous request, `agent.activity` events expose OCCT progress in
 `progress_percent` and the `measure_distance` and `classify_interference`
 phases. OCCT's distance and common-volume algorithms contribute 55% and 45%
 of the reported operation progress, respectively.
+Both validation POST routes accept optional `persist` (default `false`). When
+true, CADYX stores the result as an immutable record in the project's
+`.cadyx-validations.sqlite3` sidecar; this does not increment the document
+revision. `GET /api/v1/agent/projects/{project_id}/validations?limit=50` returns
+the newest records, with `limit` from 1 to 200. Records retain the exact result,
+revision, and geometry hash used by the check and are removed with the project.
 
 `fillet_edges` accepts `body_id`, 1–128 distinct `edge_indices`, a positive
 `radius`, and optional `name`. It creates a new body with an OCCT rolling-edge

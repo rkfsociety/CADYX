@@ -520,11 +520,13 @@ class CadyxCore:
 
     def validate_body_dimensions(
         self, project_id: str, body_id: str, expected_revision: Any,
-        expected_dimensions: Any, tolerance: Any,
+        expected_dimensions: Any, tolerance: Any, *, persist: bool = False,
     ) -> dict[str, Any]:
         project = self.workspace.load(project_id)
         document = Document.from_dict(project["document"])
         self._check_revision(document, expected_revision)
+        if type(persist) is not bool:
+            raise ValidationError("persist must be a boolean.")
         if not isinstance(body_id, str) or not body_id:
             raise ValidationError("body_id must be non-empty text.")
         if not isinstance(expected_dimensions, dict) or set(expected_dimensions) != {"x", "y", "z"}:
@@ -564,7 +566,7 @@ class CadyxCore:
                    "status": "pass" if abs(actual[axis] - expected[axis]) <= normalized_tolerance else "fail"}
             for axis in ("x", "y", "z")
         }
-        return {
+        result = {
             "body_id": body_id,
             "revision": document.revision,
             "geometry_sha256": geometry_sha256(geometry),
@@ -575,15 +577,18 @@ class CadyxCore:
             "status": "pass" if all(item["status"] == "pass" for item in checks.values()) else "fail",
             "checks": checks,
         }
+        return self._maybe_persist_validation(project_id, "body_dimensions", result, persist)
 
     def validate_body_clearance(
         self, project_id: str, first_body_id: str, second_body_id: str,
         expected_revision: Any, minimum_clearance: Any, tolerance: Any,
-        *, progress: Callable[[str, float], None] | None = None,
+        *, progress: Callable[[str, float], None] | None = None, persist: bool = False,
     ) -> dict[str, Any]:
         project = self.workspace.load(project_id)
         document = Document.from_dict(project["document"])
         self._check_revision(document, expected_revision)
+        if type(persist) is not bool:
+            raise ValidationError("persist must be a boolean.")
         if (not isinstance(first_body_id, str) or not first_body_id
                 or not isinstance(second_body_id, str) or not second_body_id
                 or first_body_id == second_body_id):
@@ -649,7 +654,7 @@ class CadyxCore:
             "first": {"body_id": first_body_id, "geometry": first_geometry},
             "second": {"body_id": second_body_id, "geometry": second_geometry},
         })
-        return {
+        result = {
             "body_ids": [first_body_id, second_body_id],
             "revision": document.revision,
             "geometry_sha256": geometry_hash,
@@ -668,6 +673,20 @@ class CadyxCore:
             **witness_points,
             "status": status,
         }
+        return self._maybe_persist_validation(project_id, "body_clearance", result, persist)
+
+    def list_validation_records(self, project_id: str, *, limit: int = 50) -> dict[str, Any]:
+        return {"records": self.workspace.list_validation_records(project_id, limit=limit)}
+
+    def _maybe_persist_validation(
+        self, project_id: str, kind: str, result: dict[str, Any], persist: bool,
+    ) -> dict[str, Any]:
+        if type(persist) is not bool:
+            raise ValidationError("persist must be a boolean.")
+        if not persist:
+            return result
+        record = self.workspace.record_validation(project_id, kind, result)
+        return {**result, "record": record}
 
     def rotate_view(
         self, project_id: str, *, yaw_delta: float, pitch_delta: float = 0.0,
