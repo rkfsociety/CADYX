@@ -2002,21 +2002,81 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
     gp_Pnt minimum_point, minimum_opposite;
     size_t samples = 0, hits = 0, face_count = 0, triangle_count = 0;
     for (TopExp_Explorer count(solid, TopAbs_FACE); count.More(); count.Next()) ++face_count;
-    for (TopExp_Explorer count(solid, TopAbs_FACE); count.More(); count.Next()) {
+    std::vector<size_t> face_triangle_counts(face_count, 0);
+    std::vector<size_t> active_faces;
+    size_t counted_face = 0;
+    for (TopExp_Explorer count(solid, TopAbs_FACE); count.More(); count.Next(), ++counted_face) {
       TopLoc_Location location;
       const auto triangulation = BRep_Tool::Triangulation(TopoDS::Face(count.Current()), location);
-      if (!triangulation.IsNull()) triangle_count += static_cast<size_t>(triangulation->NbTriangles());
+      if (!triangulation.IsNull()) {
+        const size_t count_for_face = static_cast<size_t>(triangulation->NbTriangles());
+        face_triangle_counts[counted_face] = count_for_face;
+        triangle_count += count_for_face;
+        if (count_for_face) active_faces.push_back(counted_face);
+      }
     }
-    const size_t triangle_step = std::max<size_t>(1, (triangle_count + 9999) / 10000);
-    size_t face_index = 0, triangle_offset = 0;
+    const size_t sample_budget = std::min<size_t>(10000, triangle_count);
+    std::vector<size_t> face_sample_quotas(face_count, 0);
+    if (active_faces.size() <= sample_budget) {
+      for (size_t index : active_faces) face_sample_quotas[index] = 1;
+      size_t remaining = sample_budget - active_faces.size();
+      const size_t distributable = triangle_count - active_faces.size();
+      if (remaining && distributable) {
+        std::vector<long double> remainders(face_count, 0.0L);
+        std::vector<size_t> allocation_order = active_faces;
+        size_t assigned = 0;
+        for (size_t index : active_faces) {
+          const size_t capacity = face_triangle_counts[index] - 1;
+          const long double exact_share = static_cast<long double>(remaining) * capacity / distributable;
+          const size_t extra = std::min(remaining - assigned,
+                                        std::min(capacity, static_cast<size_t>(std::floor(exact_share))));
+          face_sample_quotas[index] += extra;
+          assigned += extra;
+          remainders[index] = exact_share - extra;
+        }
+        std::sort(allocation_order.begin(), allocation_order.end(), [&](size_t left, size_t right) {
+          return remainders[left] == remainders[right]
+              ? left < right : remainders[left] > remainders[right];
+        });
+        size_t unassigned = remaining - assigned;
+        while (unassigned) {
+          bool allocated = false;
+          for (size_t index : allocation_order) {
+            if (face_sample_quotas[index] >= face_triangle_counts[index]) continue;
+            ++face_sample_quotas[index];
+            --unassigned;
+            allocated = true;
+            if (!unassigned) break;
+          }
+          if (!allocated) throw std::runtime_error("Thickness sample allocation exceeded available triangles.");
+        }
+      }
+    } else {
+      for (size_t sample = 0; sample < sample_budget; ++sample) {
+        const long double position = (static_cast<long double>(sample) + 0.5L)
+                                   * active_faces.size() / sample_budget;
+        face_sample_quotas[active_faces[static_cast<size_t>(position)]] = 1;
+      }
+    }
+    size_t face_index = 0;
     for (TopExp_Explorer explorer(solid, TopAbs_FACE); explorer.More(); explorer.Next(), ++face_index) {
       const TopoDS_Face face = TopoDS::Face(explorer.Current());
       TopLoc_Location location;
       const auto triangulation = BRep_Tool::Triangulation(face, location);
       if (!triangulation.IsNull()) {
+        const size_t face_triangle_count = static_cast<size_t>(triangulation->NbTriangles());
+        const size_t face_sample_quota = face_sample_quotas[face_index];
+        size_t selected_in_face = 0;
+        size_t next_triangle = face_sample_quota
+            ? face_triangle_count / (2 * face_sample_quota) : face_triangle_count;
         for (int triangle_index = 1; triangle_index <= triangulation->NbTriangles(); ++triangle_index) {
-          const size_t global_triangle_index = triangle_offset + static_cast<size_t>(triangle_index - 1);
-          if (global_triangle_index % triangle_step != 0) continue;
+          const size_t local_triangle_index = static_cast<size_t>(triangle_index - 1);
+          if (local_triangle_index != next_triangle) continue;
+          ++selected_in_face;
+          if (selected_in_face < face_sample_quota) {
+            next_triangle = ((2 * selected_in_face + 1) * face_triangle_count)
+                          / (2 * face_sample_quota);
+          }
           int a, b, c;
           triangulation->Triangle(triangle_index).Get(a, b, c);
           const gp_Pnt pa = triangulation->Node(a).Transformed(location.Transformation());
@@ -2061,7 +2121,6 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
             }
           }
         }
-        triangle_offset += static_cast<size_t>(triangulation->NbTriangles());
       }
       progress.SetPhase("sample_surface_triangles");
       progress.Report(face_count ? 0.95 * static_cast<double>(face_index + 1) / face_count : 0.95);
