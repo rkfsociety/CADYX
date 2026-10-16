@@ -50,18 +50,27 @@ def eigen_symmetric(matrix: list[list[float]]) -> tuple[list[float], list[list[f
 
 
 def project_pca(points: Sequence[Sequence[float]], dimensions: int = 2
-                ) -> tuple[list[list[float]], list[float]]:
+                ) -> tuple[list[list[float]], list[float], list[float], list[list[float]]]:
     center = [statistics.mean(point[axis] for point in points)
               for axis in range(len(points[0]))]
     centered = [[value - center[axis] for axis, value in enumerate(point)] for point in points]
     covariance = [[sum(point[i] * point[j] for point in centered) / len(points)
                    for j in range(len(center))] for i in range(len(center))]
     eigenvalues, eigenvectors = eigen_symmetric(covariance)
-    projected = [[sum(point[axis] * eigenvectors[axis][component]
+    basis = [[eigenvectors[axis][component] for component in range(dimensions)]
+             for axis in range(len(center))]
+    projected = [[sum(point[axis] * basis[axis][component]
                       for axis in range(len(center)))
                   for component in range(dimensions)] for point in centered]
     singular = [math.sqrt(value * len(points)) for value in eigenvalues]
-    return projected, singular
+    return projected, singular, center, basis
+
+
+def apply_pca(points: Sequence[Sequence[float]], center: Sequence[float],
+              basis: Sequence[Sequence[float]]) -> list[list[float]]:
+    return [[sum((point[axis] - center[axis]) * basis[axis][component]
+                 for axis in range(len(center)))
+             for component in range(len(basis[0]))] for point in points]
 
 
 def solve(matrix: list[list[float]], vector: list[float]) -> list[float]:
@@ -210,36 +219,51 @@ def main() -> int:
 
     points = read_csv(args.map)
     map_xyz = [[float(row[key]) for key in ("x", "y", "z")] for row in points]
-    map_xy, map_singular = project_pca(map_xyz)
+    map_xy, map_singular, _, _ = project_pca(map_xyz)
     trajectory_rows = read_csv(args.capture / "marker_trajectories.csv")
-    candidates = []
+    all_candidates = []
+    fit_candidates = []
     for row in trajectory_rows:
         if row["classification"] != "smooth_rotating_candidate":
             continue
         span = float(row["angle_span_degrees"])
         fit_rms = float(row["fit_rms_px"])
         observations = int(row["observations"])
-        if span < 100.0 or fit_rms >= 15.0 or observations < 70:
-            continue
         coefficients = [float(row[key]) for key in ("cx_cos", "cy_cos", "cx_sin", "cy_sin")]
-        candidates.append({"track_id": int(row["track_id"]), "span": span,
-                           "fit_rms": fit_rms, "observations": observations,
-                           "coefficients": coefficients})
-    if len(candidates) < 4:
-        raise ValueError(f"Only {len(candidates)} long-span trajectory candidates; at least four are needed.")
+        candidate = {"track_id": int(row["track_id"]), "span": span,
+                     "fit_rms": fit_rms, "observations": observations,
+                     "coefficients": coefficients}
+        all_candidates.append(candidate)
+        if span >= 100.0 and fit_rms < 15.0 and observations >= 70:
+            fit_candidates.append(candidate)
+    if len(fit_candidates) < 4:
+        raise ValueError(f"Only {len(fit_candidates)} long-span trajectory candidates; at least four are needed.")
 
-    feature_points, feature_singular = project_pca([row["coefficients"] for row in candidates])
-    pairs, affine, loo_errors = association(map_xy, feature_points, args.threshold_px,
-                                             args.iterations, args.seed)
-    distances_px = [error for _, _, error in pairs]
-    valid_loo_errors = [value for value in loo_errors if value is not None and math.isfinite(value)]
+    fit_features, feature_singular, feature_center, feature_basis = project_pca(
+        [row["coefficients"] for row in fit_candidates])
+    fit_pairs, affine, fit_loo_errors = association(map_xy, fit_features, args.threshold_px,
+                                                     args.iterations, args.seed)
+    all_features = apply_pca([row["coefficients"] for row in all_candidates],
+                             feature_center, feature_basis)
+    anchor_track_ids = {fit_candidates[target_index]["track_id"]
+                        for _, target_index, _ in fit_pairs}
+    anchor_map_ids = {source_index for source_index, _, _ in fit_pairs}
+    matches = [(source_index, fit_candidates[target_index], error, loo, True)
+               for (source_index, target_index, error), loo in zip(fit_pairs, fit_loo_errors)]
+    remaining_maps = [index for index in range(len(map_xy)) if index not in anchor_map_ids]
+    remaining_candidates = [index for index, row in enumerate(all_candidates)
+                            if row["track_id"] not in anchor_track_ids]
+    projected_maps = [transform(map_xy[index], affine) for index in remaining_maps]
+    candidate_features = [all_features[index] for index in remaining_candidates]
+    extensions = mutual_matches(distances(projected_maps, candidate_features), args.threshold_px)
+    matches.extend((remaining_maps[map_index], all_candidates[remaining_candidates[track_index]],
+                    error, None, False)
+                   for map_index, track_index, error in extensions)
+    distances_px = [error for _, _, error in fit_pairs]
+    valid_loo_errors = [value for value in fit_loo_errors if value is not None and math.isfinite(value)]
     map_dimensions = len(points)
     detections = []
-    loo_by_pair = {(source_index, target_index): loo
-                   for (source_index, target_index, _), loo in zip(pairs, loo_errors)}
-    for source_index, target_index, error in pairs:
-        row = candidates[target_index]
-        loo = loo_by_pair[source_index, target_index]
+    for source_index, row, error, loo, fit_anchor in matches:
         detections.append({
             "track_id": row["track_id"], "mkf_id": source_index + 1,
             "feature_residual_px": round(error, 3),
@@ -247,6 +271,7 @@ def main() -> int:
             "angle_span_degrees": round(row["span"], 3),
             "trajectory_fit_rms_px": round(row["fit_rms"], 3),
             "observations": row["observations"],
+            "fit_anchor": fit_anchor,
             "status": "candidate",
         })
     detections.sort(key=lambda row: (row["mkf_id"], row["track_id"]))
@@ -257,13 +282,14 @@ def main() -> int:
     with csv_path.open("x", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=(
             "track_id", "mkf_id", "feature_residual_px", "leave_one_out_error_px",
-            "angle_span_degrees", "trajectory_fit_rms_px", "observations", "status"))
+            "angle_span_degrees", "trajectory_fit_rms_px", "observations", "fit_anchor", "status"))
         writer.writeheader()
         writer.writerows(detections)
     summary = {
         "format": "revopoint-marker-map-registration-experimental-v1",
         "map_file": str(args.map), "map_points": map_dimensions,
-        "candidate_tracks": len(candidates), "matched_candidates": len(detections),
+        "candidate_tracks": len(all_candidates), "fit_tracks": len(fit_candidates),
+        "fit_matches": len(fit_pairs), "matched_candidates": len(detections),
         "threshold_px": args.threshold_px, "ransac_iterations": args.iterations,
         "affine_feature_residual_rms_px": round(math.sqrt(sum(error * error for error in distances_px)
                                                     / len(distances_px)), 3),
@@ -282,7 +308,7 @@ def main() -> int:
     }
     json_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({key: summary[key] for key in (
-        "map_points", "candidate_tracks", "matched_candidates",
+        "map_points", "candidate_tracks", "fit_tracks", "fit_matches", "matched_candidates",
         "affine_feature_residual_rms_px", "leave_one_out_rms_px", "matches", "limits")},
         indent=2, ensure_ascii=False))
     return 0
