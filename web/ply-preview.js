@@ -151,6 +151,7 @@ let folderListRequest = 0;
 let previewRequest = 0;
 
 function queueViewportSnapshot() {
+  window.dispatchEvent(new Event("cadyx:viewport-rendered"));
   if (!selectedProjectId || selectedProjectId.startsWith(FOLDER_SELECTION_PREFIX)
       || renderedSceneProjectId !== selectedProjectId
       || !Number.isInteger(renderedSceneRevision)) return;
