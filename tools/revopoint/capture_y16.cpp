@@ -35,6 +35,7 @@ struct Options {
     std::filesystem::path q_file;
     double disparity_scale = 0.0;
     int frame_count = 1;
+    int requested_fps = 15;
     bool list_modes = false;
 };
 
@@ -82,6 +83,7 @@ void CheckHr(HRESULT hr, const char* action) {
 void PrintUsage() {
     std::cout << "Capture Y16 frames and reproject the first frame through a supplied Q.bin.\n"
               << "Usage: CaptureY16.exe --out-prefix PATH --q-file PATH --disparity-scale NUMBER [--frames N]\n"
+              << "       [--fps 5|10|15]\n"
               << "       CaptureY16.exe --list-modes\n"
               << "The scale is explicit because the raw-to-disparity mapping is not calibrated yet.\n";
 }
@@ -112,13 +114,17 @@ Options ParseOptions(int argc, wchar_t** argv) {
         } else if (argument == L"--frames") {
             try { options.frame_count = std::stoi(value); }
             catch (...) { throw std::runtime_error("--frames must be an integer from 1 to 1000."); }
+        } else if (argument == L"--fps") {
+            try { options.requested_fps = std::stoi(value); }
+            catch (...) { throw std::runtime_error("--fps must be 5, 10, or 15."); }
         } else {
             throw std::runtime_error("Unknown command-line option.");
         }
     }
     if (options.list_modes) return options;
     if (options.output_prefix.empty() || options.q_file.empty() || options.disparity_scale <= 0.0 ||
-        !std::isfinite(options.disparity_scale) || options.frame_count < 1 || options.frame_count > 1000) {
+        !std::isfinite(options.disparity_scale) || options.frame_count < 1 || options.frame_count > 1000 ||
+        (options.requested_fps != 5 && options.requested_fps != 10 && options.requested_fps != 15)) {
         throw std::runtime_error("--out-prefix, --q-file and a positive --disparity-scale are required.");
     }
     return options;
@@ -215,7 +221,8 @@ ComPtr<IMFActivate> FindDepthCamera() {
     return selected;
 }
 
-std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, std::vector<LONGLONG>& timestamps) {
+std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int requested_fps,
+                                                        std::vector<LONGLONG>& timestamps) {
     ComPtr<IMFActivate> activation = FindDepthCamera();
     ComPtr<IMFMediaSource> source;
     CheckHr(activation->ActivateObject(IID_PPV_ARGS(&source)), "Activate depth camera");
@@ -243,13 +250,13 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, std::ve
         UINT32 height = 0;
         CheckHr(type->GetGUID(MF_MT_SUBTYPE, &subtype), "Read media subtype");
         CheckHr(MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &width, &height), "Read media dimensions");
-        if (IsY16(subtype) && width == kWidth && height == kHeight) {
-            y16_type = type;
-            break;
-        }
+        UINT32 rate_num = 0, rate_den = 0;
+        const HRESULT rate_hr = MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, &rate_num, &rate_den);
+        if (IsY16(subtype) && width == kWidth && height == kHeight && SUCCEEDED(rate_hr) && rate_den &&
+            std::abs(static_cast<double>(rate_num) / rate_den - requested_fps) < 0.1) y16_type = type;
     }
     if (!y16_type) {
-        throw std::runtime_error("DepthCam does not expose a 640x400 Y16 media type.");
+        throw std::runtime_error("DepthCam does not expose the requested 640x400 Y16 frame-rate mode.");
     }
     CheckHr(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, y16_type.Get()),
             "Select native Y16 media type");
@@ -441,7 +448,7 @@ int wmain(int argc, wchar_t** argv) {
         const auto q = ReadQMatrix(options.q_file);
         std::vector<LONGLONG> timestamps;
         const auto started = std::chrono::steady_clock::now();
-        const auto frames = CaptureY16Frames(options.frame_count, timestamps);
+        const auto frames = CaptureY16Frames(options.frame_count, options.requested_fps, timestamps);
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         const auto& raw = frames.front();
         const auto points = Reproject(raw, q, options.disparity_scale);

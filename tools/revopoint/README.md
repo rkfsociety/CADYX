@@ -35,7 +35,7 @@ List the camera's advertised native modes with:
 & .\tools\revopoint\build\CaptureY16.exe --list-modes
 ```
 
-The connected camera advertises Y16 at 640×400, 1280×800, and 640×800, each with nominal 5, 10, and 15 fps modes. The current capture selects the first 640×400 Y16 mode (nominally 15 fps); measured delivery was lower, so the remaining resolutions and explicit frame-rate selection need benchmarking before concluding the sensor cannot reach 10 fps.
+The connected camera advertises Y16 at 640×400, 1280×800, and 640×800, each with nominal 5, 10, and 15 fps modes. Explicit 640×400 selections at nominal 5, 10, and 15 fps each delivered about 4.6 fps by Media Foundation timestamps in 40-frame runs. Other resolutions remain unmeasured. The direct UVC path therefore does not meet the 10 fps target in the tested mode; this does not measure Revo Scan's complete proprietary capture pipeline.
 
 The raw-to-disparity scale `256` is a provisional value from the first live capture. It has not been validated against a known object dimension, so treat the PLY scale as unverified. The utility captures one camera pose; it does not track motion, align multiple frames, fuse a full scan, or create a watertight mesh. The scanner's exact product model is not established by its generic USB camera names.
 
