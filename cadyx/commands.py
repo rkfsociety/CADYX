@@ -2115,7 +2115,7 @@ class CommandSystem:
                         spline_profile = closed_spline_profile(document.objects, sketch_id)
                         old_profile = (spline_profile[1] if spline_profile is not None
                                        else closed_profile(document.objects, sketch_id)[1])
-                        old_value = (2.0 * max(point["x"] for point in old_profile)
+                        old_value = (2.0 * max(abs(point["x"]) for point in old_profile)
                                      if parameter_name == "outer_diameter" else
                                      max(point["y"] for point in old_profile) - min(point["y"] for point in old_profile))
                     if old_value <= 0:
@@ -2313,7 +2313,7 @@ class CommandSystem:
             if angle > 360:
                 raise ValidationError("angle_degrees must be no greater than 360.")
             parameters["angle_degrees"] = angle
-            parameters["outer_diameter"] = max(point["x"] for point in profile) * 2.0
+            parameters["outer_diameter"] = max(abs(point["x"]) for point in profile) * 2.0
             axial_values = [point["y"] for point in profile]
             parameters["height"] = max(axial_values) - min(axial_values)
         if progress is not None:
