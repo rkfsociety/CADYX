@@ -54,10 +54,16 @@
       throw new Error("Формат PLY для предпросмотра не поддерживается.");
     }
     const littleEndian = format === "binary_little_endian";
-    const vertex = elements[0];
-    const face = elements[1]?.name === "face" ? elements[1] : null;
-    if (!vertex || vertex.name !== "vertex") throw new Error("В PLY не найдены вершины.");
-    if (elements.length > (face ? 2 : 1)) throw new Error("PLY содержит неподдерживаемые типы элементов.");
+    const vertexElements = elements.filter((element) => element.name === "vertex");
+    const faceIndices = elements.flatMap((element, index) => element.name === "face" ? [index] : []);
+    if (vertexElements.length !== 1 || elements[0] !== vertexElements[0]) {
+      throw new Error("В PLY должен быть ровно один элемент вершин, расположенный первым.");
+    }
+    if (faceIndices.length > 1 || faceIndices.some((index) => index !== 1)) {
+      throw new Error("В PLY грани должны идти сразу после вершин.");
+    }
+    const vertex = vertexElements[0];
+    const face = faceIndices.length ? elements[1] : null;
     return { dataOffset: lineEnd + 1, vertex, face, littleEndian, format };
   }
 
