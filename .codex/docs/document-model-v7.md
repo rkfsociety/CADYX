@@ -89,7 +89,7 @@ their respective human/agent edit leases. Results below appear inside
   uses `center_x`, `center_y`, positive `width`/`height`, and `angle_degrees`.
   `add_sketch_parallelogram` takes three consecutive non-collinear `{x, y}`
   corners. `add_sketch_regular_polygon` uses `center_x`, `center_y`, integer
-  `side_count` (3–512), positive `radius`, optional `rotation_degrees` (default
+  `side_count` (at least 3), positive `radius`, optional `rotation_degrees` (default
   0) and `radius_mode` (`inscribed` default or `circumscribed`). Each command
   creates a closed point/line profile and returns its point and line ids.
   `add_sketch_inscribed_polygon` fixes the circumradius; `add_sketch_circumscribed_polygon`

@@ -635,8 +635,8 @@ class CommandSystem:
             cx = _finite_number(command.get("center_x"), "Polygon center x")
             cy = _finite_number(command.get("center_y"), "Polygon center y")
             sides = command.get("side_count")
-            if type(sides) is not int or not 3 <= sides <= 512:
-                raise ValidationError("A regular polygon needs 3 to 512 sides.")
+            if type(sides) is not int or not 3 <= sides <= sys.maxsize:
+                raise ValidationError("A regular polygon needs at least 3 sides within the supported integer range.")
             radius = _number(command.get("radius"), "radius")
             radius_mode = command.get("radius_mode", "inscribed")
             if not isinstance(radius_mode, str) or radius_mode not in {"inscribed", "circumscribed"}:
