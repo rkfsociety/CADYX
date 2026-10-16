@@ -145,7 +145,61 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     function select(id,reveal=false){if(!state.byId.has(id))return;state.selected=id;try{selectedObjectId=id}catch{}renderTree();renderProps(state.byId.get(id));if(reveal)list?.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'nearest'});detail.dataset.v2Selection='true';syncOverlay()}
     function bodyFor(o){if(!o)return null;if(o.type==='body')return o;return state.byId.get(o.body_id)||null}
     function projectSetup(){let viewer;try{viewer=modelViewer}catch{return null}const c=viewer?.getCamera?.();if(!c?.orientation||!state.scene)return null;const meshes=state.objects.filter(o=>o.type==='body').map(o=>sceneBody(o.id)).filter(Boolean);if(!meshes.length)return null;const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];for(const m of meshes)for(let i=0;i<m.positions.length;i+=3)for(let a=0;a<3;a++){min[a]=Math.min(min[a],m.positions[i+a]);max[a]=Math.max(max[a],m.positions[i+a])}const center=min.map((x,a)=>(x+max[a])/2);let radius=.001;for(const m of meshes)for(let i=0;i<m.positions.length;i+=3)radius=Math.max(radius,Math.hypot(m.positions[i]-center[0],m.positions[i+1]-center[1],m.positions[i+2]-center[2]));const W=canvas.width,H=canvas.height,dpr=Math.min(devicePixelRatio||1,2),scale=Math.min(W,H)*.43*c.zoom/radius,O=c.orientation;return{W,H,p:(x,y,z)=>{x-=center[0];y-=center[1];z-=center[2];return[W/2+(O[0]*x+O[1]*y+O[2]*z)*scale+c.panX*dpr,H/2-(O[6]*x+O[7]*y+O[8]*z)*scale+c.panY*dpr,O[3]*x+O[4]*y+O[5]*z]}}}
-    function drawOverlay(){const dpr=Math.min(devicePixelRatio||1,2),rect=panel.getBoundingClientRect();overlay.width=Math.round(rect.width*dpr);overlay.height=Math.round(rect.height*dpr);const ctx=overlay.getContext('2d');ctx.clearRect(0,0,overlay.width,overlay.height);const o=state.byId.get(state.selected),body=bodyFor(o),m=sceneBody(body?.id),P=projectSetup();if(!m||!P)return;ctx.save();const pts=m.positions;const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];for(let i=0;i<pts.length;i+=3)for(let a=0;a<3;a++){min[a]=Math.min(min[a],pts[i+a]);max[a]=Math.max(max[a],pts[i+a])}const corners=[];for(const x of [min[0],max[0]])for(const y of [min[1],max[1]])for(const z of [min[2],max[2]])corners.push(P.p(x,y,z));ctx.font=`700 ${10*dpr}px ui-monospace,monospace`;ctx.fillStyle='#ffb27e';[0,1,2].forEach(a=>{const value=max[a]-min[a];if(value<=1e-6)return;const c0=corners.reduce((p,x)=>x[1]>p[1]?x:p,corners[0]);ctx.fillText(`${fmt(value)} mm`,c0[0]+8*dpr,c0[1]-(a*14+8)*dpr)});const dia=Number(o?.parameters?.outer_diameter??o?.parameters?.major_diameter);if(Number.isFinite(dia)){const top=corners.reduce((p,x)=>x[1]<p[1]?x:p,corners[0]);ctx.fillText(`Ø${fmt(dia)} mm`,top[0],top[1]-10*dpr)}ctx.restore()}
+    function drawOverlay(){
+      const dpr=Math.min(devicePixelRatio||1,2),rect=panel.getBoundingClientRect();
+      overlay.width=Math.round(rect.width*dpr);overlay.height=Math.round(rect.height*dpr);
+      const ctx=overlay.getContext('2d');ctx.clearRect(0,0,overlay.width,overlay.height);
+      const o=state.byId.get(state.selected),body=bodyFor(o),m=sceneBody(body?.id),P=projectSetup();
+      if(!m||!P)return;
+      ctx.save();
+      const pts=m.positions,min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];
+      for(let i=0;i<pts.length;i+=3)for(let a=0;a<3;a++){min[a]=Math.min(min[a],pts[i+a]);max[a]=Math.max(max[a],pts[i+a])}
+      const corners=[];for(const x of [min[0],max[0]])for(const y of [min[1],max[1]])for(const z of [min[2],max[2]])corners.push(P.p(x,y,z));
+      const axisNames=['X','Y','Z'],center=min.map((value,axis)=>(value+max[axis])/2),center2d=P.p(...center);
+      ctx.font=`700 ${10*dpr}px ui-monospace,monospace`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.lineWidth=1*dpr;ctx.strokeStyle='#ffb27e';ctx.fillStyle='#ffb27e';ctx.globalAlpha=.96;
+      const drawArrow=(tip,dx,dy)=>{
+        const length=5*dpr,halfWidth=2.2*dpr,baseX=tip[0]+dx*length,baseY=tip[1]+dy*length;
+        ctx.beginPath();ctx.moveTo(tip[0],tip[1]);ctx.lineTo(baseX-dy*halfWidth,baseY+dx*halfWidth);
+        ctx.lineTo(baseX+dy*halfWidth,baseY-dx*halfWidth);ctx.closePath();ctx.fill();
+      };
+      for(let axis=0;axis<3;axis++){
+        const value=max[axis]-min[axis];if(value<=1e-6)continue;
+        const otherAxes=[0,1,2].filter(index=>index!==axis);let best=null;
+        for(const firstSide of [min[otherAxes[0]],max[otherAxes[0]]])for(const secondSide of [min[otherAxes[1]],max[otherAxes[1]]]){
+          const start=[...min],end=[...min];start[axis]=min[axis];end[axis]=max[axis];
+          start[otherAxes[0]]=end[otherAxes[0]]=firstSide;start[otherAxes[1]]=end[otherAxes[1]]=secondSide;
+          const a=P.p(...start),b=P.p(...end),dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy);
+          if(length<8*dpr)continue;
+          const middleX=(a[0]+b[0])/2,middleY=(a[1]+b[1])/2;
+          const side=(dx*(middleY-center2d[1])-dy*(middleX-center2d[0]))/length;
+          const score=Math.abs(side);
+          if(!best||score>best.score)best={a,b,dx:dx/length,dy:dy/length,side,score};
+        }
+        if(!best)continue;
+        const outwardX=-best.dy*Math.sign(best.side||1),outwardY=best.dx*Math.sign(best.side||1);
+        const offset=(12+axis*6)*dpr;
+        const start=[best.a[0]+outwardX*offset,best.a[1]+outwardY*offset];
+        const end=[best.b[0]+outwardX*offset,best.b[1]+outwardY*offset];
+        ctx.beginPath();
+        ctx.moveTo(best.a[0],best.a[1]);ctx.lineTo(start[0]+outwardX*3*dpr,start[1]+outwardY*3*dpr);
+        ctx.moveTo(best.b[0],best.b[1]);ctx.lineTo(end[0]+outwardX*3*dpr,end[1]+outwardY*3*dpr);
+        ctx.moveTo(start[0],start[1]);ctx.lineTo(end[0],end[1]);ctx.stroke();
+        drawArrow(start,best.dx,best.dy);drawArrow(end,-best.dx,-best.dy);
+        const label=`${axisNames[axis]}  ${fmt(value)} mm`,labelX=(start[0]+end[0])/2+outwardX*8*dpr;
+        const labelY=(start[1]+end[1])/2+outwardY*8*dpr,textWidth=ctx.measureText(label).width,padding=3*dpr;
+        ctx.fillStyle='rgba(11,17,20,.94)';ctx.fillRect(labelX-textWidth/2-padding,labelY-7*dpr,textWidth+padding*2,14*dpr);
+        ctx.fillStyle='#ffb27e';ctx.fillText(label,labelX,labelY);
+      }
+      const dia=Number(o?.parameters?.outer_diameter??o?.parameters?.major_diameter);
+      if(Number.isFinite(dia)){
+        const point=corners.reduce((best,candidate)=>candidate[1]<best[1]?candidate:best,corners[0]);ctx.textAlign='center';ctx.textBaseline='middle';
+        const label=`Ø${fmt(dia)} mm`,textWidth=ctx.measureText(label).width,padding=3*dpr;
+        ctx.fillStyle='rgba(11,17,20,.94)';ctx.fillRect(point[0]-textWidth/2-padding,point[1]-20*dpr,textWidth+padding*2,14*dpr);
+        ctx.fillStyle='#ffb27e';ctx.fillText(label,point[0],point[1]-13*dpr);
+      }
+      ctx.restore();
+    }
     let lastOverlaySignature=null;
     function syncOverlay(){let c;try{c=modelViewer?.getCamera?.()}catch{}const r=panel.getBoundingClientRect(),sig=state.selected&&c?.orientation?`${state.project}|${state.rev}|${state.selected}|${r.width|0}|${r.height|0}|${c.zoom}|${c.panX}|${c.panY}|${c.orientation.join(',')}`:'';if(sig===lastOverlaySignature)return;lastOverlaySignature=sig;drawOverlay()}
     window.addEventListener('cadyx:viewport-rendered',syncOverlay);
