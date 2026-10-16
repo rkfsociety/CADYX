@@ -89,7 +89,7 @@ body { color: var(--text); }
   border: 0;
   border-right: 1px solid var(--line);
 }
-.header-revision::before { content: "REV"; color: var(--dim); font: 10px var(--mono); letter-spacing: .08em; }
+.header-revision::before { content: "РЕВ"; color: var(--dim); font: 10px var(--mono); letter-spacing: .08em; }
 .header-revision .topbar-label { display: none; }
 .header-revision strong { color: var(--muted); font: 11px var(--mono); }
 .agent-owner-chip {
@@ -520,7 +520,7 @@ body { color: var(--text); }
   padding-left: 14px;
   border-left: 1px solid var(--line);
   color: var(--muted);
-  content: "mm  ·  Z-UP";
+  content: "мм  ·  Z ВВЕРХ";
   font: 9px var(--mono);
   white-space: nowrap;
 }
@@ -611,7 +611,7 @@ body { color: var(--text); }
       </div>
       <div class="topbar-end">
         <div class="header-revision"><span class="topbar-label">РЕВИЗИЯ</span><strong id="document-revision">—</strong></div>
-        <span id="agent-owner-chip" class="agent-owner-chip" data-state="idle">○ AI</span>
+        <span id="agent-owner-chip" class="agent-owner-chip" data-state="idle">○ ИИ</span>
         <span class="readonly-badge">ТОЛЬКО ЧТЕНИЕ</span>
       </div>
     </header>
@@ -634,7 +634,7 @@ body { color: var(--text); }
               <button id="analysis-nav" class="nav-item" type="button" data-workspace-view="analysis"><span class="nav-index">03</span><span class="nav-copy"><strong>АНАЛИЗ</strong><small>Сравнение с оригиналом</small></span></button>
               <button class="nav-item" type="button" data-workspace-view="manufacturing"><span class="nav-index">04</span><span class="nav-copy"><strong>ПРОИЗВОДСТВО</strong><small>Подготовка производства</small></span></button>
               <button class="nav-item" type="button" data-workspace-view="activity"><span class="nav-index">05</span><span class="nav-copy"><strong>АКТИВНОСТЬ</strong><small>Состояние агента</small></span></button>
-              <a class="nav-item" href="/scanner" target="_blank" rel="noopener"><span class="nav-index">08</span><span class="nav-copy"><strong>СКАНЕР LIVE</strong><small>Поток глубины</small></span></a>
+              <a class="nav-item" href="/scanner" target="_blank" rel="noopener"><span class="nav-index">08</span><span class="nav-copy"><strong>СКАНЕР · ПОТОК ГЛУБИНЫ</strong><small>Текущий кадр</small></span></a>
               <button id="files-nav" class="nav-item" type="button" data-workspace-view="files" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">06</span><span class="nav-copy"><strong>ФАЙЛЫ</strong><small>Файлы проекта</small></span></button>
               <button id="projects-nav" class="nav-item" type="button" data-workspace-view="projects" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">07</span><span class="nav-copy"><strong>ПРОЕКТЫ</strong><small>Сохранённые проекты</small></span></button>
             </nav>
@@ -739,7 +739,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   /* Promote workspace navigation to the CAD workspace tab bar. */
   detail.prepend(navigation);
-  const workspaceLabels = { overview: "Model", analysis: "Analysis", manufacturing: "Manufacturing" };
+  const workspaceLabels = { overview: "Обзор", analysis: "Анализ", manufacturing: "Производство" };
   navigation.querySelectorAll(".nav-item").forEach((button) => {
     const title = workspaceLabels[button.dataset.workspaceView];
     const strong = button.querySelector("strong");
@@ -756,18 +756,18 @@ window.addEventListener("DOMContentLoaded", () => {
   tree.className = "cad-model-tree";
   tree.innerHTML = `
     <div class="cad-tree-heading">
-      <strong>Model Tree</strong>
+      <strong>Дерево модели</strong>
       <button class="cad-tree-collapse" type="button" title="Свернуть дерево модели" aria-label="Свернуть дерево модели">‹</button>
     </div>
-    <div class="cad-tree-search"><input type="search" placeholder="Search features…" aria-label="Поиск по дереву модели"></div>
+    <div class="cad-tree-search"><input type="search" placeholder="Поиск по элементам…" aria-label="Поиск по дереву модели"></div>
     <div class="cad-tree-scroll">
       <div class="cad-tree-root">
         <div class="cad-tree-root-row"><span class="cad-tree-chevron">⌄</span><span class="cad-tree-icon">◆</span><span id="cad-tree-project-name" class="cad-tree-label">—</span></div>
         <div class="cad-tree-static">
-          <div class="cad-tree-static-row"><span class="cad-tree-chevron">⌄</span><span class="cad-tree-icon">⌖</span><span class="cad-tree-label">Origin</span></div>
-          <div class="cad-tree-static-row"><span></span><span class="cad-tree-icon">□</span><span class="cad-tree-label">XY Plane</span></div>
-          <div class="cad-tree-static-row"><span></span><span class="cad-tree-icon">□</span><span class="cad-tree-label">XZ Plane</span></div>
-          <div class="cad-tree-static-row"><span></span><span class="cad-tree-icon">□</span><span class="cad-tree-label">YZ Plane</span></div>
+          <div class="cad-tree-static-row"><span class="cad-tree-chevron">⌄</span><span class="cad-tree-icon">⌖</span><span class="cad-tree-label">Начало координат</span></div>
+          <div class="cad-tree-static-row"><span></span><span class="cad-tree-icon">□</span><span class="cad-tree-label">Плоскость XY</span></div>
+          <div class="cad-tree-static-row"><span></span><span class="cad-tree-icon">□</span><span class="cad-tree-label">Плоскость XZ</span></div>
+          <div class="cad-tree-static-row"><span></span><span class="cad-tree-icon">□</span><span class="cad-tree-label">Плоскость YZ</span></div>
         </div>
         <div id="cad-tree-features" class="cad-tree-features"></div>
         <p id="cad-tree-empty" class="cad-tree-empty">Модель ещё не содержит отображаемых объектов.</p>
@@ -844,19 +844,19 @@ window.addEventListener("DOMContentLoaded", () => {
   inspectorTabs.className = "cad-inspector-tabs";
   inspectorTabs.setAttribute("role", "tablist");
   inspectorTabs.innerHTML = `
-    <button class="cad-inspector-tab" type="button" data-cad-inspector="properties" role="tab" aria-selected="true">Properties</button>
-    <button class="cad-inspector-tab" type="button" data-cad-inspector="comments" role="tab" aria-selected="false">Comments</button>
-    <button class="cad-inspector-tab" type="button" data-cad-inspector="history" role="tab" aria-selected="false">History</button>`;
+    <button class="cad-inspector-tab" type="button" data-cad-inspector="properties" role="tab" aria-selected="true">Свойства</button>
+    <button class="cad-inspector-tab" type="button" data-cad-inspector="comments" role="tab" aria-selected="false">Комментарии</button>
+    <button class="cad-inspector-tab" type="button" data-cad-inspector="history" role="tab" aria-selected="false">История</button>`;
   const commentsPane = document.createElement("section");
   commentsPane.id = "cad-comments-pane";
   commentsPane.className = "cad-inspector-pane";
   commentsPane.hidden = true;
-  commentsPane.innerHTML = `<h3>Comments</h3><div class="cad-placeholder-card"><p>Контекстные комментарии к feature, грани или ребру будут отображаться здесь.</p></div>`;
+  commentsPane.innerHTML = `<h3>Комментарии</h3><div class="cad-placeholder-card"><p>Контекстные комментарии к элементу модели, грани или ребру будут отображаться здесь.</p></div>`;
   const historyPane = document.createElement("section");
   historyPane.id = "cad-history-pane";
   historyPane.className = "cad-inspector-pane";
   historyPane.hidden = true;
-  historyPane.innerHTML = `<h3>History</h3><div id="cad-history-items" class="cad-history-items"></div>`;
+  historyPane.innerHTML = `<h3>История</h3><div id="cad-history-items" class="cad-history-items"></div>`;
   inspector.prepend(inspectorTabs);
   inspector.append(commentsPane, historyPane);
 
@@ -925,15 +925,15 @@ window.addEventListener("DOMContentLoaded", () => {
     const reason = lockStatus?.textContent?.trim() || "";
     const state = agentState?.dataset.state || "idle";
     const hasProject = !detail.hidden;
-    let label = "○ AI";
+    let label = "○ ИИ";
     let chipState = "idle";
     let aiState = "idle";
-    if (!hasProject) label = "○ AI";
-    else if (locked && /ИИ-АГЕНТ|АГЕНТ РАБОТАЕТ/.test(reason)) { label = "● AI"; chipState = "running"; aiState = "running"; }
-    else if (locked && /ВОССТАНОВЛЕНИЕ/.test(reason)) { label = "! AI"; chipState = "failed"; aiState = "failed"; }
-    else if (locked) { label = "◌ AI"; chipState = "warning"; aiState = "warning"; }
-    else if (state === "failed") { label = "! AI"; chipState = "failed"; aiState = "failed"; }
-    else if (state === "running") { label = "● AI"; chipState = "running"; aiState = "running"; }
+    if (!hasProject) label = "○ ИИ";
+    else if (locked && /ИИ-АГЕНТ|АГЕНТ РАБОТАЕТ/.test(reason)) { label = "● ИИ"; chipState = "running"; aiState = "running"; }
+    else if (locked && /ВОССТАНОВЛЕНИЕ/.test(reason)) { label = "! ИИ"; chipState = "failed"; aiState = "failed"; }
+    else if (locked) { label = "◌ ИИ"; chipState = "warning"; aiState = "warning"; }
+    else if (state === "failed") { label = "! ИИ"; chipState = "failed"; aiState = "failed"; }
+    else if (state === "running") { label = "● ИИ"; chipState = "running"; aiState = "running"; }
     ownerChip.textContent = label;
     ownerChip.dataset.state = chipState;
     detail.dataset.aiState = aiState;

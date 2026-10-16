@@ -114,11 +114,11 @@
     <div class="topbar-start"><a class="brand" href="/">CADYX</a></div>
     <div class="topbar-project">
       <span class="project-light active" aria-hidden="true"></span>
-      <div class="topbar-project-copy"><span class="document-title">REV OPOINT · LIVE DEPTH</span><span class="project-short-id">Y16 / 640×400</span></div>
+      <div class="topbar-project-copy"><span class="document-title">REVOPOINT · ПРЯМОЙ ПОТОК ГЛУБИНЫ</span><span class="project-short-id">Y16 / 640×400</span></div>
     </div>
     <div class="topbar-end">
       <span id="state" class="scanner-state" data-live="false">ОЖИДАНИЕ КАДРА</span>
-      <a class="button" href="/">В CADYX</a>
+      <a class="button" href="/">На главную CADYX</a>
     </div>
   </header>
   <main class="scanner-shell">
@@ -141,10 +141,10 @@
       </section>
       <section class="panel scanner-card">
         <h2>ИСТОЧНИК</h2>
-        <div class="panel-note">REV OPOINT DEPTHCAM</div>
-        <dl class="scanner-details"><dt>Калибровка</dt><dd>Q.bin</dd><dt>Масштаб disparity</dt><dd>256 · гипотеза</dd><dt>Геометрия</dt><dd>кадр, без слияния</dd></dl>
+        <div class="panel-note">REVOPOINT DEPTHCAM</div>
+        <dl class="scanner-details"><dt>Калибровка</dt><dd>Q.bin</dd><dt>Коэффициент диспаратности</dt><dd>256 · гипотеза</dd><dt>Геометрия</dt><dd>текущий кадр, без слияния</dd></dl>
       </section>
-      <div class="scanner-hint"><strong>ЗАПУСК ЗАХВАТА</strong>Утилита CaptureY16 должна обновлять live-файл в workspace. Кадры доступны только локальному API CADYX.<br><br><code>--live-raw .revopoint-live.raw</code></div>
+      <div class="scanner-hint"><strong>ЗАПУСК ЗАХВАТА</strong>Программа CaptureY16 должна обновлять файл прямого потока в рабочей папке. Кадры доступны только через локальный API CADYX.<br><br><code>--live-raw .revopoint-live.raw</code></div>
     </aside>
   </main>
   <script>
@@ -244,7 +244,7 @@
           if (!streamLive) {
             state.textContent = "ПОТОК ОСТАНОВЛЕН · ПОСЛЕДНИЙ КАДР";
             rate.textContent = "—";
-            age.textContent = mtime ? `ВОЗРАСТ КАДРА ${(frameAgeMs / 1000).toFixed(1)} с` : "ОЖИДАНИЕ";
+            age.textContent = mtime ? `ВОЗРАСТ КАДРА ${(frameAgeMs / 1000).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} с` : "ОЖИДАНИЕ";
           }
           if (mtime !== lastMtime) {
             const raw = new Uint8Array(await response.arrayBuffer());
@@ -300,12 +300,12 @@
             lastArrival = now;
             lastMtime = mtime;
             rate.textContent = streamLive && intervals.length
-              ? (1000 / (intervals.reduce((sum, value) => sum + value, 0) / intervals.length)).toFixed(1)
+              ? (1000 / (intervals.reduce((sum, value) => sum + value, 0) / intervals.length)).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })
               : "измерение…";
             if (!streamLive) rate.textContent = "—";
             if (streamLive) {
               state.textContent = "ПОТОК АКТИВЕН";
-              age.textContent = `КАДР ${new Date().toLocaleTimeString()}`;
+              age.textContent = `КАДР ${new Date().toLocaleTimeString("ru-RU")}`;
             }
           }
         } catch (error) {
