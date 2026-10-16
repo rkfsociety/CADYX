@@ -26,7 +26,6 @@
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <IntCurvesFace_ShapeIntersector.hxx>
-#include <GeomLProp_SLProps.hxx>
 #include <Precision.hxx>
 #include <Message_ProgressIndicator.hxx>
 #include <BRepGProp.hxx>
@@ -1633,29 +1632,44 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
     BRepClass3d_SolidClassifier classifier(solid);
     double minimum = std::numeric_limits<double>::infinity();
     gp_Pnt minimum_point, minimum_opposite;
-    size_t samples = 0, hits = 0, face_count = 0;
+    size_t samples = 0, hits = 0, face_count = 0, triangle_count = 0;
     for (TopExp_Explorer count(solid, TopAbs_FACE); count.More(); count.Next()) ++face_count;
-    size_t face_index = 0;
+    for (TopExp_Explorer count(solid, TopAbs_FACE); count.More(); count.Next()) {
+      TopLoc_Location location;
+      const auto triangulation = BRep_Tool::Triangulation(TopoDS::Face(count.Current()), location);
+      if (!triangulation.IsNull()) triangle_count += static_cast<size_t>(triangulation->NbTriangles());
+    }
+    const size_t triangle_step = std::max<size_t>(1, (triangle_count + 9999) / 10000);
+    size_t face_index = 0, triangle_offset = 0;
     for (TopExp_Explorer explorer(solid, TopAbs_FACE); explorer.More(); explorer.Next(), ++face_index) {
       const TopoDS_Face face = TopoDS::Face(explorer.Current());
       TopLoc_Location location;
       const auto triangulation = BRep_Tool::Triangulation(face, location);
       if (!triangulation.IsNull()) {
-        TopLoc_Location surface_location;
-        const auto surface = BRep_Tool::Surface(face, surface_location);
-        for (int node = 1; node <= triangulation->NbNodes(); ++node) {
-          if (!triangulation->HasUVNodes()) continue;
-          const gp_Pnt2d uv = triangulation->UVNode(node);
-          GeomLProp_SLProps props(surface, uv.X(), uv.Y(), 1, Precision::Confusion());
-          if (!props.IsNormalDefined()) continue;
-          gp_Dir outward = props.Normal();
-          outward.Transform(surface_location.Transformation());
-          if (face.Orientation() == TopAbs_REVERSED) outward.Reverse();
-          const gp_Pnt point = props.Value().Transformed(surface_location.Transformation());
-          const gp_Pnt start = point.Translated(gp_Vec(outward).Reversed() * start_offset);
-          classifier.Perform(start, start_offset * 0.1);
-          if (classifier.State() != TopAbs_IN) continue;
+        for (int triangle_index = 1; triangle_index <= triangulation->NbTriangles(); ++triangle_index) {
+          const size_t global_triangle_index = triangle_offset + static_cast<size_t>(triangle_index - 1);
+          if (global_triangle_index % triangle_step != 0) continue;
+          int a, b, c;
+          triangulation->Triangle(triangle_index).Get(a, b, c);
+          const gp_Pnt pa = triangulation->Node(a).Transformed(location.Transformation());
+          const gp_Pnt pb = triangulation->Node(b).Transformed(location.Transformation());
+          const gp_Pnt pc = triangulation->Node(c).Transformed(location.Transformation());
+          gp_Vec normal_vector = gp_Vec(pa, pb).Crossed(gp_Vec(pa, pc));
+          if (face.Orientation() == TopAbs_REVERSED) normal_vector.Reverse();
+          if (normal_vector.SquareMagnitude() <= Precision::SquareConfusion()) continue;
+          const gp_Dir outward(normal_vector);
+          const gp_Pnt point((pa.X() + pb.X() + pc.X()) / 3.0,
+                             (pa.Y() + pb.Y() + pc.Y()) / 3.0,
+                             (pa.Z() + pb.Z() + pc.Z()) / 3.0);
           gp_Dir inward = outward.Reversed();
+          gp_Pnt start = point.Translated(gp_Vec(inward) * start_offset);
+          classifier.Perform(start, start_offset * 0.1);
+          if (classifier.State() != TopAbs_IN) {
+            inward = outward;
+            start = point.Translated(gp_Vec(inward) * start_offset);
+            classifier.Perform(start, start_offset * 0.1);
+            if (classifier.State() != TopAbs_IN) continue;
+          }
           intersector.Perform(gp_Lin(start, inward), 0.0, diagonal * 2.0);
           ++samples;
           if (!intersector.IsDone())
@@ -1679,8 +1693,9 @@ API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
             }
           }
         }
+        triangle_offset += static_cast<size_t>(triangulation->NbTriangles());
       }
-      progress.SetPhase("sample_surface_normals");
+      progress.SetPhase("sample_surface_triangles");
       progress.Report(face_count ? 0.95 * static_cast<double>(face_index + 1) / face_count : 0.95);
     }
     if (samples == 0 || hits == 0 || !std::isfinite(minimum))

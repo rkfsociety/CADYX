@@ -253,7 +253,7 @@ class NativeKernel:
     def brep_thickness(self, geometry, *, progress=None):
         geometry_buffer = self._export_brep_buffer(geometry)
         error = ctypes.create_string_buffer(1024)
-        callback = None
+        callback = _PROGRESS_CALLBACK()
         if progress is not None:
             def report(_user_data, phase, percent):
                 progress(phase.decode("ascii", errors="replace"), percent)
