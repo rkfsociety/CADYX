@@ -749,7 +749,7 @@ class CadyxCore:
             "body_ids": {"reference": reference_body_id, "candidate": candidate_body_id},
             "revision": document.revision,
             "geometry_sha256": geometry_hash,
-            "method": "OCCT_BRepAlgoAPI_Common+Cut",
+            "method": "OCCT_BRepAlgoAPI_Common",
             "coordinate_frame": "global_xyz",
             "units": "model_units^3",
             "deflection": deflection,

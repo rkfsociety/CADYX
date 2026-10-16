@@ -1564,25 +1564,13 @@ API char* cadyx_brep_preservation(const unsigned char* reference_data, size_t re
     common.SetRunParallel(true);
     common.Build();
     if (!common.IsDone()) throw std::runtime_error("OCCT could not compute the preserved solid volume.");
-    BRepAlgoAPI_Cut lost(reference, candidate);
-    lost.SetFuzzyValue(deflection);
-    lost.SetRunParallel(true);
-    lost.Build();
-    if (!lost.IsDone()) throw std::runtime_error("OCCT could not compute the removed solid volume.");
-    BRepAlgoAPI_Cut added(candidate, reference);
-    added.SetFuzzyValue(deflection);
-    added.SetRunParallel(true);
-    added.Build();
-    if (!added.IsDone()) throw std::runtime_error("OCCT could not compute the added solid volume.");
 
     const double reference_volume = ShapeVolume(reference);
     const double candidate_volume = ShapeVolume(candidate);
     const TopoDS_Shape common_shape = common.Shape();
-    const TopoDS_Shape lost_shape = lost.Shape();
-    const TopoDS_Shape added_shape = added.Shape();
     const double preserved_volume = common_shape.IsNull() ? 0.0 : ShapeVolume(common_shape);
-    const double lost_volume = lost_shape.IsNull() ? 0.0 : ShapeVolume(lost_shape);
-    const double added_volume = added_shape.IsNull() ? 0.0 : ShapeVolume(added_shape);
+    const double lost_volume = std::max(0.0, reference_volume - preserved_volume);
+    const double added_volume = std::max(0.0, candidate_volume - preserved_volume);
     GProp_GProps reference_surface;
     GProp_GProps candidate_surface;
     BRepGProp::SurfaceProperties(reference, reference_surface);
