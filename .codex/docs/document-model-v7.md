@@ -476,7 +476,8 @@ validation record sidecar described above. This is a volume-overlap check; it
 does not certify local surface deviation or geometric equivalence.
 
 `fillet_edges` accepts `body_id`, one or more distinct `edge_indices`, a positive
-`radius`, and optional `name`. It creates a new body with an OCCT rolling-edge
+`radius`, and optional `name`. Topology indices must fit the native integer
+representation; there is no fixed selection-count ceiling. It creates a new body with an OCCT rolling-edge
 fillet and can round the mug rim, base, or a fused handle junction.
 `set_parameter` can edit its radius. The `filleted_solid` descriptor retains the
 source B-rep, selected current edge indices, and radius. If an upstream edit

@@ -19,7 +19,7 @@ from .sketches import closed_profile
 
 _INSTALLED = False
 _MAX_BREP_BYTES = 64 * 1024 * 1024
-_MAX_PATTERN_COUNT = (1 << 31) - 1
+_MAX_NATIVE_INT = (1 << 31) - 1
 
 ADVANCED_CAPABILITIES = (
     {"type": "create_section_sketch", "description": "Create an editable XZ section sketch at a Y offset for direct loft authoring.", "required": ["offset"], "optional": ["name"], "constraints": ["offset is finite; resulting sketch is compatible with loft_sketches and loft_profiles."]},
@@ -56,15 +56,15 @@ def _vector(value: Any, name: str, *, nonzero: bool = False) -> list[float]:
 
 
 def _indices(value: Any, name: str) -> list[int]:
-    if (not isinstance(value, list) or not value or len(value) > 256
-            or any(type(item) is not int or item < 0 for item in value)
+    if (not isinstance(value, list) or not value
+            or any(type(item) is not int or item < 0 or item > _MAX_NATIVE_INT for item in value)
             or len(set(value)) != len(value)):
-        raise ValidationError(f"{name} must contain distinct non-negative topology indices.")
+        raise ValidationError(f"{name} must contain distinct topology indices representable by the native integer type.")
     return list(value)
 
 
 def _pattern_count(value: Any) -> int:
-    if type(value) is not int or value < 2 or value > _MAX_PATTERN_COUNT:
+    if type(value) is not int or value < 2 or value > _MAX_NATIVE_INT:
         raise ValidationError("count must be an integer of at least 2 that fits the native integer range.")
     return value
 
