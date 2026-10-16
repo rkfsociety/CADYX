@@ -95,6 +95,8 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - `POST /api/v1/projects/{id}/commands` with a human `lease_id` and a command
 - Agent equivalents under `/api/v1/agent/projects`
 - `extrude_sketch`, `revolve_sketch`, `sweep_sketch`, `fuse_bodies`, `cut_bodies`, and `fillet_edges` commands for editable OCCT solids; see the [feature contract](.codex/docs/document-model-v7.md#sketch-driven-solid-features)
+- Document Model v8 adds `create_model_parameters`, `bind_model_parameters`, and atomic `set_model_parameter` rebuilds; Geometry displays the named values. See the [parameter contract](.codex/docs/document-model-v8.md).
+- `insert_fillet_before_feature` inserts a boss-root fillet before a downstream pocket and atomically reorders/rebuilds the editable feature chain; see [Document Model v8](.codex/docs/document-model-v8.md#rebuilding-topology-selected-edge-features).
 - `import_step` to preserve a single-solid STEP model as an OCCT B-rep; see the [STEP import contract](.codex/docs/document-model-v7.md#step-import-and-editable-b-reps)
 - `export_brep` to validate and atomically publish a revision-bound STEP file, optional STL, and verification manifest; see the [CAD delivery contract](.codex/docs/document-model-v7.md#verified-cad-delivery)
 - `resize_imported_thread` and `transform_imported_brep` to modify and align imported OCCT B-reps; see the [imported B-rep feature contract](.codex/docs/document-model-v7.md#step-import-and-editable-b-reps)

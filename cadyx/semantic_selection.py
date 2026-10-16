@@ -1,6 +1,7 @@
 """Resolve topology fingerprints to current face/edge indices immediately before a command."""
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .errors import ValidationError
@@ -31,6 +32,66 @@ def _resolve(kernel, geometry: dict[str, Any], *, keys: list[str], collection: s
     return [by_key[key] for key in keys]
 
 
+def capture_edge_references(kernel, geometry: dict[str, Any], indices: list[int]) -> list[dict[str, Any]]:
+    """Capture geometric edge descriptors so editable fillets can survive dimension changes."""
+    edges = kernel.topology(geometry).get("edges")
+    if not isinstance(edges, list):
+        raise ValidationError("Current topology does not expose edges.")
+    by_index = {edge.get("index"): edge for edge in edges if isinstance(edge, dict)}
+    references = []
+    for index in indices:
+        edge = by_index.get(index)
+        if edge is None:
+            raise ValidationError(f"Current topology has no edge index {index}.")
+        reference = {key: edge[key] for key in ("curve", "center", "length", "start", "end",
+                     "direction", "radius", "origin") if key in edge}
+        references.append(reference)
+    return references
+
+
+def resolve_edge_references(kernel, geometry: dict[str, Any], references: list[dict[str, Any]]) -> list[int]:
+    """Resolve stored geometric edge intent after upstream topology IDs have changed."""
+    topology = kernel.topology(geometry)
+    edges = topology.get("edges")
+    if not isinstance(edges, list) or not references:
+        raise ValidationError("Stored edge references or current topology are unavailable.")
+    bounds = topology.get("bounds", {})
+    low, high = bounds.get("min"), bounds.get("max")
+    diagonal = math.dist(low, high) if isinstance(low, list) and isinstance(high, list) else 1.0
+    max_distance = max(2.0, diagonal * 0.25)
+    chosen: list[int] = []
+    for reference in references:
+        candidates = []
+        for edge in edges:
+            if not isinstance(edge, dict) or edge.get("curve") != reference.get("curve"):
+                continue
+            center, old_center = edge.get("center"), reference.get("center")
+            if not isinstance(center, list) or not isinstance(old_center, list):
+                continue
+            distance = math.dist(center, old_center)
+            if distance > max_distance:
+                continue
+            old_length, length = reference.get("length"), edge.get("length")
+            if (isinstance(old_length, (int, float)) and isinstance(length, (int, float))
+                    and abs(length - old_length) > max(5.0, abs(old_length) * 0.5)):
+                continue
+            old_direction, direction = reference.get("direction"), edge.get("direction")
+            orientation_cost = 0.0
+            if isinstance(old_direction, list) and isinstance(direction, list):
+                dot = abs(sum(a * b for a, b in zip(old_direction, direction, strict=True)))
+                if dot < 0.9:
+                    continue
+                orientation_cost = 1.0 - dot
+            score = distance / max(max_distance, 1e-9) + orientation_cost
+            candidates.append((score, edge.get("index")))
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        match = next((index for _, index in candidates if index not in chosen), None)
+        if match is None:
+            raise ValidationError("Stored edge intent no longer matches a unique edge; inspect topology again.")
+        chosen.append(match)
+    return chosen
+
+
 def install() -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -39,6 +100,9 @@ def install() -> None:
     original = commands.CommandSystem.execute
 
     def execute(self, document, command, *, progress=None, project_id=None):
+        semantic_keys = None
+        edge_indices = None
+        edge_source_geometry = None
         if isinstance(command, dict):
             kind = command.get("type")
             mapping = {
@@ -49,16 +113,36 @@ def install() -> None:
                 "fillet_edges": ("edge_keys", "edge_indices", "edges"),
             }
             selector = mapping.get(kind)
-            if selector and selector[0] in command and selector[1] not in command:
+            if selector:
                 body_id = command.get("body_id")
                 source = next((item for item in document.objects
                                if item.get("id") == body_id and item.get("type") == "body"), None)
                 if source is None or not isinstance(source.get("geometry"), dict):
                     raise ValidationError("Semantic selection requires an existing editable body.")
-                resolved = _resolve(self.kernel, source["geometry"],
-                                    keys=_keys(command[selector[0]], selector[0]), collection=selector[2])
-                command = {**command, selector[1]: resolved}
-        return original(self, document, command, progress=progress, project_id=project_id)
+                edge_source_geometry = source["geometry"]
+                if selector[0] in command:
+                    resolved = _resolve(self.kernel, edge_source_geometry,
+                                        keys=_keys(command[selector[0]], selector[0]), collection=selector[2])
+                    semantic_keys = list(command[selector[0]])
+                    edge_indices = resolved
+                    command = {**command, selector[1]: resolved}
+                elif selector[1] in command:
+                    raw_indices = command[selector[1]]
+                    if (not isinstance(raw_indices, list) or not raw_indices
+                            or any(type(index) is not int or index < 0 for index in raw_indices)
+                            or len(set(raw_indices)) != len(raw_indices)):
+                        raise ValidationError(f"{selector[1]} must contain distinct non-negative integers.")
+                    edge_indices = raw_indices
+        result = original(self, document, command, progress=progress, project_id=project_id)
+        if edge_indices and isinstance(result, dict) and isinstance(result.get("feature_id"), str):
+            feature_id = result["feature_id"]
+            feature = next((item for item in document.objects
+                            if item.get("id") == feature_id and item.get("type") == "feature"), None)
+            if feature is not None:
+                feature["edge_references"] = capture_edge_references(self.kernel, edge_source_geometry, edge_indices)
+                if semantic_keys:
+                    feature["edge_keys"] = semantic_keys
+        return result
 
     commands.CommandSystem.execute = execute
 

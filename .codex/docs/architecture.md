@@ -121,7 +121,8 @@ This is an authentication boundary, not transport encryption. The built-in serve
 
 ## APIs and events
 
-Document Model v7 supports XY/XZ sketches, point/line/circle/ellipse/spline primitives,
+Document Model v8 extends v7 with named numeric parameters and expression bindings,
+and retains the XY/XZ sketch, point/line/circle/ellipse/spline primitives,
 atomic builders for polylines/polygons, rectangles, and circles, checked
 geometric/dimensional constraints, and linked OCCT extrusion, revolution, sweep,
 fuse, fillet, and external metric-thread features. The Command System also builds
@@ -135,8 +136,9 @@ be batched atomically; deletions cannot leave dangling references. Constraints
 check the supplied geometry without solving it. The existing command endpoints
 support these objects under the same leases and atomic save path. Document v1 and
 v2 are upgraded in memory; the project envelope stays at version 1. See
-[Document Model v7](document-model-v7.md) for the supported commands, migration
-policy and exact semantics. Sketch points, lines, circles, full ellipses,
+[Document Model v7](document-model-v7.md) for the base object graph and
+[Document Model v8](document-model-v8.md) for named parameters, atomic rebuilds
+and schema migration. Sketch points, lines, circles, full ellipses,
 elliptical arcs and interpolating splines now render in the
 shared viewport. Agents create projects and edit models through the Agent API;
 human API clients may write through the Web API, while the browser provides no

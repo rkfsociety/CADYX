@@ -1875,7 +1875,10 @@ async function applyGeometryDimensions(featureId, fields) {
     leaseId = lease.lease.lease_id;
     let expectedRevision = info.document.revision;
     for (const input of changed) {
-      await api(`/api/v1/projects/${encoded}/commands`, { method: "POST", body: JSON.stringify({ lease_id: leaseId, expected_revision: expectedRevision, command: { type: "set_parameter", feature_id: featureId, name: input.dataset.parameter, value: Number(input.value) } }) });
+      const command = input.dataset.modelParameter === "true"
+        ? { type: "set_model_parameter", name: input.dataset.parameter, value: Number(input.value) }
+        : { type: "set_parameter", feature_id: featureId, name: input.dataset.parameter, value: Number(input.value) };
+      await api(`/api/v1/projects/${encoded}/commands`, { method: "POST", body: JSON.stringify({ lease_id: leaseId, expected_revision: expectedRevision, command }) });
       expectedRevision += 1;
       input.dataset.originalValue = input.value;
     }

@@ -99,7 +99,7 @@ class WebApiTests(unittest.TestCase):
                 before = path.read_bytes()
                 status, detail = self.request(f"{prefix}/{project_id}")
                 self.assertEqual(status, 200)
-                self.assertEqual(detail["document"]["version"], 7)
+                self.assertEqual(detail["document"]["version"], 8)
                 _, acquired = self.request(f"{prefix}/{project_id}/leases",
                                           {"owner_type": owner, "owner_id": "migration-test"})
                 lease = acquired["lease"]["lease_id"]
@@ -112,7 +112,7 @@ class WebApiTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 saved = json.loads(path.read_text())
                 self.assertEqual(saved["version"], 1)
-                self.assertEqual(saved["document"]["version"], 7)
+                self.assertEqual(saved["document"]["version"], 8)
                 self.assertEqual(saved["history"][0]["actor_type"], owner)
 
     def test_agent_and_web_api_share_core_locking(self) -> None:

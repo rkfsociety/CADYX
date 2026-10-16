@@ -35,7 +35,9 @@ class MigrationTests(unittest.TestCase):
     def test_migration_preserves_snapshot_and_is_idempotent(self):
         original = copy.deepcopy(self.legacy)
         expected = copy.deepcopy(original)
-        expected["document"]["version"] = 7
+        expected["document"]["version"] = 8
+        expected["document"]["model_parameters"] = {}
+        expected["document"]["parameter_bindings"] = []
         migrated = migrate_project(self.legacy)
         self.assertEqual(migrated, expected)
         self.assertEqual(self.legacy, original)
@@ -43,6 +45,15 @@ class MigrationTests(unittest.TestCase):
         migrated["history"][0]["command"]["width"] = 99
         self.assertEqual(self.legacy, original)
         self.assertEqual(Document.from_dict(original["document"]).to_dict(), expected["document"])
+
+    def test_v7_document_migration_adds_named_parameters_and_bindings(self):
+        document = {"id": "document:legacy", "version": 7, "revision": 3, "objects": []}
+        migrated = migrate_document(document)
+
+        self.assertEqual(migrated["version"], 8)
+        self.assertEqual(migrated["model_parameters"], {})
+        self.assertEqual(migrated["parameter_bindings"], [])
+        self.assertEqual(document["version"], 7)
 
     def test_project_migration_deep_copies_nested_document_once(self):
         original = copy.deepcopy(self.legacy)
@@ -55,7 +66,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_reads_failed_commands_and_failed_save_preserve_bytes(self):
         before = self.path.read_bytes()
-        self.assertEqual(self.core.workspace.load(self.id)["document"]["version"], 7)
+        self.assertEqual(self.core.workspace.load(self.id)["document"]["version"], 8)
         self.core.list_projects()
         self.core.inspect_project(self.id)
         self.core.heartbeat(self.id, self.lease)
@@ -76,7 +87,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(saved["document"]["objects"][:-1], self.legacy["document"]["objects"])
         self.assertEqual(saved["document"]["id"], self.legacy["document"]["id"])
         self.assertEqual(saved["document"]["revision"], 2)
-        self.assertEqual(saved["document"]["version"], 7)
+        self.assertEqual(saved["document"]["version"], 8)
         reloaded = CadyxCore(self.temp.name, kernel=PrimitiveKernelAdapter()).inspect_project(self.id)
         self.assertEqual(reloaded["document"], saved["document"])
         self.assertEqual(reloaded["history"], saved["history"])

@@ -12,7 +12,7 @@ Every project lives at `projects/<project-name>/project.json`. Newly created pro
   "modified_at": "<UTC ISO-8601>",
   "document": {
     "id": "document:<uuid>",
-    "version": 7,
+    "version": 8,
     "revision": 0,
     "objects": []
   },
@@ -38,11 +38,12 @@ Agent stop fences and resumed-lease revision protection are stored separately
 in `.cadyx-agent.sqlite3`; they do not change the portable schema. See the
 [stop/resume contract](architecture.md#safe-agent-stop-and-resume).
 
-The project envelope remains version 1; the nested document now uses version 7.
-Legacy document v1 through v6 snapshots are explicitly upgraded in memory on read
-and persisted only with a successful command. See [Document Model v7](document-model-v7.md)
-for the sketch schema, solid feature commands, constraint semantics and
-compatibility policy.
+The project envelope remains version 1; the nested document now uses version 8.
+Legacy document v1 through v7 snapshots are explicitly upgraded in memory on read
+and persisted only with a successful command. See [Document Model v8](document-model-v8.md)
+for named parameters, expression bindings and atomic dependent rebuilds; [Document
+Model v7](document-model-v7.md) documents the underlying sketch schema and solid
+feature object graph.
 
 Box geometry is stored as a JSON descriptor with its kernel id, dimensions, and measured volume. New descriptors use `occt-v1`; Open CASCADE reconstructs the B-rep from dimensions and checks its validity when creating or validating a project. Native kernel objects are not serialized. Existing `primitive-v1` box descriptors remain readable and are checked by rebuilding the corresponding Open CASCADE solid.
 
@@ -52,7 +53,7 @@ Box geometry is stored as a JSON descriptor with its kernel id, dimensions, and 
 steps. Project-envelope and document versions are independent: migrate the
 envelope first, then the nested document. The envelope is still v1 (no envelope
 step is needed); the supported document steps are v1 to v2, v2 to v3, v3 to v4,
-and v4 to v5, v5 to v6, and v6 to v7. New schema changes
+and v4 to v5, v5 to v6, v6 to v7, and v7 to v8. New schema changes
 must add each required consecutive step instead of relabelling an unknown
 snapshot. Missing steps, unsupported versions (including future versions), and
 non-integer version tags are errors.

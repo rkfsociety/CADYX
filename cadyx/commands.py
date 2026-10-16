@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import sys
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Iterable
 from uuid import uuid4
@@ -16,6 +17,7 @@ from .delivery import compare_step_metrics, geometry_sha256, verify_binary_stl
 from .engineering import involute_spur_gear_profile
 from .kernel import GeometryKernel
 from .mesh_geometry import mesh_ply_bytes
+from .model_parameters import assign_property, evaluate_expression, property_location
 from .models import Document
 from .scan import DEFAULT_SCAN_PARAMETERS, ScanProcessor, normalize_scan_parameters
 from .sketches import closed_profile, closed_profiles, closed_spline_profile, open_path
@@ -93,6 +95,18 @@ class CommandSystem:
         kind = command.get("type")
         if not isinstance(kind, str) or kind not in _SUPPORTED_COMMAND_TYPES:
             raise ValidationError(f"Unsupported command type: {kind!r}.")
+        if kind == "create_model_parameter":
+            return self._create_model_parameter(document, command)
+        if kind == "create_model_parameters":
+            return self._create_model_parameters(document, command)
+        if kind == "set_model_parameter":
+            return self._set_model_parameter(document, command, progress=progress)
+        if kind == "bind_model_parameter":
+            return self._bind_model_parameter(document, command, progress=progress)
+        if kind == "bind_model_parameters":
+            return self._bind_model_parameters(document, command, progress=progress)
+        if kind == "insert_fillet_before_feature":
+            return self._insert_fillet_before_feature(document, command, progress=progress)
         if kind == "create_box":
             return self._create_box(document, command)
         if kind == "create_metric_thread":
@@ -2307,6 +2321,368 @@ class CommandSystem:
         self._rebuild_derived_features(document, {body["id"]}, progress=progress)
         return {"feature_id": feature_id, "parameter": parameter_name, "value": value, "geometry": geometry}
 
+    @staticmethod
+    def _model_parameter_values(document: Document) -> dict[str, float]:
+        return {name: float(record["value"]) for name, record in document.model_parameters.items()}
+
+    def _create_model_parameter(self, document: Document, command: dict[str, Any]) -> dict[str, Any]:
+        name = command.get("name")
+        if not isinstance(name, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None:
+            raise ValidationError("Model parameter name must be a valid identifier.")
+        if name in document.model_parameters:
+            raise ValidationError(f"Model parameter {name} already exists.")
+        value = _finite_number(command.get("value"), "Model parameter value")
+        unit = command.get("unit", "mm")
+        if unit not in {"mm", "deg", "unitless"}:
+            raise ValidationError("Model parameter unit must be mm, deg, or unitless.")
+        document.model_parameters[name] = {"value": value, "unit": unit}
+        return {"name": name, "value": value, "unit": unit}
+
+    def _create_model_parameters(self, document: Document, command: dict[str, Any]) -> dict[str, Any]:
+        records = command.get("parameters")
+        if not isinstance(records, dict) or not records:
+            raise ValidationError("parameters must be a non-empty map of model parameter records.")
+        staged = {}
+        for name, record in records.items():
+            if not isinstance(name, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None:
+                raise ValidationError("Model parameter names must be valid identifiers.")
+            if name in document.model_parameters or name in staged:
+                raise ValidationError(f"Model parameter {name} already exists.")
+            if not isinstance(record, dict) or set(record) - {"value", "unit"} or "value" not in record:
+                raise ValidationError(f"Model parameter {name} needs a value and optional unit.")
+            value = _finite_number(record["value"], "Model parameter value")
+            unit = record.get("unit", "mm")
+            if unit not in {"mm", "deg", "unitless"}:
+                raise ValidationError("Model parameter unit must be mm, deg, or unitless.")
+            staged[name] = {"value": value, "unit": unit}
+        document.model_parameters.update(staged)
+        return {"parameters": staged}
+
+    @staticmethod
+    def _commit_staged_document(document: Document, staged: Document) -> None:
+        document.objects = staged.objects
+        document.model_parameters = staged.model_parameters
+        document.parameter_bindings = staged.parameter_bindings
+
+    def _set_model_parameter(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        name = command.get("name")
+        if not isinstance(name, str) or name not in document.model_parameters:
+            raise NotFoundError("Model parameter was not found.")
+        value = _finite_number(command.get("value"), "Model parameter value")
+        staged = deepcopy(document)
+        self._prepare_edge_references(staged)
+        staged.model_parameters[name]["value"] = value
+        changed_features: set[str] = set()
+        changed_sketches: set[str] = set()
+        by_id = {item["id"]: item for item in staged.objects}
+        values = self._model_parameter_values(staged)
+        changed_targets: set[str] = set()
+        resolved: list[tuple[dict[str, Any], str, float]] = []
+        for binding in staged.parameter_bindings:
+            result = evaluate_expression(binding["expression"], values)
+            target = by_id[binding["object_id"]]
+            parent, final = property_location(target, binding["path"])
+            if not math.isclose(float(parent[final]), result, rel_tol=0.0, abs_tol=1e-12):
+                resolved.append((target, binding["path"], result))
+        for target, path, result in resolved:
+            assign_property(target, path, result)
+            changed_targets.add(target["id"])
+            if target["type"] == "feature":
+                changed_features.add(target["id"])
+            elif target["type"] == "sketch":
+                changed_sketches.add(target["id"])
+            else:
+                sketch_id = target.get("sketch_id")
+                if isinstance(sketch_id, str):
+                    changed_sketches.add(sketch_id)
+        if progress is not None:
+            progress({"phase": "rebuild_model_parameters", "parameter": name,
+                      "changed_targets": len(changed_targets)})
+        self._rebuild_parameter_targets(staged, changed_features, changed_sketches, progress=progress)
+        staged.validate()
+        self._commit_staged_document(document, staged)
+        return {"name": name, "value": value, "unit": staged.model_parameters[name]["unit"],
+                "changed_object_ids": sorted(changed_targets)}
+
+    def _bind_model_parameter(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        object_id, path, expression = command.get("object_id"), command.get("path"), command.get("expression")
+        if not isinstance(object_id, str) or not isinstance(path, str) or not isinstance(expression, str):
+            raise ValidationError("Parameter binding needs object_id, path, and expression strings.")
+        staged = deepcopy(document)
+        self._prepare_edge_references(staged)
+        target = next((item for item in staged.objects if item.get("id") == object_id), None)
+        if target is None:
+            raise NotFoundError("Parameter binding target was not found.")
+        result = evaluate_expression(expression, self._model_parameter_values(staged))
+        parent, final = property_location(target, path)
+        parent[final] = result
+        staged.parameter_bindings = [binding for binding in staged.parameter_bindings
+                                     if (binding["object_id"], binding["path"]) != (object_id, path)]
+        staged.parameter_bindings.append({"object_id": object_id, "path": path,
+                                          "expression": expression})
+        if target["type"] == "feature":
+            source_id = target.get("source_body_id")
+            if isinstance(source_id, str):
+                self._rebuild_derived_features(staged, {source_id}, progress=progress)
+            else:
+                self._rebuild_bound_feature(staged, object_id, progress=progress)
+        else:
+            sketch_id = object_id if target["type"] == "sketch" else target.get("sketch_id")
+            if isinstance(sketch_id, str):
+                self._rebuild_changed_features(staged, {sketch_id}, progress=progress)
+        staged.validate()
+        self._commit_staged_document(document, staged)
+        return {"object_id": object_id, "path": path, "expression": expression, "value": result}
+
+    def _bind_model_parameters(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        bindings = command.get("bindings")
+        if not isinstance(bindings, list) or not bindings:
+            raise ValidationError("bindings must be a non-empty list.")
+        staged = deepcopy(document)
+        self._prepare_edge_references(staged)
+        by_id = {item["id"]: item for item in staged.objects}
+        values = self._model_parameter_values(staged)
+        replacements: list[tuple[dict[str, Any], str, float]] = []
+        next_bindings = list(staged.parameter_bindings)
+        seen: set[tuple[str, str]] = set()
+        for binding in bindings:
+            if not isinstance(binding, dict) or set(binding) != {"object_id", "path", "expression"}:
+                raise ValidationError("Each binding needs object_id, path, and expression.")
+            object_id, path, expression = binding["object_id"], binding["path"], binding["expression"]
+            if not all(isinstance(value, str) for value in (object_id, path, expression)):
+                raise ValidationError("Binding object_id, path, and expression must be strings.")
+            key = (object_id, path)
+            if key in seen:
+                raise ValidationError("A parameter binding target may occur only once per command.")
+            seen.add(key)
+            target = by_id.get(object_id)
+            if target is None:
+                raise NotFoundError("Parameter binding target was not found.")
+            result = evaluate_expression(expression, values)
+            parent, final = property_location(target, path)
+            replacements.append((target, path, result))
+            next_bindings = [item for item in next_bindings
+                             if (item["object_id"], item["path"]) != key]
+            next_bindings.append({"object_id": object_id, "path": path, "expression": expression})
+        for target, path, result in replacements:
+            assign_property(target, path, result)
+        staged.parameter_bindings = next_bindings
+        changed_features = {target["id"] for target, _, _ in replacements if target["type"] == "feature"}
+        changed_sketches = {target["id"] if target["type"] == "sketch" else target.get("sketch_id")
+                            for target, _, _ in replacements if target["type"] in {"sketch", "point", "circle", "ellipse"}}
+        changed_sketches.discard(None)
+        self._rebuild_parameter_targets(staged, changed_features, changed_sketches, progress=progress)
+        staged.validate()
+        self._commit_staged_document(document, staged)
+        return {"bindings": [{"object_id": target["id"], "path": path, "value": value}
+                              for target, path, value in replacements]}
+
+    def _rebuild_parameter_targets(
+        self, document: Document, feature_ids: set[str], sketch_ids: set[str], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
+        by_id = {item["id"]: item for item in document.objects}
+        features = [by_id[feature_id] for feature_id in feature_ids]
+        produced_bodies = {feature.get("body_id") for feature in features}
+        roots = [feature for feature in features if feature.get("source_body_id") not in produced_bodies]
+        # A changed root primitive regenerates its complete downstream chain, including changed sketches.
+        if any(feature.get("operation") == "create_box" for feature in roots):
+            root = next(feature for feature in roots if feature.get("operation") == "create_box")
+            self._rebuild_bound_feature(document, root["id"], progress=progress)
+            return
+        if sketch_ids:
+            self._rebuild_changed_features(document, sketch_ids, progress=progress)
+        feature_order = {item["id"]: index for index, item in enumerate(document.objects)}
+        for feature in sorted(roots, key=lambda item: feature_order[item["id"]]):
+            source_id = feature.get("source_body_id")
+            if isinstance(source_id, str):
+                self._rebuild_derived_features(document, {source_id}, progress=progress)
+            else:
+                self._rebuild_bound_feature(document, feature["id"], progress=progress)
+
+    def _prepare_edge_references(self, document: Document) -> None:
+        by_id = {item["id"]: item for item in document.objects}
+        from .semantic_selection import capture_edge_references
+        for feature in document.objects:
+            if feature.get("type") != "feature" or feature.get("operation") not in {"fillet_edges", "chamfer_edges"}:
+                continue
+            if feature.get("edge_references"):
+                continue
+            source = by_id.get(feature.get("source_body_id"))
+            if source is None or source.get("type") != "body":
+                raise ValidationError("Topology feature source body was not found.")
+            indices = feature.get("edge_indices")
+            if not isinstance(indices, list):
+                indices = (feature.get("parameters") or {}).get("edge_indices")
+            if not isinstance(indices, list) or not indices:
+                raise ValidationError("Topology feature edge indices are unavailable for stable rebuild.")
+            feature["edge_references"] = capture_edge_references(self.kernel, source["geometry"], indices)
+
+    def _insert_fillet_before_feature(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        upstream_id = command.get("upstream_feature_id")
+        downstream_id = command.get("downstream_feature_id")
+        source_body_id = command.get("source_body_id")
+        dependent_ids = command.get("dependent_feature_ids")
+        if (not all(isinstance(value, str) for value in (upstream_id, downstream_id, source_body_id))
+                or not isinstance(dependent_ids, list) or any(not isinstance(value, str) for value in dependent_ids)
+                or len(set(dependent_ids)) != len(dependent_ids)):
+            raise ValidationError("Fillet insertion needs feature/body IDs and a unique dependent feature list.")
+        radius = _number(command.get("radius"), "radius")
+        label = command.get("name", "Вставленное скругление")
+        if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+            raise ValidationError("Fillet name must be a non-empty string of at most 120 characters.")
+        staged = deepcopy(document)
+        self._prepare_edge_references(staged)
+        by_id = {item["id"]: item for item in staged.objects}
+        upstream, downstream = by_id.get(upstream_id), by_id.get(downstream_id)
+        source = by_id.get(source_body_id)
+        if (upstream is None or upstream.get("type") != "feature" or upstream.get("operation") != "boss"
+                or downstream is None or downstream.get("type") != "feature"
+                or downstream.get("operation") != "pocket_sketch"
+                or source is None or source.get("type") != "body"
+                or downstream.get("source_body_id") != source_body_id
+                or upstream.get("source_body_id") != downstream.get("body_id")):
+            raise ValidationError("Fillet insertion requires a boss currently after a pocket on the same body chain.")
+        boss_body = by_id.get(upstream.get("body_id"))
+        slot_body = by_id.get(downstream.get("body_id"))
+        if any(body is None or body.get("type") != "body" for body in (boss_body, slot_body)):
+            raise ValidationError("Fillet insertion source or downstream result body is missing.")
+        dependents = []
+        for feature_id in dependent_ids:
+            feature = by_id.get(feature_id)
+            if (feature is None or feature.get("type") != "feature"
+                    or feature.get("source_body_id") != boss_body["id"]):
+                raise ValidationError("Each dependent feature must currently consume the boss result body.")
+            dependents.append(feature)
+        if upstream_id in dependent_ids or downstream_id in dependent_ids:
+            raise ValidationError("Upstream and downstream features cannot also be listed as dependents.")
+
+        upstream["source_body_id"] = source_body_id
+        self._rebuild_bound_feature(staged, upstream_id, progress=progress)
+        parameters = upstream["parameters"]
+        origin, axis = parameters.get("origin"), parameters.get("axis")
+        diameter = parameters.get("diameter")
+        if (not isinstance(origin, list) or len(origin) != 3 or not isinstance(axis, list) or len(axis) != 3
+                or not isinstance(diameter, (int, float))):
+            raise ValidationError("Boss geometry lacks an analytic axis or diameter for root-edge selection.")
+        topology = self.kernel.topology(boss_body["geometry"])
+        edges = topology.get("edges")
+        if not isinstance(edges, list):
+            raise ValidationError("Boss topology does not expose edge metadata.")
+        root_edges = []
+        for edge in edges:
+            if (not isinstance(edge, dict) or edge.get("curve") != "circle"
+                    or not math.isclose(float(edge.get("radius", -1)), float(diameter) / 2,
+                                        rel_tol=0.0, abs_tol=1e-5)):
+                continue
+            edge_origin, edge_axis = edge.get("axis_origin"), edge.get("axis_direction")
+            if (not isinstance(edge_origin, list) or len(edge_origin) != 3
+                    or not isinstance(edge_axis, list) or len(edge_axis) != 3
+                    or any(abs(float(edge_origin[i]) - float(origin[i])) > 1e-5 for i in range(3))):
+                continue
+            axis_dot = abs(sum(float(edge_axis[i]) * float(axis[i]) for i in range(3)))
+            if axis_dot >= 1.0 - 1e-6:
+                root_edges.append(edge)
+        if len(root_edges) != 1 or type(root_edges[0].get("index")) is not int:
+            raise ValidationError("Boss base circle is not uniquely selectable on the uncut boss feature.")
+        edge_indices = [root_edges[0]["index"]]
+        geometry = self.kernel.create_fillet(boss_body["geometry"], edge_indices=edge_indices, radius=radius)
+        from .semantic_selection import capture_edge_references
+        edge_references = capture_edge_references(self.kernel, boss_body["geometry"], edge_indices)
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        fillet_body = {"id": body_id, "type": "body", "name": label.strip(),
+                       "feature_ids": [feature_id], "geometry": geometry}
+        fillet_feature = {"id": feature_id, "type": "feature", "operation": "fillet_edges",
+                          "body_id": body_id, "source_body_id": boss_body["id"],
+                          "edge_indices": edge_indices, "edge_references": edge_references,
+                          "edge_keys": [root_edges[0]["semantic_key"]],
+                          "parameters": {"radius": radius}, "geometry": geometry}
+        downstream["source_body_id"] = body_id
+        for dependent in dependents:
+            dependent["source_body_id"] = slot_body["id"]
+
+        ordered_feature_ids = [upstream_id, feature_id, downstream_id]
+        pair_objects = []
+        pair_ids = {upstream_id, feature_id, downstream_id}
+        for target_id in ordered_feature_ids:
+            target = fillet_feature if target_id == feature_id else by_id[target_id]
+            body = fillet_body if target_id == feature_id else by_id.get(target.get("body_id"))
+            if body is None or body.get("type") != "body":
+                raise ValidationError("Feature insertion could not locate its paired result body.")
+            pair_objects.extend([body, target])
+        original_ids = {item["id"] for item in staged.objects
+                        if item.get("type") == "feature" and item.get("id") in pair_ids}
+        body_ids = {by_id[target_id].get("body_id") for target_id in (upstream_id, downstream_id)}
+        body_ids.add(body_id)
+        selected_ids = original_ids | body_ids
+        insertion_index = min(index for index, item in enumerate(staged.objects) if item["id"] in selected_ids)
+        staged.objects = [item for item in staged.objects if item["id"] not in selected_ids]
+        staged.objects[insertion_index:insertion_index] = pair_objects
+        self._rebuild_derived_features(staged, {source_body_id}, progress=progress)
+        staged.validate()
+        self._commit_staged_document(document, staged)
+        return {"body_id": body_id, "feature_id": feature_id, "source_body_id": boss_body["id"],
+                "downstream_feature_id": downstream_id, "edge_indices": edge_indices,
+                "geometry": geometry}
+
+    def _rebuild_bound_feature(
+        self, document: Document, feature_id: str, *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
+        feature = next((item for item in document.objects
+                        if item.get("id") == feature_id and item.get("type") == "feature"), None)
+        if feature is None:
+            raise NotFoundError("Bound feature was not found.")
+        operation = feature.get("operation")
+        parameters = feature.get("parameters")
+        body = next((item for item in document.objects
+                     if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+        if body is None or not isinstance(parameters, dict):
+            raise ValidationError("Bound feature is missing its result body or parameters.")
+        if operation == "create_box":
+            geometry = self.kernel.create_box(**parameters)
+        elif operation in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "pad_sketch_to_body"}:
+            geometry = (self.kernel.create_swept_pipe(
+                open_path(document.objects, feature.get("source_sketch_id"))[1],
+                plane=open_path(document.objects, feature.get("source_sketch_id"))[0],
+                radius=parameters["radius"],
+            ) if operation == "sweep_sketch" else
+                self._profile_geometry(document, feature, parameters, progress=progress))
+        elif operation in {"boss", "hole", "linear_pattern_body", "circular_pattern_body"}:
+            source = next((item for item in document.objects
+                           if item.get("id") == feature.get("source_body_id") and item.get("type") == "body"), None)
+            if source is None:
+                raise ValidationError("Bound feature source body was not found.")
+            operation_id = {"linear_pattern_body": 6, "circular_pattern_body": 7,
+                            "hole": 9, "boss": 10}[operation]
+            if operation == "linear_pattern_body":
+                values = [float(parameters["count"]), *parameters["offset"]]
+            elif operation == "circular_pattern_body":
+                values = [float(parameters["count"]), *parameters["axis_origin"],
+                          *parameters["axis_direction"], parameters["angle_step_degrees"]]
+            else:
+                values = [*parameters["origin"], *parameters["axis"],
+                          parameters["diameter"], parameters["depth"]]
+            from .advanced_features import _advanced_native
+            geometry = _advanced_native(source["geometry"], operation_id, values)
+        else:
+            raise ValidationError(f"Model parameter binding is not yet supported for {operation!r} features.")
+        body["geometry"] = geometry
+        feature["geometry"] = geometry
+        self._rebuild_derived_features(document, {body["id"]}, progress=progress)
+
     def _create_metric_thread(
         self,
         document: Document,
@@ -2547,13 +2923,14 @@ class CommandSystem:
         profiles: list[list[dict[str, float]]] | None = None,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        source_sketch_id = feature.get("source_sketch_id") or parameters.get("source_sketch_id")
+        source_sketch_id = (feature.get("source_sketch_id") or parameters.get("source_sketch_id")
+                            or parameters.get("sketch_id"))
         operation = feature.get("operation")
-        if operation == "pad_sketch_to_body":
+        if operation in {"pad_sketch_to_body", "rib_from_sketch", "pocket_sketch"}:
             sketch = next((item for item in document.objects if item.get("id") == source_sketch_id
                            and item.get("type") == "sketch"), None)
             if sketch is None:
-                raise ValidationError("Pad feature source sketch is missing.")
+                raise ValidationError("Manufacturing feature source sketch is missing.")
             plane, profiles = closed_profiles(document.objects, source_sketch_id)
             depth = parameters["depth"]
             centered = parameters.get("centered", False)
@@ -2570,7 +2947,9 @@ class CommandSystem:
             source_body = next((item for item in document.objects if item.get("id") == feature.get("source_body_id")
                                 and item.get("type") == "body"), None)
             if source_body is None:
-                raise ValidationError("Pad feature source body is missing.")
+                raise ValidationError("Manufacturing feature source body is missing.")
+            if operation == "pocket_sketch":
+                return self.kernel.cut_solids(source_body["geometry"], tool)
             return self.kernel.fuse_profiles(source_body["geometry"], tool)
         if operation != "loft_sketches" and (profile is None or plane is None):
             spline_profile = closed_spline_profile(document.objects, source_sketch_id)
@@ -2741,7 +3120,11 @@ class CommandSystem:
             source_sketch_ids = feature.get("source_sketch_ids", [])
             if feature.get("source_sketch_id"):
                 source_sketch_ids = [feature["source_sketch_id"]]
+            elif feature.get("operation") in {"rib_from_sketch", "pocket_sketch"}:
+                sketch_id = (feature.get("parameters") or {}).get("sketch_id")
+                source_sketch_ids = [sketch_id] if isinstance(sketch_id, str) else []
             if (feature.get("operation") not in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches", "pad_sketch_to_body"}
+                    and feature.get("operation") not in {"rib_from_sketch", "pocket_sketch"}
                     or not changed_sketches.intersection(source_sketch_ids)):
                 continue
             if progress is not None:
@@ -2776,7 +3159,9 @@ class CommandSystem:
             operation = feature.get("operation")
             if operation in {"fillet_edges", "chamfer_edges"}:
                 sources = {feature.get("source_body_id")}
-            elif operation in {"linear_pattern_body", "circular_pattern_body", "hole", "boss", "pad_sketch_to_body"}:
+            elif operation in {"linear_pattern_body", "circular_pattern_body", "hole", "boss", "pad_sketch_to_body",
+                               "rib_from_sketch", "pocket_sketch",
+                               "through_hole", "counterbore_hole", "countersink_hole", "threaded_hole"}:
                 sources = {feature.get("source_body_id")}
             elif operation in {"fuse_bodies", "cut_bodies"}:
                 sources = {feature.get("base_body_id"), feature.get("tool_body_id")}
@@ -2789,21 +3174,39 @@ class CommandSystem:
                 raise ValidationError("Derived feature refers to a missing result body.")
             if progress is not None:
                 progress({"phase": "kernel_boolean_fuse" if operation == "fuse_bodies" else
-                          "kernel_boolean_cut" if operation == "cut_bodies" else "kernel_fillet"})
+                          "kernel_boolean_cut" if operation == "cut_bodies" else
+                          "kernel_fillet" if operation == "fillet_edges" else
+                          "kernel_chamfer" if operation == "chamfer_edges" else operation,
+                          "feature_id": feature.get("id"), "feature_name": body.get("name")})
             if operation == "fillet_edges":
                 source = by_id.get(feature.get("source_body_id"))
                 if source is None or source.get("type") != "body":
                     raise ValidationError("Fillet feature refers to a missing source body.")
+                edges = feature.get("edge_indices", [])
+                edges = self._resolve_feature_edges(feature, source["geometry"], edges)
+                feature["edge_indices"] = list(edges)
+                if progress is not None:
+                    topology_edges = self.kernel.topology(source["geometry"]).get("edges", [])
+                    selected_edges = [edge for edge in topology_edges
+                                      if isinstance(edge, dict) and edge.get("index") in set(edges)]
+                    progress({"phase": "kernel_fillet", "feature_id": feature["id"],
+                              "feature_name": body.get("name"), "resolved_edge_indices": list(edges),
+                              "resolved_edges": [{key: edge[key] for key in
+                                  ("index", "curve", "center", "length", "start", "end", "direction")
+                                  if key in edge} for edge in selected_edges]})
                 geometry = self.kernel.create_fillet(source["geometry"],
-                    edge_indices=feature["edge_indices"], radius=feature["parameters"]["radius"])
+                    edge_indices=edges, radius=feature["parameters"]["radius"])
             elif operation == "chamfer_edges":
                 source = by_id.get(feature.get("source_body_id"))
                 if source is None or source.get("type") != "body":
                     raise ValidationError("Chamfer feature refers to a missing source body.")
                 from .advanced_features import _advanced_native
+                edges = feature["parameters"].get("edge_indices", [])
+                edges = self._resolve_feature_edges(feature, source["geometry"], edges)
+                feature["parameters"]["edge_indices"] = list(edges)
                 geometry = _advanced_native(source["geometry"], 2,
-                    [feature["parameters"]["distance"]], feature["parameters"]["edge_indices"])
-            elif operation == "pad_sketch_to_body":
+                    [feature["parameters"]["distance"]], edges)
+            elif operation in {"pad_sketch_to_body", "rib_from_sketch", "pocket_sketch"}:
                 geometry = self._profile_geometry(document, feature, feature["parameters"], progress=progress)
             elif operation in {"linear_pattern_body", "circular_pattern_body", "hole", "boss"}:
                 source = by_id.get(feature.get("source_body_id"))
@@ -2823,6 +3226,39 @@ class CommandSystem:
                               parameters["diameter"], parameters["depth"]]
                 from .advanced_features import _advanced_native
                 geometry = _advanced_native(source["geometry"], operation_id, values)
+            elif operation in {"through_hole", "counterbore_hole", "countersink_hole", "threaded_hole"}:
+                source = by_id.get(feature.get("source_body_id"))
+                if source is None or source.get("type") != "body":
+                    raise ValidationError("Hole feature refers to a missing source body.")
+                from .agent_authoring import _agent_native, _cylinder_cut
+                from .advanced_features import _advanced_native
+                parameters = feature["parameters"]
+                origin, axis = parameters["origin"], parameters["axis"]
+                if operation == "through_hole":
+                    geometry, _, _ = _cylinder_cut(self.kernel, source["geometry"], origin=origin,
+                        axis=axis, diameter=parameters["diameter"], through=True, depth=None,
+                        label="Through hole")
+                elif operation == "counterbore_hole":
+                    geometry, _, _ = _cylinder_cut(self.kernel, source["geometry"], origin=origin,
+                        axis=axis, diameter=parameters["hole_diameter"], through=parameters["through"],
+                        depth=parameters.get("hole_depth"), label="Counterbore main hole")
+                    geometry = _advanced_native(geometry, 9, [*origin, *axis,
+                        parameters["counterbore_diameter"], parameters["counterbore_depth"]])
+                elif operation == "countersink_hole":
+                    geometry, _, _ = _cylinder_cut(self.kernel, source["geometry"], origin=origin,
+                        axis=axis, diameter=parameters["hole_diameter"], through=parameters["through"],
+                        depth=parameters.get("hole_depth"), label="Countersink main hole")
+                    sink_depth = (parameters["countersink_diameter"] - parameters["hole_diameter"]) / 2.0 / math.tan(math.radians(parameters["angle_degrees"]) / 2.0)
+                    geometry = _agent_native(geometry, 1, [*origin, *axis,
+                        parameters["countersink_diameter"], parameters["hole_diameter"], sink_depth])
+                else:
+                    from .agent_authoring import _rotation_from_z
+                    thread = self.kernel.create_metric_thread(major_diameter=parameters["major_diameter"],
+                        pitch=parameters["pitch"], length=parameters["length"],
+                        handedness=parameters["handedness"])
+                    rotation_axis, angle, _ = _rotation_from_z(axis)
+                    tool = _agent_native(thread, 2, [*rotation_axis, angle, *origin])
+                    geometry = self.kernel.cut_solids(source["geometry"], tool)
             elif operation == "fuse_bodies":
                 base, tool = by_id.get(feature.get("base_body_id")), by_id.get(feature.get("tool_body_id"))
                 if any(item is None or item.get("type") != "body" for item in (base, tool)):
@@ -2836,6 +3272,21 @@ class CommandSystem:
             body["geometry"] = geometry
             feature["geometry"] = geometry
             rebuilt_bodies.add(body["id"])
+
+    def _resolve_feature_edges(
+        self, feature: dict[str, Any], geometry: dict[str, Any], fallback_indices: list[int],
+    ) -> list[int]:
+        if feature.get("edge_keys"):
+            from .semantic_selection import _resolve
+            try:
+                return _resolve(self.kernel, geometry, keys=feature["edge_keys"], collection="edges")
+            except ValidationError:
+                pass
+        references = feature.get("edge_references")
+        if references:
+            from .semantic_selection import resolve_edge_references
+            return resolve_edge_references(self.kernel, geometry, references)
+        return fallback_indices
 
     def _fuse_bodies(
         self, document: Document, command: dict[str, Any], *,

@@ -1,6 +1,6 @@
 # Advanced solid modeling
 
-CADYX extends the v7 document/command contract with OCCT-backed operations intended for complex molded housings, machined parts, and similar single-part models. The browser remains observation-only; agents author these features through `cadyx_execute_command` / the Agent API.
+CADYX extends the v8 document/command contract with OCCT-backed operations intended for complex molded housings, machined parts, and similar single-part models. The browser remains observation-only; agents author these features through `cadyx_execute_command` / the Agent API.
 
 ## Direct section loft workflow
 
@@ -17,7 +17,7 @@ Use `create_section_sketch` to create editable XZ sections at explicit Y offsets
 - `variable_fillet_edges`: linear start/end-radius fillet.
 - Existing `fillet_edges` remains available for constant-radius fillets.
 
-Topology inspection includes faces as well as edges. Each reported face/edge carries a `semantic_key` generated from current geometric properties. Advanced commands accept `face_keys` / `edge_keys` as alternatives to raw indices. These keys are guards against blind index selection, not permanent topological names: after an upstream geometry change, inspect topology again before applying a downstream topology-selected feature.
+Topology inspection includes faces as well as edges. Each reported face/edge carries a `semantic_key` generated from current geometric properties. Advanced commands accept `face_keys` / `edge_keys` as alternatives to raw indices. These keys are guards against blind index selection, not permanent topological names. Saved fillet/chamfer features also retain geometric edge references so dependent rebuilds can resolve the changed edge and refresh the stored indices. Inspect topology again when authoring a new topology-selected feature; unresolved or ambiguous references fail the atomic rebuild. See [Document Model v8](../.codex/docs/document-model-v8.md#rebuilding-topology-selected-edge-features).
 
 The topology response is also the agent's measurement surface. In addition to body volume, surface area, bounds, and topology counts, current native runtimes report analytic data where OCCT exposes it:
 

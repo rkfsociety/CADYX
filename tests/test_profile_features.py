@@ -82,7 +82,7 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertGreater(handle["geometry"]["volume"], 0)
 
         document = self.core.inspect_project(self.project_id)["document"]
-        self.assertEqual(document["version"], 7)
+        self.assertEqual(document["version"], 8)
         self.assertEqual(Document.from_dict(document).to_dict(), document)
         features = [item for item in document["objects"] if item["type"] == "feature"]
         self.assertEqual([item["operation"] for item in features], ["revolve_sketch", "extrude_sketch"])

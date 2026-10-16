@@ -11,6 +11,7 @@ from typing import Any
 
 from .errors import ValidationError
 from .migrations import DOCUMENT_VERSION, migrate_document
+from .model_parameters import evaluate_expression, property_location
 from .sketches import typed_id, validate_sketches
 
 
@@ -33,6 +34,8 @@ class Document:
     version: int = DOCUMENT_VERSION
     revision: int = 0
     objects: list[dict[str, Any]] = field(default_factory=list)
+    model_parameters: dict[str, dict[str, Any]] = field(default_factory=dict)
+    parameter_bindings: list[dict[str, str]] = field(default_factory=list)
 
     @classmethod
     def create(cls) -> Document:
@@ -51,6 +54,8 @@ class Document:
             version=value["version"],
             revision=value.get("revision", 0),
             objects=value.get("objects", []),
+            model_parameters=value.get("model_parameters", {}),
+            parameter_bindings=value.get("parameter_bindings", []),
         )
         document.validate()
         return document
@@ -61,6 +66,8 @@ class Document:
             "version": self.version,
             "revision": self.revision,
             "objects": deepcopy(self.objects),
+            "model_parameters": deepcopy(self.model_parameters),
+            "parameter_bindings": deepcopy(self.parameter_bindings),
         }
 
     def validate(self) -> None:
@@ -71,6 +78,18 @@ class Document:
             raise ValidationError("Document revision must be a non-negative integer.")
         if not isinstance(self.objects, list):
             raise ValidationError("Document objects must be a list.")
+        if not isinstance(self.model_parameters, dict):
+            raise ValidationError("Document model_parameters must be an object.")
+        for name, parameter in self.model_parameters.items():
+            if (not isinstance(name, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None
+                    or not isinstance(parameter, dict) or set(parameter) != {"value", "unit"}
+                    or isinstance(parameter.get("value"), bool)
+                    or not isinstance(parameter.get("value"), (int, float))
+                    or not math.isfinite(parameter["value"])
+                    or not isinstance(parameter.get("unit"), str) or not parameter["unit"]):
+                raise ValidationError("Document model parameter definitions are invalid.")
+        if not isinstance(self.parameter_bindings, list):
+            raise ValidationError("Document parameter_bindings must be a list.")
 
         seen: set[str] = set()
         for item in self.objects:
@@ -248,6 +267,25 @@ class Document:
                                    for key in topology)
                             or topology["solid_count"] != 1 or topology["face_count"] == 0):
                         raise ValidationError("STEP source B-rep topology metrics are invalid.")
+        binding_targets: set[tuple[str, str]] = set()
+        for binding in self.parameter_bindings:
+            if (not isinstance(binding, dict) or set(binding) != {"object_id", "path", "expression"}
+                    or not all(isinstance(binding.get(key), str)
+                               for key in ("object_id", "path", "expression"))):
+                raise ValidationError("Parameter binding records are invalid.")
+            target_id, path = binding["object_id"], binding["path"]
+            target = by_id.get(target_id)
+            if target is None:
+                raise ValidationError("Parameter binding target was not found.")
+            target_key = (target_id, path)
+            if target_key in binding_targets:
+                raise ValidationError("Parameter binding targets must be unique.")
+            binding_targets.add(target_key)
+            parent, final = property_location(target, path)
+            current = parent[final]
+            expected = evaluate_expression(binding["expression"], self.model_parameters)
+            if not math.isclose(float(current), expected, rel_tol=1e-12, abs_tol=1e-12):
+                raise ValidationError("Bound model parameter value is out of date with its expression.")
         validate_sketches(self.objects)
 
 
