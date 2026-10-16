@@ -61,6 +61,19 @@ Priority order when trade-offs are necessary:
 6. reasonable model simplicity;
 7. construction speed.
 
+## Efficient execution
+
+Keep the workflow lean by eliminating repeated discovery and avoidable rework, not by weakening the model or its checks:
+
+1. Complete the required read-only startup checks in one discovery pass. From the prompt and references, settle the part class, datum, driving dimensions, natural base feature, and intended feature tree before the first mutation; ask only about a material ambiguity that cannot be inferred safely.
+2. Check capabilities once for the planned command sequence. Recheck only after a host/API change, an unexpected command result, or evidence that the capability set changed. Do not repeat unchanged project, history, or viewport reads just to narrate progress.
+3. Use the shortest standard parametric feature chain that preserves design intent: one analytic profile where appropriate, one base operation, a shared seed plus pattern/mirror for repeats, and late finishing features. Reuse returned object IDs and section groups instead of reconstructing inputs or creating duplicate geometry.
+4. Make each mutation a deliberate logical feature and include the current `expected_revision`. Avoid speculative geometry, redundant constraints, separate features for details that belong to one standard operation, and camera adjustments during construction unless inspection needs them.
+5. Inspect at meaningful boundaries (base form, major feature groups, final model). Check transient topology only immediately before an edge-based operation. Do not inspect after every small command when no decision depends on it, but stop and correct the first unexpected result before adding dependent features.
+6. Reserve final viewport framing and the complete requirement-to-feature review for the end. Perform only the required robustness perturbations that are safe for the model's editable parameters, then restore exact nominal values and verify the final state.
+
+The speed target is fewer discovery/rework/observation steps. Never omit a required feature, combine unrelated design intent, or skip a verification that could reveal an incorrect model merely to reduce command count.
+
 ## Engineering planning and verification
 
 Apply these rules in addition to the modeling doctrine. They define how to plan the feature tree, manage dimensions and prove that the resulting model behaves like a robust parametric CAD model rather than only looking correct at one revision.
