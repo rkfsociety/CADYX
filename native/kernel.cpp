@@ -24,6 +24,10 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <IntCurvesFace_ShapeIntersector.hxx>
+#include <GeomLProp_SLProps.hxx>
+#include <Precision.hxx>
 #include <Message_ProgressIndicator.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
@@ -82,6 +86,7 @@
 #include <string>
 #include <stdexcept>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #define API extern "C" __declspec(dllexport)
@@ -1599,6 +1604,107 @@ API char* cadyx_brep_preservation(const unsigned char* reference_data, size_t re
     CopyError(error, capacity, exception.what());
   } catch (...) {
     CopyError(error, capacity, "Unknown native preservation failure.");
+  }
+  return nullptr;
+}
+
+API char* cadyx_brep_thickness(const unsigned char* data, size_t size,
+                              NativeProgressCallback progress_callback, void* progress_user_data,
+                              char* error, size_t capacity) noexcept {
+  try {
+    const TopoDS_Solid solid = ExtractSingleSolid(ReadImportedBrep(data, size));
+    if (!BRepCheck_Analyzer(solid).IsValid())
+      throw std::runtime_error("Thickness sampling requires a valid closed solid.");
+    Bnd_Box bounds;
+    BRepBndLib::Add(solid, bounds, false);
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+    bounds.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    const double diagonal = gp_Pnt(xmin, ymin, zmin).Distance(gp_Pnt(xmax, ymax, zmax));
+    if (!std::isfinite(diagonal) || diagonal <= Precision::Confusion())
+      throw std::runtime_error("Thickness sampling requires non-degenerate solid bounds.");
+    const double mesh_deflection = diagonal / 500.0;
+    const double start_offset = std::max(Precision::Confusion() * 10.0, diagonal * 1e-8);
+    BRepMesh_IncrementalMesh mesher(solid, mesh_deflection, false, 0.25, true);
+    if (!mesher.IsDone()) throw std::runtime_error("OCCT could not triangulate the solid for thickness sampling.");
+    NativeProgressIndicator progress(progress_callback, progress_user_data);
+    Message_ProgressScope whole(progress.Start(), "wall_thickness_sampling", 100.0);
+    IntCurvesFace_ShapeIntersector intersector;
+    intersector.Load(solid, std::max(Precision::Confusion(), diagonal * 1e-9));
+    BRepClass3d_SolidClassifier classifier(solid);
+    double minimum = std::numeric_limits<double>::infinity();
+    gp_Pnt minimum_point, minimum_opposite;
+    size_t samples = 0, hits = 0, face_count = 0;
+    for (TopExp_Explorer count(solid, TopAbs_FACE); count.More(); count.Next()) ++face_count;
+    size_t face_index = 0;
+    for (TopExp_Explorer explorer(solid, TopAbs_FACE); explorer.More(); explorer.Next(), ++face_index) {
+      const TopoDS_Face face = TopoDS::Face(explorer.Current());
+      TopLoc_Location location;
+      const auto triangulation = BRep_Tool::Triangulation(face, location);
+      if (!triangulation.IsNull()) {
+        TopLoc_Location surface_location;
+        const auto surface = BRep_Tool::Surface(face, surface_location);
+        for (int node = 1; node <= triangulation->NbNodes(); ++node) {
+          if (!triangulation->HasUVNodes()) continue;
+          const gp_Pnt2d uv = triangulation->UVNode(node);
+          GeomLProp_SLProps props(surface, uv.X(), uv.Y(), 1, Precision::Confusion());
+          if (!props.IsNormalDefined()) continue;
+          gp_Dir outward = props.Normal();
+          outward.Transform(surface_location.Transformation());
+          if (face.Orientation() == TopAbs_REVERSED) outward.Reverse();
+          const gp_Pnt point = props.Value().Transformed(surface_location.Transformation());
+          const gp_Pnt start = point.Translated(gp_Vec(outward).Reversed() * start_offset);
+          classifier.Perform(start, start_offset * 0.1);
+          if (classifier.State() != TopAbs_IN) continue;
+          gp_Dir inward = outward.Reversed();
+          intersector.Perform(gp_Lin(start, inward), 0.0, diagonal * 2.0);
+          ++samples;
+          if (!intersector.IsDone())
+            throw std::runtime_error("OCCT ray intersection failed during thickness sampling.");
+          double nearest = std::numeric_limits<double>::infinity();
+          gp_Pnt opposite;
+          for (int hit = 1; hit <= intersector.NbPnt(); ++hit) {
+            const double along = intersector.WParameter(hit);
+            if (along > Precision::Confusion() && along < nearest) {
+              nearest = along;
+              opposite = intersector.Pnt(hit);
+            }
+          }
+          if (std::isfinite(nearest)) {
+            ++hits;
+            const double thickness = nearest + start_offset;
+            if (thickness < minimum) {
+              minimum = thickness;
+              minimum_point = point;
+              minimum_opposite = opposite;
+            }
+          }
+        }
+      }
+      progress.SetPhase("sample_surface_normals");
+      progress.Report(face_count ? 0.95 * static_cast<double>(face_index + 1) / face_count : 0.95);
+    }
+    if (samples == 0 || hits == 0 || !std::isfinite(minimum))
+      throw std::runtime_error("OCCT found no valid inward-normal thickness samples.");
+    progress.SetPhase("completed");
+    progress.Report(1.0, true);
+    std::ostringstream result;
+    result.imbue(std::locale::classic());
+    result << std::setprecision(17)
+           << "{\"minimum_sampled_thickness\":" << minimum
+           << ",\"mesh_deflection\":" << mesh_deflection
+           << ",\"start_offset\":" << start_offset
+           << ",\"sample_count\":" << samples
+           << ",\"hit_count\":" << hits
+           << ",\"point\":[" << minimum_point.X() << ',' << minimum_point.Y() << ',' << minimum_point.Z() << ']'
+           << ",\"opposite_point\":[" << minimum_opposite.X() << ',' << minimum_opposite.Y() << ',' << minimum_opposite.Z() << ']'
+           << '}';
+    return CopyResult(result.str());
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString() ? exception.GetMessageString() : "OCCT thickness sampling failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown native thickness sampling failure.");
   }
   return nullptr;
 }

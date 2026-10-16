@@ -447,6 +447,23 @@ def make_request_handler(
                 )
                 self._json(200, result)
                 return
+            if agent_api and len(parts) == 3 and parts[1:] == ["validations", "thickness"]:
+                required = {"body_id", "expected_revision", "minimum_thickness", "tolerance"}
+                if body is None or not required.issubset(body) or set(body) - required - {"persist"}:
+                    raise ValidationError(
+                        "Thickness validation requires body_id, expected_revision, minimum_thickness, and tolerance."
+                    )
+                result = core.observe_agent_operation(
+                    project_id, "Измеряет минимальную толщину стенки",
+                    lambda progress: core.validate_body_thickness(
+                        project_id, body["body_id"], body["expected_revision"],
+                        body["minimum_thickness"], body["tolerance"],
+                        progress=progress, persist=body.get("persist", False),
+                    ),
+                    reports_progress=True,
+                )
+                self._json(200, result)
+                return
             if agent_api and len(parts) == 2 and parts[1] == "rename":
                 if body is None or set(body) != {"name"}:
                     raise ValidationError("Project rename requires only a name field.")

@@ -763,6 +763,73 @@ class CadyxCore:
         }
         return self._maybe_persist_validation(project_id, "body_preservation", result, persist)
 
+    def validate_body_thickness(
+        self, project_id: str, body_id: str, expected_revision: Any,
+        minimum_thickness: Any, tolerance: Any, *,
+        progress: Callable[[str, float], None] | None = None, persist: bool = False,
+    ) -> dict[str, Any]:
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        self._check_revision(document, expected_revision)
+        if type(persist) is not bool:
+            raise ValidationError("persist must be a boolean.")
+        if not isinstance(body_id, str) or not body_id:
+            raise ValidationError("Thickness validation needs a body id.")
+
+        def nonnegative(value: Any, name: str, *, positive: bool = False) -> float:
+            message = f"{name} must be a finite {'positive' if positive else 'non-negative'} number."
+            if type(value) not in (int, float):
+                raise ValidationError(message)
+            try:
+                number = float(value)
+            except (OverflowError, ValueError):
+                raise ValidationError(message) from None
+            if not math.isfinite(number) or number < 0 or (positive and number == 0):
+                raise ValidationError(message)
+            return number
+
+        required = nonnegative(minimum_thickness, "minimum_thickness", positive=True)
+        allowed_tolerance = nonnegative(tolerance, "tolerance")
+        bodies = {item["id"]: item for item in document.objects if item.get("type") == "body"}
+        if body_id not in bodies:
+            raise ValidationError("Thickness validation needs an existing body.")
+        geometry = bodies[body_id]["geometry"]
+        measured = self.kernel.sample_minimum_thickness(geometry, progress=progress)
+        metric_names = ("minimum_sampled_thickness", "mesh_deflection", "start_offset")
+        metrics = {name: measured.get(name) for name in metric_names}
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+               for value in metrics.values()) or metrics["minimum_sampled_thickness"] <= 0:
+            raise ValidationError("OCCT returned invalid wall-thickness sampling metrics.")
+        sample_count, hit_count = measured.get("sample_count"), measured.get("hit_count")
+        if (type(sample_count) is not int or type(hit_count) is not int
+                or sample_count <= 0 or hit_count <= 0 or hit_count > sample_count):
+            raise ValidationError("OCCT returned invalid wall-thickness sample counts.")
+        for name in ("point", "opposite_point"):
+            point = measured.get(name)
+            if (not isinstance(point, list) or len(point) != 3
+                    or any(type(value) not in (int, float) or not math.isfinite(value) for value in point)):
+                raise ValidationError("OCCT returned invalid wall-thickness witness points.")
+        # A low sampled chord proves a local thin-wall condition; passing sparse
+        # normal samples cannot prove a global minimum, so the other outcome is untested.
+        status = ("fail" if metrics["minimum_sampled_thickness"] + allowed_tolerance < required
+                  else "untested")
+        result = {
+            "body_id": body_id,
+            "revision": document.revision,
+            "geometry_sha256": geometry_sha256({"body_id": body_id, "geometry": geometry}),
+            "method": "OCCT_inward_normal_ray_sample",
+            "coordinate_frame": "global_xyz",
+            "units": "model_units",
+            **metrics,
+            "sample_count": sample_count,
+            "hit_count": hit_count,
+            "minimum_thickness": required,
+            "tolerance": allowed_tolerance,
+            "witness_points": {"surface": measured["point"], "opposite": measured["opposite_point"]},
+            "status": status,
+        }
+        return self._maybe_persist_validation(project_id, "body_thickness", result, persist)
+
     def _maybe_persist_validation(
         self, project_id: str, kind: str, result: dict[str, Any], persist: bool,
     ) -> dict[str, Any]:

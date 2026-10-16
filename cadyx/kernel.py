@@ -80,6 +80,11 @@ class GeometryKernel(Protocol):
         self, reference: dict[str, Any], candidate: dict[str, Any],
     ) -> dict[str, Any]: ...
 
+    def sample_minimum_thickness(
+        self, geometry: dict[str, Any], *,
+        progress: Callable[[str, float], None] | None = None,
+    ) -> dict[str, Any]: ...
+
     def validate(self, geometry: dict[str, Any]) -> None: ...
 
     def tessellate(self, geometry: dict[str, Any]) -> dict[str, Any]: ...
@@ -764,6 +769,17 @@ class OCCTKernelAdapter:
         candidate_brep, _ = native.export_geometry(candidate)
         return native.brep_preservation(reference_brep, candidate_brep)
 
+    def sample_minimum_thickness(
+        self, geometry: dict[str, Any], *,
+        progress: Callable[[str, float], None] | None = None,
+    ) -> dict[str, Any]:
+        if isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1":
+            raise ValidationError("Wall-thickness sampling requires an editable OCCT B-rep, not a triangle mesh.")
+        self.validate(geometry)
+        native = NativeKernel()
+        brep, _ = native.export_geometry(geometry)
+        return native.brep_thickness(brep, progress=progress)
+
     def validate(self, geometry: dict[str, Any]) -> None:
         try:
             descriptor = json.dumps(geometry, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1072,6 +1088,12 @@ class PrimitiveKernelAdapter:
         self, reference: dict[str, Any], candidate: dict[str, Any],
     ) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not measure preserved solid volume.")
+
+    def sample_minimum_thickness(
+        self, geometry: dict[str, Any], *,
+        progress: Callable[[str, float], None] | None = None,
+    ) -> dict[str, Any]:
+        raise ValidationError("The primitive demo kernel does not measure solid wall thickness.")
 
     def create_extruded_profile(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not build extruded B-reps.")

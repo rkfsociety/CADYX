@@ -151,6 +151,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_validate_body_dimensions", "description": "Read-only axis-aligned bounding-box dimension check bound to an exact saved revision and geometry hash; optionally persist the result.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING, "expected_revision": _INTEGER, "expected_dimensions": {"type": "object", "properties": {"x": _NUMBER, "y": _NUMBER, "z": _NUMBER}, "required": ["x", "y", "z"], "additionalProperties": False}, "tolerance": {"type": "number", "minimum": 0}, "persist": {"type": "boolean"}}, ["project_id", "body_id", "expected_revision", "expected_dimensions", "tolerance"])},
     {"name": "cadyx_validate_body_clearance", "description": "Read-only OCCT minimum-distance and common-volume check for two B-rep bodies, bound to expected_revision and a combined geometry hash; classifies interference, streams progress through agent.activity events, and can persist the result.", "inputSchema": _schema({"project_id": _STRING, "first_body_id": _STRING, "second_body_id": _STRING, "expected_revision": _INTEGER, "minimum_clearance": {"type": "number", "minimum": 0}, "tolerance": {"type": "number", "minimum": 0}, "persist": {"type": "boolean"}}, ["project_id", "first_body_id", "second_body_id", "expected_revision", "minimum_clearance", "tolerance"])},
     {"name": "cadyx_validate_body_preservation", "description": "Compare a reference and candidate solid using OCCT common volume; reports overlapping, lost, and added volume in model units cubed, with pass/fail/untested against the maximum permitted loss and tolerance, bound to a saved revision and geometry hash.", "inputSchema": _schema({"project_id": _STRING, "reference_body_id": _STRING, "candidate_body_id": _STRING, "expected_revision": _INTEGER, "maximum_lost_volume": {"type": "number", "minimum": 0}, "tolerance": {"type": "number", "minimum": 0}, "persist": {"type": "boolean"}}, ["project_id", "reference_body_id", "candidate_body_id", "expected_revision", "maximum_lost_volume", "tolerance"])},
+    {"name": "cadyx_validate_body_thickness", "description": "Sample inward-normal rays at triangulated B-rep surface nodes and report the smallest measured wall chord. A sampled chord below the requested minimum reports fail; otherwise status is untested because sampling cannot prove the global minimum. Revision/hash bound; can persist the result.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING, "expected_revision": _INTEGER, "minimum_thickness": {"type": "number", "exclusiveMinimum": 0}, "tolerance": {"type": "number", "minimum": 0}, "persist": {"type": "boolean"}}, ["project_id", "body_id", "expected_revision", "minimum_thickness", "tolerance"])},
     {"name": "cadyx_list_validation_records", "description": "List recent durable validation records for a project without changing its document revision.", "inputSchema": _schema({"project_id": _STRING, "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, ["project_id"])},
     {"name": "cadyx_get_viewport", "description": "Read validated viewport scene data for the saved project revision.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_get_viewport_image", "description": "Get the saved model's viewport PNG as an MCP image the model can inspect.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
@@ -283,6 +284,14 @@ class MCPApplication:
                 "candidate_body_id": args["candidate_body_id"],
                 "expected_revision": args["expected_revision"],
                 "maximum_lost_volume": args["maximum_lost_volume"],
+                "tolerance": args["tolerance"],
+                "persist": args.get("persist", False),
+            })
+        if name == "cadyx_validate_body_thickness":
+            return self.api.post(self._project(args["project_id"], "/validations/thickness"), {
+                "body_id": args["body_id"],
+                "expected_revision": args["expected_revision"],
+                "minimum_thickness": args["minimum_thickness"],
                 "tolerance": args["tolerance"],
                 "persist": args.get("persist", False),
             })
