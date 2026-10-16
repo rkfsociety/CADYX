@@ -86,6 +86,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <limits>
+#include <unordered_set>
 #include <vector>
 
 #define API extern "C" __declspec(dllexport)
@@ -1131,20 +1132,22 @@ TopoDS_Solid ExtractSingleSolid(const TopoDS_Shape& shape) {
 }
 
 TopoDS_Shape MakeFillet(const TopoDS_Shape& source, const int* edge_indices, size_t edge_count, double radius) {
-  if (!edge_indices || edge_count == 0 || edge_count > 128 || !std::isfinite(radius) || radius <= 0)
+  if (!edge_indices || edge_count == 0 || !std::isfinite(radius) || radius <= 0)
     throw std::runtime_error("Fillet needs selected edges and a positive radius.");
   EnsureOneSolid(source, "Fillet");
   NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> mapped_edges;
   TopExp::MapShapes(source, TopAbs_EDGE, mapped_edges);
+  if (edge_count > static_cast<size_t>(mapped_edges.Extent()))
+    throw std::runtime_error("Fillet edge selection exceeds the body edge count.");
   BRepFilletAPI_MakeFillet operation(source);
-  std::vector<int> selected;
+  std::unordered_set<int> selected;
+  selected.reserve(edge_count);
   for (size_t i = 0; i < edge_count; ++i) {
     const int index = edge_indices[i];
     if (index < 0 || index >= mapped_edges.Extent())
       throw std::runtime_error("Fillet edge index is outside the current body topology.");
-    if (std::find(selected.begin(), selected.end(), index) != selected.end())
+    if (!selected.insert(index).second)
       throw std::runtime_error("Fillet edge indices must be unique.");
-    selected.push_back(index);
     operation.Add(radius, TopoDS::Edge(mapped_edges.FindKey(index + 1)));
   }
   operation.Build();

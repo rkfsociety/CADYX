@@ -2933,10 +2933,10 @@ class CommandSystem:
         if source_id in self._consumed_body_ids(document):
             raise ValidationError("A consumed solid body cannot be filleted again.")
         edges = command.get("edge_indices")
-        if (not isinstance(edges, list) or not 1 <= len(edges) <= 128
+        if (not isinstance(edges, list) or not edges
                 or any(type(index) is not int or index < 0 for index in edges)
                 or len(set(edges)) != len(edges)):
-            raise ValidationError("edge_indices must contain 1 to 128 distinct non-negative edge indices.")
+            raise ValidationError("edge_indices must contain distinct non-negative edge indices.")
         radius = _number(command.get("radius"), "radius")
         name = command.get("name", f"Скругление · {source.get('name', 'Тело')}")
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:

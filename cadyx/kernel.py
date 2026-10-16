@@ -765,10 +765,10 @@ class OCCTKernelAdapter:
         self, base: dict[str, Any], *, edge_indices: list[int], radius: float,
     ) -> dict[str, Any]:
         self.validate(base)
-        if (not isinstance(edge_indices, list) or not 1 <= len(edge_indices) <= 128
+        if (not isinstance(edge_indices, list) or not edge_indices
                 or any(type(index) is not int or index < 0 for index in edge_indices)
                 or len(set(edge_indices)) != len(edge_indices)):
-            raise ValidationError("Fillet needs 1 to 128 distinct non-negative edge indices.")
+            raise ValidationError("Fillet needs distinct non-negative edge indices.")
         radius = _positive_amount(radius, "radius")
         geometry = {"kernel": self.kernel_id, "kind": "filleted_solid", "base": base,
                     "edge_indices": list(edge_indices), "radius": radius}
@@ -1068,8 +1068,7 @@ class OCCTKernelAdapter:
                 or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "filleted_solid"):
             raise ValidationError("Filleted solid geometry descriptor is invalid.")
         self.validate(geometry.get("base"))
-        if (not isinstance(geometry.get("edge_indices"), list)
-                or not 1 <= len(geometry["edge_indices"]) <= 128
+        if (not isinstance(geometry.get("edge_indices"), list) or not geometry["edge_indices"]
                 or any(type(index) is not int or index < 0 for index in geometry["edge_indices"])
                 or len(set(geometry["edge_indices"])) != len(geometry["edge_indices"])):
             raise ValidationError("Fillet edge indices are invalid.")

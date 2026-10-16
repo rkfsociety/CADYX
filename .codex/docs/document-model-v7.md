@@ -471,7 +471,7 @@ Optional `persist: true` stores the result in the
 validation record sidecar described above. This is a volume-overlap check; it
 does not certify local surface deviation or geometric equivalence.
 
-`fillet_edges` accepts `body_id`, 1–128 distinct `edge_indices`, a positive
+`fillet_edges` accepts `body_id`, one or more distinct `edge_indices`, a positive
 `radius`, and optional `name`. It creates a new body with an OCCT rolling-edge
 fillet and can round the mug rim, base, or a fused handle junction.
 `set_parameter` can edit its radius. The `filleted_solid` descriptor retains the

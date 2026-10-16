@@ -178,7 +178,7 @@ class Document:
                     if source_body_id == item["body_id"] or by_id.get(source_body_id, {}).get("type") != "body":
                         raise ValidationError("Fillet feature must reference a different existing source body.")
                     edges = item.get("edge_indices")
-                    if (not isinstance(edges, list) or not edges or len(edges) > 128
+                    if (not isinstance(edges, list) or not edges
                             or any(type(index) is not int or index < 0 for index in edges)
                             or len(set(edges)) != len(edges)):
                         raise ValidationError("Fillet feature edge indices are invalid.")
