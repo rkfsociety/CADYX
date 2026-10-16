@@ -216,7 +216,9 @@
         canvas.height = height;
       }
       context.clearRect(0, 0, width, height);
-      if (!geometry) {
+      if (!geometry || (!geometry.positions.length
+          && !(geometry.lines || []).length && !(geometry.points || []).length)) {
+        drawEmptyScene(width, height, dpr);
         onRender?.();
         return;
       }
@@ -342,6 +344,64 @@
       if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cameraOrientation);
       if (showViewCube) drawViewCube(width, dpr, cameraOrientation);
       onRender?.();
+    }
+
+    function drawEmptyScene(width, height, dpr) {
+      if (!showWorldAxes) {
+        if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cameraOrientation);
+        if (showViewCube) drawViewCube(width, dpr, cameraOrientation);
+        return;
+      }
+      const radius = 4.8;
+      const scale = Math.min(width, height) * 0.43 * zoom / radius;
+      const extent = Math.hypot(width, height) / (2 * scale) * 1.15;
+      const center = [0, 0, 0];
+      const project = (worldX, worldY, worldZ) => {
+        const x = worldX - center[0];
+        const y = worldY - center[1];
+        const z = worldZ - center[2];
+        const right = cameraOrientation[0] * x + cameraOrientation[1] * y + cameraOrientation[2] * z;
+        const up = cameraOrientation[6] * x + cameraOrientation[7] * y + cameraOrientation[8] * z;
+        return [width / 2 + right * scale, height / 2 - up * scale];
+      };
+      const targetSpacing = 34 / scale;
+      const magnitude = 10 ** Math.floor(Math.log10(targetSpacing));
+      const normalized = targetSpacing / magnitude;
+      const gridStep = (normalized < 1.5 ? 1 : normalized < 3.5 ? 2 : normalized < 7.5 ? 5 : 10) * magnitude;
+      const majorStep = gridStep * 5;
+      const lineCount = Math.ceil(extent / gridStep);
+
+      context.save();
+      context.lineWidth = dpr;
+      for (let index = -lineCount; index <= lineCount; index += 1) {
+        const coordinate = index * gridStep;
+        const major = index % 5 === 0;
+        context.strokeStyle = major ? "rgba(117, 145, 153, 0.25)" : "rgba(117, 145, 153, 0.12)";
+        context.beginPath();
+        context.moveTo(...project(coordinate, -extent, 0));
+        context.lineTo(...project(coordinate, extent, 0));
+        context.moveTo(...project(-extent, coordinate, 0));
+        context.lineTo(...project(extent, coordinate, 0));
+        context.stroke();
+      }
+
+      context.font = `500 ${9 * dpr}px Segoe UI, Arial, sans-serif`;
+      context.textBaseline = "middle";
+      context.textAlign = "center";
+      context.fillStyle = "rgba(190, 206, 211, 0.72)";
+      const labelCount = Math.floor(extent / majorStep);
+      for (let index = -labelCount; index <= labelCount; index += 1) {
+        if (!index) continue;
+        const coordinate = index * majorStep;
+        const xPoint = project(coordinate, 0, 0);
+        const yPoint = project(0, coordinate, 0);
+        context.fillText(String(coordinate), xPoint[0], xPoint[1] + 11 * dpr);
+        context.fillText(String(coordinate), yPoint[0] + 12 * dpr, yPoint[1]);
+      }
+      context.restore();
+      drawWorldAxes(project, extent * 0.72, dpr);
+      if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cameraOrientation);
+      if (showViewCube) drawViewCube(width, dpr, cameraOrientation);
     }
 
     function createSnapshotBlob() {

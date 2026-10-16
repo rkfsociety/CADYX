@@ -60,6 +60,10 @@ const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
 const modelViewer = window.CadyxViewport.createViewer($("#model-preview"), {
   showViewCube: true, wireframe: true, onRender: queueViewportSnapshot,
 });
+const emptyViewportGeometry = {
+  positions: new Float64Array(0), triangles: new Uint32Array(0), lines: [], points: [],
+  bounds: { min: [0, 0, 0], max: [0, 0, 0] },
+};
 const orthographicViewers = [
   { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: 0 } },
   { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: Math.PI / 2, pitch: 0 } },
@@ -958,9 +962,9 @@ function showProjectLoading(name) {
   renderValidationRecords([]);
   $("#validation-records-status").textContent = "";
   if (!renderedSceneKey?.startsWith(`${selectedProjectId}:`)) {
-    $("#model-preview").hidden = true;
-    $("#viewport-empty").hidden = false;
-    $("#viewport-empty").querySelector("p").textContent = "Загружаю последнюю сохранённую модель…";
+    renderedSceneProjectId = null;
+    renderedSceneRevision = null;
+    modelViewer.load(emptyViewportGeometry, { reset: true });
   }
 }
 
@@ -1567,13 +1571,6 @@ async function refreshDetail() {
     if (pendingViewportTransition?.projectId === projectId) pendingViewportTransition = null;
     renderedSceneKey = key;
   }
-  const hasVisibleGeometry = visibleObjects.some((item) => item.type === "body")
-    || visibleSketchId !== null && visibleObjects.some((item) => item.sketch_id === visibleSketchId);
-  if (!hasVisibleGeometry) {
-    $("#viewport-empty").querySelector("p").textContent = "Модель ещё не построена";
-  }
-  $("#viewport-empty").hidden = hasVisibleGeometry;
-  $("#model-preview").hidden = !hasVisibleGeometry;
   renderedSceneProjectId = projectId;
   renderedSceneRevision = scene.revision;
   modelViewer.render();
