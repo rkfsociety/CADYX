@@ -1460,3 +1460,42 @@ API char* cadyx_fuse_profiles(
   }
   return nullptr;
 }
+
+API char* cadyx_brep_distance(const unsigned char* first_data, size_t first_size,
+                              const unsigned char* second_data, size_t second_size,
+                              char* error, size_t capacity) noexcept {
+  try {
+    const TopoDS_Solid first = ExtractSingleSolid(ReadImportedBrep(first_data, first_size));
+    const TopoDS_Solid second = ExtractSingleSolid(ReadImportedBrep(second_data, second_size));
+    if (!BRepCheck_Analyzer(first).IsValid() || !BRepCheck_Analyzer(second).IsValid())
+      throw std::runtime_error("Clearance measurement requires valid closed solids.");
+    constexpr double deflection = 1e-7;
+    BRepExtrema_DistShapeShape distance(first, second, deflection);
+    if (!distance.IsDone()) distance.Perform();
+    if (!distance.IsDone() || distance.NbSolution() < 1)
+      throw std::runtime_error("OCCT could not compute minimum distance between the solids.");
+    const double value = distance.Value();
+    if (!std::isfinite(value) || value < 0)
+      throw std::runtime_error("OCCT returned an invalid solid distance.");
+    const gp_Pnt& first_point = distance.PointOnShape1(1);
+    const gp_Pnt& second_point = distance.PointOnShape2(1);
+    std::ostringstream result;
+    result.imbue(std::locale::classic());
+    result << std::setprecision(17)
+           << "{\"minimum_distance\":" << value
+           << ",\"deflection\":" << deflection
+           << ",\"inner_solution\":" << (distance.InnerSolution() ? "true" : "false")
+           << ",\"solution_count\":" << distance.NbSolution()
+           << ",\"point_on_first\":[" << first_point.X() << ',' << first_point.Y() << ',' << first_point.Z() << ']'
+           << ",\"point_on_second\":[" << second_point.X() << ',' << second_point.Y() << ',' << second_point.Z() << "]}";
+    return CopyResult(result.str());
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString()
+        ? exception.GetMessageString() : "OCCT solid distance failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown native distance failure.");
+  }
+  return nullptr;
+}

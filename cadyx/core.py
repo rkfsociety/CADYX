@@ -576,6 +576,81 @@ class CadyxCore:
             "checks": checks,
         }
 
+    def validate_body_clearance(
+        self, project_id: str, first_body_id: str, second_body_id: str,
+        expected_revision: Any, minimum_clearance: Any, tolerance: Any,
+    ) -> dict[str, Any]:
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        self._check_revision(document, expected_revision)
+        if (not isinstance(first_body_id, str) or not first_body_id
+                or not isinstance(second_body_id, str) or not second_body_id
+                or first_body_id == second_body_id):
+            raise ValidationError("Clearance validation needs two distinct body ids.")
+
+        def nonnegative_number(value: Any, name: str) -> float:
+            message = f"{name} must be a finite non-negative number."
+            if type(value) not in (int, float):
+                raise ValidationError(message)
+            try:
+                normalized = float(value)
+            except (OverflowError, ValueError):
+                raise ValidationError(message) from None
+            if not math.isfinite(normalized) or normalized < 0:
+                raise ValidationError(message)
+            return normalized
+
+        required = nonnegative_number(minimum_clearance, "minimum_clearance")
+        allowed_tolerance = nonnegative_number(tolerance, "tolerance")
+        bodies = {item["id"]: item for item in document.objects if item.get("type") == "body"}
+        if first_body_id not in bodies or second_body_id not in bodies:
+            raise ValidationError("Clearance validation needs two existing bodies.")
+        first_geometry = bodies[first_body_id]["geometry"]
+        second_geometry = bodies[second_body_id]["geometry"]
+        measured = self.kernel.minimum_distance(first_geometry, second_geometry)
+        distance = measured.get("minimum_distance")
+        deflection = measured.get("deflection")
+        inner_solution = measured.get("inner_solution")
+        if (type(distance) not in (int, float) or not math.isfinite(distance) or distance < 0
+                or type(deflection) not in (int, float) or not math.isfinite(deflection) or deflection <= 0
+                or type(inner_solution) is not bool
+                or type(measured.get("solution_count")) is not int or measured["solution_count"] < 1):
+            raise ValidationError("OCCT returned invalid solid-clearance metrics.")
+        witness_points = {}
+        for name in ("point_on_first", "point_on_second"):
+            point = measured.get(name)
+            if (not isinstance(point, list) or len(point) != 3
+                    or any(type(value) not in (int, float) or not math.isfinite(value) for value in point)):
+                raise ValidationError("OCCT returned invalid solid-clearance witness points.")
+            witness_points[name] = [float(value) for value in point]
+        if inner_solution:
+            status = "fail"
+        elif distance <= deflection:
+            status = "untested"
+        elif distance + allowed_tolerance >= required:
+            status = "pass"
+        else:
+            status = "fail"
+        geometry_hash = geometry_sha256({
+            "first": {"body_id": first_body_id, "geometry": first_geometry},
+            "second": {"body_id": second_body_id, "geometry": second_geometry},
+        })
+        return {
+            "body_ids": [first_body_id, second_body_id],
+            "revision": document.revision,
+            "geometry_sha256": geometry_hash,
+            "method": "OCCT_BRepExtrema_DistShapeShape",
+            "coordinate_frame": "global_xyz",
+            "units": "model_units",
+            "minimum_clearance": required,
+            "measured_distance": distance,
+            "tolerance": allowed_tolerance,
+            "deflection": deflection,
+            "inner_solution": inner_solution,
+            **witness_points,
+            "status": status,
+        }
+
     def rotate_view(
         self, project_id: str, *, yaw_delta: float, pitch_delta: float = 0.0,
         zoom_factor: float = 1.0, duration_ms: int = 1200,

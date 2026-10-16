@@ -85,6 +85,12 @@ class NativeKernel:
                         ctypes.c_char_p, ctypes.c_size_t,
                     ]
                     library.cadyx_brep_export.restype = ctypes.c_void_p
+                    library.cadyx_brep_distance.argtypes = [
+                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                        ctypes.c_char_p, ctypes.c_size_t,
+                    ]
+                    library.cadyx_brep_distance.restype = ctypes.c_void_p
                     library.cadyx_step_export.argtypes = [
                         ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
                         ctypes.POINTER(ctypes.c_size_t), ctypes.c_char_p, ctypes.c_size_t,
@@ -193,6 +199,20 @@ class NativeKernel:
 
     def export_geometry(self, geometry):
         return self._geometry_graph(geometry, export=True)
+
+    def minimum_brep_distance(self, first, second):
+        first_buffer = self._export_brep_buffer(first)
+        second_buffer = self._export_brep_buffer(second)
+        error = ctypes.create_string_buffer(1024)
+        result = self.library.cadyx_brep_distance(
+            first_buffer, len(first), second_buffer, len(second), error, len(error),
+        )
+        if not result:
+            raise ValidationError(error.value.decode("utf-8", errors="replace"))
+        try:
+            return json.loads(ctypes.string_at(result).decode("utf-8"))
+        finally:
+            self.library.cadyx_free(result)
 
     def _geometry_graph(self, geometry, *, mesh=False, topology=False, export=False):
         nodes = []

@@ -71,6 +71,8 @@ class GeometryKernel(Protocol):
 
     def metrics(self, geometry: dict[str, Any]) -> dict[str, Any]: ...
 
+    def minimum_distance(self, first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]: ...
+
     def validate(self, geometry: dict[str, Any]) -> None: ...
 
     def tessellate(self, geometry: dict[str, Any]) -> dict[str, Any]: ...
@@ -728,6 +730,17 @@ class OCCTKernelAdapter:
             "volume", "surface_area", "bounds", "topology", "brep_valid",
         )}
 
+    def minimum_distance(self, first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+        if any(isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1"
+               for geometry in (first, second)):
+            raise ValidationError("Minimum solid clearance requires editable OCCT B-rep bodies, not triangle meshes.")
+        self.validate(first)
+        self.validate(second)
+        native = NativeKernel()
+        first_brep, _ = native.export_geometry(first)
+        second_brep, _ = native.export_geometry(second)
+        return native.minimum_brep_distance(first_brep, second_brep)
+
     def validate(self, geometry: dict[str, Any]) -> None:
         try:
             descriptor = json.dumps(geometry, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1025,6 +1038,9 @@ class PrimitiveKernelAdapter:
         )
         if geometry != expected:
             raise ValidationError("Saved geometry descriptor is inconsistent.")
+
+    def minimum_distance(self, first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any]:
+        raise ValidationError("The primitive demo kernel does not measure solid clearance.")
 
     def create_extruded_profile(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not build extruded B-reps.")

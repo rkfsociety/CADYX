@@ -423,6 +423,17 @@ errors, overall and per-axis `pass`/`fail` status, the document revision, the
 not establish oriented feature dimensions, wall thickness, clearance, or fit.
 It does not acquire an edit lease or change the document.
 
+`POST /api/v1/agent/projects/{project_id}/validations/clearance` checks two
+distinct valid OCCT solid bodies against a requested minimum surface distance.
+Supply `first_body_id`, `second_body_id`, `expected_revision`,
+`minimum_clearance`, and an allowed shortfall `tolerance`, all lengths in model
+units. The result includes the OCCT minimum distance, witness points, calculation
+deflection, combined geometry hash, and `pass`, `fail`, or `untested` status.
+Containment is a failure. A distance at or below the calculation deflection is
+`untested`, because a zero result alone does not distinguish touching from
+partial interference. Triangle meshes are unsupported. This check does not
+acquire an edit lease or change the document.
+
 `fillet_edges` accepts `body_id`, 1–128 distinct `edge_indices`, a positive
 `radius`, and optional `name`. It creates a new body with an OCCT rolling-edge
 fillet and can round the mug rim, base, or a fused handle junction.

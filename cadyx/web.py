@@ -398,6 +398,22 @@ def make_request_handler(
                 )
                 self._json(200, result)
                 return
+            if agent_api and len(parts) == 3 and parts[1:] == ["validations", "clearance"]:
+                if body is None or set(body) != {
+                    "first_body_id", "second_body_id", "expected_revision", "minimum_clearance", "tolerance",
+                }:
+                    raise ValidationError(
+                        "Clearance validation requires both body ids, expected_revision, minimum_clearance, and tolerance."
+                    )
+                result = core.observe_agent_operation(
+                    project_id, "Измеряет зазор между телами",
+                    lambda: core.validate_body_clearance(
+                        project_id, body["first_body_id"], body["second_body_id"],
+                        body["expected_revision"], body["minimum_clearance"], body["tolerance"],
+                    ),
+                )
+                self._json(200, result)
+                return
             if agent_api and len(parts) == 2 and parts[1] == "rename":
                 if body is None or set(body) != {"name"}:
                     raise ValidationError("Project rename requires only a name field.")

@@ -116,6 +116,7 @@ def agent_api_capabilities() -> dict[str, Any]:
             {"method": "GET", "path": "/api/v1/agent/capabilities", "description": "This read-only route discovery and command parameter guide."},
             {"method": "GET", "path": "/api/v1/agent/projects/{id}/topology?body_id=...", "description": "Current editable B-rep topology; refresh after upstream edits."},
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/validations/dimensions", "description": "Read-only axis-aligned bounding-box dimension check bound to expected_revision and geometry SHA-256; values and tolerance use model units."},
+            {"method": "POST", "path": "/api/v1/agent/projects/{id}/validations/clearance", "description": "Read-only OCCT minimum-distance check for two valid B-rep solids, bound to expected_revision and a combined geometry SHA-256; touching/near-zero distance is untested and containment fails."},
             {"method": "GET", "path": "/api/v1/agent/projects/{id}/viewport[.png]", "description": "Read-only scene or model image; PNG is returned as image content by MCP."},
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/viewport/camera", "description": "Animate browser camera without document mutation."},
             {"method": "GET|POST", "path": "/api/v1/agent/projects/{id}/dashboard", "description": "Read/report workflow; reports do not mutate the CAD document."},
