@@ -35,6 +35,7 @@ struct Options {
     std::filesystem::path q_file;
     double disparity_scale = 0.0;
     int frame_count = 1;
+    bool list_modes = false;
 };
 
 std::string Hresult(HRESULT hr);
@@ -81,6 +82,7 @@ void CheckHr(HRESULT hr, const char* action) {
 void PrintUsage() {
     std::cout << "Capture Y16 frames and reproject the first frame through a supplied Q.bin.\n"
               << "Usage: CaptureY16.exe --out-prefix PATH --q-file PATH --disparity-scale NUMBER [--frames N]\n"
+              << "       CaptureY16.exe --list-modes\n"
               << "The scale is explicit because the raw-to-disparity mapping is not calibrated yet.\n";
 }
 
@@ -92,6 +94,7 @@ Options ParseOptions(int argc, wchar_t** argv) {
             PrintUsage();
             std::exit(0);
         }
+        if (argument == L"--list-modes") { options.list_modes = true; continue; }
         if (i + 1 >= argc) {
             throw std::runtime_error("Missing value after a command-line option.");
         }
@@ -113,11 +116,39 @@ Options ParseOptions(int argc, wchar_t** argv) {
             throw std::runtime_error("Unknown command-line option.");
         }
     }
+    if (options.list_modes) return options;
     if (options.output_prefix.empty() || options.q_file.empty() || options.disparity_scale <= 0.0 ||
         !std::isfinite(options.disparity_scale) || options.frame_count < 1 || options.frame_count > 1000) {
         throw std::runtime_error("--out-prefix, --q-file and a positive --disparity-scale are required.");
     }
     return options;
+}
+
+bool IsY16(REFGUID subtype);
+ComPtr<IMFActivate> FindDepthCamera();
+
+void ListNativeModes() {
+    ComPtr<IMFActivate> activation = FindDepthCamera();
+    ComPtr<IMFMediaSource> source;
+    CheckHr(activation->ActivateObject(IID_PPV_ARGS(&source)), "Activate depth camera");
+    ComPtr<IMFSourceReader> reader;
+    CheckHr(MFCreateSourceReaderFromMediaSource(source.Get(), nullptr, &reader), "Create mode-list reader");
+    for (DWORD i = 0; i < 64; ++i) {
+        ComPtr<IMFMediaType> type;
+        const HRESULT hr = reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, i, &type);
+        if (hr == MF_E_NO_MORE_TYPES) break;
+        CheckHr(hr, "Enumerate native media type");
+        GUID subtype{}; UINT32 width = 0, height = 0; UINT32 numerator = 0, denominator = 0;
+        CheckHr(type->GetGUID(MF_MT_SUBTYPE, &subtype), "Read media subtype");
+        CheckHr(MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &width, &height), "Read media dimensions");
+        const HRESULT rate_hr = MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, &numerator, &denominator);
+        std::wcout << L"mode " << i << L": " << width << L"x" << height << L", subtype="
+                   << subtype.Data1 << L", fps=";
+        if (SUCCEEDED(rate_hr) && denominator) std::wcout << static_cast<double>(numerator) / denominator;
+        else std::wcout << L"unknown";
+        std::wcout << (IsY16(subtype) ? L", Y16" : L"") << L"\n";
+    }
+    source->Shutdown();
 }
 
 bool IsY16(REFGUID subtype) {
@@ -406,6 +437,7 @@ int wmain(int argc, wchar_t** argv) {
     try {
         const Options options = ParseOptions(argc, argv);
         MediaFoundationRuntime runtime;
+        if (options.list_modes) { ListNativeModes(); return 0; }
         const auto q = ReadQMatrix(options.q_file);
         std::vector<LONGLONG> timestamps;
         const auto started = std::chrono::steady_clock::now();

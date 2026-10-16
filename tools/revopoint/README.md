@@ -29,6 +29,14 @@ The command writes `frame.raw`, `frame.ply`, and `frame.json` side by side. It r
 
 For a continuous capture-rate measurement, add `--frames 120`. The camera stays open for the sequence; the utility saves the packed frames to `frame_burst.raw`, records Media Foundation timestamps in `frame_timestamps.csv`, and reports both timestamp-derived and wall-clock rates. The PLY remains a preview of the first frame. On the connected device, a 120-frame run produced 4.53 fps by media timestamps; this is a measured result for the selected 640×400 Y16 UVC mode, not the vendor's complete scan pipeline.
 
+List the camera's advertised native modes with:
+
+```powershell
+& .\tools\revopoint\build\CaptureY16.exe --list-modes
+```
+
+The connected camera advertises Y16 at 640×400, 1280×800, and 640×800, each with nominal 5, 10, and 15 fps modes. The current capture selects the first 640×400 Y16 mode (nominally 15 fps); measured delivery was lower, so the remaining resolutions and explicit frame-rate selection need benchmarking before concluding the sensor cannot reach 10 fps.
+
 The raw-to-disparity scale `256` is a provisional value from the first live capture. It has not been validated against a known object dimension, so treat the PLY scale as unverified. The utility captures one camera pose; it does not track motion, align multiple frames, fuse a full scan, or create a watertight mesh. The scanner's exact product model is not established by its generic USB camera names.
 
 Keep each capture prefix unique. The original Y16 frame is preserved beside the derived PLY so later calibration work can use the same input.
