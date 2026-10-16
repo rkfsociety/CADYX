@@ -554,6 +554,39 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .primary-grid[data-view="analysis"] > #comparison-panel,
 .primary-grid[data-view="manufacturing"] > #manufacturing-panel,
 .primary-grid[data-view="projects"] > #projects-panel { border-radius: 8px; }
+.primary-grid[data-view="analysis"] > #comparison-panel {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  grid-template-rows: 36px minmax(170px, 42%) minmax(180px, 1fr);
+}
+.comparison-stage { display: grid; min-height: 0; grid-template-rows: auto auto minmax(80px, 1fr); overflow: hidden; }
+.comparison-stage > p { margin: 0; padding: 6px 12px; color: var(--muted); font-size: 11px; }
+.validation-records { display: grid; min-height: 0; grid-template-rows: 38px minmax(0, 1fr); border-top: 1px solid var(--line); }
+.validation-records-heading { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; }
+.validation-records-heading h3 { margin: 0; color: var(--text); font: 600 12px var(--ui-font); }
+.validation-records-heading span { color: var(--dim); font: 10px var(--mono); }
+.validation-records-list { display: grid; min-height: 0; align-content: start; gap: 8px; overflow: auto; padding: 10px 12px 14px; }
+.validation-record { display: grid; min-width: 0; grid-template-columns: minmax(150px, .8fr) minmax(190px, 1.4fr) minmax(180px, 1fr); align-items: center; gap: 10px 16px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid #65737c; border-radius: 6px; background: linear-gradient(110deg, #131d23, #10171c); }
+.validation-record[data-status="pass"] { border-left-color: #55c49d; }
+.validation-record[data-status="fail"] { border-left-color: #f27668; }
+.validation-record[data-status="untested"] { border-left-color: #e4ac62; }
+.validation-record-title { display: grid; min-width: 0; gap: 5px; }
+.validation-record-title strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.validation-record-title span { color: var(--dim); font: 10px var(--mono); }
+.validation-record-status { justify-self: start; padding: 3px 7px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font: 700 9px var(--mono); letter-spacing: .04em; }
+.validation-record[data-status="pass"] .validation-record-status { border-color: #347c66; color: #77d8b6; background: #10241f; }
+.validation-record[data-status="fail"] .validation-record-status { border-color: #85453c; color: #ff9589; background: #2a1514; }
+.validation-record[data-status="untested"] .validation-record-status { border-color: #76572f; color: #efbd74; background: #251c10; }
+.validation-record-summary { min-width: 0; color: #d3dce0; font: 11px/1.5 var(--ui-font); }
+.validation-record-time { color: var(--dim); font: 10px/1.5 var(--mono); text-align: right; }
+.validation-record[data-stale="true"] .validation-record-title > span:not(.validation-record-status)::after { content: " · СТАРАЯ РЕВИЗИЯ"; color: #e4ac62; }
+.validation-records-empty { margin: 0; padding: 18px 12px; color: var(--dim); font-size: 12px; }
+@media (max-width: 900px) {
+  .validation-record { grid-template-columns: minmax(130px, .8fr) minmax(160px, 1.2fr); }
+  .validation-record-time { grid-column: 1 / -1; text-align: left; }
+}
 
 @media (max-width: 1180px) {
   :root { --cadyx-tree-width: 220px; --cadyx-inspector-width: 300px; }
@@ -701,7 +734,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                 <section id="folder-inspector" class="panel folder-inspector" aria-labelledby="folder-inspector-title" hidden><div class="panel-heading"><h2 id="folder-inspector-title">СОДЕРЖИМОЕ ПАПКИ</h2><span id="folder-inspector-count" class="panel-note">0 ФАЙЛОВ</span></div><div class="folder-inspector-content"><div class="folder-inspector-stat"><span>3D-МОДЕЛЕЙ</span><strong id="folder-model-file-count">0</strong></div><div class="folder-inspector-file"><span>ВЫБРАННЫЙ ФАЙЛ</span><strong id="folder-inspector-file-name">Не выбран</strong><dl><div><dt>ТИП</dt><dd id="folder-inspector-file-type">—</dd></div><div><dt>РАЗМЕР</dt><dd id="folder-inspector-file-size">—</dd></div></dl></div></div></section>
               </aside>
 
-              <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" tabindex="-1"><div class="panel-heading"><h2 id="comparison-title">СРАВНЕНИЕ С ОРИГИНАЛОМ</h2><span id="comparison-metrics" class="panel-note"></span></div><p id="comparison-description" class="comparison-description" hidden>Оригинал показан контуром · результат — поверхностью.</p><p id="comparison-empty" class="comparison-empty">Для этого проекта пока нет данных сравнения.</p><canvas id="comparison-preview" class="comparison-preview" aria-label="Совмещённые оригинал и изменённая модель" hidden></canvas></section>
+              <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" tabindex="-1"><div class="panel-heading"><h2 id="comparison-title">СРАВНЕНИЕ С ОРИГИНАЛОМ</h2><span id="comparison-metrics" class="panel-note"></span></div><div class="comparison-stage"><p id="comparison-description" class="comparison-description" hidden>Оригинал показан контуром · результат — поверхностью.</p><p id="comparison-empty" class="comparison-empty">Для этого проекта пока нет данных сравнения.</p><canvas id="comparison-preview" class="comparison-preview" aria-label="Совмещённые оригинал и изменённая модель" hidden></canvas></div><section class="validation-records" aria-labelledby="validation-records-title"><div class="validation-records-heading"><h3 id="validation-records-title">СОХРАНЁННЫЕ ПРОВЕРКИ</h3><span id="validation-records-status" role="status" aria-live="polite"></span><span id="validation-records-count">0</span></div><div id="validation-records-list" class="validation-records-list" role="list" aria-label="Результаты инженерных проверок"><p id="validation-records-empty" class="validation-records-empty">Сохранённых результатов пока нет.</p></div></section></section>
               <section id="manufacturing-panel" class="panel manufacturing-panel" aria-labelledby="manufacturing-title" hidden><div class="panel-heading"><h2 id="manufacturing-title">ПОДГОТОВКА ПРОИЗВОДСТВА</h2></div><div class="manufacturing-empty"><span class="empty-cube" aria-hidden="true">⌁</span><p>Данные для производства пока не подготовлены.</p><small>Для этого проекта пока нет траекторий инструмента или плана обработки.</small></div></section>
               <section id="projects-panel" class="panel projects-panel" aria-labelledby="projects-title" hidden><div class="panel-heading"><div><span class="panel-index">07</span><h2 id="projects-title">ПРОЕКТЫ</h2></div><div class="projects-toolbar"><label for="projects-sort">СОРТИРОВКА</label><select id="projects-sort" aria-label="Сортировка проектов"><option value="name">По имени</option><option value="modified-desc">Сначала недавно изменённые</option><option value="modified-asc">Сначала давно изменённые</option></select><button id="create-project-group" class="button" type="button">НОВАЯ ПАПКА</button><span id="projects-count" class="subtle-count" title="Количество проектов">0</span></div></div><div id="projects-list" class="projects-list" role="list" aria-label="Сохранённые проекты" tabindex="-1"></div><p id="projects-empty" class="projects-empty" hidden>В рабочей области пока нет сохранённых проектов.</p></section>
             </div>

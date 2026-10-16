@@ -214,6 +214,7 @@ let automaticUpdateInFlight = false;
 let automaticUpdatesUnavailable = false;
 let workspaceAvailabilityConnected = false;
 let filesAvailabilityConnected = false;
+let validationRecordsRequest = 0;
 const activitiesByProject = new Map();
 const activityRevisionsByProject = new Map();
 const agentLocksByProject = new Map();
@@ -356,6 +357,7 @@ $("#workspace-navigation").addEventListener("click", (event) => {
     $("#geometry-rows").focus({ preventScroll: true });
   } else if (view === "analysis") {
     $("#comparison-panel").focus({ preventScroll: true });
+    refreshValidationRecords().catch(showValidationRecordsError);
   } else if (view === "manufacturing") {
     $("#manufacturing-panel").focus({ preventScroll: true });
   } else if (view === "activity") {
@@ -428,6 +430,99 @@ function notify(message, isError = false) {
 
 function formatNumber(value) {
   return Number.isFinite(Number(value)) ? numberFormat.format(Number(value)) : "—";
+}
+
+const validationKindLabels = {
+  body_dimensions: "Габариты тела",
+  body_clearance: "Зазор между телами",
+  body_preservation: "Сохранность объёма",
+  body_thickness: "Толщина стенки",
+};
+const validationStatusLabels = { pass: "ПРОЙДЕНО", fail: "ОБНАРУЖЕНО", untested: "НЕ ДОКАЗАНО" };
+
+function validationRecordSummary(record) {
+  const result = record?.result || {};
+  const unit = "мод. ед.";
+  if (record?.kind === "body_dimensions") {
+    return Object.entries(result.checks || {}).map(([axis, check]) =>
+      `${axis.toUpperCase()} ${formatNumber(check.actual)} / ${formatNumber(check.expected)} ${unit}`
+    ).join(" · ") || "Размеры не указаны";
+  }
+  if (record?.kind === "body_clearance") {
+    return `Зазор ${formatNumber(result.measured_distance)} ${unit} · требуется ${formatNumber(result.minimum_clearance)} ${unit} · пересечение ${formatNumber(result.intersection_volume)} ${unit}³`;
+  }
+  if (record?.kind === "body_preservation") {
+    return `Потеряно ${formatNumber(result.lost_volume)} ${unit}³ · допустимо ${formatNumber(result.maximum_lost_volume)} ${unit}³`;
+  }
+  if (record?.kind === "body_thickness") {
+    return `Минимум ${formatNumber(result.minimum_sampled_thickness)} ${unit} · P10 ${formatNumber(result.p10_sampled_thickness)} ${unit} · нарушений ${formatNumber(result.violating_sample_count)} из ${formatNumber(result.hit_count)}`;
+  }
+  return "Сводка результата отсутствует";
+}
+
+function renderValidationRecords(records) {
+  const list = $("#validation-records-list");
+  const empty = $("#validation-records-empty");
+  const currentRevisionText = $("#document-revision").textContent.replace(/\s/g, "");
+  const currentRevision = /^\d+$/.test(currentRevisionText) ? Number(currentRevisionText) : null;
+  const safeRecords = Array.isArray(records) ? records : [];
+  list.replaceChildren(empty);
+  $("#validation-records-count").textContent = integerFormat.format(safeRecords.length);
+  empty.hidden = safeRecords.length > 0;
+  for (const record of safeRecords) {
+    const result = record?.result || {};
+    const revision = Number.isInteger(result.revision) ? result.revision : record.revision;
+    const stale = currentRevision !== null && Number.isInteger(revision) && revision !== currentRevision;
+    const status = ["pass", "fail", "untested"].includes(result.status) ? result.status : "untested";
+    const article = document.createElement("article");
+    article.className = "validation-record";
+    article.dataset.status = status;
+    article.dataset.stale = String(stale);
+    article.setAttribute("role", "listitem");
+
+    const title = document.createElement("div");
+    title.className = "validation-record-title";
+    const name = document.createElement("strong");
+    name.textContent = validationKindLabels[record?.kind] || "Инженерная проверка";
+    const details = document.createElement("span");
+    details.textContent = `РЕВИЗИЯ ${Number.isInteger(revision) ? integerFormat.format(revision) : "—"}`;
+    title.append(name, details);
+
+    const summary = document.createElement("div");
+    summary.className = "validation-record-summary";
+    summary.textContent = validationRecordSummary(record);
+
+    const time = document.createElement("time");
+    time.className = "validation-record-time";
+    const createdAt = new Date(record?.created_at || "");
+    if (Number.isFinite(createdAt.getTime())) {
+      time.dateTime = createdAt.toISOString();
+      time.textContent = formatActivityTimestamp(record.created_at);
+      time.title = createdAt.toLocaleString("ru-RU");
+    } else {
+      time.textContent = "Время неизвестно";
+    }
+
+    const badge = document.createElement("span");
+    badge.className = "validation-record-status";
+    badge.textContent = validationStatusLabels[status];
+    title.append(badge);
+    article.append(title, summary, time);
+    list.append(article);
+  }
+}
+
+async function refreshValidationRecords(projectId = selectedProjectId) {
+  if (!projectId || projectId.startsWith(FOLDER_SELECTION_PREFIX)) return;
+  const request = ++validationRecordsRequest;
+  const response = await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/validations?limit=50`, { cache: "no-store" });
+  if (request !== validationRecordsRequest || projectId !== selectedProjectId) return;
+  renderValidationRecords(response.records);
+  $("#validation-records-status").textContent = "";
+}
+
+function showValidationRecordsError() {
+  $("#validation-records-status").textContent = "Не удалось обновить";
 }
 
 function setApiConnectionStatus(online) {
@@ -859,6 +954,9 @@ function showProjectLoading(name) {
   $("#comparison-empty").hidden = false;
   $("#comparison-preview").hidden = true;
   $("#comparison-panel").dataset.available = "false";
+  validationRecordsRequest += 1;
+  renderValidationRecords([]);
+  $("#validation-records-status").textContent = "";
   if (!renderedSceneKey?.startsWith(`${selectedProjectId}:`)) {
     $("#model-preview").hidden = true;
     $("#viewport-empty").hidden = false;
@@ -1297,6 +1395,9 @@ async function checkAutomaticUpdates() {
       refreshAgentDashboardSnapshot(selectedProjectId)
         .catch((error) => notify(`Не удалось обновить очередь агента: ${error.message}`, true));
     }
+    if (selectedProjectId && !folder && primaryGrid.dataset.view === "analysis") {
+      await refreshValidationRecords(selectedProjectId).catch(showValidationRecordsError);
+    }
     updateWorkspaceControls();
   } catch (error) {
     setApiConnectionStatus(false);
@@ -1491,6 +1592,7 @@ async function refreshDetail() {
   }
   currentObjects = visibleObjects;
   renderObjectTree(visibleObjects);
+  refreshValidationRecords(projectId).catch(showValidationRecordsError);
 }
 
 async function refreshActivitySnapshot(projectId) {
