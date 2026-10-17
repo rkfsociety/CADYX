@@ -633,6 +633,9 @@ function renderCurrentProgress(dashboard, value, lock = null) {
       : activity?.state === "completed" || completedWorkflowWithoutJournal ? "completed" : "idle";
   const action = runningActivity?.action || (agentLeaseActive ? "Выполняет команду" : activity?.action)
     || (completedWorkflowWithoutJournal ? workflow.title : "Действий пока нет");
+  const actionText = !runningActivity && !agentLeaseActive && activity?.state === "completed" && action
+    ? `${action} · завершено`
+    : action;
   const shownTask = runningTask || activePhase || progressTask;
 
   $("#workflow-current").dataset.state = state;
@@ -644,8 +647,8 @@ function renderCurrentProgress(dashboard, value, lock = null) {
     : activity?.state === "failed" ? "ПОСЛЕДНЕЕ ДЕЙСТВИЕ · ОШИБКА"
       : completedWorkflowWithoutJournal ? "ЗАВЕРШЁННЫЙ ОТЧЁТ" : "ПОСЛЕДНЕЕ ДЕЙСТВИЕ";
   const actionElement = $("#activity-title");
-  actionElement.textContent = action;
-  actionElement.title = action;
+  actionElement.textContent = actionText;
+  actionElement.title = actionText;
 
   const taskRow = $("#workflow-task-row");
   const taskElement = $("#workflow-current-task");

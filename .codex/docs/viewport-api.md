@@ -191,6 +191,9 @@ verification, and mark failed work explicitly. Publish the plan before model
 changes so the agent has a stable execution sequence; the browser displays the
 latest actual action, current or most recently finished task, and the timestamped
 history of completed/failed actions without exposing future steps.
+When the latest action has completed and no action or agent lease is active,
+the progress strip appends `· завершено` to its action text so present-tense
+action names cannot be mistaken for work that is still running.
 
 `window.CadyxViewport.createViewer(canvas)` is shared with PLY preview and returns:
 
