@@ -210,7 +210,7 @@ class MCPApplication:
                     {"type": "text", "text": value[1]},
                     {"type": "image", "data": base64.b64encode(value[2]).decode("ascii"), "mimeType": value[3]},
                 ]}
-            return {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False, indent=2)}], "structuredContent": value}
+            return {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False, separators=(",", ":"))}], "structuredContent": value}
         except Exception as exc:
             return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
 
@@ -363,7 +363,11 @@ class MCPApplication:
             })
             return {"command_result": result, "revision": result.get("document", {}).get("revision"), "lease_released": True}
         except RuntimeError as exc:
-            # A dropped response is ambiguous. Ask Core to stop/fence this lease,
+            # A definite client-side API rejection cannot have committed this command.
+            # Do not turn ordinary validation/revision errors into agent safe-stops.
+            if isinstance(exc, APIError) and exc.status in {400, 401, 403, 404, 405, 409, 413, 415, 422}:
+                raise
+            # A dropped response or server failure is ambiguous. Fence the lease,
             # then require inspection; never issue the mutation a second time.
             try:
                 stopped = self.api.post(self._project(project_id, "/stop"), {"lease_id": lease_id})

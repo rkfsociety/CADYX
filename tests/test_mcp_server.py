@@ -13,7 +13,7 @@ from unittest.mock import patch
 from cadyx.capabilities import COMMAND_CAPABILITIES
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
-from cadyx.mcp_server import CadyxAPI, MCPApplication, TOOLS, handle_message
+from cadyx.mcp_server import APIError, CadyxAPI, MCPApplication, TOOLS, handle_message
 from cadyx.web import CadyxHTTPServer, make_request_handler
 
 
@@ -344,15 +344,46 @@ class CadyxMCPServerTests(unittest.TestCase):
 
     def test_errors_keep_saved_document_and_free_the_lease(self) -> None:
         project_id = self._create_project()
-        invalid = self.app.call_tool("cadyx_execute_command", {
-            "project_id": project_id,
-            "expected_revision": 0,
-            "command": {"type": "not_a_command"},
-        })
+        with patch.object(self.app.api, "post", wraps=self.app.api.post) as post:
+            invalid = self.app.call_tool("cadyx_execute_command", {
+                "project_id": project_id,
+                "expected_revision": 0,
+                "command": {"type": "not_a_command"},
+            })
         self.assertTrue(invalid["isError"])
+        self.assertFalse(any(call.args[0].endswith("/stop") for call in post.call_args_list),
+                         "A definite 4xx rejection must not trigger agent safe-stop.")
         detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
         self.assertEqual(detail["document"]["revision"], 0)
         self.assertEqual(detail["lock"]["state"], "FREE")
+
+    def test_server_error_still_fences_ambiguous_command(self) -> None:
+        project_id = self._create_project()
+        original_post = self.app.api.post
+
+        def fail_command(path: str, body: dict):
+            if path.endswith("/commands"):
+                raise APIError(500, {"error": "INTERNAL_ERROR", "message": "simulated server failure"})
+            return original_post(path, body)
+
+        with patch.object(self.app.api, "post", side_effect=fail_command):
+            result = self.app.call_tool("cadyx_execute_command", {
+                "project_id": project_id,
+                "expected_revision": 0,
+                "command": {"type": "create_box", "width": 10, "height": 8, "depth": 4},
+            })
+        self.assertTrue(result["isError"])
+        self.assertIn("safely stopped/validated", result["content"][0]["text"])
+        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(detail["document"]["revision"], 0)
+        self.assertEqual(detail["lock"]["state"], "FREE")
+
+    def test_compact_text_content_preserves_structured_result(self) -> None:
+        response = self.app.call_tool("cadyx_health", {})
+        self.assertEqual(
+            response["content"][0]["text"],
+            json.dumps(response["structuredContent"], ensure_ascii=False, separators=(",", ":")),
+        )
 
     def test_dropped_command_response_is_stopped_and_never_replayed(self) -> None:
         project_id = self._create_project()

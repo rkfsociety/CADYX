@@ -249,7 +249,7 @@ def make_request_handler(
             *,
             extra_headers: tuple[tuple[str, str], ...] = (),
         ) -> None:
-            encoded = json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")
+            encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(encoded)))
@@ -398,7 +398,7 @@ def make_request_handler(
                         self.wfile.flush()
                         next_keepalive = time.monotonic() + _SSE_KEEPALIVE_SECONDS
                         continue
-                    payload = json.dumps(item.as_dict(), ensure_ascii=False, allow_nan=False)
+                    payload = json.dumps(item.as_dict(), ensure_ascii=False, allow_nan=False, separators=(",", ":"))
                     frame = f"id: {item.id}\nevent: {item.event}\ndata: {payload}\n\n"
                     self.wfile.write(frame.encode("utf-8"))
                     self.wfile.flush()
