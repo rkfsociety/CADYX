@@ -142,6 +142,28 @@ class WebApiTests(unittest.TestCase):
         status, activity = self.request(f"/api/v1/agent/projects/{project_id}/activity")
         self.assertEqual((status, activity["activities"][-1]["state"]), (200, "completed"))
 
+    def test_agent_global_thickness_validation_returns_polyhedron_certificate(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Global thickness"})
+        project_id = created["project"]["id"]
+        _, lease = self.request(
+            f"/api/v1/agent/projects/{project_id}/leases", {"owner_id": "thickness-test"},
+        )
+        _, committed = self.request(
+            f"/api/v1/agent/projects/{project_id}/commands",
+            {"lease_id": lease["lease"]["lease_id"],
+             "command": {"type": "create_box", "width": 2.0, "height": 3.0, "depth": 5.0}},
+        )
+        body_id = committed["history_entry"]["result"]["body_id"]
+        status, result = self.request(
+            f"/api/v1/agent/projects/{project_id}/validations/thickness",
+            {"body_id": body_id, "expected_revision": 1, "minimum_thickness": 1.9,
+             "tolerance": 0.0, "method": "global_minimum"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["status"], "pass")
+        self.assertTrue(result["certified"])
+        self.assertAlmostEqual(result["minimum_global_thickness"], 2.0, places=7)
+
     def test_agent_project_rename_is_utf8_and_rejects_locked_projects(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "Mojibake temporary"})
         project_id = created["project"]["id"]

@@ -103,6 +103,11 @@ class GeometryKernel(Protocol):
         progress: Callable[[str, float], None] | None = None,
     ) -> dict[str, Any]: ...
 
+    def certify_global_minimum_thickness(
+        self, geometry: dict[str, Any], *,
+        progress: Callable[[str, float], None] | None = None,
+    ) -> dict[str, Any]: ...
+
     def validate(self, geometry: dict[str, Any]) -> None: ...
 
     def tessellate(self, geometry: dict[str, Any]) -> dict[str, Any]: ...
@@ -937,6 +942,17 @@ class OCCTKernelAdapter:
         brep, _ = native.export_geometry(geometry)
         return native.brep_thickness(brep, minimum_thickness, tolerance, progress=progress)
 
+    def certify_global_minimum_thickness(
+        self, geometry: dict[str, Any], *,
+        progress: Callable[[str, float], None] | None = None,
+    ) -> dict[str, Any]:
+        if isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1":
+            raise ValidationError("Global wall-thickness certification requires an editable OCCT B-rep, not a triangle mesh.")
+        self.validate(geometry)
+        native = NativeKernel()
+        brep, _ = native.export_geometry(geometry)
+        return native.brep_global_thickness(brep, progress=progress)
+
     def validate(self, geometry: dict[str, Any]) -> None:
         try:
             descriptor = json.dumps(geometry, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1322,6 +1338,12 @@ class PrimitiveKernelAdapter:
         progress: Callable[[str, float], None] | None = None,
     ) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not measure solid wall thickness.")
+
+    def certify_global_minimum_thickness(
+        self, geometry: dict[str, Any], *,
+        progress: Callable[[str, float], None] | None = None,
+    ) -> dict[str, Any]:
+        raise ValidationError("The primitive demo kernel does not certify solid wall thickness.")
 
     def create_extruded_profile(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise ValidationError("The primitive demo kernel does not build extruded B-reps.")

@@ -2,6 +2,25 @@
 
 CADYX exposes read-only engineering checks through the Agent API. Checks use the saved document revision and geometry hash, and may optionally store immutable results in the project's validation sidecar. Validation does not change the model revision.
 
+## Global minimum thickness
+
+The thickness endpoint accepts an optional `method` field. `method: "sampled"` is the default and preserves the screening behavior below. `method: "global_minimum"` requests a convex-polyhedron certificate instead:
+
+```json
+{
+  "body_id": "...",
+  "expected_revision": 12,
+  "minimum_thickness": 1.5,
+  "tolerance": 0.05,
+  "method": "global_minimum",
+  "persist": false
+}
+```
+
+The certified method applies to a valid single solid with one shell, planar faces, and linear edges, and verifies convexity from the oriented face half-spaces. It enumerates the support directions required for the minimum caliper width of a convex polyhedron (face normals and cross-products of edge directions) and evaluates every solid vertex in those directions. It returns `minimum_global_thickness`, `minimum_bound`, `maximum_bound`, the support direction and points, topology counts, `metric_definition: "minimum_caliper_width"`, and `certified: true`. The requested threshold is `pass` only when the full enclosure meets it after the requested tolerance, `fail` only when the full enclosure is below it, and `untested` when the enclosure overlaps the threshold.
+
+Curved, non-convex, hollow, or otherwise unsupported B-reps return `untested` with `certified: false` and a reason. The certificate is for global minimum caliper width, a whole-solid thickness measure for the supported convex polyhedra; it is not a local-thickness certificate for arbitrary curved or concave solids. The sampled method remains available for those shapes as a non-certifying screen.
+
 ## Sampled wall thickness
 
 `POST /api/v1/agent/projects/{id}/validations/thickness` accepts:

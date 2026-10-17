@@ -81,6 +81,29 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(image["content"][1]["mimeType"], "image/png")
         self.assertTrue(image["content"][1]["data"])
 
+    def test_global_thickness_method_is_exposed_and_dispatched(self) -> None:
+        tool = next(tool for tool in TOOLS if tool["name"] == "cadyx_validate_body_thickness")
+        method_schema = tool["inputSchema"]["properties"]["method"]
+        self.assertEqual(method_schema["enum"], ["sampled", "global_minimum"])
+        self.assertNotIn("method", tool["inputSchema"]["required"])
+
+        project_id = self._create_project("MCP global thickness")
+        lease = self.core.acquire_lease(project_id, "agent", "mcp-thickness-test")
+        created = self.core.execute_command(
+            project_id, lease["lease_id"],
+            {"type": "create_box", "width": 2.0, "height": 3.0, "depth": 5.0},
+        )
+        result = self._tool_value("cadyx_validate_body_thickness", {
+            "project_id": project_id,
+            "body_id": created["history_entry"]["result"]["body_id"],
+            "expected_revision": created["document"]["revision"],
+            "minimum_thickness": 1.9,
+            "tolerance": 0.0,
+            "method": "global_minimum",
+        })
+        self.assertTrue(result["certified"])
+        self.assertEqual(result["status"], "pass")
+
     def test_execute_command_schema_tracks_discovered_command_types(self) -> None:
         tool = next(tool for tool in TOOLS if tool["name"] == "cadyx_execute_command")
         command_schema = tool["inputSchema"]["properties"]["command"]

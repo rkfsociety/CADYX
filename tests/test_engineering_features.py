@@ -19,6 +19,42 @@ class EngineeringFeatureTests(unittest.TestCase):
     def command(self, value: dict) -> dict:
         return self.core.execute_command(self.project_id, self.lease_id, value)["history_entry"]["result"]
 
+    def test_global_minimum_thickness_certifies_convex_polyhedron(self) -> None:
+        body = self.command({"type": "create_box", "width": 2.0, "height": 3.0, "depth": 5.0})
+        revision = self.core.inspect_project(self.project_id)["document"]["revision"]
+
+        passed = self.core.validate_body_thickness(
+            self.project_id, body["body_id"], revision, 1.9, 0.0, method="global_minimum",
+        )
+        self.assertEqual(passed["status"], "pass")
+        self.assertTrue(passed["certified"])
+        self.assertEqual(passed["method"], "OCCT_convex_polyhedron_minimum_width")
+        self.assertEqual(passed["metric_definition"], "minimum_caliper_width")
+        self.assertAlmostEqual(passed["minimum_global_thickness"], 2.0, places=7)
+        self.assertLessEqual(passed["minimum_bound"], 2.0)
+        self.assertGreaterEqual(passed["maximum_bound"], 2.0)
+        self.assertGreater(passed["direction_count"], 0)
+
+        failed = self.core.validate_body_thickness(
+            self.project_id, body["body_id"], revision, 2.1, 0.0, method="global_minimum",
+        )
+        self.assertEqual(failed["status"], "fail")
+        self.assertTrue(failed["certified"])
+
+        boundary = self.core.validate_body_thickness(
+            self.project_id, body["body_id"], revision, 2.0, 0.0, method="global_minimum",
+        )
+        self.assertEqual(boundary["status"], "untested")
+        self.assertTrue(boundary["certified"])
+
+    def test_global_minimum_thickness_reports_unsupported_curved_shape(self) -> None:
+        cylinder = self.core.kernel.create_extruded_circle(
+            {"x": 0.0, "y": 0.0}, 2.0, plane="XY", depth=5.0,
+        )
+        measured = self.core.kernel.certify_global_minimum_thickness(cylinder)
+        self.assertFalse(measured["supported"])
+        self.assertTrue(measured["reason"])
+
     @staticmethod
     def _proper_crossings(left: list[tuple[float, float]], right: list[tuple[float, float]]) -> int:
         def orientation(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float:

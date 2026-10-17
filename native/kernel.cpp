@@ -52,6 +52,7 @@
 #include <GeomAPI_PointsToBSpline.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <GeomAbs_CurveType.hxx>
+#include <GeomAbs_SurfaceType.hxx>
 #include <NCollection_Array1.hxx>
 #include <NCollection_HArray1.hxx>
 #include <TopExp_Explorer.hxx>
@@ -2117,6 +2118,172 @@ API char* cadyx_brep_preservation(const unsigned char* reference_data, size_t re
     CopyError(error, capacity, exception.what());
   } catch (...) {
     CopyError(error, capacity, "Unknown native preservation failure.");
+  }
+  return nullptr;
+}
+
+API char* cadyx_brep_global_thickness(const unsigned char* data, size_t size,
+                                     NativeProgressCallback progress_callback, void* progress_user_data,
+                                     char* error, size_t capacity) noexcept {
+  try {
+    const TopoDS_Solid solid = ExtractSingleSolid(ReadImportedBrep(data, size));
+    if (!BRepCheck_Analyzer(solid).IsValid())
+      throw std::runtime_error("Global thickness certification requires a valid closed solid.");
+    size_t shell_count = 0;
+    for (TopExp_Explorer explorer(solid, TopAbs_SHELL); explorer.More(); explorer.Next()) ++shell_count;
+
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> mapped_vertices;
+    TopExp::MapShapes(solid, TopAbs_VERTEX, mapped_vertices);
+    if (shell_count != 1 || mapped_vertices.Extent() < 4)
+      return CopyResult("{\"supported\":false,\"reason\":\"requires_one_convex_polyhedral_shell\"}");
+    std::vector<gp_Pnt> vertices;
+    vertices.reserve(static_cast<size_t>(mapped_vertices.Extent()));
+    double max_shape_tolerance = 0.0;
+    for (int index = 1; index <= mapped_vertices.Extent(); ++index) {
+      const TopoDS_Vertex vertex = TopoDS::Vertex(mapped_vertices(index));
+      vertices.push_back(BRep_Tool::Pnt(vertex));
+      max_shape_tolerance = std::max(max_shape_tolerance, BRep_Tool::Tolerance(vertex));
+    }
+
+    std::vector<gp_Dir> face_directions;
+    std::vector<gp_Dir> edge_directions;
+    std::vector<gp_Pln> supporting_planes;
+    for (TopExp_Explorer explorer(solid, TopAbs_FACE); explorer.More(); explorer.Next()) {
+      const TopoDS_Face face = TopoDS::Face(explorer.Current());
+      BRepAdaptor_Surface surface(face, true);
+      if (surface.GetType() != GeomAbs_Plane)
+        return CopyResult("{\"supported\":false,\"reason\":\"requires_planar_faces\"}");
+      gp_Pln plane = surface.Plane();
+      gp_Dir normal = plane.Axis().Direction();
+      if (face.Orientation() == TopAbs_REVERSED) normal.Reverse();
+      face_directions.push_back(normal);
+      supporting_planes.push_back(plane);
+      max_shape_tolerance = std::max(max_shape_tolerance, BRep_Tool::Tolerance(face));
+    }
+    if (supporting_planes.size() < 4)
+      return CopyResult("{\"supported\":false,\"reason\":\"requires_one_convex_polyhedral_shell\"}");
+
+    Bnd_Box bounds;
+    BRepBndLib::Add(solid, bounds, false);
+    double xmin, ymin, zmin, xmax, ymax, zmax;
+    bounds.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+    const double diagonal = gp_Pnt(xmin, ymin, zmin).Distance(gp_Pnt(xmax, ymax, zmax));
+    if (!std::isfinite(diagonal) || diagonal <= Precision::Confusion())
+      throw std::runtime_error("Global thickness certification requires non-degenerate solid bounds.");
+    const double convexity_tolerance = std::max(
+        2.0 * max_shape_tolerance,
+        diagonal * std::numeric_limits<double>::epsilon() * 128.0);
+    NativeProgressIndicator progress(progress_callback, progress_user_data);
+    progress.SetPhase("verify_convex_polyhedron");
+    Message_ProgressScope whole(progress.Start(), "global_wall_thickness", 100.0);
+    for (size_t face_index = 0; face_index < supporting_planes.size(); ++face_index) {
+      const gp_Pln& plane = supporting_planes[face_index];
+      const gp_Dir normal = face_directions[face_index];
+      for (const gp_Pnt& vertex : vertices) {
+        const double signed_distance = gp_Vec(plane.Location(), vertex).Dot(gp_Vec(normal));
+        if (signed_distance > convexity_tolerance)
+          return CopyResult("{\"supported\":false,\"reason\":\"requires_one_convex_polyhedral_shell\"}");
+      }
+      progress.Report(0.40 * static_cast<double>(face_index + 1) / supporting_planes.size());
+    }
+
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> mapped_edges;
+    TopExp::MapShapes(solid, TopAbs_EDGE, mapped_edges);
+    const double parallel_tolerance = std::max(Precision::Angular(), 1e-12);
+    for (int index = 1; index <= mapped_edges.Extent(); ++index) {
+      const TopoDS_Edge edge = TopoDS::Edge(mapped_edges(index));
+      BRepAdaptor_Curve curve(edge);
+      if (curve.GetType() != GeomAbs_Line)
+        return CopyResult("{\"supported\":false,\"reason\":\"requires_linear_edges\"}");
+      TopoDS_Vertex first_vertex, last_vertex;
+      TopExp::Vertices(edge, first_vertex, last_vertex, true);
+      if (first_vertex.IsNull() || last_vertex.IsNull())
+        return CopyResult("{\"supported\":false,\"reason\":\"requires_linear_edges\"}");
+      gp_Vec edge_vector(BRep_Tool::Pnt(first_vertex), BRep_Tool::Pnt(last_vertex));
+      if (edge_vector.Magnitude() <= Precision::Confusion()) continue;
+      const gp_Dir direction(edge_vector);
+      if (std::none_of(edge_directions.begin(), edge_directions.end(), [&](const gp_Dir& known) {
+            return direction.IsParallel(known, parallel_tolerance);
+          })) edge_directions.push_back(direction);
+    }
+
+    struct WidthCandidate {
+      double width = std::numeric_limits<double>::infinity();
+      gp_Dir direction;
+      gp_Pnt minimum_point;
+      gp_Pnt maximum_point;
+    } best;
+    size_t candidate_count = 0;
+    auto consider_direction = [&](const gp_Dir& direction) {
+      ++candidate_count;
+      double minimum_projection = std::numeric_limits<double>::infinity();
+      double maximum_projection = -std::numeric_limits<double>::infinity();
+      gp_Pnt minimum_point, maximum_point;
+      for (const gp_Pnt& vertex : vertices) {
+        const double value = vertex.X() * direction.X() + vertex.Y() * direction.Y() + vertex.Z() * direction.Z();
+        if (value < minimum_projection) { minimum_projection = value; minimum_point = vertex; }
+        if (value > maximum_projection) { maximum_projection = value; maximum_point = vertex; }
+      }
+      const double width = maximum_projection - minimum_projection;
+      if (std::isfinite(width) && width < best.width) {
+        best.width = width;
+        best.direction = direction;
+        best.minimum_point = minimum_point;
+        best.maximum_point = maximum_point;
+      }
+    };
+    progress.SetPhase("enumerate_support_directions");
+    for (const gp_Dir& direction : face_directions) consider_direction(direction);
+    const size_t pair_count = edge_directions.size() < 2
+        ? 0 : edge_directions.size() * (edge_directions.size() - 1) / 2;
+    size_t pairs_done = 0;
+    double angular_error_bound = parallel_tolerance;
+    for (size_t first = 0; first < edge_directions.size(); ++first) {
+      for (size_t second = first + 1; second < edge_directions.size(); ++second) {
+        gp_Vec cross = gp_Vec(edge_directions[first]).Crossed(gp_Vec(edge_directions[second]));
+        const double cross_magnitude = cross.Magnitude();
+        if (cross_magnitude > parallel_tolerance) {
+          consider_direction(gp_Dir(cross));
+          angular_error_bound = std::max(
+              angular_error_bound, 64.0 * std::numeric_limits<double>::epsilon() / cross_magnitude);
+        }
+        ++pairs_done;
+        if (pair_count)
+          progress.Report(0.40 + 0.55 * static_cast<double>(pairs_done) / pair_count);
+      }
+    }
+    if (!std::isfinite(best.width) || candidate_count == 0)
+      throw std::runtime_error("OCCT could not enumerate global thickness support directions.");
+    const double roundoff_bound = diagonal * std::numeric_limits<double>::epsilon()
+                                * static_cast<double>(128 + 16 * (vertices.size() + candidate_count));
+    const double error_bound = 2.0 * max_shape_tolerance + roundoff_bound
+                             + diagonal * angular_error_bound;
+    progress.SetPhase("completed");
+    progress.Report(1.0, true);
+    std::ostringstream result;
+    result.imbue(std::locale::classic());
+    result << std::setprecision(17)
+           << "{\"supported\":true,\"certified\":true"
+           << ",\"minimum_global_thickness\":" << best.width
+           << ",\"minimum_bound\":" << std::max(0.0, best.width - error_bound)
+           << ",\"maximum_bound\":" << best.width + error_bound
+           << ",\"numerical_error_bound\":" << error_bound
+           << ",\"face_count\":" << supporting_planes.size()
+           << ",\"vertex_count\":" << vertices.size()
+           << ",\"edge_direction_count\":" << edge_directions.size()
+           << ",\"direction_count\":" << candidate_count
+           << ",\"support_direction\":[" << best.direction.X() << ',' << best.direction.Y() << ',' << best.direction.Z() << ']'
+           << ",\"minimum_support_point\":[" << best.minimum_point.X() << ',' << best.minimum_point.Y() << ',' << best.minimum_point.Z() << ']'
+           << ",\"maximum_support_point\":[" << best.maximum_point.X() << ',' << best.maximum_point.Y() << ',' << best.maximum_point.Z() << ']'
+           << '}';
+    return CopyResult(result.str());
+  } catch (const Standard_Failure& exception) {
+    CopyError(error, capacity, exception.GetMessageString()
+        ? exception.GetMessageString() : "OCCT global thickness certification failed.");
+  } catch (const std::exception& exception) {
+    CopyError(error, capacity, exception.what());
+  } catch (...) {
+    CopyError(error, capacity, "Unknown native global thickness certification failure.");
   }
   return nullptr;
 }

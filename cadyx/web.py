@@ -453,9 +453,10 @@ def make_request_handler(
                 return
             if agent_api and len(parts) == 3 and parts[1:] == ["validations", "thickness"]:
                 required = {"body_id", "expected_revision", "minimum_thickness", "tolerance"}
-                if body is None or not required.issubset(body) or set(body) - required - {"persist"}:
+                if body is None or not required.issubset(body) or set(body) - required - {"persist", "method"}:
                     raise ValidationError(
-                        "Thickness validation requires body_id, expected_revision, minimum_thickness, and tolerance."
+                        "Thickness validation requires body_id, expected_revision, minimum_thickness, and tolerance; "
+                        "optional fields are method and persist."
                     )
                 result = core.observe_agent_operation(
                     project_id, "Измеряет минимальную толщину стенки",
@@ -463,6 +464,7 @@ def make_request_handler(
                         project_id, body["body_id"], body["expected_revision"],
                         body["minimum_thickness"], body["tolerance"],
                         progress=progress, persist=body.get("persist", False),
+                        method=body.get("method", "sampled"),
                     ),
                     reports_progress=True,
                 )

@@ -792,6 +792,7 @@ class CadyxCore:
         self, project_id: str, body_id: str, expected_revision: Any,
         minimum_thickness: Any, tolerance: Any, *,
         progress: Callable[[str, float], None] | None = None, persist: bool = False,
+        method: str = "sampled",
     ) -> dict[str, Any]:
         project = self.workspace.load(project_id)
         document = Document.from_dict(project["document"])
@@ -815,10 +816,87 @@ class CadyxCore:
 
         required = nonnegative(minimum_thickness, "minimum_thickness", positive=True)
         allowed_tolerance = nonnegative(tolerance, "tolerance")
+        if not isinstance(method, str) or method not in {"sampled", "global_minimum"}:
+            raise ValidationError("Thickness method must be sampled or global_minimum.")
         bodies = {item["id"]: item for item in document.objects if item.get("type") == "body"}
         if body_id not in bodies:
             raise ValidationError("Thickness validation needs an existing body.")
         geometry = bodies[body_id]["geometry"]
+        if method == "global_minimum":
+            measured_global = self.kernel.certify_global_minimum_thickness(geometry, progress=progress)
+            if type(measured_global.get("supported")) is not bool:
+                raise ValidationError("OCCT returned an invalid global wall-thickness certification result.")
+            result = {
+                "body_id": body_id,
+                "revision": document.revision,
+                "geometry_sha256": geometry_sha256({"body_id": body_id, "geometry": geometry}),
+                "method": "OCCT_convex_polyhedron_minimum_width",
+                "metric_definition": "minimum_caliper_width",
+                "coordinate_frame": "global_xyz",
+                "units": "model_units",
+                "minimum_thickness": required,
+                "tolerance": allowed_tolerance,
+                "certified": False,
+                "status": "untested",
+            }
+            if measured_global["supported"]:
+                numeric_names = (
+                    "minimum_global_thickness", "minimum_bound", "maximum_bound", "numerical_error_bound",
+                )
+                metrics = {name: measured_global.get(name) for name in numeric_names}
+                if (type(measured_global.get("certified")) is not bool
+                        or not measured_global["certified"]
+                        or any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+                               for value in metrics.values())
+                        or metrics["minimum_bound"] > metrics["minimum_global_thickness"]
+                        or metrics["minimum_global_thickness"] > metrics["maximum_bound"]
+                        or metrics["maximum_bound"] - metrics["minimum_bound"]
+                        > 2.0 * metrics["numerical_error_bound"] + 1e-12):
+                    raise ValidationError("OCCT returned invalid global wall-thickness bounds.")
+                direction = measured_global.get("support_direction")
+                direction_magnitude = (math.sqrt(sum(value * value for value in direction))
+                                       if isinstance(direction, list) and len(direction) == 3
+                                       and all(type(value) in (int, float) and math.isfinite(value)
+                                               for value in direction) else math.nan)
+                points = {
+                    "minimum": measured_global.get("minimum_support_point"),
+                    "maximum": measured_global.get("maximum_support_point"),
+                }
+                if (not isinstance(direction, list) or len(direction) != 3
+                        or any(type(value) not in (int, float) or not math.isfinite(value) for value in direction)
+                        or not math.isfinite(direction_magnitude)
+                        or abs(direction_magnitude - 1.0) > 1e-8
+                        or any(not isinstance(point, list) or len(point) != 3
+                               or any(type(value) not in (int, float) or not math.isfinite(value) for value in point)
+                               for point in points.values())):
+                    raise ValidationError("OCCT returned invalid global wall-thickness witnesses.")
+                counts = {name: measured_global.get(name) for name in (
+                    "face_count", "vertex_count", "edge_direction_count", "direction_count",
+                )}
+                if any(type(value) is not int or value <= 0 for value in counts.values()):
+                    raise ValidationError("OCCT returned invalid global wall-thickness support counts.")
+                lower, upper = metrics["minimum_bound"], metrics["maximum_bound"]
+                if upper + allowed_tolerance < required:
+                    status = "fail"
+                elif lower + allowed_tolerance >= required:
+                    status = "pass"
+                else:
+                    status = "untested"
+                result.update({
+                    **metrics,
+                    **counts,
+                    "support_direction": direction,
+                    "support_points": points,
+                    "certified": True,
+                    "status": status,
+                })
+            else:
+                reason = measured_global.get("reason")
+                if not isinstance(reason, str) or not reason:
+                    raise ValidationError("OCCT returned no reason for unsupported global wall-thickness certification.")
+                result["reason"] = reason
+            return self._maybe_persist_validation(project_id, "body_thickness", result, persist)
+
         measured = self.kernel.sample_minimum_thickness(
             geometry, minimum_thickness=required, tolerance=allowed_tolerance, progress=progress,
         )
