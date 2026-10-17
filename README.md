@@ -96,6 +96,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - Agent equivalents under `/api/v1/agent/projects`
 - `extrude_sketch`, `revolve_sketch`, `sweep_sketch`, `fuse_bodies`, `cut_bodies`, and `fillet_edges` commands for editable OCCT solids; see the [feature contract](.codex/docs/document-model-v7.md#sketch-driven-solid-features)
 - Document Model v8 adds `create_model_parameters`, `bind_model_parameters`, and atomic `set_model_parameter` rebuilds; Geometry displays the named values. See the [parameter contract](.codex/docs/document-model-v8.md).
+- `fillet_edges` can round multiple compatible edges in one feature; `merge_consecutive_fillet_features` can safely consolidate a same-radius linear fillet chain while rebuilding dependents. See [Document Model v8](.codex/docs/document-model-v8.md#rebuilding-topology-selected-edge-features).
 - `insert_fillet_before_feature` inserts a boss-root fillet before a downstream pocket and atomically reorders/rebuilds the editable feature chain; see [Document Model v8](.codex/docs/document-model-v8.md#rebuilding-topology-selected-edge-features).
 - `import_step` to preserve a single-solid STEP model as an OCCT B-rep; see the [STEP import contract](.codex/docs/document-model-v7.md#step-import-and-editable-b-reps)
 - `export_brep` to validate and atomically publish a revision-bound STEP file, optional STL, and verification manifest; see the [CAD delivery contract](.codex/docs/document-model-v7.md#verified-cad-delivery)
@@ -105,7 +106,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - Experimental Windows-only Revopoint tools capture UVC Y16 frames, write provisional Q-reprojected PLY files, and query/control the dual-axis turntable over BLE; see the [tool guide](tools/revopoint/README.md) for 30° capture and calibration limits.
 - `POST /api/v1/agent/projects/{id}/viewport/camera` to animate the selected browser viewport from the Agent API; see the [viewport contract](.codex/docs/viewport-api.md)
 - `GET /api/v1/projects/{id}/activity` and its Agent API equivalent return the recent visual activity snapshots; `agent.activity` SSE events update them live
-- Dashboard reports are process-local, emit `agent.dashboard` SSE events, and are polled through the `dashboard_revision` in `/api/v1/updates`. Progress and ETA are estimates supplied by the agent; hardware telemetry is not currently available.
+- Dashboard reports emit `agent.dashboard` SSE events and are polled through the `dashboard_revision` in `/api/v1/updates`. The browser shows server-tracked elapsed duration; agent-reported ETA remains in the API. Hardware telemetry is not currently available.
 - Agent `/stop` with `lease_id` and `/resume` with `owner_id` / `expected_revision`; resumed commands require `expected_revision`. See the [stop/resume contract](.codex/docs/architecture.md#safe-agent-stop-and-resume).
 - `/api/v1/updates` is polled automatically alongside SSE so project, workspace-file, activity, dashboard, and UI-asset changes appear without a manual page refresh
 - `GET /api/v1/events` for the SSE update channel

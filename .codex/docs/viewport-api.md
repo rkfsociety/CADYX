@@ -73,7 +73,7 @@ version trigger a page reload;
 the selected project is restored. Returning to a hidden tab or reconnecting also
 triggers a sync. The browser keeps the read-only model viewport dominant, with
 section navigation on the left and an inspection column on the right. The
-column shows a single progress block with current status, progress/ETA, the
+column shows a single progress block with current status, progress and elapsed duration, the
 current or last actual agent action, and its current or most recently finished
 task. The browser does not show planned phases or future queue entries; agents
 continue to receive the full plan and queue through the Agent API. The column
@@ -135,7 +135,9 @@ dashboard snapshot:
     {"id": "042", "title": "Уточнение крепёжных элементов", "state": "running"}
   ],
   "revision": 1,
-  "updated_at": "2026-10-14T12:00:00+00:00"
+  "updated_at": "2026-10-14T12:00:00+00:00",
+  "started_at": "2026-10-14T11:55:48+00:00",
+  "elapsed_seconds": null
 }
 ```
 
@@ -163,6 +165,16 @@ been confirmed. It persists an active browser lock across reloads and clears it
 only after a newer API revision confirms that all workflows and queues have
 completed. Hardware telemetry is not currently reported, so the UI does not
 display invented CPU/GPU/memory values.
+
+Core adds `started_at` and `elapsed_seconds` to persisted dashboard snapshots;
+agents must not send these fields. `started_at` is set at the first phase
+`in_progress` or task `running` report. The browser counts up from this UTC
+timestamp and displays elapsed time in the progress strip. On verified 100%
+completion or a failed phase/task, Core freezes the whole-second duration in
+`elapsed_seconds`, which remains available after host or page restarts. Legacy
+dashboard snapshots without timer fields remain readable. The API retains the
+agent-reported `eta_seconds` for integrations, while the browser shows elapsed
+time in this location.
 Workflow titles, phase names, task titles, and `agent.activity.action` values
 are shown as received; send them in Russian to keep the localized browser
 interface consistent. Project names, object names, and file names remain as

@@ -251,7 +251,7 @@ class CadyxCore:
         return self.events.agent_dashboard_snapshot(project_id)
 
     def report_agent_dashboard(self, project_id: str, report: dict[str, Any]) -> dict[str, Any]:
-        """Publish an agent-reported workflow estimate and task queue."""
+        """Publish agent progress and tasks; elapsed time is tracked by the dashboard store."""
         self.workspace.load(project_id)
         if not isinstance(report, dict) or set(report) != {"workflow", "tasks"}:
             raise ValidationError("Dashboard reports must contain workflow and tasks only.")

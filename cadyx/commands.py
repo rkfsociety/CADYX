@@ -107,6 +107,8 @@ class CommandSystem:
             return self._bind_model_parameters(document, command, progress=progress)
         if kind == "insert_fillet_before_feature":
             return self._insert_fillet_before_feature(document, command, progress=progress)
+        if kind == "merge_consecutive_fillet_features":
+            return self._merge_consecutive_fillet_features(document, command, progress=progress)
         if kind == "create_box":
             return self._create_box(document, command)
         if kind == "create_metric_thread":
@@ -2526,6 +2528,131 @@ class CommandSystem:
             if not isinstance(indices, list) or not indices:
                 raise ValidationError("Topology feature edge indices are unavailable for stable rebuild.")
             feature["edge_references"] = capture_edge_references(self.kernel, source["geometry"], indices)
+
+    def _merge_consecutive_fillet_features(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        feature_ids = command.get("feature_ids")
+        label = command.get("name", "Объединённое скругление")
+        if (not isinstance(feature_ids, list) or len(feature_ids) < 2
+                or any(not isinstance(value, str) or not value for value in feature_ids)
+                or len(set(feature_ids)) != len(feature_ids)):
+            raise ValidationError("feature_ids must contain at least two unique fillet feature IDs.")
+        if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+            raise ValidationError("Merged fillet name must be non-empty text up to 120 characters.")
+
+        staged = deepcopy(document)
+        self._prepare_edge_references(staged)
+        by_id = {item["id"]: item for item in staged.objects}
+        features = [by_id.get(feature_id) for feature_id in feature_ids]
+        if any(feature is None or feature.get("type") != "feature"
+               or feature.get("operation") != "fillet_edges" for feature in features):
+            raise ValidationError("Every selected feature must be an editable fillet feature.")
+        feature_order = [item["id"] for item in staged.objects if item.get("type") == "feature"]
+        if [feature["id"] for feature in features] != sorted(feature_ids, key=feature_order.index):
+            raise ValidationError("Fillet features must be supplied in document order.")
+
+        radius = _number(features[0].get("parameters", {}).get("radius"), "radius")
+        for index, feature in enumerate(features):
+            current_radius = _number(feature.get("parameters", {}).get("radius"), "radius")
+            if not math.isclose(current_radius, radius, rel_tol=1e-12, abs_tol=1e-12):
+                raise ValidationError("Only fillet features with the same radius can be merged.")
+            if index and feature.get("source_body_id") != features[index - 1].get("body_id"):
+                raise ValidationError("Fillet features must form one consecutive source-body chain.")
+
+        source_body = by_id.get(features[0].get("source_body_id"))
+        old_body_ids = [feature.get("body_id") for feature in features]
+        if (source_body is None or source_body.get("type") != "body"
+                or any(not isinstance(body_id, str) or by_id.get(body_id, {}).get("type") != "body"
+                       for body_id in old_body_ids)):
+            raise ValidationError("The fillet chain references a missing source or result body.")
+        removed_ids = set(feature_ids) | set(old_body_ids)
+
+        downstream_features = [item for item in staged.objects
+                               if item.get("type") == "feature" and item.get("id") not in feature_ids
+                               and item.get("source_body_id") == old_body_ids[-1]]
+        for intermediate_body_id, next_feature in zip(old_body_ids[:-1], features[1:], strict=True):
+            consumers = [item for item in staged.objects if item.get("type") == "feature"
+                         and item.get("source_body_id") == intermediate_body_id]
+            if consumers != [next_feature]:
+                raise ValidationError("An intermediate fillet body has a branching dependency and cannot be merged.")
+
+        def references_removed(value: Any) -> bool:
+            if isinstance(value, dict):
+                return any(references_removed(child) for key, child in value.items() if key != "id")
+            if isinstance(value, list):
+                return any(references_removed(child) for child in value)
+            return isinstance(value, str) and value in removed_ids
+
+        for item in staged.objects:
+            if item.get("id") in removed_ids or not references_removed(item):
+                continue
+            if (item.get("type") == "feature" and item in downstream_features
+                    and item.get("source_body_id") == old_body_ids[-1]):
+                continue
+            raise ValidationError("A retained object references an intermediate fillet feature or body.")
+
+        old_bindings = [binding for binding in staged.parameter_bindings
+                        if binding["object_id"] in feature_ids]
+        radius_bindings = [binding for binding in old_bindings
+                           if binding["path"] == "parameters.radius"]
+        if len(old_bindings) != len(radius_bindings):
+            raise ValidationError("Only radius bindings can be transferred from merged fillets.")
+        binding_expression = None
+        if radius_bindings:
+            if (len(radius_bindings) != len(features)
+                    or len({binding["expression"] for binding in radius_bindings}) != 1):
+                raise ValidationError("Merged fillets must share the same radius expression binding.")
+            binding_expression = radius_bindings[0]["expression"]
+
+        references = [reference for feature in features
+                      for reference in feature.get("edge_references", [])]
+        if not references or any(not isinstance(reference, dict) for reference in references):
+            raise ValidationError("Every fillet needs stored geometric edge references before merging.")
+        from .semantic_selection import capture_edge_references, resolve_edge_references
+        edge_indices = resolve_edge_references(self.kernel, source_body["geometry"], references)
+        if len(set(edge_indices)) != len(edge_indices):
+            raise ValidationError("Merged fillets resolve to duplicate edges on the common source body.")
+        if progress is not None:
+            progress({"phase": "kernel_fillet", "feature_count": len(features),
+                      "edge_count": len(edge_indices)})
+        geometry = self.kernel.create_fillet(source_body["geometry"],
+                                             edge_indices=edge_indices, radius=radius)
+        edge_references = capture_edge_references(self.kernel, source_body["geometry"], edge_indices)
+        topology_edges = self.kernel.topology(source_body["geometry"]).get("edges", [])
+        edge_keys = [edge["semantic_key"] for edge in topology_edges
+                     if edge.get("index") in set(edge_indices) and isinstance(edge.get("semantic_key"), str)]
+        if len(edge_keys) != len(edge_indices):
+            raise ValidationError("The merged fillet selection lacks complete semantic edge keys.")
+
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        merged_body = {"id": body_id, "type": "body", "name": label.strip(),
+                       "feature_ids": [feature_id], "geometry": geometry}
+        merged_feature = {"id": feature_id, "type": "feature", "operation": "fillet_edges",
+                          "body_id": body_id, "source_body_id": source_body["id"],
+                          "edge_indices": edge_indices, "edge_references": edge_references,
+                          "edge_keys": edge_keys, "parameters": {"radius": radius},
+                          "geometry": geometry}
+        for downstream in downstream_features:
+            downstream["source_body_id"] = body_id
+        staged.parameter_bindings = [binding for binding in staged.parameter_bindings
+                                     if binding["object_id"] not in feature_ids]
+        if binding_expression is not None:
+            staged.parameter_bindings.append({"object_id": feature_id,
+                "path": "parameters.radius", "expression": binding_expression})
+
+        removed_positions = [index for index, item in enumerate(staged.objects)
+                             if item.get("id") in removed_ids]
+        insertion_index = min(removed_positions)
+        staged.objects = [item for item in staged.objects if item.get("id") not in removed_ids]
+        staged.objects[insertion_index:insertion_index] = [merged_body, merged_feature]
+        self._rebuild_derived_features(staged, {source_body["id"]}, progress=progress)
+        staged.validate()
+        self._commit_staged_document(document, staged)
+        return {"feature_id": feature_id, "body_id": body_id, "source_body_id": source_body["id"],
+                "merged_feature_ids": feature_ids, "edge_indices": edge_indices,
+                "radius": radius, "geometry": geometry}
 
     def _insert_fillet_before_feature(
         self, document: Document, command: dict[str, Any], *,

@@ -509,6 +509,8 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(published["workflow"]["title"], report["workflow"]["title"])
             self.assertEqual(published["workflow"]["phases"], report["workflow"]["phases"])
             self.assertEqual(published["tasks"], [])
+            self.assertIsNone(published["started_at"])
+            self.assertIsNone(published["elapsed_seconds"])
             self.assertEqual(published["revision"], 1)
 
             status, snapshot = self.request(f"/api/v1/agent/projects/{project_id}/dashboard")
@@ -542,6 +544,8 @@ class WebApiTests(unittest.TestCase):
             f"/api/v1/agent/projects/{project_id}/dashboard", report,
         )
         self.assertEqual(status, 200)
+        self.assertIsNotNone(active_report["started_at"])
+        self.assertIsNone(active_report["elapsed_seconds"])
         status, active_updates = self.request("/api/v1/updates")
         self.assertEqual(status, 200)
         self.assertTrue(active_updates["agent_work_active"])
@@ -577,7 +581,9 @@ class WebApiTests(unittest.TestCase):
         try:
             report["tasks"][1]["state"] = "completed"
             report["workflow"]["progress_percent"] = 100
-            self.request(f"/api/v1/agent/projects/{project_id}/dashboard", report)
+            status, finished_report = self.request(f"/api/v1/agent/projects/{project_id}/dashboard", report)
+            self.assertEqual(status, 200)
+            self.assertIsNotNone(finished_report["elapsed_seconds"])
             status, completed_updates = self.request("/api/v1/updates")
             self.assertEqual(status, 200)
             self.assertFalse(completed_updates["agent_work_active"])

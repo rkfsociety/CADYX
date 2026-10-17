@@ -535,15 +535,22 @@ function setApiConnectionStatus(online) {
   }
 }
 
-function formatEta(seconds) {
-  if (!Number.isInteger(seconds) || seconds < 0) return "ОСТАЛОСЬ —";
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    return `ОСТАЛОСЬ ${hours} ч ${minutes % 60} мин`;
+function formatElapsed(dashboard) {
+  let seconds = dashboard?.elapsed_seconds;
+  if (!Number.isInteger(seconds) || seconds < 0) {
+    const startedAt = Date.parse(dashboard?.started_at || "");
+    if (!Number.isFinite(startedAt)) return "ПРОШЛО —";
+    seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
   }
-  return minutes ? `ОСТАЛОСЬ ${minutes} мин ${remainingSeconds} с` : `ОСТАЛОСЬ ${remainingSeconds} с`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
+  return `ПРОШЛО ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function updateWorkflowElapsed() {
+  const output = $("#workflow-eta");
+  if (output) output.textContent = formatElapsed(dashboardsByProject.get(selectedProjectId));
 }
 
 const phaseStateLabel = (state) => ({
@@ -572,15 +579,14 @@ function renderAgentDashboard(dashboard) {
     $("#workflow-progress").dataset.available = "true";
     $("#workflow-progress").setAttribute("aria-valuenow", String(progress));
     $("#workflow-progress-bar").style.width = `${progress}%`;
-    $("#workflow-eta").textContent = formatEta(workflow.eta_seconds);
   } else {
     $("#workflow-name").textContent = "РАБОТА НЕ НАЧАТА";
     $("#workflow-percent").textContent = "—";
     $("#workflow-progress").dataset.available = "false";
     $("#workflow-progress").setAttribute("aria-valuenow", "0");
     $("#workflow-progress-bar").style.width = "0%";
-    $("#workflow-eta").textContent = "ОСТАЛОСЬ —";
   }
+  $("#workflow-eta").textContent = formatElapsed(dashboard);
 
   renderCurrentProgress(
     dashboard,
@@ -2183,6 +2189,7 @@ window.addEventListener("online", () => {
 });
 window.addEventListener("pageshow", checkAutomaticUpdates);
 setInterval(checkAutomaticUpdates, 5000);
+setInterval(updateWorkflowElapsed, 1000);
 checkAutomaticUpdates();
 if (selectedProjectId && !selectedProjectId.startsWith(FOLDER_SELECTION_PREFIX)) {
   showProjectLoading("Восстанавливаю последний проект…");

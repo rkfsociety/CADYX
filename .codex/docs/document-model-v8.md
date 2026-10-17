@@ -43,6 +43,21 @@ semantic-key matches are preferred; geometric fallback uses curve type,
 orientation, length, and proximity, and fails when a unique edge cannot be
 identified. Inspect topology again when authoring a new edge feature.
 
+`fillet_edges` accepts multiple unique edge indices for one source body and
+one radius. Prefer a single operation when the selected edges share the same
+effective radius, are available on the same pre-fillet body, and the combined
+kernel operation succeeds. Keep separate features when geometry or radius
+expressions differ, or when the combined operation is not valid.
+
+`merge_consecutive_fillet_features` atomically replaces a linear chain of two
+or more fillet features with one feature on their common first source body.
+The chain must use one numeric radius and, when bound, the same radius
+expression. Every saved edge reference must resolve uniquely on that source;
+branching dependencies from intermediate bodies are rejected. Dependents of
+the final fillet body are reparented and rebuilt in the staged document. A
+failed combined fillet or dependent rebuild leaves the saved document
+unchanged.
+
 `insert_fillet_before_feature` atomically inserts a boss-root fillet before a
 downstream sketch pocket, reparents dependent features, reorders the feature
 chain, and rebuilds its descendants. It selects the boss's full analytic base

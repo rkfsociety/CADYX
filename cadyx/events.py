@@ -80,14 +80,30 @@ class EventBroker:
 
     @staticmethod
     def _dashboard_state_is_valid(dashboard: Any) -> bool:
+        required = {"workflow", "tasks", "revision", "updated_at"}
+        optional = {"started_at", "elapsed_seconds"}
         if (
             not isinstance(dashboard, dict)
-            or set(dashboard) != {"workflow", "tasks", "revision", "updated_at"}
+            or not required.issubset(dashboard)
+            or set(dashboard) - required - optional
             or type(dashboard.get("revision")) is not int
             or dashboard["revision"] < 1
             or not isinstance(dashboard.get("updated_at"), str)
             or not isinstance(dashboard.get("tasks"), list)
         ):
+            return False
+        started_at = dashboard.get("started_at")
+        elapsed_seconds = dashboard.get("elapsed_seconds")
+        if started_at is not None:
+            if not isinstance(started_at, str):
+                return False
+            try:
+                datetime.fromisoformat(started_at)
+            except ValueError:
+                return False
+        if elapsed_seconds is not None and (type(elapsed_seconds) is not int or elapsed_seconds < 0):
+            return False
+        if elapsed_seconds is not None and started_at is None:
             return False
         workflow = dashboard["workflow"]
         if workflow is not None:
@@ -169,6 +185,29 @@ class EventBroker:
                 return True
         return any(task.get("state") in {"pending", "running"} for task in dashboard.get("tasks", []))
 
+    @staticmethod
+    def _dashboard_has_started(dashboard: dict[str, Any]) -> bool:
+        workflow = dashboard.get("workflow")
+        return bool(
+            workflow is not None
+            and any(phase.get("state") == "in_progress" for phase in workflow.get("phases", []))
+        ) or any(task.get("state") == "running" for task in dashboard.get("tasks", []))
+
+    @staticmethod
+    def _dashboard_is_terminal(dashboard: dict[str, Any]) -> bool:
+        workflow = dashboard.get("workflow")
+        tasks = dashboard.get("tasks", [])
+        states = [phase.get("state") for phase in (workflow or {}).get("phases", [])]
+        states.extend(task.get("state") for task in tasks)
+        if "failed" in states:
+            return True
+        if workflow is None:
+            return not any(state in {"pending", "running"} for state in states)
+        return (
+            workflow.get("progress_percent") == 100
+            and all(state == "completed" for state in states)
+        )
+
     def _agent_work_active_locked(self) -> bool:
         return bool(self._agent_work_project_ids_locked())
 
@@ -241,10 +280,31 @@ class EventBroker:
             with self._lock:
                 previous = self._agent_dashboards.get(project_id)
                 revision = previous["revision"] + 1 if previous else 1
+                now = datetime.now(timezone.utc)
+                started_at = previous.get("started_at") if previous else None
+                elapsed_seconds = previous.get("elapsed_seconds") if previous else None
+                has_started = self._dashboard_has_started(data)
+                has_unfinished_work = self._dashboard_is_active(data)
+                terminal = self._dashboard_is_terminal(data)
+                if has_started and (started_at is None or elapsed_seconds is not None):
+                    started_at = now.isoformat()
+                    elapsed_seconds = None
+                elif has_unfinished_work and elapsed_seconds is not None:
+                    # A newly queued workflow clears the previous run's frozen duration.
+                    started_at = None
+                    elapsed_seconds = None
+                elif terminal and started_at is not None and elapsed_seconds is None:
+                    try:
+                        started = datetime.fromisoformat(started_at)
+                    except ValueError:
+                        started = now
+                    elapsed_seconds = max(0, int((now - started).total_seconds()))
                 dashboard = {
                     **copy.deepcopy(data),
+                    "started_at": started_at,
+                    "elapsed_seconds": elapsed_seconds,
                     "revision": revision,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": now.isoformat(),
                 }
                 dashboards = {**self._agent_dashboards, project_id: dashboard}
                 work_revision = self._agent_work_revision + 1
@@ -305,7 +365,8 @@ class EventBroker:
         with self._lock:
             dashboard = self._agent_dashboards.get(project_id)
             if dashboard is None:
-                return {"workflow": None, "tasks": [], "revision": 0, "updated_at": None}
+                return {"workflow": None, "tasks": [], "started_at": None,
+                        "elapsed_seconds": None, "revision": 0, "updated_at": None}
             return copy.deepcopy(dashboard)
 
     def agent_dashboard_revision(self, project_id: str) -> int:

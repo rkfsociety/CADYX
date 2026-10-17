@@ -9,6 +9,91 @@ from cadyx.semantic_selection import capture_edge_references, resolve_edge_refer
 
 
 class ModelParameterExpressionTests(unittest.TestCase):
+    def test_merges_consecutive_same_radius_fillets_and_rebuilds_dependents(self):
+        system = CommandSystem(OCCTKernelAdapter())
+        document = Document.create()
+        system.execute(document, {"type": "create_model_parameter", "name": "FilletRadius",
+                                 "value": 3, "unit": "mm"})
+        base = system.execute(document, {"type": "create_box", "width": 80,
+                                         "height": 60, "depth": 20})
+        edges = system.kernel.topology(base["geometry"])["edges"]
+        first_edge = next(edge["index"] for edge in edges if edge["curve"] == "line"
+                          and edge["center"] == [40, 0, 0] and edge["length"] == 80)
+        first = system.execute(document, {"type": "fillet_edges", "body_id": base["body_id"],
+            "edge_indices": [first_edge], "radius": 3})
+        next_edges = system.kernel.topology(first["geometry"])["edges"]
+        second_edge = next(edge["index"] for edge in next_edges if edge["curve"] == "line"
+                           and edge["center"] == [40, 60, 20] and edge["length"] == 80)
+        second = system.execute(document, {"type": "fillet_edges", "body_id": first["body_id"],
+            "edge_indices": [second_edge], "radius": 3})
+        for result in (first, second):
+            system.execute(document, {"type": "bind_model_parameter", "object_id": result["feature_id"],
+                "path": "parameters.radius", "expression": "FilletRadius"})
+        boss = system.execute(document, {"type": "boss", "body_id": second["body_id"],
+            "origin": [40, 30, 20], "axis": [0, 0, 1], "diameter": 8, "depth": 5})
+        sequential_volume = next(item["geometry"]["volume"] for item in document.objects
+            if item["id"] == boss["body_id"])
+
+        merged = system.execute(document, {"type": "merge_consecutive_fillet_features",
+            "feature_ids": [first["feature_id"], second["feature_id"]], "name": "RootFilletsR3"})
+
+        features = [item for item in document.objects if item.get("type") == "feature"]
+        fillets = [item for item in features if item.get("operation") == "fillet_edges"]
+        boss_feature = next(item for item in features if item["id"] == boss["feature_id"])
+        merged_feature = next(item for item in fillets if item["id"] == merged["feature_id"])
+        merged_body = next(item for item in document.objects if item["id"] == boss["body_id"])
+        self.assertEqual(len(fillets), 1)
+        self.assertEqual(len(merged_feature["edge_indices"]), 2)
+        self.assertEqual(merged_feature["parameters"]["radius"], 3)
+        self.assertEqual(boss_feature["source_body_id"], merged["body_id"])
+        self.assertAlmostEqual(merged_body["geometry"]["volume"], sequential_volume, places=6)
+        self.assertEqual(len(document.parameter_bindings), 1)
+        self.assertEqual(document.parameter_bindings[0]["object_id"], merged["feature_id"])
+        system.execute(document, {"type": "set_model_parameter", "name": "FilletRadius", "value": 4})
+        merged_feature = next(item for item in document.objects if item["id"] == merged["feature_id"])
+        self.assertEqual(merged_feature["parameters"]["radius"], 4)
+        document.validate()
+
+    def test_invalid_fillet_merge_leaves_document_unchanged(self):
+        system = CommandSystem(OCCTKernelAdapter())
+        document = Document.create()
+        before = document.to_dict()
+        with self.assertRaises(ValidationError):
+            system.execute(document, {"type": "merge_consecutive_fillet_features",
+                                      "feature_ids": ["feature:missing", "feature:also-missing"]})
+        self.assertEqual(document.to_dict(), before)
+
+    def test_fillet_merge_rejects_different_radius_bindings_even_at_same_value(self):
+        system = CommandSystem(OCCTKernelAdapter())
+        document = Document.create()
+        system.execute(document, {"type": "create_model_parameters", "parameters": {
+            "NominalRadius": {"value": 3, "unit": "mm"},
+            "ClearanceLimit": {"value": 3, "unit": "mm"},
+        }})
+        base = system.execute(document, {"type": "create_box", "width": 80,
+                                         "height": 60, "depth": 20})
+        edges = system.kernel.topology(base["geometry"])["edges"]
+        first_edge = next(edge["index"] for edge in edges if edge["curve"] == "line"
+                          and edge["center"] == [40, 0, 0] and edge["length"] == 80)
+        first = system.execute(document, {"type": "fillet_edges", "body_id": base["body_id"],
+            "edge_indices": [first_edge], "radius": 3})
+        next_edges = system.kernel.topology(first["geometry"])["edges"]
+        second_edge = next(edge["index"] for edge in next_edges if edge["curve"] == "line"
+                           and edge["center"] == [40, 60, 20] and edge["length"] == 80)
+        second = system.execute(document, {"type": "fillet_edges", "body_id": first["body_id"],
+            "edge_indices": [second_edge], "radius": 3})
+        system.execute(document, {"type": "bind_model_parameter", "object_id": first["feature_id"],
+            "path": "parameters.radius", "expression": "NominalRadius"})
+        system.execute(document, {"type": "bind_model_parameter", "object_id": second["feature_id"],
+            "path": "parameters.radius", "expression": "min(NominalRadius, ClearanceLimit)"})
+        before = document.to_dict()
+
+        with self.assertRaises(ValidationError):
+            system.execute(document, {"type": "merge_consecutive_fillet_features",
+                "feature_ids": [first["feature_id"], second["feature_id"]]})
+
+        self.assertEqual(document.to_dict(), before)
+
     def test_evaluates_named_values_and_arithmetic(self):
         self.assertEqual(evaluate_expression("BaseLength / 2 + 5", {"BaseLength": 140}), 75)
         self.assertEqual(evaluate_expression("min(Target, (Width - Gap) / 2)",
