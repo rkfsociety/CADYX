@@ -72,10 +72,57 @@
     return response.arrayBuffer();
   }
 
+  function cloneTraceValue(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  class TraceDraft {
+    constructor(initial = { segments: [] }) {
+      this._past = [];
+      this._present = cloneTraceValue(initial);
+      this._future = [];
+    }
+
+    snapshot() {
+      return cloneTraceValue(this._present);
+    }
+
+    replace(next) {
+      this._past.push(this.snapshot());
+      this._present = cloneTraceValue(next);
+      this._future = [];
+      return this.snapshot();
+    }
+
+    update(mutator) {
+      const next = this.snapshot();
+      mutator(next);
+      return this.replace(next);
+    }
+
+    undo() {
+      if (!this._past.length) return this.snapshot();
+      this._future.push(this.snapshot());
+      this._present = this._past.pop();
+      return this.snapshot();
+    }
+
+    redo() {
+      if (!this._future.length) return this.snapshot();
+      this._past.push(this.snapshot());
+      this._present = this._future.pop();
+      return this.snapshot();
+    }
+
+    get canUndo() { return this._past.length > 0; }
+    get canRedo() { return this._future.length > 0; }
+  }
+
   window.CadyxBrowserApi = Object.freeze({
     errorLabels,
     errorMessage,
     requestJson,
     requestArrayBuffer,
+    TraceDraft,
   });
 })();

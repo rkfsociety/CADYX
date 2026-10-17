@@ -130,13 +130,19 @@ class ExtensionRegistry:
 
 def builtin_extensions() -> tuple[CommandExtension, ...]:
     # These modules define handlers/metadata only; none imports CommandSystem.
-    from . import advanced_features, agent_authoring, manufacturing_features, scan_reverse
+    from . import advanced_features, agent_authoring, curve_editing, manufacturing_features, scan_reverse
     from .capability_refinements import refine_capabilities
     from .semantic_selection import execute_with_selection, refine_capabilities as semantic_capabilities
 
     return (
         CommandExtension("advanced_features", advanced_features.ADVANCED_CAPABILITIES, advanced_features._execute),
         CommandExtension("agent_authoring", agent_authoring.CAPABILITIES, agent_authoring._execute),
+        CommandExtension(
+            "curve_editing",
+            curve_editing.CAPABILITIES,
+            curve_editing._execute,
+            activity_actions=curve_editing.ACTIVITY_ACTIONS,
+        ),
         CommandExtension("manufacturing_features", manufacturing_features.CAPABILITIES, manufacturing_features._execute),
         CommandExtension("semantic_selection", middleware=execute_with_selection, refine=semantic_capabilities),
         CommandExtension("selector_contracts", refine=refine_capabilities),

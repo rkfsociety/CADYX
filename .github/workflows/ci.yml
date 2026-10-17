@@ -103,3 +103,5 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Scanner camera tests failed.' }
           & $node tests/test_ply_preview.cjs
           if ($LASTEXITCODE -ne 0) { throw 'PLY preview tests failed.' }
+          & $node tests/test_curve_draft.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Trace draft tests failed.' }
