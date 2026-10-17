@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from .api_contracts import VALIDATION_OPERATIONS
+from .base_commands import base_command_handlers
 from .extensions import ExtensionRegistry, builtin_extensions
 
 
@@ -127,7 +128,9 @@ BASE_COMMAND_CAPABILITIES: tuple[dict[str, Any], ...] = (
 )
 
 
-COMMAND_REGISTRY = ExtensionRegistry(BASE_COMMAND_CAPABILITIES, builtin_extensions())
+COMMAND_REGISTRY = ExtensionRegistry(
+    BASE_COMMAND_CAPABILITIES, builtin_extensions(), base_handlers=base_command_handlers(),
+)
 COMMAND_CAPABILITIES = COMMAND_REGISTRY.capabilities
 
 

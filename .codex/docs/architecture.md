@@ -217,8 +217,9 @@ executor during initialization. Semantic selection wraps dispatch; scan alignmen
 wraps that pipeline and reapplies the saved transform after `set_scan_parameter`.
 The last registered middleware is outermost. Progress and project context pass
 through the same pipeline, inside the existing Core lease/revision/atomic-save
-boundary. The base command dispatch remains in `commands.py`; decomposing that
-separate dispatch is roadmap stage 16.
+boundary. Base handlers are supplied by `base_command_handlers()` and must
+exactly match the base capability names before extensions are composed. Production
+dispatch has a registered handler for every discovered command.
 
 Extension modules define ordinary functions and metadata, without `install()` or
 method/global-contract reassignment. `OCCTKernelAdapter.topology` explicitly calls
@@ -227,6 +228,31 @@ source bodies while preserving document metadata. Face selectors resolve against
 faces and do not capture edge references. `tests/test_extensions.py` covers
 composition, collisions, middleware order, isolated handlers and import order;
 native authoring and rendering tests cover the adapter/scene integration.
+
+### Command families and atomic execution
+
+`commands.py` retains the `CommandSystem` constructor, shared execution context,
+and public request/type validation. Its implementation methods live in focused
+`command_*` modules: sketch editing/common helpers, sketch profiles, sketch curves,
+body features, history/deletion, parameters, dependent-feature rebuilding, scan
+processing, and STEP import/verified delivery. The classes are composed by ordinary
+inheritance so existing extension calls to shared helper methods continue to use
+the same kernel, resolvers, artifact writers and staged document. Helpers have
+unique names across families; no class methods are assigned after definition.
+
+Each family declares its named `COMMAND_HANDLERS`; `base_commands.py` combines
+these tables with duplicate detection. `capabilities.py` pairs them with the
+canonical metadata through the same registry used for extensions. Missing,
+extra or non-callable base bindings fail during registry construction. Alias
+handlers retain their original parameter mapping, feature operation names and
+progress phases. Command lookup does not depend on an ordered `if` chain.
+
+Handlers neither acquire leases nor save project state. Core continues to copy
+and validate the document, enforce lease/revision/stop fences, record history and
+commit once through the existing atomic workspace path. An exception after a
+partial staged edit leaves the saved document, revision and history unchanged.
+`tests/test_command_families.py` covers isolated family behavior, registration
+parity and that atomic-failure invariant without loading native libraries.
 
 ### Agent API discovery and local Codex MCP adapter
 

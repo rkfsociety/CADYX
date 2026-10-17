@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from cadyx.base_commands import base_command_handlers
 from cadyx.capabilities import BASE_COMMAND_CAPABILITIES, COMMAND_CAPABILITIES, COMMAND_REGISTRY
 from cadyx.commands import CommandSystem
 from cadyx.errors import ValidationError
@@ -27,14 +28,15 @@ class ExtensionRegistryTests(unittest.TestCase):
     def test_builtin_order_and_discovery_are_repeatable_and_isolated(self):
         baseline = deepcopy(BASE_COMMAND_CAPABILITIES)
         public = deepcopy(COMMAND_CAPABILITIES)
-        first = ExtensionRegistry(BASE_COMMAND_CAPABILITIES, builtin_extensions())
-        second = ExtensionRegistry(BASE_COMMAND_CAPABILITIES, builtin_extensions())
+        first = ExtensionRegistry(BASE_COMMAND_CAPABILITIES, builtin_extensions(), base_handlers=base_command_handlers())
+        second = ExtensionRegistry(BASE_COMMAND_CAPABILITIES, builtin_extensions(), base_handlers=base_command_handlers())
         self.assertEqual(first.extension_names, (
             "advanced_features", "agent_authoring", "manufacturing_features",
             "semantic_selection", "selector_contracts", "scan_reverse"))
         self.assertEqual(first.capabilities, public)
         self.assertEqual(second.capabilities, public)
         self.assertEqual(first.command_types, COMMAND_REGISTRY.command_types)
+        self.assertEqual(first.handlers, COMMAND_REGISTRY.handlers)
         snapshot = first.capabilities
         snapshot[0]["required"].append("injected")
         self.assertEqual(first.capabilities, second.capabilities)

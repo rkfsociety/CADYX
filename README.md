@@ -127,8 +127,8 @@ SHA-256 values on every run (Node uses the official release checksum list),
 extracts fresh SDK trees and rebuilds the bridges; cached DLLs are never used.
 Local fast checks use `python -m compileall -q cadyx tests scripts` and
 `python -m unittest discover -s tests -p test_source_contracts.py -v`, plus
-the `test_events.py`, `test_migrations.py`, `test_persisted_schemas.py` and
-`test_extensions.py` modules with the same invocation.
+the `test_events.py`, `test_migrations.py`, `test_persisted_schemas.py`,
+`test_extensions.py` and `test_command_families.py` modules with the same invocation.
 
 The source gate also installs development-only tools from `requirements-dev.txt`
 (Ruff 0.17.1 and mypy 2.4.0, reviewed against PyPI on 2026-10-17).

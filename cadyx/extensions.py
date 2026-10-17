@@ -2,7 +2,7 @@
 
 Composition copies metadata and rejects duplicate names before publishing a
 registry. Importing an extension never changes another module or class. The
-base Command System retains its own dispatch and the Core atomic boundary.
+base command families and extensions share lookup; Core retains the atomic boundary.
 """
 from __future__ import annotations
 
@@ -10,7 +10,9 @@ from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from types import MappingProxyType
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
+
+from .errors import ValidationError
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +29,8 @@ class ExtensionRegistry:
         self,
         base_capabilities: tuple[dict[str, Any], ...],
         extensions: tuple[CommandExtension, ...],
+        *,
+        base_handlers: Mapping[str, Callable[..., dict[str, Any]]] | None = None,
     ) -> None:
         contracts = deepcopy(base_capabilities)
         seen: set[str] = set()
@@ -42,6 +46,12 @@ class ExtensionRegistry:
                 seen.add(name)
 
         add_contracts(contracts)
+        if base_handlers is not None:
+            if set(base_handlers) != seen:
+                raise ValueError("Base command handlers must exactly match base capability names.")
+            if any(not callable(handler) for handler in base_handlers.values()):
+                raise ValueError("Base command handlers must be callable.")
+            handlers.update(base_handlers)
         for extension in extensions:
             if extension.name in names:
                 raise ValueError(f"Duplicate extension registration: {extension.name}.")
@@ -72,11 +82,15 @@ class ExtensionRegistry:
         """Return an isolated discovery snapshot, never the registry's metadata."""
         return deepcopy(self._capabilities)
 
-    def bind(self, system: Any, base_execute: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    def bind(
+        self, system: Any, base_execute: Callable[..., dict[str, Any]] | None = None,
+    ) -> Callable[..., dict[str, Any]]:
         def dispatch(document, command, *, progress=None, project_id=None):
             handler = self.handlers.get(command.get("type"))
             if handler is None:
-                return base_execute(document, command, progress=progress, project_id=project_id)
+                if base_execute is not None:
+                    return base_execute(document, command, progress=progress, project_id=project_id)
+                raise ValidationError(f"Unsupported command type: {command.get('type')!r}.")
             return handler(system, document, command, progress=progress, project_id=project_id)
 
         execute: Callable[..., dict[str, Any]] = dispatch
