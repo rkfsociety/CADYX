@@ -57,37 +57,38 @@ class RuntimeCacheTests(unittest.TestCase):
     def test_delete_project_invalidates_only_that_projects_runtime_caches(self):
         with TemporaryDirectory() as directory:
             core = CadyxCore(directory, kernel=_KernelStub())
+            cache = core._rendering
             first = core.create_project("First", select=False)["project"]["id"]
             second = core.create_project("Second", select=False)["project"]["id"]
             first_key, second_key = (first, "int:0"), (second, "int:0")
-            core._validated_document_keys.update(((first_key, None), (second_key, None)))
-            core._document_validation_locks[first_key] = threading.Lock()
-            core._document_validation_locks[second_key] = threading.Lock()
-            core._scene_cache[(first, "r0")] = {"revision": 0}
-            core._scene_cache[(second, "r0")] = {"revision": 0}
+            cache._validated_document_keys.update(((first_key, None), (second_key, None)))
+            cache._document_validation_locks[first_key] = threading.Lock()
+            cache._document_validation_locks[second_key] = threading.Lock()
+            cache._scene_cache[(first, "r0")] = {"revision": 0}
+            cache._scene_cache[(second, "r0")] = {"revision": 0}
             first_png = (first, "r0", 1, 1, 0)
             second_png = (second, "r0", 1, 1, 0)
-            core._png_cache[first_png] = b"abc"
-            core._png_cache[second_png] = b"de"
-            core._png_cache_bytes = 5
-            core._viewport_snapshots[first] = (0, b"1234")
-            core._viewport_snapshots[second] = (0, b"56")
-            core._viewport_snapshot_bytes = 6
+            cache._png_cache[first_png] = b"abc"
+            cache._png_cache[second_png] = b"de"
+            cache._png_cache_bytes = 5
+            cache._viewport_snapshots[first] = (0, b"1234")
+            cache._viewport_snapshots[second] = (0, b"56")
+            cache._viewport_snapshot_bytes = 6
 
             core.delete_project(first)
 
-            self.assertNotIn(first_key, core._validated_document_keys)
-            self.assertIn(second_key, core._validated_document_keys)
-            self.assertNotIn(first_key, core._document_validation_locks)
-            self.assertIn(second_key, core._document_validation_locks)
-            self.assertFalse(any(key[0] == first for key in core._scene_cache))
-            self.assertTrue(any(key[0] == second for key in core._scene_cache))
-            self.assertFalse(any(key[0] == first for key in core._png_cache))
-            self.assertTrue(any(key[0] == second for key in core._png_cache))
-            self.assertEqual(core._png_cache_bytes, 2)
-            self.assertNotIn(first, core._viewport_snapshots)
-            self.assertIn(second, core._viewport_snapshots)
-            self.assertEqual(core._viewport_snapshot_bytes, 2)
+            self.assertNotIn(first_key, cache._validated_document_keys)
+            self.assertIn(second_key, cache._validated_document_keys)
+            self.assertNotIn(first_key, cache._document_validation_locks)
+            self.assertIn(second_key, cache._document_validation_locks)
+            self.assertFalse(any(key[0] == first for key in cache._scene_cache))
+            self.assertTrue(any(key[0] == second for key in cache._scene_cache))
+            self.assertFalse(any(key[0] == first for key in cache._png_cache))
+            self.assertTrue(any(key[0] == second for key in cache._png_cache))
+            self.assertEqual(cache._png_cache_bytes, 2)
+            self.assertNotIn(first, cache._viewport_snapshots)
+            self.assertIn(second, cache._viewport_snapshots)
+            self.assertEqual(cache._viewport_snapshot_bytes, 2)
 
     def test_concurrent_validation_still_coalesces_per_document_key(self):
         with TemporaryDirectory() as directory:
