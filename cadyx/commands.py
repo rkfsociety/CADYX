@@ -1667,7 +1667,8 @@ class CommandSystem:
     ) -> dict[str, Any]:
         sketch_id = sketch["id"]
         copies: list[dict[str, Any]] = []
-        for transform in transforms:
+        instance_count = 1
+        for instance_count, transform in enumerate(transforms, start=2):
             id_map = {item["id"]: f"{item['type']}:{uuid4()}" for item in source}
             for item in source:
                 clone = dict(item)
@@ -1721,7 +1722,7 @@ class CommandSystem:
             "circle_ids": [item["id"] for item in copies if item["type"] == "circle"],
             "ellipse_ids": [item["id"] for item in copies if item["type"] == "ellipse"],
             "spline_ids": [item["id"] for item in copies if item["type"] == "spline"],
-            "instance_count": len(transforms) + 1,
+            "instance_count": instance_count,
         }
 
     @staticmethod

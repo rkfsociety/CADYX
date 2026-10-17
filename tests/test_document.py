@@ -236,6 +236,7 @@ class SketchDocumentTests(unittest.TestCase):
             type="pattern_sketch_elements", sketch_id=self.sketch, object_ids=[circle["circle_id"]],
             mode="circular", count=4, center_x=0, center_y=0, angle_step_degrees=90,
         )
+        self.assertEqual(circular["instance_count"], 4)
         self.assertEqual(len(circular["circle_ids"]), 3)
         document = self.core.inspect_project(self.project)["document"]
         by_id = {item["id"]: item for item in document["objects"]}

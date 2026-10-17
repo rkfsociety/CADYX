@@ -53,6 +53,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Event tests failed.' }
           python -m unittest discover -s tests -p test_migrations.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Migration tests failed.' }
+          python -m unittest discover -s tests -p test_persisted_schemas.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Persisted schema tests failed.' }
 
   windows:
     needs: source

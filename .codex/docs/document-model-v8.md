@@ -63,3 +63,19 @@ downstream sketch pocket, reparents dependent features, reorders the feature
 chain, and rebuilds its descendants. It selects the boss's full analytic base
 circle before the pocket interrupts that circle. This is a general editable
 feature-chain operation, not a geometry import.
+
+## Persisted validation registry
+
+`cadyx/persisted_schemas.py` is the canonical registry for object kinds and
+operation-specific feature validators. Register a new feature operation there
+alongside its Command System emitter; literal feature records are checked for
+registration by `tests/test_persisted_schemas.py`. Operations historically lacking
+additional field restrictions and unknown extension operations retain that
+permissive behavior; registration does not imply geometry certification.
+`Document.validate` owns unique typed identities, reciprocal body/feature
+ownership and parameter bindings; registered feature validators resolve source
+references against its shared object index. Sketch fields and constraints still
+use the existing batch `validate_sketches` validator. Kernel checks remain separate.
+
+This refactor changes no saved JSON fields or versions. Sequential copy-only
+migrations run before validation, including all supported v1–v7 upgrades to v8.

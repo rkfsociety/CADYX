@@ -10,6 +10,7 @@ import re
 from typing import Any
 
 from .errors import ValidationError
+from .persisted_schemas import OBJECT_SCHEMAS, validate_persisted_object
 from .migrations import DOCUMENT_VERSION, migrate_document
 from .model_parameters import evaluate_expression, property_location
 from .sketches import typed_id, validate_sketches
@@ -101,7 +102,7 @@ class Document:
             if object_id in seen:
                 raise ValidationError(f"Duplicate document object id: {object_id}.")
             kind = item.get("type")
-            if not isinstance(kind, str) or kind not in {"body", "feature", "sketch", "point", "line", "circle", "ellipse", "spline", "constraint"}:
+            if not isinstance(kind, str) or kind not in OBJECT_SCHEMAS:
                 raise ValidationError("Unsupported document object type.")
             typed_id(object_id, kind)
             seen.add(object_id)
@@ -117,8 +118,7 @@ class Document:
 
         for item in self.objects:
             if item.get("type") == "body":
-                if "visible" in item and type(item["visible"]) is not bool:
-                    raise ValidationError("Body visible must be a boolean when provided.")
+                validate_persisted_object(item, by_id)
                 feature_ids = item.get("feature_ids", [])
                 if not isinstance(feature_ids, list):
                     raise ValidationError("Body feature_ids must be a list.")
@@ -141,132 +141,7 @@ class Document:
                 )
                 if not body or body.get("type") != "body" or not isinstance(feature_ids, list) or not feature_is_linked:
                     raise ValidationError("Feature must reference a body that includes the feature id.")
-                if item.get("operation") in {"extrude_sketch", "revolve_sketch", "pad_sketch_to_body"}:
-                    source_sketch_id = item.get("source_sketch_id")
-                    typed_id(source_sketch_id, "sketch")
-                    if by_id.get(source_sketch_id, {}).get("type") != "sketch":
-                        raise ValidationError("Profile feature must reference an existing source sketch.")
-                    if item.get("operation") == "pad_sketch_to_body":
-                        source_body_id = item.get("source_body_id")
-                        typed_id(source_body_id, "body")
-                        parameters = item.get("parameters")
-                        if (source_body_id == item["body_id"] or by_id.get(source_body_id, {}).get("type") != "body"
-                                or not isinstance(parameters, dict)
-                                or set(parameters) != {"sketch_id", "depth", "centered"}
-                                or parameters.get("sketch_id") != source_sketch_id
-                                or isinstance(parameters.get("depth"), bool)
-                                or not isinstance(parameters.get("depth"), (int, float))
-                                or not math.isfinite(parameters["depth"]) or parameters["depth"] <= 0
-                                or type(parameters.get("centered")) is not bool):
-                            raise ValidationError("Pad feature source references or parameters are invalid.")
-                elif item.get("operation") == "sweep_sketch":
-                    source_sketch_id = item.get("source_sketch_id")
-                    typed_id(source_sketch_id, "sketch")
-                    if by_id.get(source_sketch_id, {}).get("type") != "sketch":
-                        raise ValidationError("Sweep feature must reference an existing source sketch.")
-                elif item.get("operation") == "loft_sketches":
-                    source_sketch_ids = item.get("source_sketch_ids")
-                    parameters = item.get("parameters")
-                    groups = parameters.get("section_sketch_groups", [[value] for value in source_sketch_ids]) \
-                        if isinstance(parameters, dict) and isinstance(source_sketch_ids, list) else None
-                    if (not isinstance(source_sketch_ids, list) or len(source_sketch_ids) < 2
-                            or any(not isinstance(value, str) for value in source_sketch_ids)
-                            or len(set(source_sketch_ids)) != len(source_sketch_ids)
-                            or not isinstance(parameters, dict)
-                            or set(parameters) not in ({"section_sketch_ids", "section_offsets"},
-                                                        {"section_sketch_ids", "section_offsets", "section_sketch_groups"})
-                            or parameters.get("section_sketch_ids") != source_sketch_ids
-                            or not isinstance(groups, list) or len(groups) < 2
-                            or any(not isinstance(group, list) or not group
-                                   or any(not isinstance(value, str) for value in group) for group in groups)
-                            or [value for group in groups for value in group] != source_sketch_ids):
-                        raise ValidationError("Loft feature section references are invalid.")
-                    offsets = parameters["section_offsets"]
-                    if (not isinstance(offsets, list) or len(offsets) != len(groups)
-                            or any(isinstance(value, bool) or not isinstance(value, (int, float))
-                                   or not math.isfinite(value) for value in offsets)
-                            or any(right <= left for left, right in zip(offsets, offsets[1:]))):
-                        raise ValidationError("Loft feature section offsets are invalid.")
-                    for group, offset in zip(groups, offsets, strict=True):
-                        for sketch_id in group:
-                            typed_id(sketch_id, "sketch")
-                            sketch = by_id.get(sketch_id)
-                            if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != "XZ"
-                                    or sketch.get("section_normal_axis") != "Y"
-                                    or sketch.get("section_offset") != offset):
-                                raise ValidationError("Loft feature source sketch is missing or has changed section metadata.")
-                elif item.get("operation") == "create_ruled_shell":
-                    parameters = item.get("parameters")
-                    if (not isinstance(parameters, dict)
-                            or set(parameters) != {"patches", "sewing_tolerance"}
-                            or not isinstance(parameters.get("patches"), list)
-                            or isinstance(parameters.get("sewing_tolerance"), bool)
-                            or not isinstance(parameters.get("sewing_tolerance"), (int, float))
-                            or not math.isfinite(parameters["sewing_tolerance"])):
-                        raise ValidationError("Ruled shell feature parameters are invalid.")
-                elif item.get("operation") == "fillet_edges":
-                    source_body_id = item.get("source_body_id")
-                    typed_id(source_body_id, "body")
-                    if source_body_id == item["body_id"] or by_id.get(source_body_id, {}).get("type") != "body":
-                        raise ValidationError("Fillet feature must reference a different existing source body.")
-                    edges = item.get("edge_indices")
-                    if (not isinstance(edges, list) or not edges
-                            or any(type(index) is not int or index < 0 for index in edges)
-                            or len(set(edges)) != len(edges)):
-                        raise ValidationError("Fillet feature edge indices are invalid.")
-                elif item.get("operation") in {"resize_imported_thread", "transform_imported_brep"}:
-                    source_body_id = item.get("source_body_id")
-                    typed_id(source_body_id, "body")
-                    if source_body_id == item["body_id"] or by_id.get(source_body_id, {}).get("type") != "body":
-                        raise ValidationError("Imported B-rep feature must reference a different existing source body.")
-                    if not isinstance(item.get("parameters"), dict):
-                        raise ValidationError("Imported B-rep feature parameters are missing.")
-                elif item.get("operation") in {"fuse_bodies", "cut_bodies"}:
-                    base_id, tool_id = item.get("base_body_id"), item.get("tool_body_id")
-                    typed_id(base_id, "body")
-                    typed_id(tool_id, "body")
-                    if base_id == tool_id or item["body_id"] in {base_id, tool_id}:
-                        raise ValidationError("Boolean feature must reference two different source bodies.")
-                    if any(by_id.get(source_id, {}).get("type") != "body" for source_id in (base_id, tool_id)):
-                        raise ValidationError("Boolean feature must reference existing source bodies.")
-                elif item.get("operation") == "import_step":
-                    source = item.get("source")
-                    if (not isinstance(source, dict)
-                            or not isinstance(source.get("file"), str)
-                            or source["file"] in {"", ".", "..", "project.json", ".cadyx-project-id"}
-                            or any(character in source["file"] for character in ("/", "\\", ":", "\x00"))
-                            or not source["file"].casefold().endswith((".step", ".stp"))
-                            or not isinstance(source.get("sha256"), str)
-                            or re.fullmatch(r"[0-9a-f]{64}", source["sha256"]) is None
-                            or type(source.get("size")) is not int or not 0 < source["size"] <= 64 * 1024 * 1024):
-                        raise ValidationError("STEP source metadata is invalid.")
-                    metrics = item.get("source_metrics")
-                    if (not isinstance(metrics, dict)
-                            or set(metrics) != {
-                                "volume", "surface_area", "bounds", "topology", "brep_valid", "repaired",
-                            }
-                            or type(metrics.get("brep_valid")) is not bool
-                            or type(metrics.get("repaired")) is not bool):
-                        raise ValidationError("STEP source geometry metrics are invalid.")
-                    for key in ("volume", "surface_area"):
-                        value = metrics.get(key)
-                        if (isinstance(value, bool) or not isinstance(value, (int, float))
-                                or not math.isfinite(value) or value <= 0):
-                            raise ValidationError("STEP source geometry measures are invalid.")
-                    bounds = metrics.get("bounds")
-                    if (not isinstance(bounds, dict) or set(bounds) != {"min", "max"}
-                            or any(not isinstance(bounds.get(key), list) or len(bounds[key]) != 3
-                                   or any(isinstance(value, bool) or not isinstance(value, (int, float))
-                                          or not math.isfinite(value) for value in bounds[key])
-                                   for key in ("min", "max"))):
-                        raise ValidationError("STEP source geometry bounds are invalid.")
-                    topology = metrics.get("topology")
-                    if (not isinstance(topology, dict)
-                            or set(topology) != {"solid_count", "face_count", "edge_count", "vertex_count"}
-                            or any(type(topology.get(key)) is not int or topology[key] < 0
-                                   for key in topology)
-                            or topology["solid_count"] != 1 or topology["face_count"] == 0):
-                        raise ValidationError("STEP source B-rep topology metrics are invalid.")
+                validate_persisted_object(item, by_id)
         binding_targets: set[tuple[str, str]] = set()
         for binding in self.parameter_bindings:
             if (not isinstance(binding, dict) or set(binding) != {"object_id", "path", "expression"}
