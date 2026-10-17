@@ -43,7 +43,7 @@ class CommandSystem(
         self._extension_execute = COMMAND_REGISTRY.bind(self)
 
     @staticmethod
-    def activity_action(command_name: str) -> str:
+    def activity_action(command_name: str | None) -> str:
         return COMMAND_REGISTRY.activity_action(command_name)
 
     def execute(
