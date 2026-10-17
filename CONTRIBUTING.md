@@ -1,0 +1,39 @@
+# Contributing to CADYX
+
+CADYX is an AI-first CAD development prototype, currently verified on **Windows x64**. Before making changes, read [AGENTS.md](AGENTS.md), [`.codex/rules.md`](.codex/rules.md), the relevant architecture documents, and the existing tests.
+
+## Set up and verify
+
+Install PowerShell 7+, CMake and the MSVC C++ Build Tools. From the repository root:
+
+```powershell
+.\scripts\setup-runtime.ps1 -WithNode
+.\.runtime\python\python.exe -m unittest discover -s tests -v
+.\.runtime\python\python.exe -m compileall -q cadyx tests scripts
+```
+
+For the source-only static gate, use a compatible Python installation and run:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m ruff check .
+python scripts/check-static-types.py
+python -m unittest discover -s tests -p test_source_contracts.py -v
+```
+
+The Node browser tests and complete Windows verification steps are defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Check them before calling a change verified; a green source-only gate does not imply that the native Windows workflow passed.
+
+## Architecture invariants
+
+- CAD agents create and modify models using the versioned Agent API and shared Command System, not by driving the browser.
+- The browser is primarily a read-only observation surface. Human actions must respect the per-project lease and activity gate; do not bypass it.
+- Keep geometry, saved document state, and command history revision-consistent and validate edits atomically.
+- Use the repository's reviewed runtime locks and verify official stable releases before changing dependency versions.
+- Add targeted regression coverage and update authoritative contracts when behavior changes; never suppress failures by weakening a baseline.
+- Keep actual project models, scans, credentials and generated runtime files out of Git.
+
+## Proposing changes
+
+Repository maintainers currently work directly on `main` per [project rules](.codex/rules.md). External contributors can propose a pull request from a fork. Provide the scope, reason, affected interfaces and test results. Avoid unrelated formatting or large generated-file changes. Security reports belong in a **private** channel as described in [SECURITY.md](SECURITY.md).
+
+**Licensing:** no open-source license has yet been selected. Obtain the project owner's permission before reusing, redistributing, or licensing CADYX code; do not assume a pull request changes these terms.

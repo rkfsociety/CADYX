@@ -161,3 +161,14 @@ execution, managing the agent lease for each run. No provider adapter is
 included. External integrations report workflow and queue state through the
 Agent API. See the [Agent Runtime contract](.codex/docs/architecture.md#agent-runtime).
 
+## Project status and deployment boundaries
+
+CADYX is a **development prototype**, not a hosted CAD service or a production-ready public server. The supported reference setup is **Windows x64** with the versions pinned in `scripts/runtime-versions.json`. Native OCCT and Open3D components are built locally; other platforms are not verified. The browser is an observation interface, while CAD agents operate through the Agent API and the shared Command System. Human edits are admitted only when the project's edit lease and running-activity state allow them. A model-provider adapter is **not** bundled.
+
+The HTTP host binds to loopback by default. Non-loopback access requires authentication, but the built-in server does not provide TLS. Do not expose it directly to the public Internet. Hardware-specific experimental scanner calibration assets under `tools/revopoint/calibration/` are not general-purpose calibration data. Read [SECURITY.md](SECURITY.md) before enabling network access.
+
+## Contributing and licensing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for environment prerequisites, checks, and the AI-first editing contract. For responsible disclosure, see [SECURITY.md](SECURITY.md).
+
+**No open-source license has been selected or granted for this repository.** Public visibility, if enabled, does not by itself grant permission to redistribute, modify, or reuse CADYX source code. Licensing must be decided by the project owner before presenting the project as open source.

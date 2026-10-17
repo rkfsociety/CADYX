@@ -24,7 +24,10 @@ const context = {
     currentPath = []; strokedPaths = []; dashPatterns = []; arcs = 0;
     rasterizedPixels = 0; rasterizedBounds = null;
   },
-  fillRect(x, y) { drawnPoints.push([x, y]); },
+  fillRect(x, y, width, height) {
+    // Capture geometry point markers, not coordinate-label backgrounds.
+    if (width > 0 && height > 0 && width <= 4 && height <= 4) drawnPoints.push([x, y]);
+  },
   beginPath() { currentPath = []; }, moveTo(x, y) { currentPath.push([x, y]); },
   lineTo(x, y) { segments++; drawnLines.push([x, y]); currentPath.push([x, y]); },
   closePath() {}, fill() { meshMoves.push(...currentPath); }, stroke() { strokedPaths.push(currentPath.slice()); }, strokeRect() {}, save() {}, restore() {},

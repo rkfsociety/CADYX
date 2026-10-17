@@ -7,3 +7,30 @@ projects/*
 *.tmp
 .runtime/
 tools/revopoint/build/
+
+# Local credentials and runtime configuration (never commit real tokens).
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.token
+*.secret
+
+# Generated Python, JavaScript, test and editor artifacts.
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
