@@ -1,0 +1,266 @@
+name: Apply roadmap stage 35
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/stage35-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Decompose CadyxCore orchestration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import ast
+          from pathlib import Path
+
+          root = Path('.')
+          core_path = root / 'cadyx/core.py'
+          source = core_path.read_text(encoding='utf-8')
+          lines = source.splitlines(keepends=True)
+          tree = ast.parse(source)
+          core_class = next(
+              node for node in tree.body
+              if isinstance(node, ast.ClassDef) and node.name == 'CadyxCore'
+          )
+          methods = {
+              node.name: node
+              for node in core_class.body
+              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+          }
+
+          groups = {
+              'ProjectLifecycleService': [
+                  '_project_availability', '_require_project_policy',
+                  '_selection_project_locks', '_assert_workspace_selection_policy',
+                  '_project_lifecycle_lock', 'create_project', 'upload_project_step',
+                  'copy_project_files', 'remove_staged_project_step',
+                  'prune_project_files', 'rename_project', 'delete_project',
+                  'list_projects', 'list_workspace', 'create_project_group',
+                  'assign_project_group', 'workspace_selection_snapshot',
+                  'select_workspace_resource', 'inspect_project',
+              ],
+              'CommandActivityService': [
+                  'agent_dashboard_snapshot', 'report_agent_dashboard', 'acquire_lease',
+                  'rotate_view', 'observe_agent_operation', 'heartbeat', 'release_lease',
+                  'recover_expired_lease', 'stop_agent', 'resume_agent', 'execute_command',
+              ],
+              'RenderingCacheService': [
+                  'compare_bodies', 'render_project', '_scene_for_project',
+                  '_remember_png_locked', '_render_project_png_server',
+                  'render_project_thumbnail_png', 'publish_viewport_snapshot',
+                  'render_project_png_with_source', 'render_project_png',
+                  'inspect_body_topology', '_document_cache_key',
+                  '_remember_geometry_validation', '_invalidate_project_runtime_caches',
+                  '_validate_geometry_once', '_clone_scene',
+              ],
+              'EngineeringValidationService': [
+                  'validate_body_dimensions', 'validate_body_clearance',
+                  'list_validation_records', 'validate_body_preservation',
+                  'validate_body_thickness', '_maybe_persist_validation',
+              ],
+          }
+          missing = sorted(name for names in groups.values() for name in names if name not in methods)
+          if missing:
+              raise SystemExit(f'core method anchors changed: {missing}')
+
+          def node_start(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
+              starts = [node.lineno]
+              starts.extend(dec.lineno for dec in node.decorator_list)
+              return min(starts)
+
+          def method_source(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+              return ''.join(lines[node_start(node) - 1: node.end_lineno])
+
+          def delegate_call(node: ast.FunctionDef | ast.AsyncFunctionDef, target: str) -> str:
+              args = node.args
+              positional = [arg.arg for arg in (*args.posonlyargs, *args.args)]
+              if positional and positional[0] in {'self', 'cls'}:
+                  positional = positional[1:]
+              forwarded = list(positional)
+              if args.vararg is not None:
+                  forwarded.append(f'*{args.vararg.arg}')
+              forwarded.extend(f'{arg.arg}={arg.arg}' for arg in args.kwonlyargs)
+              if args.kwarg is not None:
+                  forwarded.append(f'**{args.kwarg.arg}')
+              return f"self.{target}.{node.name}({', '.join(forwarded)})"
+
+          service_for = {
+              name: service
+              for service, names in groups.items()
+              for name in names
+          }
+          target_attr = {
+              'ProjectLifecycleService': '_lifecycle',
+              'CommandActivityService': '_command_activity',
+              'RenderingCacheService': '_rendering',
+              'EngineeringValidationService': '_engineering_validation',
+          }
+
+          replacements: list[tuple[int, int, str]] = []
+          for name, service in service_for.items():
+              node = methods[name]
+              header = ''.join(lines[node.lineno - 1: node.body[0].lineno - 1])
+              if not header.rstrip().endswith(':'):
+                  raise SystemExit(f'could not preserve signature for {name}')
+              call = delegate_call(node, target_attr[service])
+              stub = header + f'        return {call}\n'
+              replacements.append((node_start(node) - 1, node.end_lineno, stub))
+
+          new_lines = list(lines)
+          for start, end, replacement in sorted(replacements, reverse=True):
+              new_lines[start:end] = [replacement]
+          new_core = ''.join(new_lines)
+
+          old_import = 'from .commands import CommandSystem\n'
+          service_import = (
+              'from .core_services import (\n'
+              '    CommandActivityService,\n'
+              '    EngineeringValidationService,\n'
+              '    ProjectLifecycleService,\n'
+              '    RenderingCacheService,\n'
+              '    _ProjectAvailability,\n'
+              ')\n'
+          )
+          if old_import not in new_core or 'from .core_services import (' in new_core:
+              raise SystemExit('core service import anchor changed')
+          new_core = new_core.replace(old_import, old_import + service_import, 1)
+
+          lifecycle_state = '''        self._workspace_selection_guard = threading.RLock()\n        self._workspace_selection: dict[str, str] | None = None\n        self._project_lifecycle_guard = threading.Lock()\n        self._project_lifecycle_locks: dict[str, threading.RLock] = {}\n'''
+          cache_state = '''        self._cache_policy = cache_policy if cache_policy is not None else RuntimeCachePolicy()\n        self._geometry_cache_guard = threading.RLock()\n        self._validated_document_keys: OrderedDict[tuple[str, str], None] = OrderedDict()\n        self._document_validation_locks: dict[tuple[str, str], threading.Lock] = {}\n        self._scene_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()\n        self._png_cache: OrderedDict[tuple[str, str, int, int, int], bytes] = OrderedDict()\n        self._png_cache_bytes = 0\n        self._viewport_snapshot_guard = threading.RLock()\n        self._viewport_snapshots: OrderedDict[str, tuple[int, bytes]] = OrderedDict()\n        self._viewport_snapshot_bytes = 0\n'''
+          if lifecycle_state not in new_core or cache_state not in new_core:
+              raise SystemExit('core service state anchors changed')
+          new_core = new_core.replace(lifecycle_state, '', 1).replace(cache_state, '', 1)
+
+          event_anchor = '        self.events = EventBroker(dashboard_state_path=self.workspace.root / ".cadyx-agent-dashboards.json")\n'
+          service_init = '''        self._lifecycle = ProjectLifecycleService(self)\n        self._command_activity = CommandActivityService(self)\n        self._rendering = RenderingCacheService(self, cache_policy=cache_policy)\n        self._engineering_validation = EngineeringValidationService(self)\n'''
+          if event_anchor not in new_core:
+              raise SystemExit('core constructor event anchor changed')
+          new_core = new_core.replace(event_anchor, event_anchor + service_init, 1)
+
+          dataclass_start = new_core.index('@dataclass(frozen=True)\nclass _ProjectAvailability:')
+          class_start = new_core.index('\n\nclass CadyxCore:', dataclass_start)
+          new_core = new_core[:dataclass_start] + new_core[class_start + 2:]
+          core_path.write_text(new_core, encoding='utf-8')
+
+          service_imports = '''"""Focused orchestration collaborators behind :class:`CadyxCore`."""\n\nfrom __future__ import annotations\n\nimport copy\nimport math\nimport threading\nfrom collections import OrderedDict\nfrom contextlib import ExitStack, contextmanager\nfrom dataclasses import dataclass\nfrom datetime import datetime, timezone\nfrom typing import TYPE_CHECKING, Any, Callable, Iterator, Literal\nfrom uuid import uuid4\n\nfrom .delivery import geometry_sha256\nfrom .errors import CadyxError, ConflictError, NotFoundError, ValidationError\nfrom .mesh_geometry import mesh_bounds\nfrom .models import Document, OwnerType\nfrom .rendering import render_scene, render_scene_png\nfrom .runtime_cache import RuntimeCachePolicy, remember_bounded_bytes, trim_lru_entries\nfrom .workspace import utc_now\n\nif TYPE_CHECKING:\n    from .core import CadyxCore\n\n\n@dataclass(frozen=True)\nclass _ProjectAvailability:\n    lock: dict[str, Any]\n    running_operation: bool\n    active_workflow: bool\n\n    @property\n    def lock_state(self) -> str | None:\n        state = self.lock.get("state")\n        return state if isinstance(state, str) else None\n\n    @property\n    def is_free(self) -> bool:\n        return (\n            self.lock_state == "FREE"\n            and self.lock.get("recovery_required") is False\n            and not self.running_operation\n        )\n\n    def permits(\n        self,\n        policy: Literal["read", "write", "file_management", "selection", "destructive"],\n        *,\n        valid_lease: bool = False,\n        sole_active_workflow_target: bool = False,\n    ) -> bool:\n        if policy == "read":\n            return True\n        if policy == "write":\n            if valid_lease:\n                return (\n                    self.lock_state in {"AI_LOCKED", "HUMAN_LOCKED", "SYSTEM_LOCKED"}\n                    and not self.running_operation\n                )\n            return self.is_free\n        if policy in {"file_management", "destructive"}:\n            return self.is_free\n        if policy == "selection":\n            return self.is_free and (not self.active_workflow or sole_active_workflow_target)\n        raise ValueError(f"Unknown project availability policy: {policy}")\n\n\nclass _CoreService:\n    _local_names: frozenset[str] = frozenset()\n\n    def __init__(self, core: CadyxCore) -> None:\n        object.__setattr__(self, "_core", core)\n\n    def __getattr__(self, name: str) -> Any:\n        return getattr(self._core, name)\n\n    def __setattr__(self, name: str, value: Any) -> None:\n        if name == "_core" or name in self._local_names:\n            object.__setattr__(self, name, value)\n        else:\n            setattr(self._core, name, value)\n\n\n'''
+
+          class_preludes = {
+              'ProjectLifecycleService': '''class ProjectLifecycleService(_CoreService):\n    """Own project lifecycle locks, availability policy, and viewer selection state."""\n\n    _local_names = frozenset({\n        "_workspace_selection_guard", "_workspace_selection",\n        "_project_lifecycle_guard", "_project_lifecycle_locks",\n    })\n\n    def __init__(self, core: CadyxCore) -> None:\n        super().__init__(core)\n        self._workspace_selection_guard = threading.RLock()\n        self._workspace_selection: dict[str, str] | None = None\n        self._project_lifecycle_guard = threading.Lock()\n        self._project_lifecycle_locks: dict[str, threading.RLock] = {}\n\n''',
+              'CommandActivityService': '''class CommandActivityService(_CoreService):\n    """Coordinate leases, command execution, dashboards, and visible activity."""\n\n''',
+              'RenderingCacheService': '''class RenderingCacheService(_CoreService):\n    """Own revision-bound render/validation caches and viewport snapshots."""\n\n    _local_names = frozenset({\n        "_cache_policy", "_geometry_cache_guard", "_validated_document_keys",\n        "_document_validation_locks", "_scene_cache", "_png_cache",\n        "_png_cache_bytes", "_viewport_snapshot_guard",\n        "_viewport_snapshots", "_viewport_snapshot_bytes",\n    })\n\n    def __init__(self, core: CadyxCore, *, cache_policy: RuntimeCachePolicy | None = None) -> None:\n        super().__init__(core)\n        self._cache_policy = cache_policy if cache_policy is not None else RuntimeCachePolicy()\n        self._geometry_cache_guard = threading.RLock()\n        self._validated_document_keys: OrderedDict[tuple[str, str], None] = OrderedDict()\n        self._document_validation_locks: dict[tuple[str, str], threading.Lock] = {}\n        self._scene_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()\n        self._png_cache: OrderedDict[tuple[str, str, int, int, int], bytes] = OrderedDict()\n        self._png_cache_bytes = 0\n        self._viewport_snapshot_guard = threading.RLock()\n        self._viewport_snapshots: OrderedDict[str, tuple[int, bytes]] = OrderedDict()\n        self._viewport_snapshot_bytes = 0\n\n''',
+              'EngineeringValidationService': '''class EngineeringValidationService(_CoreService):\n    """Run revision-bound engineering checks and optional validation persistence."""\n\n''',
+          }
+
+          chunks = [service_imports]
+          for service, names in groups.items():
+              chunks.append(class_preludes[service])
+              for name in names:
+                  chunks.append(method_source(methods[name]))
+                  chunks.append('\n')
+          (root / 'cadyx/core_services.py').write_text(''.join(chunks), encoding='utf-8')
+
+          test_source = '''"""Direct tests for the CadyxCore orchestration collaborators."""\nfrom __future__ import annotations\n\nimport tempfile\nimport unittest\n\nfrom cadyx.core import CadyxCore\nfrom cadyx.core_services import (\n    CommandActivityService,\n    EngineeringValidationService,\n    ProjectLifecycleService,\n    RenderingCacheService,\n)\nfrom cadyx.runtime_cache import RuntimeCachePolicy\n\n\nclass CoreServiceCompositionTests(unittest.TestCase):\n    def test_core_composes_four_focused_services(self) -> None:\n        with tempfile.TemporaryDirectory() as root:\n            core = CadyxCore(root, kernel=object())\n            self.assertIsInstance(core._lifecycle, ProjectLifecycleService)\n            self.assertIsInstance(core._command_activity, CommandActivityService)\n            self.assertIsInstance(core._rendering, RenderingCacheService)\n            self.assertIsInstance(core._engineering_validation, EngineeringValidationService)\n\n    def test_lifecycle_service_owns_selection_and_lock_state(self) -> None:\n        with tempfile.TemporaryDirectory() as root:\n            core = CadyxCore(root, kernel=object())\n            created = core.create_project("service-owned-lifecycle")\n            project_id = created["project"]["id"]\n            self.assertEqual(\n                core.workspace_selection_snapshot(),\n                {"type": "project", "project_id": project_id},\n            )\n            self.assertNotIn("_workspace_selection", core.__dict__)\n            self.assertIn("_workspace_selection", core._lifecycle.__dict__)\n            self.assertNotIn("_project_lifecycle_locks", core.__dict__)\n\n    def test_rendering_service_owns_cache_budgets(self) -> None:\n        policy = RuntimeCachePolicy(\n            validated_document_entries=2, scene_entries=3, png_entries=4,\n            png_bytes=1024, viewport_snapshot_entries=5, viewport_snapshot_bytes=2048,\n        )\n        with tempfile.TemporaryDirectory() as root:\n            core = CadyxCore(root, kernel=object(), cache_policy=policy)\n            self.assertIs(core._rendering._cache_policy, policy)\n            self.assertNotIn("_scene_cache", core.__dict__)\n            self.assertIn("_scene_cache", core._rendering.__dict__)\n            core._invalidate_project_runtime_caches("missing-project")\n\n\nif __name__ == "__main__":\n    unittest.main()\n'''
+          (root / 'tests/test_core_services.py').write_text(test_source, encoding='utf-8')
+
+          roadmap_path = root / '.codex/roadmap.md'
+          roadmap = roadmap_path.read_text(encoding='utf-8')
+          old_stage = '''35. **Candidate — CadyxCore orchestration decomposition:** after the workspace/event/runtime contracts above are stabilized, split the oversized `CadyxCore` implementation behind its existing public facade into focused collaborators for project lifecycle/selection, command execution/activity, rendering/cache ownership and engineering validation. Keep `CadyxCore` as the API-facing composition root so Agent API/MCP/HTTP callers and lease semantics stay unchanged. Acceptance: each collaborator has a narrow dependency surface and direct unit tests, no collaborator bypasses Core's lease/revision/atomic-save rules, cross-project lock ordering remains explicit, and the existing Core/Web/MCP suites remain behaviorally identical. Evidence: [`cadyx/core.py`](../cadyx/core.py), [`tests/test_locking.py`](../tests/test_locking.py), [`tests/test_agent_control.py`](../tests/test_agent_control.py), [`tests/test_web_api.py`](../tests/test_web_api.py), and [`tests/test_mcp_server.py`](../tests/test_mcp_server.py).'''
+          new_stage = '''35. **Complete — CadyxCore orchestration decomposition:** `CadyxCore` remains the API-facing composition root while four focused collaborators now own project lifecycle/selection state, command execution/activity orchestration, revision-bound rendering/cache state, and engineering validation. Public Core method names and signatures remain unchanged and delegate behind the facade; lifecycle lock ordering, lease/revision checks and atomic workspace saves still flow through the same Core/Workspace boundaries. Runtime cache budgets and invalidation are owned by the rendering collaborator instead of the facade, and selection/lifecycle locks are owned by the lifecycle collaborator. Evidence: [`cadyx/core.py`](../cadyx/core.py), [`cadyx/core_services.py`](../cadyx/core_services.py), [`tests/test_core_services.py`](../tests/test_core_services.py), [`tests/test_locking.py`](../tests/test_locking.py), [`tests/test_agent_control.py`](../tests/test_agent_control.py), [`tests/test_web_api.py`](../tests/test_web_api.py), and [`tests/test_mcp_server.py`](../tests/test_mcp_server.py).'''
+          if old_stage not in roadmap:
+              raise SystemExit('roadmap stage 35 anchor changed')
+          roadmap_path.write_text(roadmap.replace(old_stage, new_stage, 1), encoding='utf-8')
+          PY
+
+      - name: Install source quality tools
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Normalize imports and lint
+        run: |
+          python -m ruff check --fix cadyx/core.py cadyx/core_services.py tests/test_core_services.py
+          python -m ruff check .
+
+      - name: Refresh reduced mypy ratchet
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import subprocess
+          import sys
+          import tomllib
+          from collections import Counter
+          from pathlib import Path
+
+          config = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))
+          files = list(config['tool']['cadyx']['static-quality']['mypy-ratchet-files'])
+          completed = subprocess.run(
+              [sys.executable, '-m', 'mypy', *files, '--no-error-summary', '--no-pretty'],
+              text=True, capture_output=True, check=False,
+          )
+          if completed.returncode not in (0, 1):
+              print(completed.stdout)
+              print(completed.stderr, file=sys.stderr)
+              raise SystemExit(completed.returncode)
+          pattern = re.compile(r'^(.+?\\.py):\\d+(?::\\d+)?: error: .+? \\[([^\\]]+)\\]$')
+          actual: dict[str, Counter[str]] = {}
+          for line in (completed.stdout + completed.stderr).splitlines():
+              if ': error:' not in line:
+                  continue
+              match = pattern.match(line)
+              if match is None:
+                  raise SystemExit(f'unparsed mypy error: {line}')
+              module = Path(match.group(1).replace('\\\\', '/')).stem
+              actual.setdefault(module, Counter())[match.group(2)] += 1
+          for file_name in files:
+              actual.setdefault(Path(file_name).stem, Counter())
+          baseline_path = Path('tests/mypy-error-baseline.json')
+          old = json.loads(baseline_path.read_text(encoding='utf-8'))
+          for module, counts in actual.items():
+              previous = old.get(module, {})
+              for code, count in counts.items():
+                  if count > previous.get(code, 0):
+                      raise SystemExit(f'mypy debt increased for {module}[{code}]: {previous.get(code, 0)} -> {count}')
+          normalized = {
+              module: {code: count for code, count in sorted(counts.items()) if count}
+              for module, counts in sorted(actual.items())
+          }
+          baseline_path.write_text(json.dumps(normalized, indent=2) + '\n', encoding='utf-8')
+          PY
+          python scripts/check-static-types.py
+
+      - name: Verify source contracts and focused behavior
+        shell: bash
+        run: |
+          python -m compileall -q cadyx tests scripts
+          python -m unittest discover -s tests -p 'test_core_services.py' -v
+          python -m unittest discover -s tests -p 'test_source_contracts.py' -v
+          python -m unittest discover -s tests -p 'test_locking.py' -v
+          python -m unittest discover -s tests -p 'test_agent_control.py' -v
+          python -m unittest discover -s tests -p 'test_static_quality.py' -v
+          git diff --check
+
+      - name: Commit stage 35
+        shell: bash
+        run: |
+          rm .github/workflows/stage35-apply.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Complete roadmap stage 35 core orchestration decomposition'
+          git push origin main
