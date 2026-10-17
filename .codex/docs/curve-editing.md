@@ -2,9 +2,15 @@
 
 CADYX keeps the browser observation-only for ordinary CAD authoring. Human curve correction is a narrow opt-in exception for reference tracing: a local client may prepare a draft of connected line and circular-arc segments, undo/redo that unsaved draft, and submit a confirmed version through the same human lease and Command System used by every browser-originated document mutation.
 
+## Browser entry point
+
+The scanner window exposes a separate `ТРАССИРОВКА КРИВОЙ` dialog. It is intentionally outside the ordinary CAD viewport so the main project surface stays observation-only. The dialog lets the user choose a local source image and an existing project, trace a single connected chain with line/circular-arc tools, undo/redo the local draft, close the contour, and enter the source-to-model coordinate system.
+
+The selected image is never uploaded or persisted by the editor. The browser computes its SHA-256 locally and stores only that digest plus coordinate-system provenance with the saved trace. Before save, the dialog checks the current project availability, reads the current document revision, acquires a human lease, submits the versioned trace command, and releases the lease in `finally`. Agent-active, locked, recovery-required, stale-revision and stale-trace-version cases remain server-authoritative failures.
+
 ## Draft and save boundary
 
-Unsaved edits are client-local. `web/browser-api.js` provides `TraceDraft`, an isolated snapshot history with `replace`, `update`, `undo`, and `redo`; undo/redo never writes project state. A confirmed save uses `save_traced_curve_version` through `POST /api/v1/projects/{project_id}/commands` while holding a human lease and supplying the current project revision. Agent callers may use the same command through the Agent API, but browser editing does not bypass lease ownership, revision checks, Core atomicity, or project availability policy.
+Unsaved edits are client-local. `web/browser-api.js` provides `TraceDraft`, an isolated snapshot history with `replace`, `update`, `undo`, and `redo`; undo/redo never writes project state. The scanner trace UI follows the same snapshot-history rule. A confirmed save uses `save_traced_curve_version` through `POST /api/v1/projects/{project_id}/commands` while holding a human lease and supplying the current project revision. Agent callers may use the same command through the Agent API, but browser editing does not bypass lease ownership, revision checks, Core atomicity, or project availability policy.
 
 Each confirmed save creates a new sketch. Earlier sketches with the same `trace_id` are immutable trace-history versions and are never modified in place. `base_version` is an optimistic trace-history fence: stale saves fail with `REVISION_CONFLICT`. This is independent of, and additional to, the project document revision fence enforced by Core.
 
@@ -25,4 +31,4 @@ The saved sketch records `trace_id`, `trace_version`, normalized source-image SH
 
 ## Supported scope
 
-The initial constrained editor contract supports XY and XZ sketches, exact straight segments and exact circular arcs, and at most 4096 source segments per saved version. It does not authorize a general browser sketch editor, direct DOM-driven CAD authoring, constraint solving, spline fitting, image storage in `project.json`, or mutation of an earlier trace version. Image acquisition/display and higher-level tracing UI can evolve independently while keeping this save boundary stable.
+The constrained editor supports XY and XZ sketches, exact straight segments and exact circular arcs, and at most 4096 source segments per saved version. Arc input uses the current chain endpoint plus a chosen center and end direction; the browser normalizes that to one exact radius and a signed sweep before sending source coordinates. It does not authorize a general browser sketch editor, direct DOM-driven CAD authoring, constraint solving, spline fitting, image storage in `project.json`, or mutation of an earlier trace version.
