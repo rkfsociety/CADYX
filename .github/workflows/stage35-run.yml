@@ -1,0 +1,57 @@
+name: Run roadmap stage 35 fixed
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/stage35-run.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Run corrected stage 35 recipe
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          path = Path('.github/workflows/stage35-apply.yml')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              "                  '_document_cache_key','_remember_geometry_validation','_invalidate_project_runtime_caches',\n                  '_validate_geometry_once','_clone_scene',\n",
+              "                  '_remember_geometry_validation','_invalidate_project_runtime_caches',\n                  '_validate_geometry_once',\n",
+              1,
+          )
+          path.write_text(text, encoding='utf-8')
+
+          def run_block(name: str) -> None:
+              lines = text.splitlines()
+              marker = f'      - name: {name}'
+              start = lines.index(marker)
+              run_index = next(i for i in range(start + 1, len(lines)) if lines[i] == '        run: |')
+              block = []
+              for line in lines[run_index + 1:]:
+                  if line.startswith('      - name: '):
+                      break
+                  block.append(line[10:] if line.startswith('          ') else line)
+              script = '\n'.join(block) + '\n'
+              subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script], check=True)
+
+          run_block('Decompose CadyxCore orchestration')
+          run_block('Install quality tools')
+          run_block('Lint and type ratchet')
+          run_block('Verify focused behavior')
+          run_block('Commit stage 35')
+          PY
