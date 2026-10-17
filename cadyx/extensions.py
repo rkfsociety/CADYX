@@ -12,6 +12,7 @@ from functools import partial
 from types import MappingProxyType
 from typing import Any, Callable, Mapping
 
+from .command_presentation import BUILTIN_ACTIVITY_ACTIONS, DEFAULT_ACTIVITY_ACTION
 from .errors import ValidationError
 
 
@@ -22,6 +23,7 @@ class CommandExtension:
     handler: Callable[..., dict[str, Any]] | None = None
     middleware: Callable[..., dict[str, Any]] | None = None
     refine: Callable[[tuple[dict[str, Any], ...]], tuple[dict[str, Any], ...]] | None = None
+    activity_actions: Mapping[str, str] | None = None
 
 
 class ExtensionRegistry:
@@ -37,13 +39,32 @@ class ExtensionRegistry:
         handlers: dict[str, Callable[..., dict[str, Any]]] = {}
         middleware = []
         names: set[str] = set()
+        activity_actions: dict[str, str] = {}
 
-        def add_contracts(entries: tuple[dict[str, Any], ...]) -> None:
+        def add_contracts(
+            entries: tuple[dict[str, Any], ...],
+            actions: Mapping[str, str] | None = None,
+        ) -> None:
+            entry_names: set[str] = set()
             for entry in entries:
                 name = entry["type"]
                 if name in seen:
                     raise ValueError(f"Duplicate command registration: {name}.")
                 seen.add(name)
+                entry_names.add(name)
+                action = (
+                    actions[name]
+                    if actions is not None and name in actions
+                    else BUILTIN_ACTIVITY_ACTIONS.get(name, DEFAULT_ACTIVITY_ACTION)
+                )
+                if not isinstance(action, str) or not action.strip():
+                    raise ValueError(f"Command {name} needs a non-empty activity action.")
+                activity_actions[name] = action
+            if actions is not None:
+                unknown_actions = set(actions) - entry_names
+                if unknown_actions:
+                    names_text = ", ".join(sorted(unknown_actions))
+                    raise ValueError(f"Extension activity metadata has no command: {names_text}.")
 
         add_contracts(contracts)
         if base_handlers is not None:
@@ -59,7 +80,7 @@ class ExtensionRegistry:
             if extension.capabilities and extension.handler is None:
                 raise ValueError(f"Extension {extension.name} declares commands without a handler.")
             entries = deepcopy(extension.capabilities)
-            add_contracts(entries)
+            add_contracts(entries, extension.activity_actions)
             if extension.handler is not None:
                 for entry in entries:
                     handlers[entry["type"]] = extension.handler
@@ -74,6 +95,7 @@ class ExtensionRegistry:
         self._capabilities = contracts
         self.command_types = frozenset(seen)
         self.handlers = MappingProxyType(handlers)
+        self.activity_actions = MappingProxyType(activity_actions)
         self.middleware = tuple(middleware)
         self.extension_names = tuple(extension.name for extension in extensions)
 
@@ -81,6 +103,12 @@ class ExtensionRegistry:
     def capabilities(self) -> tuple[dict[str, Any], ...]:
         """Return an isolated discovery snapshot, never the registry's metadata."""
         return deepcopy(self._capabilities)
+
+    def activity_action(self, command_name: Any) -> str:
+        """Resolve presentation metadata without exposing Core to command-name tables."""
+        if not isinstance(command_name, str):
+            return DEFAULT_ACTIVITY_ACTION
+        return self.activity_actions.get(command_name, DEFAULT_ACTIVITY_ACTION)
 
     def bind(
         self, system: Any, base_execute: Callable[..., dict[str, Any]] | None = None,
