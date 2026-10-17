@@ -9,7 +9,15 @@ const window = {
   fetch: async () => { throw new Error("unexpected default fetch"); },
 };
 window.fetch.bind = Function.prototype.bind.bind(window.fetch);
-const context = vm.createContext({ window, Error, JSON, Object, TypeError, Number, encodeURIComponent });
+let deepCloneCalls = 0;
+const countingJson = {
+  parse: JSON.parse.bind(JSON),
+  stringify(value, replacer, space) {
+    deepCloneCalls += 1;
+    return JSON.stringify(value, replacer, space);
+  },
+};
+const context = vm.createContext({ window, Error, JSON: countingJson, Object, TypeError, Number, encodeURIComponent });
 vm.runInContext(traceDraftSource, context, { filename: "trace-draft.js" });
 vm.runInContext(source, context, { filename: "browser-api.js" });
 
@@ -53,16 +61,27 @@ const longSegments = Array.from({ length: 4096 }, (_, index) => ({
 }));
 const longDraft = new TraceDraft(longSegments, { historyLimit: 8 });
 const retainedHead = longDraft.current()[0];
+const cloneCallsBeforeEdits = deepCloneCalls;
 for (let index = 0; index < 64; index += 1) {
-  longDraft.update((segments) => segments.push({
+  const view = longDraft.update((segments) => segments.push({
     kind: "line",
     start: { x: 4096 + index, y: 0 },
     end: { x: 4097 + index, y: 0 },
   }));
+  assert.equal(view, longDraft.current(), "editing should return the allocation-free current view");
 }
+assert.equal(deepCloneCalls, cloneCallsBeforeEdits, "long-trace edits must not deep-clone the complete draft");
 assert.equal(longDraft.historySize, 8, "4096-segment editing must retain only bounded undo revisions");
 assert.equal(longDraft.current()[0], retainedHead, "unchanged long-trace segments must be structurally shared across edits");
 assert.equal(longDraft.current().length, 4160);
+const cloneCallsBeforeUndo = deepCloneCalls;
+assert.equal(longDraft.undo(), longDraft.current(), "undo should return the current view without cloning");
+assert.equal(longDraft.redo(), longDraft.current(), "redo should return the current view without cloning");
+assert.equal(deepCloneCalls, cloneCallsBeforeUndo, "undo/redo must not deep-clone the complete draft");
+const longOwned = longDraft.snapshot();
+assert.equal(deepCloneCalls, cloneCallsBeforeUndo + 1, "ownership snapshots should clone exactly once");
+longOwned[0].end.x = 88;
+assert.equal(longDraft.current()[0].end.x, 1, "long ownership snapshots must stay isolated from the live revision");
 
 (async () => {
   const session = new TraceEditorSession({

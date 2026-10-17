@@ -49,7 +49,7 @@
       this._remember(this._past, this._present);
       this._present = cloneOwned(next);
       this._future.length = 0;
-      return this.snapshot();
+      return this._present;
     }
 
     update(mutator) {
@@ -58,7 +58,7 @@
       this._remember(this._past, this._present);
       this._present = next;
       this._future.length = 0;
-      return this.snapshot();
+      return this._present;
     }
 
     undo() {
@@ -66,7 +66,7 @@
         this._remember(this._future, this._present);
         this._present = this._past.pop();
       }
-      return this.snapshot();
+      return this._present;
     }
 
     redo() {
@@ -74,7 +74,7 @@
         this._remember(this._past, this._present);
         this._present = this._future.pop();
       }
-      return this.snapshot();
+      return this._present;
     }
 
     get canUndo() { return this._past.length > 0; }
