@@ -105,6 +105,29 @@ created through the existing Core or Agent API before a runtime run. See the
 
 The shared Command System supports box and parameter edits, scan import and parameter edits, direct single-solid STEP import, XY/XZ sketches and constraints, profile/path replacement, and linked solid features. Profile extrusion/revolution, circular-section path sweeps, connected Boolean fuses, and topology-selected edge fillets all create editable OCCT B-reps. STEP import stores the transferred OCCT B-rep with the source hash and geometry metrics; invalid source shapes remain marked invalid if OCCT cannot repair them within the documented tolerance. Feature descriptors retain their source sketches or bodies and parameters; supported upstream edits rebuild dependent features in document order inside the same atomic command. Fusion accepts intersecting B-rep solids, including swept pipes and prior fuse/fillet results, and must produce one connected solid. Fillet selection uses current unique B-rep edge indices exposed by the Agent topology endpoint; indices are traversal results, not persistent names. Scan commands resolve direct workspace PLY files through `ProjectWorkspace`, run inside the same Core lease and atomic-save path, and never write to the source. Each processed mesh is published as an atomic, content-addressed binary PLY beside its source; matching files are reused, and conflicts are never overwritten. The `reconstruct_scan` feature stores its source hash, output-file metadata, and processing parameters; its body's `cadyx-mesh-v1` geometry stores bounded compressed float32 vertices and uint32 faces in `project.json`. The Core retains the latest 128 in-memory activity snapshots per project and publishes updates as `agent.activity` SSE. Snapshots include Agent Runtime/API inspections, render requests, commands, solid features, camera orbits, and native scan phases; the browser shows the current action/task and a newest-first timestamped list of completed/failed action snapshots, without exposing the full journal. The `GeometryKernel` protocol isolates CADYX Core from a specific kernel. `OCCTKernelAdapter` creates and validates boxes, profile extrusions/revolutions, swept pipes, fused solids, filleted solids, and imported STEP solids, and validates legacy `primitive-v1` descriptors. It also validates and tessellates portable triangle meshes without turning them into B-reps. `PrimitiveKernelAdapter` remains available for demos and does not create B-rep geometry. See the [Document Model v7 contract](document-model-v7.md#sketch-driven-solid-features) for exact commands and limits.
 
+### Geometry descriptor ownership
+
+`cadyx/kernel.py` remains the public `GeometryKernel` boundary and OCCT adapter;
+`OCPKernelAdapter` and `PrimitiveKernelAdapter` remain import-compatible aliases.
+Pure numeric/profile normalization and loft matching live in `kernel_profiles.py`;
+the demo adapter lives in `kernel_primitive.py`.
+`kernel_descriptors.py` owns canonical JSON serialization, the bounded validation
+cache, existing kind-specific descriptor/native-volume checks, and discriminated
+`TypedDict` contracts for boxes, profiles, lofts, Booleans, pipes, threads, imported
+B-reps, fillets and triangle meshes. Mesh payload validation/decoding remains owned
+by `mesh_geometry.py`.
+
+Raw saved geometry enters as recursive JSON values. `normalize_geometry` validates
+that descriptor using the same cache as `validate`, then returns an independent
+JSON snapshot typed as `CheckedGeometry`; mutating it cannot alter the source or
+poison cached objects. OCCT operations that previously validated input descriptors
+now use this checked snapshot. Geometry constructors expose kind-specific return
+types. Native shape checks remain authoritative; these annotations do not imply
+that the whole adapter implementation is covered by the incremental mypy gate.
+Persisted JSON, legacy `primitive-v1`/spline descriptors, validation errors and
+native reconstruction algorithms remain unchanged; no migration is required.
+
+
 `export_brep` requires `expected_revision`, validates one current single-solid B-rep, exports STEP and re-imports it to check validity, solid count, bounds and volume before publishing. Optional binary STL output is checked for watertightness and orientation, with mesh volume error and a bounded sampled surface-deviation measurement recorded in a revision-bound manifest. Export files use no-replace atomic publication in the project folder; the manifest is published last. STEP is authoritative; STL sampling does not claim exhaustive surface equivalence. See the [verified delivery contract](document-model-v7.md#verified-cad-delivery).
 
 ## HTTP authentication and LAN bind gate
