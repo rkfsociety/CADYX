@@ -21,6 +21,7 @@ from .lease import EditLeaseManager
 from .models import Document, OwnerType
 from .mesh_geometry import mesh_bounds
 from .rendering import render_scene, render_scene_png
+from .runtime_cache import RuntimeCachePolicy, remember_bounded_bytes, trim_lru_entries
 from .scan import ScanProcessor
 from .workspace import ProjectWorkspace, utc_now
 from .sketches import closed_profile, closed_profiles, open_path
@@ -79,6 +80,7 @@ class CadyxCore:
         scan_processor: ScanProcessor | None = None,
         lease_timeout_seconds: float = 60.0,
         lease_clock: Callable[[], float] | None = None,
+        cache_policy: RuntimeCachePolicy | None = None,
     ) -> None:
         self.workspace = ProjectWorkspace(projects_dir)
         self.kernel = kernel if kernel is not None else OCCTKernelAdapter()
@@ -99,11 +101,13 @@ class CadyxCore:
         self._workspace_selection: dict[str, str] | None = None
         self._project_lifecycle_guard = threading.Lock()
         self._project_lifecycle_locks: dict[str, threading.RLock] = {}
+        self._cache_policy = cache_policy if cache_policy is not None else RuntimeCachePolicy()
         self._geometry_cache_guard = threading.RLock()
         self._validated_document_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
         self._document_validation_locks: dict[tuple[str, str], threading.Lock] = {}
         self._scene_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
         self._png_cache: OrderedDict[tuple[str, str, int, int, int], bytes] = OrderedDict()
+        self._png_cache_bytes = 0
         self._viewport_snapshot_guard = threading.RLock()
         self._viewport_snapshots: OrderedDict[str, tuple[int, bytes]] = OrderedDict()
         self._viewport_snapshot_bytes = 0
@@ -322,6 +326,7 @@ class CadyxCore:
                 )
                 self.workspace.mark_project_deleting(project_id)
             cleanup_pending = self.workspace.delete_project(project_id)
+            self._invalidate_project_runtime_caches(project_id)
         with self._workspace_selection_guard:
             if self._workspace_selection == {"type": "project", "project_id": project_id}:
                 self._workspace_selection = None
@@ -500,21 +505,21 @@ class CadyxCore:
         })
 
     def inspect_project(self, project_id: str) -> dict[str, Any]:
-        # project.json is atomically replaced, so read-only viewers can safely
-        # inspect the last committed revision while an agent edits its next one.
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
-        self._validate_geometry_once(project_id, document)
-        availability = self._project_availability(project_id, nonblocking=True)
-        if not availability.permits("read"):
-            raise RuntimeError("Read-only project inspection must remain available while the project is busy.")
-        return {
-            "project": self._summary(project),
-            "lock": availability.lock,
-            "document": document.to_dict(),
-            "history": copy.deepcopy(project["history"]),
-        }
-
+        with self._project_lifecycle_lock(project_id):
+            # project.json is atomically replaced, so read-only viewers can safely
+            # inspect the last committed revision while an agent edits its next one.
+            project = self.workspace.load(project_id)
+            document = Document.from_dict(project["document"])
+            self._validate_geometry_once(project_id, document)
+            availability = self._project_availability(project_id, nonblocking=True)
+            if not availability.permits("read"):
+                raise RuntimeError("Read-only project inspection must remain available while the project is busy.")
+            return {
+                "project": self._summary(project),
+                "lock": availability.lock,
+                "document": document.to_dict(),
+                "history": copy.deepcopy(project["history"]),
+            }
     def acquire_lease(self, project_id: str, owner_type: str, owner_id: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
             self.workspace.load(project_id)
@@ -583,8 +588,9 @@ class CadyxCore:
                 "original": {**original, "positions": positions}, "modified": modified}
 
     def render_project(self, project_id: str) -> dict[str, Any]:
-        _, scene = self._scene_for_project(project_id)
-        return self._clone_scene(scene)
+        with self._project_lifecycle_lock(project_id):
+            _, scene = self._scene_for_project(project_id)
+            return self._clone_scene(scene)
 
     def _scene_for_project(self, project_id: str) -> tuple[tuple[str, str], dict[str, Any]]:
         # Check the stat-only revision token before loading and validating the full document.
@@ -603,56 +609,66 @@ class CadyxCore:
             if cached_scene is None:
                 self._scene_cache[key] = scene
                 self._scene_cache.move_to_end(key)
-                while len(self._scene_cache) > 8:
-                    self._scene_cache.popitem(last=False)
+                trim_lru_entries(self._scene_cache, self._cache_policy.scene_entries)
                 cached_scene = scene
             else:
                 self._scene_cache.move_to_end(key)
         return key, cached_scene
 
+    def _remember_png_locked(
+        self,
+        cache_key: tuple[str, str, int, int, int],
+        encoded: bytes,
+    ) -> None:
+        self._png_cache_bytes = remember_bounded_bytes(
+            self._png_cache,
+            cache_key,
+            encoded,
+            current_bytes=self._png_cache_bytes,
+            max_entries=self._cache_policy.png_entries,
+            max_bytes=self._cache_policy.png_bytes,
+            size_of=len,
+        )
+
     def _render_project_png_server(
         self, project_id: str, *, width: int = 960, height: int = 720, margin: int = 56,
     ) -> bytes:
-        key, scene = self._scene_for_project(project_id)
-        cache_key = (*key, width, height, margin)
-        with self._geometry_cache_guard:
-            cached_png = self._png_cache.get(cache_key)
-            if cached_png is not None:
-                self._png_cache.move_to_end(cache_key)
-                return cached_png
-        encoded = render_scene_png(scene, width=width, height=height, margin=margin)
-        with self._geometry_cache_guard:
-            cached_png = self._png_cache.get(cache_key)
-            if cached_png is not None:
-                self._png_cache.move_to_end(cache_key)
-                return cached_png
-            self._png_cache[cache_key] = encoded
-            self._png_cache.move_to_end(cache_key)
-            while len(self._png_cache) > 8:
-                self._png_cache.popitem(last=False)
-        return encoded
+        with self._project_lifecycle_lock(project_id):
+            key, scene = self._scene_for_project(project_id)
+            cache_key = (*key, width, height, margin)
+            with self._geometry_cache_guard:
+                cached_png = self._png_cache.get(cache_key)
+                if cached_png is not None:
+                    self._png_cache.move_to_end(cache_key)
+                    return cached_png
+            encoded = render_scene_png(scene, width=width, height=height, margin=margin)
+            with self._geometry_cache_guard:
+                cached_png = self._png_cache.get(cache_key)
+                if cached_png is not None:
+                    self._png_cache.move_to_end(cache_key)
+                    return cached_png
+                self._remember_png_locked(cache_key, encoded)
+            return encoded
 
     def render_project_thumbnail_png(self, project_id: str) -> tuple[bytes, int]:
         """Render a compact 16:9 frame fitted for square project cards."""
-        key, scene = self._scene_for_project(project_id)
-        width, height, margin = 480, 270, 28
-        cache_key = (*key, width, height, margin)
-        with self._geometry_cache_guard:
-            cached_png = self._png_cache.get(cache_key)
-            if cached_png is not None:
-                self._png_cache.move_to_end(cache_key)
-                return cached_png, scene["revision"]
-        encoded = render_scene_png(scene, width=width, height=height, margin=margin)
-        with self._geometry_cache_guard:
-            cached_png = self._png_cache.get(cache_key)
-            if cached_png is not None:
-                self._png_cache.move_to_end(cache_key)
-                return cached_png, scene["revision"]
-            self._png_cache[cache_key] = encoded
-            self._png_cache.move_to_end(cache_key)
-            while len(self._png_cache) > 8:
-                self._png_cache.popitem(last=False)
-        return encoded, scene["revision"]
+        with self._project_lifecycle_lock(project_id):
+            key, scene = self._scene_for_project(project_id)
+            width, height, margin = 480, 270, 28
+            cache_key = (*key, width, height, margin)
+            with self._geometry_cache_guard:
+                cached_png = self._png_cache.get(cache_key)
+                if cached_png is not None:
+                    self._png_cache.move_to_end(cache_key)
+                    return cached_png, scene["revision"]
+            encoded = render_scene_png(scene, width=width, height=height, margin=margin)
+            with self._geometry_cache_guard:
+                cached_png = self._png_cache.get(cache_key)
+                if cached_png is not None:
+                    self._png_cache.move_to_end(cache_key)
+                    return cached_png, scene["revision"]
+                self._remember_png_locked(cache_key, encoded)
+            return encoded, scene["revision"]
 
     def publish_viewport_snapshot(self, project_id: str, revision: int, encoded: bytes) -> dict[str, int]:
         if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
@@ -666,39 +682,42 @@ class CadyxCore:
         if not width or not height or width > 4096 or height > 4096 or width * height > 16_777_216:
             raise ValidationError("Viewport snapshot dimensions exceed the supported limit.")
 
-        _, scene = self._scene_for_project(project_id)
-        if revision != scene["revision"]:
-            raise ConflictError(
-                "The browser viewport has not rendered the current project revision yet.",
-                code="VIEWPORT_SNAPSHOT_STALE",
-            )
-        with self._viewport_snapshot_guard:
-            previous = self._viewport_snapshots.pop(project_id, None)
-            if previous is not None:
-                self._viewport_snapshot_bytes -= len(previous[1])
-            self._viewport_snapshots[project_id] = (revision, encoded)
-            self._viewport_snapshot_bytes += len(encoded)
-            while len(self._viewport_snapshots) > 8 or self._viewport_snapshot_bytes > 32 * 1024 * 1024:
-                _, evicted = self._viewport_snapshots.popitem(last=False)
-                self._viewport_snapshot_bytes -= len(evicted[1])
+        with self._project_lifecycle_lock(project_id):
+            _, scene = self._scene_for_project(project_id)
+            if revision != scene["revision"]:
+                raise ConflictError(
+                    "The browser viewport has not rendered the current project revision yet.",
+                    code="VIEWPORT_SNAPSHOT_STALE",
+                )
+            with self._viewport_snapshot_guard:
+                self._viewport_snapshot_bytes = remember_bounded_bytes(
+                    self._viewport_snapshots,
+                    project_id,
+                    (revision, encoded),
+                    current_bytes=self._viewport_snapshot_bytes,
+                    max_entries=self._cache_policy.viewport_snapshot_entries,
+                    max_bytes=self._cache_policy.viewport_snapshot_bytes,
+                    size_of=lambda item: len(item[1]),
+                )
         return {"revision": revision, "width": width, "height": height}
 
     def render_project_png_with_source(self, project_id: str) -> tuple[bytes, str, int]:
-        _, scene = self._scene_for_project(project_id)
-        with self._viewport_snapshot_guard:
-            snapshot = self._viewport_snapshots.get(project_id)
-            if snapshot is not None:
-                if snapshot[0] != scene["revision"]:
-                    # A previous browser frame is not a valid image of the
-                    # current document. Treat it as unavailable until the
-                    # browser publishes the new revision; the server renderer
-                    # can still provide a correct current image immediately.
-                    self._viewport_snapshots.pop(project_id)
-                    self._viewport_snapshot_bytes -= len(snapshot[1])
-                else:
-                    self._viewport_snapshots.move_to_end(project_id)
-                    return snapshot[1], "browser", scene["revision"]
-        return self._render_project_png_server(project_id), "server-fallback", scene["revision"]
+        with self._project_lifecycle_lock(project_id):
+            _, scene = self._scene_for_project(project_id)
+            with self._viewport_snapshot_guard:
+                snapshot = self._viewport_snapshots.get(project_id)
+                if snapshot is not None:
+                    if snapshot[0] != scene["revision"]:
+                        # A previous browser frame is not a valid image of the
+                        # current document. Treat it as unavailable until the
+                        # browser publishes the new revision; the server renderer
+                        # can still provide a correct current image immediately.
+                        self._viewport_snapshots.pop(project_id)
+                        self._viewport_snapshot_bytes -= len(snapshot[1])
+                    else:
+                        self._viewport_snapshots.move_to_end(project_id)
+                        return snapshot[1], "browser", scene["revision"]
+            return self._render_project_png_server(project_id), "server-fallback", scene["revision"]
 
     def render_project_png(self, project_id: str) -> bytes:
         return self.render_project_png_with_source(project_id)[0]
@@ -1752,8 +1771,30 @@ class CadyxCore:
         with self._geometry_cache_guard:
             self._validated_document_keys[key] = None
             self._validated_document_keys.move_to_end(key)
-            while len(self._validated_document_keys) > 32:
-                self._validated_document_keys.popitem(last=False)
+            trim_lru_entries(
+                self._validated_document_keys,
+                self._cache_policy.validated_document_entries,
+            )
+
+    def _invalidate_project_runtime_caches(self, project_id: str) -> None:
+        with self._geometry_cache_guard:
+            for key in tuple(self._validated_document_keys):
+                if key[0] == project_id:
+                    self._validated_document_keys.pop(key, None)
+            for key in tuple(self._document_validation_locks):
+                if key[0] == project_id:
+                    self._document_validation_locks.pop(key, None)
+            for key in tuple(self._scene_cache):
+                if key[0] == project_id:
+                    self._scene_cache.pop(key, None)
+            for key in tuple(self._png_cache):
+                if key[0] == project_id:
+                    encoded = self._png_cache.pop(key)
+                    self._png_cache_bytes -= len(encoded)
+        with self._viewport_snapshot_guard:
+            snapshot = self._viewport_snapshots.pop(project_id, None)
+            if snapshot is not None:
+                self._viewport_snapshot_bytes -= len(snapshot[1])
 
     def _validate_geometry_once(self, project_id: str, document: Document) -> None:
         key = self._document_cache_key(project_id, document)
