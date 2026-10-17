@@ -401,7 +401,7 @@ class SketchDocumentTests(unittest.TestCase):
             self.core.execute_command(self.project, None, {"type": "create_sketch"})
 
     def test_v1_migration_preserves_objects_history_and_failed_command_bytes(self):
-        project = self.core.create_project("Legacy")["project"]["id"]
+        project = self.core.create_project("Legacy", select=False)["project"]["id"]
         lease = self.core.acquire_lease(project, "human", "legacy")["lease_id"]
         box = self.core.execute_command(project, lease, {"type": "create_box", "width": 2, "height": 3, "depth": 4})
         path = self.core.workspace._project_dir(project) / "project.json"
