@@ -27,14 +27,14 @@ jobs:
           from pathlib import Path
           path = Path('cadyx/extensions.py')
           source = path.read_text(encoding='utf-8')
-          old = '''        unknown_builtin_actions = set(BUILTIN_ACTIVITY_ACTIONS) - seen
-        if unknown_builtin_actions:
-            names_text = ", ".join(sorted(unknown_builtin_actions))
-            raise ValueError(f"Built-in activity metadata has no registered command: {names_text}.")
-        self._capabilities = contracts
-'''
-          new = '''        self._capabilities = contracts
-'''
+          old = (
+              '        unknown_builtin_actions = set(BUILTIN_ACTIVITY_ACTIONS) - seen\n'
+              '        if unknown_builtin_actions:\n'
+              '            names_text = ", ".join(sorted(unknown_builtin_actions))\n'
+              '            raise ValueError(f"Built-in activity metadata has no registered command: {names_text}.")\n'
+              '        self._capabilities = contracts\n'
+          )
+          new = '        self._capabilities = contracts\n'
           if source.count(old) != 1:
               raise SystemExit('expected built-in metadata guard exactly once')
           path.write_text(source.replace(old, new, 1), encoding='utf-8')
