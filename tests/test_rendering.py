@@ -97,15 +97,15 @@ class RenderingTests(unittest.TestCase):
         result = self.command({"type": "create_box", "width": 2, "height": 3, "depth": 5})
         first = self.core.render_project(self.project)
         first["objects"][0]["positions"][0] = 999
-        with patch("cadyx.core.render_scene", side_effect=AssertionError("scene should be cached")), \
-                patch("cadyx.core.Document.from_dict", side_effect=AssertionError("document should not be copied on a cache hit")):
+        with patch("cadyx.core_services.render_scene", side_effect=AssertionError("scene should be cached")), \
+                patch("cadyx.core_services.Document.from_dict", side_effect=AssertionError("document should not be copied on a cache hit")):
             repeated = self.core.render_project(self.project)
         self.assertEqual(repeated["objects"][0]["positions"][0], 0,
                          "Cached scenes are returned as isolated copies")
 
         self.command({"type": "set_parameter", "feature_id": result["feature_id"],
                       "name": "width", "value": 4})
-        with patch("cadyx.core.render_scene", wraps=render_scene) as render:
+        with patch("cadyx.core_services.render_scene", wraps=render_scene) as render:
             changed = self.core.render_project(self.project)
         self.assertEqual(render.call_count, 1, "A document revision change rebuilds the scene")
         self.assertEqual(changed["bounds"]["max"], [4, 3, 5])
@@ -136,7 +136,7 @@ class RenderingTests(unittest.TestCase):
 
     def test_scene_cache_hit_avoids_document_copy(self):
         first = self.core.render_project(self.project)
-        with patch("cadyx.core.Document.from_dict", side_effect=AssertionError("cache hit should skip document copy")):
+        with patch("cadyx.core_services.Document.from_dict", side_effect=AssertionError("cache hit should skip document copy")):
             repeated = self.core.render_project(self.project)
         self.assertEqual(repeated, first)
 
