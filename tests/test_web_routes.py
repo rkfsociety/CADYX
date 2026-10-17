@@ -13,6 +13,16 @@ class WebRouteTableTests(unittest.TestCase):
         self.assertEqual(len({(spec.method, spec.template) for spec in specs}), len(specs))
         self.assertEqual(len({spec.name for spec in specs}), len(specs))
 
+    def test_route_inventory_uses_known_domains_and_body_kinds(self) -> None:
+        specs = route_specs()
+        self.assertEqual(
+            {spec.domain for spec in specs},
+            {"system", "workspace", "scanner", "files", "project", "agent", "validation", "viewport", "static"},
+        )
+        self.assertLessEqual({spec.body_kind for spec in specs}, {"none", "json", "png", "step"})
+        self.assertTrue(all(spec.body_kind == "none" for spec in specs if spec.method == "GET"))
+        self.assertTrue(all(spec.body_kind == "none" for spec in specs if spec.method == "DELETE"))
+
     def test_matches_representative_route_families_without_socket(self) -> None:
         cases = (
             ("GET", "/api/v1/health", "health", {}),
@@ -34,6 +44,23 @@ class WebRouteTableTests(unittest.TestCase):
                 assert match is not None
                 self.assertEqual(match.spec.name, name)
                 self.assertEqual(match.params, params)
+
+    def test_every_declared_route_matches_its_own_template(self) -> None:
+        replacements = {
+            "folder": "folder%20name",
+            "filename": "part%20name.step",
+            "project_id": "project-123",
+            "lease_id": "lease-456",
+        }
+        for spec in route_specs():
+            path = spec.template
+            for name, value in replacements.items():
+                path = path.replace("{" + name + "}", value)
+            with self.subTest(method=spec.method, template=spec.template):
+                match = match_route(spec.method, path)
+                self.assertIsNotNone(match)
+                assert match is not None
+                self.assertEqual(match.spec, spec)
 
     def test_rejects_wrong_method_shape_and_unknown_paths(self) -> None:
         self.assertIsNone(match_route("DELETE", "/api/v1/health"))
