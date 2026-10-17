@@ -1,7 +1,7 @@
 [tool.ruff]
 required-version = "==0.17.1"
 target-version = "py315"
-include = ["cadyx/**/*.py", "tests/test_static_quality.py"]
+include = ["cadyx/**/*.py", "tests/test_static_quality.py", "scripts/check-static-types.py"]
 cache-dir = ".runtime/ruff-cache"
 
 [tool.ruff.lint]
@@ -17,6 +17,7 @@ files = [
     "cadyx/workspace.py",
     "cadyx/web.py",
     "tests/test_static_quality.py",
+    "scripts/check-static-types.py",
 ]
 follow_imports = "silent"
 disallow_untyped_defs = true
@@ -28,3 +29,18 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 show_error_codes = true
 cache_dir = ".runtime/mypy-cache"
+
+[tool.cadyx.static-quality]
+mypy-strict-files = [
+    "cadyx/agent_runtime.py",
+    "cadyx/errors.py",
+    "cadyx/commands.py",
+    "tests/test_static_quality.py",
+    "scripts/check-static-types.py",
+]
+mypy-ratchet-files = [
+    "cadyx/core.py",
+    "cadyx/commands.py",
+    "cadyx/workspace.py",
+    "cadyx/web.py",
+]

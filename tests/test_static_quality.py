@@ -28,6 +28,12 @@ MYPY_CORE_SERVICE_FILES = {
     "cadyx/workspace.py",
     "cadyx/web.py",
 }
+MYPY_ERROR_BASELINE_CAPS = {
+    "core": 70,
+    "commands": 0,
+    "workspace": 19,
+    "web": 20,
+}
 RUFF_BUG_RISK_RULES = {"B006", "B008"}
 
 
@@ -57,6 +63,13 @@ def boundary_baseline(root: Path) -> dict[str, list[dict[str, str]]]:
     return value
 
 
+def mypy_error_baseline(root: Path) -> dict[str, dict[str, int]]:
+    value = json.loads((root / "tests" / "mypy-error-baseline.json").read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise AssertionError("mypy error baseline must be an object.")
+    return value
+
+
 class StaticQualityTests(unittest.TestCase):
     def test_static_config_covers_core_services_and_bug_risk_rules(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -66,11 +79,31 @@ class StaticQualityTests(unittest.TestCase):
             MYPY_CORE_SERVICE_FILES.issubset(mypy_files),
             "Core service modules must stay in configured mypy coverage.",
         )
+        ratchet_files = set(config["tool"]["cadyx"]["static-quality"]["mypy-ratchet-files"])
+        self.assertEqual(ratchet_files, MYPY_CORE_SERVICE_FILES)
         ruff_rules = set(config["tool"]["ruff"]["lint"]["select"])
         self.assertTrue(
             RUFF_BUG_RISK_RULES.issubset(ruff_rules),
             "Configured Ruff bug-risk rules must not be removed from the source gate.",
         )
+
+    def test_mypy_error_baseline_can_only_decrease(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        baseline = mypy_error_baseline(root)
+        self.assertEqual(set(baseline), set(MYPY_ERROR_BASELINE_CAPS))
+        for module, cap in MYPY_ERROR_BASELINE_CAPS.items():
+            with self.subTest(module=module):
+                codes = baseline[module]
+                self.assertIsInstance(codes, dict)
+                self.assertTrue(all(
+                    isinstance(code, str) and type(count) is int and count > 0
+                    for code, count in codes.items()
+                ))
+                self.assertLessEqual(
+                    sum(codes.values()),
+                    cap,
+                    "Legacy mypy baseline totals may only decrease.",
+                )
 
     def test_suppressions_have_codes_and_inline_reasons(self) -> None:
         root = Path(__file__).resolve().parents[1]

@@ -1,0 +1,28 @@
+{
+  "core": {
+    "arg-type": 16,
+    "assignment": 9,
+    "attr-defined": 1,
+    "call-arg": 2,
+    "dict-item": 1,
+    "misc": 2,
+    "operator": 27,
+    "typeddict-item": 2,
+    "union-attr": 7,
+    "var-annotated": 3
+  },
+  "commands": {},
+  "workspace": {
+    "arg-type": 3,
+    "assignment": 2,
+    "attr-defined": 5,
+    "no-untyped-def": 1,
+    "valid-type": 6,
+    "var-annotated": 2
+  },
+  "web": {
+    "arg-type": 7,
+    "index": 8,
+    "union-attr": 5
+  }
+}

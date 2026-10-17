@@ -37,7 +37,7 @@ jobs:
         run: |
           python -m ruff check .
           if ($LASTEXITCODE -ne 0) { throw 'Lint checks failed.' }
-          python -m mypy
+          python scripts/check-static-types.py
           if ($LASTEXITCODE -ne 0) { throw 'Type checks failed.' }
           python -m unittest discover -s tests -p test_static_quality.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Interface annotation checks failed.' }
