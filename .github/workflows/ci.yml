@@ -11,7 +11,38 @@ permissions:
   contents: read
 
 jobs:
+  source:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read reviewed Python version
+        shell: pwsh
+        run: |
+          $versions = Get-Content scripts/runtime-versions.json -Raw | ConvertFrom-Json
+          "python=$($versions.python.version)" >> $env:GITHUB_OUTPUT
+        id: versions
+
+      - name: Set up source-check Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.versions.outputs.python }}
+
+      - name: Compile sources and check contracts without native SDKs
+        shell: pwsh
+        run: |
+          python -m compileall -q cadyx tests scripts
+          if ($LASTEXITCODE -ne 0) { throw 'Source compilation failed.' }
+          python -m unittest discover -s tests -p test_source_contracts.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Contract checks failed.' }
+          python -m unittest discover -s tests -p test_events.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Event tests failed.' }
+          python -m unittest discover -s tests -p test_migrations.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Migration tests failed.' }
+
   windows:
+    needs: source
     runs-on: windows-latest
     steps:
       - name: Check out repository
@@ -19,6 +50,14 @@ jobs:
 
       - name: Set up CMake
         uses: lukka/get-cmake@latest
+
+      # Cache only archives: setup rechecks hashes and extracts/builds afresh.
+      # Never restore executable SDK trees or DLLs from an unchecked cache.
+      - name: Restore runtime archives
+        uses: actions/cache@v4
+        with:
+          path: .runtime/downloads
+          key: runtime-archives-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/runtime-versions.json', 'scripts/*lock.json', 'scripts/setup-runtime.ps1', 'scripts/extract-sdk.py', 'native/**') }}
 
       - name: Build verified runtime
         shell: pwsh

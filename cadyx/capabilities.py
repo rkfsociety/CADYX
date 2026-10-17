@@ -172,7 +172,7 @@ def agent_api_capabilities() -> dict[str, Any]:
         "contracts": [
             ".codex/docs/architecture.md#edit-leases",
             ".codex/docs/architecture.md#safe-agent-stop-and-resume",
-            ".codex/docs/document-model-v3.md",
+            ".codex/docs/document-model-v8.md",
             ".codex/docs/viewport-api.md",
         ],
         "limitations": [

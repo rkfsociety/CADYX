@@ -113,6 +113,22 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 
 The API is versioned and provider-neutral. When host authentication is configured, every endpoint above except `/api/v1/health` requires valid credentials. See the architecture guide for the exact boundary and current limits.
 
+## CI verification
+
+The `source` job compiles Python sources and checks discovery documentation paths,
+current document-version references, command/MCP schema parity, event contracts,
+and migrations without installing the native SDKs. The `windows` job runs only
+after this gate succeeds and remains authoritative for the verified OCCT/Open3D
+build, runtime smoke check, full Python suite and browser tests.
+
+CI caches only runtime download archives, keyed by the reviewed version/hash
+locks, setup/extraction scripts and native sources. Setup rechecks archive
+SHA-256 values on every run (Node uses the official release checksum list),
+extracts fresh SDK trees and rebuilds the bridges; cached DLLs are never used.
+Local fast checks use `python -m compileall -q cadyx tests scripts` and
+`python -m unittest discover -s tests -p test_source_contracts.py -v`, plus
+the `test_events.py` and `test_migrations.py` modules with the same invocation.
+
 ## Agent Runtime
 
 `cadyx.AgentRuntime` accepts an implementation of the `AgentProvider` protocol.
