@@ -37,7 +37,7 @@ jobs:
         run: |
           python -m ruff check .
           if ($LASTEXITCODE -ne 0) { throw 'Lint checks failed.' }
-          python -m mypy
+          python scripts/check-static-types.py
           if ($LASTEXITCODE -ne 0) { throw 'Type checks failed.' }
           python -m unittest discover -s tests -p test_static_quality.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Interface annotation checks failed.' }
@@ -49,6 +49,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Source compilation failed.' }
           python -m unittest discover -s tests -p test_source_contracts.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Contract checks failed.' }
+          python -m unittest discover -s tests -p test_web_routes.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'HTTP route contract tests failed.' }
           python -m unittest discover -s tests -p test_events.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Event tests failed.' }
           python -m unittest discover -s tests -p test_migrations.py -v
@@ -101,3 +103,5 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Scanner camera tests failed.' }
           & $node tests/test_ply_preview.cjs
           if ($LASTEXITCODE -ne 0) { throw 'PLY preview tests failed.' }
+          & $node tests/test_curve_draft.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Trace draft tests failed.' }

@@ -1,30 +1,70 @@
 {
   "core": [
-    "validate_body_dimensions:expected_revision: unchecked annotation",
-    "validate_body_dimensions:expected_dimensions: unchecked annotation",
-    "validate_body_dimensions:tolerance: unchecked annotation",
-    "validate_body_clearance:expected_revision: unchecked annotation",
-    "validate_body_clearance:minimum_clearance: unchecked annotation",
-    "validate_body_clearance:tolerance: unchecked annotation",
-    "validate_body_preservation:expected_revision: unchecked annotation",
-    "validate_body_preservation:maximum_lost_volume: unchecked annotation",
-    "validate_body_preservation:tolerance: unchecked annotation",
-    "validate_body_thickness:expected_revision: unchecked annotation",
-    "validate_body_thickness:minimum_thickness: unchecked annotation",
-    "validate_body_thickness:tolerance: unchecked annotation",
-    "observe_agent_operation:return: unchecked annotation",
-    "finite_number:value: unchecked annotation",
-    "nonnegative_number:value: unchecked annotation",
-    "nonnegative_volume:value: unchecked annotation",
-    "nonnegative:value: unchecked annotation"
+    {
+      "issue": "validate_body_dimensions:expected_revision: unchecked annotation",
+      "reason": "Raw transport revisions are validated by _check_revision before comparison."
+    },
+    {
+      "issue": "validate_body_dimensions:expected_dimensions: unchecked annotation",
+      "reason": "Raw JSON dimensions are shape-checked and numerically normalized before use."
+    },
+    {
+      "issue": "validate_body_dimensions:tolerance: unchecked annotation",
+      "reason": "Raw JSON tolerance is numerically normalized before use."
+    },
+    {
+      "issue": "validate_body_clearance:expected_revision: unchecked annotation",
+      "reason": "Raw transport revisions are validated by _check_revision before comparison."
+    },
+    {
+      "issue": "validate_body_clearance:minimum_clearance: unchecked annotation",
+      "reason": "Raw JSON clearance is numerically normalized before use."
+    },
+    {
+      "issue": "validate_body_clearance:tolerance: unchecked annotation",
+      "reason": "Raw JSON tolerance is numerically normalized before use."
+    },
+    {
+      "issue": "validate_body_preservation:expected_revision: unchecked annotation",
+      "reason": "Raw transport revisions are validated by _check_revision before comparison."
+    },
+    {
+      "issue": "validate_body_preservation:maximum_lost_volume: unchecked annotation",
+      "reason": "Raw JSON volume thresholds are numerically normalized before use."
+    },
+    {
+      "issue": "validate_body_preservation:tolerance: unchecked annotation",
+      "reason": "Raw JSON tolerance is numerically normalized before use."
+    },
+    {
+      "issue": "validate_body_thickness:expected_revision: unchecked annotation",
+      "reason": "Raw transport revisions are validated by _check_revision before comparison."
+    },
+    {
+      "issue": "validate_body_thickness:minimum_thickness: unchecked annotation",
+      "reason": "Raw JSON thickness is numerically normalized before use."
+    },
+    {
+      "issue": "validate_body_thickness:tolerance: unchecked annotation",
+      "reason": "Raw JSON tolerance is numerically normalized before use."
+    },
+    {
+      "issue": "observe_agent_operation:return: unchecked annotation",
+      "reason": "The observation wrapper preserves operation-specific return payloads without constraining their shape."
+    }
   ],
-  "commands": [
-    "contains_reference:value: unchecked annotation",
-    "references_removed:value: unchecked annotation",
-    "references_removed:value: unchecked annotation"
+  "commands": [],
+  "workspace": [
+    {
+      "issue": "validate:project: unchecked annotation",
+      "reason": "Project validation intentionally accepts an untrusted decoded JSON value so migrations can reject non-object envelopes with the stable validation error."
+    }
   ],
   "web": [
-    "log_message:args: unchecked annotation"
+    {
+      "issue": "log_message:args: unchecked annotation",
+      "reason": "BaseHTTPRequestHandler supplies printf-style diagnostic arguments with a typeshed Any signature."
+    }
   ],
   "agent_runtime": []
 }

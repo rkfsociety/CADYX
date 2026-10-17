@@ -42,6 +42,10 @@ class CommandSystem(
         self.publish_cad_delivery = publish_cad_delivery
         self._extension_execute = COMMAND_REGISTRY.bind(self)
 
+    @staticmethod
+    def activity_action(command_name: str | None) -> str:
+        return COMMAND_REGISTRY.activity_action(command_name)
+
     def execute(
         self,
         document: Document,

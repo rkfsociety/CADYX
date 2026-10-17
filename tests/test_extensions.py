@@ -31,7 +31,7 @@ class ExtensionRegistryTests(unittest.TestCase):
         first = ExtensionRegistry(BASE_COMMAND_CAPABILITIES, builtin_extensions(), base_handlers=base_command_handlers())
         second = ExtensionRegistry(BASE_COMMAND_CAPABILITIES, builtin_extensions(), base_handlers=base_command_handlers())
         self.assertEqual(first.extension_names, (
-            "advanced_features", "agent_authoring", "manufacturing_features",
+            "advanced_features", "agent_authoring", "curve_editing", "manufacturing_features",
             "semantic_selection", "selector_contracts", "scan_reverse"))
         self.assertEqual(first.capabilities, public)
         self.assertEqual(second.capabilities, public)
@@ -120,7 +120,7 @@ class ExtensionRegistryTests(unittest.TestCase):
         document.validate()
 
     def test_imports_do_not_replace_class_methods_or_render_functions(self):
-        from cadyx import core, kernel, rendering
+        from cadyx import kernel, rendering
         methods = (CommandSystem.execute, kernel.OCCTKernelAdapter.topology, rendering.render_scene)
         contracts = deepcopy(COMMAND_CAPABILITIES)
         for name in (*COMMAND_REGISTRY.extension_names, "advanced_topology"):
@@ -129,7 +129,6 @@ class ExtensionRegistryTests(unittest.TestCase):
             self.assertFalse(hasattr(module, "install"))
         importlib.reload(importlib.import_module("cadyx"))
         self.assertEqual(methods, (CommandSystem.execute, kernel.OCCTKernelAdapter.topology, rendering.render_scene))
-        self.assertIs(core.render_scene, rendering.render_scene)
         self.assertTrue(inspect.getsourcefile(CommandSystem.execute).endswith("commands.py"))
         self.assertTrue(inspect.getsourcefile(kernel.OCCTKernelAdapter.topology).endswith("kernel.py"))
         self.assertEqual(COMMAND_CAPABILITIES, contracts)

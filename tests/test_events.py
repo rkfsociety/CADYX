@@ -1,6 +1,9 @@
+import json
+import tempfile
 import threading
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 from cadyx.events import EventBroker
@@ -52,6 +55,101 @@ class EventBrokerTests(unittest.TestCase):
             "workflow": None, "tasks": [], "revision": 1,
             "updated_at": "2026-01-01T00:00:00+00:00",
         }))
+
+    def test_malformed_persisted_dashboard_state_fails_closed(self):
+        valid_dashboard = {
+            "workflow": None,
+            "tasks": [],
+            "revision": 1,
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+        invalid_states = [
+            {"version": 2, "agent_work_revision": 0, "dashboards": {}},
+            {"version": 1, "agent_work_revision": -1, "dashboards": {}},
+            {"version": 1, "agent_work_revision": 0, "dashboards": []},
+            {"version": 1, "agent_work_revision": 0, "dashboards": {"p": {**valid_dashboard, "revision": 0}}},
+            {"version": 1, "agent_work_revision": 0, "dashboards": {"p": {**valid_dashboard, "elapsed_seconds": 1}}},
+            {"version": 1, "agent_work_revision": 0, "dashboards": {"p": {**valid_dashboard, "started_at": "bad"}}},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "dashboards.json"
+            for index, state in enumerate(invalid_states):
+                with self.subTest(index=index):
+                    path.write_text(json.dumps(state), encoding="utf-8")
+                    with self.assertRaisesRegex(RuntimeError, "could not be loaded"):
+                        EventBroker(dashboard_state_path=path)
+
+    def test_dashboard_revisions_and_event_ids_are_monotonic(self):
+        broker = EventBroker()
+        subscriber_id, events = broker.subscribe()
+        try:
+            first = broker.publish_agent_dashboard("p", {"workflow": None, "tasks": []})
+            second = broker.publish_agent_dashboard("p", {"workflow": None, "tasks": []})
+            self.assertEqual((first["revision"], second["revision"]), (1, 2))
+            self.assertEqual(broker.agent_work_snapshot()["revision"], 2)
+            published = [events.get_nowait() for _ in range(4)]
+            self.assertEqual([item.id for item in published], [1, 2, 3, 4])
+            self.assertEqual(
+                [item.event for item in published],
+                ["agent.dashboard", "workspace.agent-work", "agent.dashboard", "workspace.agent-work"],
+            )
+        finally:
+            broker.unsubscribe(subscriber_id)
+
+    def test_project_filter_and_drop_oldest_delivery_are_shared(self):
+        broker = EventBroker(subscriber_capacity=2)
+        project_subscriber_id, project_events = broker.subscribe("project-a")
+        global_subscriber_id, global_events = broker.subscribe()
+        try:
+            broker.publish("probe", "project-b", {"n": 1})
+            broker.publish("probe", "project-a", {"n": 2})
+            broker.publish("probe", "project-a", {"n": 3})
+            self.assertEqual([project_events.get_nowait().data["n"] for _ in range(2)], [2, 3])
+            self.assertEqual([global_events.get_nowait().data["n"] for _ in range(2)], [2, 3])
+
+            broker.publish_agent_dashboard("project-a", {
+                "workflow": {"title": "Работа", "progress_percent": 0, "eta_seconds": None,
+                             "phases": [{"id": "build", "title": "Сборка", "state": "pending"}]},
+                "tasks": [],
+            })
+            dashboard_event = project_events.get_nowait()
+            self.assertEqual((dashboard_event.event, dashboard_event.project_id),
+                             ("agent.dashboard", "project-a"))
+            self.assertTrue(project_events.empty(), "project filter must exclude workspace-global events")
+            global_after = [global_events.get_nowait(), global_events.get_nowait()]
+            self.assertEqual([item.event for item in global_after],
+                             ["agent.dashboard", "workspace.agent-work"])
+        finally:
+            broker.unsubscribe(project_subscriber_id)
+            broker.unsubscribe(global_subscriber_id)
+
+    def test_active_work_transitions_preserve_global_lock_semantics(self):
+        broker = EventBroker()
+        pending = {
+            "workflow": {"title": "Работа", "progress_percent": 0, "eta_seconds": None,
+                         "phases": [{"id": "build", "title": "Сборка", "state": "pending"}]},
+            "tasks": [],
+        }
+        running = {
+            "workflow": {"title": "Работа", "progress_percent": 50, "eta_seconds": None,
+                         "phases": [{"id": "build", "title": "Сборка", "state": "in_progress"}]},
+            "tasks": [],
+        }
+        completed = {
+            "workflow": {"title": "Работа", "progress_percent": 100, "eta_seconds": None,
+                         "phases": [{"id": "build", "title": "Сборка", "state": "completed"}]},
+            "tasks": [],
+        }
+        broker.publish_agent_dashboard("p", pending)
+        self.assertEqual(broker.agent_work_snapshot(), {
+            "active": True, "active_project_ids": ["p"], "revision": 1,
+        })
+        broker.publish_agent_dashboard("p", running)
+        self.assertTrue(broker.agent_dashboard_is_active("p"))
+        broker.publish_agent_dashboard("p", completed)
+        self.assertEqual(broker.agent_work_snapshot(), {
+            "active": False, "active_project_ids": [], "revision": 3,
+        })
 
     def test_dashboard_persistence_does_not_hold_broker_lock(self):
         broker = EventBroker()

@@ -33,6 +33,218 @@ class ProjectEvent:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class _ActivityRecord:
+    operation_id: Any
+    payload: dict[str, Any]
+
+    @classmethod
+    def capture(cls, payload: dict[str, Any]) -> _ActivityRecord:
+        copied = copy.deepcopy(payload)
+        return cls(operation_id=copied.get("operation_id"), payload=copied)
+
+    def as_dict(self) -> dict[str, Any]:
+        return copy.deepcopy(self.payload)
+
+
+@dataclass(frozen=True, slots=True)
+class _DashboardRecord:
+    """Validated persisted/API dashboard value with lossless v1 serialization."""
+
+    payload: dict[str, Any]
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> _DashboardRecord:
+        required = {"workflow", "tasks", "revision", "updated_at"}
+        optional = {"started_at", "elapsed_seconds"}
+        if (
+            not isinstance(value, dict)
+            or not required.issubset(value)
+            or set(value) - required - optional
+            or type(value.get("revision")) is not int
+            or value["revision"] < 1
+            or not isinstance(value.get("updated_at"), str)
+            or not isinstance(value.get("tasks"), list)
+        ):
+            raise ValueError("invalid dashboard state structure")
+
+        started_at = value.get("started_at")
+        elapsed_seconds = value.get("elapsed_seconds")
+        if started_at is not None:
+            if not isinstance(started_at, str):
+                raise ValueError("invalid dashboard state structure")
+            try:
+                datetime.fromisoformat(started_at)
+            except ValueError as exc:
+                raise ValueError("invalid dashboard state structure") from exc
+        if elapsed_seconds is not None and (
+            type(elapsed_seconds) is not int or elapsed_seconds < 0
+        ):
+            raise ValueError("invalid dashboard state structure")
+        if elapsed_seconds is not None and started_at is None:
+            raise ValueError("invalid dashboard state structure")
+
+        workflow = value["workflow"]
+        if workflow is not None:
+            if (
+                not isinstance(workflow, dict)
+                or set(workflow) != {"title", "progress_percent", "eta_seconds", "phases"}
+                or not isinstance(workflow["title"], str)
+                or isinstance(workflow["progress_percent"], bool)
+                or not isinstance(workflow["progress_percent"], (int, float))
+                or not math.isfinite(workflow["progress_percent"])
+                or not 0 <= workflow["progress_percent"] <= 100
+                or (
+                    workflow["eta_seconds"] is not None
+                    and type(workflow["eta_seconds"]) is not int
+                )
+                or not isinstance(workflow["phases"], list)
+            ):
+                raise ValueError("invalid dashboard state structure")
+            if any(
+                not isinstance(phase, dict)
+                or set(phase) != {"id", "title", "state"}
+                or phase.get("state")
+                not in {"pending", "in_progress", "completed", "failed"}
+                for phase in workflow["phases"]
+            ):
+                raise ValueError("invalid dashboard state structure")
+
+        if not all(
+            isinstance(task, dict)
+            and set(task) == {"id", "title", "state"}
+            and task.get("state") in {"pending", "running", "completed", "failed"}
+            for task in value["tasks"]
+        ):
+            raise ValueError("invalid dashboard state structure")
+        return cls(copy.deepcopy(value))
+
+    @classmethod
+    def from_report(
+        cls,
+        report: dict[str, Any],
+        *,
+        revision: int,
+        updated_at: str,
+        started_at: str | None,
+        elapsed_seconds: int | None,
+    ) -> _DashboardRecord:
+        return cls.from_mapping(
+            {
+                **copy.deepcopy(report),
+                "started_at": started_at,
+                "elapsed_seconds": elapsed_seconds,
+                "revision": revision,
+                "updated_at": updated_at,
+            }
+        )
+
+    @property
+    def revision(self) -> int:
+        return self.payload["revision"]
+
+    @property
+    def updated_at(self) -> str:
+        return self.payload["updated_at"]
+
+    @property
+    def started_at(self) -> str | None:
+        value = self.payload.get("started_at")
+        return value if isinstance(value, str) else None
+
+    @property
+    def elapsed_seconds(self) -> int | None:
+        value = self.payload.get("elapsed_seconds")
+        return value if type(value) is int else None
+
+    def as_dict(self) -> dict[str, Any]:
+        return copy.deepcopy(self.payload)
+
+    def is_active(self) -> bool:
+        workflow = self.payload.get("workflow")
+        if workflow is not None:
+            phases = workflow.get("phases", [])
+            phase_states = [phase.get("state") for phase in phases]
+            if any(state in {"pending", "in_progress"} for state in phase_states):
+                return True
+            # Failed is terminal. Requiring failed workflows to report 100%
+            # would leave workspace selection locked forever.
+            if phase_states and all(state == "completed" for state in phase_states):
+                if float(workflow.get("progress_percent", 0)) < 100:
+                    return True
+            elif not phase_states:
+                return True
+        return any(
+            task.get("state") in {"pending", "running"}
+            for task in self.payload.get("tasks", [])
+        )
+
+    def has_started(self) -> bool:
+        workflow = self.payload.get("workflow")
+        return bool(
+            workflow is not None
+            and any(
+                phase.get("state") == "in_progress"
+                for phase in workflow.get("phases", [])
+            )
+        ) or any(
+            task.get("state") == "running" for task in self.payload.get("tasks", [])
+        )
+
+    def is_terminal(self) -> bool:
+        workflow = self.payload.get("workflow")
+        tasks = self.payload.get("tasks", [])
+        states = [phase.get("state") for phase in (workflow or {}).get("phases", [])]
+        states.extend(task.get("state") for task in tasks)
+        if "failed" in states:
+            return True
+        if workflow is None:
+            return not any(state in {"pending", "running"} for state in states)
+        return workflow.get("progress_percent") == 100 and all(
+            state == "completed" for state in states
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _DashboardStoreState:
+    dashboards: dict[str, _DashboardRecord]
+    agent_work_revision: int
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> _DashboardStoreState:
+        if not isinstance(value, dict) or value.get("version") != 1:
+            raise ValueError("invalid dashboard state structure")
+        dashboards = value.get("dashboards")
+        revision = value.get("agent_work_revision")
+        if not isinstance(dashboards, dict) or type(revision) is not int or revision < 0:
+            raise ValueError("invalid dashboard state structure")
+        parsed: dict[str, _DashboardRecord] = {}
+        for project_id, dashboard in dashboards.items():
+            if not isinstance(project_id, str):
+                raise ValueError("invalid dashboard state structure")
+            parsed[project_id] = _DashboardRecord.from_mapping(dashboard)
+        return cls(parsed, revision)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "agent_work_revision": self.agent_work_revision,
+            "dashboards": {
+                project_id: dashboard.as_dict()
+                for project_id, dashboard in self.dashboards.items()
+            },
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _Subscriber:
+    queue: queue.Queue[ProjectEvent]
+    project_id: str | None
+
+    def accepts(self, item: ProjectEvent) -> bool:
+        return self.project_id is None or self.project_id == item.project_id
+
+
 class EventBroker:
     def __init__(
         self,
@@ -44,12 +256,14 @@ class EventBroker:
         self._lock = threading.Lock()
         self._dashboard_persist_lock = threading.Lock()
         self._next_id = 1
-        self._subscribers: dict[int, tuple[queue.Queue[ProjectEvent], str | None]] = {}
+        self._subscribers: dict[int, _Subscriber] = {}
         self._next_subscriber_id = 1
-        self._activities: dict[str, list[dict[str, Any]]] = {}
+        self._activities: dict[str, list[_ActivityRecord]] = {}
         self._activity_revisions: dict[str, int] = {}
-        self._agent_dashboards: dict[str, dict[str, Any]] = {}
-        self._dashboard_state_path = Path(dashboard_state_path) if dashboard_state_path is not None else None
+        self._agent_dashboards: dict[str, _DashboardRecord] = {}
+        self._dashboard_state_path = (
+            Path(dashboard_state_path) if dashboard_state_path is not None else None
+        )
         self._agent_work_revision = 0
         self._load_agent_dashboards()
 
@@ -59,86 +273,33 @@ class EventBroker:
             return
         try:
             with path.open("r", encoding="utf-8") as stream:
-                state = json.load(stream)
-            if not isinstance(state, dict):
-                raise ValueError("invalid dashboard state structure")
-            dashboards = state["dashboards"]
-            revision = state["agent_work_revision"]
-            if (
-                state.get("version") != 1
-                or not isinstance(dashboards, dict)
-                or any(not isinstance(project_id, str) or not self._dashboard_state_is_valid(value)
-                       for project_id, value in dashboards.items())
-                or type(revision) is not int
-                or revision < 0
-            ):
-                raise ValueError("invalid dashboard state structure")
-            self._agent_dashboards = copy.deepcopy(dashboards)
-            self._agent_work_revision = revision
-        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-            raise RuntimeError(f"CADYX agent dashboard state could not be loaded from {path}: {exc}") from exc
+                state = _DashboardStoreState.from_mapping(json.load(stream))
+            self._agent_dashboards = state.dashboards
+            self._agent_work_revision = state.agent_work_revision
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"CADYX agent dashboard state could not be loaded from {path}: {exc}"
+            ) from exc
 
     @staticmethod
     def _dashboard_state_is_valid(dashboard: Any) -> bool:
-        required = {"workflow", "tasks", "revision", "updated_at"}
-        optional = {"started_at", "elapsed_seconds"}
-        if (
-            not isinstance(dashboard, dict)
-            or not required.issubset(dashboard)
-            or set(dashboard) - required - optional
-            or type(dashboard.get("revision")) is not int
-            or dashboard["revision"] < 1
-            or not isinstance(dashboard.get("updated_at"), str)
-            or not isinstance(dashboard.get("tasks"), list)
-        ):
+        try:
+            _DashboardRecord.from_mapping(dashboard)
+        except (TypeError, ValueError):
             return False
-        started_at = dashboard.get("started_at")
-        elapsed_seconds = dashboard.get("elapsed_seconds")
-        if started_at is not None:
-            if not isinstance(started_at, str):
-                return False
-            try:
-                datetime.fromisoformat(started_at)
-            except ValueError:
-                return False
-        if elapsed_seconds is not None and (type(elapsed_seconds) is not int or elapsed_seconds < 0):
-            return False
-        if elapsed_seconds is not None and started_at is None:
-            return False
-        workflow = dashboard["workflow"]
-        if workflow is not None:
-            if (
-                not isinstance(workflow, dict)
-                or set(workflow) != {"title", "progress_percent", "eta_seconds", "phases"}
-                or not isinstance(workflow["title"], str)
-                or isinstance(workflow["progress_percent"], bool)
-                or not isinstance(workflow["progress_percent"], (int, float))
-                or not math.isfinite(workflow["progress_percent"])
-                or not 0 <= workflow["progress_percent"] <= 100
-                or (workflow["eta_seconds"] is not None and type(workflow["eta_seconds"]) is not int)
-                or not isinstance(workflow["phases"], list)
-            ):
-                return False
-            if any(
-                not isinstance(phase, dict)
-                or set(phase) != {"id", "title", "state"}
-                or phase.get("state") not in {"pending", "in_progress", "completed", "failed"}
-                for phase in workflow["phases"]
-            ):
-                return False
-        return all(
-            isinstance(task, dict)
-            and set(task) == {"id", "title", "state"}
-            and task.get("state") in {"pending", "running", "completed", "failed"}
-            for task in dashboard["tasks"]
-        )
+        return True
 
-    def _persist_agent_dashboards(self, dashboards: dict[str, dict[str, Any]], revision: int) -> None:
+    def _persist_agent_dashboards(
+        self,
+        dashboards: dict[str, _DashboardRecord],
+        revision: int,
+    ) -> None:
         path = self._dashboard_state_path
         if path is None:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path: str | None = None
+        state = _DashboardStoreState(dashboards, revision).as_dict()
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w",
@@ -150,7 +311,7 @@ class EventBroker:
             ) as stream:
                 temporary_path = stream.name
                 json.dump(
-                    {"version": 1, "agent_work_revision": revision, "dashboards": dashboards},
+                    state,
                     stream,
                     ensure_ascii=False,
                     allow_nan=False,
@@ -168,95 +329,81 @@ class EventBroker:
             raise
 
     @staticmethod
-    def _dashboard_is_active(dashboard: dict[str, Any]) -> bool:
-        workflow = dashboard.get("workflow")
-        if workflow is not None:
-            phases = workflow.get("phases", [])
-            phase_states = [phase.get("state") for phase in phases]
-            if any(state in {"pending", "in_progress"} for state in phase_states):
-                return True
-            # Failed is a terminal state, not active work. Requiring failed
-            # workflows to report 100% would leave workspace selection locked
-            # forever after an interrupted/abandoned task.
-            if phase_states and all(state == "completed" for state in phase_states):
-                if float(workflow.get("progress_percent", 0)) < 100:
-                    return True
-            elif not phase_states:
-                return True
-        return any(task.get("state") in {"pending", "running"} for task in dashboard.get("tasks", []))
+    def _offer_drop_oldest(
+        subscriber: queue.Queue[ProjectEvent],
+        item: ProjectEvent,
+    ) -> None:
+        if subscriber.full():
+            try:
+                subscriber.get_nowait()
+            except queue.Empty:
+                pass
+        subscriber.put_nowait(item)
 
-    @staticmethod
-    def _dashboard_has_started(dashboard: dict[str, Any]) -> bool:
-        workflow = dashboard.get("workflow")
-        return bool(
-            workflow is not None
-            and any(phase.get("state") == "in_progress" for phase in workflow.get("phases", []))
-        ) or any(task.get("state") == "running" for task in dashboard.get("tasks", []))
+    def _fan_out_locked(self, item: ProjectEvent) -> None:
+        for subscriber in self._subscribers.values():
+            if not subscriber.accepts(item):
+                continue
+            self._offer_drop_oldest(subscriber.queue, item)
 
-    @staticmethod
-    def _dashboard_is_terminal(dashboard: dict[str, Any]) -> bool:
-        workflow = dashboard.get("workflow")
-        tasks = dashboard.get("tasks", [])
-        states = [phase.get("state") for phase in (workflow or {}).get("phases", [])]
-        states.extend(task.get("state") for task in tasks)
-        if "failed" in states:
-            return True
-        if workflow is None:
-            return not any(state in {"pending", "running"} for state in states)
-        return (
-            workflow.get("progress_percent") == 100
-            and all(state == "completed" for state in states)
+    def _emit_locked(
+        self,
+        event: str,
+        project_id: str | None,
+        data: dict[str, Any],
+        *,
+        occurred_at: str | None = None,
+    ) -> ProjectEvent:
+        item = ProjectEvent(
+            id=self._next_id,
+            event=event,
+            project_id=project_id,
+            data=data,
+            occurred_at=occurred_at or datetime.now(timezone.utc).isoformat(),
         )
-
-    def _agent_work_active_locked(self) -> bool:
-        return bool(self._agent_work_project_ids_locked())
+        self._next_id += 1
+        self._fan_out_locked(item)
+        return item
 
     def _agent_work_project_ids_locked(self) -> list[str]:
         return sorted(
-            project_id for project_id, dashboard in self._agent_dashboards.items()
-            if self._dashboard_is_active(dashboard)
+            project_id
+            for project_id, dashboard in self._agent_dashboards.items()
+            if dashboard.is_active()
         )
 
     def agent_dashboard_is_active(self, project_id: str) -> bool:
         with self._lock:
             dashboard = self._agent_dashboards.get(project_id)
-            return dashboard is not None and self._dashboard_is_active(dashboard)
+            return dashboard is not None and dashboard.is_active()
 
-    def publish(self, event: str, project_id: str | None, data: dict[str, Any]) -> ProjectEvent:
+    def publish(
+        self,
+        event: str,
+        project_id: str | None,
+        data: dict[str, Any],
+    ) -> ProjectEvent:
         with self._lock:
             if event == "agent.activity" and project_id is not None:
                 revision = self._activity_revisions.get(project_id, 0) + 1
                 self._activity_revisions[project_id] = revision
                 data = {**data, "revision": revision}
-            item = ProjectEvent(
-                id=self._next_id,
-                event=event,
-                project_id=project_id,
-                data=data,
-                occurred_at=datetime.now(timezone.utc).isoformat(),
-            )
-            self._next_id += 1
-            if event == "agent.activity" and project_id is not None:
                 activities = self._activities.setdefault(project_id, [])
-                operation_id = data.get("operation_id")
-                existing = next((index for index, activity in enumerate(activities)
-                                 if activity.get("operation_id") == operation_id), None)
-                snapshot = copy.deepcopy(data)
+                record = _ActivityRecord.capture(data)
+                existing = next(
+                    (
+                        index
+                        for index, activity in enumerate(activities)
+                        if activity.operation_id == record.operation_id
+                    ),
+                    None,
+                )
                 if existing is None:
-                    activities.append(snapshot)
+                    activities.append(record)
                 else:
-                    activities[existing] = snapshot
+                    activities[existing] = record
                 del activities[:-128]
-            for subscriber, filter_project in self._subscribers.values():
-                if filter_project is not None and filter_project != project_id:
-                    continue
-                if subscriber.full():
-                    try:
-                        subscriber.get_nowait()
-                    except queue.Empty:
-                        pass
-                subscriber.put_nowait(item)
-            return item
+            return self._emit_locked(event, project_id, data)
 
     def activity_snapshot(self, project_id: str) -> list[dict[str, Any]]:
         return self.activity_state_snapshot(project_id)[0]
@@ -264,7 +411,7 @@ class EventBroker:
     def activity_state_snapshot(self, project_id: str) -> tuple[list[dict[str, Any]], int]:
         with self._lock:
             return (
-                copy.deepcopy(self._activities.get(project_id, [])),
+                [record.as_dict() for record in self._activities.get(project_id, [])],
                 self._activity_revisions.get(project_id, 0),
             )
 
@@ -272,22 +419,34 @@ class EventBroker:
         with self._lock:
             return self._activity_revisions.get(project_id, 0)
 
-    def publish_agent_dashboard(self, project_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    def publish_agent_dashboard(
+        self,
+        project_id: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
         # Disk durability is intentionally serialized separately from the
         # broker lock. Dashboard fsync may be slow, but ordinary SSE events,
         # snapshots, and subscriber management should remain responsive.
         with self._dashboard_persist_lock:
             with self._lock:
                 previous = self._agent_dashboards.get(project_id)
-                revision = previous["revision"] + 1 if previous else 1
+                revision = previous.revision + 1 if previous else 1
                 now = datetime.now(timezone.utc)
-                started_at = previous.get("started_at") if previous else None
-                elapsed_seconds = previous.get("elapsed_seconds") if previous else None
-                has_started = self._dashboard_has_started(data)
-                has_unfinished_work = self._dashboard_is_active(data)
-                terminal = self._dashboard_is_terminal(data)
+                now_iso = now.isoformat()
+                started_at = previous.started_at if previous else None
+                elapsed_seconds = previous.elapsed_seconds if previous else None
+                report = _DashboardRecord.from_report(
+                    data,
+                    revision=revision,
+                    updated_at=now_iso,
+                    started_at=None,
+                    elapsed_seconds=None,
+                )
+                has_started = report.has_started()
+                has_unfinished_work = report.is_active()
+                terminal = report.is_terminal()
                 if has_started and (started_at is None or elapsed_seconds is not None):
-                    started_at = now.isoformat()
+                    started_at = now_iso
                     elapsed_seconds = None
                 elif has_unfinished_work and elapsed_seconds is not None:
                     # A newly queued workflow clears the previous run's frozen duration.
@@ -299,14 +458,15 @@ class EventBroker:
                     except ValueError:
                         started = now
                     elapsed_seconds = max(0, int((now - started).total_seconds()))
-                dashboard = {
-                    **copy.deepcopy(data),
-                    "started_at": started_at,
-                    "elapsed_seconds": elapsed_seconds,
-                    "revision": revision,
-                    "updated_at": now.isoformat(),
-                }
-                dashboards = {**self._agent_dashboards, project_id: dashboard}
+                dashboard = _DashboardRecord.from_report(
+                    data,
+                    revision=revision,
+                    updated_at=now_iso,
+                    started_at=started_at,
+                    elapsed_seconds=elapsed_seconds,
+                )
+                dashboards = dict(self._agent_dashboards)
+                dashboards[project_id] = dashboard
                 work_revision = self._agent_work_revision + 1
 
             self._persist_agent_dashboards(dashboards, work_revision)
@@ -314,43 +474,25 @@ class EventBroker:
             with self._lock:
                 self._agent_dashboards = dashboards
                 self._agent_work_revision = work_revision
-                item = ProjectEvent(
-                    id=self._next_id,
-                    event="agent.dashboard",
-                    project_id=project_id,
-                    data=copy.deepcopy(dashboard),
-                    occurred_at=dashboard["updated_at"],
+                dashboard_payload = dashboard.as_dict()
+                self._emit_locked(
+                    "agent.dashboard",
+                    project_id,
+                    dashboard_payload,
+                    occurred_at=dashboard.updated_at,
                 )
-                self._next_id += 1
-                for subscriber, filter_project in self._subscribers.values():
-                    if filter_project is not None and filter_project != project_id:
-                        continue
-                    if subscriber.full():
-                        try:
-                            subscriber.get_nowait()
-                        except queue.Empty:
-                            pass
-                    subscriber.put_nowait(item)
                 active_project_ids = self._agent_work_project_ids_locked()
-                work_item = ProjectEvent(
-                    id=self._next_id,
-                    event="workspace.agent-work",
-                    project_id=None,
-                    data={"active": bool(active_project_ids), "revision": work_revision,
-                          "project_ids": active_project_ids},
-                    occurred_at=dashboard["updated_at"],
+                self._emit_locked(
+                    "workspace.agent-work",
+                    None,
+                    {
+                        "active": bool(active_project_ids),
+                        "revision": work_revision,
+                        "project_ids": active_project_ids,
+                    },
+                    occurred_at=dashboard.updated_at,
                 )
-                self._next_id += 1
-                for subscriber, filter_project in self._subscribers.values():
-                    if filter_project is not None:
-                        continue
-                    if subscriber.full():
-                        try:
-                            subscriber.get_nowait()
-                        except queue.Empty:
-                            pass
-                    subscriber.put_nowait(work_item)
-                return copy.deepcopy(dashboard)
+                return dashboard.as_dict()
 
     def agent_work_snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -365,22 +507,34 @@ class EventBroker:
         with self._lock:
             dashboard = self._agent_dashboards.get(project_id)
             if dashboard is None:
-                return {"workflow": None, "tasks": [], "started_at": None,
-                        "elapsed_seconds": None, "revision": 0, "updated_at": None}
-            return copy.deepcopy(dashboard)
+                return {
+                    "workflow": None,
+                    "tasks": [],
+                    "started_at": None,
+                    "elapsed_seconds": None,
+                    "revision": 0,
+                    "updated_at": None,
+                }
+            return dashboard.as_dict()
 
     def agent_dashboard_revision(self, project_id: str) -> int:
         with self._lock:
             dashboard = self._agent_dashboards.get(project_id)
-            return dashboard["revision"] if dashboard else 0
+            return dashboard.revision if dashboard else 0
 
-    def subscribe(self, project_id: str | None = None) -> tuple[int, queue.Queue[ProjectEvent]]:
-        subscriber: queue.Queue[ProjectEvent] = queue.Queue(maxsize=self._capacity)
+    def subscribe(
+        self,
+        project_id: str | None = None,
+    ) -> tuple[int, queue.Queue[ProjectEvent]]:
+        subscriber_queue: queue.Queue[ProjectEvent] = queue.Queue(maxsize=self._capacity)
         with self._lock:
             subscriber_id = self._next_subscriber_id
             self._next_subscriber_id += 1
-            self._subscribers[subscriber_id] = (subscriber, project_id)
-        return subscriber_id, subscriber
+            self._subscribers[subscriber_id] = _Subscriber(
+                queue=subscriber_queue,
+                project_id=project_id,
+            )
+        return subscriber_id, subscriber_queue
 
     def unsubscribe(self, subscriber_id: int) -> None:
         with self._lock:

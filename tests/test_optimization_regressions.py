@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from uuid import uuid4
 
+from cadyx.curve_editing import _latest_version
+from cadyx.errors import ValidationError
 from cadyx.events import EventBroker
 from cadyx.models import Document
 
@@ -10,6 +13,11 @@ from cadyx.models import Document
 class _MembershipTrap(list):
     def __contains__(self, value):
         raise AssertionError(f"linear feature-id membership scan used for {value!r}")
+
+
+class _UnexpectedTraceLookup(dict):
+    def get(self, key, default=None):
+        raise AssertionError(f"trace-version scan continued after invalid metadata: {key!r}")
 
 
 class _CountingEventBroker(EventBroker):
@@ -56,6 +64,32 @@ class OptimizationRegressionTests(unittest.TestCase):
         payload["tasks"][0]["title"] = "Mutated"
         self.assertEqual(published["tasks"][0]["title"], "Original")
         self.assertEqual(broker.agent_dashboard_snapshot("project-1")["tasks"][0]["title"], "Original")
+
+    def test_trace_version_lookup_handles_large_unrelated_documents_in_one_scan(self):
+        trace_id = "trace-target"
+        document = SimpleNamespace(
+            objects=[
+                *({"id": f"body:{index}", "type": "body"} for index in range(10_000)),
+                {"type": "sketch", "trace_id": trace_id, "trace_version": 3},
+                {"type": "sketch", "trace_id": "other", "trace_version": 99},
+                {"type": "sketch", "trace_id": trace_id, "trace_version": 9},
+                {"type": "sketch", "trace_id": trace_id, "trace_version": 4},
+            ]
+        )
+
+        self.assertEqual(_latest_version(document, trace_id), 9)
+
+    def test_trace_version_lookup_validates_immediately_without_materializing_matches(self):
+        trace_id = "trace-target"
+        document = SimpleNamespace(
+            objects=[
+                {"type": "sketch", "trace_id": trace_id, "trace_version": 0},
+                _UnexpectedTraceLookup(),
+            ]
+        )
+
+        with self.assertRaisesRegex(ValidationError, "Existing trace version metadata is invalid"):
+            _latest_version(document, trace_id)
 
 
 if __name__ == "__main__":

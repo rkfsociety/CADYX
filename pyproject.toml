@@ -1,15 +1,24 @@
 [tool.ruff]
 required-version = "==0.17.1"
 target-version = "py315"
-include = ["cadyx/**/*.py", "tests/test_static_quality.py"]
+include = ["cadyx/**/*.py", "tests/test_static_quality.py", "scripts/check-static-types.py"]
 cache-dir = ".runtime/ruff-cache"
 
 [tool.ruff.lint]
-select = ["F401", "F811", "F821", "F822", "F823", "RUF100"]
+select = ["B006", "B008", "F401", "F811", "F821", "F822", "F823", "RUF100"]
 
 [tool.mypy]
 python_version = "3.15"
-files = ["cadyx/agent_runtime.py", "cadyx/errors.py", "tests/test_static_quality.py"]
+files = [
+    "cadyx/agent_runtime.py",
+    "cadyx/errors.py",
+    "cadyx/core.py",
+    "cadyx/commands.py",
+    "cadyx/workspace.py",
+    "cadyx/web.py",
+    "tests/test_static_quality.py",
+    "scripts/check-static-types.py",
+]
 follow_imports = "silent"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
@@ -20,3 +29,18 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 show_error_codes = true
 cache_dir = ".runtime/mypy-cache"
+
+[tool.cadyx.static-quality]
+mypy-strict-files = [
+    "cadyx/agent_runtime.py",
+    "cadyx/errors.py",
+    "cadyx/commands.py",
+    "tests/test_static_quality.py",
+    "scripts/check-static-types.py",
+]
+mypy-ratchet-files = [
+    "cadyx/core.py",
+    "cadyx/commands.py",
+    "cadyx/workspace.py",
+    "cadyx/web.py",
+]

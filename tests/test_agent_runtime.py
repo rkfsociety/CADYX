@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
 from typing import Sequence
+from unittest.mock import patch
 
 from cadyx.agent_runtime import (
     AgentMessage,
     AgentResponse,
+    AgentRunCancelled,
+    AgentRunDeadlineExceeded,
     AgentRuntime,
     AgentToolCall,
     AgentToolSpec,
@@ -41,6 +45,34 @@ class SlowProvider:
     def complete(self, messages: Sequence[AgentMessage], tools: Sequence[AgentToolSpec]) -> AgentResponse:
         time.sleep(0.75)
         return AgentResponse("Completed after a long provider call.")
+
+
+class BlockingProvider:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def complete(self, messages: Sequence[AgentMessage], tools: Sequence[AgentToolSpec]) -> AgentResponse:
+        self.started.set()
+        self.release.wait(5.0)
+        return AgentResponse("Provider eventually returned.")
+
+
+class CancellingProvider:
+    def __init__(self, cancel_event: threading.Event) -> None:
+        self.cancel_event = cancel_event
+        self.requests: list[tuple[AgentMessage, ...]] = []
+
+    def complete(self, messages: Sequence[AgentMessage], tools: Sequence[AgentToolSpec]) -> AgentResponse:
+        self.requests.append(tuple(messages))
+        if len(self.requests) == 1:
+            return AgentResponse(None, (AgentToolCall("inspect-1", "inspect_project", {}),))
+        self.cancel_event.set()
+        return AgentResponse(None, (
+            AgentToolCall("command-after-cancel", "execute_command", {
+                "command": {"type": "create_box", "width": 2, "height": 3, "depth": 4},
+            }),
+        ))
 
 
 class AgentRuntimeTests(unittest.TestCase):
@@ -135,6 +167,68 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(result.final_response, "Completed after a long provider call.")
         self.assertEqual(result.revision, 0)
         self.assertEqual(core.inspect_project(project_id)["lock"]["state"], "FREE")
+
+    def test_deadline_aborts_stalled_provider_and_releases_lease(self) -> None:
+        provider = BlockingProvider()
+        runtime = AgentRuntime(
+            self.core,
+            provider,
+            owner_id="deadline-runtime",
+            run_timeout_seconds=0.20,
+        )
+        try:
+            with self.assertRaisesRegex(AgentRunDeadlineExceeded, "execution deadline"):
+                runtime.run(self.project_id, "Wait for a stalled provider.")
+            self.assertTrue(provider.started.is_set())
+            self.assertEqual(self.core.inspect_project(self.project_id)["lock"]["state"], "FREE")
+        finally:
+            provider.release.set()
+
+    def test_cancellation_between_tool_rounds_prevents_later_tool_execution(self) -> None:
+        cancel_event = threading.Event()
+        provider = CancellingProvider(cancel_event)
+        runtime = AgentRuntime(self.core, provider, owner_id="cancel-runtime")
+
+        with self.assertRaisesRegex(AgentRunCancelled, "cancelled"):
+            runtime.run(self.project_id, "Inspect, then edit.", cancel_event=cancel_event)
+
+        self.assertEqual(len(provider.requests), 2)
+        self.assertEqual(self.core.inspect_project(self.project_id)["document"]["revision"], 0)
+        self.assertEqual(self.core.inspect_project(self.project_id)["lock"]["state"], "FREE")
+
+    def test_deadline_preserves_primary_failure_when_cleanup_also_fails(self) -> None:
+        provider = BlockingProvider()
+        runtime = AgentRuntime(
+            self.core,
+            provider,
+            owner_id="cleanup-runtime",
+            run_timeout_seconds=0.20,
+        )
+        try:
+            with patch.object(self.core, "stop_agent", side_effect=RuntimeError("cleanup failed")) as stop:
+                with self.assertRaises(AgentRunDeadlineExceeded) as error:
+                    runtime.run(self.project_id, "Wait for a stalled provider.")
+            stop.assert_called_once()
+            self.assertTrue(any("cleanup failed" in note for note in error.exception.__notes__))
+        finally:
+            provider.release.set()
+
+    def test_run_timeout_validation_and_default_unlimited_behavior(self) -> None:
+        for invalid in (True, 0, -1, float("inf"), float("nan"), "1"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, "run_timeout_seconds"):
+                    AgentRuntime(
+                        self.core,
+                        ScriptedProvider([AgentResponse("unused")]),
+                        owner_id="runtime-test",
+                        run_timeout_seconds=invalid,
+                    )
+        runtime = AgentRuntime(
+            self.core,
+            ScriptedProvider([AgentResponse("done")]),
+            owner_id="runtime-test",
+        )
+        self.assertIsNone(runtime.run_timeout_seconds)
 
 
 if __name__ == "__main__":

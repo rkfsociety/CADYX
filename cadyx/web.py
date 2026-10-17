@@ -4,27 +4,30 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import mimetypes
 import os
 import queue
-import struct
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socket import socket
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import urlsplit
 
-from .api_contracts import validate_request_fields
 from .auth import authorization_matches
-from .capabilities import agent_api_capabilities
 from .core import CadyxCore
 from .errors import CadyxError, NotFoundError, ValidationError
-from .models import OwnerType
+from .web_routes import dispatch_route, match_route
 
 _MAX_BODY_BYTES = 1_000_000
 _MAX_STEP_UPLOAD_BYTES = 64 * 1024 * 1024
 _MAX_VIEWPORT_SNAPSHOT_BYTES = 16 * 1024 * 1024
+_DEFAULT_MAX_HTTP_REQUESTS = 64
+_DEFAULT_MAX_SSE_STREAMS = 8
+_SSE_KEEPALIVE_SECONDS = 15.0
+_SSE_SHUTDOWN_POLL_SECONDS = 0.25
+_SOCKET_REQUEST = socket | tuple[bytes, socket]
 _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 _UI_ASSETS = (
     "index.html", "scanner.html", "app.js", "style.css", "viewport.js",
@@ -59,8 +62,87 @@ def _ui_asset_version() -> str:
 
 
 class CadyxHTTPServer(ThreadingHTTPServer):
+    """Threaded HTTP server with bounded request/SSE admission and shutdown signaling."""
+
     daemon_threads = True
     allow_reuse_address = True
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        request_handler_class: type[BaseHTTPRequestHandler],
+        *,
+        max_http_requests: int = _DEFAULT_MAX_HTTP_REQUESTS,
+        max_sse_streams: int = _DEFAULT_MAX_SSE_STREAMS,
+    ) -> None:
+        if not isinstance(max_http_requests, int) or isinstance(max_http_requests, bool) or max_http_requests < 1:
+            raise ValueError("max_http_requests must be a positive integer.")
+        if not isinstance(max_sse_streams, int) or isinstance(max_sse_streams, bool) or max_sse_streams < 1:
+            raise ValueError("max_sse_streams must be a positive integer.")
+        self.max_http_requests = max_http_requests
+        self.max_sse_streams = max_sse_streams
+        self.shutdown_event = threading.Event()
+        self._request_slots = threading.BoundedSemaphore(max_http_requests)
+        self._sse_slots = threading.BoundedSemaphore(max_sse_streams)
+        super().__init__(server_address, request_handler_class)
+
+    def try_acquire_request_slot(self) -> bool:
+        return self._request_slots.acquire(blocking=False)
+
+    def release_request_slot(self) -> None:
+        self._request_slots.release()
+
+    def try_acquire_sse_slot(self) -> bool:
+        return self._sse_slots.acquire(blocking=False)
+
+    def release_sse_slot(self) -> None:
+        self._sse_slots.release()
+
+    def process_request(self, request: _SOCKET_REQUEST, client_address: tuple[str, int]) -> None:
+        if not self.try_acquire_request_slot():
+            self._reject_overloaded_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.release_request_slot()
+            raise
+
+    def process_request_thread(self, request: _SOCKET_REQUEST, client_address: tuple[str, int]) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.release_request_slot()
+
+    def _reject_overloaded_request(self, request: _SOCKET_REQUEST) -> None:
+        body = (
+            b'{"error":"SERVICE_UNAVAILABLE","message":'
+            b'"HTTP concurrency limit reached."}'
+        )
+        response = (
+            b"HTTP/1.1 503 Service Unavailable\r\n"
+            b"Content-Type: application/json; charset=utf-8\r\n"
+            + f"Content-Length: {len(body)}\r\n".encode("ascii")
+            + b"Cache-Control: no-store\r\n"
+            + b"Retry-After: 1\r\n"
+            + b"Connection: close\r\n\r\n"
+            + body
+        )
+        connection = request[1] if isinstance(request, tuple) else request
+        try:
+            connection.sendall(response)
+        except OSError:
+            pass
+        finally:
+            self.shutdown_request(request)
+
+    def shutdown(self) -> None:
+        self.shutdown_event.set()
+        super().shutdown()
+
+    def server_close(self) -> None:
+        self.shutdown_event.set()
+        super().server_close()
 
 
 def make_request_handler(
@@ -72,214 +154,17 @@ def make_request_handler(
 
         def do_GET(self) -> None:
             parsed = urlsplit(self.path)
+            route = match_route("GET", parsed.path)
             try:
-                if parsed.path == "/api/v1/health":
-                    self._json(200, {"status": "ok", "api_version": 1})
+                if route is not None and route.spec.name == "health":
+                    dispatch_route(self, core, route, parsed)
                     return
                 if not self._require_auth():
                     return
-                if parsed.path == "/api/v1/events":
-                    self._stream_events(parse_qs(parsed.query).get("project_id", [None])[0])
+                if route is None:
+                    self._not_found()
                     return
-                if parsed.path == "/api/v1/scanner/live-frame":
-                    frame_path = core.workspace.root / ".revopoint-live.raw"
-                    if not frame_path.is_file() or frame_path.stat().st_size != 640 * 400 * 2:
-                        self._json(404, {"error": "NO_LIVE_FRAME", "message": "Live scanner frame is not available."})
-                        return
-                    payload = frame_path.read_bytes()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/octet-stream")
-                    self.send_header("Content-Length", str(len(payload)))
-                    self.send_header("Cache-Control", "no-store")
-                    self.send_header("X-CADYX-Frame-Width", "640")
-                    self.send_header("X-CADYX-Frame-Height", "400")
-                    self.send_header("X-CADYX-Frame-Mtime", str(frame_path.stat().st_mtime_ns))
-                    self.end_headers()
-                    self.wfile.write(payload)
-                    return
-                if parsed.path == "/api/v1/scanner/calibration":
-                    calibration_path = Path(__file__).resolve().parent.parent / "tools" / "revopoint" / "calibration" / "Q.bin"
-                    calibration = calibration_path.read_bytes()
-                    if len(calibration) != 64:
-                        raise RuntimeError("Revopoint Q calibration must contain 64 bytes.")
-                    matrix = struct.unpack("<16f", calibration)
-                    if not all(math.isfinite(value) for value in matrix):
-                        raise RuntimeError("Revopoint Q calibration contains a non-finite value.")
-                    self._json(200, {"width": 640, "height": 400, "matrix": matrix,
-                                     "disparity_scale": 256,
-                                     "disparity_scale_status": "provisional_unverified"})
-                    return
-                if parsed.path == "/api/v1/updates":
-                    query = parse_qs(parsed.query)
-                    project_id = query.get("project_id", [None])[0]
-                    folder_name = query.get("folder", [None])[0]
-                    agent_work = core.events.agent_work_snapshot()
-                    snapshot: dict[str, Any] = {
-                        "ui_version": _ui_asset_version(),
-                        "workspace_revision": core.workspace.workspace_revision_token(),
-                        "project_revision": None,
-                        "project_lock": None,
-                        "activity_revision": None,
-                        "dashboard_revision": None,
-                        "agent_work_active": agent_work["active"],
-                        "agent_work_active_project_ids": agent_work["active_project_ids"],
-                        "agent_work_revision": agent_work["revision"],
-                        "folder_revision": None,
-                    }
-                    if project_id:
-                        snapshot["project_revision"] = core.workspace.project_revision_token(project_id)
-                        snapshot["project_lock"] = core.leases.snapshot_for_listing(project_id)
-                        snapshot["activity_revision"] = core.events.activity_revision(project_id)
-                        snapshot["dashboard_revision"] = core.events.agent_dashboard_revision(project_id)
-                    if folder_name:
-                        snapshot["folder_revision"] = core.workspace.folder_revision_token(folder_name)
-                    self._json(200, snapshot)
-                    return
-                if parsed.path == "/api/v1/agent/workspace/selection":
-                    self._json(200, {"selection": core.workspace_selection_snapshot()})
-                    return
-                if parsed.path == "/api/v1/agent/capabilities":
-                    self._json(200, agent_api_capabilities())
-                    return
-                if parsed.path == "/api/v1/projects":
-                    self._json(200, core.list_workspace())
-                    return
-                if parsed.path == "/api/v1/agent/projects":
-                    self._json(200, core.list_workspace())
-                    return
-                parts = parsed.path.strip("/").split("/")
-                folder_files_prefix = ["api", "v1", "workspace", "folders"]
-                if (
-                    len(parts) in {6, 7}
-                    and parts[:4] == folder_files_prefix
-                    and parts[5] == "files"
-                ):
-                    folder_name = unquote(parts[4])
-                    if len(parts) == 6:
-                        self._json(200, {"files": core.workspace.list_folder_files(folder_name)})
-                    else:
-                        file_name = unquote(parts[6])
-                        self._binary_file(core.workspace.resolve_folder_file(folder_name, file_name))
-                    return
-                prefix = ["api", "v1", "projects"]
-                agent_prefix = ["api", "v1", "agent", "projects"]
-                project_file_prefix = agent_prefix if parts[:4] == agent_prefix else prefix
-                if (len(parts) in {len(project_file_prefix) + 2, len(project_file_prefix) + 3}
-                        and parts[:len(project_file_prefix)] == project_file_prefix
-                        and parts[len(project_file_prefix) + 1] == "files"):
-                    project_id = parts[len(project_file_prefix)]
-                    if len(parts) == len(project_file_prefix) + 2:
-                        self._json(200, {"files": core.workspace.list_project_files(project_id)})
-                    else:
-                        file_name = unquote(parts[len(project_file_prefix) + 2])
-                        self._binary_file(core.workspace.resolve_project_file(project_id, file_name))
-                    return
-                comparison_prefix = agent_prefix if parts[:4] == agent_prefix else prefix
-                if len(parts) == 5 and parts[:3] == prefix and parts[4] == "dashboard":
-                    self._json(200, core.agent_dashboard_snapshot(parts[3]))
-                    return
-                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "dashboard":
-                    self._json(200, core.agent_dashboard_snapshot(parts[4]))
-                    return
-                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "validations":
-                    query = parse_qs(parsed.query)
-                    try:
-                        limit = int(query.get("limit", ["50"])[0])
-                    except ValueError as exc:
-                        raise ValidationError("Validation record limit must be an integer from 1 to 200.") from exc
-                    self._json(200, core.list_validation_records(parts[4], limit=limit))
-                    return
-                if len(parts) == len(comparison_prefix) + 2 and parts[:len(comparison_prefix)] == comparison_prefix and parts[-1] == "comparison":
-                    query = parse_qs(parsed.query)
-                    self._json(200, core.compare_bodies(parts[-2],
-                        query.get("original_body_id", [None])[0],
-                        query.get("modified_body_id", [None])[0]))
-                    return
-                if len(parts) == 5 and parts[:3] == prefix and parts[4] == "viewport.png":
-                    if parse_qs(parsed.query).get("thumbnail") == ["1"]:
-                        encoded, revision = core.render_project_thumbnail_png(parts[3])
-                        source = "server-thumbnail"
-                    else:
-                        encoded, source, revision = core.render_project_png_with_source(parts[3])
-                    self._png(200, encoded, extra_headers=(
-                        ("X-CADYX-Viewport-Source", source),
-                        ("X-CADYX-Document-Revision", str(revision)),
-                    ))
-                    return
-                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "viewport.png":
-                    encoded, source, revision = core.observe_agent_operation(
-                        parts[4], "Получает изображение модели",
-                        lambda: core.render_project_png_with_source(parts[4]),
-                    )
-                    self._png(200, encoded, extra_headers=(
-                        ("X-CADYX-Viewport-Source", source),
-                        ("X-CADYX-Document-Revision", str(revision)),
-                    ))
-                    return
-                if len(parts) == 5 and parts[:3] == prefix and parts[4] == "viewport":
-                    self._json(200, core.render_project(parts[3]))
-                    return
-                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "viewport":
-                    self._json(200, core.observe_agent_operation(
-                        parts[4], "Получает 3D-сцену", lambda: core.render_project(parts[4]),
-                    ))
-                    return
-                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "topology":
-                    project_id = parts[4]
-                    body_id = parse_qs(parsed.query).get("body_id", [None])[0]
-                    self._json(200, core.observe_agent_operation(
-                        project_id, "Изучает рёбра модели",
-                        lambda: core.inspect_body_topology(project_id, body_id),
-                    ))
-                    return
-                if len(parts) == 5 and parts[:3] == prefix and parts[4] == "activity":
-                    activities, revision = core.events.activity_state_snapshot(parts[3])
-                    if not activities:
-                        core.workspace.load(parts[3])
-                    self._json(200, {"activities": activities, "revision": revision})
-                    return
-                if len(parts) == 4 and parts[:3] == prefix:
-                    self._json(200, core.inspect_project(parts[3]))
-                    return
-                if len(parts) == 6 and parts[:4] == agent_prefix and parts[5] == "activity":
-                    activities, revision = core.events.activity_state_snapshot(parts[4])
-                    if not activities:
-                        core.workspace.load(parts[4])
-                    self._json(200, {"activities": activities, "revision": revision})
-                    return
-                if len(parts) == 5 and parts[:4] == agent_prefix:
-                    self._json(200, core.observe_agent_operation(
-                        parts[4], "Изучает модель", lambda: core.inspect_project(parts[4]),
-                    ))
-                    return
-                if parsed.path == "/":
-                    self._static("index.html", "text/html; charset=utf-8")
-                    return
-                if parsed.path == "/scanner":
-                    self._static("scanner.html", "text/html; charset=utf-8")
-                    return
-                if parsed.path == "/favicon.svg":
-                    self._static("favicon.svg", "image/svg+xml")
-                    return
-                if parsed.path == "/assets/app.js":
-                    self._static("app.js", "text/javascript; charset=utf-8")
-                    return
-                if parsed.path == "/assets/viewport.js":
-                    self._static("viewport.js", "text/javascript; charset=utf-8")
-                    return
-                if parsed.path == "/assets/scanner-camera.js":
-                    self._static("scanner-camera.js", "text/javascript; charset=utf-8")
-                    return
-                if parsed.path == "/assets/ply-parser.js":
-                    self._static("ply-parser.js", "text/javascript; charset=utf-8")
-                    return
-                if parsed.path == "/assets/ply-preview.js":
-                    self._static("ply-preview.js", "text/javascript; charset=utf-8")
-                    return
-                if parsed.path == "/assets/style.css":
-                    self._static("style.css", "text/css; charset=utf-8")
-                    return
-                self._json(404, {"error": "NOT_FOUND", "message": "Route was not found."})
+                dispatch_route(self, core, route, parsed)
             except CadyxError as exc:
                 self._json(exc.http_status, exc.as_dict())
 
@@ -288,54 +173,14 @@ def make_request_handler(
             try:
                 if not self._require_auth():
                     return
-                parts = parsed.path.strip("/").split("/")
-                if ((len(parts) == 7 and parts[:4] == ["api", "v1", "agent", "projects"]
-                     and parts[5:] == ["viewport", "snapshot"])
-                    or (len(parts) == 6 and parts[:3] == ["api", "v1", "projects"]
-                        and parts[4:] == ["viewport", "snapshot"])):
-                    project_id = parts[4] if parts[2] == "agent" else parts[3]
-                    revision_text = self.headers.get("X-CADYX-Document-Revision")
-                    try:
-                        revision = int(revision_text) if revision_text is not None else -1
-                    except ValueError as exc:
-                        raise ValidationError("X-CADYX-Document-Revision must be an integer.") from exc
-                    snapshot = core.publish_viewport_snapshot(
-                        project_id, revision, self._read_viewport_png(),
-                    )
-                    self._json(200, snapshot)
+                route = match_route("POST", parsed.path)
+                if route is None:
+                    # Preserve the historical POST contract: malformed JSON is
+                    # reported before a not-found response for unknown routes.
+                    self._read_json()
+                    self._not_found()
                     return
-                if (len(parts) == 7 and parts[:4] == ["api", "v1", "agent", "projects"]
-                        and parts[5] == "files"):
-                    project_id = parts[4]
-                    filename = unquote(parts[6])
-                    result = core.upload_project_step(project_id, filename, self._read_step_upload())
-                    self._json(201, {"project_id": project_id, "file": result})
-                    return
-                body = self._read_json()
-                if parts == ["api", "v1", "agent", "workspace", "selection"]:
-                    if body is None:
-                        raise ValidationError("A JSON request body is required.")
-                    selection = core.select_workspace_resource(body)
-                    self._json(200, {"selection": selection})
-                    return
-                if parts == ["api", "v1", "project-groups"]:
-                    if body is None or set(body) != {"name"}:
-                        raise ValidationError("Project group creation requires only a name field.")
-                    self._json(201, {"group": core.create_project_group(body["name"])})
-                    return
-                if (len(parts) == 5 and parts[:3] == ["api", "v1", "projects"]
-                        and parts[4] == "group"):
-                    if body is None or set(body) != {"group_id"}:
-                        raise ValidationError("Project group assignment requires only group_id.")
-                    self._json(200, core.assign_project_group(parts[3], body["group_id"]))
-                    return
-                if parts[:3] == ["api", "v1", "projects"]:
-                    self._route_project(parts[3:], body, agent_api=False)
-                    return
-                if parts[:4] == ["api", "v1", "agent", "projects"]:
-                    self._route_project(parts[4:], body, agent_api=True)
-                    return
-                self._json(404, {"error": "NOT_FOUND", "message": "Route was not found."})
+                dispatch_route(self, core, route, parsed)
             except CadyxError as exc:
                 self._json(exc.http_status, exc.as_dict())
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -346,17 +191,19 @@ def make_request_handler(
             try:
                 if not self._require_auth():
                     return
-                parts = parsed.path.strip("/").split("/")
-                if len(parts) == 4 and parts[:3] == ["api", "v1", "projects"]:
-                    self._json(200, core.delete_project(parts[3]))
+                route = match_route("DELETE", parsed.path)
+                if route is None:
+                    self._not_found()
                     return
-                if (len(parts) == 7 and parts[:4] == ["api", "v1", "agent", "projects"]
-                        and parts[5] == "files"):
-                    self._json(200, core.remove_staged_project_step(parts[4], unquote(parts[6])))
-                    return
-                self._json(404, {"error": "NOT_FOUND", "message": "Route was not found."})
+                dispatch_route(self, core, route, parsed)
             except CadyxError as exc:
                 self._json(exc.http_status, exc.as_dict())
+
+        def _not_found(self) -> None:
+            self._json(404, {"error": "NOT_FOUND", "message": "Route was not found."})
+
+        def _ui_asset_version(self) -> str:
+            return _ui_asset_version()
 
         def _require_auth(self) -> bool:
             if authorization_matches(self.headers.get("Authorization"), auth_token):
@@ -376,146 +223,6 @@ def make_request_handler(
                 ),
             )
             return False
-
-        def _route_project(self, parts: list[str], body: dict[str, Any] | None, *, agent_api: bool) -> None:
-            if not parts:
-                if body is None:
-                    raise ValidationError("A JSON request body is required.")
-                if agent_api:
-                    if not body.keys() <= {"name", "select"} or "name" not in body:
-                        raise ValidationError("Agent project creation requires name and accepts optional select.")
-                    select = body.get("select", True)
-                    if not isinstance(select, bool):
-                        raise ValidationError("select must be a boolean.")
-                else:
-                    if set(body) != {"name"}:
-                        raise ValidationError("Project creation requires only a name field.")
-                    select = True
-                result = core.create_project(body["name"], select=select)
-                self._json(201, result)
-                return
-            project_id = parts[0]
-            if agent_api and len(parts) == 3 and parts[1:] == ["validations", "dimensions"]:
-                validate_request_fields("dimensions", body)
-                result = core.observe_agent_operation(
-                    project_id, "Проверяет габариты тела",
-                    lambda: core.validate_body_dimensions(
-                        project_id, body["body_id"], body["expected_revision"],
-                        body["expected_dimensions"], body["tolerance"],
-                        persist=body.get("persist", False),
-                    ),
-                )
-                self._json(200, result)
-                return
-            if agent_api and len(parts) == 3 and parts[1:] == ["validations", "clearance"]:
-                validate_request_fields("clearance", body)
-                result = core.observe_agent_operation(
-                    project_id, "Измеряет зазор между телами",
-                    lambda progress: core.validate_body_clearance(
-                        project_id, body["first_body_id"], body["second_body_id"],
-                        body["expected_revision"], body["minimum_clearance"], body["tolerance"],
-                        progress=progress, persist=body.get("persist", False),
-                    ),
-                    reports_progress=True,
-                )
-                self._json(200, result)
-                return
-            if agent_api and len(parts) == 3 and parts[1:] == ["validations", "preservation"]:
-                validate_request_fields("preservation", body)
-                result = core.observe_agent_operation(
-                    project_id, "Проверяет сохранённый объём тела",
-                    lambda: core.validate_body_preservation(
-                        project_id, body["reference_body_id"], body["candidate_body_id"],
-                        body["expected_revision"], body["maximum_lost_volume"], body["tolerance"],
-                        persist=body.get("persist", False),
-                    ),
-                )
-                self._json(200, result)
-                return
-            if agent_api and len(parts) == 3 and parts[1:] == ["validations", "thickness"]:
-                validate_request_fields("thickness", body)
-                result = core.observe_agent_operation(
-                    project_id, "Измеряет минимальную толщину стенки",
-                    lambda progress: core.validate_body_thickness(
-                        project_id, body["body_id"], body["expected_revision"],
-                        body["minimum_thickness"], body["tolerance"],
-                        progress=progress, persist=body.get("persist", False),
-                        method=body.get("method", "sampled"),
-                    ),
-                    reports_progress=True,
-                )
-                self._json(200, result)
-                return
-            if agent_api and len(parts) == 2 and parts[1] == "rename":
-                if body is None or set(body) != {"name"}:
-                    raise ValidationError("Project rename requires only a name field.")
-                self._json(200, core.rename_project(project_id, body["name"]))
-                return
-            if agent_api and len(parts) == 2 and parts[1] == "copy-files":
-                if body is None or set(body) != {"source_project_id"}:
-                    raise ValidationError("Project file copy requires only source_project_id.")
-                self._json(201, core.copy_project_files(project_id, body["source_project_id"]))
-                return
-            if agent_api and len(parts) == 2 and parts[1] == "prune-files":
-                if body is None or set(body) != {"keep_files"} or not isinstance(body["keep_files"], list):
-                    raise ValidationError("Project file pruning requires only a keep_files array.")
-                self._json(200, core.prune_project_files(project_id, body["keep_files"]))
-                return
-            if agent_api and len(parts) == 2 and parts[1] == "dashboard":
-                if body is None:
-                    raise ValidationError("A JSON request body is required.")
-                self._json(200, core.report_agent_dashboard(project_id, body))
-                return
-            if agent_api and len(parts) == 3 and parts[1:] == ["viewport", "camera"]:
-                if body is None:
-                    raise ValidationError("A JSON request body is required.")
-                allowed = {"yaw_delta", "pitch_delta", "zoom_factor", "duration_ms"}
-                if not body.keys() <= allowed or "yaw_delta" not in body:
-                    raise ValidationError("Camera requests need yaw_delta and only supported camera fields.")
-                result = core.rotate_view(
-                    project_id,
-                    yaw_delta=body["yaw_delta"],
-                    pitch_delta=body.get("pitch_delta", 0.0),
-                    zoom_factor=body.get("zoom_factor", 1.0),
-                    duration_ms=body.get("duration_ms", 1200),
-                )
-                self._json(200, {"camera": result})
-                return
-            if agent_api and len(parts) == 2 and parts[1] in {"stop", "resume"}:
-                if body is None:
-                    raise ValidationError("A JSON request body is required.")
-                if parts[1] == "stop":
-                    result = core.stop_agent(project_id, body.get("lease_id"))
-                else:
-                    result = core.resume_agent(project_id, body.get("owner_id"), body.get("expected_revision"))
-                self._json(200, result)
-                return
-            if len(parts) == 2 and parts[1] == "leases":
-                if body is None:
-                    raise ValidationError("A JSON request body is required.")
-                owner_type = "agent" if agent_api else body.get("owner_type")
-                owner_id = body.get("owner_id")
-                self._json(201, {"lease": core.acquire_lease(project_id, owner_type, owner_id)})
-                return
-            if len(parts) == 2 and parts[1] == "commands":
-                if body is None:
-                    raise ValidationError("A JSON request body is required.")
-                command = body.get("command")
-                expected = OwnerType.AGENT if agent_api else OwnerType.HUMAN
-                self._json(200, core.execute_command(project_id, body.get("lease_id"), command,
-                           expected_owner_type=expected, expected_revision=body.get("expected_revision")))
-                return
-            if len(parts) == 3 and parts[1:] == ["leases", "recover"]:
-                self._json(200, core.recover_expired_lease(project_id))
-                return
-            if len(parts) == 4 and parts[1] == "leases" and parts[3] in {"heartbeat", "release"}:
-                lease_id = parts[2]
-                if parts[3] == "heartbeat":
-                    self._json(200, {"lease": core.heartbeat(project_id, lease_id)})
-                else:
-                    self._json(200, core.release_lease(project_id, lease_id))
-                return
-            raise NotFoundError("Route was not found.")
 
         def _read_json(self) -> dict[str, Any] | None:
             raw_length = self.headers.get("Content-Length")
@@ -645,26 +352,51 @@ def make_request_handler(
                     pass
 
         def _stream_events(self, project_id: str | None) -> None:
-            if project_id:
-                # Confirm the filter names a real project before opening a stream.
-                core.inspect_project(project_id)
-            subscriber_id, subscriber = core.events.subscribe(project_id)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self.send_header("X-Accel-Buffering", "no")
-            self.end_headers()
-            self.close_connection = True
+            if not isinstance(self.server, CadyxHTTPServer):
+                raise RuntimeError("CADYX request handler requires CadyxHTTPServer.")
+            server = self.server
+            if not server.try_acquire_sse_slot():
+                self.close_connection = True
+                self._json(
+                    503,
+                    {
+                        "error": "SERVICE_UNAVAILABLE",
+                        "message": "SSE concurrency limit reached.",
+                    },
+                    extra_headers=(("Retry-After", "1"), ("Connection", "close")),
+                )
+                return
+            subscriber_id: int | None = None
             try:
+                if project_id:
+                    core.inspect_project(project_id)
+                subscriber_id, subscriber = core.events.subscribe(project_id)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                self.close_connection = True
                 self.wfile.write(b": CADYX event stream\n\n")
                 self.wfile.flush()
-                while True:
+                next_keepalive = time.monotonic() + _SSE_KEEPALIVE_SECONDS
+                while not server.shutdown_event.is_set():
+                    now = time.monotonic()
+                    timeout = min(
+                        _SSE_SHUTDOWN_POLL_SECONDS,
+                        max(0.0, next_keepalive - now),
+                    )
                     try:
-                        item = subscriber.get(timeout=15)
+                        item = subscriber.get(timeout=timeout)
                     except queue.Empty:
+                        if server.shutdown_event.is_set():
+                            break
+                        if time.monotonic() < next_keepalive:
+                            continue
                         self.wfile.write(b": keepalive\n\n")
                         self.wfile.flush()
+                        next_keepalive = time.monotonic() + _SSE_KEEPALIVE_SECONDS
                         continue
                     payload = json.dumps(item.as_dict(), ensure_ascii=False, allow_nan=False)
                     frame = f"id: {item.id}\nevent: {item.event}\ndata: {payload}\n\n"
@@ -673,10 +405,11 @@ def make_request_handler(
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:
-                core.events.unsubscribe(subscriber_id)
+                if subscriber_id is not None:
+                    core.events.unsubscribe(subscriber_id)
+                server.release_sse_slot()
 
         def log_message(self, format: str, *args: Any) -> None:
-            # Keep request logging concise while retaining normal server diagnostics.
             super().log_message(format, *args)
 
     return CadyxRequestHandler
