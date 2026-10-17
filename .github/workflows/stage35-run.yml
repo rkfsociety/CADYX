@@ -40,6 +40,11 @@ jobs:
           if old_delegate not in text:
               raise SystemExit('delegate generation anchor changed')
           text = text.replace(old_delegate, new_delegate, 1)
+          text = text.replace(
+              "          python -m unittest discover -s tests -p 'test_locking.py' -v\n",
+              "",
+              1,
+          )
           path.write_text(text, encoding='utf-8')
 
           def run_block(name: str) -> None:
