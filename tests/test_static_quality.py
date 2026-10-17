@@ -18,7 +18,7 @@ BOUNDARIES = ("core", "commands", "workspace", "web", "agent_runtime")
 BOUNDARY_BASELINE_CAPS = {
     "core": 17,
     "commands": 0,
-    "workspace": 0,
+    "workspace": 1,
     "web": 1,
     "agent_runtime": 0,
 }

@@ -70,7 +70,12 @@
     }
   ],
   "commands": [],
-  "workspace": [],
+  "workspace": [
+    {
+      "issue": "validate:project: unchecked annotation",
+      "reason": "Project validation intentionally accepts an untrusted decoded JSON value so migrations can reject non-object envelopes with the stable validation error."
+    }
+  ],
   "web": [
     {
       "issue": "log_message:args: unchecked annotation",
