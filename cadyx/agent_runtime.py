@@ -9,7 +9,9 @@ through :class:`CadyxCore` and its shared Command System.
 from __future__ import annotations
 
 import json
+import math
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
@@ -71,10 +73,43 @@ class AgentRuntimeError(RuntimeError):
     """Raised when an agent provider violates the runtime contract or limits."""
 
 
+class AgentRunCancelled(AgentRuntimeError):
+    """Raised when cooperative cancellation aborts an agent run."""
+
+
+class AgentRunDeadlineExceeded(AgentRuntimeError):
+    """Raised when a configured agent-run execution deadline expires."""
+
+
 @dataclass(frozen=True)
 class _RegisteredTool:
     spec: AgentToolSpec
     execute: Callable[[Mapping[str, Any]], Any]
+
+
+class _RunGuard:
+    """Monotonic deadline and cooperative-cancellation state for one run."""
+
+    def __init__(
+        self,
+        timeout_seconds: float | None,
+        cancel_event: threading.Event | None,
+    ) -> None:
+        self._cancel_event = cancel_event
+        self._deadline = (
+            None if timeout_seconds is None else time.monotonic() + timeout_seconds
+        )
+
+    def check(self) -> None:
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise AgentRunCancelled("Agent run was cancelled.")
+        if self._deadline is not None and time.monotonic() >= self._deadline:
+            raise AgentRunDeadlineExceeded("Agent run exceeded its execution deadline.")
+
+    def wait_seconds(self, maximum: float = 0.05) -> float:
+        if self._deadline is None:
+            return maximum
+        return max(0.001, min(maximum, self._deadline - time.monotonic()))
 
 
 class _LeaseHeartbeat:
@@ -120,7 +155,9 @@ class AgentRuntime:
 
     Each run obtains a revision-protected agent lease, exposes only inspection,
     viewport and command tools for that project, and releases the lease through
-    the validated agent-stop path on completion or failure.
+    the validated agent-stop path on completion or failure. A configured run
+    timeout bounds provider waits independently of the edit-lease timeout;
+    callers may also request cooperative cancellation with a ``threading.Event``.
     """
 
     def __init__(
@@ -131,6 +168,7 @@ class AgentRuntime:
         owner_id: str,
         max_tool_rounds: int = 8,
         max_tool_calls: int = 32,
+        run_timeout_seconds: float | None = None,
     ) -> None:
         if not isinstance(owner_id, str) or not owner_id.strip() or len(owner_id) > 160:
             raise ValueError("owner_id must be a non-empty string of at most 160 characters")
@@ -138,11 +176,21 @@ class AgentRuntime:
             raise ValueError("max_tool_rounds must be a positive integer")
         if type(max_tool_calls) is not int or max_tool_calls < 1:
             raise ValueError("max_tool_calls must be a positive integer")
+        if run_timeout_seconds is not None:
+            if (
+                isinstance(run_timeout_seconds, bool)
+                or not isinstance(run_timeout_seconds, (int, float))
+                or not math.isfinite(run_timeout_seconds)
+                or run_timeout_seconds <= 0
+            ):
+                raise ValueError("run_timeout_seconds must be a positive finite number or None")
+            run_timeout_seconds = float(run_timeout_seconds)
         self.core = core
         self.provider = provider
         self.owner_id = owner_id.strip()
         self.max_tool_rounds = max_tool_rounds
         self.max_tool_calls = max_tool_calls
+        self.run_timeout_seconds = run_timeout_seconds
 
     def run(
         self,
@@ -150,23 +198,30 @@ class AgentRuntime:
         prompt: str,
         *,
         system_prompt: str = "You are operating a CADYX project. Inspect the project before editing it and use the provided tools for all project changes.",
+        cancel_event: threading.Event | None = None,
     ) -> AgentRunResult:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("prompt must be a non-empty string")
         if not isinstance(system_prompt, str):
             raise ValueError("system_prompt must be a string")
+        if cancel_event is not None and not isinstance(cancel_event, threading.Event):
+            raise ValueError("cancel_event must be a threading.Event or None")
 
+        guard = _RunGuard(self.run_timeout_seconds, cancel_event)
+        guard.check()
         current = self.core.observe_agent_operation(
             project_id, "Изучает модель", lambda: self.core.inspect_project(project_id),
         )
+        guard.check()
         revision = current["document"]["revision"]
         resumed = self.core.resume_agent(project_id, self.owner_id, revision)
         lease_id = resumed["lease"]["lease_id"]
         revision_state = [resumed["document"]["revision"]]
         heartbeat = _LeaseHeartbeat(self.core, project_id, lease_id)
-        heartbeat.start()
         primary_error: BaseException | None = None
         try:
+            heartbeat.start()
+            guard.check()
             result = self._run_loop(
                 project_id,
                 lease_id,
@@ -174,7 +229,9 @@ class AgentRuntime:
                 prompt,
                 system_prompt,
                 heartbeat,
+                guard,
             )
+            guard.check()
             heartbeat.check()
         except BaseException as exc:
             primary_error = exc
@@ -197,6 +254,36 @@ class AgentRuntime:
             tool_names=tuple(result[3]),
         )
 
+    def _complete_provider(
+        self,
+        messages: Sequence[AgentMessage],
+        tools: Sequence[AgentToolSpec],
+        heartbeat: _LeaseHeartbeat,
+        guard: _RunGuard,
+    ) -> AgentResponse:
+        completed = threading.Event()
+        response: list[AgentResponse] = []
+        failure: list[BaseException] = []
+
+        def invoke() -> None:
+            try:
+                response.append(self.provider.complete(messages, tools))
+            except BaseException as exc:
+                failure.append(exc)
+            finally:
+                completed.set()
+
+        thread = threading.Thread(target=invoke, name="cadyx-agent-provider", daemon=True)
+        thread.start()
+        while not completed.wait(guard.wait_seconds()):
+            guard.check()
+            heartbeat.check()
+        guard.check()
+        heartbeat.check()
+        if failure:
+            raise failure[0]
+        return response[0]
+
     def _run_loop(
         self,
         project_id: str,
@@ -205,6 +292,7 @@ class AgentRuntime:
         prompt: str,
         system_prompt: str,
         heartbeat: _LeaseHeartbeat,
+        guard: _RunGuard,
     ) -> tuple[str, int, int, list[str]]:
         def no_arguments(arguments: Mapping[str, Any]) -> None:
             if arguments:
@@ -228,6 +316,7 @@ class AgentRuntime:
                 raise ValidationError("command must be an object.")
             if set(arguments) != {"command"}:
                 raise ValidationError("Only the command field is accepted.")
+            guard.check()
             heartbeat.check()
             result = self.core.execute_command(
                 project_id,
@@ -283,8 +372,10 @@ class AgentRuntime:
         provider_turns = 0
         tool_rounds = 0
         while True:
+            guard.check()
             heartbeat.check()
-            response = self.provider.complete(tuple(messages), tool_specs)
+            response = self._complete_provider(tuple(messages), tool_specs, heartbeat, guard)
+            guard.check()
             heartbeat.check()
             provider_turns += 1
             self._validate_response(response)
@@ -298,6 +389,8 @@ class AgentRuntime:
             if tool_rounds > self.max_tool_rounds:
                 raise AgentRuntimeError("Agent exceeded the maximum number of tool rounds.")
             for call in response.tool_calls:
+                guard.check()
+                heartbeat.check()
                 if call.id in seen_call_ids:
                     raise AgentRuntimeError("Provider reused a tool call id within one run.")
                 seen_call_ids.add(call.id)
@@ -308,11 +401,11 @@ class AgentRuntime:
                 if tool is None:
                     value: Any = {"error": "UNKNOWN_TOOL", "message": "Tool is not available."}
                 else:
-                    heartbeat.check()
                     try:
                         value = tool.execute(call.arguments)
                     except CadyxError as exc:
                         value = exc.as_dict()
+                    guard.check()
                     heartbeat.check()
                     called_tools.append(call.name)
                 messages.append(
