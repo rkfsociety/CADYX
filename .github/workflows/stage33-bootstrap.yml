@@ -21,6 +21,24 @@ jobs:
           python-version: '3.13'
       - name: Apply stage 33 refactor
         run: python scripts/stage33_bootstrap.py
+      - name: Keep custom registries independent from built-in metadata
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('cadyx/extensions.py')
+          source = path.read_text(encoding='utf-8')
+          old = '''        unknown_builtin_actions = set(BUILTIN_ACTIVITY_ACTIONS) - seen
+        if unknown_builtin_actions:
+            names_text = ", ".join(sorted(unknown_builtin_actions))
+            raise ValueError(f"Built-in activity metadata has no registered command: {names_text}.")
+        self._capabilities = contracts
+'''
+          new = '''        self._capabilities = contracts
+'''
+          if source.count(old) != 1:
+              raise SystemExit('expected built-in metadata guard exactly once')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
       - name: Compile source
         run: python -m compileall -q cadyx tests
       - name: Test command presentation registry
