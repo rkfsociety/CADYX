@@ -21,6 +21,31 @@ The local prototype uses Python standard-library modules for the Core, Agent Run
 
 The `projects/` directory is runtime data. Its contents are ignored by Git apart from `.gitkeep`. Source scans, meshes, CAD files, images, measurements, and references must be treated as user data and must not be overwritten or removed as part of routine development. The Agent API can stage a STEP source with `POST /api/v1/agent/projects/{id}/files/{name}` (`application/octet-stream`, up to 64 MiB); the upload must target a free project, must use a direct `.step`/`.stp` filename, and never replaces an existing file. For temporary reconstruction references, `DELETE /api/v1/agent/projects/{id}/files/{name}` removes only a direct STEP file from a free project and refuses while a current `import_step` feature still uses it. The local MCP adapter exposes this as `cadyx_remove_staged_step`; the original local source remains untouched. `POST /api/v1/agent/projects/{id}/copy-files` copies user files recursively from another free project, omits project metadata and `.cadyx-*` runtime state, preflights collisions, and never overwrites. `cadyx_copy_project_files` exposes this through the local MCP adapter. `POST /api/v1/agent/projects/{id}/prune-files` removes user files recursively while retaining explicit direct filenames; it requires a free project with an empty document, preserves project metadata and `.cadyx-*` state, and reports hashes for retained files. `cadyx_prune_project_files` exposes this through the local MCP adapter. Host authentication policy applies to file routes. The local MCP adapter's `cadyx_upload_project_step` reads the specified local regular file and sends its bytes to the upload route; the HTTP host never resolves arbitrary client paths. `POST /api/v1/agent/projects` accepts `select: false` to create a project without changing the current viewer selection, allowing file staging while a different project has active work.
 
+## Project availability policies
+
+`CadyxCore._project_availability` combines the lease snapshot, running
+operation state and persisted dashboard activity. Its policy checks are the
+single Core boundary used by project reads, writes, file management, resource
+selection and destructive lifecycle operations. A lock snapshot that is
+missing, busy or otherwise unknown does not count as free.
+
+Read-only inspection and listings use the nonblocking lease snapshot and
+continue to return the last atomically saved project state while a writer is
+active. A new write lease requires a free project with no recovery requirement
+or running operation; commands still require their validated owner lease and
+revision. A command admitted with a valid lease remains atomic if that lease
+expires while the command is running.
+
+File management and destructive actions require `FREE`, no lease recovery and
+no running operation, preserving their established `PROJECT_BUSY` or
+`PROJECT_LOCKED` errors. Selection checks the current and target projects and
+global workflow state in Core, so direct Agent API callers and MCP clients get
+the same fail-closed policy. The sole active workflow project may be selected
+to restore its viewer when its lease is free and it has no running operation;
+switching to another project, a folder or a new selected project stays blocked
+until work completes. Creating a project with `select: false` does not change
+the current selection.
+
 ## Edit leases
 
 Each project has one durable lease in its `.cadyx-leases.sqlite3` sidecar, shared by all local host processes using the same workspace. A lease records `project_id`, `owner_type`, `owner_id`, acquisition and heartbeat times, an opaque `lease_id`, and the timeout chosen on acquisition. Owners are `agent`, `human`, or `system`; states include `FREE`, `AI_LOCKED`, `HUMAN_LOCKED`, and `SYSTEM_LOCKED`. A heartbeat from a host with a different configured timeout does not change the lease's original timeout.
@@ -197,8 +222,14 @@ workspace folder. Agents select an existing CAD project with
 `POST /api/v1/agent/workspace/selection` and `{"type":"project","project_id":"..."}`;
 they select a workspace folder with `{"type":"folder","folder_name":"..."}`.
 The Core validates the target and publishes `workspace.selection.changed` over
-SSE. New projects remain automatically selected by `project.created` for API
-clients. The browser's Projects (07) view lists saved projects and opens each
+SSE. Before changing selection or creating a selected project, Core checks the
+current and target project availability without waiting for an active write.
+The target must be free, recovered and have no running operation. A sole
+active-workflow project remains selectable to restore its viewer when its
+lease is free and it has no running operation; switching elsewhere or selecting
+a new project remains blocked until work completes. `select: false` creates a
+project without changing selection. MCP delegates these checks to Core through
+the Agent API. The browser's Projects (07) view lists saved projects and opens each
 project in a separate tab; this does not change the process-local Agent API
 selection. Workspace-folder selection remains Agent API-only.
 The browser loads a model when its address contains `project_id`. At an
@@ -301,7 +332,7 @@ parity and that atomic-failure invariant without loading native libraries.
 
 Command value hints live on the corresponding `COMMAND_CAPABILITIES` entry. MCP command branches derive their fields and schemas from the final registry, including extension entries; fields without a confirmed value schema remain permissive. The shared validation-operation registry in `cadyx/api_contracts.py` supplies discovery's `operations` and validation route descriptions, MCP tool schemas/request projection/defaults, and HTTP required/allowed-field checks for dimensions, clearance, preservation and thickness. `operations` is additive discovery metadata, not a second execution API. Core retains value, revision and geometry validation, and HTTP retains its existing error messages and progress wrappers. Source-contract tests verify registry parity, request projection and documentation paths/current document version; Web API tests verify the field gates and Core delegation.
 
-`cadyx/mcp_server.py` implements a local stdio MCP adapter using only Python's standard library. It calls the protected CADYX HTTP Agent API; it does not import Core or access project files directly. Tools cover workspace selection, project/file/model inspection, capabilities, current B-rep topology, scene and PNG image retrieval, camera, dashboard, commands, safe project-file copying/deletion, stop/resume, and validated expired-lease recovery. It has no shell, generic HTTP, or model-file write tool. Each model command requires the revision observed by the caller, acquires an agent lease immediately before the command, and releases it after the atomic API call. A dropped command response is never replayed automatically. A concurrent stop tool sets Core's durable stop fence, waits for an admitted command to finish, and returns Core's validated saved state. Project selection is refused when the current/target resource is locked or has a running operation. During an active workflow, selection may return to its sole active project so a restarted viewer can resume observing it; switching to another project, a folder, or a new project remains blocked. `/api/v1/updates` lists active workflow project IDs for this check.
+`cadyx/mcp_server.py` implements a local stdio MCP adapter using only Python's standard library. It calls the protected CADYX HTTP Agent API; it does not import Core or access project files directly. Tools cover workspace selection, project/file/model inspection, capabilities, current B-rep topology, scene and PNG image retrieval, camera, dashboard, commands, safe project-file copying/deletion, stop/resume, and validated expired-lease recovery. It has no shell, generic HTTP, or model-file write tool. Each model command requires the revision observed by the caller, acquires an agent lease immediately before the command, and releases it after the atomic API call. A dropped command response is never replayed automatically. A concurrent stop tool sets Core's durable stop fence, waits for an admitted command to finish, and returns Core's validated saved state. Core enforces project selection availability for MCP through the same Agent API policy used by direct clients. During an active workflow, selection may return to its sole active project so a restarted viewer can resume observing it; switching to another project, a folder, or a new project remains blocked. `/api/v1/updates` lists active workflow project IDs for this check.
 The MCP command response intentionally omits the saved document's full object array and large geometry payloads; it returns the revision, object counts, and compact command/history results. Read the Agent API project snapshot for full document inspection.
 
 The repository entry point is [`AGENTS.md`](../../AGENTS.md), which points to the repo-local skill at `.agents/skills/cadyx-operator/SKILL.md`. `.codex/config.toml` registers the stdio process at project scope after this trusted checkout is opened in Codex; see [README](../../README.md#codex-operator-integration). The client accepts a token from process environment or `CADYX_API_TOKEN_FILE`; token contents are not passed as process arguments or logged. No MCP package or provider SDK is required.

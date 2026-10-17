@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cadyx.core import CadyxCore
+from cadyx.core import CadyxCore, _ProjectAvailability
 from cadyx.errors import ConflictError, LeaseRequiredError, ValidationError
 from cadyx.models import OwnerType
 
@@ -115,6 +115,94 @@ class ProjectLockingTests(unittest.TestCase):
         core.recover_expired_lease(project_id)
         self.assertEqual(core.inspect_project(project_id)["lock"]["state"], "FREE")
         core.acquire_lease(project_id, "human", "person-1")
+
+
+class ProjectAvailabilityPolicyTests(unittest.TestCase):
+    def test_operation_policies_fail_closed_for_busy_project_states(self) -> None:
+        # valid_lease models a command already admitted by leases.require;
+        # expiration does not cancel that in-flight atomic command.
+        cases = (
+            (
+                "free",
+                {"state": "FREE", "recovery_required": False},
+                False,
+                False,
+                True,
+                False,
+                True,
+                True,
+            ),
+            (
+                "active lease",
+                {"state": "AI_LOCKED", "recovery_required": False},
+                False,
+                False,
+                False,
+                True,
+                False,
+                False,
+            ),
+            (
+                "recovery required",
+                {"state": "AI_LOCKED", "recovery_required": True},
+                False,
+                False,
+                False,
+                True,
+                False,
+                False,
+            ),
+            (
+                "running operation",
+                {"state": "FREE", "recovery_required": False},
+                True,
+                False,
+                False,
+                False,
+                False,
+                False,
+            ),
+            (
+                "unknown lock state",
+                {"state": "BUSY", "recovery_required": False},
+                False,
+                False,
+                False,
+                False,
+                False,
+                False,
+            ),
+        )
+        for (
+            label,
+            lock,
+            running_operation,
+            active_workflow,
+            can_acquire_write,
+            can_write_with_lease,
+            can_manage_files,
+            can_select,
+        ) in cases:
+            with self.subTest(state=label):
+                availability = _ProjectAvailability(lock, running_operation, active_workflow)
+                self.assertTrue(availability.permits("read"))
+                self.assertEqual(availability.permits("write"), can_acquire_write)
+                self.assertEqual(
+                    availability.permits("write", valid_lease=True),
+                    can_write_with_lease,
+                )
+                self.assertEqual(availability.permits("file_management"), can_manage_files)
+                self.assertEqual(availability.permits("destructive"), can_manage_files)
+                self.assertEqual(availability.permits("selection"), can_select)
+
+    def test_only_active_workflow_project_can_be_selected_to_restore_viewer(self) -> None:
+        availability = _ProjectAvailability(
+            {"state": "FREE", "recovery_required": False},
+            running_operation=False,
+            active_workflow=True,
+        )
+        self.assertFalse(availability.permits("selection"))
+        self.assertTrue(availability.permits("selection", sole_active_workflow_target=True))
 
 
 if __name__ == "__main__":

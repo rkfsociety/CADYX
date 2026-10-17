@@ -7,8 +7,9 @@ import math
 import threading
 from collections import OrderedDict
 from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Literal
 from uuid import uuid4
 
 from .commands import CommandSystem
@@ -23,6 +24,50 @@ from .rendering import render_scene, render_scene_png
 from .scan import ScanProcessor
 from .workspace import ProjectWorkspace, utc_now
 from .sketches import closed_profile, closed_profiles, open_path
+
+
+@dataclass(frozen=True)
+class _ProjectAvailability:
+    lock: dict[str, Any]
+    running_operation: bool
+    active_workflow: bool
+
+    @property
+    def lock_state(self) -> str | None:
+        state = self.lock.get("state")
+        return state if isinstance(state, str) else None
+
+    @property
+    def is_free(self) -> bool:
+        return (
+            self.lock_state == "FREE"
+            and self.lock.get("recovery_required") is False
+            and not self.running_operation
+        )
+
+    def permits(
+        self,
+        policy: Literal["read", "write", "file_management", "selection", "destructive"],
+        *,
+        valid_lease: bool = False,
+        sole_active_workflow_target: bool = False,
+    ) -> bool:
+        if policy == "read":
+            return True
+        if policy == "write":
+            if valid_lease:
+                # The lease was validated at command admission. A lease may
+                # expire while that atomic command is already running.
+                return (
+                    self.lock_state in {"AI_LOCKED", "HUMAN_LOCKED", "SYSTEM_LOCKED"}
+                    and not self.running_operation
+                )
+            return self.is_free
+        if policy in {"file_management", "destructive"}:
+            return self.is_free
+        if policy == "selection":
+            return self.is_free and (not self.active_workflow or sole_active_workflow_target)
+        raise ValueError(f"Unknown project availability policy: {policy}")
 
 
 class CadyxCore:
@@ -68,6 +113,109 @@ class CadyxCore:
         with self.leases.guard(project_id):
             yield
 
+    def _project_availability(
+        self,
+        project_id: str,
+        *,
+        nonblocking: bool = False,
+    ) -> _ProjectAvailability:
+        lock = (
+            self.leases.snapshot_for_listing(project_id)
+            if nonblocking
+            else self.leases.snapshot(project_id)
+        )
+        activities, _ = self.events.activity_state_snapshot(project_id)
+        return _ProjectAvailability(
+            lock=lock,
+            running_operation=any(item.get("state") == "running" for item in activities),
+            active_workflow=self.events.agent_dashboard_is_active(project_id),
+        )
+
+    def _require_project_policy(
+        self,
+        project_id: str,
+        policy: Literal["read", "write", "file_management", "selection", "destructive"],
+        message: str,
+        *,
+        code: str = "PROJECT_BUSY",
+        valid_lease: bool = False,
+    ) -> _ProjectAvailability:
+        availability = self._project_availability(project_id)
+        if not availability.permits(policy, valid_lease=valid_lease):
+            raise ConflictError(message, code=code)
+        return availability
+
+    @contextmanager
+    def _selection_project_locks(
+        self,
+        current_selection: dict[str, str] | None,
+        target_project_id: str | None,
+    ) -> Iterator[None]:
+        project_ids = {
+            selection["project_id"]
+            for selection in (current_selection,)
+            if selection is not None and selection.get("type") == "project"
+        }
+        if target_project_id is not None:
+            project_ids.add(target_project_id)
+        with ExitStack() as stack:
+            for project_id in sorted(project_ids):
+                stack.enter_context(self._project_lifecycle_lock(project_id))
+            yield
+
+    def _assert_workspace_selection_policy(
+        self,
+        current_selection: dict[str, str] | None,
+        target_type: str,
+        target_project_id: str | None,
+    ) -> None:
+        active_project_ids = self.events.agent_work_snapshot()["active_project_ids"]
+        sole_active_target = (
+            target_type == "project"
+            and target_project_id is not None
+            and len(active_project_ids) == 1
+            and active_project_ids[0] == target_project_id
+        )
+
+        current_project_id = (
+            current_selection.get("project_id")
+            if current_selection is not None and current_selection.get("type") == "project"
+            else None
+        )
+        current_availability = None
+        if current_project_id is not None:
+            current_availability = self._project_availability(current_project_id, nonblocking=True)
+            allow_current_workflow = sole_active_target and current_project_id == target_project_id
+            if not current_availability.permits(
+                "selection",
+                sole_active_workflow_target=allow_current_workflow,
+            ):
+                raise ConflictError(
+                    "The currently selected project is locked, has a running operation, or belongs to active agent work; selection is unchanged.",
+                    code="PROJECT_BUSY",
+                )
+
+        if active_project_ids and not sole_active_target:
+            raise ConflictError(
+                "CADYX reports active agent work; selection is unchanged.",
+                code="PROJECT_BUSY",
+            )
+
+        if target_type == "project" and target_project_id is not None:
+            target_availability = (
+                current_availability
+                if target_project_id == current_project_id and current_availability is not None
+                else self._project_availability(target_project_id, nonblocking=True)
+            )
+            if not target_availability.permits(
+                "selection",
+                sole_active_workflow_target=sole_active_target,
+            ):
+                raise ConflictError(
+                    "The target project is locked, requires lease recovery, or has a running operation; selection is unchanged.",
+                    code="PROJECT_BUSY",
+                )
+
     @contextmanager
     def _project_lifecycle_lock(self, project_id: str) -> Iterator[None]:
         with self._project_lifecycle_guard:
@@ -76,24 +224,32 @@ class CadyxCore:
             yield
 
     def create_project(self, name: str, *, select: bool = True) -> dict[str, Any]:
-        project = self.workspace.create(name)
-        summary = self._summary(project)
-        lock = self.leases.snapshot(project["id"])
-        if select:
-            with self._workspace_selection_guard:
+        if not select:
+            project = self.workspace.create(name)
+            summary = self._summary(project)
+            lock = self.leases.snapshot(project["id"])
+            self.events.publish("project.lock.changed", project["id"], lock)
+            return {"project": summary, "lock": lock}
+
+        with self._workspace_selection_guard:
+            current_selection = copy.deepcopy(self._workspace_selection)
+            with self._selection_project_locks(current_selection, None):
+                self._assert_workspace_selection_policy(current_selection, "new-project", None)
+                project = self.workspace.create(name)
+                summary = self._summary(project)
+                lock = self.leases.snapshot(project["id"])
                 self._workspace_selection = {"type": "project", "project_id": project["id"]}
                 self.events.publish("project.created", project["id"], summary)
-        self.events.publish("project.lock.changed", project["id"], lock)
+            self.events.publish("project.lock.changed", project["id"], lock)
         return {"project": summary, "lock": lock}
 
     def upload_project_step(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
-            lock = self.leases.snapshot(project_id)
-            activities, _ = self.events.activity_state_snapshot(project_id)
-            if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
-                item.get("state") == "running" for item in activities
-            ):
-                raise ConflictError("STEP files can only be staged in a free project with no running operation.", code="PROJECT_BUSY")
+            self._require_project_policy(
+                project_id,
+                "file_management",
+                "STEP files can only be staged in a free project with no running operation.",
+            )
             return self.workspace.publish_project_step(project_id, filename, content)
 
     def copy_project_files(self, target_project_id: str, source_project_id: str) -> dict[str, Any]:
@@ -104,25 +260,20 @@ class CadyxCore:
                 stack.enter_context(self._project_lifecycle_lock(project_id))
                 stack.enter_context(self._project_guard(project_id))
             for project_id in (target_project_id, source_project_id):
-                lock = self.leases.snapshot(project_id)
-                activities, _ = self.events.activity_state_snapshot(project_id)
-                if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
-                    item.get("state") == "running" for item in activities
-                ):
-                    raise ConflictError(
-                        "Both projects must be free with no running operation before files can be copied.",
-                        code="PROJECT_BUSY",
-                    )
+                self._require_project_policy(
+                    project_id,
+                    "file_management",
+                    "Both projects must be free with no running operation before files can be copied.",
+                )
             return self.workspace.copy_project_files(source_project_id, target_project_id)
 
     def remove_staged_project_step(self, project_id: str, filename: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
-            lock = self.leases.snapshot(project_id)
-            activities, _ = self.events.activity_state_snapshot(project_id)
-            if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
-                item.get("state") == "running" for item in activities
-            ):
-                raise ConflictError("STEP references can only be removed from a free project with no running operation.", code="PROJECT_BUSY")
+            self._require_project_policy(
+                project_id,
+                "file_management",
+                "STEP references can only be removed from a free project with no running operation.",
+            )
             project = self.workspace.load(project_id)
             document = Document.from_dict(project["document"])
             still_used = any(
@@ -137,12 +288,11 @@ class CadyxCore:
 
     def prune_project_files(self, project_id: str, keep_files: list[str]) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
-            lock = self.leases.snapshot(project_id)
-            activities, _ = self.events.activity_state_snapshot(project_id)
-            if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
-                item.get("state") == "running" for item in activities
-            ):
-                raise ConflictError("Project files can only be pruned from a free project with no running operation.", code="PROJECT_BUSY")
+            self._require_project_policy(
+                project_id,
+                "file_management",
+                "Project files can only be pruned from a free project with no running operation.",
+            )
             project = self.workspace.load(project_id)
             document = Document.from_dict(project["document"])
             if document.objects:
@@ -151,9 +301,12 @@ class CadyxCore:
 
     def rename_project(self, project_id: str, name: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id):
-            lock = self.leases.snapshot(project_id)
-            if lock.get("state") != "FREE":
-                raise ConflictError("Project must be unlocked before it can be renamed.", code="PROJECT_LOCKED")
+            self._require_project_policy(
+                project_id,
+                "destructive",
+                "Project must be unlocked before it can be renamed.",
+                code="PROJECT_LOCKED",
+            )
             project = self.workspace.rename(project_id, name)
             summary = self._summary(project)
             self.events.publish("project.renamed", project_id, summary)
@@ -162,12 +315,11 @@ class CadyxCore:
     def delete_project(self, project_id: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id):
             with self._project_guard(project_id):
-                lock = self.leases.snapshot(project_id)
-                activities, _ = self.events.activity_state_snapshot(project_id)
-                if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
-                    item.get("state") == "running" for item in activities
-                ):
-                    raise ConflictError("Project must be free with no running operation before deletion.", code="PROJECT_BUSY")
+                self._require_project_policy(
+                    project_id,
+                    "destructive",
+                    "Project must be free with no running operation before deletion.",
+                )
                 self.workspace.mark_project_deleting(project_id)
             cleanup_pending = self.workspace.delete_project(project_id)
         with self._workspace_selection_guard:
@@ -186,7 +338,7 @@ class CadyxCore:
             project_id = project["id"]
             result.append({
                 "project": self._summary(project),
-                "lock": self.leases.snapshot_for_listing(project_id),
+                "lock": self._project_availability(project_id, nonblocking=True).lock,
                 "group_id": group_by_project.get(project_id),
             })
         return result
@@ -203,12 +355,11 @@ class CadyxCore:
 
     def assign_project_group(self, project_id: str, group_id: str | None) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
-            lock = self.leases.snapshot(project_id)
-            activities, _ = self.events.activity_state_snapshot(project_id)
-            if lock.get("state") != "FREE" or lock.get("recovery_required") or any(
-                item.get("state") == "running" for item in activities
-            ):
-                raise ConflictError("A project can only be moved when it is free with no running operation.", code="PROJECT_BUSY")
+            self._require_project_policy(
+                project_id,
+                "file_management",
+                "A project can only be moved when it is free with no running operation.",
+            )
             self.workspace.assign_project_group(project_id, group_id)
         return {"project_id": project_id, "group_id": group_id}
 
@@ -227,7 +378,6 @@ class CadyxCore:
             project_id = selection["project_id"]
             if not isinstance(project_id, str) or not project_id.strip():
                 raise ValidationError("project_id must be non-empty text.")
-            self.workspace.load(project_id)
             selected = {"type": "project", "project_id": project_id}
         elif resource_type == "folder":
             if set(selection) != {"type", "folder_name"}:
@@ -241,9 +391,19 @@ class CadyxCore:
         else:
             raise ValidationError("Workspace selection type must be project or folder.")
 
+        target_project_id = selected.get("project_id") if resource_type == "project" else None
         with self._workspace_selection_guard:
-            self._workspace_selection = copy.deepcopy(selected)
-            self.events.publish("workspace.selection.changed", None, selected)
+            current_selection = copy.deepcopy(self._workspace_selection)
+            with self._selection_project_locks(current_selection, target_project_id):
+                if target_project_id is not None:
+                    self.workspace.load(target_project_id)
+                self._assert_workspace_selection_policy(
+                    current_selection,
+                    resource_type,
+                    target_project_id,
+                )
+                self._workspace_selection = copy.deepcopy(selected)
+                self.events.publish("workspace.selection.changed", None, selected)
         return selected
 
     def agent_dashboard_snapshot(self, project_id: str) -> dict[str, Any]:
@@ -345,9 +505,12 @@ class CadyxCore:
         project = self.workspace.load(project_id)
         document = Document.from_dict(project["document"])
         self._validate_geometry_once(project_id, document)
+        availability = self._project_availability(project_id, nonblocking=True)
+        if not availability.permits("read"):
+            raise RuntimeError("Read-only project inspection must remain available while the project is busy.")
         return {
             "project": self._summary(project),
-            "lock": self.leases.snapshot_for_listing(project_id),
+            "lock": availability.lock,
             "document": document.to_dict(),
             "history": copy.deepcopy(project["history"]),
         }
@@ -355,6 +518,13 @@ class CadyxCore:
     def acquire_lease(self, project_id: str, owner_type: str, owner_id: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
             self.workspace.load(project_id)
+            availability = self._project_availability(project_id)
+            if (
+                not availability.permits("write")
+                and availability.lock_state == "FREE"
+                and availability.lock.get("recovery_required") is False
+            ):
+                raise ConflictError("Project has an operation in progress; retry later.", code="PROJECT_BUSY")
             lease = self.leases.acquire(project_id, owner_type, owner_id)
             snapshot = self.leases.snapshot(project_id)
             self.events.publish("project.lock.changed", project_id, snapshot)
@@ -1113,6 +1283,13 @@ class CadyxCore:
             # explicit state transition rather than relying on viewer caching.
             self._validate_geometry(Document.from_dict(detail["document"]))
             self._check_revision(Document.from_dict(detail["document"]), expected_revision)
+            availability = self._project_availability(project_id)
+            if (
+                not availability.permits("write")
+                and availability.lock_state == "FREE"
+                and availability.lock.get("recovery_required") is False
+            ):
+                raise ConflictError("Project has an operation in progress; retry later.", code="PROJECT_BUSY")
             lease = self.leases.acquire(project_id, "agent", owner_id)
             self.leases.mark_resumed(project_id, lease.lease_id)
             detail["lock"] = self.leases.snapshot(project_id)
@@ -1136,6 +1313,12 @@ class CadyxCore:
                     f"This API requires a {expected_owner_type.value} edit lease.",
                     code="PROJECT_LOCKED",
                 )
+            self._require_project_policy(
+                project_id,
+                "write",
+                "Project has an operation in progress; retry later.",
+                valid_lease=True,
+            )
             project = self.workspace.load(project_id)
             if command_name == "export_brep" and expected_revision is None:
                 raise ValidationError("export_brep requires expected_revision to bind files to a saved document revision.")

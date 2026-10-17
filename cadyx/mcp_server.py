@@ -226,12 +226,9 @@ class MCPApplication:
             selection = {"type": selection_type}
             key = "project_id" if selection_type == "project" else "folder_name"
             selection[key] = args.get(key)
-            self._assert_selection_is_safe(selection_type, args.get(key))
             return self.api.post("/api/v1/agent/workspace/selection", selection)
         if name == "cadyx_create_project":
             select = args.get("select", True)
-            if select:
-                self._assert_selection_is_safe("new-project", None)
             return self.api.post("/api/v1/agent/projects", {"name": args.get("name"), "select": select})
         if name == "cadyx_rename_project":
             return self.api.post(self._project(args["project_id"], "/rename"), {"name": args["name"]})
@@ -336,27 +333,6 @@ class MCPApplication:
             except UnicodeDecodeError as exc:
                 raise ValueError("File is binary or not valid UTF-8; do not treat it as text. Use the matching CADYX import command.") from exc
         raise ValueError(f"File type {mime_type} is not exposed as text or image by this MCP adapter.")
-
-    def _assert_selection_is_safe(self, target_type: str, target_name: str | None) -> None:
-        selection = self.api.get("/api/v1/agent/workspace/selection").get("selection")
-        if selection and selection.get("type") == "project":
-            current_id = selection["project_id"]
-            detail = self.api.get(self._project(current_id))
-            activity = self.api.get(self._project(current_id, "/activity"))
-            if detail["lock"].get("state") != "FREE" or any(item.get("state") == "running" for item in activity.get("activities", [])):
-                raise APIError(409, {"error": "PROJECT_BUSY", "message": "The currently selected project is locked or has a running operation; selection is unchanged."})
-        updates = self.api.get("/api/v1/updates")
-        if updates.get("agent_work_active") and not (
-            target_type == "project"
-            and target_name in updates.get("agent_work_active_project_ids", [])
-            and len(updates.get("agent_work_active_project_ids", [])) == 1
-        ):
-            raise APIError(409, {"error": "PROJECT_BUSY", "message": "CADYX reports active agent work; selection is unchanged."})
-        if target_type == "project":
-            detail = self.api.get(self._project(target_name or ""))
-            activity = self.api.get(self._project(target_name or "", "/activity"))
-            if detail["lock"].get("state") != "FREE" or detail["lock"].get("recovery_required") or any(item.get("state") == "running" for item in activity.get("activities", [])):
-                raise APIError(409, {"error": "PROJECT_BUSY", "message": "The target project is locked, requires lease recovery, or has a running operation; selection is unchanged."})
 
     def _execute_command(self, project_id: str, expected_revision: int, command: dict[str, Any]) -> Any:
         if not isinstance(command, dict) or not isinstance(command.get("type"), str):

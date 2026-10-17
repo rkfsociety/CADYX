@@ -139,7 +139,7 @@ class MultiprocessLeaseTests(unittest.TestCase):
         with self.assertRaises(queue.Empty):
             recovery[1].get(timeout=0.2)
         # A different project remains usable while this command holds its lock.
-        other = self.core.create_project("Independent")["project"]["id"]
+        other = self.core.create_project("Independent", select=False)["project"]["id"]
         self.core.acquire_lease(other, "human", "human")
         finish.set()
         self.assertEqual(self.result(command)[0], "ok")
@@ -163,7 +163,7 @@ class MultiprocessLeaseTests(unittest.TestCase):
     def test_crash_before_and_after_atomic_save_preserves_recoverable_state(self):
         for action, revision in (("execute_command", 0), ("saved_crash", 1)):
             with self.subTest(action=action):
-                self.project_id = self.core.create_project(action)["project"]["id"]
+                self.project_id = self.core.create_project(action, select=False)["project"]["id"]
                 token = self.core.acquire_lease(self.project_id, "agent", "agent")["lease_id"]
                 entered, finish = self.context.Event(), self.context.Event()
                 process, _ = self.launch(action, (token, BOX), entered=entered, finish=finish)
@@ -225,7 +225,7 @@ class MultiprocessLeaseTests(unittest.TestCase):
     def test_stop_after_command_process_crash_returns_known_revision(self):
         for action, revision in (("execute_command", 0), ("saved_crash", 1)):
             with self.subTest(action=action):
-                self.project_id = self.core.create_project(action)["project"]["id"]
+                self.project_id = self.core.create_project(action, select=False)["project"]["id"]
                 token = self.core.acquire_lease(self.project_id, "agent", "agent")["lease_id"]
                 entered, finish = self.context.Event(), self.context.Event()
                 command = self.launch(action, (token, BOX), entered=entered, finish=finish)

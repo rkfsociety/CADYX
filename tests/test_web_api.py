@@ -136,6 +136,7 @@ class WebApiTests(unittest.TestCase):
                 self.assertEqual(saved["version"], 1)
                 self.assertEqual(saved["document"]["version"], 8)
                 self.assertEqual(saved["history"][0]["actor_type"], owner)
+                self.core.release_lease(project_id, lease)
 
     def test_agent_and_web_api_share_core_locking(self) -> None:
         status, created = self.request("/api/v1/projects", {"name": "API test"})
@@ -505,6 +506,93 @@ class WebApiTests(unittest.TestCase):
         finally:
             self.core.events.unsubscribe(subscriber_id)
 
+    def test_agent_selection_api_rejects_locked_projects_and_running_operations(self) -> None:
+        _, current = self.request("/api/v1/agent/projects", {"name": "Current selection"})
+        current_id = current["project"]["id"]
+        _, target = self.request(
+            "/api/v1/agent/projects",
+            {"name": "Locked target", "select": False},
+        )
+        target_id = target["project"]["id"]
+        current_folder = "some-folder"
+        (self.core.workspace.root / current_folder).mkdir()
+
+        current_lease = self.core.acquire_lease(current_id, "agent", "selection-current")
+        status, error = self.request(
+            "/api/v1/agent/workspace/selection",
+            {"type": "folder", "folder_name": current_folder},
+        )
+        self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
+        self.assertEqual(
+            self.core.workspace_selection_snapshot(),
+            {"type": "project", "project_id": current_id},
+        )
+        self.core.release_lease(current_id, current_lease["lease_id"])
+
+        target_lease = self.core.acquire_lease(target_id, "human", "selection-target")
+        status, error = self.request(
+            "/api/v1/agent/workspace/selection",
+            {"type": "project", "project_id": target_id},
+        )
+        self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
+        self.assertEqual(
+            self.core.workspace_selection_snapshot(),
+            {"type": "project", "project_id": current_id},
+        )
+        self.core.release_lease(target_id, target_lease["lease_id"])
+
+        self.core.events.publish("agent.activity", current_id, {
+            "operation_id": "selection-operation",
+            "state": "running",
+        })
+        folder_name = "selection-folder"
+        (self.core.workspace.root / folder_name).mkdir()
+        status, error = self.request(
+            "/api/v1/agent/workspace/selection",
+            {"type": "folder", "folder_name": folder_name},
+        )
+        self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
+        self.assertEqual(
+            self.core.workspace_selection_snapshot(),
+            {"type": "project", "project_id": current_id},
+        )
+        self.core.events.publish("agent.activity", current_id, {
+            "operation_id": "selection-operation",
+            "state": "completed",
+        })
+
+    def test_selected_project_creation_respects_active_workflow_policy(self) -> None:
+        _, current = self.request("/api/v1/agent/projects", {"name": "Active current project"})
+        current_id = current["project"]["id"]
+        self.core.report_agent_dashboard(current_id, {
+            "workflow": {
+                "title": "Текущая работа",
+                "progress_percent": 40,
+                "eta_seconds": None,
+                "phases": [{"id": "build", "title": "Построение", "state": "in_progress"}],
+            },
+            "tasks": [],
+        })
+        project_ids_before = {item["project"]["id"] for item in self.core.list_projects()}
+
+        status, error = self.request("/api/v1/agent/projects", {"name": "Must not be selected"})
+        self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
+        self.assertEqual(
+            {item["project"]["id"] for item in self.core.list_projects()},
+            project_ids_before,
+        )
+
+        status, staged = self.request(
+            "/api/v1/agent/projects",
+            {"name": "Unselected project", "select": False},
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(staged["project"]["name"], "Unselected project")
+        self.assertEqual(
+            self.core.workspace_selection_snapshot(),
+            {"type": "project", "project_id": current_id},
+        )
+
     def test_project_listing_adopts_existing_directories_and_exposes_their_files(self) -> None:
         directory = self.core.workspace.root / "imported-scans"
         directory.mkdir()
@@ -869,6 +957,7 @@ class WebApiTests(unittest.TestCase):
                 self.assertEqual(before["history"], after["history"])
                 command({"type": "update_sketch_elements", "updates": [{"object_id": point, "changes": {"y": 2}} for point in points]})
                 self.assertEqual(self.core.inspect_project(project)["document"]["revision"], 6)
+                self.core.release_lease(project, lease)
 
     def test_agent_profile_operations_and_camera_orbit(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "Mug API"})
