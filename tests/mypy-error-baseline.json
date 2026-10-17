@@ -13,12 +13,11 @@
   },
   "commands": {},
   "workspace": {
-    "arg-type": 3,
-    "assignment": 2,
-    "attr-defined": 5,
-    "no-untyped-def": 1,
+    "arg-type": 1,
+    "assignment": 1,
+    "attr-defined": 4,
     "valid-type": 6,
-    "var-annotated": 2
+    "var-annotated": 1
   },
   "web": {
     "arg-type": 7,
