@@ -127,6 +127,16 @@ that the whole adapter implementation is covered by the incremental mypy gate.
 Persisted JSON, legacy `primitive-v1`/spline descriptors, validation errors and
 native reconstruction algorithms remain unchanged; no migration is required.
 
+### OCCT C ABI ownership
+
+`cadyx/native_kernel.py` is the sole Python binding boundary for the OCCT bridge:
+it declares each bridge signature once, binds optional symbols when present,
+marshals native buffers, translates native error buffers, and releases returned
+allocations. Its methods expose decoded JSON, B-rep bytes, or `None` for optional
+capabilities. Advanced modeling, agent authoring, and topology modules use these
+methods without accessing the DLL or configuring `ctypes` signatures. The separate
+Open3D scan bridge remains owned by `cadyx/native_scan.py`.
+
 
 `export_brep` requires `expected_revision`, validates one current single-solid B-rep, exports STEP and re-imports it to check validity, solid count, bounds and volume before publishing. Optional binary STL output is checked for watertightness and orientation, with mesh volume error and a bounded sampled surface-deviation measurement recorded in a revision-bound manifest. Export files use no-replace atomic publication in the project folder; the manifest is published last. STEP is authoritative; STL sampling does not claim exhaustive surface equivalence. See the [verified delivery contract](document-model-v7.md#verified-cad-delivery).
 

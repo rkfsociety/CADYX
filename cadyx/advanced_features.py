@@ -6,8 +6,6 @@ booleans and verified STEP/STL delivery keep using the existing kernel path.
 from __future__ import annotations
 
 import base64
-import ctypes
-import json
 import math
 import zlib
 from typing import Any
@@ -98,24 +96,9 @@ def _raw_brep(geometry: dict[str, Any]) -> bytes:
 
 def _raw_brep_volume(raw: bytes) -> float | None:
     """Measure raw B-rep bytes directly when supported by the current runtime."""
-    native = NativeKernel()
-    library = native.library
-    if not hasattr(library, "cadyx_brep_metrics"):
+    payload = NativeKernel().brep_metrics(raw)
+    if payload is None:
         return None
-    data = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw)
-    function = library.cadyx_brep_metrics
-    function.argtypes = [
-        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t,
-    ]
-    function.restype = ctypes.c_void_p
-    error = ctypes.create_string_buffer(2048)
-    result = function(data, len(raw), error, len(error))
-    if not result:
-        raise ValidationError(error.value.decode("utf-8", errors="replace"))
-    try:
-        payload = json.loads(ctypes.string_at(result))
-    finally:
-        library.cadyx_free(result)
     volume = payload.get("volume") if isinstance(payload, dict) else None
     if isinstance(volume, bool) or not isinstance(volume, (int, float)) or not math.isfinite(volume) or volume <= 0:
         raise ValidationError("OCCT returned invalid B-rep metrics.")
@@ -142,37 +125,12 @@ def _wrap_brep(raw: bytes) -> dict[str, Any]:
 
 def _advanced_native(geometry: dict[str, Any], operation: int, values: list[float], indices: list[int] | None = None) -> dict[str, Any]:
     native = NativeKernel()
-    library = native.library
-    if not hasattr(library, "cadyx_advanced_brep"):
-        raise RuntimeError("CADYX native runtime is stale; run scripts/setup-runtime.ps1 to rebuild advanced modeling support.")
-    function = library.cadyx_advanced_brep
-    function.argtypes = [
-        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_int,
-        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_int), ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_size_t), ctypes.c_char_p, ctypes.c_size_t,
-        ctypes.c_char_p, ctypes.c_size_t,
-    ]
-    function.restype = ctypes.c_void_p
     brep = _raw_brep(geometry)
-    data = (ctypes.c_ubyte * len(brep)).from_buffer_copy(brep)
-    numbers = (ctypes.c_double * len(values))(*values) if values else None
-    selected = indices or []
-    native_indices = (ctypes.c_int * len(selected))(*selected) if selected else None
-    size = ctypes.c_size_t()
-    generated_faces = ctypes.create_string_buffer(64 * 1024)
-    error = ctypes.create_string_buffer(2048)
-    result = function(data, len(brep), operation, numbers, len(values), native_indices, len(selected),
-                      ctypes.byref(size), generated_faces, len(generated_faces), error, len(error))
-    if not result:
-        raise ValidationError(error.value.decode("utf-8", errors="replace"))
-    try:
-        result_geometry = _wrap_brep(bytes(ctypes.string_at(result, size.value)))
-        if operation in {2, 4}:
-            result_geometry["selected_face_indices"] = json.loads(generated_faces.value)
-        return result_geometry
-    finally:
-        library.cadyx_free(result)
+    result_brep, selected_face_indices = native.advanced_brep(brep, operation, values, indices)
+    result_geometry = _wrap_brep(result_brep)
+    if operation in {2, 4}:
+        result_geometry["selected_face_indices"] = selected_face_indices
+    return result_geometry
 
 
 def _append_feature(document, source: dict[str, Any], operation: str, geometry: dict[str, Any],

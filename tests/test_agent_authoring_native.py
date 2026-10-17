@@ -1,6 +1,7 @@
 import math
 import unittest
 
+from cadyx.advanced_features import _advanced_native
 from cadyx.commands import CommandSystem
 from cadyx.kernel import OCCTKernelAdapter
 from cadyx.models import Document
@@ -97,6 +98,15 @@ class AgentAuthoringNativeTests(unittest.TestCase):
             self.assertAlmostEqual(actual, expected, places=6)
         for actual, expected in zip(metrics["bounds"]["max"], [12.0, 7.0, 4.0], strict=True):
             self.assertAlmostEqual(actual, expected, places=6)
+
+    def test_advanced_brep_uses_central_native_boundary(self):
+        geometry = self.kernel.create_box(width=20.0, height=20.0, depth=20.0)
+
+        result = _advanced_native(geometry, 2, [1.0], [0])
+
+        self.assertEqual(result["kind"], "imported_brep")
+        self.assertLess(result["volume"], geometry["volume"])
+        self.assertIsInstance(result["selected_face_indices"], list)
 
 
 if __name__ == "__main__":

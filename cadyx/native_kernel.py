@@ -8,6 +8,7 @@ import os
 from collections import OrderedDict
 from pathlib import Path
 from threading import Lock
+from typing import Any
 import zlib
 
 from .errors import ValidationError
@@ -22,8 +23,104 @@ _periodic_spline_cache_bytes = 0
 _periodic_spline_cache_lock = Lock()
 
 
+class _GraphNode(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_int), ("input_a", ctypes.c_int), ("input_b", ctypes.c_int),
+        ("operation", ctypes.c_int), ("plane", ctypes.c_int), ("centered", ctypes.c_int),
+        ("amount", ctypes.c_double), ("coordinate_offset", ctypes.c_size_t),
+        ("coordinate_count", ctypes.c_size_t), ("edge_offset", ctypes.c_size_t),
+        ("edge_count", ctypes.c_size_t),
+    ]
+
+
+# Keep every OCCT bridge signature in one place. Optional symbols support runtimes
+# built before the corresponding modeling or topology capability was added.
+_NATIVE_FUNCTION_SIGNATURES = {
+    "cadyx_box": ([ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_int,
+                   ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_profile": ([ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_int,
+                        ctypes.c_int, ctypes.c_double, ctypes.c_int, ctypes.c_int,
+                        ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_periodic_spline_samples": ([ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
+                                       ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t],
+                                      ctypes.c_void_p),
+    "cadyx_fuse_profiles": ([ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_int,
+                              ctypes.c_int, ctypes.c_double, ctypes.c_int,
+                              ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_int,
+                              ctypes.c_int, ctypes.c_double, ctypes.c_int, ctypes.c_int,
+                              ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_graph": ([ctypes.POINTER(_GraphNode), ctypes.c_size_t,
+                     ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
+                     ctypes.POINTER(ctypes.c_int), ctypes.c_size_t,
+                     ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                     ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t],
+                    ctypes.c_void_p),
+    "cadyx_step_import": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                           ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_section_profile": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                                ctypes.c_int, ctypes.c_double, ctypes.c_size_t,
+                                ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_brep_export": ([ctypes.POINTER(_GraphNode), ctypes.c_size_t,
+                           ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
+                           ctypes.POINTER(ctypes.c_int), ctypes.c_size_t,
+                           ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                           ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_void_p),
+                           ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_brep_distance": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                             ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                             _PROGRESS_CALLBACK, ctypes.c_void_p,
+                             ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_brep_preservation": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                                 ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                                 ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_brep_global_thickness": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                                     _PROGRESS_CALLBACK, ctypes.c_void_p,
+                                     ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_brep_thickness": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                              ctypes.c_double, ctypes.c_double,
+                              _PROGRESS_CALLBACK, ctypes.c_void_p,
+                              ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_step_export": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                           ctypes.POINTER(ctypes.c_size_t), ctypes.c_char_p,
+                           ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_stl_export": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                          ctypes.c_double, ctypes.c_double,
+                          ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_void_p),
+                          ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_modify_imported_brep": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                                    ctypes.c_int, ctypes.POINTER(ctypes.c_double),
+                                    ctypes.c_size_t, ctypes.c_char_p,
+                                    ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_advanced_brep": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                             ctypes.c_int, ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
+                             ctypes.POINTER(ctypes.c_int), ctypes.c_size_t,
+                             ctypes.POINTER(ctypes.c_size_t), ctypes.c_char_p,
+                             ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_agent_feature_brep": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                                  ctypes.c_int, ctypes.POINTER(ctypes.c_double),
+                                  ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t),
+                                  ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_brep_metrics": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                            ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_agent_topology": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                              ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_face_topology": ([ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
+                             ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
+    "cadyx_free": ([ctypes.c_void_p], None),
+    "cadyx_kernel_version": ([], ctypes.c_char_p),
+}
+_OPTIONAL_NATIVE_FUNCTIONS = frozenset({
+    "cadyx_advanced_brep",
+    "cadyx_agent_feature_brep",
+    "cadyx_brep_metrics",
+    "cadyx_agent_topology",
+    "cadyx_face_topology",
+})
+
+
 class NativeKernel:
     _library = None
+    _functions = None
     _directories = []
     _lock = Lock()
 
@@ -42,112 +139,18 @@ class NativeKernel:
                     for relative in manifest["dll_directories"]:
                         directories.append(os.add_dll_directory(str(runtime / relative)))
                     library = ctypes.CDLL(str(runtime / manifest["bridge"]))
-                    library.cadyx_box.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double,
-                                                 ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t]
-                    library.cadyx_box.restype = ctypes.c_void_p
-                    library.cadyx_profile.argtypes = [
-                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_int,
-                        ctypes.c_int, ctypes.c_double, ctypes.c_int, ctypes.c_int,
-                        ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_profile.restype = ctypes.c_void_p
-                    library.cadyx_periodic_spline_samples.argtypes = [
-                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_size_t,
-                        ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_periodic_spline_samples.restype = ctypes.c_void_p
-                    library.cadyx_fuse_profiles.argtypes = [
-                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_int,
-                        ctypes.c_int, ctypes.c_double, ctypes.c_int,
-                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t, ctypes.c_int,
-                        ctypes.c_int, ctypes.c_double, ctypes.c_int, ctypes.c_int,
-                        ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_fuse_profiles.restype = ctypes.c_void_p
-                    class GraphNode(ctypes.Structure):
-                        _fields_ = [
-                            ("type", ctypes.c_int), ("input_a", ctypes.c_int), ("input_b", ctypes.c_int),
-                            ("operation", ctypes.c_int), ("plane", ctypes.c_int), ("centered", ctypes.c_int),
-                            ("amount", ctypes.c_double), ("coordinate_offset", ctypes.c_size_t),
-                            ("coordinate_count", ctypes.c_size_t), ("edge_offset", ctypes.c_size_t),
-                            ("edge_count", ctypes.c_size_t),
-                        ]
-                    self.__class__._graph_node = GraphNode
-                    library.cadyx_graph.argtypes = [
-                        ctypes.POINTER(GraphNode), ctypes.c_size_t,
-                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
-                        ctypes.POINTER(ctypes.c_int), ctypes.c_size_t,
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
-                        ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_graph.restype = ctypes.c_void_p
-                    library.cadyx_step_import.argtypes = [
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
-                        ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_step_import.restype = ctypes.c_void_p
-                    library.cadyx_section_profile.argtypes = [
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_int,
-                        ctypes.c_double, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_section_profile.restype = ctypes.c_void_p
-                    library.cadyx_brep_export.argtypes = [
-                        ctypes.POINTER(GraphNode), ctypes.c_size_t,
-                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
-                        ctypes.POINTER(ctypes.c_int), ctypes.c_size_t,
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
-                        ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_void_p),
-                        ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_brep_export.restype = ctypes.c_void_p
-                    library.cadyx_brep_distance.argtypes = [
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
-                        _PROGRESS_CALLBACK, ctypes.c_void_p,
-                        ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_brep_distance.restype = ctypes.c_void_p
-                    library.cadyx_brep_preservation.argtypes = [
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
-                        ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_brep_preservation.restype = ctypes.c_void_p
-                    library.cadyx_brep_global_thickness.argtypes = [
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
-                        _PROGRESS_CALLBACK, ctypes.c_void_p,
-                        ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_brep_global_thickness.restype = ctypes.c_void_p
-                    library.cadyx_brep_thickness.argtypes = [
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
-                        ctypes.c_double, ctypes.c_double,
-                        _PROGRESS_CALLBACK, ctypes.c_void_p,
-                        ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_brep_thickness.restype = ctypes.c_void_p
-                    library.cadyx_step_export.argtypes = [
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t,
-                        ctypes.POINTER(ctypes.c_size_t), ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_step_export.restype = ctypes.c_void_p
-                    library.cadyx_stl_export.argtypes = [
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_double, ctypes.c_double,
-                        ctypes.POINTER(ctypes.c_size_t), ctypes.POINTER(ctypes.c_void_p),
-                        ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_stl_export.restype = ctypes.c_void_p
-                    library.cadyx_modify_imported_brep.argtypes = [
-                        ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t, ctypes.c_int,
-                        ctypes.POINTER(ctypes.c_double), ctypes.c_size_t,
-                        ctypes.c_char_p, ctypes.c_size_t,
-                    ]
-                    library.cadyx_modify_imported_brep.restype = ctypes.c_void_p
-                    library.cadyx_free.argtypes = [ctypes.c_void_p]
-                    library.cadyx_free.restype = None
-                    library.cadyx_kernel_version.argtypes = []
-                    library.cadyx_kernel_version.restype = ctypes.c_char_p
-                    if library.cadyx_kernel_version().decode("ascii") != manifest["occt_version"]:
+                    functions = {}
+                    for name, (argtypes, restype) in _NATIVE_FUNCTION_SIGNATURES.items():
+                        try:
+                            function = getattr(library, name)
+                        except AttributeError:
+                            if name in _OPTIONAL_NATIVE_FUNCTIONS:
+                                continue
+                            raise
+                        function.argtypes = argtypes
+                        function.restype = restype
+                        functions[name] = function
+                    if functions["cadyx_kernel_version"]().decode("ascii") != manifest["occt_version"]:
                         raise RuntimeError("Native OCCT version differs from the runtime manifest.")
                 except Exception:
                     for directory in directories:
@@ -155,11 +158,126 @@ class NativeKernel:
                     raise
                 self._directories.extend(directories)
                 self.__class__._library = library
+                self.__class__._functions = functions
+        self._functions = self.__class__._functions
+        self._graph_node = _GraphNode
         self.library = self._library
 
     @property
     def version(self):
         return self.library.cadyx_kernel_version().decode("ascii")
+
+    @staticmethod
+    def _native_error(error):
+        return error.value.decode("utf-8", errors="replace")
+
+    def _raise_native_error(self, result, error):
+        if not result:
+            raise ValidationError(self._native_error(error))
+
+    def _free_native_result(self, result):
+        if result:
+            self._functions["cadyx_free"](result)
+
+    def _json_result(self, result, error):
+        self._raise_native_error(result, error)
+        try:
+            return json.loads(ctypes.string_at(result).decode("utf-8"))
+        finally:
+            self._free_native_result(result)
+
+    def _bytes_result(self, result, size, error):
+        self._raise_native_error(result, error)
+        try:
+            return bytes(ctypes.string_at(result, size.value))
+        finally:
+            self._free_native_result(result)
+
+    def _optional_brep_json(
+        self,
+        symbol,
+        brep,
+        *,
+        invalid_message: str,
+        error_capacity: int = 2048,
+    ) -> dict[str, Any] | None:
+        function = self._functions.get(symbol)
+        if function is None:
+            return None
+        source = self._export_brep_buffer(brep)
+        error = ctypes.create_string_buffer(error_capacity)
+        result = function(source, len(brep), error, len(error))
+        payload = self._json_result(result, error)
+        if not isinstance(payload, dict):
+            raise ValidationError(invalid_message)
+        return payload
+
+    def brep_metrics(self, brep: bytes) -> dict[str, Any] | None:
+        """Measure a B-rep directly when this runtime includes the optional helper."""
+        return self._optional_brep_json(
+            "cadyx_brep_metrics", brep, invalid_message="OCCT returned invalid B-rep metrics."
+        )
+
+    def agent_topology(self, brep: bytes) -> dict[str, Any] | None:
+        """Return analytic edge and face data when supported by this runtime."""
+        return self._optional_brep_json(
+            "cadyx_agent_topology", brep, invalid_message="OCCT returned invalid topology metadata."
+        )
+
+    def face_topology(self, brep: bytes) -> dict[str, Any] | None:
+        """Return basic face data for older bridges that lack combined topology."""
+        return self._optional_brep_json(
+            "cadyx_face_topology", brep, invalid_message="OCCT returned invalid topology metadata."
+        )
+
+    def advanced_brep(
+        self,
+        brep: bytes,
+        operation: int,
+        values: list[float],
+        indices: list[int] | None = None,
+    ) -> tuple[bytes, list[int] | None]:
+        function = self._functions.get("cadyx_advanced_brep")
+        if function is None:
+            raise RuntimeError(
+                "CADYX native runtime is stale; run scripts/setup-runtime.ps1 to rebuild advanced modeling support."
+            )
+        source = self._export_brep_buffer(brep)
+        numbers = (ctypes.c_double * len(values))(*values) if values else None
+        selected = indices or []
+        native_indices = (ctypes.c_int * len(selected))(*selected) if selected else None
+        size = ctypes.c_size_t()
+        generated_faces = ctypes.create_string_buffer(64 * 1024)
+        error = ctypes.create_string_buffer(2048)
+        result = function(
+            source, len(brep), operation, numbers, len(values), native_indices, len(selected),
+            ctypes.byref(size), generated_faces, len(generated_faces), error, len(error),
+        )
+        self._raise_native_error(result, error)
+        try:
+            face_indices = json.loads(generated_faces.value) if operation in {2, 4} else None
+            if face_indices is not None and (
+                not isinstance(face_indices, list) or any(type(index) is not int for index in face_indices)
+            ):
+                raise ValidationError("OCCT returned invalid generated face indices.")
+            return bytes(ctypes.string_at(result, size.value)), face_indices
+        finally:
+            self._free_native_result(result)
+
+    def agent_feature_brep(self, brep: bytes, operation: int, values: list[float]) -> bytes:
+        function = self._functions.get("cadyx_agent_feature_brep")
+        if function is None:
+            raise RuntimeError(
+                "CADYX native runtime is stale; run scripts/setup-runtime.ps1 to rebuild agent authoring support."
+            )
+        source = self._export_brep_buffer(brep)
+        numbers = (ctypes.c_double * len(values))(*values)
+        size = ctypes.c_size_t()
+        error = ctypes.create_string_buffer(2048)
+        result = function(
+            source, len(brep), operation, numbers, len(values), ctypes.byref(size), error, len(error),
+        )
+        return self._bytes_result(result, size, error)
 
     def box(self, dimensions, *, mesh=False):
         error = ctypes.create_string_buffer(1024)

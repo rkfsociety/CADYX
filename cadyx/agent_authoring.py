@@ -1,7 +1,6 @@
 """Agent-oriented high-level features for photo/reference-driven CAD authoring."""
 from __future__ import annotations
 
-import ctypes
 import math
 from typing import Any
 from uuid import uuid4
@@ -179,44 +178,8 @@ def _append_standalone_feature(
 
 def _agent_native(geometry: dict[str, Any], operation: int, values: list[float]) -> dict[str, Any]:
     native = NativeKernel()
-    library = native.library
-    if not hasattr(library, "cadyx_agent_feature_brep"):
-        raise RuntimeError(
-            "CADYX native runtime is stale; run scripts/setup-runtime.ps1 to rebuild agent authoring support."
-        )
-    function = library.cadyx_agent_feature_brep
-    function.argtypes = [
-        ctypes.POINTER(ctypes.c_ubyte),
-        ctypes.c_size_t,
-        ctypes.c_int,
-        ctypes.POINTER(ctypes.c_double),
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_size_t),
-        ctypes.c_char_p,
-        ctypes.c_size_t,
-    ]
-    function.restype = ctypes.c_void_p
     brep = _raw_brep(geometry)
-    data = (ctypes.c_ubyte * len(brep)).from_buffer_copy(brep)
-    numbers = (ctypes.c_double * len(values))(*values)
-    size = ctypes.c_size_t()
-    error = ctypes.create_string_buffer(2048)
-    result = function(
-        data,
-        len(brep),
-        operation,
-        numbers,
-        len(values),
-        ctypes.byref(size),
-        error,
-        len(error),
-    )
-    if not result:
-        raise ValidationError(error.value.decode("utf-8", errors="replace"))
-    try:
-        return _wrap_brep(bytes(ctypes.string_at(result, size.value)))
-    finally:
-        library.cadyx_free(result)
+    return _wrap_brep(native.agent_feature_brep(brep, operation, values))
 
 
 def _must_remove(before: dict[str, Any], after: dict[str, Any], label: str) -> None:

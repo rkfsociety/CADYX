@@ -1,7 +1,6 @@
 """Face/edge topology metadata and geometric selector fingerprints for agent authoring."""
 from __future__ import annotations
 
-import ctypes
 import hashlib
 import json
 from typing import Any
@@ -54,38 +53,6 @@ def _signature(kind: str, item: dict[str, Any]) -> str:
     return f"{kind}:{digest}"
 
 
-def _call_json(
-    native: NativeKernel,
-    brep: bytes,
-    function_name: str,
-    *,
-    missing: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    library = native.library
-    if not hasattr(library, function_name):
-        return {} if missing is None else missing
-    data = (ctypes.c_ubyte * len(brep)).from_buffer_copy(brep)
-    function = getattr(library, function_name)
-    function.argtypes = [
-        ctypes.POINTER(ctypes.c_ubyte),
-        ctypes.c_size_t,
-        ctypes.c_char_p,
-        ctypes.c_size_t,
-    ]
-    function.restype = ctypes.c_void_p
-    error = ctypes.create_string_buffer(2048)
-    result = function(data, len(brep), error, len(error))
-    if not result:
-        raise ValidationError(error.value.decode("utf-8", errors="replace"))
-    try:
-        payload = json.loads(ctypes.string_at(result))
-    finally:
-        library.cadyx_free(result)
-    if not isinstance(payload, dict):
-        raise ValidationError("OCCT returned invalid topology metadata.")
-    return payload
-
-
 def _merge_by_index(
     base: list[dict[str, Any]], extra: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -109,12 +76,9 @@ def enrich_topology(geometry: dict[str, Any], result: dict[str, Any]) -> dict[st
     native = NativeKernel()
     brep = _raw_brep(geometry)
 
-    details = _call_json(
-        native,
-        brep,
-        "cadyx_agent_topology",
-        missing={"edges": [], "faces": []},
-    )
+    details = native.agent_topology(brep)
+    if details is None:
+        details = {"edges": [], "faces": []}
     extra_edges = details.get("edges")
     faces = details.get("faces")
     if not isinstance(extra_edges, list) or not isinstance(faces, list):
@@ -124,9 +88,9 @@ def enrich_topology(geometry: dict[str, Any], result: dict[str, Any]) -> dict[st
     # topology, avoiding a second B-rep parse and face traversal. Keep the
     # old bridge as a compatibility fallback for already-built runtimes.
     if any(not isinstance(face, dict) or "surface" not in face for face in faces):
-        face_payload = _call_json(
-            native, brep, "cadyx_face_topology", missing={"faces": []}
-        )
+        face_payload = native.face_topology(brep)
+        if face_payload is None:
+            face_payload = {"faces": []}
         base_faces = face_payload.get("faces")
         if not isinstance(base_faces, list):
             raise ValidationError("OCCT returned invalid face topology metadata.")
