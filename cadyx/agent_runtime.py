@@ -153,10 +153,10 @@ class _LeaseHeartbeat:
 class AgentRuntime:
     """Run a provider-neutral tool loop against one existing CADYX project.
 
-    Each run obtains a revision-protected agent lease, exposes only inspection,
-    viewport and command tools for that project, and releases the lease through
-    the validated agent-stop path on completion or failure. A configured run
-    timeout bounds provider waits independently of the edit-lease timeout;
+    Each command obtains a revision-protected agent lease immediately before
+    mutation, maintains a heartbeat during the command, and releases it through
+    the validated stop path afterward. Provider waits and read-only tools never
+    hold an edit lease. A configured run timeout bounds provider waits;
     callers may also request cooperative cancellation with a ``threading.Event``.
     """
 
@@ -212,43 +212,14 @@ class AgentRuntime:
         current = self.core.observe_agent_operation(
             project_id, "Изучает модель", lambda: self.core.inspect_project(project_id),
         )
+        revision_state = [current["document"]["revision"]]
         guard.check()
-        revision = current["document"]["revision"]
-        resumed = self.core.resume_agent(project_id, self.owner_id, revision)
-        lease_id = resumed["lease"]["lease_id"]
-        revision_state = [resumed["document"]["revision"]]
-        heartbeat = _LeaseHeartbeat(self.core, project_id, lease_id)
-        primary_error: BaseException | None = None
-        try:
-            heartbeat.start()
-            guard.check()
-            result = self._run_loop(
-                project_id,
-                lease_id,
-                revision_state,
-                prompt,
-                system_prompt,
-                heartbeat,
-                guard,
-            )
-            guard.check()
-            heartbeat.check()
-        except BaseException as exc:
-            primary_error = exc
-            raise
-        finally:
-            heartbeat.stop()
-            try:
-                stopped = self.core.stop_agent(project_id, lease_id)
-            except BaseException as stop_error:
-                if primary_error is None:
-                    raise
-                primary_error.add_note(f"Agent lease cleanup also failed: {stop_error}")
-
+        result = self._run_loop(project_id, revision_state, prompt, system_prompt, guard)
+        guard.check()
         return AgentRunResult(
             project_id=project_id,
             final_response=result[0],
-            revision=stopped["document"]["revision"],
+            revision=revision_state[0],
             provider_turns=result[1],
             tool_calls=result[2],
             tool_names=tuple(result[3]),
@@ -258,7 +229,6 @@ class AgentRuntime:
         self,
         messages: Sequence[AgentMessage],
         tools: Sequence[AgentToolSpec],
-        heartbeat: _LeaseHeartbeat,
         guard: _RunGuard,
     ) -> AgentResponse:
         completed = threading.Event()
@@ -277,9 +247,7 @@ class AgentRuntime:
         thread.start()
         while not completed.wait(guard.wait_seconds()):
             guard.check()
-            heartbeat.check()
         guard.check()
-        heartbeat.check()
         if failure:
             raise failure[0]
         return response[0]
@@ -287,11 +255,9 @@ class AgentRuntime:
     def _run_loop(
         self,
         project_id: str,
-        lease_id: str,
         revision_state: list[int],
         prompt: str,
         system_prompt: str,
-        heartbeat: _LeaseHeartbeat,
         guard: _RunGuard,
     ) -> tuple[str, int, int, list[str]]:
         def no_arguments(arguments: Mapping[str, Any]) -> None:
@@ -300,9 +266,11 @@ class AgentRuntime:
 
         def inspect_project(arguments: Mapping[str, Any]) -> dict[str, Any]:
             no_arguments(arguments)
-            return self.core.observe_agent_operation(
+            detail = self.core.observe_agent_operation(
                 project_id, "Изучает модель", lambda: self.core.inspect_project(project_id),
             )
+            revision_state[0] = detail["document"]["revision"]
+            return detail
 
         def get_viewport(arguments: Mapping[str, Any]) -> dict[str, Any]:
             no_arguments(arguments)
@@ -317,15 +285,37 @@ class AgentRuntime:
             if set(arguments) != {"command"}:
                 raise ValidationError("Only the command field is accepted.")
             guard.check()
-            heartbeat.check()
-            result = self.core.execute_command(
-                project_id,
-                lease_id,
-                command,
-                expected_owner_type=OwnerType.AGENT,
-                expected_revision=revision_state[0],
-            )
-            revision_state[0] = result["document"]["revision"]
+            # Resume checks the last observed revision while acquiring the lease
+            # under Core's project guard. Another editor cannot race this command.
+            resumed = self.core.resume_agent(project_id, self.owner_id, revision_state[0])
+            lease_id = resumed["lease"]["lease_id"]
+            heartbeat = _LeaseHeartbeat(self.core, project_id, lease_id)
+            primary_error: BaseException | None = None
+            try:
+                heartbeat.start()
+                guard.check()
+                heartbeat.check()
+                result = self.core.execute_command(
+                    project_id,
+                    lease_id,
+                    command,
+                    expected_owner_type=OwnerType.AGENT,
+                    expected_revision=revision_state[0],
+                )
+                revision_state[0] = result["document"]["revision"]
+                guard.check()
+                heartbeat.check()
+            except BaseException as exc:
+                primary_error = exc
+                raise
+            finally:
+                heartbeat.stop()
+                try:
+                    self.core.stop_agent(project_id, lease_id)
+                except BaseException as stop_error:
+                    if primary_error is None:
+                        raise
+                    primary_error.add_note(f"Agent lease cleanup also failed: {stop_error}")
             return result
 
         empty_schema = {"type": "object", "properties": {}, "additionalProperties": False}
@@ -341,7 +331,7 @@ class AgentRuntime:
             "execute_command": _RegisteredTool(
                 AgentToolSpec(
                     "execute_command",
-                    "Execute one CADYX document command under the current agent lease.",
+                    "Execute one CADYX command with an immediately acquired and released agent lease.",
                     {
                         "type": "object",
                         "properties": {
@@ -373,10 +363,8 @@ class AgentRuntime:
         tool_rounds = 0
         while True:
             guard.check()
-            heartbeat.check()
-            response = self._complete_provider(tuple(messages), tool_specs, heartbeat, guard)
+            response = self._complete_provider(tuple(messages), tool_specs, guard)
             guard.check()
-            heartbeat.check()
             provider_turns += 1
             self._validate_response(response)
             messages.append(AgentMessage("assistant", response.content, response.tool_calls))
@@ -390,7 +378,6 @@ class AgentRuntime:
                 raise AgentRuntimeError("Agent exceeded the maximum number of tool rounds.")
             for call in response.tool_calls:
                 guard.check()
-                heartbeat.check()
                 if call.id in seen_call_ids:
                     raise AgentRuntimeError("Provider reused a tool call id within one run.")
                 seen_call_ids.add(call.id)
@@ -406,7 +393,6 @@ class AgentRuntime:
                     except CadyxError as exc:
                         value = exc.as_dict()
                     guard.check()
-                    heartbeat.check()
                     called_tools.append(call.name)
                 messages.append(
                     AgentMessage(

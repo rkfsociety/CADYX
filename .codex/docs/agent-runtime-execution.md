@@ -1,19 +1,17 @@
 # Agent Runtime execution budgets and cancellation
 
-`AgentRuntime` keeps provider execution limits separate from project edit-lease expiry. `run_timeout_seconds` is an optional positive finite monotonic budget configured on the runtime. Its default is `None`, which preserves the previous unlimited run duration. `run(..., cancel_event=...)` optionally accepts a `threading.Event` for cooperative caller cancellation.
+`AgentRuntime` keeps provider execution limits separate from project edit-lease expiry. `run_timeout_seconds` is an optional positive finite monotonic budget; its default `None` permits an unlimited provider run. `run(..., cancel_event=...)` optionally accepts a `threading.Event` for cooperative cancellation.
 
-A configured deadline or cancellation request raises a typed `AgentRunDeadlineExceeded` or `AgentRunCancelled`, both subclasses of `AgentRuntimeError`. The runtime checks the run guard before and after provider turns and before each tool call. A tool or atomic Core command already admitted when cancellation arrives is allowed to finish; no later provider response or tool call is accepted.
+A deadline or cancellation raises `AgentRunDeadlineExceeded` or `AgentRunCancelled`, both subclasses of `AgentRuntimeError`. The guard is checked before and after provider turns, before tool calls, and while a command lease is held. An already admitted atomic Core command may finish; no subsequent command is accepted after cancellation.
 
-## Provider waits
+## Provider waits and command leases
 
-The provider protocol remains synchronous, so a blocking provider call cannot be forcibly terminated safely. CADYX invokes each `AgentProvider.complete` call on a daemon worker and waits for its result through the run guard. While the run remains active, the existing lease heartbeat continues. When a deadline or cancellation wins the race, the runtime stops accepting the provider result, stops the heartbeat and proceeds to validated lease cleanup. A provider worker that eventually returns has only messages and tool specifications, not executable CADYX tool callbacks, so its late response cannot mutate the project or resume the tool loop.
+Provider calls execute on daemon workers so the guarded caller can stop waiting on a stalled synchronous provider. Neither provider reasoning nor read-only inspect/viewport tools hold an edit lease or need a heartbeat. A late provider response has no executable CADYX callbacks and cannot mutate the project.
 
-With no execution budget and no cancellation request, provider calls retain the previous unlimited-duration behavior. The guarded wait still observes heartbeat failures while the provider is running.
+For each `execute_command`, the runtime resumes a *new* revision-protected agent lease immediately before the command, starts a heartbeat for its duration, executes under the expected revision and agent ownership, then stops the heartbeat and uses `CadyxCore.stop_agent` to validate and release that lease. Consecutive commands get distinct leases, including within one provider response. A failed resume leaves other owners' leases untouched. Explicit project inspection refreshes the runtime's expected revision; if another editor changes it after inspection, resume returns `REVISION_CONFLICT` and no agent command is admitted.
 
 ## Cleanup and error precedence
 
-After an agent lease has been acquired, every run exit path attempts `CadyxCore.stop_agent(project_id, lease_id)`, including provider failure, deadline expiry, cancellation, heartbeat failure and heartbeat startup failure. This keeps the existing validated stop path authoritative for saved-document and geometry checks.
+Every *acquired* command lease is stopped in a `finally` block on success, command rejection, exception, cancellation or deadline. If cleanup alone fails, its error is raised. If a command already failed, its exception remains primary and the cleanup error is attached as a note. Provider failures, cancellation and deadlines **outside** commands require no lease cleanup because the project is free (unless owned by another editor). A crashed process still leaves its current edit lease for validated Core stop/expired-lease recovery.
 
-If cleanup alone fails, that cleanup error is raised. If the run already has a primary failure, the primary exception is preserved and the cleanup failure is attached as an exception note rather than replacing it. This applies to typed deadline/cancellation failures as well as provider and runtime failures.
-
-Tests in `tests/test_agent_runtime.py` cover the unchanged unlimited heartbeat behavior, a stalled provider deadline, cancellation between tool rounds with no subsequent command execution, and primary-error preservation when cleanup also fails.
+Tests in `tests/test_agent_runtime.py` cover provider-time unlock, independent per-command leases, competing editors and stale revisions, cancellation during a command, cleanup-error precedence and recovery after an interrupted stop.

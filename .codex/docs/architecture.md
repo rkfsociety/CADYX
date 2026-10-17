@@ -111,14 +111,15 @@ request/response format to CADYX's `AgentMessage`, `AgentToolSpec` and
 configuration in Core.
 
 The runtime exposes three tools to the provider: inspect the current project,
-read its viewport scene, and execute one Command System command. Each run
-compares the inspected revision while acquiring a fresh agent lease, checks
-that revision for every command, refreshes the lease heartbeat while the
-provider is working, and uses the validated stop path to release the lease on
-success or failure. Provider tool rounds and total calls are bounded. Tool
-validation and conflict errors are returned as structured tool results so the
-provider can respond. Unexpected provider/runtime failures end the run and
-still attempt validated lease cleanup.
+read its viewport scene, and execute one Command System command. Each command
+acquires its own fresh agent lease, checks the most recently inspected revision,
+maintains a heartbeat only during the command, and releases the lease through
+validated agent stop in a `finally` block. Provider waits and read-only tools
+do not hold a lease; explicit inspections refresh the expected revision.
+A competing editor or changed revision produces a structured conflict result
+without releasing someone else's lease. Provider tool rounds and total calls
+are bounded. Unexpected command/cleanup failures preserve the original error
+and attempt validated lease cleanup; provider-only failures have no lease to clean.
 
 The runtime is an in-process Python API exported as `cadyx.AgentRuntime`; it is
 not a provider integration, HTTP endpoint or background service. Projects are
