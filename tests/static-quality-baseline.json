@@ -1,0 +1,30 @@
+{
+  "core": [
+    "validate_body_dimensions:expected_revision: unchecked annotation",
+    "validate_body_dimensions:expected_dimensions: unchecked annotation",
+    "validate_body_dimensions:tolerance: unchecked annotation",
+    "validate_body_clearance:expected_revision: unchecked annotation",
+    "validate_body_clearance:minimum_clearance: unchecked annotation",
+    "validate_body_clearance:tolerance: unchecked annotation",
+    "validate_body_preservation:expected_revision: unchecked annotation",
+    "validate_body_preservation:maximum_lost_volume: unchecked annotation",
+    "validate_body_preservation:tolerance: unchecked annotation",
+    "validate_body_thickness:expected_revision: unchecked annotation",
+    "validate_body_thickness:minimum_thickness: unchecked annotation",
+    "validate_body_thickness:tolerance: unchecked annotation",
+    "observe_agent_operation:return: unchecked annotation",
+    "finite_number:value: unchecked annotation",
+    "nonnegative_number:value: unchecked annotation",
+    "nonnegative_volume:value: unchecked annotation",
+    "nonnegative:value: unchecked annotation"
+  ],
+  "commands": [
+    "contains_reference:value: unchecked annotation",
+    "references_removed:value: unchecked annotation",
+    "references_removed:value: unchecked annotation"
+  ],
+  "web": [
+    "log_message:args: unchecked annotation"
+  ],
+  "agent_runtime": []
+}

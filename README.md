@@ -129,6 +129,27 @@ Local fast checks use `python -m compileall -q cadyx tests scripts` and
 `python -m unittest discover -s tests -p test_source_contracts.py -v`, plus
 the `test_events.py` and `test_migrations.py` modules with the same invocation.
 
+The source gate also installs development-only tools from `requirements-dev.txt`
+(Ruff 0.17.1 and mypy 2.4.0, reviewed against PyPI on 2026-10-17).
+With a normal Python 3.15 installation, run `python -m pip install -r requirements-dev.txt`,
+`python -m ruff check .`, `python -m mypy`, and
+`python -m unittest discover -s tests -p test_static_quality.py -v`.
+These tools are not installed into the production embedded runtime.
+[Ruff configuration](https://docs.astral.sh/ruff/configuration/) and
+[mypy configuration](https://mypy.readthedocs.io/en/stable/config_file.html)
+live in `pyproject.toml`: lint covers application Python, and type checking starts
+with Agent Runtime, shared errors and the annotation checks themselves. Mypy
+follows other application imports silently; it does not certify their internals.
+Unreachable branches fail in the mypy-covered modules. Public Core, Command,
+HTTP and Agent Runtime annotations have a separate native-free ratchet: missing
+annotations or new bare `Any`/`object` annotations fail. Existing dynamic payload
+containers remain supported; the small `tests/static-quality-baseline.json`
+records existing bare dynamic annotations, not a blanket mypy error suppression.
+Remove baseline entries as they are typed; do not grow the baseline to bypass
+failures. Expand mypy's file list as modules are made type-clean. Suppressions
+must name specific codes and include an inline `-- reason`; a source check
+enforces this. No formatter or mass cleanup is part of this gate.
+
 ## Agent Runtime
 
 `cadyx.AgentRuntime` accepts an implementation of the `AgentProvider` protocol.

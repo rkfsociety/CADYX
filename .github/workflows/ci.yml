@@ -29,6 +29,19 @@ jobs:
         with:
           python-version: ${{ steps.versions.outputs.python }}
 
+      - name: Install pinned development checks
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Check static quality without native SDKs
+        shell: pwsh
+        run: |
+          python -m ruff check .
+          if ($LASTEXITCODE -ne 0) { throw 'Lint checks failed.' }
+          python -m mypy
+          if ($LASTEXITCODE -ne 0) { throw 'Type checks failed.' }
+          python -m unittest discover -s tests -p test_static_quality.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Interface annotation checks failed.' }
+
       - name: Compile sources and check contracts without native SDKs
         shell: pwsh
         run: |

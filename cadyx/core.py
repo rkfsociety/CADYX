@@ -360,7 +360,7 @@ class CadyxCore:
             self.events.publish("project.lock.changed", project_id, snapshot)
             return lease.as_dict()
 
-    def compare_bodies(self, project_id: str, original_id=None, modified_id=None) -> dict:
+    def compare_bodies(self, project_id: str, original_id: str | None = None, modified_id: str | None = None) -> dict:
         explicit_selection = original_id is not None or modified_id is not None
         document = Document.from_dict(self.workspace.load(project_id)["document"])
         bodies = {item["id"]: item for item in document.objects if item.get("type") == "body"}

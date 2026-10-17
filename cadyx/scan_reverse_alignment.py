@@ -7,7 +7,7 @@ from typing import Any
 
 from .errors import ValidationError
 from .mesh_geometry import tessellate_mesh_geometry
-from .scan_reverse_common import _EPS, _bounds, _cross, _dot, _pack_mesh, _positive, _sample_points, _unit, _vector3
+from .scan_reverse_common import _bounds, _cross, _dot, _pack_mesh, _positive, _sample_points, _unit, _vector3
 
 _ALLOWED_UNITS = {"unitless", "mm", "cm", "m", "in"}
 

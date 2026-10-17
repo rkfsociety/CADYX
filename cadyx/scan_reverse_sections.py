@@ -12,7 +12,7 @@ def _axis_index(axis: str) -> int:
     return {"X": 0, "Y": 1, "Z": 2}[axis]
 
 def _point_key(point: list[float], tolerance: float) -> tuple[int, int, int]:
-    return tuple(int(round(value / tolerance)) for value in point)  # type: ignore[return-value]
+    return tuple(int(round(value / tolerance)) for value in point)  # type: ignore[return-value] -- Vector3 input guarantees exactly three coordinates.
 
 def _intersections_for_triangle(points: list[list[float]], axis: int, offset: float, epsilon: float) -> list[list[float]]:
     hits: list[list[float]] = []
@@ -66,7 +66,7 @@ def _slice_mesh(positions: list[float], triangles: list[int], axis: int, offset:
                 representatives[key] = [representatives[key][axis_index] + (point[axis_index] - representatives[key][axis_index]) / count
                                         for axis_index in range(3)]
         edge = tuple(sorted(keys))
-        edges.add(edge)  # type: ignore[arg-type]
+        edges.add(edge)  # type: ignore[arg-type] -- Sorting the two endpoints preserves the fixed edge pair length.
 
     adjacency: dict[tuple[int, int, int], set[tuple[int, int, int]]] = {}
     for first, second in edges:

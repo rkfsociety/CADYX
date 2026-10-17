@@ -69,7 +69,7 @@ def make_request_handler(
     class CadyxRequestHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
-        def do_GET(self) -> None:  # noqa: N802 - stdlib handler method name
+        def do_GET(self) -> None:
             parsed = urlsplit(self.path)
             try:
                 if parsed.path == "/api/v1/health":
@@ -282,7 +282,7 @@ def make_request_handler(
             except CadyxError as exc:
                 self._json(exc.http_status, exc.as_dict())
 
-        def do_POST(self) -> None:  # noqa: N802 - stdlib handler method name
+        def do_POST(self) -> None:
             parsed = urlsplit(self.path)
             try:
                 if not self._require_auth():
@@ -340,7 +340,7 @@ def make_request_handler(
             except (json.JSONDecodeError, UnicodeDecodeError):
                 self._json(400, {"error": "INVALID_JSON", "message": "Request body must be valid UTF-8 JSON."})
 
-        def do_DELETE(self) -> None:  # noqa: N802 - stdlib handler method name
+        def do_DELETE(self) -> None:
             parsed = urlsplit(self.path)
             try:
                 if not self._require_auth():

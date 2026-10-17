@@ -50,3 +50,5 @@
 
 
 - Confirmed: CI runs a native-free source/contract gate before the full Windows native lane; only hash-reverified download archives are cached, never SDK/build trees. Commands and cache policy: [CI verification](../README.md#ci-verification); contract checks: `tests/test_source_contracts.py`.
+
+- Confirmed: the native-free CI source gate includes development-only Ruff/mypy and a public-boundary annotation ratchet. Mypy coverage is deliberately incremental; do not treat the entire Core/Command/Web implementations as type-checked or grow the dynamic-annotation baseline to hide regressions. Canonical commands, scope and suppression policy: [CI verification](../README.md#ci-verification), `pyproject.toml`, and `tests/test_static_quality.py`.

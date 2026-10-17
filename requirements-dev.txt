@@ -1,0 +1,8 @@
+# Development checks only; reviewed against PyPI on 2026-10-17.
+ruff==0.17.1
+mypy==2.4.0
+ast-serialize==0.13.1
+librt==0.16.0
+mypy_extensions==1.1.0
+pathspec==1.1.1
+typing_extensions==4.16.0
