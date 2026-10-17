@@ -23,6 +23,7 @@ jobs:
       - name: Run corrected stage 35 recipe
         shell: bash
         run: |
+          python -m pip install -r requirements-dev.txt
           python - <<'PY'
           from pathlib import Path
           import subprocess
@@ -50,7 +51,6 @@ jobs:
               subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script], check=True)
 
           run_block('Decompose CadyxCore orchestration')
-          run_block('Install quality tools')
           run_block('Lint and type ratchet')
           run_block('Verify focused behavior')
           run_block('Commit stage 35')
