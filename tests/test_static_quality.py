@@ -1,17 +1,34 @@
-"""Native-free ratchet for annotations on public application boundaries."""
+"""Native-free ratchets for public annotations and static-quality configuration."""
 from __future__ import annotations
 
 import ast
-import json
 import io
+import json
 import re
+import subprocess
+import sys
 import tokenize
+import tomllib
 from collections import Counter
 import unittest
 from pathlib import Path
 
 
-BOUNDARIES = ("core", "commands", "web", "agent_runtime")
+BOUNDARIES = ("core", "commands", "workspace", "web", "agent_runtime")
+BOUNDARY_BASELINE_CAPS = {
+    "core": 17,
+    "commands": 0,
+    "workspace": 0,
+    "web": 1,
+    "agent_runtime": 0,
+}
+MYPY_CORE_SERVICE_FILES = {
+    "cadyx/core.py",
+    "cadyx/commands.py",
+    "cadyx/workspace.py",
+    "cadyx/web.py",
+}
+RUFF_BUG_RISK_RULES = {"B006", "B008"}
 
 
 def annotation_errors(source: str) -> list[str]:
@@ -33,7 +50,28 @@ def annotation_errors(source: str) -> list[str]:
     return errors
 
 
+def boundary_baseline(root: Path) -> dict[str, list[dict[str, str]]]:
+    value = json.loads((root / "tests" / "static-quality-baseline.json").read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise AssertionError("Static-quality baseline must be an object.")
+    return value
+
+
 class StaticQualityTests(unittest.TestCase):
+    def test_static_config_covers_core_services_and_bug_risk_rules(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+        mypy_files = set(config["tool"]["mypy"]["files"])
+        self.assertTrue(
+            MYPY_CORE_SERVICE_FILES.issubset(mypy_files),
+            "Core service modules must stay in configured mypy coverage.",
+        )
+        ruff_rules = set(config["tool"]["ruff"]["lint"]["select"])
+        self.assertTrue(
+            RUFF_BUG_RISK_RULES.issubset(ruff_rules),
+            "Configured Ruff bug-risk rules must not be removed from the source gate.",
+        )
+
     def test_suppressions_have_codes_and_inline_reasons(self) -> None:
         root = Path(__file__).resolve().parents[1]
         pattern = re.compile(r"(?:type:\s*ignore\[[\w, -]+\]|noqa:\s*[A-Z]+\d+(?:,\s*[A-Z]+\d+)*)\s+--\s+\S")
@@ -43,15 +81,36 @@ class StaticQualityTests(unittest.TestCase):
                     with self.subTest(path=path.name, line=token.start[0]):
                         self.assertRegex(token.string, pattern)
 
-    def test_public_boundary_annotations(self) -> None:
+    def test_public_boundary_annotations_match_documented_ratchet(self) -> None:
         root = Path(__file__).resolve().parents[1]
+        baseline = boundary_baseline(root)
+        self.assertEqual(set(baseline), set(BOUNDARIES))
         for module in BOUNDARIES:
             with self.subTest(module=module):
+                records = baseline[module]
+                self.assertIsInstance(records, list)
+                allowed: Counter[str] = Counter()
+                for record in records:
+                    self.assertIsInstance(record, dict)
+                    self.assertEqual(set(record), {"issue", "reason"})
+                    issue = record["issue"]
+                    reason = record["reason"]
+                    self.assertIsInstance(issue, str)
+                    self.assertIsInstance(reason, str)
+                    self.assertTrue(reason.strip(), "Every unchecked annotation needs a reason.")
+                    allowed[issue] += 1
+                self.assertEqual(
+                    sum(allowed.values()),
+                    BOUNDARY_BASELINE_CAPS[module],
+                    "Lower the hard cap whenever the committed annotation baseline shrinks.",
+                )
                 source = (root / "cadyx" / f"{module}.py").read_text(encoding="utf-8")
-                baseline = json.loads((root / "tests" / "static-quality-baseline.json").read_text(encoding="utf-8"))
                 current = Counter(annotation_errors(source))
-                allowed = Counter(baseline[module])
-                self.assertEqual(dict(current - allowed), {}, "New unchecked public annotation")
+                self.assertEqual(
+                    current,
+                    allowed,
+                    "Unchecked public annotations must exactly match the documented baseline.",
+                )
 
     def test_ratchet_rejects_unchecked_signatures(self) -> None:
         for source in (
@@ -67,6 +126,23 @@ class StaticQualityTests(unittest.TestCase):
         self.assertEqual(annotation_errors(
             "def call(value: dict[str, Any], *, revision: int) -> None: pass"
         ), [])
+
+    def test_configured_bug_risk_rules_fail_negative_probes(self) -> None:
+        probes = {
+            "B006": "def probe(values=[]):\n    return values\n",
+            "B008": "def build():\n    return 1\n\ndef probe(value=build()):\n    return value\n",
+        }
+        for rule, source in probes.items():
+            with self.subTest(rule=rule):
+                completed = subprocess.run(
+                    [sys.executable, "-m", "ruff", "check", "--isolated", "--select", rule, "-"],
+                    input=source,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn(rule, completed.stdout + completed.stderr)
 
 
 if __name__ == "__main__":
