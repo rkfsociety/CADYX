@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import io
 import json
 import re
@@ -29,10 +30,32 @@ MYPY_CORE_SERVICE_FILES = {
     "cadyx/web.py",
 }
 MYPY_ERROR_BASELINE_CAPS = {
-    "core": 70,
-    "commands": 0,
-    "workspace": 19,
-    "web": 20,
+    "core": {
+        "arg-type": 16,
+        "assignment": 9,
+        "attr-defined": 1,
+        "call-arg": 2,
+        "dict-item": 1,
+        "misc": 2,
+        "operator": 27,
+        "typeddict-item": 2,
+        "union-attr": 7,
+        "var-annotated": 3,
+    },
+    "commands": {},
+    "workspace": {
+        "arg-type": 3,
+        "assignment": 2,
+        "attr-defined": 5,
+        "no-untyped-def": 1,
+        "valid-type": 6,
+        "var-annotated": 2,
+    },
+    "web": {
+        "arg-type": 7,
+        "index": 8,
+        "union-attr": 5,
+    },
 }
 RUFF_BUG_RISK_RULES = {"B006", "B008"}
 
@@ -91,19 +114,23 @@ class StaticQualityTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         baseline = mypy_error_baseline(root)
         self.assertEqual(set(baseline), set(MYPY_ERROR_BASELINE_CAPS))
-        for module, cap in MYPY_ERROR_BASELINE_CAPS.items():
+        for module, caps in MYPY_ERROR_BASELINE_CAPS.items():
             with self.subTest(module=module):
                 codes = baseline[module]
                 self.assertIsInstance(codes, dict)
-                self.assertTrue(all(
-                    isinstance(code, str) and type(count) is int and count > 0
-                    for code, count in codes.items()
-                ))
-                self.assertLessEqual(
-                    sum(codes.values()),
-                    cap,
-                    "Legacy mypy baseline totals may only decrease.",
+                self.assertTrue(
+                    set(codes).issubset(caps),
+                    "New mypy error codes cannot be added to the legacy baseline.",
                 )
+                for code, count in codes.items():
+                    self.assertIsInstance(code, str)
+                    self.assertIs(type(count), int)
+                    self.assertGreater(count, 0)
+                    self.assertLessEqual(
+                        count,
+                        caps[code],
+                        "Legacy mypy error-code counts may only decrease.",
+                    )
 
     def test_suppressions_have_codes_and_inline_reasons(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -161,6 +188,8 @@ class StaticQualityTests(unittest.TestCase):
         ), [])
 
     def test_configured_bug_risk_rules_fail_negative_probes(self) -> None:
+        if importlib.util.find_spec("ruff") is None:
+            self.skipTest("Ruff negative probes run in the native-free source gate with dev dependencies installed.")
         probes = {
             "B006": "def probe(values=[]):\n    return values\n",
             "B008": "def build():\n    return 1\n\ndef probe(value=build()):\n    return value\n",
