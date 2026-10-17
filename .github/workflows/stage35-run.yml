@@ -45,6 +45,11 @@ jobs:
               "",
               1,
           )
+          text = text.replace(
+              "          git add cadyx/core.py cadyx/core_services.py tests/test_core_services.py tests/mypy-error-baseline.json .codex/roadmap.md\n",
+              "          git add cadyx/core.py cadyx/core_services.py tests/test_core_services.py tests/mypy-error-baseline.json tests/static-quality-baseline.json tests/test_static_quality.py .codex/roadmap.md\n",
+              1,
+          )
           path.write_text(text, encoding='utf-8')
 
           def run_block(name: str) -> None:
@@ -61,6 +66,37 @@ jobs:
               subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script], check=True)
 
           run_block('Decompose CadyxCore orchestration')
+
+          import json
+          import sys
+          from collections import Counter
+          sys.path.insert(0, 'tests')
+          from test_static_quality import annotation_errors
+
+          baseline_path = Path('tests/static-quality-baseline.json')
+          baseline = json.loads(baseline_path.read_text(encoding='utf-8'))
+          current = Counter(annotation_errors(Path('cadyx/core.py').read_text(encoding='utf-8')))
+          remaining = []
+          needed = current.copy()
+          for record in baseline['core']:
+              issue = record['issue']
+              if needed[issue] > 0:
+                  remaining.append(record)
+                  needed[issue] -= 1
+          leftovers = {issue: count for issue, count in needed.items() if count}
+          if leftovers:
+              raise SystemExit(f'new unchecked core annotations appeared: {leftovers}')
+          baseline['core'] = remaining
+          baseline_path.write_text(json.dumps(baseline, indent=2) + '\n', encoding='utf-8')
+
+          quality_test = Path('tests/test_static_quality.py')
+          quality_text = quality_test.read_text(encoding='utf-8')
+          old_cap = '    "core": 17,\n'
+          new_cap = f'    "core": {len(remaining)},\n'
+          if old_cap not in quality_text:
+              raise SystemExit('core boundary cap anchor changed')
+          quality_test.write_text(quality_text.replace(old_cap, new_cap, 1), encoding='utf-8')
+
           run_block('Lint and type ratchet')
           run_block('Verify focused behavior')
           run_block('Commit stage 35')
