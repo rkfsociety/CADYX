@@ -103,6 +103,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/favicon.svg", "ui_favicon", "static"),
     RouteSpec("GET", "/assets/app.js", "asset_app", "static"),
     RouteSpec("GET", "/assets/viewport.js", "asset_viewport", "static"),
+    RouteSpec("GET", "/assets/trace-draft.js", "asset_trace_draft", "static"),
     RouteSpec("GET", "/assets/scanner-camera.js", "asset_scanner_camera", "static"),
     RouteSpec("GET", "/assets/ply-parser.js", "asset_ply_parser", "static"),
     RouteSpec("GET", "/assets/ply-preview.js", "asset_ply_preview", "static"),
@@ -342,9 +343,7 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
     elif name == "agent_project_create":
         _create_project(handler, core, agent_api=True)
     elif name == "agent_project_get":
-        handler._json(200, core.observe_agent_operation(
-            project_id, "Изучает модель", lambda: core.inspect_project(project_id),
-        ))
+        handler._json(200, core.observe_agent_operation(project_id, "Изучает модель", lambda: core.inspect_project(project_id)))
     elif name == "agent_dashboard_get":
         handler._json(200, core.agent_dashboard_snapshot(project_id))
     elif name == "agent_dashboard_post":
@@ -353,15 +352,10 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         _project_activity(handler, core, project_id)
     elif name == "agent_comparison":
         query = parse_qs(parsed.query)
-        handler._json(200, core.compare_bodies(project_id,
-            query.get("original_body_id", [None])[0],
-            query.get("modified_body_id", [None])[0]))
+        handler._json(200, core.compare_bodies(project_id, query.get("original_body_id", [None])[0], query.get("modified_body_id", [None])[0]))
     elif name == "agent_topology":
         body_id = parse_qs(parsed.query).get("body_id", [None])[0]
-        handler._json(200, core.observe_agent_operation(
-            project_id, "Изучает рёбра модели",
-            lambda: core.inspect_body_topology(project_id, body_id),
-        ))
+        handler._json(200, core.observe_agent_operation(project_id, "Изучает рёбра модели", lambda: core.inspect_body_topology(project_id, body_id)))
     elif name == "agent_rename":
         body = _require_json(handler)
         if set(body) != {"name"}:
@@ -379,8 +373,7 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         handler._json(200, core.prune_project_files(project_id, body["keep_files"]))
     elif name in {"agent_stop", "agent_resume"}:
         body = _require_json(handler)
-        result = (core.stop_agent(project_id, body.get("lease_id")) if name == "agent_stop"
-                  else core.resume_agent(project_id, body.get("owner_id"), body.get("expected_revision")))
+        result = (core.stop_agent(project_id, body.get("lease_id")) if name == "agent_stop" else core.resume_agent(project_id, body.get("owner_id"), body.get("expected_revision")))
         handler._json(200, result)
     elif name in {"agent_lease", "agent_command", "agent_lease_recover", "agent_lease_heartbeat", "agent_lease_release"}:
         _dispatch_project_control(handler, core, route, agent_api=True)
@@ -398,8 +391,7 @@ def _dispatch_project_control(handler: Any, core: CadyxCore, route: RouteMatch, 
     elif name == "command":
         body = _require_json(handler)
         expected = OwnerType.AGENT if agent_api else OwnerType.HUMAN
-        handler._json(200, core.execute_command(project_id, body.get("lease_id"), body.get("command"),
-            expected_owner_type=expected, expected_revision=body.get("expected_revision")))
+        handler._json(200, core.execute_command(project_id, body.get("lease_id"), body.get("command"), expected_owner_type=expected, expected_revision=body.get("expected_revision")))
     elif name == "lease_recover":
         handler._read_json()
         handler._json(200, core.recover_expired_lease(project_id))
@@ -430,24 +422,13 @@ def _dispatch_validation(handler: Any, core: CadyxCore, route: RouteMatch, parse
     validate_request_fields(operation, body)
     assert body is not None
     if operation == "dimensions":
-        result = core.observe_agent_operation(project_id, "Проверяет габариты тела",
-            lambda: core.validate_body_dimensions(project_id, body["body_id"], body["expected_revision"],
-                body["expected_dimensions"], body["tolerance"], persist=body.get("persist", False)))
+        result = core.observe_agent_operation(project_id, "Проверяет габариты тела", lambda: core.validate_body_dimensions(project_id, body["body_id"], body["expected_revision"], body["expected_dimensions"], body["tolerance"], persist=body.get("persist", False)))
     elif operation == "clearance":
-        result = core.observe_agent_operation(project_id, "Измеряет зазор между телами",
-            lambda progress: core.validate_body_clearance(project_id, body["first_body_id"], body["second_body_id"],
-                body["expected_revision"], body["minimum_clearance"], body["tolerance"],
-                progress=progress, persist=body.get("persist", False)), reports_progress=True)
+        result = core.observe_agent_operation(project_id, "Измеряет зазор между телами", lambda progress: core.validate_body_clearance(project_id, body["first_body_id"], body["second_body_id"], body["expected_revision"], body["minimum_clearance"], body["tolerance"], progress=progress, persist=body.get("persist", False)), reports_progress=True)
     elif operation == "preservation":
-        result = core.observe_agent_operation(project_id, "Проверяет сохранённый объём тела",
-            lambda: core.validate_body_preservation(project_id, body["reference_body_id"], body["candidate_body_id"],
-                body["expected_revision"], body["maximum_lost_volume"], body["tolerance"],
-                persist=body.get("persist", False)))
+        result = core.observe_agent_operation(project_id, "Проверяет сохранённый объём тела", lambda: core.validate_body_preservation(project_id, body["reference_body_id"], body["candidate_body_id"], body["expected_revision"], body["maximum_lost_volume"], body["tolerance"], persist=body.get("persist", False)))
     else:
-        result = core.observe_agent_operation(project_id, "Измеряет минимальную толщину стенки",
-            lambda progress: core.validate_body_thickness(project_id, body["body_id"], body["expected_revision"],
-                body["minimum_thickness"], body["tolerance"], progress=progress,
-                persist=body.get("persist", False), method=body.get("method", "sampled")), reports_progress=True)
+        result = core.observe_agent_operation(project_id, "Измеряет минимальную толщину стенки", lambda progress: core.validate_body_thickness(project_id, body["body_id"], body["expected_revision"], body["minimum_thickness"], body["tolerance"], progress=progress, persist=body.get("persist", False), method=body.get("method", "sampled")), reports_progress=True)
     handler._json(200, result)
 
 
@@ -464,13 +445,10 @@ def _dispatch_viewport(handler: Any, core: CadyxCore, route: RouteMatch, parsed:
             source = "server-thumbnail"
         else:
             encoded, source, revision = core.render_project_png_with_source(project_id)
-        handler._png(200, encoded, extra_headers=(("X-CADYX-Viewport-Source", source),
-            ("X-CADYX-Document-Revision", str(revision))))
+        handler._png(200, encoded, extra_headers=(("X-CADYX-Viewport-Source", source), ("X-CADYX-Document-Revision", str(revision))))
     elif name == "agent_viewport_png":
-        encoded, source, revision = core.observe_agent_operation(project_id, "Получает изображение модели",
-            lambda: core.render_project_png_with_source(project_id))
-        handler._png(200, encoded, extra_headers=(("X-CADYX-Viewport-Source", source),
-            ("X-CADYX-Document-Revision", str(revision))))
+        encoded, source, revision = core.observe_agent_operation(project_id, "Получает изображение модели", lambda: core.render_project_png_with_source(project_id))
+        handler._png(200, encoded, extra_headers=(("X-CADYX-Viewport-Source", source), ("X-CADYX-Document-Revision", str(revision))))
     elif name in {"project_viewport_snapshot", "agent_viewport_snapshot"}:
         revision_text = handler.headers.get("X-CADYX-Document-Revision")
         try:
@@ -483,8 +461,7 @@ def _dispatch_viewport(handler: Any, core: CadyxCore, route: RouteMatch, parsed:
         allowed = {"yaw_delta", "pitch_delta", "zoom_factor", "duration_ms"}
         if not body.keys() <= allowed or "yaw_delta" not in body:
             raise ValidationError("Camera requests need yaw_delta and only supported camera fields.")
-        result = core.rotate_view(project_id, yaw_delta=body["yaw_delta"], pitch_delta=body.get("pitch_delta", 0.0),
-            zoom_factor=body.get("zoom_factor", 1.0), duration_ms=body.get("duration_ms", 1200))
+        result = core.rotate_view(project_id, yaw_delta=body["yaw_delta"], pitch_delta=body.get("pitch_delta", 0.0), zoom_factor=body.get("zoom_factor", 1.0), duration_ms=body.get("duration_ms", 1200))
         handler._json(200, {"camera": result})
     else:
         raise RuntimeError(f"Unhandled viewport route: {name}")
@@ -498,6 +475,7 @@ def _dispatch_static(handler: Any, core: CadyxCore, route: RouteMatch, parsed: S
         "ui_favicon": ("favicon.svg", "image/svg+xml"),
         "asset_app": ("app.js", "text/javascript; charset=utf-8"),
         "asset_viewport": ("viewport.js", "text/javascript; charset=utf-8"),
+        "asset_trace_draft": ("trace-draft.js", "text/javascript; charset=utf-8"),
         "asset_scanner_camera": ("scanner-camera.js", "text/javascript; charset=utf-8"),
         "asset_ply_parser": ("ply-parser.js", "text/javascript; charset=utf-8"),
         "asset_ply_preview": ("ply-preview.js", "text/javascript; charset=utf-8"),
