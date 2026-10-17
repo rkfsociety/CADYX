@@ -151,14 +151,16 @@ def _normalize_segments(value: Any, coordinates: dict[str, Any]) -> list[dict[st
 
 
 def _latest_version(document: Any, trace_id: str) -> int:
-    versions = [
-        item.get("trace_version")
-        for item in document.objects
-        if item.get("type") == "sketch" and item.get("trace_id") == trace_id
-    ]
-    if any(type(version) is not int or version <= 0 for version in versions):
-        raise ValidationError("Existing trace version metadata is invalid.")
-    return max(versions, default=0)
+    latest = 0
+    for item in document.objects:
+        if item.get("type") != "sketch" or item.get("trace_id") != trace_id:
+            continue
+        version = item.get("trace_version")
+        if type(version) is not int or version <= 0:
+            raise ValidationError("Existing trace version metadata is invalid.")
+        if version > latest:
+            latest = version
+    return latest
 
 
 def _execute(self: Any, document: Any, command: dict[str, Any], *, progress=None, project_id=None) -> dict[str, Any]:
