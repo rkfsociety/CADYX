@@ -9,11 +9,7 @@
     "typeddict-item": 2,
     "union-attr": 7
   },
-  "web": {
-    "arg-type": 7,
-    "index": 8,
-    "union-attr": 5
-  },
+  "web": {},
   "workspace": {
     "arg-type": 1,
     "assignment": 1,
