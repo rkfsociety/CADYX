@@ -51,22 +51,6 @@
     {
       "issue": "observe_agent_operation:return: unchecked annotation",
       "reason": "The observation wrapper preserves operation-specific return payloads without constraining their shape."
-    },
-    {
-      "issue": "finite_number:value: unchecked annotation",
-      "reason": "The local parser accepts raw JSON values and rejects non-numeric inputs before conversion."
-    },
-    {
-      "issue": "nonnegative_number:value: unchecked annotation",
-      "reason": "The local parser accepts raw JSON values and rejects non-numeric inputs before conversion."
-    },
-    {
-      "issue": "nonnegative_volume:value: unchecked annotation",
-      "reason": "The local parser accepts raw JSON values and rejects non-numeric inputs before conversion."
-    },
-    {
-      "issue": "nonnegative:value: unchecked annotation",
-      "reason": "The local parser accepts raw JSON values and rejects non-numeric inputs before conversion."
     }
   ],
   "commands": [],

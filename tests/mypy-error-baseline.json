@@ -1,27 +1,24 @@
 {
-  "core": {
-    "arg-type": 16,
-    "assignment": 9,
-    "attr-defined": 1,
-    "call-arg": 2,
-    "dict-item": 1,
-    "misc": 2,
-    "operator": 27,
-    "typeddict-item": 2,
-    "union-attr": 7,
-    "var-annotated": 3
-  },
   "commands": {},
+  "core": {
+    "arg-type": 9,
+    "assignment": 8,
+    "call-arg": 2,
+    "misc": 2,
+    "operator": 1,
+    "typeddict-item": 2,
+    "union-attr": 7
+  },
+  "web": {
+    "arg-type": 7,
+    "index": 8,
+    "union-attr": 5
+  },
   "workspace": {
     "arg-type": 1,
     "assignment": 1,
     "attr-defined": 4,
     "valid-type": 6,
     "var-annotated": 1
-  },
-  "web": {
-    "arg-type": 7,
-    "index": 8,
-    "union-attr": 5
   }
 }

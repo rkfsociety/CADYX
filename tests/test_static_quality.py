@@ -17,7 +17,7 @@ from pathlib import Path
 
 BOUNDARIES = ("core", "commands", "workspace", "web", "agent_runtime")
 BOUNDARY_BASELINE_CAPS = {
-    "core": 17,
+    "core": 13,
     "commands": 0,
     "workspace": 1,
     "web": 1,
