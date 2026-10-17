@@ -118,11 +118,86 @@
     get canRedo() { return this._future.length > 0; }
   }
 
+  class TraceEditorSession {
+    constructor({
+      projectId,
+      leaseId,
+      expectedRevision,
+      name,
+      sourceImageSha256,
+      coordinateSystem,
+      plane = "XY",
+      closed = false,
+      traceId = null,
+      baseVersion = 0,
+      segments = [],
+    }) {
+      if (!projectId || !leaseId) throw new TypeError("projectId and leaseId are required");
+      if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+        throw new TypeError("expectedRevision must be a non-negative integer");
+      }
+      if (!Number.isInteger(baseVersion) || baseVersion < 0) {
+        throw new TypeError("baseVersion must be a non-negative integer");
+      }
+      this.projectId = projectId;
+      this.leaseId = leaseId;
+      this.expectedRevision = expectedRevision;
+      this.name = name;
+      this.sourceImageSha256 = sourceImageSha256;
+      this.coordinateSystem = cloneTraceValue(coordinateSystem);
+      this.plane = plane;
+      this.closed = closed;
+      this.traceId = traceId;
+      this.baseVersion = baseVersion;
+      this.draft = new TraceDraft({ segments });
+    }
+
+    command() {
+      const command = {
+        type: "save_traced_curve_version",
+        name: this.name,
+        source_image_sha256: this.sourceImageSha256,
+        coordinate_system: cloneTraceValue(this.coordinateSystem),
+        segments: this.draft.snapshot().segments,
+        plane: this.plane,
+        closed: this.closed,
+        base_version: this.baseVersion,
+      };
+      if (this.traceId) command.trace_id = this.traceId;
+      return command;
+    }
+
+    async save(fetchImpl = window.fetch.bind(window)) {
+      const response = await requestJson(
+        `/api/v1/projects/${encodeURIComponent(this.projectId)}/commands`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            lease_id: this.leaseId,
+            expected_revision: this.expectedRevision,
+            command: this.command(),
+          }),
+        },
+        fetchImpl,
+      );
+      const result = response?.history_entry?.result;
+      const revision = response?.document?.revision;
+      if (!result || !Number.isInteger(result.trace_version) || !result.trace_id || !Number.isInteger(revision)) {
+        throw new Error("Сервер CADYX вернул неполный результат сохранения трассировки.");
+      }
+      this.traceId = result.trace_id;
+      this.baseVersion = result.trace_version;
+      this.expectedRevision = revision;
+      return cloneTraceValue(response);
+    }
+  }
+
   window.CadyxBrowserApi = Object.freeze({
     errorLabels,
     errorMessage,
     requestJson,
     requestArrayBuffer,
     TraceDraft,
+    TraceEditorSession,
   });
 })();
