@@ -131,6 +131,8 @@ class CadyxMCPServerTests(unittest.TestCase):
             "create_sketch": {
                 "name": {"type": "string"},
                 "plane": {"type": "string", "enum": ["XY", "XZ"]},
+                "section_normal_axis": {"type": "string", "enum": ["Y", "Z"]},
+                "section_offset": {"type": "number"},
             },
             "add_sketch_point": {
                 "sketch_id": {"type": "string"},

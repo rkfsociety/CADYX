@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from .api_contracts import validate_request_fields
 from .auth import authorization_matches
 from .capabilities import agent_api_capabilities
 from .core import CadyxCore
@@ -395,13 +396,7 @@ def make_request_handler(
                 return
             project_id = parts[0]
             if agent_api and len(parts) == 3 and parts[1:] == ["validations", "dimensions"]:
-                required = {
-                    "body_id", "expected_revision", "expected_dimensions", "tolerance",
-                }
-                if body is None or not required.issubset(body) or set(body) - required - {"persist"}:
-                    raise ValidationError(
-                        "Dimension validation requires body_id, expected_revision, expected_dimensions, and tolerance."
-                    )
+                validate_request_fields("dimensions", body)
                 result = core.observe_agent_operation(
                     project_id, "Проверяет габариты тела",
                     lambda: core.validate_body_dimensions(
@@ -413,13 +408,7 @@ def make_request_handler(
                 self._json(200, result)
                 return
             if agent_api and len(parts) == 3 and parts[1:] == ["validations", "clearance"]:
-                required = {
-                    "first_body_id", "second_body_id", "expected_revision", "minimum_clearance", "tolerance",
-                }
-                if body is None or not required.issubset(body) or set(body) - required - {"persist"}:
-                    raise ValidationError(
-                        "Clearance validation requires both body ids, expected_revision, minimum_clearance, and tolerance."
-                    )
+                validate_request_fields("clearance", body)
                 result = core.observe_agent_operation(
                     project_id, "Измеряет зазор между телами",
                     lambda progress: core.validate_body_clearance(
@@ -432,15 +421,7 @@ def make_request_handler(
                 self._json(200, result)
                 return
             if agent_api and len(parts) == 3 and parts[1:] == ["validations", "preservation"]:
-                required = {
-                    "reference_body_id", "candidate_body_id", "expected_revision",
-                    "maximum_lost_volume", "tolerance",
-                }
-                if body is None or not required.issubset(body) or set(body) - required - {"persist"}:
-                    raise ValidationError(
-                        "Preservation validation requires reference_body_id, candidate_body_id, "
-                        "expected_revision, maximum_lost_volume, and tolerance."
-                    )
+                validate_request_fields("preservation", body)
                 result = core.observe_agent_operation(
                     project_id, "Проверяет сохранённый объём тела",
                     lambda: core.validate_body_preservation(
@@ -452,12 +433,7 @@ def make_request_handler(
                 self._json(200, result)
                 return
             if agent_api and len(parts) == 3 and parts[1:] == ["validations", "thickness"]:
-                required = {"body_id", "expected_revision", "minimum_thickness", "tolerance"}
-                if body is None or not required.issubset(body) or set(body) - required - {"persist", "method"}:
-                    raise ValidationError(
-                        "Thickness validation requires body_id, expected_revision, minimum_thickness, and tolerance; "
-                        "optional fields are method and persist."
-                    )
+                validate_request_fields("thickness", body)
                 result = core.observe_agent_operation(
                     project_id, "Измеряет минимальную толщину стенки",
                     lambda progress: core.validate_body_thickness(

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from .api_contracts import VALIDATION_OPERATIONS
 from .capabilities import COMMAND_CAPABILITIES
 
 _PROTOCOL_VERSION = "2025-11-25"
@@ -165,10 +166,14 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_list_folder_files", "description": "List direct user files in a workspace folder.", "inputSchema": _schema({"folder_name": _STRING}, ["folder_name"])},
     {"name": "cadyx_read_folder_file", "description": "Read a direct workspace file through the read-only API; small images are returned as image content.", "inputSchema": _schema({"folder_name": _STRING, "name": _STRING}, ["folder_name", "name"])},
     {"name": "cadyx_inspect_topology", "description": "Inspect current editable B-rep edges before a fillet. Refresh topology after any upstream edit.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING}, ["project_id", "body_id"])},
-    {"name": "cadyx_validate_body_dimensions", "description": "Read-only axis-aligned bounding-box dimension check bound to an exact saved revision and geometry hash; optionally persist the result.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING, "expected_revision": _INTEGER, "expected_dimensions": {"type": "object", "properties": {"x": _NUMBER, "y": _NUMBER, "z": _NUMBER}, "required": ["x", "y", "z"], "additionalProperties": False}, "tolerance": {"type": "number", "minimum": 0}, "persist": {"type": "boolean"}}, ["project_id", "body_id", "expected_revision", "expected_dimensions", "tolerance"])},
-    {"name": "cadyx_validate_body_clearance", "description": "Read-only OCCT minimum-distance and common-volume check for two B-rep bodies, bound to expected_revision and a combined geometry hash; classifies interference, streams progress through agent.activity events, and can persist the result.", "inputSchema": _schema({"project_id": _STRING, "first_body_id": _STRING, "second_body_id": _STRING, "expected_revision": _INTEGER, "minimum_clearance": {"type": "number", "minimum": 0}, "tolerance": {"type": "number", "minimum": 0}, "persist": {"type": "boolean"}}, ["project_id", "first_body_id", "second_body_id", "expected_revision", "minimum_clearance", "tolerance"])},
-    {"name": "cadyx_validate_body_preservation", "description": "Compare a reference and candidate solid using OCCT common volume; reports overlapping, lost, and added volume in model units cubed, with pass/fail/untested against the maximum permitted loss and tolerance, bound to a saved revision and geometry hash.", "inputSchema": _schema({"project_id": _STRING, "reference_body_id": _STRING, "candidate_body_id": _STRING, "expected_revision": _INTEGER, "maximum_lost_volume": {"type": "number", "minimum": 0}, "tolerance": {"type": "number", "minimum": 0}, "persist": {"type": "boolean"}}, ["project_id", "reference_body_id", "candidate_body_id", "expected_revision", "maximum_lost_volume", "tolerance"])},
-    {"name": "cadyx_validate_body_thickness", "description": "Validate a body against minimum_thickness using sampled inward-normal rays, or method=global_minimum to certify minimum support width for a convex planar polyhedron. The certified method returns a numeric enclosure and is untested for curved, non-linear-edged, or non-convex solids. Revision/hash bound; can persist the result.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING, "expected_revision": _INTEGER, "minimum_thickness": {"type": "number", "exclusiveMinimum": 0}, "tolerance": {"type": "number", "minimum": 0}, "method": {"type": "string", "enum": ["sampled", "global_minimum"]}, "persist": {"type": "boolean"}}, ["project_id", "body_id", "expected_revision", "minimum_thickness", "tolerance"])},
+    *(
+        {"name": operation["tool_name"], "description": operation["description"],
+         "inputSchema": _schema(
+             {"project_id": _STRING, **operation["input_schema"]["properties"]},
+             ["project_id", *operation["input_schema"]["required"]],
+         )}
+        for operation in VALIDATION_OPERATIONS.values()
+    ),
     {"name": "cadyx_list_validation_records", "description": "List recent durable validation records for a project without changing its document revision.", "inputSchema": _schema({"project_id": _STRING, "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, ["project_id"])},
     {"name": "cadyx_get_viewport", "description": "Read validated viewport scene data for the saved project revision.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_get_viewport_image", "description": "Get the saved model's viewport PNG as an MCP image the model can inspect.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
@@ -181,6 +186,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_resume_agent_work", "description": "Resume after a confirmed FREE state and current revision; the next command uses the validated revision and releases the new lease.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER}, ["project_id", "expected_revision"])},
     {"name": "cadyx_recover_expired_lease", "description": "Recover a stale lease only when the Agent API currently confirms it expired; Core validates the saved document before release.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
 ]
+
 
 
 class MCPApplication:
@@ -278,41 +284,14 @@ class MCPApplication:
             project_id = urllib.parse.quote(args["project_id"], safe="")
             body_id = urllib.parse.quote(args["body_id"], safe="")
             return self.api.get(f"/api/v1/agent/projects/{project_id}/topology?body_id={body_id}")
-        if name == "cadyx_validate_body_dimensions":
-            return self.api.post(self._project(args["project_id"], "/validations/dimensions"), {
-                "body_id": args["body_id"],
-                "expected_revision": args["expected_revision"],
-                "expected_dimensions": args["expected_dimensions"],
-                "tolerance": args["tolerance"],
-                "persist": args.get("persist", False),
-            })
-        if name == "cadyx_validate_body_clearance":
-            return self.api.post(self._project(args["project_id"], "/validations/clearance"), {
-                "first_body_id": args["first_body_id"],
-                "second_body_id": args["second_body_id"],
-                "expected_revision": args["expected_revision"],
-                "minimum_clearance": args["minimum_clearance"],
-                "tolerance": args["tolerance"],
-                "persist": args.get("persist", False),
-            })
-        if name == "cadyx_validate_body_preservation":
-            return self.api.post(self._project(args["project_id"], "/validations/preservation"), {
-                "reference_body_id": args["reference_body_id"],
-                "candidate_body_id": args["candidate_body_id"],
-                "expected_revision": args["expected_revision"],
-                "maximum_lost_volume": args["maximum_lost_volume"],
-                "tolerance": args["tolerance"],
-                "persist": args.get("persist", False),
-            })
-        if name == "cadyx_validate_body_thickness":
-            return self.api.post(self._project(args["project_id"], "/validations/thickness"), {
-                "body_id": args["body_id"],
-                "expected_revision": args["expected_revision"],
-                "minimum_thickness": args["minimum_thickness"],
-                "tolerance": args["tolerance"],
-                "method": args.get("method", "sampled"),
-                "persist": args.get("persist", False),
-            })
+        for operation in VALIDATION_OPERATIONS.values():
+            if name == operation["tool_name"]:
+                body = {field: args[field] for field in operation["input_schema"]["required"]}
+                for field in operation["input_schema"]["properties"]:
+                    if field not in body and (field in args or field in operation["defaults"]):
+                        body[field] = args.get(field, operation["defaults"].get(field))
+                path = operation["path"].replace("{id}", urllib.parse.quote(args["project_id"], safe=""))
+                return self.api.post(path, body)
         if name == "cadyx_list_validation_records":
             project_id = urllib.parse.quote(args["project_id"], safe="")
             limit = args.get("limit", 50)

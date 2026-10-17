@@ -14,12 +14,34 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from cadyx.core import CadyxCore
+from cadyx.api_contracts import VALIDATION_OPERATIONS
 from cadyx.models import Document
 from cadyx.web import CadyxHTTPServer, make_request_handler
 import cadyx.web as web_module
 
 
 class WebApiTests(unittest.TestCase):
+    def test_validation_routes_preserve_field_errors_and_core_delegation(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Validation contracts"})
+        project_id = created["project"]["id"]
+        for name, operation in VALIDATION_OPERATIONS.items():
+            path = operation["path"].replace("{id}", project_id)
+            body = dict.fromkeys(operation["input_schema"]["required"], "value")
+            with self.subTest(operation=name):
+                for invalid in ({}, {**body, "unexpected": True}):
+                    status, error = self.request(path, invalid)
+                    self.assertEqual(status, 400)
+                    self.assertEqual(error["message"], operation["field_error"])
+                with patch.object(self.core, "validate_body_" + name,
+                                  return_value={"status": "untested"}) as validate:
+                    status, result = self.request(path, body)
+                    self.assertEqual(status, 200)
+                    self.assertEqual(result, {"status": "untested"})
+                    validate.assert_called_once()
+                    self.assertFalse(validate.call_args.kwargs["persist"])
+                    if name == "thickness":
+                        self.assertEqual(validate.call_args.kwargs["method"], "sampled")
+
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary_directory.cleanup)
