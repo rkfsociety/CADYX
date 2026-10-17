@@ -35,6 +35,11 @@ jobs:
               "                  '_remember_geometry_validation','_invalidate_project_runtime_caches',\n                  '_validate_geometry_once',\n",
               1,
           )
+          old_delegate = """              repl.append((start(n)-1, n.end_lineno, header + f'        return {call(n, targets[svc])}\\n'))\n"""
+          new_delegate = """              delegated = call(n, targets[svc])\n              if name in {'_selection_project_locks', '_project_lifecycle_lock'}:\n                  decorators = ''.join(lines[start(n)-1:n.lineno-1])\n                  body = decorators + header + f'        with {delegated}:\\n            yield\\n'\n              else:\n                  body = header + f'        return {delegated}\\n'\n              repl.append((start(n)-1, n.end_lineno, body))\n"""
+          if old_delegate not in text:
+              raise SystemExit('delegate generation anchor changed')
+          text = text.replace(old_delegate, new_delegate, 1)
           path.write_text(text, encoding='utf-8')
 
           def run_block(name: str) -> None:
