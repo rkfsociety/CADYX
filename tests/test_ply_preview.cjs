@@ -72,6 +72,33 @@ assert.equal(state.selectedResourceFromSearch("?folder=archive"), "folder:archiv
 const lock = state.reduceAgentWorkLock({ active: false, revision: 2, projectIds: [] }, true, 3, ["project-1"]);
 assert.equal(JSON.stringify(lock), JSON.stringify({ active: true, revision: 3, projectIds: ["project-1"] }));
 
+const viewerModule = browserSandbox.window.CadyxBrowserViewers;
+const presetButtons = ["isometric", "front"].map((cameraPreset) => ({
+  dataset: { cameraPreset },
+  pressed: null,
+  setAttribute(name, value) {
+    if (name === "aria-pressed") this.pressed = value;
+  },
+}));
+const root = {
+  querySelectorAll: () => presetButtons,
+  addEventListener: () => {},
+};
+const canvas = { addEventListener: () => {} };
+let appliedCamera = null;
+const presetViewer = {
+  getCamera: () => ({ zoom: 2.5 }),
+  setCamera: (camera) => { appliedCamera = camera; },
+};
+const presetController = viewerModule.createCameraPresetController({ root, canvas, viewer: presetViewer });
+assert.equal(presetController.apply("front"), true);
+assert.equal(appliedCamera.yaw, 0);
+assert.equal(appliedCamera.pitch, 0);
+assert.equal(appliedCamera.zoom, 2.5);
+assert.equal(appliedCamera.projection, "orthographic");
+assert.equal(presetButtons[1].pressed, "true");
+assert.equal(presetController.apply("missing"), false);
+
 let captures = 0;
 let publishes = 0;
 const context = { projectId: "project-1", renderedProjectId: "project-1", revision: 7 };
@@ -96,9 +123,35 @@ synchronizer.markDirty();
 assert.equal(timers.length, 1);
 timers.shift()();
 
+const jsonResponse = (status, value) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  headers: { get: (name) => name.toLowerCase() === "content-type" ? "application/json" : null },
+  json: async () => value,
+});
+
 setImmediate(async () => {
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(captures, 1);
   assert.equal(publishes, 1);
-  console.log("PLY preview and browser modules: parser, helpers, state and snapshot throttling passed.");
+
+  const browserApi = browserSandbox.window.CadyxBrowserApi;
+  const success = await browserApi.requestJson(
+    "/ok",
+    {},
+    async () => jsonResponse(200, { ok: true }),
+  );
+  assert.equal(success.ok, true);
+  await assert.rejects(
+    () => browserApi.requestJson(
+      "/missing",
+      {},
+      async () => jsonResponse(404, { error: "NOT_FOUND" }),
+    ),
+    (error) => error.status === 404
+      && error.code === "NOT_FOUND"
+      && error.message === "Проект, файл или объект не найден.",
+  );
+
+  console.log("PLY preview and browser modules: parser, helpers, API errors, viewer presets, state and snapshot throttling passed.");
 });
