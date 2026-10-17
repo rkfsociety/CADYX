@@ -18,6 +18,7 @@ _PROGRESS_CALLBACK = ctypes.CFUNCTYPE(
 )
 _PERIODIC_SPLINE_CACHE_MAX_BYTES = 8 * 1024 * 1024
 _PERIODIC_SPLINE_CACHE_MAX_ENTRIES = 128
+_NATIVE_ABI_VERSION = 1
 _periodic_spline_cache: OrderedDict[tuple[bytes, int], tuple[bytes, int]] = OrderedDict()
 _periodic_spline_cache_bytes = 0
 _periodic_spline_cache_lock = Lock()
@@ -108,6 +109,7 @@ _NATIVE_FUNCTION_SIGNATURES = {
                              ctypes.c_char_p, ctypes.c_size_t], ctypes.c_void_p),
     "cadyx_free": ([ctypes.c_void_p], None),
     "cadyx_kernel_version": ([], ctypes.c_char_p),
+    "cadyx_kernel_abi_manifest": ([], ctypes.c_char_p),
 }
 _OPTIONAL_NATIVE_FUNCTIONS = frozenset({
     "cadyx_advanced_brep",
@@ -118,9 +120,67 @@ _OPTIONAL_NATIVE_FUNCTIONS = frozenset({
 })
 
 
+def _load_native_functions(library):
+    try:
+        manifest_function = library.cadyx_kernel_abi_manifest
+    except AttributeError as exc:
+        raise RuntimeError(
+            "Native bridge ABI manifest is missing; run scripts/setup-runtime.ps1 to rebuild the bridge."
+        ) from exc
+    manifest_function.argtypes = []
+    manifest_function.restype = ctypes.c_char_p
+    try:
+        raw_manifest = manifest_function()
+        manifest = json.loads(raw_manifest.decode("utf-8"))
+    except (AttributeError, UnicodeDecodeError, json.JSONDecodeError, TypeError) as exc:
+        raise RuntimeError("Native bridge ABI manifest is invalid; rebuild the native runtime.") from exc
+
+    if not isinstance(manifest, dict):
+        raise RuntimeError("Native bridge ABI manifest must be a JSON object.")
+    abi_version = manifest.get("abi_version")
+    if type(abi_version) is not int or abi_version != _NATIVE_ABI_VERSION:
+        raise RuntimeError(
+            f"Unsupported native bridge ABI version {abi_version!r}; "
+            f"expected {_NATIVE_ABI_VERSION}. Run scripts/setup-runtime.ps1 to rebuild the native runtime."
+        )
+    exports = manifest.get("exports")
+    if (not isinstance(exports, list) or any(not isinstance(name, str) or not name.startswith("cadyx_")
+                                             for name in exports)
+            or len(exports) != len(set(exports))):
+        raise RuntimeError("Native bridge ABI manifest has an invalid export list.")
+    exported_names = set(exports)
+    if "cadyx_kernel_abi_manifest" not in exported_names:
+        raise RuntimeError("Native bridge ABI manifest does not advertise its own symbol.")
+
+    required_names = set(_NATIVE_FUNCTION_SIGNATURES) - _OPTIONAL_NATIVE_FUNCTIONS
+    missing_required = sorted(required_names - exported_names)
+    if missing_required:
+        raise RuntimeError(
+            "Native bridge ABI manifest omits required exports: " + ", ".join(missing_required)
+        )
+
+    functions = {}
+    advertised_functions = {}
+    for name in exports:
+        try:
+            advertised_functions[name] = getattr(library, name)
+        except AttributeError as exc:
+            raise RuntimeError(f"Native bridge advertises missing export {name!r}.") from exc
+
+    for name, (argtypes, restype) in _NATIVE_FUNCTION_SIGNATURES.items():
+        function = advertised_functions.get(name)
+        if function is None:
+            continue
+        function.argtypes = argtypes
+        function.restype = restype
+        functions[name] = function
+    return functions, manifest
+
+
 class NativeKernel:
     _library = None
     _functions = None
+    _abi_manifest = None
     _directories = []
     _lock = Lock()
 
@@ -139,17 +199,7 @@ class NativeKernel:
                     for relative in manifest["dll_directories"]:
                         directories.append(os.add_dll_directory(str(runtime / relative)))
                     library = ctypes.CDLL(str(runtime / manifest["bridge"]))
-                    functions = {}
-                    for name, (argtypes, restype) in _NATIVE_FUNCTION_SIGNATURES.items():
-                        try:
-                            function = getattr(library, name)
-                        except AttributeError:
-                            if name in _OPTIONAL_NATIVE_FUNCTIONS:
-                                continue
-                            raise
-                        function.argtypes = argtypes
-                        function.restype = restype
-                        functions[name] = function
+                    functions, abi_manifest = _load_native_functions(library)
                     if functions["cadyx_kernel_version"]().decode("ascii") != manifest["occt_version"]:
                         raise RuntimeError("Native OCCT version differs from the runtime manifest.")
                 except Exception:
@@ -159,7 +209,9 @@ class NativeKernel:
                 self._directories.extend(directories)
                 self.__class__._library = library
                 self.__class__._functions = functions
+                self.__class__._abi_manifest = abi_manifest
         self._functions = self.__class__._functions
+        self._abi_manifest = self.__class__._abi_manifest
         self._graph_node = _GraphNode
         self.library = self._library
 

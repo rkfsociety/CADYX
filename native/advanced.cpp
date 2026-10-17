@@ -1,4 +1,6 @@
 // Advanced solid-modeling operations for CADYX. OCCT objects never leave this DLL.
+#include "kernel_internal.hpp"
+
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -41,17 +43,10 @@
 #include <limits>
 #include <vector>
 
-#define API extern "C" __declspec(dllexport)
+using namespace cadyx::native;
 
 namespace {
 constexpr size_t kMaxBrepBytes = 64 * 1024 * 1024;
-
-void CopyError(char* error, size_t capacity, const char* message) {
-  if (!error || capacity == 0) return;
-  const size_t count = std::min(std::strlen(message), capacity - 1);
-  std::memcpy(error, message, count);
-  error[count] = '\0';
-}
 
 TopoDS_Shape ReadBrep(const unsigned char* data, size_t size) {
   if (!data || size == 0 || size > kMaxBrepBytes)
@@ -86,8 +81,7 @@ char* Serialize(const TopoDS_Shape& shape, size_t* output_size) {
   const std::string value = output.str();
   if (value.empty() || value.size() > kMaxBrepBytes)
     throw std::runtime_error("Serialized B-rep is empty or exceeds the 64 MB limit.");
-  char* result = new char[value.size()];
-  std::memcpy(result, value.data(), value.size());
+  char* result = CopyBytes(value);
   *output_size = value.size();
   return result;
 }
@@ -165,7 +159,8 @@ TopoDS_Shape Transform(const TopoDS_Shape& source, const gp_Trsf& transform) {
 // 8 offset solid(offset,tolerance)
 // 9 hole(origin xyz, axis xyz, diameter, depth)
 // 10 boss(origin xyz, axis xyz, diameter, depth)
-API char* cadyx_advanced_brep(const unsigned char* data, size_t size, int operation,
+namespace cadyx::native {
+char* AdvancedBrepImpl(const unsigned char* data, size_t size, int operation,
                               const double* values, size_t value_count,
                               const int* indices, size_t index_count,
                               size_t* output_size, char* generated_faces_json, size_t generated_faces_capacity,
@@ -347,3 +342,4 @@ API char* cadyx_advanced_brep(const unsigned char* data, size_t size, int operat
   }
   return nullptr;
 }
+}  // namespace cadyx::native

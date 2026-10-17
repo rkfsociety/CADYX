@@ -110,6 +110,22 @@ class OCPKernelAdapterConformanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "one connected solid"):
             self.kernel.fuse_profiles(base, separated)
 
+    def test_native_engineering_validation_operations_keep_their_results(self) -> None:
+        native = NativeKernel()
+        geometry = self.kernel.create_box(width=2, height=3, depth=5)
+        brep, _ = native.export_geometry(geometry)
+
+        distance = native.minimum_brep_distance(brep, brep)
+        preservation = native.brep_preservation(brep, brep)
+        thickness = native.brep_thickness(brep, minimum_thickness=1.9, tolerance=0.1)
+
+        self.assertAlmostEqual(distance["minimum_distance"], 0.0)
+        self.assertAlmostEqual(distance["intersection_volume"], 30.0)
+        self.assertAlmostEqual(preservation["preserved_volume"], 30.0)
+        self.assertAlmostEqual(preservation["lost_volume"], 0.0)
+        self.assertAlmostEqual(preservation["added_volume"], 0.0)
+        self.assertAlmostEqual(thickness["minimum_sampled_thickness"], 2.0)
+
     def test_multicontour_fusion_can_join_disconnected_intermediate_parts(self) -> None:
         def rectangle(x1, x2):
             return [{"x": x1, "y": 0.0}, {"x": x2, "y": 0.0},

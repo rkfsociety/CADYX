@@ -1,4 +1,6 @@
 // Face-level topology metadata for agent-side selection of shell/draft operations.
+#include "kernel_internal.hpp"
+
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
@@ -22,17 +24,10 @@
 #include <stdexcept>
 #include <string>
 
-#define API extern "C" __declspec(dllexport)
+using namespace cadyx::native;
 
 namespace {
 constexpr size_t kMaxBrepBytes = 64 * 1024 * 1024;
-
-void CopyError(char* error, size_t capacity, const char* message) {
-  if (!error || capacity == 0) return;
-  const size_t count = std::min(std::strlen(message), capacity - 1);
-  std::memcpy(error, message, count);
-  error[count] = '\0';
-}
 
 TopoDS_Shape ReadBrep(const unsigned char* data, size_t size) {
   if (!data || size == 0 || size > kMaxBrepBytes)
@@ -62,14 +57,10 @@ const char* SurfaceName(GeomAbs_SurfaceType type) {
   return "other";
 }
 
-char* CopyResult(const std::string& value) {
-  char* result = new char[value.size() + 1];
-  std::memcpy(result, value.c_str(), value.size() + 1);
-  return result;
-}
 }  // namespace
 
-API char* cadyx_face_topology(const unsigned char* data, size_t size,
+namespace cadyx::native {
+char* FaceTopologyImpl(const unsigned char* data, size_t size,
                               char* error, size_t capacity) noexcept {
   try {
     const TopoDS_Shape shape = ReadBrep(data, size);
@@ -103,3 +94,4 @@ API char* cadyx_face_topology(const unsigned char* data, size_t size,
   }
   return nullptr;
 }
+}  // namespace cadyx::native

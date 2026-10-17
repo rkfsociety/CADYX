@@ -129,13 +129,21 @@ native reconstruction algorithms remain unchanged; no migration is required.
 
 ### OCCT C ABI ownership
 
-`cadyx/native_kernel.py` is the sole Python binding boundary for the OCCT bridge:
-it declares each bridge signature once, binds optional symbols when present,
-marshals native buffers, translates native error buffers, and releases returned
-allocations. Its methods expose decoded JSON, B-rep bytes, or `None` for optional
-capabilities. Advanced modeling, agent authoring, and topology modules use these
-methods without accessing the DLL or configuring `ctypes` signatures. The separate
-Open3D scan bridge remains owned by `cadyx/native_scan.py`.
+`native/kernel_abi.hpp` is the canonical OCCT C ABI declaration and export list.
+`native/kernel.cpp` is its only exported facade; implementations live in the
+shared, primitive/profile, topology, delivery, validation, advanced-feature and
+agent-feature modules. `kernel_common.cpp` owns shape JSON serialization, error
+buffer copying and the only `new[]` result allocators. Every returned allocation
+is released through `cadyx_free`; the Open3D scan bridge remains separate.
+
+The facade reports an ABI version and advertised export list through
+`cadyx_kernel_abi_manifest`. Before binding any other symbol,
+`cadyx/native_kernel.py` checks the ABI version, required exports and the presence
+of every advertised symbol. Optional capabilities are bound only when the
+manifest lists them. A bridge without a supported manifest fails at startup with
+a rebuild instruction. Python signatures remain centralized in
+`_NATIVE_FUNCTION_SIGNATURES`; modeling modules use typed `NativeKernel` methods
+without accessing the DLL or configuring `ctypes` signatures.
 
 
 `export_brep` requires `expected_revision`, validates one current single-solid B-rep, exports STEP and re-imports it to check validity, solid count, bounds and volume before publishing. Optional binary STL output is checked for watertightness and orientation, with mesh volume error and a bounded sampled surface-deviation measurement recorded in a revision-bound manifest. Export files use no-replace atomic publication in the project folder; the manifest is published last. STEP is authoritative; STL sampling does not claim exhaustive surface equivalence. See the [verified delivery contract](document-model-v7.md#verified-cad-delivery).

@@ -1,4 +1,6 @@
 // Agent-oriented native helpers for high-level holes, work-plane transforms and measurements.
+#include "kernel_internal.hpp"
+
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -46,30 +48,10 @@
 #include <stdexcept>
 #include <string>
 
-#define API extern "C" __declspec(dllexport)
+using namespace cadyx::native;
 
 namespace {
 constexpr size_t kMaxBrepBytes = 64 * 1024 * 1024;
-
-void CopyError(char* error, size_t capacity, const char* message) {
-  if (!error || capacity == 0) return;
-  const size_t count = std::min(std::strlen(message), capacity - 1);
-  std::memcpy(error, message, count);
-  error[count] = '\0';
-}
-
-char* CopyResult(const std::string& value) {
-  char* result = new char[value.size() + 1];
-  std::memcpy(result, value.c_str(), value.size() + 1);
-  return result;
-}
-
-char* CopyBytes(const std::string& value) {
-  if (value.empty()) throw std::runtime_error("OCCT returned an empty B-rep.");
-  char* result = new char[value.size()];
-  std::memcpy(result, value.data(), value.size());
-  return result;
-}
 
 TopoDS_Shape ReadBrep(const unsigned char* data, size_t size) {
   if (!data || size == 0 || size > kMaxBrepBytes)
@@ -155,7 +137,8 @@ const char* SurfaceName(GeomAbs_SurfaceType type) {
 //   values = origin xyz, axis xyz, outer diameter, inner diameter, depth
 // operation 2: rigid transform
 //   values = rotation axis xyz, angle radians, translation xyz
-API char* cadyx_agent_feature_brep(const unsigned char* data, size_t size, int operation,
+namespace cadyx::native {
+char* AgentFeatureBrepImpl(const unsigned char* data, size_t size, int operation,
                                    const double* values, size_t value_count,
                                    size_t* output_size, char* error, size_t capacity) noexcept {
   if (output_size) *output_size = 0;
@@ -217,7 +200,7 @@ API char* cadyx_agent_feature_brep(const unsigned char* data, size_t size, int o
 
 // Measure a serialized B-rep directly so Python does not have to compress it,
 // reconstruct an imported_brep JSON node, and immediately decompress it again.
-API char* cadyx_brep_metrics(const unsigned char* data, size_t size,
+char* BrepMetricsImpl(const unsigned char* data, size_t size,
                              char* error, size_t capacity) noexcept {
   try {
     const TopoDS_Shape shape = OneSolid(ReadBrep(data, size), "B-rep metrics");
@@ -243,7 +226,7 @@ API char* cadyx_brep_metrics(const unsigned char* data, size_t size,
 
 // Complete face metadata and analytic edge/face data are emitted together so
 // Python can enrich semantic topology without parsing the same B-rep twice.
-API char* cadyx_agent_topology(const unsigned char* data, size_t size,
+char* AgentTopologyImpl(const unsigned char* data, size_t size,
                                char* error, size_t capacity) noexcept {
   try {
     const TopoDS_Shape shape = OneSolid(ReadBrep(data, size), "Topology input");
@@ -383,3 +366,4 @@ API char* cadyx_agent_topology(const unsigned char* data, size_t size,
   }
   return nullptr;
 }
+}  // namespace cadyx::native
