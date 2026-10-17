@@ -357,6 +357,77 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(detail["document"]["revision"], 0)
         self.assertEqual(detail["lock"]["state"], "FREE")
 
+    def test_definitive_http_command_rejections_preserve_original_error_without_stop(self) -> None:
+        project_id = self._create_project()
+        original_post = self.app.api.post
+        command = {"type": "create_box", "width": 10, "height": 8, "depth": 4}
+        for status in (400, 401, 403, 404, 405, 409, 413, 415, 422):
+            with self.subTest(status=status):
+                rejection = APIError(status, {"error": "REJECTED", "message": "definite rejection"})
+
+                def reject_command(path: str, body: dict):
+                    if path.endswith("/commands"):
+                        raise rejection
+                    return original_post(path, body)
+
+                with patch.object(self.app.api, "post", side_effect=reject_command) as post:
+                    with self.assertRaises(APIError) as error:
+                        self.app._execute_command(project_id, 0, command)
+                self.assertIs(error.exception, rejection)
+                paths = [call.args[0] for call in post.call_args_list]
+                self.assertFalse(any(path.endswith("/stop") for path in paths))
+                self.assertTrue(any(path.endswith("/release") for path in paths))
+                self.assertNotIn(project_id, self.app._active_leases)
+        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(detail["document"]["revision"], 0)
+        self.assertEqual(detail["lock"]["state"], "FREE")
+
+    def test_http_408_command_rejection_is_ambiguous_and_fenced(self) -> None:
+        project_id = self._create_project()
+        original_post = self.app.api.post
+
+        def timeout_command(path: str, body: dict):
+            if path.endswith("/commands"):
+                raise APIError(408, {"error": "TIMEOUT", "message": "outcome uncertain"})
+            return original_post(path, body)
+
+        with patch.object(self.app.api, "post", side_effect=timeout_command) as post:
+            result = self.app.call_tool("cadyx_execute_command", {
+                "project_id": project_id,
+                "expected_revision": 0,
+                "command": {"type": "create_box", "width": 10, "height": 8, "depth": 4},
+            })
+        self.assertTrue(result["isError"])
+        self.assertIn("safely stopped/validated", result["content"][0]["text"])
+        self.assertEqual(sum(call.args[0].endswith("/stop") for call in post.call_args_list), 1)
+        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(detail["document"]["revision"], 0)
+        self.assertEqual(detail["lock"]["state"], "FREE")
+
+    def test_unparseable_success_response_is_fenced_as_ambiguous(self) -> None:
+        project_id = self._create_project()
+        original_post = self.app.api.post
+
+        def corrupt_command_response(path: str, body: dict):
+            if path.endswith("/commands"):
+                original_post(path, body)  # Command commits; only its response is lost.
+                raise json.JSONDecodeError("invalid response JSON", "{", 1)
+            return original_post(path, body)
+
+        with patch.object(self.app.api, "post", side_effect=corrupt_command_response) as post:
+            result = self.app.call_tool("cadyx_execute_command", {
+                "project_id": project_id,
+                "expected_revision": 0,
+                "command": {"type": "create_box", "width": 10, "height": 8, "depth": 4},
+            })
+        self.assertTrue(result["isError"])
+        self.assertIn("inspect history and geometry before deciding whether to retry", result["content"][0]["text"])
+        self.assertEqual(sum(call.args[0].endswith("/stop") for call in post.call_args_list), 1)
+        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(detail["document"]["revision"], 1)
+        self.assertEqual(len(detail["history"]), 1)
+        self.assertEqual(detail["lock"]["state"], "FREE")
+
     def test_server_error_still_fences_ambiguous_command(self) -> None:
         project_id = self._create_project()
         original_post = self.app.api.post

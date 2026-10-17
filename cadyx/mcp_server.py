@@ -21,6 +21,8 @@ from .capabilities import COMMAND_CAPABILITIES
 _PROTOCOL_VERSION = "2025-11-25"
 _MAX_FILE_BYTES = 64 * 1024 * 1024
 _JSON = "application/json"
+# Only these command HTTP responses prove that the submitted mutation was rejected.
+_DEFINITIVE_COMMAND_REJECTION_STATUSES = frozenset({400, 401, 403, 404, 405, 409, 413, 415, 422})
 
 
 class APIError(RuntimeError):
@@ -362,10 +364,10 @@ class MCPApplication:
                 "command": command,
             })
             return {"command_result": result, "revision": result.get("document", {}).get("revision"), "lease_released": True}
-        except RuntimeError as exc:
-            # A definite client-side API rejection cannot have committed this command.
-            # Do not turn ordinary validation/revision errors into agent safe-stops.
-            if isinstance(exc, APIError) and exc.status in {400, 401, 403, 404, 405, 409, 413, 415, 422}:
+        except Exception as exc:
+            # Only definitive HTTP rejections rule out a commit. A lost, malformed,
+            # or otherwise unusable response is ambiguous even after HTTP 200.
+            if isinstance(exc, APIError) and exc.status in _DEFINITIVE_COMMAND_REJECTION_STATUSES:
                 raise
             # A dropped response or server failure is ambiguous. Fence the lease,
             # then require inspection; never issue the mutation a second time.
