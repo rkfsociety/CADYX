@@ -15,7 +15,6 @@ from .scan_reverse_sections import (
 )
 from .scan_reverse_compare import _deviation
 
-_INSTALLED = False
 
 SCAN_REVERSE_CAPABILITIES = (
     {
@@ -301,7 +300,7 @@ def _reapply_alignment_after_parameter_edit(self, document, command: dict[str, A
                     if item.get("id") == feature_id and item.get("type") == "feature"
                     and item.get("operation") == "reconstruct_scan"), None)
     alignment = dict(feature["alignment"]) if feature and isinstance(feature.get("alignment"), dict) else None
-    result = original(self, document, command, progress=progress, project_id=project_id)
+    result = original(document, command, progress=progress, project_id=project_id)
     if alignment is None:
         return result
     feature = next(item for item in document.objects if item.get("id") == feature_id)
@@ -337,25 +336,11 @@ def _execute(self, document, command: dict[str, Any], *, progress=None, project_
         return _compare(self, document, command, progress=progress)
     raise ValidationError(f"Unsupported scan reverse-engineering command: {kind!r}.")
 
-def install() -> None:
-    global _INSTALLED
-    if _INSTALLED:
-        return
-    from . import capabilities, commands
 
-    command_types = {item["type"] for item in SCAN_REVERSE_CAPABILITIES}
-    original = commands.CommandSystem.execute
-
-    def execute(self, document, command, *, progress=None, project_id=None):
-        if isinstance(command, dict) and command.get("type") in command_types:
-            return _execute(self, document, command, progress=progress, project_id=project_id)
-        if isinstance(command, dict) and command.get("type") == "set_scan_parameter":
-            return _reapply_alignment_after_parameter_edit(
-                self, document, command, original, progress=progress, project_id=project_id,
-            )
-        return original(self, document, command, progress=progress, project_id=project_id)
-
-    commands.CommandSystem.execute = execute
-    capabilities.COMMAND_CAPABILITIES = capabilities.COMMAND_CAPABILITIES + SCAN_REVERSE_CAPABILITIES
-    commands.COMMAND_CAPABILITIES = capabilities.COMMAND_CAPABILITIES
-    _INSTALLED = True
+def execute_with_alignment(next_execute, self, document, command, *, progress=None, project_id=None):
+    """Reapply saved scan alignment after the base parameter command succeeds."""
+    if command.get("type") == "set_scan_parameter":
+        return _reapply_alignment_after_parameter_edit(
+            self, document, command, next_execute, progress=progress, project_id=project_id,
+        )
+    return next_execute(document, command, progress=progress, project_id=project_id)

@@ -55,6 +55,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Migration tests failed.' }
           python -m unittest discover -s tests -p test_persisted_schemas.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Persisted schema tests failed.' }
+          python -m unittest discover -s tests -p test_extensions.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Extension registry tests failed.' }
 
   windows:
     needs: source

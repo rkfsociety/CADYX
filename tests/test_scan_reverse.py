@@ -87,6 +87,38 @@ class ScanReverseTests(unittest.TestCase):
         self.assertEqual(feature["artifact"], published[-1])
         document.validate()
 
+    def test_parameter_edit_reapplies_alignment_through_registered_middleware(self):
+        raw = _box_mesh(x=2.0, y=10.0, z=1.0)
+        document, body_id, feature_id = _document_with_scan(raw)
+        body, feature = document.objects
+        raw_artifact = dict(feature["artifact"])
+
+        class ReprocessSystem(CommandSystem):
+            def _set_scan_parameter(self, document, command, *, progress=None):
+                # Isolate reconstruction from the middleware under test. A real
+                # reprocess replaces the aligned mesh with source-space geometry.
+                body["geometry"] = raw
+                feature["artifact"] = raw_artifact
+                return {"artifact": raw_artifact}
+
+        def publish(folder, filename, data):
+            return {"file": filename + ".aligned", "sha256": hashlib.sha256(data).hexdigest(),
+                    "size": len(data)}
+
+        system = ReprocessSystem(_Kernel(), publish_scan_output=publish)
+        system.execute(document, {"type": "align_scan", "body_id": body_id,
+                                  "long_axis": "Y", "units": "mm", "scale": 2.0})
+        expected_geometry = body["geometry"]
+        phases = []
+        result = system.execute(document, {"type": "set_scan_parameter", "feature_id": feature_id,
+                                           "name": "voxel_size", "value": 1}, progress=phases.append)
+        self.assertEqual(body["geometry"], expected_geometry)
+        self.assertTrue(result["alignment_reapplied"])
+        self.assertEqual(feature["raw_artifact"], raw_artifact)
+        self.assertEqual(result["artifact"], feature["artifact"])
+        self.assertIn({"phase": "reapply_scan_alignment"}, phases)
+        document.validate()
+
     def test_scan_section_creates_closed_xz_profile_and_lofts_directly(self):
         geometry = _box_mesh()
         document, body_id, _ = _document_with_scan(geometry)

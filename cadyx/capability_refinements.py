@@ -1,15 +1,8 @@
-"""Tighten machine-readable contracts for extension commands with alternative selectors."""
+"""Pure contract refinements for extension commands with alternative selectors."""
 from __future__ import annotations
 
-_INSTALLED = False
 
-
-def install() -> None:
-    global _INSTALLED
-    if _INSTALLED:
-        return
-    from . import capabilities, commands
-
+def refine_capabilities(contracts):
     selector_contracts = {
         "shell_body": ("face_indices", "face_keys", "Exactly one of face_indices or face_keys is required."),
         "draft_faces": ("face_indices", "face_keys", "Exactly one of face_indices or face_keys is required."),
@@ -18,7 +11,7 @@ def install() -> None:
         "fillet_edges": ("edge_indices", "edge_keys", "Exactly one of edge_indices or edge_keys is required."),
     }
     refined = []
-    for entry in capabilities.COMMAND_CAPABILITIES:
+    for entry in contracts:
         item = dict(entry)
         contract = selector_contracts.get(item.get("type"))
         if contract:
@@ -28,6 +21,4 @@ def install() -> None:
             constraints = list(dict.fromkeys([*(item.get("constraints") or []), note]))
             item.update(required=required, optional=optional, constraints=constraints)
         refined.append(item)
-    capabilities.COMMAND_CAPABILITIES = tuple(refined)
-    commands.COMMAND_CAPABILITIES = capabilities.COMMAND_CAPABILITIES
-    _INSTALLED = True
+    return tuple(refined)

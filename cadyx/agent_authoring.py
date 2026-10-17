@@ -11,8 +11,6 @@ from .errors import NotFoundError, ValidationError
 from .models import Document
 from .native_kernel import NativeKernel
 
-_INSTALLED = False
-_ORIGINAL_RENDER = None
 
 CAPABILITIES = (
     {
@@ -359,7 +357,7 @@ def _boolean(value: Any, name: str, default: bool) -> bool:
     return value
 
 
-def _execute(self, document: Document, command: dict[str, Any], *, progress=None) -> dict[str, Any]:
+def _execute(self, document: Document, command: dict[str, Any], *, progress=None, project_id=None) -> dict[str, Any]:
     kind = command.get("type")
 
     if kind == "extrude_profile_on_plane":
@@ -539,7 +537,7 @@ def _execute(self, document: Document, command: dict[str, Any], *, progress=None
     )
 
 
-def _render_scene_without_consumed_sources(document: Document, kernel: Any):
+def filter_consumed_sources(document: Document) -> Document:
     hidden = {
         item.get("source_body_id")
         for item in document.objects
@@ -554,41 +552,14 @@ def _render_scene_without_consumed_sources(document: Document, kernel: Any):
     )
     hidden.discard(None)
     if not hidden:
-        return _ORIGINAL_RENDER(document, kernel)
-    filtered = Document(
-        id=document.id,
-        version=document.version,
-        revision=document.revision,
+        return document
+    from dataclasses import replace
+
+    return replace(
+        document,
         objects=[
             item
             for item in document.objects
             if not (item.get("type") == "body" and item.get("id") in hidden)
         ],
     )
-    return _ORIGINAL_RENDER(filtered, kernel)
-
-
-def install() -> None:
-    global _INSTALLED, _ORIGINAL_RENDER
-    if _INSTALLED:
-        return
-    from . import capabilities, commands, core, rendering
-
-    names = {item["type"] for item in CAPABILITIES}
-    original_execute = commands.CommandSystem.execute
-
-    def execute(self, document, command, *, progress=None, project_id=None):
-        if isinstance(command, dict) and command.get("type") in names:
-            return _execute(self, document, command, progress=progress)
-        return original_execute(
-            self, document, command, progress=progress, project_id=project_id
-        )
-
-    commands.CommandSystem.execute = execute
-    capabilities.COMMAND_CAPABILITIES = capabilities.COMMAND_CAPABILITIES + CAPABILITIES
-    commands.COMMAND_CAPABILITIES = capabilities.COMMAND_CAPABILITIES
-
-    _ORIGINAL_RENDER = core.render_scene
-    core.render_scene = _render_scene_without_consumed_sources
-    rendering.render_scene = _render_scene_without_consumed_sources
-    _INSTALLED = True

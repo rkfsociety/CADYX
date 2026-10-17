@@ -12,6 +12,9 @@ from .sketches import spline_sample_points
 
 
 def render_scene(document: Document, kernel: GeometryKernel) -> dict:
+    from .agent_authoring import filter_consumed_sources
+
+    document = filter_consumed_sources(document)
     objects = []
     by_id = {item["id"]: item for item in document.objects}
     consumed_bodies = {

@@ -1,7 +1,6 @@
 import math
 import unittest
 
-import cadyx  # installs topology and authoring extensions
 from cadyx.commands import CommandSystem
 from cadyx.kernel import OCCTKernelAdapter
 from cadyx.models import Document

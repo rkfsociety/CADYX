@@ -6,7 +6,6 @@ from typing import Any
 
 from .errors import ValidationError
 
-_INSTALLED = False
 
 
 def _keys(value: Any, name: str) -> list[str]:
@@ -92,62 +91,55 @@ def resolve_edge_references(kernel, geometry: dict[str, Any], references: list[d
     return chosen
 
 
-def install() -> None:
-    global _INSTALLED
-    if _INSTALLED:
-        return
-    from . import capabilities, commands
-    original = commands.CommandSystem.execute
+def execute_with_selection(next_execute, self, document, command, *, progress=None, project_id=None):
+    semantic_keys = None
+    edge_indices = None
+    edge_source_geometry = None
+    if isinstance(command, dict):
+        kind = command.get("type")
+        mapping = {
+            "shell_body": ("face_keys", "face_indices", "faces"),
+            "draft_faces": ("face_keys", "face_indices", "faces"),
+            "chamfer_edges": ("edge_keys", "edge_indices", "edges"),
+            "variable_fillet_edges": ("edge_keys", "edge_indices", "edges"),
+            "fillet_edges": ("edge_keys", "edge_indices", "edges"),
+        }
+        selector = mapping.get(kind)
+        if selector:
+            body_id = command.get("body_id")
+            source = next((item for item in document.objects
+                           if item.get("id") == body_id and item.get("type") == "body"), None)
+            if source is None or not isinstance(source.get("geometry"), dict):
+                raise ValidationError("Semantic selection requires an existing editable body.")
+            edge_source_geometry = source["geometry"]
+            if selector[0] in command:
+                resolved = _resolve(self.kernel, edge_source_geometry,
+                                    keys=_keys(command[selector[0]], selector[0]), collection=selector[2])
+                semantic_keys = list(command[selector[0]])
+                edge_indices = resolved if selector[2] == "edges" else None
+                command = {**command, selector[1]: resolved}
+            elif selector[1] in command:
+                raw_indices = command[selector[1]]
+                if (not isinstance(raw_indices, list) or not raw_indices
+                        or any(type(index) is not int or index < 0 for index in raw_indices)
+                        or len(set(raw_indices)) != len(raw_indices)):
+                    raise ValidationError(f"{selector[1]} must contain distinct non-negative integers.")
+                edge_indices = raw_indices if selector[2] == "edges" else None
+    result = next_execute(document, command, progress=progress, project_id=project_id)
+    if edge_indices and isinstance(result, dict) and isinstance(result.get("feature_id"), str):
+        feature_id = result["feature_id"]
+        feature = next((item for item in document.objects
+                        if item.get("id") == feature_id and item.get("type") == "feature"), None)
+        if feature is not None:
+            feature["edge_references"] = capture_edge_references(self.kernel, edge_source_geometry, edge_indices)
+            if semantic_keys:
+                feature["edge_keys"] = semantic_keys
+    return result
 
-    def execute(self, document, command, *, progress=None, project_id=None):
-        semantic_keys = None
-        edge_indices = None
-        edge_source_geometry = None
-        if isinstance(command, dict):
-            kind = command.get("type")
-            mapping = {
-                "shell_body": ("face_keys", "face_indices", "faces"),
-                "draft_faces": ("face_keys", "face_indices", "faces"),
-                "chamfer_edges": ("edge_keys", "edge_indices", "edges"),
-                "variable_fillet_edges": ("edge_keys", "edge_indices", "edges"),
-                "fillet_edges": ("edge_keys", "edge_indices", "edges"),
-            }
-            selector = mapping.get(kind)
-            if selector:
-                body_id = command.get("body_id")
-                source = next((item for item in document.objects
-                               if item.get("id") == body_id and item.get("type") == "body"), None)
-                if source is None or not isinstance(source.get("geometry"), dict):
-                    raise ValidationError("Semantic selection requires an existing editable body.")
-                edge_source_geometry = source["geometry"]
-                if selector[0] in command:
-                    resolved = _resolve(self.kernel, edge_source_geometry,
-                                        keys=_keys(command[selector[0]], selector[0]), collection=selector[2])
-                    semantic_keys = list(command[selector[0]])
-                    edge_indices = resolved
-                    command = {**command, selector[1]: resolved}
-                elif selector[1] in command:
-                    raw_indices = command[selector[1]]
-                    if (not isinstance(raw_indices, list) or not raw_indices
-                            or any(type(index) is not int or index < 0 for index in raw_indices)
-                            or len(set(raw_indices)) != len(raw_indices)):
-                        raise ValidationError(f"{selector[1]} must contain distinct non-negative integers.")
-                    edge_indices = raw_indices
-        result = original(self, document, command, progress=progress, project_id=project_id)
-        if edge_indices and isinstance(result, dict) and isinstance(result.get("feature_id"), str):
-            feature_id = result["feature_id"]
-            feature = next((item for item in document.objects
-                            if item.get("id") == feature_id and item.get("type") == "feature"), None)
-            if feature is not None:
-                feature["edge_references"] = capture_edge_references(self.kernel, edge_source_geometry, edge_indices)
-                if semantic_keys:
-                    feature["edge_keys"] = semantic_keys
-        return result
 
-    commands.CommandSystem.execute = execute
-
+def refine_capabilities(contracts):
     rewritten = []
-    for item in capabilities.COMMAND_CAPABILITIES:
+    for item in contracts:
         item = dict(item)
         kind = item.get("type")
         if kind in {"shell_body", "draft_faces"}:
@@ -159,6 +151,4 @@ def install() -> None:
             item["constraints"] = [*(item.get("constraints") or []),
                                    "edge_keys may replace edge_indices using semantic_key values from topology."]
         rewritten.append(item)
-    capabilities.COMMAND_CAPABILITIES = tuple(rewritten)
-    commands.COMMAND_CAPABILITIES = capabilities.COMMAND_CAPABILITIES
-    _INSTALLED = True
+    return tuple(rewritten)

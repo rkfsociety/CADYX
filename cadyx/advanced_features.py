@@ -17,7 +17,6 @@ from .errors import NotFoundError, ValidationError
 from .native_kernel import NativeKernel
 from .sketches import closed_profile
 
-_INSTALLED = False
 _MAX_BREP_BYTES = 64 * 1024 * 1024
 _MAX_NATIVE_INT = (1 << 31) - 1
 
@@ -298,22 +297,3 @@ def _execute(self, document, command: dict[str, Any], *, progress=None, project_
     if progress: progress({"phase": kind})
     geometry = _advanced_native(source["geometry"], operation, values, indices)
     return _append_feature(document, source, kind, geometry, parameters, command.get("name"))
-
-
-def install() -> None:
-    global _INSTALLED
-    if _INSTALLED:
-        return
-    from . import capabilities, commands
-    command_types = {item["type"] for item in ADVANCED_CAPABILITIES}
-    original = commands.CommandSystem.execute
-
-    def execute(self, document, command, *, progress=None, project_id=None):
-        if isinstance(command, dict) and command.get("type") in command_types:
-            return _execute(self, document, command, progress=progress, project_id=project_id)
-        return original(self, document, command, progress=progress, project_id=project_id)
-
-    commands.CommandSystem.execute = execute
-    capabilities.COMMAND_CAPABILITIES = capabilities.COMMAND_CAPABILITIES + ADVANCED_CAPABILITIES
-    commands.COMMAND_CAPABILITIES = capabilities.COMMAND_CAPABILITIES
-    _INSTALLED = True

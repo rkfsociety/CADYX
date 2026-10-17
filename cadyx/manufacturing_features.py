@@ -10,7 +10,6 @@ from .errors import NotFoundError, ValidationError
 from .native_kernel import NativeKernel
 from .sketches import closed_profile, closed_profiles
 
-_INSTALLED = False
 
 CAPABILITIES = (
     {"type": "create_sketch_from_body_section", "description": "Extract closed planar contours from any editable B-rep body into editable sketches.", "required": ["body_id", "normal_axis", "offset"], "optional": ["max_points", "name"], "constraints": ["normal_axis is X, Y or Z; max_points is at least 16 total samples (default 2048); open/branched sections are rejected by the native sectioner."]},
@@ -50,7 +49,7 @@ def _feature(document, source, operation, geometry, parameters, name, *, source_
     return {"body_id": body_id, "feature_id": feature_id, "source_body_id": source["id"], "geometry": geometry}
 
 
-def _execute(self, document, command, *, progress=None):
+def _execute(self, document, command, *, progress=None, project_id=None):
     kind = command.get("type")
     source = _body(document, command.get("body_id"))
 
@@ -118,22 +117,3 @@ def _execute(self, document, command, *, progress=None):
     parameters = {"sketch_id": sketch_id, "depth": depth, "centered": centered}
     return _feature(document, source, kind, geometry, parameters, command.get("name"),
                     source_sketch_id=sketch_id if kind == "pad_sketch_to_body" else None)
-
-
-def install() -> None:
-    global _INSTALLED
-    if _INSTALLED:
-        return
-    from . import capabilities, commands
-    names = {item["type"] for item in CAPABILITIES}
-    original = commands.CommandSystem.execute
-
-    def execute(self, document, command, *, progress=None, project_id=None):
-        if isinstance(command, dict) and command.get("type") in names:
-            return _execute(self, document, command, progress=progress)
-        return original(self, document, command, progress=progress, project_id=project_id)
-
-    commands.CommandSystem.execute = execute
-    capabilities.COMMAND_CAPABILITIES = capabilities.COMMAND_CAPABILITIES + CAPABILITIES
-    commands.COMMAND_CAPABILITIES = capabilities.COMMAND_CAPABILITIES
-    _INSTALLED = True

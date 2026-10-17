@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from .api_contracts import VALIDATION_OPERATIONS
+from .extensions import ExtensionRegistry, builtin_extensions
 
 
 _COORDINATE_SCHEMA = {
@@ -31,7 +32,7 @@ _SKETCH_SPLINE_PARAMETER_SCHEMAS = {
 
 # Parameter names and JSON Schema hints are an operator guide; CommandSystem and
 # Core validators remain authoritative for required fields, ranges, references and geometry.
-COMMAND_CAPABILITIES: tuple[dict[str, Any], ...] = (
+BASE_COMMAND_CAPABILITIES: tuple[dict[str, Any], ...] = (
     {"type": "create_model_parameter", "description": "Create a named numeric model parameter.", "required": ["name", "value"], "optional": ["unit"], "constraints": ["Names are unique identifiers; unit is mm, deg, or unitless."]},
     {"type": "create_model_parameters", "description": "Create several named numeric model parameters atomically.", "required": ["parameters"], "optional": [], "constraints": ["parameters maps valid unique identifiers to {value, unit}; all records are validated before any are stored."]},
     {"type": "set_model_parameter", "description": "Change a named parameter and atomically rebuild all bound model inputs.", "required": ["name", "value"], "optional": [], "constraints": ["The parameter must exist; every dependent sketch and feature must rebuild successfully."]},
@@ -124,6 +125,10 @@ COMMAND_CAPABILITIES: tuple[dict[str, Any], ...] = (
     {"type": "create_sketch_from_section", "description": "Extract each closed planar contour of an imported STEP B-rep section into its own editable sketch profile.", "required": ["body_id", "normal_axis", "offset"], "optional": ["max_points", "name"], "constraints": ["The section may contain multiple closed contours; open and branched contours are rejected. normal_axis is X, Y or Z, offset is measured in model units, and max_points is at least 16 total samples (default 2048). Resulting sketches are sampled approximations of the exact B-rep section."]},
     {"type": "export_brep", "description": "Publish a revision-bound STEP and optional STL delivery with verification manifest.", "required": ["body_id"], "optional": ["include_stl", "linear_deflection", "angular_deflection"], "constraints": ["Requires expected_revision; exports only a validated single-solid B-rep and never replaces user files."], "parameter_schemas": {"body_id": {"type": "string"}, "include_stl": {"type": "boolean"}, "linear_deflection": {"type": "number", "minimum": 0.001}, "angular_deflection": {"type": "number", "minimum": 0.01, "maximum": 1}}},
 )
+
+
+COMMAND_REGISTRY = ExtensionRegistry(BASE_COMMAND_CAPABILITIES, builtin_extensions())
+COMMAND_CAPABILITIES = COMMAND_REGISTRY.capabilities
 
 
 def agent_api_capabilities() -> dict[str, Any]:

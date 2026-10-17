@@ -892,9 +892,11 @@ class OCCTKernelAdapter:
         return geometry
 
     def topology(self, geometry: dict[str, Any]) -> dict[str, Any]:
+        from .advanced_topology import enrich_topology
+
         result = NativeKernel().geometry_graph(geometry, topology=True)
         self._same_saved_volume(geometry, result["volume"])
-        return result
+        return enrich_topology(geometry, result)
 
     def metrics(self, geometry: dict[str, Any]) -> dict[str, Any]:
         result = NativeKernel().geometry_graph(geometry)

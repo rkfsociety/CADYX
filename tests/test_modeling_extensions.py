@@ -1,6 +1,5 @@
 import unittest
 
-import cadyx  # installs extension layers
 from cadyx.commands import CommandSystem
 from cadyx.models import Document
 

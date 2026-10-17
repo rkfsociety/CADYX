@@ -2,7 +2,6 @@ import math
 import unittest
 from unittest.mock import patch
 
-import cadyx  # installs extension layers
 from cadyx.agent_authoring import _rotation_from_z, _workplane_rotation
 from cadyx.commands import CommandSystem
 from cadyx.models import Document

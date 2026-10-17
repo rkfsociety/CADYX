@@ -35,9 +35,10 @@ from .sketch_curve_toolkit import (
     evaluate_archimedean_spiral,
     sample_parametric_expressions,
 )
-from .capabilities import COMMAND_CAPABILITIES
+from .capabilities import BASE_COMMAND_CAPABILITIES, COMMAND_REGISTRY
+from .capabilities import COMMAND_CAPABILITIES as COMMAND_CAPABILITIES
 
-_SUPPORTED_COMMAND_TYPES = frozenset(item["type"] for item in COMMAND_CAPABILITIES)
+_SUPPORTED_COMMAND_TYPES = frozenset(item["type"] for item in BASE_COMMAND_CAPABILITIES)
 
 
 def _finite_number(value: Any, name: str) -> float:
@@ -81,8 +82,24 @@ class CommandSystem:
         self.scan_processor = scan_processor if scan_processor is not None else ScanProcessor()
         self.publish_scan_output = publish_scan_output
         self.publish_cad_delivery = publish_cad_delivery
+        self._extension_execute = COMMAND_REGISTRY.bind(self, self._execute_base)
 
     def execute(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(command, dict):
+            raise ValidationError("command must be a JSON object.")
+        kind = command.get("type")
+        if not isinstance(kind, str) or kind not in COMMAND_REGISTRY.command_types:
+            raise ValidationError(f"Unsupported command type: {kind!r}.")
+        return self._extension_execute(document, command, progress=progress, project_id=project_id)
+
+    def _execute_base(
         self,
         document: Document,
         command: dict[str, Any],

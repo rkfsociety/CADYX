@@ -3,7 +3,6 @@ import unittest
 import zlib
 from unittest.mock import patch
 
-import cadyx  # installs the advanced command layer
 from cadyx import capabilities
 from cadyx.advanced_features import _raw_brep
 from cadyx.commands import CommandSystem

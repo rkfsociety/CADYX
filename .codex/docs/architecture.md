@@ -201,6 +201,33 @@ tombstone and workspace listing retries cleanup; the API reports
 
 The default host is `127.0.0.1`. Non-loopback binds require the host authentication gate described above; the built-in server still relies on a trusted LAN or external TLS/VPN for transport confidentiality.
 
+### Explicit built-in extension composition
+
+`cadyx/extensions.py` declares the ordered built-ins: advanced features, agent
+authoring, manufacturing features, semantic selection, selector-contract
+refinements, and scan reverse engineering. `capabilities.py` constructs one
+`COMMAND_REGISTRY` from `BASE_COMMAND_CAPABILITIES` plus these definitions and
+publishes its final contract snapshot once. Composition copies input metadata
+and rejects duplicate command/extension names, missing handlers, and refinements
+that change registered command names. Rebuilding a registry is deterministic
+and does not mutate the base or a previous registry.
+
+Each `CommandSystem` binds the registered handlers and middleware to its base
+executor during initialization. Semantic selection wraps dispatch; scan alignment
+wraps that pipeline and reapplies the saved transform after `set_scan_parameter`.
+The last registered middleware is outermost. Progress and project context pass
+through the same pipeline, inside the existing Core lease/revision/atomic-save
+boundary. The base command dispatch remains in `commands.py`; decomposing that
+separate dispatch is roadmap stage 16.
+
+Extension modules define ordinary functions and metadata, without `install()` or
+method/global-contract reassignment. `OCCTKernelAdapter.topology` explicitly calls
+analytic topology enrichment, and the shared renderer explicitly filters consumed
+source bodies while preserving document metadata. Face selectors resolve against
+faces and do not capture edge references. `tests/test_extensions.py` covers
+composition, collisions, middleware order, isolated handlers and import order;
+native authoring and rendering tests cover the adapter/scene integration.
+
 ### Agent API discovery and local Codex MCP adapter
 
 `GET /api/v1/agent/capabilities` is a read-only machine-readable inventory of Agent API routes, supported Command System names, required/optional parameter names, optional JSON Schema hints, known error codes and documented limitations. Parameter metadata is an operator guide; Core and command validators plus the linked model contracts remain authoritative. `CommandSystem.execute` rejects command types absent from the discovery registry, so a new operation is not exposed until its contract is registered.
