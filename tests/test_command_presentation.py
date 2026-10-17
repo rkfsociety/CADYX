@@ -55,10 +55,12 @@ class CommandPresentationTests(unittest.TestCase):
             )
 
     def test_core_has_no_second_command_action_table(self) -> None:
-        source = (ROOT / "cadyx" / "core.py").read_text(encoding="utf-8")
-        self.assertNotIn("def _activity_action", source)
-        self.assertNotIn('"create_box": "Строит модель"', source)
-        self.assertIn("self.commands.activity_action(command_name)", source)
+        core_source = (ROOT / "cadyx" / "core.py").read_text(encoding="utf-8")
+        service_source = (ROOT / "cadyx" / "core_services.py").read_text(encoding="utf-8")
+        for source in (core_source, service_source):
+            self.assertNotIn("def _activity_action", source)
+            self.assertNotIn('"create_box": "Строит модель"', source)
+        self.assertIn("self.commands.activity_action(command_name)", service_source)
 
 
 if __name__ == "__main__":
