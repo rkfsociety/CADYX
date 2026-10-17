@@ -758,7 +758,18 @@ class CommandActivityService(_CoreService):
             activity.update({"state": "completed", "phase": "completed", "result": copy.deepcopy(result)})
             self._publish_activity(project_id, activity)
             self.events.publish("document.changed", project_id, {"revision": document.revision})
-            self.events.publish("command.completed", project_id, history_entry)
+            # v2 SSE receipt: subscribers fetch full command history via the read API.
+            # Never broadcast command inputs or geometry-bearing results here.
+            receipt = {
+                "schema_version": 2,
+                "operation_id": operation_id,
+                "revision": document.revision,
+                "command": command_name,
+                "outcome": "completed",
+            }
+            if isinstance(result.get("feature_id"), str):
+                receipt["feature_id"] = result["feature_id"]
+            self.events.publish("command.completed", project_id, receipt)
             return {"document": document.to_dict(), "history_entry": history_entry}
 
 class RenderingCacheService(_CoreService):
