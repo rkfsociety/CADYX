@@ -1,0 +1,38 @@
+name: Fix roadmap stage 35 bootstrap
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/stage35-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Fix signature extraction
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/stage35-apply.yml')
+          text = path.read_text(encoding='utf-8')
+          old = """              header = ''.join(lines[node.lineno - 1: node.body[0].lineno - 1])\n              if not header.rstrip().endswith(':'):\n                  raise SystemExit(f'could not preserve signature for {name}')\n"""
+          new = """              signature_end = next(\n                  index for index in range(node.lineno - 1, node.body[0].lineno)\n                  if lines[index].rstrip().endswith(':')\n              )\n              header = ''.join(lines[node.lineno - 1: signature_end + 1])\n"""
+          if old not in text:
+              raise SystemExit('stage35 signature anchor changed')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          rm .github/workflows/stage35-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore: fix stage 35 signature extraction'
+          git push origin main
