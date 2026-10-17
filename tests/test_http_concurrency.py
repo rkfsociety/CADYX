@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import cadyx.web as web_module
 from cadyx.core import CadyxCore
@@ -40,13 +40,14 @@ class HTTPConcurrencyTests(unittest.TestCase):
         *,
         max_http_requests: int = 2,
         max_sse_streams: int = 1,
+        auth_token: str | None = None,
     ) -> tuple[CadyxHTTPServer, threading.Thread, str]:
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
         core = CadyxCore(str(Path(temporary_directory.name) / "projects"))
         server = CadyxHTTPServer(
             ("127.0.0.1", 0),
-            make_request_handler(core),
+            make_request_handler(core, auth_token=auth_token),
             max_http_requests=max_http_requests,
             max_sse_streams=max_sse_streams,
         )
@@ -56,12 +57,22 @@ class HTTPConcurrencyTests(unittest.TestCase):
         return server, thread, f"http://127.0.0.1:{server.server_port}"
 
     @staticmethod
-    def _wait_for_sse_capacity(server: CadyxHTTPServer, timeout: float = 1.0) -> bool:
+    def _wait_for_sse_capacity(
+        server: CadyxHTTPServer, timeout: float = 1.0, count: int = 1,
+    ) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if server.try_acquire_sse_slot():
-                server.release_sse_slot()
-                return True
+            acquired = 0
+            try:
+                for _ in range(count):
+                    if not server.try_acquire_sse_slot():
+                        break
+                    acquired += 1
+                if acquired == count:
+                    return True
+            finally:
+                for _ in range(acquired):
+                    server.release_sse_slot()
             time.sleep(0.01)
         return False
 
@@ -96,7 +107,7 @@ class HTTPConcurrencyTests(unittest.TestCase):
             patch.object(web_module, "_SSE_KEEPALIVE_SECONDS", 0.05),
             patch.object(web_module, "_SSE_SHUTDOWN_POLL_SECONDS", 0.01),
         ):
-            server, _, base_url = self._start_live_server()
+            server, _, base_url = self._start_live_server(max_http_requests=1)
             connection = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
             connection.request("GET", "/api/v1/events")
             response = connection.getresponse()
@@ -121,6 +132,68 @@ class HTTPConcurrencyTests(unittest.TestCase):
                 connection.close()
 
             self.assertTrue(self._wait_for_sse_capacity(server))
+            with urlopen(base_url + "/api/v1/health", timeout=2) as healthy:
+                self.assertEqual(healthy.status, 200)
+
+    def test_sse_observers_do_not_starve_http_requests(self) -> None:
+        with (
+            patch.object(web_module, "_SSE_KEEPALIVE_SECONDS", 0.05),
+            patch.object(web_module, "_SSE_SHUTDOWN_POLL_SECONDS", 0.01),
+        ):
+            server, _, base_url = self._start_live_server(max_http_requests=1, max_sse_streams=2)
+            streams: list[tuple[HTTPConnection, object]] = []
+            try:
+                for _ in range(2):
+                    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+                    connection.request("GET", "/api/v1/events")
+                    response = connection.getresponse()
+                    streams.append((connection, response))
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.readline(), b": CADYX event stream\n")
+                    self.assertEqual(response.readline(), b"\n")
+
+                self.assertFalse(server.try_acquire_sse_slot())
+                for path in ("/api/v1/health", "/api/v1/projects"):
+                    with urlopen(base_url + path, timeout=2) as response:
+                        self.assertEqual(response.status, 200)
+                        self.assertIsInstance(json.loads(response.read()), dict)
+            finally:
+                for connection, response in streams:
+                    response.close()
+                    connection.close()
+            self.assertTrue(self._wait_for_sse_capacity(server, count=2))
+
+    def test_unauthenticated_and_failed_sse_enrollment_release_capacity(self) -> None:
+        server, _, base_url = self._start_live_server(
+            max_http_requests=1, max_sse_streams=1, auth_token="test-secret",
+        )
+        with self.assertRaises(HTTPError) as unauthorized:
+            urlopen(base_url + "/api/v1/events", timeout=2)
+        with unauthorized.exception as error:
+            self.assertEqual(error.code, 401)
+
+        with self.assertRaises(HTTPError) as missing:
+            urlopen(Request(
+                base_url + "/api/v1/events?project_id=missing",
+                headers={"Authorization": "Bearer test-secret"},
+            ), timeout=2)
+        with missing.exception as error:
+            self.assertEqual(error.code, 404)
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+        try:
+            connection.request("GET", "/api/v1/events", headers={"Authorization": "Bearer test-secret"})
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.readline(), b": CADYX event stream\n")
+            self.assertEqual(response.readline(), b"\n")
+            with urlopen(base_url + "/api/v1/health", timeout=2) as health:
+                self.assertEqual(health.status, 200)
+            response.close()
+        finally:
+            connection.close()
+        server.shutdown()
+        self.assertTrue(self._wait_for_sse_capacity(server))
 
     def test_shutdown_terminates_active_sse_loop_and_releases_capacity(self) -> None:
         with patch.object(web_module, "_SSE_SHUTDOWN_POLL_SECONDS", 0.01):

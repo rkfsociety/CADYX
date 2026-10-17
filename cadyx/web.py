@@ -84,6 +84,7 @@ class CadyxHTTPServer(ThreadingHTTPServer):
         self.shutdown_event = threading.Event()
         self._request_slots = threading.BoundedSemaphore(max_http_requests)
         self._sse_slots = threading.BoundedSemaphore(max_sse_streams)
+        self._request_slot_state = threading.local()
         super().__init__(server_address, request_handler_class)
 
     def try_acquire_request_slot(self) -> bool:
@@ -91,6 +92,13 @@ class CadyxHTTPServer(ThreadingHTTPServer):
 
     def release_request_slot(self) -> None:
         self._request_slots.release()
+
+    def release_request_slot_for_sse(self) -> None:
+        """Transfer an authenticated SSE subscriber out of the HTTP request budget."""
+        if not getattr(self._request_slot_state, "held", False):
+            raise RuntimeError("SSE request does not own an HTTP slot.")
+        self._request_slot_state.held = False
+        self.release_request_slot()
 
     def try_acquire_sse_slot(self) -> bool:
         return self._sse_slots.acquire(blocking=False)
@@ -109,10 +117,13 @@ class CadyxHTTPServer(ThreadingHTTPServer):
             raise
 
     def process_request_thread(self, request: _SOCKET_REQUEST, client_address: tuple[str, int]) -> None:
+        self._request_slot_state.held = True
         try:
             super().process_request_thread(request, client_address)
         finally:
-            self.release_request_slot()
+            if self._request_slot_state.held:
+                self.release_request_slot()
+            del self._request_slot_state.held
 
     def _reject_overloaded_request(self, request: _SOCKET_REQUEST) -> None:
         body = (
@@ -371,13 +382,16 @@ def make_request_handler(
                 if project_id:
                     core.inspect_project(project_id)
                 subscriber_id, subscriber = core.events.subscribe(project_id)
+                # SSE owns its separate permit after authentication and enrollment.
+                # The connection is never reused as an ordinary HTTP request.
+                self.close_connection = True
+                server.release_request_slot_for_sse()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("Connection", "keep-alive")
                 self.send_header("X-Accel-Buffering", "no")
                 self.end_headers()
-                self.close_connection = True
                 self.wfile.write(b": CADYX event stream\n\n")
                 self.wfile.flush()
                 next_keepalive = time.monotonic() + _SSE_KEEPALIVE_SECONDS
