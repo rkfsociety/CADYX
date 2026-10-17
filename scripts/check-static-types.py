@@ -103,6 +103,7 @@ def main() -> int:
         actual.setdefault(Path(file_name).stem, Counter())
 
     if actual != expected:
+        _print_process_output(ratchet)
         print("mypy legacy-error ratchet changed; only baseline reductions are allowed.", file=sys.stderr)
         modules = sorted(set(expected) | set(actual))
         for module in modules:
