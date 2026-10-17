@@ -46,6 +46,24 @@ const owned = bounded.snapshot();
 owned[0].end.x = 77;
 assert.equal(bounded.current()[0].end.x, 1, "ownership snapshots stay isolated from the live revision");
 
+const longSegments = Array.from({ length: 4096 }, (_, index) => ({
+  kind: "line",
+  start: { x: index, y: 0 },
+  end: { x: index + 1, y: 0 },
+}));
+const longDraft = new TraceDraft(longSegments, { historyLimit: 8 });
+const retainedHead = longDraft.current()[0];
+for (let index = 0; index < 64; index += 1) {
+  longDraft.update((segments) => segments.push({
+    kind: "line",
+    start: { x: 4096 + index, y: 0 },
+    end: { x: 4097 + index, y: 0 },
+  }));
+}
+assert.equal(longDraft.historySize, 8, "4096-segment editing must retain only bounded undo revisions");
+assert.equal(longDraft.current()[0], retainedHead, "unchanged long-trace segments must be structurally shared across edits");
+assert.equal(longDraft.current().length, 4160);
+
 (async () => {
   const session = new TraceEditorSession({
     projectId: "project/with space",
