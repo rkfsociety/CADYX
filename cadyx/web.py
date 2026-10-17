@@ -27,6 +27,7 @@ _DEFAULT_MAX_HTTP_REQUESTS = 64
 _DEFAULT_MAX_SSE_STREAMS = 8
 _SSE_KEEPALIVE_SECONDS = 15.0
 _SSE_SHUTDOWN_POLL_SECONDS = 0.25
+_SOCKET_REQUEST = socket | tuple[bytes, socket]
 _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 _UI_ASSETS = (
     "index.html", "scanner.html", "app.js", "style.css", "viewport.js",
@@ -97,7 +98,7 @@ class CadyxHTTPServer(ThreadingHTTPServer):
     def release_sse_slot(self) -> None:
         self._sse_slots.release()
 
-    def process_request(self, request: socket, client_address: tuple[str, int]) -> None:
+    def process_request(self, request: _SOCKET_REQUEST, client_address: tuple[str, int]) -> None:
         if not self.try_acquire_request_slot():
             self._reject_overloaded_request(request)
             return
@@ -107,13 +108,13 @@ class CadyxHTTPServer(ThreadingHTTPServer):
             self.release_request_slot()
             raise
 
-    def process_request_thread(self, request: socket, client_address: tuple[str, int]) -> None:
+    def process_request_thread(self, request: _SOCKET_REQUEST, client_address: tuple[str, int]) -> None:
         try:
             super().process_request_thread(request, client_address)
         finally:
             self.release_request_slot()
 
-    def _reject_overloaded_request(self, request: socket) -> None:
+    def _reject_overloaded_request(self, request: _SOCKET_REQUEST) -> None:
         body = (
             b'{"error":"SERVICE_UNAVAILABLE","message":'
             b'"HTTP concurrency limit reached."}'
@@ -127,8 +128,9 @@ class CadyxHTTPServer(ThreadingHTTPServer):
             + b"Connection: close\r\n\r\n"
             + body
         )
+        connection = request[1] if isinstance(request, tuple) else request
         try:
-            request.sendall(response)
+            connection.sendall(response)
         except OSError:
             pass
         finally:
@@ -364,7 +366,7 @@ def make_request_handler(
                     extra_headers=(("Retry-After", "1"), ("Connection", "close")),
                 )
                 return
-            subscriber_id: str | None = None
+            subscriber_id: int | None = None
             try:
                 if project_id:
                     core.inspect_project(project_id)
