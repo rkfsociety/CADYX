@@ -3,12 +3,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
+const traceDraftSource = fs.readFileSync(path.join(__dirname, "..", "web", "trace-draft.js"), "utf8");
 const source = fs.readFileSync(path.join(__dirname, "..", "web", "browser-api.js"), "utf8");
 const window = {
   fetch: async () => { throw new Error("unexpected default fetch"); },
 };
 window.fetch.bind = Function.prototype.bind.bind(window.fetch);
 const context = vm.createContext({ window, Error, JSON, Object, TypeError, Number, encodeURIComponent });
+vm.runInContext(traceDraftSource, context, { filename: "trace-draft.js" });
 vm.runInContext(source, context, { filename: "browser-api.js" });
 
 const { TraceDraft, TraceEditorSession } = window.CadyxBrowserApi;
@@ -33,6 +35,16 @@ draft.undo();
 draft.replace({ segments: [{ kind: "line", start: { x: 2, y: 2 }, end: { x: 3, y: 2 } }] });
 assert.equal(draft.canRedo, false, "a new edit must clear redo history");
 assert.equal(draft.snapshot().segments[0].start.x, 2);
+
+const bounded = new TraceDraft([], { historyLimit: 4 });
+const sharedSegment = { kind: "line", start: { x: 0, y: 0 }, end: { x: 1, y: 0 } };
+for (let index = 0; index < 20; index += 1) bounded.update((segments) => segments.push(index ? { ...sharedSegment } : sharedSegment));
+assert.equal(bounded.historySize, 4, "undo history must stay within the configured bound");
+assert.equal(bounded.current().length, 20);
+assert.equal(bounded.current(), bounded.current(), "current view must not allocate a new container");
+const owned = bounded.snapshot();
+owned[0].end.x = 77;
+assert.equal(bounded.current()[0].end.x, 1, "ownership snapshots stay isolated from the live revision");
 
 (async () => {
   const session = new TraceEditorSession({
