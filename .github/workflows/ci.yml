@@ -49,6 +49,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Source compilation failed.' }
           python -m unittest discover -s tests -p test_source_contracts.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Contract checks failed.' }
+          python -m unittest discover -s tests -p test_web_routes.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'HTTP route contract tests failed.' }
           python -m unittest discover -s tests -p test_events.py -v
           if ($LASTEXITCODE -ne 0) { throw 'Event tests failed.' }
           python -m unittest discover -s tests -p test_migrations.py -v
