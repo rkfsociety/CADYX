@@ -59,6 +59,7 @@ class WorkspaceServiceTests(unittest.TestCase):
     def test_artifact_store_lists_only_direct_user_files(self) -> None:
         directory = self.root / "project"
         directory.mkdir()
+        directory = directory.resolve()
         (directory / "part.step").write_bytes(b"step")
         (directory / "project.json").write_text("{}", encoding="utf-8")
         (directory / ".cadyx-private").write_bytes(b"private")
