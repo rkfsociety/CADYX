@@ -11,6 +11,16 @@ from .core import CadyxCore
 from .web import CadyxHTTPServer, make_request_handler
 
 
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("value must be an integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("value must be at least 1")
+    return parsed
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the local CADYX Core and web interface.")
     parser.add_argument("--host", default=os.environ.get("CADYX_HOST", "127.0.0.1"))
@@ -24,6 +34,18 @@ def main() -> None:
         default=os.environ.get("CADYX_AUTH_TOKEN_FILE"),
         help="Read the HTTP authentication token from a UTF-8 file.",
     )
+    parser.add_argument(
+        "--max-http-requests",
+        type=_positive_int,
+        default=os.environ.get("CADYX_MAX_HTTP_REQUESTS", "64"),
+        help="Maximum concurrent HTTP handlers, including active SSE streams.",
+    )
+    parser.add_argument(
+        "--max-sse-streams",
+        type=_positive_int,
+        default=os.environ.get("CADYX_MAX_SSE_STREAMS", "8"),
+        help="Maximum concurrent server-sent-event streams.",
+    )
     arguments = parser.parse_args()
 
     try:
@@ -36,10 +58,16 @@ def main() -> None:
     server = CadyxHTTPServer(
         (arguments.host, arguments.port),
         make_request_handler(core, auth_token=auth_token),
+        max_http_requests=arguments.max_http_requests,
+        max_sse_streams=arguments.max_sse_streams,
     )
     print(f"CADYX listening at http://{arguments.host}:{server.server_port}")
     print(f"Project workspace: {core.workspace.root}")
     print(f"HTTP authentication: {'required' if auth_token else 'disabled (loopback only)'}")
+    print(
+        "HTTP concurrency: "
+        f"{arguments.max_http_requests} handlers, {arguments.max_sse_streams} SSE streams"
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -8,8 +8,10 @@ import mimetypes
 import os
 import queue
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socket import socket
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -21,6 +23,10 @@ from .web_routes import dispatch_route, match_route
 _MAX_BODY_BYTES = 1_000_000
 _MAX_STEP_UPLOAD_BYTES = 64 * 1024 * 1024
 _MAX_VIEWPORT_SNAPSHOT_BYTES = 16 * 1024 * 1024
+_DEFAULT_MAX_HTTP_REQUESTS = 64
+_DEFAULT_MAX_SSE_STREAMS = 8
+_SSE_KEEPALIVE_SECONDS = 15.0
+_SSE_SHUTDOWN_POLL_SECONDS = 0.25
 _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 _UI_ASSETS = (
     "index.html", "scanner.html", "app.js", "style.css", "viewport.js",
@@ -55,8 +61,86 @@ def _ui_asset_version() -> str:
 
 
 class CadyxHTTPServer(ThreadingHTTPServer):
+    """Threaded HTTP server with bounded request/SSE admission and shutdown signaling."""
+
     daemon_threads = True
     allow_reuse_address = True
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        request_handler_class: type[BaseHTTPRequestHandler],
+        *,
+        max_http_requests: int = _DEFAULT_MAX_HTTP_REQUESTS,
+        max_sse_streams: int = _DEFAULT_MAX_SSE_STREAMS,
+    ) -> None:
+        if not isinstance(max_http_requests, int) or isinstance(max_http_requests, bool) or max_http_requests < 1:
+            raise ValueError("max_http_requests must be a positive integer.")
+        if not isinstance(max_sse_streams, int) or isinstance(max_sse_streams, bool) or max_sse_streams < 1:
+            raise ValueError("max_sse_streams must be a positive integer.")
+        self.max_http_requests = max_http_requests
+        self.max_sse_streams = max_sse_streams
+        self.shutdown_event = threading.Event()
+        self._request_slots = threading.BoundedSemaphore(max_http_requests)
+        self._sse_slots = threading.BoundedSemaphore(max_sse_streams)
+        super().__init__(server_address, request_handler_class)
+
+    def try_acquire_request_slot(self) -> bool:
+        return self._request_slots.acquire(blocking=False)
+
+    def release_request_slot(self) -> None:
+        self._request_slots.release()
+
+    def try_acquire_sse_slot(self) -> bool:
+        return self._sse_slots.acquire(blocking=False)
+
+    def release_sse_slot(self) -> None:
+        self._sse_slots.release()
+
+    def process_request(self, request: socket, client_address: tuple[str, int]) -> None:
+        if not self.try_acquire_request_slot():
+            self._reject_overloaded_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.release_request_slot()
+            raise
+
+    def process_request_thread(self, request: socket, client_address: tuple[str, int]) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.release_request_slot()
+
+    def _reject_overloaded_request(self, request: socket) -> None:
+        body = (
+            b'{"error":"SERVICE_UNAVAILABLE","message":'
+            b'"HTTP concurrency limit reached."}'
+        )
+        response = (
+            b"HTTP/1.1 503 Service Unavailable\r\n"
+            b"Content-Type: application/json; charset=utf-8\r\n"
+            + f"Content-Length: {len(body)}\r\n".encode("ascii")
+            + b"Cache-Control: no-store\r\n"
+            + b"Retry-After: 1\r\n"
+            + b"Connection: close\r\n\r\n"
+            + body
+        )
+        try:
+            request.sendall(response)
+        except OSError:
+            pass
+        finally:
+            self.shutdown_request(request)
+
+    def shutdown(self) -> None:
+        self.shutdown_event.set()
+        super().shutdown()
+
+    def server_close(self) -> None:
+        self.shutdown_event.set()
+        super().server_close()
 
 
 def make_request_handler(
@@ -266,25 +350,51 @@ def make_request_handler(
                     pass
 
         def _stream_events(self, project_id: str | None) -> None:
-            if project_id:
-                core.inspect_project(project_id)
-            subscriber_id, subscriber = core.events.subscribe(project_id)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self.send_header("X-Accel-Buffering", "no")
-            self.end_headers()
-            self.close_connection = True
+            if not isinstance(self.server, CadyxHTTPServer):
+                raise RuntimeError("CADYX request handler requires CadyxHTTPServer.")
+            server = self.server
+            if not server.try_acquire_sse_slot():
+                self.close_connection = True
+                self._json(
+                    503,
+                    {
+                        "error": "SERVICE_UNAVAILABLE",
+                        "message": "SSE concurrency limit reached.",
+                    },
+                    extra_headers=(("Retry-After", "1"), ("Connection", "close")),
+                )
+                return
+            subscriber_id: str | None = None
             try:
+                if project_id:
+                    core.inspect_project(project_id)
+                subscriber_id, subscriber = core.events.subscribe(project_id)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                self.close_connection = True
                 self.wfile.write(b": CADYX event stream\n\n")
                 self.wfile.flush()
-                while True:
+                next_keepalive = time.monotonic() + _SSE_KEEPALIVE_SECONDS
+                while not server.shutdown_event.is_set():
+                    now = time.monotonic()
+                    timeout = min(
+                        _SSE_SHUTDOWN_POLL_SECONDS,
+                        max(0.0, next_keepalive - now),
+                    )
                     try:
-                        item = subscriber.get(timeout=15)
+                        item = subscriber.get(timeout=timeout)
                     except queue.Empty:
+                        if server.shutdown_event.is_set():
+                            break
+                        if time.monotonic() < next_keepalive:
+                            continue
                         self.wfile.write(b": keepalive\n\n")
                         self.wfile.flush()
+                        next_keepalive = time.monotonic() + _SSE_KEEPALIVE_SECONDS
                         continue
                     payload = json.dumps(item.as_dict(), ensure_ascii=False, allow_nan=False)
                     frame = f"id: {item.id}\nevent: {item.event}\ndata: {payload}\n\n"
@@ -293,7 +403,9 @@ def make_request_handler(
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:
-                core.events.unsubscribe(subscriber_id)
+                if subscriber_id is not None:
+                    core.events.unsubscribe(subscriber_id)
+                server.release_sse_slot()
 
         def log_message(self, format: str, *args: Any) -> None:
             super().log_message(format, *args)
