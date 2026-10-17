@@ -1,0 +1,465 @@
+name: Apply roadmap stage 34
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/stage34-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Apply stage 34 changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          core_path = Path('cadyx/core.py')
+          core = core_path.read_text(encoding='utf-8')
+
+          old_import = 'from .rendering import render_scene, render_scene_png\n'
+          new_import = old_import + 'from .runtime_cache import RuntimeCachePolicy, remember_bounded_bytes, trim_lru_entries\n'
+          if old_import not in core or 'from .runtime_cache import ' in core:
+              raise SystemExit('core import anchor changed')
+          core = core.replace(old_import, new_import, 1)
+
+          old_signature = '''        scan_processor: ScanProcessor | None = None,\n        lease_timeout_seconds: float = 60.0,\n        lease_clock: Callable[[], float] | None = None,\n    ) -> None:\n'''
+          new_signature = '''        scan_processor: ScanProcessor | None = None,\n        lease_timeout_seconds: float = 60.0,\n        lease_clock: Callable[[], float] | None = None,\n        cache_policy: RuntimeCachePolicy | None = None,\n    ) -> None:\n'''
+          if old_signature not in core:
+              raise SystemExit('core constructor signature anchor changed')
+          core = core.replace(old_signature, new_signature, 1)
+
+          old_cache_init = '''        self._geometry_cache_guard = threading.RLock()\n        self._validated_document_keys: OrderedDict[tuple[str, str], None] = OrderedDict()\n        self._document_validation_locks: dict[tuple[str, str], threading.Lock] = {}\n        self._scene_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()\n        self._png_cache: OrderedDict[tuple[str, str, int, int, int], bytes] = OrderedDict()\n        self._viewport_snapshot_guard = threading.RLock()\n        self._viewport_snapshots: OrderedDict[str, tuple[int, bytes]] = OrderedDict()\n        self._viewport_snapshot_bytes = 0\n'''
+          new_cache_init = '''        self._cache_policy = cache_policy if cache_policy is not None else RuntimeCachePolicy()\n        self._geometry_cache_guard = threading.RLock()\n        self._validated_document_keys: OrderedDict[tuple[str, str], None] = OrderedDict()\n        self._document_validation_locks: dict[tuple[str, str], threading.Lock] = {}\n        self._scene_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()\n        self._png_cache: OrderedDict[tuple[str, str, int, int, int], bytes] = OrderedDict()\n        self._png_cache_bytes = 0\n        self._viewport_snapshot_guard = threading.RLock()\n        self._viewport_snapshots: OrderedDict[str, tuple[int, bytes]] = OrderedDict()\n        self._viewport_snapshot_bytes = 0\n'''
+          if old_cache_init not in core:
+              raise SystemExit('core cache init anchor changed')
+          core = core.replace(old_cache_init, new_cache_init, 1)
+
+          old_delete = '''            cleanup_pending = self.workspace.delete_project(project_id)\n        with self._workspace_selection_guard:\n'''
+          new_delete = '''            cleanup_pending = self.workspace.delete_project(project_id)\n            self._invalidate_project_runtime_caches(project_id)\n        with self._workspace_selection_guard:\n'''
+          if old_delete not in core:
+              raise SystemExit('delete project anchor changed')
+          core = core.replace(old_delete, new_delete, 1)
+
+          def wrap_method(text: str, method_name: str, lock_line: str) -> str:
+              start = text.index(f'    def {method_name}(')
+              next_def = text.find('\n    def ', start + 5)
+              if next_def < 0:
+                  next_def = len(text)
+              block = text[start:next_def]
+              if lock_line.strip() in block:
+                  raise SystemExit(f'{method_name} already wrapped')
+              lines = block.splitlines()
+              return text[:start] + lines[0] + '\n' + lock_line + '\n' + '\n'.join('    ' + line for line in lines[1:]) + text[next_def:]
+
+          core = wrap_method(core, 'inspect_project', '        with self._project_lifecycle_lock(project_id):')
+
+          render_start = core.index('    def render_project(')
+          render_end = core.index('    def inspect_body_topology(', render_start)
+          render_block = '''    def render_project(self, project_id: str) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id):
+            _, scene = self._scene_for_project(project_id)
+            return self._clone_scene(scene)
+
+    def _scene_for_project(self, project_id: str) -> tuple[tuple[str, str], dict[str, Any]]:
+        # Check the stat-only revision token before loading and validating the full document.
+        key = (project_id, self.workspace.project_revision_token(project_id))
+        with self._geometry_cache_guard:
+            cached_scene = self._scene_cache.get(key)
+            if cached_scene is not None:
+                self._scene_cache.move_to_end(key)
+                return key, cached_scene
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        self._validate_geometry_once(project_id, document)
+        scene = render_scene(document, self.kernel)
+        with self._geometry_cache_guard:
+            cached_scene = self._scene_cache.get(key)
+            if cached_scene is None:
+                self._scene_cache[key] = scene
+                self._scene_cache.move_to_end(key)
+                trim_lru_entries(self._scene_cache, self._cache_policy.scene_entries)
+                cached_scene = scene
+            else:
+                self._scene_cache.move_to_end(key)
+        return key, cached_scene
+
+    def _remember_png_locked(
+        self,
+        cache_key: tuple[str, str, int, int, int],
+        encoded: bytes,
+    ) -> None:
+        self._png_cache_bytes = remember_bounded_bytes(
+            self._png_cache,
+            cache_key,
+            encoded,
+            current_bytes=self._png_cache_bytes,
+            max_entries=self._cache_policy.png_entries,
+            max_bytes=self._cache_policy.png_bytes,
+            size_of=len,
+        )
+
+    def _render_project_png_server(
+        self, project_id: str, *, width: int = 960, height: int = 720, margin: int = 56,
+    ) -> bytes:
+        with self._project_lifecycle_lock(project_id):
+            key, scene = self._scene_for_project(project_id)
+            cache_key = (*key, width, height, margin)
+            with self._geometry_cache_guard:
+                cached_png = self._png_cache.get(cache_key)
+                if cached_png is not None:
+                    self._png_cache.move_to_end(cache_key)
+                    return cached_png
+            encoded = render_scene_png(scene, width=width, height=height, margin=margin)
+            with self._geometry_cache_guard:
+                cached_png = self._png_cache.get(cache_key)
+                if cached_png is not None:
+                    self._png_cache.move_to_end(cache_key)
+                    return cached_png
+                self._remember_png_locked(cache_key, encoded)
+            return encoded
+
+    def render_project_thumbnail_png(self, project_id: str) -> tuple[bytes, int]:
+        """Render a compact 16:9 frame fitted for square project cards."""
+        with self._project_lifecycle_lock(project_id):
+            key, scene = self._scene_for_project(project_id)
+            width, height, margin = 480, 270, 28
+            cache_key = (*key, width, height, margin)
+            with self._geometry_cache_guard:
+                cached_png = self._png_cache.get(cache_key)
+                if cached_png is not None:
+                    self._png_cache.move_to_end(cache_key)
+                    return cached_png, scene["revision"]
+            encoded = render_scene_png(scene, width=width, height=height, margin=margin)
+            with self._geometry_cache_guard:
+                cached_png = self._png_cache.get(cache_key)
+                if cached_png is not None:
+                    self._png_cache.move_to_end(cache_key)
+                    return cached_png, scene["revision"]
+                self._remember_png_locked(cache_key, encoded)
+            return encoded, scene["revision"]
+
+    def publish_viewport_snapshot(self, project_id: str, revision: int, encoded: bytes) -> dict[str, int]:
+        if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+            raise ValidationError("Viewport snapshot revision must be a non-negative integer.")
+        if not isinstance(encoded, bytes) or len(encoded) < 24 or len(encoded) > 16 * 1024 * 1024:
+            raise ValidationError("Viewport snapshot must be a PNG no larger than 16 MiB.")
+        if encoded[:8] != b"\\x89PNG\\r\\n\\x1a\\n":
+            raise ValidationError("Viewport snapshot must use PNG encoding.")
+        width = int.from_bytes(encoded[16:20], "big")
+        height = int.from_bytes(encoded[20:24], "big")
+        if not width or not height or width > 4096 or height > 4096 or width * height > 16_777_216:
+            raise ValidationError("Viewport snapshot dimensions exceed the supported limit.")
+
+        with self._project_lifecycle_lock(project_id):
+            _, scene = self._scene_for_project(project_id)
+            if revision != scene["revision"]:
+                raise ConflictError(
+                    "The browser viewport has not rendered the current project revision yet.",
+                    code="VIEWPORT_SNAPSHOT_STALE",
+                )
+            with self._viewport_snapshot_guard:
+                self._viewport_snapshot_bytes = remember_bounded_bytes(
+                    self._viewport_snapshots,
+                    project_id,
+                    (revision, encoded),
+                    current_bytes=self._viewport_snapshot_bytes,
+                    max_entries=self._cache_policy.viewport_snapshot_entries,
+                    max_bytes=self._cache_policy.viewport_snapshot_bytes,
+                    size_of=lambda item: len(item[1]),
+                )
+        return {"revision": revision, "width": width, "height": height}
+
+    def render_project_png_with_source(self, project_id: str) -> tuple[bytes, str, int]:
+        with self._project_lifecycle_lock(project_id):
+            _, scene = self._scene_for_project(project_id)
+            with self._viewport_snapshot_guard:
+                snapshot = self._viewport_snapshots.get(project_id)
+                if snapshot is not None:
+                    if snapshot[0] != scene["revision"]:
+                        # A previous browser frame is not a valid image of the
+                        # current document. Treat it as unavailable until the
+                        # browser publishes the new revision; the server renderer
+                        # can still provide a correct current image immediately.
+                        self._viewport_snapshots.pop(project_id)
+                        self._viewport_snapshot_bytes -= len(snapshot[1])
+                    else:
+                        self._viewport_snapshots.move_to_end(project_id)
+                        return snapshot[1], "browser", scene["revision"]
+            return self._render_project_png_server(project_id), "server-fallback", scene["revision"]
+
+    def render_project_png(self, project_id: str) -> bytes:
+        return self.render_project_png_with_source(project_id)[0]
+
+'''
+          core = core[:render_start] + render_block + core[render_end:]
+
+          remember_start = core.index('    def _remember_geometry_validation(')
+          validate_once_start = core.index('    def _validate_geometry_once(', remember_start)
+          remember_block = '''    def _remember_geometry_validation(self, project_id: str, document: Document) -> None:
+        key = self._document_cache_key(project_id, document)
+        with self._geometry_cache_guard:
+            self._validated_document_keys[key] = None
+            self._validated_document_keys.move_to_end(key)
+            trim_lru_entries(
+                self._validated_document_keys,
+                self._cache_policy.validated_document_entries,
+            )
+
+    def _invalidate_project_runtime_caches(self, project_id: str) -> None:
+        with self._geometry_cache_guard:
+            for key in tuple(self._validated_document_keys):
+                if key[0] == project_id:
+                    self._validated_document_keys.pop(key, None)
+            for key in tuple(self._document_validation_locks):
+                if key[0] == project_id:
+                    self._document_validation_locks.pop(key, None)
+            for key in tuple(self._scene_cache):
+                if key[0] == project_id:
+                    self._scene_cache.pop(key, None)
+            for key in tuple(self._png_cache):
+                if key[0] == project_id:
+                    encoded = self._png_cache.pop(key)
+                    self._png_cache_bytes -= len(encoded)
+        with self._viewport_snapshot_guard:
+            snapshot = self._viewport_snapshots.pop(project_id, None)
+            if snapshot is not None:
+                self._viewport_snapshot_bytes -= len(snapshot[1])
+
+'''
+          core = core[:remember_start] + remember_block + core[validate_once_start:]
+          core_path.write_text(core, encoding='utf-8')
+
+          runtime_cache = '''"""Bounded in-process cache policy shared by CADYX runtime caches."""
+
+from __future__ import annotations
+
+from collections import OrderedDict
+from collections.abc import Callable, Hashable
+from dataclasses import dataclass
+from typing import TypeVar
+
+
+KeyT = TypeVar("KeyT", bound=Hashable)
+ValueT = TypeVar("ValueT")
+
+
+@dataclass(frozen=True)
+class RuntimeCachePolicy:
+    """Central entry and byte budgets for revision-bound runtime caches."""
+
+    validated_document_entries: int = 32
+    scene_entries: int = 8
+    png_entries: int = 8
+    png_bytes: int = 32 * 1024 * 1024
+    viewport_snapshot_entries: int = 8
+    viewport_snapshot_bytes: int = 32 * 1024 * 1024
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("validated_document_entries", self.validated_document_entries),
+            ("scene_entries", self.scene_entries),
+            ("png_entries", self.png_entries),
+            ("png_bytes", self.png_bytes),
+            ("viewport_snapshot_entries", self.viewport_snapshot_entries),
+            ("viewport_snapshot_bytes", self.viewport_snapshot_bytes),
+        ):
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer.")
+
+
+def trim_lru_entries(cache: OrderedDict[KeyT, ValueT], max_entries: int) -> None:
+    """Evict oldest entries until an LRU cache satisfies its entry budget."""
+
+    while len(cache) > max_entries:
+        cache.popitem(last=False)
+
+
+def remember_bounded_bytes(
+    cache: OrderedDict[KeyT, ValueT],
+    key: KeyT,
+    value: ValueT,
+    *,
+    current_bytes: int,
+    max_entries: int,
+    max_bytes: int,
+    size_of: Callable[[ValueT], int],
+) -> int:
+    """Store one LRU value and return exact retained-byte accounting."""
+
+    previous = cache.pop(key, None)
+    if previous is not None:
+        current_bytes -= size_of(previous)
+    cache[key] = value
+    cache.move_to_end(key)
+    current_bytes += size_of(value)
+    while cache and (len(cache) > max_entries or current_bytes > max_bytes):
+        _, evicted = cache.popitem(last=False)
+        current_bytes -= size_of(evicted)
+    return current_bytes
+'''
+          Path('cadyx/runtime_cache.py').write_text(runtime_cache, encoding='utf-8')
+
+          tests = '''import threading
+import unittest
+from collections import OrderedDict
+from tempfile import TemporaryDirectory
+
+from cadyx.core import CadyxCore
+from cadyx.models import Document
+from cadyx.runtime_cache import RuntimeCachePolicy, remember_bounded_bytes
+
+
+class _KernelStub:
+    def validate(self, geometry):
+        return None
+
+
+class RuntimeCacheTests(unittest.TestCase):
+    def test_byte_bounded_lru_tracks_eviction_order_and_exact_bytes(self):
+        cache = OrderedDict()
+        retained = 0
+        retained = remember_bounded_bytes(
+            cache, "a", b"12", current_bytes=retained,
+            max_entries=2, max_bytes=5, size_of=len,
+        )
+        retained = remember_bounded_bytes(
+            cache, "b", b"345", current_bytes=retained,
+            max_entries=2, max_bytes=5, size_of=len,
+        )
+        cache.move_to_end("a")
+        retained = remember_bounded_bytes(
+            cache, "c", b"6", current_bytes=retained,
+            max_entries=2, max_bytes=5, size_of=len,
+        )
+        self.assertEqual(list(cache), ["a", "c"])
+        self.assertEqual(retained, 3)
+        retained = remember_bounded_bytes(
+            cache, "oversized", b"123456", current_bytes=retained,
+            max_entries=2, max_bytes=5, size_of=len,
+        )
+        self.assertEqual(cache, OrderedDict())
+        self.assertEqual(retained, 0)
+
+    def test_policy_budgets_are_validated_in_one_object(self):
+        policy = RuntimeCachePolicy(
+            validated_document_entries=1,
+            scene_entries=2,
+            png_entries=3,
+            png_bytes=4,
+            viewport_snapshot_entries=5,
+            viewport_snapshot_bytes=6,
+        )
+        self.assertEqual(policy.png_bytes, 4)
+        with self.assertRaises(ValueError):
+            RuntimeCachePolicy(scene_entries=-1)
+        with self.assertRaises(ValueError):
+            RuntimeCachePolicy(png_bytes=True)
+
+    def test_delete_project_invalidates_only_that_projects_runtime_caches(self):
+        with TemporaryDirectory() as directory:
+            core = CadyxCore(directory, kernel=_KernelStub())
+            first = core.create_project("First", select=False)["project"]["id"]
+            second = core.create_project("Second", select=False)["project"]["id"]
+            first_key, second_key = (first, "int:0"), (second, "int:0")
+            core._validated_document_keys.update(((first_key, None), (second_key, None)))
+            core._document_validation_locks[first_key] = threading.Lock()
+            core._document_validation_locks[second_key] = threading.Lock()
+            core._scene_cache[(first, "r0")] = {"revision": 0}
+            core._scene_cache[(second, "r0")] = {"revision": 0}
+            first_png = (first, "r0", 1, 1, 0)
+            second_png = (second, "r0", 1, 1, 0)
+            core._png_cache[first_png] = b"abc"
+            core._png_cache[second_png] = b"de"
+            core._png_cache_bytes = 5
+            core._viewport_snapshots[first] = (0, b"1234")
+            core._viewport_snapshots[second] = (0, b"56")
+            core._viewport_snapshot_bytes = 6
+
+            core.delete_project(first)
+
+            self.assertNotIn(first_key, core._validated_document_keys)
+            self.assertIn(second_key, core._validated_document_keys)
+            self.assertNotIn(first_key, core._document_validation_locks)
+            self.assertIn(second_key, core._document_validation_locks)
+            self.assertFalse(any(key[0] == first for key in core._scene_cache))
+            self.assertTrue(any(key[0] == second for key in core._scene_cache))
+            self.assertFalse(any(key[0] == first for key in core._png_cache))
+            self.assertTrue(any(key[0] == second for key in core._png_cache))
+            self.assertEqual(core._png_cache_bytes, 2)
+            self.assertNotIn(first, core._viewport_snapshots)
+            self.assertIn(second, core._viewport_snapshots)
+            self.assertEqual(core._viewport_snapshot_bytes, 2)
+
+    def test_concurrent_validation_still_coalesces_per_document_key(self):
+        with TemporaryDirectory() as directory:
+            core = CadyxCore(directory, kernel=_KernelStub())
+            project_id = core.create_project("Validation", select=False)["project"]["id"]
+            document = Document.create()
+            entered = threading.Event()
+            release = threading.Event()
+            call_guard = threading.Lock()
+            calls = 0
+
+            def validate(_document):
+                nonlocal calls
+                with call_guard:
+                    calls += 1
+                entered.set()
+                self.assertTrue(release.wait(2))
+
+            core._validate_geometry = validate
+            threads = [
+                threading.Thread(target=core._validate_geometry_once, args=(project_id, document))
+                for _ in range(2)
+            ]
+            threads[0].start()
+            self.assertTrue(entered.wait(2))
+            threads[1].start()
+            release.set()
+            for thread in threads:
+                thread.join(2)
+                self.assertFalse(thread.is_alive())
+            self.assertEqual(calls, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+          Path('tests/test_runtime_cache.py').write_text(tests, encoding='utf-8')
+
+          roadmap_path = Path('.codex/roadmap.md')
+          roadmap = roadmap_path.read_text(encoding='utf-8')
+          start = roadmap.index('34. **Candidate — Unified bounded runtime-cache policy and lifecycle invalidation:**')
+          end = roadmap.index('\n\n35.', start)
+          completed = '''34. **Complete — Unified bounded runtime-cache policy and lifecycle invalidation:** validated-document, rendered-scene, server-PNG and browser-viewport cache budgets are centralized in `RuntimeCachePolicy`; PNG and browser-snapshot caches now enforce exact retained-byte budgets in addition to LRU entry limits. Project deletion invalidates validation keys/locks, scenes, PNGs and browser snapshots for only the deleted project, with byte counters adjusted exactly. Read/renderer cache population is serialized with the existing per-project lifecycle lock so a concurrent destructive transition cannot repopulate deleted-project cache entries. Revision-token scene checks, double-checked rendering and per-document validation coalescing remain intact. Evidence: [`cadyx/runtime_cache.py`](../cadyx/runtime_cache.py), [`cadyx/core.py`](../cadyx/core.py), and [`tests/test_runtime_cache.py`](../tests/test_runtime_cache.py).'''
+          roadmap = roadmap[:start] + completed + roadmap[end:]
+          roadmap_path.write_text(roadmap, encoding='utf-8')
+          PY
+      - name: Verify source changes
+        run: |
+          python -m compileall -q cadyx tests
+          python -m unittest tests.test_runtime_cache -v
+          python -m unittest discover -s tests -p test_source_contracts.py -v
+      - name: Commit implementation
+        shell: bash
+        run: |
+          rm .github/workflows/stage34-apply.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Complete roadmap stage 34 runtime cache policy"
+          git push origin HEAD:main
