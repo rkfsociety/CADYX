@@ -113,9 +113,12 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
        << ",\"vertex_count\":" << vertex_count << "}";
   if (mesh) {
     // This mesh is only for the live viewport; the editable B-rep remains exact.
-    // Keep the display approximation near one CSS pixel for a typical viewport;
-    // the exact editable B-rep remains unchanged.
-    BRepMesh_IncrementalMesh mesher(shape, 0.16, false, 0.5, false);
+    // Fine linear and angular tolerances keep small curved details legible at
+    // desktop viewport sizes without changing the source geometry.
+    constexpr double kViewportLinearDeflection = 0.04;
+    constexpr double kViewportAngularDeflection = 0.2;
+    BRepMesh_IncrementalMesh mesher(shape, kViewportLinearDeflection, false,
+                                    kViewportAngularDeflection, false);
     if (!mesher.IsDone()) throw std::runtime_error("OCCT could not tessellate the solid.");
     std::vector<double> positions;
     std::vector<size_t> triangles;
@@ -186,7 +189,7 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
         }
       }
       if (!sharp) continue;
-      GCPnts_QuasiUniformDeflection samples(curve, 0.16);
+      GCPnts_QuasiUniformDeflection samples(curve, kViewportLinearDeflection);
       if (!samples.IsDone() || samples.NbPoints() < 2)
         throw std::runtime_error("OCCT could not sample a B-rep edge for the viewport.");
       size_t previous = 0;
