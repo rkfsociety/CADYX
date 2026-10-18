@@ -87,8 +87,8 @@
     showWorldAxes = true,
     wireframe = false,
     shaded = true,
-    wireframeColor = "#a4c2ca",
-    wireframeOpacity = 0.78,
+    wireframeColor = "#b5d2da",
+    wireframeOpacity = 0.96,
     onRender = null,
   } = {}) {
     const context = canvas.getContext("2d", { alpha: true });
@@ -303,7 +303,7 @@
         triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
-        wireframeColor, wireframeOpacity, dpr, 0.75 / scale,
+        wireframeColor, wireframeOpacity, dpr, 1.5 / scale,
         selectedFeatureId
           ? geometry.featureTriangleRanges?.filter((range) => range.featureId === selectedFeatureId) || []
           : geometry.bodyTriangleRanges?.filter((range) => range.objectId === selectedBodyId) || [],
@@ -682,7 +682,7 @@
           && third >= vertexRange[0] && third < vertexRange[1];
 
         if (!colors && !triangleColors) {
-          const steel = Math.round(72 + brightness * 92);
+          const steel = Math.round(60 + brightness * 125);
           let red = Math.round(steel * 0.9), blue = Math.round(steel * 1.12), green = steel;
           if (forming && progress < 1) {
             const glow = (1 - progress) * 0.38;
@@ -898,7 +898,7 @@
           const first = triangles[face * 3];
           const second = triangles[face * 3 + 1];
           const third = triangles[face * 3 + 2];
-          const steel = Math.round(72 + brightness * 92);
+          const steel = Math.round(60 + brightness * 125);
           const faceColor = face * 3;
           let red = triangleColors
             ? Math.round(triangleColors[faceColor] * brightness)
@@ -1005,7 +1005,10 @@
         context.save();
         context.strokeStyle = wireframeColor;
         context.globalAlpha = wireframeOpacity;
-        context.lineWidth = 1.1 * dpr;
+        context.lineWidth = 1.7 * dpr;
+        context.lineCap = "round";
+        context.lineJoin = "round";
+        context.setLineDash([]);
         const edgesPerPath = 3500;
         for (let start = 0; start < featureEdges.length; start += edgesPerPath * 2) {
           context.beginPath();
@@ -1030,7 +1033,10 @@
         context.save();
         context.strokeStyle = wireframeColor;
         context.globalAlpha = wireframeOpacity;
-        context.lineWidth = 1.1 * dpr;
+        context.lineWidth = 1.7 * dpr;
+        context.lineCap = "round";
+        context.lineJoin = "round";
+        context.setLineDash([]);
         context.beginPath();
         for (let index = 0; index < silhouetteCandidates.length; index += 4) {
           const firstFace = faceFacing[silhouetteCandidates[index + 2]];
