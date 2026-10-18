@@ -115,7 +115,7 @@ copyProjectIdButton.addEventListener("click", async () => {
   if (!selectedProjectId || selectedProjectId.startsWith(FOLDER_SELECTION_PREFIX)) return;
   try {
     await navigator.clipboard.writeText(selectedProjectId);
-    notify("UUID проекта скопирован.");
+    notify(`UUID проекта скопирован: ${selectedProjectId}`, false, 10000);
   } catch {
     notify("Не удалось скопировать UUID проекта.", true);
   }
@@ -416,12 +416,12 @@ function readSelectedProject() {
   return projectId || (folderName ? `folder:${folderName}` : null);
 }
 
-function notify(message, isError = false) {
+function notify(message, isError = false, durationMs = 3000) {
   toast.textContent = message;
   toast.classList.toggle("error", isError);
   toast.classList.add("visible");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove("visible"), 3000);
+  toastTimer = setTimeout(() => toast.classList.remove("visible"), durationMs);
 }
 
 function formatNumber(value) {
