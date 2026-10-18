@@ -98,6 +98,7 @@ BASE_COMMAND_CAPABILITIES: tuple[dict[str, Any], ...] = (
     {"type": "mirror_sketch_elements", "description": "Copy sketch geometry reflected across a 2D axis.", "required": ["sketch_id", "object_ids", "axis_start", "axis_end"], "optional": [], "constraints": ["Selected point, line, circle and spline dependencies are copied together; ellipses are reflected analytically; constraints are not copied."]},
     {"type": "pattern_sketch_elements", "description": "Copy sketch geometry in a linear or circular pattern.", "required": ["sketch_id", "object_ids", "mode", "count"], "optional": ["offset_x", "offset_y", "center_x", "center_y", "angle_step_degrees"], "constraints": ["count is an integer of at least 2 including the source; selected point, line, circle and spline dependencies are copied together; ellipses are transformed analytically; constraints are not copied."]},
     {"type": "add_sketch_involute_gear", "description": "Generate an external involute spur-gear outline.", "required": ["sketch_id", "module", "tooth_count"], "optional": ["pressure_angle_degrees", "center_x", "center_y", "rotation_degrees", "backlash"], "constraints": ["tooth_count must be at least 3 and meet the pressure-angle undercut limit; there is no fixed upper tooth count. See the engineering profile contract."]},
+    {"type": "add_sketch_internal_involute_gear", "description": "Generate the closed cavity boundary of an internal involute spur gear in an XY sketch.", "required": ["sketch_id", "module", "tooth_count"], "optional": ["pressure_angle_degrees", "center_x", "center_y", "rotation_degrees", "backlash"], "constraints": ["The outline is the inner contour of a ring body; create a separate outer boundary and extrude both contours. Tooth count must meet the pressure-angle undercut limit; there is no fixed upper tooth count."]},
     {"type": "add_sketch_constraint", "description": "Add a checked sketch constraint.", "required": ["sketch_id", "kind", "references"], "optional": ["value"], "constraints": ["Constraints validate supplied geometry; they do not solve or move it."]},
     {"type": "update_sketch_elements", "description": "Update supported sketch point or circle values atomically.", "required": ["updates"], "optional": [], "constraints": ["Each update has object_id and non-empty changes; dependent features rebuild atomically."]},
     {"type": "replace_sketch_profile", "description": "Replace a closed sketch profile atomically.", "required": ["sketch_id", "points"], "optional": [], "constraints": ["Profile must remain closed and valid."]},
@@ -134,7 +135,7 @@ COMMAND_REGISTRY = ExtensionRegistry(
 COMMAND_CAPABILITIES = COMMAND_REGISTRY.capabilities
 
 
-def agent_api_capabilities() -> dict[str, Any]:
+def agent_api_capabilities(reusable_capabilities: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Describe implemented routes without claiming validation beyond the source contracts."""
     return {
         "api_version": 1,
@@ -155,6 +156,10 @@ def agent_api_capabilities() -> dict[str, Any]:
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/files/{name}", "description": "Upload a .step/.stp source as application/octet-stream; max 64 MiB; existing project files are never overwritten."},
         {"method": "DELETE", "path": "/api/v1/agent/projects/{id}/files/{name}", "description": "Remove an unused direct .step/.stp reference from a free project; fails while its imported body still uses it."},
             {"method": "GET", "path": "/api/v1/agent/capabilities", "description": "This read-only route discovery and command parameter guide."},
+            {"method": "POST", "path": "/api/v1/agent/projects/{id}/capabilities", "description": "Test and register a reusable declarative command composition."},
+            {"method": "POST", "path": "/api/v1/agent/projects/{id}/capabilities/check", "description": "Report a missing required command as a visual agent activity without acquiring a model edit lease."},
+            {"method": "POST", "path": "/api/v1/agent/projects/{id}/capabilities/{capability_id}/execute", "description": "Execute a tested capability through individually revision-checked Command System operations."},
+            {"method": "POST", "path": "/api/v1/agent/projects/{id}/capabilities/{capability_id}/rollback", "description": "Restore the previous checkpointed version while the project is idle."},
             {"method": "GET", "path": "/api/v1/agent/projects/{id}/topology?body_id=...", "description": "Current editable B-rep topology; refresh after upstream edits."},
             {"method": "GET", "path": "/api/v1/agent/projects/{id}/validations?limit=50", "description": "List up to 200 recent persisted validation records without changing the document revision."},
             *({key: operation[key] for key in ("method", "path", "description")}
@@ -185,9 +190,11 @@ def agent_api_capabilities() -> dict[str, Any]:
             ".codex/docs/document-model-v8.md",
             ".codex/docs/viewport-api.md",
         ],
+        "reusable_capabilities": deepcopy(reusable_capabilities or []),
         "limitations": [
             "Browser is a read-only observation surface; API selection and commands are authoritative.",
             "Imported PLY scan results are triangle meshes, not B-reps; no unmeasured scale or reconstruction accuracy is claimed.",
             "Parameter names are a guide. Core/Command System validators define accepted values and geometry constraints.",
+            "Agent-created capabilities are bounded declarative compositions of existing commands; arbitrary source code is never executed by the CADYX host.",
         ],
     }

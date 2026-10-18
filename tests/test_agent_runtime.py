@@ -18,6 +18,7 @@ from cadyx.agent_runtime import (
     AgentToolCall,
     AgentToolSpec,
 )
+from cadyx.capability_registry import CapabilityRegistry
 from cadyx.core import CadyxCore
 from cadyx.kernel import PrimitiveKernelAdapter
 from cadyx.models import OwnerType
@@ -134,7 +135,7 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(self.core.inspect_project(self.project_id)["lock"]["state"], "FREE")
         self.assertEqual(
             tuple(spec.name for spec in provider.requests[0][1]),
-            ("inspect_project", "get_viewport", "execute_command"),
+            ("list_capabilities", "develop_capability", "inspect_project", "get_viewport", "execute_command"),
         )
         tool_messages = [message for message in provider.requests[1][0] if message.role == "tool"]
         self.assertEqual(
@@ -167,7 +168,52 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(result.revision, 0)
         self.assertEqual(self.core.inspect_project(self.project_id)["lock"]["state"], "FREE")
         tool_message = next(message for message in provider.requests[1][0] if message.role == "tool")
-        self.assertEqual(json.loads(tool_message.content)["error"], "VALIDATION_ERROR")
+        self.assertEqual(json.loads(tool_message.content)["error"], "CAPABILITY_MISSING")
+        self.assertEqual(json.loads(tool_message.content)["command_type"], "missing")
+
+    def test_missing_command_is_developed_tested_registered_and_used_in_same_run(self) -> None:
+        definition = {
+            "id": "runtime_test_box_builder",
+            "title": "Runtime test box builder",
+            "description": "Creates an editable test box.",
+            "version": "1.0.0",
+            "input_schema": {"type": "object", "properties": {
+                "width": {"type": "number", "minimum": 0.1},
+            }, "required": ["width"], "additionalProperties": False},
+            "output_schema": {"type": "object", "properties": {"body_id": {"type": "string"}},
+                              "required": ["body_id"], "additionalProperties": False},
+            "outputs": {"body_id": {"step": 0, "field": "body_id"}},
+            "dependencies": [],
+            "steps": [{"command": {
+                "type": "create_box", "width": {"$input": "width"},
+                "height": 3, "depth": 4, "name": "Runtime capability body",
+            }}],
+            "test_input": {"width": 2},
+        }
+        provider = ScriptedProvider([
+            AgentResponse(None, (AgentToolCall("missing", "execute_command", {
+                "command": {"type": "runtime_test_box", "width": 2},
+            }),)),
+            AgentResponse(None, (AgentToolCall("develop", "develop_capability", {
+                "definition": definition,
+            }),)),
+            AgentResponse(None, (AgentToolCall("use", "cadyx_capability_runtime_test_box_builder", {
+                "width": 2,
+            }),)),
+            AgentResponse("Built the requested model.", ()),
+        ])
+
+        result = AgentRuntime(self.core, provider, owner_id="runtime-test").run(
+            self.project_id, "Build a box with the required capability.",
+        )
+
+        self.assertEqual(result.final_response, "Built the requested model.")
+        self.assertEqual(result.revision, 1)
+        self.assertEqual(self.core.inspect_project(self.project_id)["document"]["revision"], 1)
+        self.assertIn("cadyx_capability_runtime_test_box_builder",
+                      [spec.name for spec in provider.requests[2][1]])
+        registry = CapabilityRegistry(self.core.workspace.root / ".cadyx-capabilities.sqlite3")
+        self.assertEqual(registry.list(ready_only=True)[0]["id"], "runtime_test_box_builder")
 
     def test_provider_failure_without_a_command_leaves_project_free(self) -> None:
         runtime = AgentRuntime(self.core, FailingProvider(), owner_id="runtime-test")

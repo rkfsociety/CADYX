@@ -9,6 +9,53 @@ from cadyx.semantic_selection import capture_edge_references, resolve_edge_refer
 
 
 class ModelParameterExpressionTests(unittest.TestCase):
+    def test_gear_sketch_parameters_regenerate_profile_and_dependent_brep(self):
+        system = CommandSystem(OCCTKernelAdapter())
+        document = Document.create()
+        system.execute(document, {"type": "create_model_parameter", "name": "GearModule",
+                                 "value": 2, "unit": "mm"})
+        sketch_id = system.execute(document, {"type": "create_sketch", "name": "Sun gear", "plane": "XY"})["sketch_id"]
+        system.execute(document, {"type": "add_sketch_involute_gear", "sketch_id": sketch_id,
+                                 "module": 2, "tooth_count": 20})
+        extruded = system.execute(document, {"type": "extrude_sketch", "sketch_id": sketch_id, "depth": 8})
+        system.execute(document, {"type": "bind_model_parameter", "object_id": sketch_id,
+            "path": "generated_gear_profile.parameters.module", "expression": "GearModule"})
+        original = next(item for item in document.objects if item["id"] == extruded["body_id"])
+        original_volume = original["geometry"]["volume"]
+
+        system.execute(document, {"type": "set_model_parameter", "name": "GearModule", "value": 2.2})
+
+        sketch = next(item for item in document.objects if item["id"] == sketch_id)
+        body = next(item for item in document.objects if item["id"] == extruded["body_id"])
+        self.assertEqual(sketch["generated_gear_profile"]["parameters"]["module"], 2.2)
+        self.assertNotAlmostEqual(body["geometry"]["volume"], original_volume, places=5)
+        document.validate()
+
+    def test_gear_tooth_count_binding_regenerates_loop_and_dependent_brep(self):
+        system = CommandSystem(OCCTKernelAdapter())
+        document = Document.create()
+        system.execute(document, {"type": "create_model_parameter", "name": "GearTeeth",
+                                 "value": 20, "unit": "unitless"})
+        sketch_id = system.execute(document, {"type": "create_sketch", "name": "Planet gear", "plane": "XY"})["sketch_id"]
+        system.execute(document, {"type": "add_sketch_involute_gear", "sketch_id": sketch_id,
+                                 "module": 2, "tooth_count": 20})
+        extruded = system.execute(document, {"type": "extrude_sketch", "sketch_id": sketch_id, "depth": 9})
+        system.execute(document, {"type": "bind_model_parameter", "object_id": sketch_id,
+            "path": "generated_gear_profile.parameters.tooth_count", "expression": "GearTeeth"})
+        sketch = next(item for item in document.objects if item["id"] == sketch_id)
+        old_point_count = len(sketch["generated_gear_profile"]["point_ids"])
+        old_volume = next(item["geometry"]["volume"] for item in document.objects
+                          if item["id"] == extruded["body_id"])
+
+        system.execute(document, {"type": "set_model_parameter", "name": "GearTeeth", "value": 18})
+
+        sketch = next(item for item in document.objects if item["id"] == sketch_id)
+        body = next(item for item in document.objects if item["id"] == extruded["body_id"])
+        self.assertEqual(sketch["generated_gear_profile"]["parameters"]["tooth_count"], 18)
+        self.assertLess(len(sketch["generated_gear_profile"]["point_ids"]), old_point_count)
+        self.assertNotAlmostEqual(body["geometry"]["volume"], old_volume, places=5)
+        document.validate()
+
     def test_merges_consecutive_same_radius_fillets_and_rebuilds_dependents(self):
         system = CommandSystem(OCCTKernelAdapter())
         document = Document.create()

@@ -127,6 +127,60 @@ created through the existing Core or Agent API before a runtime run. See the
 [Agent Runtime module](../../cadyx/agent_runtime.py) and
 [focused tests](../../tests/test_agent_runtime.py).
 
+## Self-Evolving Capability Engine
+
+The provider-neutral Agent Runtime and local MCP surface now detect an unknown
+Command System command and report `CAPABILITY_MISSING`. Agents can inspect the
+workspace-wide persistent registry, propose a capability, run it through an
+isolated `Document` and the active geometry kernel, register a passing result,
+execute it in the requested model, and restore the previous registry
+checkpoint. The Agent API surfaces these operations under
+`/api/v1/agent/projects/{id}/capabilities`; command contracts and registered
+capabilities are returned by `GET /api/v1/agent/capabilities`.
+
+The registry lives at workspace-root `.cadyx-capabilities.sqlite3`. A
+capability stores a stable id, title/description, MAJOR.MINOR.PATCH version,
+closed input/output schemas, command-result output bindings, dependencies,
+declarative Command System steps, test input/evidence, the current command
+contract hash, and its MCP invocation name. SQLite checkpoints are captured on
+replacement and `cadyx_rollback_capability` restores the previous version.
+Only compatible `ready` entries are exposed for reuse. Each live command in a
+capability obtains and releases its own revision-protected agent lease, so
+completed steps remain saved and visible if a later step fails.
+
+The proposal format is deliberately data-only: it cannot import modules, run
+Python or shell, access files, install dependencies, or invoke project-wide
+destructive/import/export commands. It can compose existing bounded modeling
+commands, and its isolated test must produce a valid body in the active kernel.
+This gives an automatic discover-test-register-resume-reuse path for missing
+compositions. It does not let a running CADYX host synthesize or load arbitrary
+new Python/OCCT algorithms. Such a kernel/API gap still requires a trusted source
+change, the project checks, and a host restart; CADYX ships no model-provider or
+source-code sandbox that could safely automate that step. The operator MCP
+instructions and Agent Runtime system prompt expose this boundary explicitly.
+
+Capability lifecycle activities use the existing `agent.activity` SSE stream.
+The browser displays the missing command, capability name and reason, test
+result, and integration step in the workflow card. Current and previous test
+results also remain available through capability discovery after host restart.
+See [persistent capability tests](../../tests/test_self_evolving.py),
+[Agent Runtime lifecycle tests](../../tests/test_agent_runtime.py), and
+[Agent API tests](../../tests/test_web_api.py).
+
+### Internal involute gear profile
+
+`add_sketch_internal_involute_gear` writes the closed internal-tooth cavity
+boundary as ordinary editable XY sketch geometry, with the module, tooth count,
+pressure angle, center, rotation and backlash returned in `gear_parameters`.
+The command requires an existing outer circle and no other profiles in the same
+sketch, so `extrude_sketch` can preserve the ring as one outer contour plus one
+inner tooth contour. It uses the standard unshifted internal radii
+`pitch = module * teeth / 2`, `tip = pitch - module`, and
+`root = pitch + 1.25 * module`; the involute flank samples and circular tip/root
+segments are an editable polygonal approximation. The same undercut-count check
+as the external generator applies. This command creates a mesh-based sketch
+outline, but extrusion produces the usual validated editable OCCT B-rep.
+
 ## Commands and geometry
 
 The shared Command System supports box and parameter edits, scan import and parameter edits, direct single-solid STEP import, XY/XZ sketches and constraints, profile/path replacement, and linked solid features. Profile extrusion/revolution, circular-section path sweeps, connected Boolean fuses, and topology-selected edge fillets all create editable OCCT B-reps. STEP import stores the transferred OCCT B-rep with the source hash and geometry metrics; invalid source shapes remain marked invalid if OCCT cannot repair them within the documented tolerance. Feature descriptors retain their source sketches or bodies and parameters; supported upstream edits rebuild dependent features in document order inside the same atomic command. Fusion accepts intersecting B-rep solids, including swept pipes and prior fuse/fillet results, and must produce one connected solid. Fillet selection uses current unique B-rep edge indices exposed by the Agent topology endpoint; indices are traversal results, not persistent names. Scan commands resolve direct workspace PLY files through `ProjectWorkspace`, run inside the same Core lease and atomic-save path, and never write to the source. Each processed mesh is published as an atomic, content-addressed binary PLY beside its source; matching files are reused, and conflicts are never overwritten. The `reconstruct_scan` feature stores its source hash, output-file metadata, and processing parameters; its body's `cadyx-mesh-v1` geometry stores bounded compressed float32 vertices and uint32 faces in `project.json`. The Core retains the latest 128 in-memory activity snapshots per project and publishes updates as `agent.activity` SSE. Snapshots include Agent Runtime/API inspections, render requests, commands, solid features, camera orbits, and native scan phases; the browser shows the current action/task and a newest-first timestamped list of completed/failed action snapshots, without exposing the full journal. The `GeometryKernel` protocol isolates CADYX Core from a specific kernel. `OCCTKernelAdapter` creates and validates boxes, profile extrusions/revolutions, swept pipes, fused solids, filleted solids, and imported STEP solids, and validates legacy `primitive-v1` descriptors. It also validates and tessellates portable triangle meshes without turning them into B-reps. `PrimitiveKernelAdapter` remains available for demos and does not create B-rep geometry. See the [Document Model v7 contract](document-model-v7.md#sketch-driven-solid-features) for exact commands and limits.

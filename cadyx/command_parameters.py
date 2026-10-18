@@ -9,6 +9,7 @@ import math
 import re
 from copy import deepcopy
 from typing import Any, Callable
+from uuid import uuid4
 from .errors import NotFoundError, ValidationError
 from .model_parameters import assign_property, evaluate_expression, property_location
 from .models import Document
@@ -337,7 +338,7 @@ class ParameterCommands:
         else:
             sketch_id = object_id if target["type"] == "sketch" else target.get("sketch_id")
             if isinstance(sketch_id, str):
-                self._rebuild_changed_features(staged, {sketch_id}, progress=progress)
+                self._rebuild_parameter_targets(staged, set(), {sketch_id}, progress=progress)
         staged.validate()
         self._commit_staged_document(document, staged)
         return {"object_id": object_id, "path": path, "expression": expression, "value": result}
@@ -402,6 +403,7 @@ class ParameterCommands:
             self._rebuild_bound_feature(document, root["id"], progress=progress)
             return
         if sketch_ids:
+            self._regenerate_generated_gear_profiles(document, sketch_ids, progress=progress)
             self._rebuild_changed_features(document, sketch_ids, progress=progress)
         feature_order = {item["id"]: index for index, item in enumerate(document.objects)}
         for feature in sorted(roots, key=lambda item: feature_order[item["id"]]):
@@ -410,6 +412,83 @@ class ParameterCommands:
                 self._rebuild_derived_features(document, {source_id}, progress=progress)
             else:
                 self._rebuild_bound_feature(document, feature["id"], progress=progress)
+
+    def _regenerate_generated_gear_profiles(
+        self,
+        document: Document,
+        sketch_ids: set[str],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
+        from .engineering import involute_internal_gear_profile, involute_spur_gear_profile
+
+        by_id = {item["id"]: item for item in document.objects}
+        for sketch_id in sketch_ids:
+            sketch = by_id.get(sketch_id)
+            if not isinstance(sketch, dict) or sketch.get("type") != "sketch":
+                continue
+            generated = sketch.get("generated_gear_profile")
+            if not isinstance(generated, dict):
+                continue
+            operation = generated.get("operation")
+            parameters = generated.get("parameters")
+            old_points = generated.get("point_ids")
+            old_lines = generated.get("line_ids")
+            if (operation not in {"add_sketch_involute_gear", "add_sketch_internal_involute_gear"}
+                    or not isinstance(parameters, dict) or not isinstance(old_points, list)
+                    or not isinstance(old_lines, list)):
+                raise ValidationError("Generated gear sketch metadata is invalid.")
+            input_keys = {
+                "module", "tooth_count", "pressure_angle_degrees", "center_x", "center_y",
+                "rotation_degrees", "backlash",
+            }
+            gear_parameters = {key: parameters[key] for key in input_keys if key in parameters}
+            tooth_count = gear_parameters.get("tooth_count")
+            if (isinstance(tooth_count, bool) or not isinstance(tooth_count, (int, float))
+                    or not math.isfinite(tooth_count) or tooth_count < 3
+                    or not float(tooth_count).is_integer()):
+                raise ValidationError("Generated gear tooth_count must remain an integer.")
+            gear_parameters["tooth_count"] = int(tooth_count)
+            generator = (involute_spur_gear_profile if operation == "add_sketch_involute_gear"
+                         else involute_internal_gear_profile)
+            points, rebuilt_parameters = generator(**gear_parameters)
+            segments = len(points)
+            point_ids = list(old_points[:segments])
+            line_ids = list(old_lines[:segments])
+            point_ids.extend(f"point:{uuid4()}" for _ in range(segments - len(point_ids)))
+            line_ids.extend(f"line:{uuid4()}" for _ in range(segments - len(line_ids)))
+
+            if progress is not None:
+                progress({"phase": "rebuild_generated_gear_profile"})
+            retained_ids = set(point_ids) | set(line_ids)
+            removed_ids = set(old_points) | set(old_lines)
+            document.objects[:] = [
+                item for item in document.objects
+                if item.get("id") not in removed_ids or item.get("id") in retained_ids
+            ]
+            by_id = {item["id"]: item for item in document.objects}
+            elements = []
+            for point_id, (x, y) in zip(point_ids, points, strict=True):
+                item = by_id.get(point_id)
+                if item is None:
+                    item = {"id": point_id, "type": "point", "sketch_id": sketch_id}
+                    elements.append(item)
+                item.update({"x": x, "y": y})
+            for index, line_id in enumerate(line_ids):
+                item = by_id.get(line_id)
+                if item is None:
+                    item = {"id": line_id, "type": "line", "sketch_id": sketch_id}
+                    elements.append(item)
+                item.update({"start_id": point_ids[index], "end_id": point_ids[(index + 1) % segments]})
+            if elements:
+                sketch_index = document.objects.index(sketch)
+                document.objects[sketch_index + 1:sketch_index + 1] = elements
+            sketch["generated_gear_profile"] = {
+                "operation": operation,
+                "parameters": rebuilt_parameters,
+                "point_ids": point_ids,
+                "line_ids": line_ids,
+            }
 
     def _rebuild_bound_feature(
         self, document: Document, feature_id: str, *,

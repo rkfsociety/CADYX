@@ -650,6 +650,28 @@ function renderCurrentProgress(dashboard, value, lock = null) {
   actionElement.textContent = actionText;
   actionElement.title = actionText;
 
+  const capabilityDetail = $("#workflow-capability-detail");
+  const capability = activity?.detail;
+  if (capability && typeof capability === "object" && capability.capability_id) {
+    const summary = [];
+    if (capability.title) summary.push(`Функция: ${capability.title} · ${capability.capability_id}`);
+    if (capability.reason) summary.push(`Зачем: ${capability.reason}`);
+    if (capability.test_result) {
+      const tests = capability.test_result;
+      summary.push(tests.status === "passed"
+        ? `Проверка геометрии: успешно · ${tests.steps_passed} команд · ${tests.bodies_validated} тел`
+        : `Проверка геометрии: ${tests.status || "не пройдена"}`);
+    }
+    capabilityDetail.textContent = summary.join("\n");
+    capabilityDetail.dataset.state = capability.test_result?.status === "passed" ? "completed"
+      : capability.phase === "capability_missing" ? "failed" : "running";
+    capabilityDetail.hidden = summary.length === 0;
+  } else {
+    capabilityDetail.textContent = "";
+    capabilityDetail.hidden = true;
+    delete capabilityDetail.dataset.state;
+  }
+
   const taskRow = $("#workflow-task-row");
   const taskElement = $("#workflow-current-task");
   const taskState = $("#workflow-current-task-state");

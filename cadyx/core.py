@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Iterator, Literal
 
 from .commands import CommandSystem
+from .capability_registry import CapabilityRegistry
 from .core_services import (
     CommandActivityService,
     EngineeringValidationService,
@@ -23,6 +24,7 @@ from .lease import EditLeaseManager
 from .models import Document, OwnerType
 from .runtime_cache import RuntimeCachePolicy
 from .scan import ScanProcessor
+from .self_evolving import SelfEvolvingCapabilityEngine
 from .workspace import ProjectWorkspace
 from .sketches import closed_profile, closed_profiles, open_path
 
@@ -57,6 +59,8 @@ class CadyxCore:
         self._command_activity = CommandActivityService(self)
         self._rendering = RenderingCacheService(self, cache_policy=cache_policy)
         self._engineering_validation = EngineeringValidationService(self)
+        self.capability_registry = CapabilityRegistry(self.workspace.root / ".cadyx-capabilities.sqlite3")
+        self.self_evolving = SelfEvolvingCapabilityEngine(self, self.capability_registry)
 
     @contextmanager
     def _project_guard(self, project_id: str) -> Iterator[None]:
@@ -149,6 +153,118 @@ class CadyxCore:
     def report_agent_dashboard(self, project_id: str, report: dict[str, Any]) -> dict[str, Any]:
         return self._command_activity.report_agent_dashboard(project_id, report)
 
+    def agent_capabilities(self) -> dict[str, Any]:
+        from .capabilities import agent_api_capabilities
+
+        return agent_api_capabilities(self.self_evolving.available())
+
+    def develop_agent_capability(self, project_id: str, definition: dict[str, Any]) -> dict[str, Any]:
+        self.observe_agent_operation(
+            project_id, "Проверяет существующие возможности",
+            lambda: self.self_evolving.available(),
+            detail_from_result=lambda available: {
+                "phase": "capability_check", "reusable_count": len(available),
+            },
+        )
+        prepared = self.observe_agent_operation(
+            project_id, f"Разрабатывает инструмент: {definition.get('title', 'новая возможность')}",
+            lambda: self.self_evolving.prepare_proposal(definition),
+            detail_from_result=lambda item: {
+                "phase": "development", "capability_id": item["id"],
+                "title": item["title"], "reason": item["description"],
+            },
+        )
+        test_result = self.observe_agent_operation(
+            project_id, f"Тестирует инструмент на геометрии: {prepared['title']}",
+            lambda: self.self_evolving.test_proposal(prepared),
+            detail_from_result=lambda result: {
+                "phase": "testing", "capability_id": prepared["id"],
+                "title": prepared["title"], "reason": prepared["description"],
+                "test_result": result,
+            },
+        )
+        return self.observe_agent_operation(
+            project_id, f"Интегрирует возможность: {prepared['title']}",
+            lambda: self.self_evolving.register_tested(prepared, test_result),
+            detail_from_result=lambda item: {
+                "phase": "integration", "capability_id": item["id"],
+                "title": item["title"], "reason": item["description"],
+                "test_result": item["test_result"],
+            },
+        )
+
+    def check_agent_capability(self, project_id: str, command_type: str) -> dict[str, Any]:
+        result = self.self_evolving.missing_command({"type": command_type})
+        if result is None:
+            return {"status": "available", "command_type": command_type}
+        return self.observe_agent_operation(
+            project_id, f"Требуемая возможность отсутствует: {command_type}",
+            lambda: result,
+            detail_from_result=lambda missing: {
+                "phase": "capability_missing", "capability_id": command_type,
+                "title": command_type, "reason": missing["message"],
+            },
+        )
+
+    def execute_agent_capability(
+        self,
+        project_id: str,
+        capability_id: str,
+        arguments: dict[str, Any],
+        *,
+        owner_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        from .lease_heartbeat import LeaseHeartbeat
+
+        revision = [expected_revision]
+
+        def execute(arguments_for_step: dict[str, Any]) -> dict[str, Any]:
+            resumed = self.resume_agent(project_id, owner_id, revision[0])
+            lease_id = resumed["lease"]["lease_id"]
+            heartbeat = LeaseHeartbeat(self, project_id, lease_id)
+            primary_error: BaseException | None = None
+            try:
+                heartbeat.start()
+                heartbeat.check()
+                result = self.execute_command(
+                    project_id, lease_id, arguments_for_step["command"],
+                    expected_owner_type=OwnerType.AGENT, expected_revision=revision[0],
+                )
+                revision[0] = result["document"]["revision"]
+                heartbeat.check()
+            except BaseException as exc:
+                primary_error = exc
+                raise
+            finally:
+                heartbeat.stop()
+                try:
+                    self.stop_agent(project_id, lease_id)
+                except BaseException as stop_error:
+                    if primary_error is None:
+                        raise
+                    primary_error.add_note(f"Agent capability lease cleanup also failed: {stop_error}")
+            return result
+
+        self.observe_agent_operation(
+            project_id, "Возобновляет построение модели",
+            lambda: {"capability_id": capability_id},
+            detail_from_result=lambda result: {
+                "phase": "model_resume", "capability_id": result["capability_id"],
+            },
+        )
+        result = self.self_evolving.execute(capability_id, arguments, execute)
+        return {**result, "revision": revision[0]}
+
+    def rollback_agent_capability(self, project_id: str, capability_id: str) -> dict[str, Any]:
+        self._require_project_policy(
+            project_id, "write", "Capability rollback requires an idle, unlocked project.",
+        )
+        return self.observe_agent_operation(
+            project_id, "Откатывает версию возможности",
+            lambda: self.capability_registry.rollback(capability_id),
+        )
+
     def inspect_project(self, project_id: str) -> dict[str, Any]:
         return self._lifecycle.inspect_project(project_id)
     def acquire_lease(self, project_id: str, owner_type: str, owner_id: str) -> dict[str, Any]:
@@ -239,8 +355,12 @@ class CadyxCore:
         operation: Callable[..., Any],
         *,
         reports_progress: bool = False,
+        detail_from_result: Callable[[Any], dict[str, Any]] | None = None,
     ) -> Any:
-        return self._command_activity.observe_agent_operation(project_id, action, operation, reports_progress=reports_progress)
+        return self._command_activity.observe_agent_operation(
+            project_id, action, operation, reports_progress=reports_progress,
+            detail_from_result=detail_from_result,
+        )
 
     def heartbeat(self, project_id: str, lease_id: str) -> dict[str, Any]:
         return self._command_activity.heartbeat(project_id, lease_id)

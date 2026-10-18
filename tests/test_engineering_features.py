@@ -124,6 +124,30 @@ class EngineeringFeatureTests(unittest.TestCase):
                     for profile in profiles]
         self.assertEqual(self._proper_crossings(*outlines), 0)
 
+    def test_internal_involute_gear_forms_a_ring_brep_with_reference_dimensions(self) -> None:
+        module, teeth, outer_radius, face_width = 2.0, 60, 80.0, 8.0
+        sketch_id = self.command({"type": "create_sketch", "name": "Internal gear profile", "plane": "XY"})["sketch_id"]
+        self.command({"type": "add_sketch_circle", "sketch_id": sketch_id,
+                      "x": 0.0, "y": 0.0, "radius": outer_radius})
+        profile = self.command({
+            "type": "add_sketch_internal_involute_gear", "sketch_id": sketch_id,
+            "module": module, "tooth_count": teeth, "pressure_angle_degrees": 20.0,
+        })
+        self.assertTrue(profile["closed"])
+        parameters = profile["gear_parameters"]
+        self.assertAlmostEqual(parameters["pitch_radius"], 60.0)
+        self.assertAlmostEqual(parameters["base_radius"], 60.0 * math.cos(math.radians(20.0)))
+        self.assertAlmostEqual(parameters["tip_radius"], 58.0)
+        self.assertAlmostEqual(parameters["root_radius"], 62.5)
+
+        body = self.command({"type": "extrude_sketch", "sketch_id": sketch_id,
+                             "name": "Internal ring gear", "depth": face_width})
+        geometry = body["geometry"]
+        self.assertEqual(geometry["kind"], "profile_with_holes")
+        self.assertEqual(len(geometry["holes"]), 1)
+        self.assertGreater(geometry["volume"], 0)
+        self.assertEqual(self.core.kernel.validate(geometry), None)
+
     def test_metric_thread_is_editable_single_solid_brep(self) -> None:
         result = self.command({
             "type": "create_metric_thread",

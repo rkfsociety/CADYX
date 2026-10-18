@@ -545,6 +545,7 @@ class CommandActivityService(_CoreService):
         operation: Callable[..., Any],
         *,
         reports_progress: bool = False,
+        detail_from_result: Callable[[Any], dict[str, Any]] | None = None,
     ) -> Any:
         """Expose an agent's read-only model inspection as a visual activity."""
         self.workspace.load(project_id)
@@ -579,6 +580,10 @@ class CommandActivityService(_CoreService):
             activity.update({"state": "failed", "error": str(exc)})
             self._publish_activity(project_id, activity)
             raise
+        if detail_from_result is not None:
+            detail = detail_from_result(result)
+            if isinstance(detail, dict):
+                activity["detail"] = detail
         activity.update({"state": "completed", "phase": "completed"})
         self._publish_activity(project_id, activity)
         return result

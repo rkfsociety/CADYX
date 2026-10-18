@@ -13,6 +13,7 @@ _BUILTIN_ACTIVITY_ACTIONS = {
     "add_sketch_element": "Рисует элемент эскиза",
     "add_sketch_polyline": "Рисует ломаную",
     "add_sketch_involute_gear": "Строит эвольвентный профиль",
+    "add_sketch_internal_involute_gear": "Строит внутренний эвольвентный профиль",
     "add_sketch_rectangle": "Рисует прямоугольник",
     "add_sketch_rectangle_two_corners": "Рисует прямоугольник по двум углам",
     "add_sketch_rectangle_center": "Рисует прямоугольник от центра",

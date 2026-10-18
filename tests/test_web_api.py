@@ -212,6 +212,7 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(capabilities["read_only"])
         self.assertTrue(any(route["path"] == "/api/v1/agent/projects/{id}/commands" for route in capabilities["routes"]))
+        self.assertTrue(any(route["path"] == "/api/v1/agent/projects/{id}/capabilities" for route in capabilities["routes"]))
         advertised = {item["type"] for item in capabilities["commands"]}
         self.assertEqual(len(advertised), len(capabilities["commands"]))
         self.assertIn("add_sketch_circle_tangent_to_line", advertised)
@@ -252,6 +253,52 @@ class WebApiTests(unittest.TestCase):
                 except Exception as exc:
                     self.assertNotIn("Unsupported command type", str(exc))
         self.assertEqual(before, self.core.workspace.workspace_revision_token())
+
+    def test_agent_capability_lifecycle_is_available_through_agent_api(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Capability API"})
+        project_id = created["project"]["id"]
+        definition = {
+            "id": "api_test_box",
+            "title": "API test box",
+            "description": "Creates a validated box.",
+            "version": "1.0.0",
+            "input_schema": {"type": "object", "properties": {"width": {"type": "number"}},
+                             "required": ["width"], "additionalProperties": False},
+            "output_schema": {"type": "object", "properties": {"body_id": {"type": "string"}},
+                              "required": ["body_id"], "additionalProperties": False},
+            "outputs": {"body_id": {"step": 0, "field": "body_id"}},
+            "dependencies": [],
+            "steps": [{"command": {"type": "create_box", "width": {"$input": "width"},
+                                      "height": 3, "depth": 4, "name": "API capability box"}}],
+            "test_input": {"width": 2},
+        }
+        status, result = self.request(
+            f"/api/v1/agent/projects/{project_id}/capabilities", {"definition": definition},
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["test_result"]["status"], "passed")
+        activities = self.core.events.activity_snapshot(project_id)
+        self.assertEqual(activities[-1]["detail"]["phase"], "integration")
+        self.assertEqual(activities[-1]["detail"]["test_result"]["status"], "passed")
+
+        status, execution = self.request(
+            f"/api/v1/agent/projects/{project_id}/capabilities/api_test_box/execute",
+            {"owner_id": "web-api-test", "expected_revision": 0, "arguments": {"width": 5}},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(execution["status"], "completed", execution)
+        self.assertEqual(execution["revision"], 1)
+        self.assertEqual(self.core.inspect_project(project_id)["lock"]["state"], "FREE")
+
+        _, discovered = self.request("/api/v1/agent/capabilities")
+        self.assertEqual(discovered["reusable_capabilities"][0]["id"], "api_test_box")
+
+        status, rolled_back = self.request(
+            f"/api/v1/agent/projects/{project_id}/capabilities/api_test_box/rollback", {},
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(rolled_back["restored"])
 
     def _run_sketch_curve_agent_command(self, command_value: dict) -> tuple[dict, dict]:
         _, created = self.request("/api/v1/agent/projects", {"name": "Curve tool API"})

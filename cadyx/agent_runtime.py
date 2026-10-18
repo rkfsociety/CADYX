@@ -16,7 +16,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .core import CadyxCore
-from .errors import CadyxError, ConflictError, ValidationError
+from .errors import CadyxError, ValidationError
+from .lease_heartbeat import LeaseHeartbeat
 from .models import OwnerType
 
 
@@ -112,44 +113,6 @@ class _RunGuard:
         return max(0.001, min(maximum, self._deadline - time.monotonic()))
 
 
-class _LeaseHeartbeat:
-    def __init__(self, core: CadyxCore, project_id: str, lease_id: str) -> None:
-        self._core = core
-        self._project_id = project_id
-        self._lease_id = lease_id
-        timeout = core.leases.timeout_seconds
-        self._interval = max(0.001, min(timeout / 3.0, 30.0))
-        self._stopped = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._failure: BaseException | None = None
-
-    def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, name="cadyx-agent-heartbeat", daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stopped.set()
-        if self._thread is not None:
-            self._thread.join()
-
-    def check(self) -> None:
-        if self._failure is not None:
-            raise AgentRuntimeError("The CADYX agent lease heartbeat failed.") from self._failure
-
-    def _run(self) -> None:
-        while not self._stopped.wait(self._interval):
-            try:
-                self._core.heartbeat(self._project_id, self._lease_id)
-            except ConflictError as exc:
-                if exc.code == "PROJECT_BUSY":
-                    continue
-                self._failure = exc
-                return
-            except BaseException as exc:
-                self._failure = exc
-                return
-
-
 class AgentRuntime:
     """Run a provider-neutral tool loop against one existing CADYX project.
 
@@ -197,7 +160,7 @@ class AgentRuntime:
         project_id: str,
         prompt: str,
         *,
-        system_prompt: str = "You are operating a CADYX project. Inspect the project before editing it and use the provided tools for all project changes.",
+        system_prompt: str = "You are operating a CADYX project. Inspect the project before editing it and use the provided tools for all project changes. For every modeling task, check the available capabilities before planning dependent operations. If a required command is missing, inspect reusable capabilities, then use develop_capability to implement and geometry-test a safe composition of existing CADYX commands, register it, and resume the model. Never propose or execute arbitrary source code, shell commands, imports, file access, or dependency installation.",
         cancel_event: threading.Event | None = None,
     ) -> AgentRunResult:
         if not isinstance(prompt, str) or not prompt.strip():
@@ -260,6 +223,8 @@ class AgentRuntime:
         system_prompt: str,
         guard: _RunGuard,
     ) -> tuple[str, int, int, list[str]]:
+        capability_engine = self.core.self_evolving
+
         def no_arguments(arguments: Mapping[str, Any]) -> None:
             if arguments:
                 raise ValidationError("This tool does not accept arguments.")
@@ -284,12 +249,24 @@ class AgentRuntime:
                 raise ValidationError("command must be an object.")
             if set(arguments) != {"command"}:
                 raise ValidationError("Only the command field is accepted.")
+            missing = capability_engine.missing_command(command)
+            if missing is not None:
+                return self.core.observe_agent_operation(
+                    project_id, f"Требуемая возможность отсутствует: {command['type']}",
+                    lambda: missing,
+                    detail_from_result=lambda result: {
+                        "phase": "capability_missing",
+                        "capability_id": result["command_type"],
+                        "title": result["command_type"],
+                        "reason": result["message"],
+                    },
+                )
             guard.check()
             # Resume checks the last observed revision while acquiring the lease
             # under Core's project guard. Another editor cannot race this command.
             resumed = self.core.resume_agent(project_id, self.owner_id, revision_state[0])
             lease_id = resumed["lease"]["lease_id"]
-            heartbeat = _LeaseHeartbeat(self.core, project_id, lease_id)
+            heartbeat = LeaseHeartbeat(self.core, project_id, lease_id)
             primary_error: BaseException | None = None
             try:
                 heartbeat.start()
@@ -318,8 +295,70 @@ class AgentRuntime:
                     primary_error.add_note(f"Agent lease cleanup also failed: {stop_error}")
             return result
 
+        def develop_capability(arguments: Mapping[str, Any]) -> dict[str, Any]:
+            if set(arguments) != {"definition"} or not isinstance(arguments["definition"], Mapping):
+                raise ValidationError("definition must be the complete capability proposal object.")
+            guard.check()
+            definition = arguments["definition"]
+            detail = self.core.observe_agent_operation(
+                project_id, "Проверяет существующие команды", lambda: capability_engine.available(),
+            )
+            del detail
+            guard.check()
+            result = self.core.develop_agent_capability(project_id, dict(definition))
+            tool_name = result["invocation_tool"]
+            registered[tool_name] = _RegisteredTool(
+                AgentToolSpec(tool_name, result["description"], result["input_schema"]),
+                execute_capability(result["id"]),
+            )
+            guard.check()
+            return {
+                "status": "ready",
+                "capability": result,
+                "next_step": "Use the new capability tool to continue the original modeling task.",
+            }
+
+        def list_capabilities(arguments: Mapping[str, Any]) -> dict[str, Any]:
+            no_arguments(arguments)
+            return {
+                "built_in_command_types": capability_engine.built_in_command_types,
+                "validated_reusable_capabilities": capability_engine.available(),
+            }
+
+        def execute_capability(capability_id: str) -> Callable[[Mapping[str, Any]], Any]:
+            def _execute(arguments: Mapping[str, Any]) -> Any:
+                guard.check()
+                return capability_engine.execute(capability_id, arguments, execute_command)
+            return _execute
+
         empty_schema = {"type": "object", "properties": {}, "additionalProperties": False}
         registered = {
+            "list_capabilities": _RegisteredTool(
+                AgentToolSpec(
+                    "list_capabilities",
+                    "Inspect built-in CADYX commands and persistent geometry-tested reusable capabilities.",
+                    empty_schema,
+                ),
+                list_capabilities,
+            ),
+            "develop_capability": _RegisteredTool(
+                AgentToolSpec(
+                    "develop_capability",
+                    "Propose and geometry-test a persistent, declarative composition of existing CADYX commands. Proposals cannot execute source code or external actions.",
+                    {
+                        "type": "object",
+                        "properties": {
+                            "definition": {
+                                "type": "object",
+                                "description": "Stable id, description, version, scalar input schema, outputs, dependencies, command steps with $input/$step references, and test_input.",
+                            }
+                        },
+                        "required": ["definition"],
+                        "additionalProperties": False,
+                    },
+                ),
+                develop_capability,
+            ),
             "inspect_project": _RegisteredTool(
                 AgentToolSpec("inspect_project", "Read the current project, document, history and lock.", empty_schema),
                 inspect_project,
@@ -350,7 +389,12 @@ class AgentRuntime:
                 execute_command,
             ),
         }
-        tool_specs = tuple(tool.spec for tool in registered.values())
+        for capability in capability_engine.available():
+            tool_name = capability["invocation_tool"]
+            registered[tool_name] = _RegisteredTool(
+                AgentToolSpec(tool_name, capability["description"], capability["input_schema"]),
+                execute_capability(capability["id"]),
+            )
         messages: list[AgentMessage] = []
         if system_prompt:
             messages.append(AgentMessage("system", system_prompt))
@@ -363,6 +407,7 @@ class AgentRuntime:
         tool_rounds = 0
         while True:
             guard.check()
+            tool_specs = tuple(tool.spec for tool in registered.values())
             response = self._complete_provider(tuple(messages), tool_specs, guard)
             guard.check()
             provider_turns += 1

@@ -214,6 +214,32 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
                 raise ValidationError("Only XY and XZ sketches are supported.")
             if not isinstance(item.get("name"), str) or not item["name"].strip() or len(item["name"]) > 120:
                 raise ValidationError("Sketch name must contain 1 to 120 characters.")
+            generated = item.get("generated_gear_profile")
+            if generated is not None:
+                if not isinstance(generated, dict) or generated.get("operation") not in {
+                    "add_sketch_involute_gear", "add_sketch_internal_involute_gear",
+                }:
+                    raise ValidationError("Generated gear profile metadata is invalid.")
+                parameters = generated.get("parameters")
+                point_ids, line_ids = generated.get("point_ids"), generated.get("line_ids")
+                if not isinstance(parameters, dict) or not isinstance(point_ids, list) or not isinstance(line_ids, list):
+                    raise ValidationError("Generated gear profile metadata is incomplete.")
+                if len(point_ids) < 3 or len(point_ids) != len(line_ids):
+                    raise ValidationError("Generated gear profile must have matching closed point and line lists.")
+                if (len(set(point_ids)) != len(point_ids) or len(set(line_ids)) != len(line_ids)
+                        or set(point_ids).intersection(line_ids)):
+                    raise ValidationError("Generated gear profile element identifiers must be unique.")
+                tooth_count = parameters.get("tooth_count")
+                if (isinstance(tooth_count, bool) or not isinstance(tooth_count, (int, float))
+                        or not math.isfinite(tooth_count) or tooth_count < 3 or not float(tooth_count).is_integer()):
+                    raise ValidationError("Generated gear tooth_count must be an integer of at least 3.")
+                for key in ("module", "pressure_angle_degrees", "center_x", "center_y", "rotation_degrees", "backlash"):
+                    number(parameters.get(key))
+                for index, (point_id, line_id) in enumerate(zip(point_ids, line_ids, strict=True)):
+                    point = reference(point_id, "point", item["id"])
+                    line = reference(line_id, "line", item["id"])
+                    if line.get("start_id") != point_id or line.get("end_id") != point_ids[(index + 1) % len(point_ids)]:
+                        raise ValidationError("Generated gear profile lines must form the declared closed point loop.")
             continue
         sketch_id = item.get("sketch_id")
         typed_id(sketch_id, "sketch")

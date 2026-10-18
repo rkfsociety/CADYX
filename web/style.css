@@ -214,6 +214,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .workflow-agent-state { display: flex; min-width: 0; align-items: center; gap: 12px; }
 .workflow-current-label { color: var(--dim); font: 9px var(--mono); letter-spacing: .06em; }
 .workflow-action { overflow-wrap: anywhere; color: var(--text); font: 14px/1.55 var(--mono); font-weight: 500; }
+.workflow-capability-detail { white-space: pre-line; overflow-wrap: anywhere; border-left: 2px solid var(--agent); padding: 5px 8px; color: var(--muted); background: #101b1b; font: 10px/1.55 var(--mono); }
+.workflow-capability-detail[hidden] { display: none; }
+.workflow-capability-detail[data-state="completed"] { border-color: var(--success); }
+.workflow-capability-detail[data-state="failed"] { border-color: var(--danger); }
 .workflow-current[data-state="running"] .workflow-action { color: var(--agent); }
 .workflow-current[data-state="failed"] .workflow-action { color: var(--danger); }
 .workflow-task { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 5px 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }

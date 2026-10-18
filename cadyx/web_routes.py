@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import SplitResult, parse_qs, unquote
 
 from .api_contracts import validate_request_fields
-from .capabilities import agent_api_capabilities
 from .errors import ValidationError
 from .models import OwnerType
 
@@ -95,6 +94,10 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/resume", "agent_resume", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases", "agent_lease", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands", "agent_command", "agent", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities", "agent_capability_develop", "agent", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities/check", "agent_capability_check", "agent", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities/{capability_id}/execute", "agent_capability_execute", "agent", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities/{capability_id}/rollback", "agent_capability_rollback", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases/recover", "agent_lease_recover", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases/{lease_id}/heartbeat", "agent_lease_heartbeat", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases/{lease_id}/release", "agent_lease_release", "agent", "json"),
@@ -184,7 +187,7 @@ def _dispatch_system(handler: Any, core: CadyxCore, route: RouteMatch, parsed: S
     elif name == "events":
         handler._stream_events(parse_qs(parsed.query).get("project_id", [None])[0])
     elif name == "capabilities":
-        handler._json(200, agent_api_capabilities())
+        handler._json(200, core.agent_capabilities())
     elif name == "updates":
         query = parse_qs(parsed.query)
         project_id = query.get("project_id", [None])[0]
@@ -344,6 +347,31 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         _create_project(handler, core, agent_api=True)
     elif name == "agent_project_get":
         handler._json(200, core.observe_agent_operation(project_id, "Изучает модель", lambda: core.inspect_project(project_id)))
+    elif name == "agent_capability_develop":
+        body = _require_json(handler)
+        if set(body) != {"definition"} or not isinstance(body["definition"], dict):
+            raise ValidationError("Capability development requires only a definition object.")
+        handler._json(201, core.develop_agent_capability(project_id, body["definition"]))
+    elif name == "agent_capability_check":
+        body = _require_json(handler)
+        if set(body) != {"command_type"} or not isinstance(body["command_type"], str):
+            raise ValidationError("Capability check requires only a command_type string.")
+        handler._json(200, core.check_agent_capability(project_id, body["command_type"]))
+    elif name == "agent_capability_execute":
+        body = _require_json(handler)
+        if set(body) != {"arguments", "expected_revision", "owner_id"}:
+            raise ValidationError("Capability execution requires arguments, expected_revision, and owner_id.")
+        if not isinstance(body["arguments"], dict):
+            raise ValidationError("Capability arguments must be an object.")
+        handler._json(200, core.execute_agent_capability(
+            project_id, route.params["capability_id"], body["arguments"],
+            owner_id=body["owner_id"], expected_revision=body["expected_revision"],
+        ))
+    elif name == "agent_capability_rollback":
+        body = _require_json(handler)
+        if body:
+            raise ValidationError("Capability rollback accepts an empty object only.")
+        handler._json(200, core.rollback_agent_capability(project_id, route.params["capability_id"]))
     elif name == "agent_dashboard_get":
         handler._json(200, core.agent_dashboard_snapshot(project_id))
     elif name == "agent_dashboard_post":

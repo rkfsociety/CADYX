@@ -348,11 +348,27 @@ class CadyxMCPServerTests(unittest.TestCase):
             invalid = self.app.call_tool("cadyx_execute_command", {
                 "project_id": project_id,
                 "expected_revision": 0,
-                "command": {"type": "not_a_command"},
+                "command": {"type": "create_box", "width": 0, "height": 2, "depth": 3},
             })
         self.assertTrue(invalid["isError"])
         self.assertFalse(any(call.args[0].endswith("/stop") for call in post.call_args_list),
                          "A definite 4xx rejection must not trigger agent safe-stop.")
+        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(detail["document"]["revision"], 0)
+        self.assertEqual(detail["lock"]["state"], "FREE")
+
+    def test_missing_command_enters_capability_development_flow(self) -> None:
+        project_id = self._create_project()
+        missing = self._tool_value("cadyx_execute_command", {
+            "project_id": project_id,
+            "expected_revision": 0,
+            "command": {"type": "create_internal_gear", "module": 2, "tooth_count": 60},
+        })
+        self.assertEqual(missing["error"], "CAPABILITY_MISSING")
+        self.assertEqual(missing["command_type"], "create_internal_gear")
+        names = {tool["name"] for tool in TOOLS}
+        self.assertTrue({"cadyx_propose_capability", "cadyx_execute_capability",
+                         "cadyx_rollback_capability"} <= names)
         detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
         self.assertEqual(detail["document"]["revision"], 0)
         self.assertEqual(detail["lock"]["state"], "FREE")

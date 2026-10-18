@@ -89,8 +89,14 @@ def property_location(target: dict[str, Any], path: str) -> tuple[Any, str | int
         if len(parts) < 2 or parts[0] != "parameters":
             raise ValidationError("Feature bindings must target a parameter value.")
     elif kind == "sketch":
-        if parts != ["section_offset"]:
-            raise ValidationError("Sketch bindings can target only section_offset.")
+        if parts != ["section_offset"] and not (
+            len(parts) == 3
+            and parts[:2] == ["generated_gear_profile", "parameters"]
+            and parts[2] in {"module", "tooth_count", "pressure_angle_degrees", "center_x",
+                             "center_y", "rotation_degrees", "backlash"}
+            and isinstance(target.get("generated_gear_profile"), dict)
+        ):
+            raise ValidationError("Sketch bindings can target section_offset or generated gear parameters.")
     elif kind == "point":
         if parts not in (["x"], ["y"]):
             raise ValidationError("Point bindings can target only x or y.")

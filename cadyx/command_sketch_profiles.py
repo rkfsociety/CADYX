@@ -10,7 +10,7 @@ import sys
 from typing import Any, Callable
 from uuid import uuid4
 from .errors import ValidationError
-from .engineering import involute_spur_gear_profile
+from .engineering import involute_internal_gear_profile, involute_spur_gear_profile
 from .models import Document
 from .command_values import _finite_number, _number
 
@@ -41,6 +41,48 @@ class SketchProfileCommands:
             document, sketch, points, closed=True,
             operation="add_sketch_involute_gear", progress=progress,
         )
+        sketch["generated_gear_profile"] = {
+            "operation": "add_sketch_involute_gear",
+            "parameters": parameters,
+            "point_ids": list(result["point_ids"]),
+            "line_ids": list(result["line_ids"]),
+        }
+        result["gear_parameters"] = parameters
+        return result
+
+    def _add_sketch_internal_involute_gear(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        sketch = self._find_sketch(document, command.get("sketch_id"))
+        if sketch.get("plane") != "XY":
+            raise ValidationError("An internal involute gear profile needs an XY sketch.")
+        existing = [item for item in document.objects if item.get("sketch_id") == sketch["id"]]
+        if (sum(item.get("type") == "circle" for item in existing) != 1
+                or any(item.get("type") not in {"circle", "point"} for item in existing)):
+            raise ValidationError("An internal involute gear needs one outer circle and no other sketch profiles.")
+        points, parameters = involute_internal_gear_profile(
+            module=command.get("module"),
+            tooth_count=command.get("tooth_count"),
+            pressure_angle_degrees=command.get("pressure_angle_degrees", 20.0),
+            center_x=command.get("center_x", 0.0),
+            center_y=command.get("center_y", 0.0),
+            rotation_degrees=command.get("rotation_degrees", 0.0),
+            backlash=command.get("backlash", 0.0),
+        )
+        result = self._append_sketch_polyline(
+            document, sketch, points, closed=True,
+            operation="add_sketch_internal_involute_gear", progress=progress,
+        )
+        sketch["generated_gear_profile"] = {
+            "operation": "add_sketch_internal_involute_gear",
+            "parameters": parameters,
+            "point_ids": list(result["point_ids"]),
+            "line_ids": list(result["line_ids"]),
+        }
         result["gear_parameters"] = parameters
         return result
 
@@ -268,6 +310,13 @@ def _handle_add_sketch_involute_gear(
     return self._add_sketch_involute_gear(document, command, progress=progress)
 
 
+def _handle_add_sketch_internal_involute_gear(
+    self: Any, document: Document, command: dict[str, Any], *,
+    progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
+) -> dict[str, Any]:
+    return self._add_sketch_internal_involute_gear(document, command, progress=progress)
+
+
 def _handle_add_sketch_rectangle(
     self: Any, document: Document, command: dict[str, Any], *,
     progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
@@ -327,6 +376,7 @@ def _handle_circle_tool(
 
 COMMAND_HANDLERS = {
     "add_sketch_involute_gear": _handle_add_sketch_involute_gear,
+    "add_sketch_internal_involute_gear": _handle_add_sketch_internal_involute_gear,
     "add_sketch_rectangle": _handle_add_sketch_rectangle,
     "add_sketch_rounded_rectangle": _handle_add_sketch_rounded_rectangle,
     "add_sketch_circumscribed_polygon": _handle_polygon_tool,

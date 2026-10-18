@@ -157,9 +157,15 @@ enforces this. No formatter or mass cleanup is part of this gate.
 Provider adapters translate native model requests and responses to CADYX's
 provider-neutral messages, tool specifications and tool calls. The runtime
 offers project inspection, viewport inspection and revision-checked command
-execution, managing the agent lease for each run. No provider adapter is
-included. External integrations report workflow and queue state through the
-Agent API. See the [Agent Runtime contract](.codex/docs/architecture.md#agent-runtime).
+execution, managing the agent lease for each run. When a required command is
+missing, its capability tools can test and register a data-only composition of
+existing commands, reuse a compatible registry entry, and resume modeling. The
+same lifecycle is available through the local `cadyx-operator` MCP tools. It
+does not execute generated source code; new kernel/API algorithms still require
+a trusted source change and host restart. No provider adapter is included.
+External integrations report workflow and queue state through the Agent API.
+See the [Agent Runtime contract](.codex/docs/architecture.md#agent-runtime)
+and [Self-Evolving Capability Engine](.codex/docs/architecture.md#self-evolving-capability-engine).
 
 ## Project status and deployment boundaries
 
