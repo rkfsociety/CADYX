@@ -459,23 +459,24 @@ class ParameterCommands:
     ) -> None:
         by_id = {item["id"]: item for item in document.objects}
         features = [by_id[feature_id] for feature_id in feature_ids]
+        feature_order = {item["id"]: index for index, item in enumerate(document.objects)}
         produced_bodies = {feature.get("body_id") for feature in features}
         roots = [feature for feature in features if feature.get("source_body_id") not in produced_bodies]
-        # A changed root primitive regenerates its complete downstream chain, including changed sketches.
-        if any(feature.get("operation") == "create_box" for feature in roots):
-            root = next(feature for feature in roots if feature.get("operation") == "create_box")
-            self._rebuild_bound_feature(document, root["id"], progress=progress)
-            return
         if sketch_ids:
             self._regenerate_generated_gear_profiles(document, sketch_ids, progress=progress)
             self._rebuild_changed_features(document, sketch_ids, progress=progress)
-        feature_order = {item["id"]: index for index, item in enumerate(document.objects)}
+        changed_bodies: set[str] = set()
         for feature in sorted(roots, key=lambda item: feature_order[item["id"]]):
             source_id = feature.get("source_body_id")
             if isinstance(source_id, str):
-                self._rebuild_derived_features(document, {source_id}, progress=progress)
-            else:
-                self._rebuild_bound_feature(document, feature["id"], progress=progress)
+                changed_bodies.add(source_id)
+                continue
+            self._rebuild_bound_feature(document, feature["id"], progress=progress,
+                                        rebuild_derived=False)
+            body_id = feature.get("body_id")
+            if isinstance(body_id, str):
+                changed_bodies.add(body_id)
+        self._rebuild_derived_features(document, changed_bodies, progress=progress)
 
     def _regenerate_generated_gear_profiles(
         self,
@@ -561,6 +562,7 @@ class ParameterCommands:
     def _rebuild_bound_feature(
         self, document: Document, feature_id: str, *,
         progress: Callable[[dict[str, Any]], None] | None = None,
+        rebuild_derived: bool = True,
     ) -> None:
         feature = next((item for item in document.objects
                         if item.get("id") == feature_id and item.get("type") == "feature"), None)
@@ -602,7 +604,8 @@ class ParameterCommands:
             raise ValidationError(f"Model parameter binding is not yet supported for {operation!r} features.")
         body["geometry"] = geometry
         feature["geometry"] = geometry
-        self._rebuild_derived_features(document, {body["id"]}, progress=progress)
+        if rebuild_derived:
+            self._rebuild_derived_features(document, {body["id"]}, progress=progress)
 
 
 def _handle_create_model_parameter(

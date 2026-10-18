@@ -9,6 +9,36 @@ from cadyx.semantic_selection import capture_edge_references, resolve_edge_refer
 
 
 class ModelParameterExpressionTests(unittest.TestCase):
+    def test_converging_bound_roots_rebuild_shared_fuse_once_with_final_inputs(self):
+        system = CommandSystem(OCCTKernelAdapter())
+        document = Document.create()
+        system.execute(document, {"type": "create_model_parameters", "parameters": {
+            "LeftWidth": {"value": 10, "unit": "mm"},
+            "RightWidth": {"value": 10, "unit": "mm"},
+        }})
+        left = system.execute(document, {"type": "create_box", "width": 10, "height": 10, "depth": 10})
+        right = system.execute(document, {"type": "create_box", "width": 10, "height": 10, "depth": 10})
+        fused = system.execute(document, {"type": "fuse_bodies", "base_body_id": left["body_id"],
+                                          "tool_body_id": right["body_id"]})
+        system.execute(document, {"type": "bind_model_parameters", "bindings": [
+            {"object_id": left["feature_id"], "path": "parameters.width", "expression": "LeftWidth"},
+            {"object_id": right["feature_id"], "path": "parameters.width", "expression": "RightWidth"},
+        ]})
+        fuse_calls = 0
+        original_fuse = system.kernel.fuse_profiles
+
+        def count_fuse(*args, **kwargs):
+            nonlocal fuse_calls
+            fuse_calls += 1
+            return original_fuse(*args, **kwargs)
+
+        system.kernel.fuse_profiles = count_fuse
+        system.execute(document, {"type": "set_model_parameter", "name": "LeftWidth", "value": 12})
+        self.assertEqual(fuse_calls, 1)
+        feature = next(item for item in document.objects if item.get("id") == fused["feature_id"])
+        self.assertEqual(feature["geometry"]["solid"]["base"]["dimensions"]["width"], 12)
+        document.validate()
+
     def test_legacy_polyline_gear_converts_to_editable_closed_spline_on_rebuild(self):
         system = CommandSystem(OCCTKernelAdapter())
         document = Document.create()
