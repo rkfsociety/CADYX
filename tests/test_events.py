@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -79,6 +80,81 @@ class EventBrokerTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "could not be loaded"):
                         EventBroker(dashboard_state_path=path)
 
+    def test_legacy_dashboard_json_migrates_to_transactional_store(self):
+        with tempfile.TemporaryDirectory() as directory:
+            legacy_path = Path(directory) / "dashboards.json"
+            database_path = Path(directory) / "dashboards.sqlite3"
+            legacy_path.write_text(json.dumps({
+                "version": 1,
+                "agent_work_revision": 7,
+                "dashboards": {"project-a": {
+                    "workflow": None, "tasks": [], "revision": 3,
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }},
+            }), encoding="utf-8")
+
+            broker = EventBroker(dashboard_state_path=legacy_path,
+                                 dashboard_database_path=database_path)
+
+            self.assertEqual(broker.agent_dashboard_revision("project-a"), 3)
+            self.assertEqual(broker.agent_work_snapshot()["revision"], 7)
+            self.assertTrue(database_path.is_file())
+            restarted = EventBroker(dashboard_state_path=legacy_path,
+                                    dashboard_database_path=database_path)
+            self.assertEqual(restarted.agent_dashboard_snapshot("project-a"),
+                             broker.agent_dashboard_snapshot("project-a"))
+
+    def test_dashboard_persistence_updates_only_the_reported_project_row(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database_path = Path(directory) / "dashboards.sqlite3"
+            broker = EventBroker(dashboard_database_path=database_path)
+            first = broker.publish_agent_dashboard("project-a", {
+                "workflow": None,
+                "tasks": [{"id": "x", "title": "first", "state": "completed"}],
+            })
+            other = broker.publish_agent_dashboard("project-b", {
+                "workflow": None,
+                "tasks": [{"id": "x", "title": "other", "state": "completed"}],
+            })
+            updated = broker.publish_agent_dashboard("project-a", {
+                "workflow": None,
+                "tasks": [{"id": "x", "title": "updated", "state": "completed"}],
+            })
+
+            with sqlite3.connect(database_path) as connection:
+                rows = dict(connection.execute(
+                    "SELECT project_id, payload FROM dashboards"
+                ))
+                revision = connection.execute(
+                    "SELECT value FROM metadata WHERE key = 'agent_work_revision'"
+                ).fetchone()[0]
+
+            self.assertEqual(set(rows), {"project-a", "project-b"})
+            self.assertEqual(json.loads(rows["project-a"])["tasks"][0]["title"], "updated")
+            self.assertEqual(json.loads(rows["project-b"])["tasks"][0]["title"], "other")
+            self.assertEqual((first["revision"], other["revision"], updated["revision"]), (1, 1, 2))
+            self.assertEqual(revision, 3)
+            self.assertEqual(EventBroker(dashboard_database_path=database_path)
+                             .agent_work_snapshot()["revision"], 3)
+
+    def test_dashboard_database_failure_does_not_publish_uncommitted_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            broker = EventBroker(dashboard_database_path=Path(directory) / "dashboards.sqlite3")
+            subscriber_id, events = broker.subscribe()
+            try:
+                with patch.object(broker, "_persist_agent_dashboard",
+                                  side_effect=sqlite3.OperationalError("disk failure")):
+                    with self.assertRaises(sqlite3.OperationalError):
+                        broker.publish_agent_dashboard("project-a", {
+                            "workflow": None, "tasks": [],
+                        })
+
+                self.assertEqual(broker.agent_dashboard_revision("project-a"), 0)
+                self.assertEqual(broker.agent_work_snapshot()["revision"], 0)
+                self.assertTrue(events.empty())
+            finally:
+                broker.unsubscribe(subscriber_id)
+
     def test_dashboard_revisions_and_event_ids_are_monotonic(self):
         broker = EventBroker()
         subscriber_id, events = broker.subscribe()
@@ -158,12 +234,12 @@ class EventBrokerTests(unittest.TestCase):
         dashboard_done = threading.Event()
         publish_done = threading.Event()
 
-        def persist(_dashboards, _revision):
+        def persist(_project_id, _dashboard, _revision):
             persist_started.set()
             if not release_persist.wait(2.0):
                 raise AssertionError("test did not release dashboard persistence")
 
-        broker._persist_agent_dashboards = persist
+        broker._persist_agent_dashboard = persist
 
         def publish_dashboard():
             try:

@@ -5,10 +5,10 @@ from __future__ import annotations
 import copy
 import json
 import math
-import os
 import queue
-import tempfile
+import sqlite3
 import threading
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -251,6 +251,7 @@ class EventBroker:
         *,
         subscriber_capacity: int = 128,
         dashboard_state_path: str | Path | None = None,
+        dashboard_database_path: str | Path | None = None,
     ) -> None:
         self._capacity = subscriber_capacity
         self._lock = threading.Lock()
@@ -264,21 +265,96 @@ class EventBroker:
         self._dashboard_state_path = (
             Path(dashboard_state_path) if dashboard_state_path is not None else None
         )
+        self._dashboard_database_path = (
+            Path(dashboard_database_path)
+            if dashboard_database_path is not None
+            else self._dashboard_state_path.with_suffix(".sqlite3")
+            if self._dashboard_state_path is not None
+            else None
+        )
         self._agent_work_revision = 0
         self._load_agent_dashboards()
 
     def _load_agent_dashboards(self) -> None:
-        path = self._dashboard_state_path
+        path = self._dashboard_database_path
         if path is None or not path.exists():
+            if path is None:
+                return
+            self._migrate_legacy_dashboard_state()
             return
         try:
-            with path.open("r", encoding="utf-8") as stream:
-                state = _DashboardStoreState.from_mapping(json.load(stream))
-            self._agent_dashboards = state.dashboards
-            self._agent_work_revision = state.agent_work_revision
-        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            with closing(self._connect_dashboard_database()) as connection, connection:
+                self._create_dashboard_schema(connection)
+                dashboards = {
+                    project_id: _DashboardRecord.from_mapping(json.loads(payload))
+                    for project_id, payload in connection.execute(
+                        "SELECT project_id, payload FROM dashboards"
+                    )
+                }
+                row = connection.execute(
+                    "SELECT value FROM metadata WHERE key = 'agent_work_revision'"
+                ).fetchone()
+                revision = row[0] if row is not None else 0
+                if type(revision) is not int or revision < 0:
+                    raise ValueError("invalid dashboard state structure")
+            self._agent_dashboards = dashboards
+            self._agent_work_revision = revision
+        except (OSError, sqlite3.Error, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
             raise RuntimeError(
                 f"CADYX agent dashboard state could not be loaded from {path}: {exc}"
+            ) from exc
+
+    def _connect_dashboard_database(self) -> sqlite3.Connection:
+        path = self._dashboard_database_path
+        if path is None:
+            raise RuntimeError("dashboard database path is not configured")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(path, timeout=30.0)
+        connection.execute("PRAGMA auto_vacuum = INCREMENTAL")
+        connection.execute("PRAGMA synchronous = FULL")
+        return connection
+
+    @staticmethod
+    def _create_dashboard_schema(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS dashboards ("
+            "project_id TEXT PRIMARY KEY, payload TEXT NOT NULL)"
+        )
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS metadata ("
+            "key TEXT PRIMARY KEY, value INTEGER NOT NULL)"
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO metadata (key, value) VALUES ('agent_work_revision', 0)"
+        )
+
+    def _migrate_legacy_dashboard_state(self) -> None:
+        legacy_path = self._dashboard_state_path
+        database_path = self._dashboard_database_path
+        if legacy_path is None or database_path is None or not legacy_path.exists():
+            return
+        try:
+            with legacy_path.open("r", encoding="utf-8") as stream:
+                state = _DashboardStoreState.from_mapping(json.load(stream))
+            with closing(self._connect_dashboard_database()) as connection, connection:
+                self._create_dashboard_schema(connection)
+                connection.executemany(
+                    "INSERT INTO dashboards (project_id, payload) VALUES (?, ?)",
+                    [
+                        (project_id, json.dumps(dashboard.as_dict(), ensure_ascii=False,
+                                                allow_nan=False, separators=(",", ":")))
+                        for project_id, dashboard in state.dashboards.items()
+                    ],
+                )
+                connection.execute(
+                    "UPDATE metadata SET value = ? WHERE key = 'agent_work_revision'",
+                    (state.agent_work_revision,),
+                )
+            self._agent_dashboards = state.dashboards
+            self._agent_work_revision = state.agent_work_revision
+        except (OSError, sqlite3.Error, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"CADYX agent dashboard state could not be loaded from {legacy_path}: {exc}"
             ) from exc
 
     @staticmethod
@@ -289,43 +365,31 @@ class EventBroker:
             return False
         return True
 
-    def _persist_agent_dashboards(
+    def _persist_agent_dashboard(
         self,
-        dashboards: dict[str, _DashboardRecord],
+        project_id: str,
+        dashboard: _DashboardRecord,
         revision: int,
     ) -> None:
-        path = self._dashboard_state_path
+        path = self._dashboard_database_path
         if path is None:
             return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary_path: str | None = None
-        state = _DashboardStoreState(dashboards, revision).as_dict()
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=path.parent,
-                prefix=f"{path.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as stream:
-                temporary_path = stream.name
-                json.dump(
-                    state,
-                    stream,
-                    ensure_ascii=False,
-                    allow_nan=False,
-                    separators=(",", ":"),
-                )
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary_path, path)
-        except OSError:
-            if temporary_path is not None:
-                try:
-                    os.unlink(temporary_path)
-                except OSError:
-                    pass
+            with closing(self._connect_dashboard_database()) as connection:
+                with connection:
+                    self._create_dashboard_schema(connection)
+                    connection.execute(
+                        "INSERT INTO dashboards (project_id, payload) VALUES (?, ?) "
+                        "ON CONFLICT(project_id) DO UPDATE SET payload = excluded.payload",
+                        (project_id, json.dumps(dashboard.as_dict(), ensure_ascii=False,
+                                                allow_nan=False, separators=(",", ":"))),
+                    )
+                    connection.execute(
+                        "UPDATE metadata SET value = ? WHERE key = 'agent_work_revision'",
+                        (revision,),
+                    )
+                connection.execute("PRAGMA incremental_vacuum(64)")
+        except (OSError, sqlite3.Error):
             raise
 
     @staticmethod
@@ -469,7 +533,7 @@ class EventBroker:
                 dashboards[project_id] = dashboard
                 work_revision = self._agent_work_revision + 1
 
-            self._persist_agent_dashboards(dashboards, work_revision)
+            self._persist_agent_dashboard(project_id, dashboard, work_revision)
 
             with self._lock:
                 self._agent_dashboards = dashboards

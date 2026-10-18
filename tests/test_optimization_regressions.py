@@ -29,7 +29,7 @@ class _CountingEventBroker(EventBroker):
         self.active_project_scan_calls += 1
         return super()._agent_work_project_ids_locked()
 
-    def _persist_agent_dashboards(self, dashboards, revision) -> None:
+    def _persist_agent_dashboard(self, project_id, dashboard, revision) -> None:
         return None
 
 

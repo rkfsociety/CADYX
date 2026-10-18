@@ -182,9 +182,11 @@ edit the CAD document or require an edit lease. External agent integrations
 publish workflow and queue updates through this Agent API endpoint. Core
 publishes each snapshot as `agent.dashboard` over SSE; `/api/v1/updates` includes
 `dashboard_revision` so the browser can recover missed events. Dashboard
-reports and their monotonic global work revision are saved atomically in the
-workspace runtime state, so an unfinished workflow remains active after a host
-restart. `/api/v1/updates` exposes `agent_work_active` and
+reports and their monotonic global work revision are saved together in one
+SQLite transaction that updates only the reported project row and the global
+revision, so an unfinished workflow remains active after a host restart. A
+legacy JSON state is imported when the SQLite store is first created.
+`/api/v1/updates` exposes `agent_work_active` and
 `agent_work_revision`, and the host publishes `workspace.agent-work` over
 SSE. The browser disables every project control while any workflow is below
 100%, any phase or task is not completed, or the global work state has not yet

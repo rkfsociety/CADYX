@@ -60,7 +60,10 @@ class CadyxCore:
             self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds)
         else:
             self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds, clock=lease_clock)
-        self.events = EventBroker(dashboard_state_path=self.workspace.root / ".cadyx-agent-dashboards.json")
+        self.events = EventBroker(
+            dashboard_state_path=self.workspace.root / ".cadyx-agent-dashboards.json",
+            dashboard_database_path=self.workspace.root / ".cadyx-agent-dashboards.sqlite3",
+        )
         self._lifecycle = ProjectLifecycleService(self)
         self._command_activity = CommandActivityService(self)
         self._rendering = RenderingCacheService(self, cache_policy=cache_policy)
