@@ -87,9 +87,20 @@ When the document revision changes, tree selection follows the latest visible
 feature so its result dimensions stay attached to the current modeling action;
 manual selection remains in effect until the next revision.
 For solid B-rep features, the Geometry inspector estimates mass from the saved
-CAD volume and a user-entered material density in g/cm³:
+CAD volume and a selected reference material density in g/cm³. The built-in
+values are PLA 1.24, PETG 1.27, ABS 1.04, ASA 1.07, aluminum 2.70, steel 7.80,
+stainless steel 8.00, and copper 8.94. They are indicative material values;
+the inspector also accepts a custom density. The calculation is
 `mass_g = volume_mm3 * density_g_cm3 / 1000`. Triangle meshes do not show this
-calculation because they do not provide a validated solid volume.
+calculation because they do not provide a validated solid volume. The estimate
+assumes a solid part; 3D-print infill is not included. Reference values come
+from [Prusament PLA](https://prusament.com/wp-content/uploads/2021/12/notice-technique.pdf),
+[Prusament PETG](https://prusament.com/wp-content/uploads/2022/10/PETG_Prusament_TDS_2021_10_EN.pdf),
+[Prusament ASA](https://prusament.com/wp-content/uploads/2023/05/23_05_17_BL_Prusament-ASA-od-Prusa-Polymers26299-47-8_EN.pdf),
+[Protolabs ABS data](https://www.protolabs.com/en-gb/resources/blog/comparing-abs-and-pc-thermoplastics/),
+[the Aluminum Association](https://www.aluminum.org/sites/default/files/2026-01/Teal%20Sheets%20December%202025.pdf),
+[Outokumpu steel data](https://www.outokumpu.com/-/media/from-sharepoint/documents/product/outokumpu-steel-grades-properties-global-standards.pdf),
+and the [Copper Development Association](https://archive.copper.org/resources/properties/atomic_properties.php).
 Clicking empty space in the feature tree clears the tree selection, viewport
 highlight, and selected-item properties.
 Object properties are not shown in a separate panel. Files is navigation item 06 and

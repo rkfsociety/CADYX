@@ -189,6 +189,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     function renderProps(o){if(!o){props.innerHTML='<div class="cad3-empty">Выберите элемент в дереве модели.</div>';if(modelParameterSection())props.insertAdjacentHTML('afterbegin',modelParameterSection());props.querySelector('.cad3-apply-model')?.addEventListener('click',applyModelParameterEdits);return}if(o.type==='sketch'){props.innerHTML=`<div class="cad3-head"><span class="cad3-icon">${I.sketch}</span><div><strong>${esc(label(o.id))}</strong><small>Эскиз</small></div></div><section class="cad3-sec"><h3>Общие сведения</h3><dl class="cad3-grid"><dt>Плоскость</dt><dd>${esc(o.plane||'—')}</dd><dt>Состояние</dt><dd><span class="cad3-valid">● Корректно</span></dd></dl></section>`;props.insertAdjacentHTML('afterbegin',modelParameterSection());props.querySelector('.cad3-apply-model')?.addEventListener('click',applyModelParameterEdits);return}const body=state.byId.get(o.body_id),mesh=sceneBody(o.body_id),m=o.source_metrics||{},sk=state.byId.get(o.source_sketch_id);const general=`<dt>Тип элемента</dt><dd>${esc(opType(o))}</dd><dt>Операция</dt><dd>${esc(opType(o))}</dd><dt>Состояние</dt><dd><span class="cad3-valid">● Корректно</span></dd><dt>Тело</dt><dd>${esc(body?.name||o.body_id||'—')}</dd>${sk?`<dt>Исходный эскиз</dt><dd>${esc(label(sk.id))}</dd><dt>Направление</dt><dd>Перпендикулярно плоскости ${esc(sk.plane||'эскиза')}</dd>`:''}`;const result=`<dt>Вершины</dt><dd>${fmt((mesh?.positions?.length||0)/3)}</dd><dt>Грани</dt><dd>${fmt((mesh?.triangles?.length||0)/3)}</dd>${Number.isFinite(m.volume)?`<dt>Объём</dt><dd>${fmt(m.volume)} мм³</dd>`:''}${Number.isFinite(m.surface_area)?`<dt>Площадь поверхности</dt><dd>${fmt(m.surface_area)} мм²</dd>`:''}`;const dependency=deps(o);props.innerHTML=`<div class="cad3-head"><span class="cad3-icon">${opIcon(o)}</span><div><strong>${esc(label(o.id))}</strong><small>${esc(opType(o))}</small></div></div><section class="cad3-sec"><h3>Общие сведения</h3><dl class="cad3-grid">${general}</dl></section><section class="cad3-sec"><h3>Параметры</h3><dl class="cad3-grid">${parameterHtml(o)}</dl>${(editable[o.operation]||[]).some(k=>typeof o.parameters?.[k]==='number')?'<button class="cad3-apply">ПРИМЕНИТЬ ПАРАМЕТРЫ</button>':''}</section><section class="cad3-sec"><h3>Результат</h3><dl class="cad3-grid">${result}</dl></section><section class="cad3-sec"><h3>Зависимости</h3>${dependency.length?dependency.map(d=>`<button class="cad3-dep" data-dep="${d.id}"><span>${esc(label(d.id))}</span><small>${esc(d.role)}</small></button>`).join(''):'<div class="cad3-empty">Нет зависимостей.</div>'}</section>`;props.insertAdjacentHTML('afterbegin',modelParameterSection());props.querySelector('.cad3-apply-model')?.addEventListener('click',applyModelParameterEdits);props.querySelector('.cad3-apply')?.addEventListener('click',async()=>{const vals=[...props.querySelectorAll('input[data-p]')].map(i=>[i.dataset.p,{original:+i.dataset.original,next:+i.value}]).filter(([,v])=>Number.isFinite(v.next)&&v.next!==v.original);if(!vals.length)return;const fields=document.createElement('div');for(const [name,v] of vals){const i=document.createElement('input');i.dataset.parameter=name;i.dataset.originalValue=String(v.original);i.value=String(v.next);fields.append(i)}fields.append(document.createElement('button'));try{await applyGeometryDimensions(o.id,fields)}catch(e){console.error(e)}})}
     const renderGeometryProps = renderProps;
     const massDensityByBody = new Map();
+    const massMaterials = { pla: 1.24, petg: 1.27, abs: 1.04, asa: 1.07, aluminum: 2.70, steel: 7.80, stainless: 8.00, copper: 8.94 };
     renderProps = selected => {
       renderGeometryProps(selected);
       if (!selected || selected.type === 'sketch') return;
@@ -201,30 +202,47 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
 
       const section = document.createElement('section');
       section.className = 'cad3-sec cad3-mass-calculator';
-      section.innerHTML = '<h3>Вес детали</h3><dl class="cad3-grid"><dt>Плотность материала</dt><dd><input data-mass-density type="number" min="0" step="any" inputmode="decimal" placeholder="г/см³" aria-label="Плотность материала, граммов на кубический сантиметр"></dd><dt>Расчётная масса</dt><dd data-mass-result>Укажите плотность</dd></dl>';
+      section.innerHTML = '<h3>Вес детали</h3><dl class="cad3-grid"><dt>Материал</dt><dd><select data-mass-material aria-label="Материал детали"><option value="">Выберите материал</option><option value="pla">PLA · 1,24 г/см³</option><option value="petg">PETG · 1,27 г/см³</option><option value="abs">ABS · 1,04 г/см³</option><option value="asa">ASA · 1,07 г/см³</option><option value="aluminum">Алюминий · 2,70 г/см³</option><option value="steel">Сталь · 7,80 г/см³</option><option value="stainless">Нержавеющая сталь · 8,00 г/см³</option><option value="copper">Медь · 8,94 г/см³</option><option value="custom">Другая плотность</option></select></dd><dt>Плотность, г/см³</dt><dd><input data-mass-density type="number" min="0" step="any" inputmode="decimal" placeholder="Введите плотность" aria-label="Плотность материала, граммов на кубический сантиметр" disabled></dd><dt>Расчётная масса</dt><dd data-mass-result>Выберите материал</dd></dl><small class="cad3-mass-note">Оценка для цельного тела. Заполнение при 3D-печати не учитывается.</small>';
       props.append(section);
 
+      const materialSelect = section.querySelector('[data-mass-material]');
       const densityInput = section.querySelector('[data-mass-density]');
       const massResult = section.querySelector('[data-mass-result]');
       const bodyId = body?.id || selected.body_id || selected.id;
-      const savedDensity = massDensityByBody.get(bodyId);
-      if (savedDensity !== undefined) densityInput.value = String(savedDensity);
+      const savedMaterial = massDensityByBody.get(bodyId);
+      if (savedMaterial) {
+        materialSelect.value = savedMaterial.material;
+        densityInput.value = String(savedMaterial.density);
+        densityInput.disabled = savedMaterial.material !== 'custom';
+      }
       const updateMass = () => {
         const density = Number(densityInput.value);
         if (!densityInput.value || !Number.isFinite(density) || density <= 0) {
           massDensityByBody.delete(bodyId);
-          massResult.textContent = 'Укажите плотность';
+          massResult.textContent = materialSelect.value === 'custom' ? 'Укажите плотность' : 'Выберите материал';
           return;
         }
-        massDensityByBody.set(bodyId, density);
+        massDensityByBody.set(bodyId, { material: materialSelect.value, density });
         const grams = volume * density / 1000;
-        const format = value => fmt(value);
         massResult.textContent = grams < 1000
-          ? `${format(grams)} г`
-          : `${format(grams / 1000)} кг`;
+          ? `${fmt(grams)} г`
+          : `${fmt(grams / 1000)} кг`;
       };
+      materialSelect.addEventListener('change', () => {
+        if (materialSelect.value === 'custom') {
+          densityInput.disabled = false;
+          densityInput.value = '';
+        } else if (massMaterials[materialSelect.value]) {
+          densityInput.value = String(massMaterials[materialSelect.value]);
+          densityInput.disabled = true;
+        } else {
+          densityInput.value = '';
+          densityInput.disabled = true;
+        }
+        updateMass();
+      });
       densityInput.addEventListener('input', updateMass);
-      if (savedDensity !== undefined) updateMass();
+      if (savedMaterial) updateMass();
     };
     props.addEventListener('click',e=>{const b=e.target.closest('[data-dep]');if(b)select(b.dataset.dep,true)});
     const tabs=$('.cad-inspector-tabs');tabs?.addEventListener('click',()=>queueMicrotask(()=>{const active=$('.cad-inspector-tab[aria-selected=true]',tabs)?.dataset.cadInspector||'properties';props.hidden=active!=='properties'}));

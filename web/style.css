@@ -305,6 +305,8 @@ button.object-row.selected { border-color: #9b6038; background: #ff874012; }
 .geometry-apply { grid-column: 1 / -1; justify-self: start; min-height: 27px; padding: 4px 8px; font-size: 9px; }
 .geometry-not-editable { color: var(--dim) !important; font-size: 9px !important; }
 .geometry-status { margin: 0; padding: 9px; border-top: 1px solid var(--line-soft); color: var(--accent); font-size: 10px; }
+.cad3-grid select { width: 100%; min-width: 0; height: 24px; border: 1px solid #35414a; border-radius: 3px; background: #080e12; color: #eef1f3; font: 9px var(--mono); }
+.cad3-mass-note { display: block; margin-top: 7px; color: var(--dim); font-size: 9px; }
 .toast { position: fixed; z-index: 20; right: 18px; bottom: 18px; max-width: min(400px, calc(100vw - 36px)); margin: 0; padding: 9px 12px; transform: translateY(8px); border: 1px solid var(--line); border-radius: 4px; background: var(--surface-soft); color: var(--text); font-size: 11px; opacity: 0; pointer-events: none; transition: opacity .16s ease, transform .16s ease; }
 .toast.visible { transform: translateY(0); opacity: 1; pointer-events: auto; user-select: text; }
 .toast.error { border-color: #713e3c; color: #ffc3bd; }
