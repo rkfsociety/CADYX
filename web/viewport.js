@@ -342,6 +342,7 @@
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.featureEdgeFaces,
         geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
+        Boolean(drag),
         wireframeColor, wireframeOpacity, dpr, Math.max(1.5 / scale, VIEWPORT_MESH_DEFLECTION),
         selectedFeatureId
           ? geometry.featureTriangleRanges?.filter((range) => range.featureId === selectedFeatureId) || []
@@ -895,7 +896,7 @@
 
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, motionAngles,
       vertexNormals, orientation, faceNormals, featureEdges, featureEdgeFaces, silhouetteCandidates, colors, triangleColors,
-      showWireframe, shaded,
+      showWireframe, shaded, interactive,
       wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = [], overlayRanges = []) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
@@ -1051,7 +1052,7 @@
         }
         return nearestDepth;
       };
-      const drawEdge = (start, end, adjacentFaceA = -1, adjacentFaceB = -1) => {
+      const drawEdge = (start, end, adjacentFaceA = -1, adjacentFaceB = -1, minimumVisibleLength = 1.5 * dpr) => {
         const startOffset = start * 3, endOffset = end * 3;
         const x0 = screenX[start], y0 = screenY[start];
         const x1 = screenX[end], y1 = screenY[end];
@@ -1062,7 +1063,7 @@
         let runStart = null, runEnd = null;
         const flushVisibleRun = () => {
           if (!runStart) return;
-          if (Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]) > 0.5) {
+          if (Math.hypot(runEnd[0] - runStart[0], runEnd[1] - runStart[1]) > minimumVisibleLength) {
             context.moveTo(runStart[0], runStart[1]);
             context.lineTo(runEnd[0], runEnd[1]);
           }
@@ -1100,10 +1101,12 @@
         for (let start = 0; start < featureEdges.length; start += edgesPerPath * 2) {
           context.beginPath();
           const end = Math.min(featureEdges.length, start + edgesPerPath * 2);
+          // The reduced-resolution drag frame otherwise turns short edge runs into specks.
           for (let index = start; index < end; index += 2) {
             const faceIndex = index;
             drawEdge(featureEdges[index], featureEdges[index + 1],
-              featureEdgeFaces?.[faceIndex] ?? -1, featureEdgeFaces?.[faceIndex + 1] ?? -1);
+              featureEdgeFaces?.[faceIndex] ?? -1, featureEdgeFaces?.[faceIndex + 1] ?? -1,
+              interactive ? 3 * dpr : 1.5 * dpr);
           }
           context.stroke();
         }
@@ -1132,7 +1135,8 @@
           const secondFace = faceFacing[silhouetteCandidates[index + 3]];
           if (firstFace === secondFace || firstFace === 0 && secondFace === 0) continue;
           const start = silhouetteCandidates[index], end = silhouetteCandidates[index + 1];
-          drawEdge(start, end, silhouetteCandidates[index + 2], silhouetteCandidates[index + 3]);
+          drawEdge(start, end, silhouetteCandidates[index + 2], silhouetteCandidates[index + 3],
+            interactive ? 3 * dpr : 1.5 * dpr);
         }
         context.stroke();
         context.restore();

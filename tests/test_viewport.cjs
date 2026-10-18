@@ -267,6 +267,28 @@ for (const [yaw, pitch] of [[0.17, 0.2], [0.73, -0.35], [1.41, 0.4], [2.62, -0.2
   assert.ok(verticalSilhouetteSpans.every((span) => span > 200),
     `Each visible cylinder side reaches from top to bottom at yaw ${yaw} and pitch ${pitch}`);
 }
+cylinderViewer.setCamera({ yaw: 0.68, pitch: 0.38, zoom: 1.5, projection: "orthographic" });
+events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 3 });
+for (const [clientX, clientY] of [[340, 190], [380, 200], [410, 230], [390, 270], [350, 290], [310, 270]]) {
+  events.pointermove({ clientX, clientY });
+  animationFrames.shift()(animationTime);
+  const interiorFragments = strokedPaths.flatMap((path) => {
+    const fragments = [];
+    for (let index = 0; index + 1 < path.length; index += 2) {
+      const [startX, startY] = path[index], [endX, endY] = path[index + 1];
+      const midpointY = (startY + endY) / 2;
+      const midpointX = (startX + endX) / 2;
+      if (midpointX > 90 && midpointX < 270 && midpointY > 85 && midpointY < 155
+          && Math.hypot(endX - startX, endY - startY) < 2) {
+        fragments.push([startX, startY, endX, endY]);
+      }
+    }
+    return fragments;
+  });
+  assert.equal(interiorFragments.length, 0,
+    `Interactive orbit does not expose isolated subpixel edge fragments (${clientX}, ${clientY})`);
+}
+events.pointerup();
 const splitSquareViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
   showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false,
 });
@@ -296,6 +318,26 @@ explicitEdgeViewer.load({
 });
 assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 1,
   "A depth-tested B-rep edge stays continuous along the boundary of its own shaded face");
+const transientEdgeViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: true,
+});
+transientEdgeViewer.load({
+  type: "body",
+  positions: [-50, -50, 0, 50, -50, 0, -50, 50, 0, 0, 0, 0, 0.3, 0, 0],
+  triangles: [0, 1, 2], lines: [3, 4], points: [],
+  bounds: { min: [-50, -50, 0], max: [50, 50, 0] },
+});
+transientEdgeViewer.setCamera({ yaw: 0, pitch: 0, zoom: 3, projection: "orthographic" });
+assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 1,
+  "A B-rep edge longer than the full-resolution detail threshold remains visible");
+events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 4 });
+events.pointermove({ clientX: 320, clientY: 200 });
+animationFrames.shift()(animationTime);
+assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 0,
+  "Interactive orbit suppresses isolated short edge marks in its reduced-resolution frame");
+events.pointerup();
+assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 1,
+  "The complete B-rep edge returns in the crisp frame when orbit ends");
 const facetedCylinderViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
   showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false,
 });

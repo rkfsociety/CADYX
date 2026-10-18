@@ -55,6 +55,10 @@ interpolated on the nearest rasterized triangles covering each line
 sample, including nearby pixel samples when the line falls on a raster coverage
 boundary. The edge's incident triangles are excluded from occlusion so they do
 not break their own contour; all other covering faces remain depth-tested.
+Runs shorter than 1.5 screen pixels are omitted to avoid isolated marks. During
+pointer orbit, the reduced-resolution frame raises that threshold to three
+screen pixels; the full-resolution frame restores additional detail when the
+pointer is released.
 Triangle tessellation seams are never treated as feature edges. Triangle-mesh
 bodies have no B-rep feature edges and therefore show only their view-dependent,
 depth-tested silhouette. Active sketch lines and points remain overlays and are
