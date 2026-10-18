@@ -21,6 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--strict", action="store_true")
     parser.add_argument("--require-assembly", action="store_true")
     parser.add_argument("--require-drawings", action="store_true")
+    parser.add_argument("--deterministic-rebuild", action="store_true")
     parser.add_argument("--max-bodies", type=int, default=128)
     parser.add_argument("--time-budget-seconds", type=float, default=30.0)
     args = parser.parse_args(argv)
@@ -31,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
             args.project_id, args.expected_revision, specification=spec,
             strict=args.strict, export_body_id=args.export_body_id,
             require_assembly=args.require_assembly, require_drawings=args.require_drawings,
+            deterministic_rebuild=args.deterministic_rebuild,
             max_bodies=args.max_bodies, time_budget_seconds=args.time_budget_seconds,
         )
     except (CadyxError, OSError, ValueError) as exc:

@@ -544,6 +544,7 @@ def _dispatch_validation(handler: Any, core: CadyxCore, route: RouteMatch, parse
                 export_body_id=body.get("export_body_id"),
                 require_assembly=body.get("require_assembly", False),
                 require_drawings=body.get("require_drawings", False),
+                deterministic_rebuild=body.get("deterministic_rebuild", False),
                 max_bodies=body.get("max_bodies", 128),
                 time_budget_seconds=body.get("time_budget_seconds", 30.0),
                 persist=body.get("persist", False),

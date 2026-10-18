@@ -24,11 +24,13 @@ def check_project(
     export_body_id: str | None = None,
     require_assembly: bool = False, require_drawings: bool = False,
     max_bodies: int = 128, time_budget_seconds: float = 30.0,
+    deterministic_rebuild: bool = False,
     cancelled: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Return measured pass/fail and explicit unsupported/unexecuted requirements."""
     for key, value in (("strict", strict), ("require_assembly", require_assembly),
-                       ("require_drawings", require_drawings)):
+                       ("require_drawings", require_drawings),
+                       ("deterministic_rebuild", deterministic_rebuild)):
         if type(value) is not bool:
             raise ValidationError(f"{key} must be a boolean.")
     if export_body_id is not None and (not isinstance(export_body_id, str) or not export_body_id):
@@ -91,6 +93,22 @@ def check_project(
                     {"body_count": len(bodies), "coverage": "saved live geometry"})
     except _Interrupted as exc:
         add("geometry", "untested", "kernel.validate", {"reason": str(exc)})
+
+    if deterministic_rebuild:
+        from .rebuild_regression import run_rebuild_regression
+        try:
+            checkpoint()
+            if geometry_status != "pass":
+                add("deterministic_rebuild", "untested", "saved_cold_warm_rebuild_v1",
+                    {"reason": "saved geometry has not passed kernel validation"})
+            else:
+                status, evidence = run_rebuild_regression(
+                    core, document, max_bodies=max_bodies, checkpoint=checkpoint,
+                )
+                add("deterministic_rebuild", status, "saved_cold_warm_rebuild_v1", evidence)
+        except _Interrupted as exc:
+            add("deterministic_rebuild", "untested", "saved_cold_warm_rebuild_v1",
+                {"reason": str(exc)})
 
     if specification is None:
         add("specification", "untested", "model_specification_v1",

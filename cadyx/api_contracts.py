@@ -245,6 +245,7 @@ VALIDATION_OPERATIONS["project_check"] = {
             "export_body_id": {"type": "string", "minLength": 1},
             "require_assembly": {"type": "boolean"},
             "require_drawings": {"type": "boolean"},
+            "deterministic_rebuild": {"type": "boolean"},
             "max_bodies": {"type": "integer", "minimum": 1, "maximum": 128},
             "time_budget_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 120},
         },
@@ -252,7 +253,8 @@ VALIDATION_OPERATIONS["project_check"] = {
         "additionalProperties": False,
     },
     "defaults": {"strict": False, "persist": False, "require_assembly": False,
-                 "require_drawings": False, "max_bodies": 128, "time_budget_seconds": 30.0},
+                 "require_drawings": False, "deterministic_rebuild": False,
+                  "max_bodies": 128, "time_budget_seconds": 30.0},
     "field_error": "Project check requires expected_revision and supported preflight options.",
 }
 
