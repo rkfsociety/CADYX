@@ -134,7 +134,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .project-group { display: grid; min-width: 0; grid-column: 1 / -1; gap: 8px; }
 .project-group-heading { display: flex; align-items: center; gap: 8px; margin: 0; padding-bottom: 9px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font: 600 11px var(--ui-font); letter-spacing: .02em; }
 .project-group-heading span { color: var(--dim); font-size: 9px; }
-.project-group-cards { display: grid; min-width: 0; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 360px)); justify-content: start; gap: 14px; }
+.project-group-cards { display: grid; min-width: 0; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); gap: 14px; }
 .workspace-project-card { display: grid; min-width: 0; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(145deg, #141d24, #10171d); }
 .workspace-project-card[data-active="true"] { border-color: #8e5732; background: linear-gradient(145deg, #211811, #15171a); }
 .workspace-project-card-heading { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: start; }

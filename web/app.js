@@ -85,7 +85,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
 .project-group{gap:11px}
 .project-group-heading{gap:9px;padding:0 0 10px;border-bottom:1px solid #26333c;color:#c2ccd1;font:600 12px var(--ui-font);letter-spacing:0;text-transform:none}
 .project-group-heading span{color:var(--dim);font:11px var(--ui-font)}
-.project-group-cards{grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),360px));justify-content:start;gap:16px}
+.project-group-cards{grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));gap:16px}
 .workspace-project-card{position:relative;grid-template-rows:208px auto auto auto;gap:13px;min-width:0;padding:13px;border:1px solid #26343e;border-radius:12px;background:linear-gradient(145deg,#121c23,#0f171d);box-shadow:0 8px 24px #0002;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}
 #projects-panel[data-layout="grid"] .workspace-project-card{aspect-ratio:auto;grid-template-rows:208px auto auto auto;min-height:0;max-width:none;justify-self:stretch}
 #projects-panel[data-layout="grid"] .workspace-project-thumbnail{height:auto;min-height:0;overflow:hidden}
