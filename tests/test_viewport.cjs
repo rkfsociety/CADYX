@@ -225,7 +225,7 @@ for (let index = 0; index < cylinderSegments; index += 1) {
   cylinderTriangles.push(lower, lowerNext, upperNext, lower, upperNext, upper);
 }
 const cylinderViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
-  showCoordinateGizmo: false, showRotationAxes: false, wireframe: true, shaded: false,
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: true,
 });
 cylinderViewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
 cylinderViewer.load({
@@ -251,6 +251,22 @@ for (const path of strokedPaths) {
 }
 assert.ok(sideContourXs.has(178) && sideContourXs.has(422),
   "Side orthographic view draws both smooth vertical cylinder silhouettes");
+for (const [yaw, pitch] of [[0.17, 0.2], [0.73, -0.35], [1.41, 0.4], [2.62, -0.25], [4.19, 0.3]]) {
+  cylinderViewer.setCamera({ yaw, pitch, zoom: 1, projection: "orthographic" });
+  const verticalSilhouetteSpans = [];
+  for (const path of strokedPaths) {
+    for (let index = 0; index + 1 < path.length; index += 2) {
+      const [startX, startY] = path[index], [endX, endY] = path[index + 1];
+      if (Math.abs(startX - endX) < 1e-7 && Math.abs(endY - startY) > 200) {
+        verticalSilhouetteSpans.push(Math.abs(endY - startY));
+      }
+    }
+  }
+  assert.ok(verticalSilhouetteSpans.length >= 2,
+    `Depth-tested cylinder silhouettes remain continuous at yaw ${yaw} and pitch ${pitch}`);
+  assert.ok(verticalSilhouetteSpans.every((span) => span > 200),
+    `Each visible cylinder side reaches from top to bottom at yaw ${yaw} and pitch ${pitch}`);
+}
 const splitSquareViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
   showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false,
 });
@@ -268,6 +284,18 @@ splitSquareViewer.load({
 });
 assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 5,
   "Coincident vertices preserve a real crease between perpendicular faces");
+const explicitEdgeViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: true,
+});
+explicitEdgeViewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
+explicitEdgeViewer.load({
+  type: "body",
+  positions: [-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0],
+  triangles: [0, 1, 2, 0, 2, 3], lines: [0, 1], points: [],
+  bounds: { min: [-1, -1, 0], max: [1, 1, 0] },
+});
+assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 1,
+  "A depth-tested B-rep edge stays continuous along the boundary of its own shaded face");
 const facetedCylinderViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
   showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false,
 });
