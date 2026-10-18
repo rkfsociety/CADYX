@@ -98,6 +98,7 @@
     const meshLayerContext = meshLayer.getContext("2d", { alpha: true });
     let meshImage = null;
     let meshDepth = new Float32Array(0);
+    let meshDepthFace = new Int32Array(0);
     let geometry = null;
     let selectedBodyId = null;
     let selectedFeatureId = null;
@@ -668,8 +669,10 @@
         meshLayer.height = height;
         meshImage = meshLayerContext.createImageData(width, height);
         meshDepth = new Float32Array(width * height);
+        meshDepthFace = new Int32Array(width * height);
       }
       meshDepth.fill(-Infinity);
+      meshDepthFace.fill(-1);
       const pixels = meshImage.data;
       pixels.fill(0);
 
@@ -737,6 +740,7 @@
                   const depth = z0 * w0 + z1 * w1 + z2 * w2;
                   if (depth + 1e-7 >= meshDepth[pixelIndex]) {
                     meshDepth[pixelIndex] = depth;
+                    meshDepthFace[pixelIndex] = face;
                     const byteIndex = pixelIndex * 4;
                     const brightness = vertexLight
                       ? vertexLight[first] * w0 + vertexLight[second] * w1 + vertexLight[third] * w2
@@ -794,6 +798,7 @@
                 const depth = z0 * w0 + z1 * w1 + z2 * w2;
                 if (depth + 1e-7 >= meshDepth[pixelIndex]) {
                   meshDepth[pixelIndex] = depth;
+                  meshDepthFace[pixelIndex] = face;
                   const byteIndex = pixelIndex * 4;
                   const brightness = vertexLight
                     ? vertexLight[first] * w0 + vertexLight[second] * w1 + vertexLight[third] * w2
@@ -1009,8 +1014,9 @@
         }
       }
       const depthBuffer = depthBufferValid ? meshDepth : null;
+      const depthFaceBuffer = depthBufferValid ? meshDepthFace : null;
       const width = canvas.width, height = canvas.height;
-      const drawEdge = (start, end) => {
+      const drawEdge = (start, end, adjacentFaceA = -1, adjacentFaceB = -1) => {
         const startOffset = start * 3, endOffset = end * 3;
         const x0 = screenX[start], y0 = screenY[start];
         const x1 = screenX[end], y1 = screenY[end];
@@ -1041,8 +1047,11 @@
               ? Math.max(0, Math.min(1, ((centerX - x0) * dx + (centerY - y0) * dy) / lengthSquared))
               : fraction;
             const centerLineDepth = startDepth + (endDepth - startDepth) * centerFraction;
-            const centerSurfaceDepth = depthBuffer[pixelY * width + pixelX];
-            if (centerSurfaceDepth !== -Infinity) {
+            const centerIndex = pixelY * width + pixelX;
+            const centerSurfaceDepth = depthBuffer[centerIndex];
+            const centerFace = depthFaceBuffer?.[centerIndex] ?? -1;
+            if (centerSurfaceDepth !== -Infinity
+                && centerFace !== adjacentFaceA && centerFace !== adjacentFaceB) {
               hasDepthSample = true;
               bestVisibilityMargin = centerLineDepth - centerSurfaceDepth;
             }
@@ -1054,7 +1063,10 @@
                   if (offsetX === 0 && offsetY === 0) continue;
                   const sampleX = pixelX + offsetX;
                   if (sampleX < 0 || sampleX >= width) continue;
-                  const surfaceDepth = depthBuffer[sampleY * width + sampleX];
+                  const sampleIndex = sampleY * width + sampleX;
+                  const sampleFace = depthFaceBuffer?.[sampleIndex] ?? -1;
+                  if (sampleFace === adjacentFaceA || sampleFace === adjacentFaceB) continue;
+                  const surfaceDepth = depthBuffer[sampleIndex];
                   if (surfaceDepth === -Infinity) continue;
                   hasDepthSample = true;
                   const neighborX = sampleX + 0.5, neighborY = sampleY + 0.5;
@@ -1121,7 +1133,7 @@
           const secondFace = faceFacing[silhouetteCandidates[index + 3]];
           if (firstFace === secondFace || firstFace === 0 && secondFace === 0) continue;
           const start = silhouetteCandidates[index], end = silhouetteCandidates[index + 1];
-          drawEdge(start, end);
+          drawEdge(start, end, silhouetteCandidates[index + 2], silhouetteCandidates[index + 3]);
         }
         context.stroke();
         context.restore();
