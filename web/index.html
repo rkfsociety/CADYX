@@ -512,7 +512,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .workflow-collapse-button { display: none; }
 
 /* Four-view mode remains functional. */
-.primary-grid[data-four-views="true"] { display: block; }
+.primary-grid[data-four-views="true"] { position: relative; display: block; }
 .primary-grid[data-four-views="true"] > .model-panel { position: absolute; z-index: 3; inset: 0 calc(50% + 4px) calc(50% + 4px) 0; width: auto; height: auto; }
 .primary-grid[data-four-views="true"] > .inspector-column { display: none; }
 .primary-grid[data-four-views="true"] > .orthographic-panel { position: absolute; z-index: 2; inset: 0; display: block; border: 0; background: transparent; pointer-events: none; }
