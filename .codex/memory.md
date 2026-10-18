@@ -1,5 +1,7 @@
 # CADYX project memory
 
+- Confirmed: caller-driven `check_project` composes persisted document/reference validation, native geometry checks, optional model specifications and OCCT delivery eligibility preflight without modifying the CAD revision. Core, Agent API, MCP and `python -m cadyx.check_project` expose per-stage pass/fail/untested and strict CI exit verdicts; missing assembly/drawing backends and unverified STEP round-trips are not claimed. See [project checks](docs/project-checks.md).
+
 - Confirmed: typed read-only face/edge geometry queries are exposed at Agent API POST `/api/v1/agent/projects/{id}/topology/query` and MCP `cadyx_query_topology`. Queries bind to a saved revision and report explicit candidate counts and ambiguity; stale mutation `topology_revision` and colliding semantic keys fail closed. See [geometric queries](docs/architecture.md#revision-bound-geometric-topology-queries) and `cadyx/topology_queries.py`.
 
 - Confirmed: Agent API command batches can be previewed on an isolated document copy at `/commands/preview`, then committed once through `/commands/commit` under an agent lease acquired after preview and the exact saved revision. Proposals are process-local, capped at 128, and invalidated by restart/eviction; batches containing scan-file publication, export, or source-file removal are rejected in preview. Commit persists the exact staged document and per-command history atomically. See `cadyx/core.py`, `cadyx/web_routes.py`, and `cadyx/mcp_server.py`.

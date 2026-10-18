@@ -401,6 +401,26 @@ class CadyxCore:
     ) -> dict[str, Any]:
         return self._engineering_validation.validate_body_thickness(project_id, body_id, expected_revision, minimum_thickness, tolerance, progress=progress, persist=persist, method=method)
 
+    def check_project(
+        self, project_id: str, expected_revision: Any, **options: Any,
+    ) -> dict[str, Any]:
+        """Read-only headless validation of one saved project revision."""
+        from .project_checks import check_project
+        return check_project(self, project_id, expected_revision, **options)
+
+    def validate_body_project_check(
+        self, project_id: str, expected_revision: Any, *,
+        specification: Any = None, strict: bool = False, persist: bool = False,
+        **options: Any,
+    ) -> dict[str, Any]:
+        if type(persist) is not bool:
+            raise ValidationError("persist must be a boolean.")
+        result = self.check_project(
+            project_id, expected_revision, specification=specification,
+            strict=strict, **options,
+        )
+        return self._maybe_persist_validation(project_id, "project_check", result, persist)
+
     def validate_body_specification(
         self, project_id: str, expected_revision: Any, specification: Any,
         *, persist: bool = False,

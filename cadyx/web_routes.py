@@ -83,6 +83,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/preservation", "agent_validate_preservation", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/thickness", "agent_validate_thickness", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/specification", "agent_validate_specification", "validation", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/project-check", "agent_validate_project_check", "validation", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/viewport", "agent_viewport", "viewport"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/viewport.png", "agent_viewport_png", "viewport"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/viewport/snapshot", "agent_viewport_snapshot", "viewport", "png"),
@@ -509,6 +510,24 @@ def _dispatch_validation(handler: Any, core: CadyxCore, route: RouteMatch, parse
         return
     body = handler._read_json()
     operation = name.removeprefix("agent_validate_")
+    if operation == "project_check":
+        validate_request_fields(operation, body)
+        assert body is not None
+        result = core.observe_agent_operation(
+            project_id, "Проверяет проект",
+            lambda: core.validate_body_project_check(
+                project_id, body["expected_revision"],
+                specification=body.get("specification"), strict=body.get("strict", False),
+                export_body_id=body.get("export_body_id"),
+                require_assembly=body.get("require_assembly", False),
+                require_drawings=body.get("require_drawings", False),
+                max_bodies=body.get("max_bodies", 128),
+                time_budget_seconds=body.get("time_budget_seconds", 30.0),
+                persist=body.get("persist", False),
+            ),
+        )
+        handler._json(200, result)
+        return
     if operation == "specification":
         validate_request_fields(operation, body)
         assert body is not None
