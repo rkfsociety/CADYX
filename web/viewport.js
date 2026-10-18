@@ -233,6 +233,7 @@
         featureEdges: Uint32Array.from(featureEdges),
         silhouetteCandidates: Uint32Array.from(silhouetteCandidates),
         smoothVertexPairs: Uint32Array.from(smoothVertexPairs),
+        canonicalVertices,
       };
     }
 
@@ -334,7 +335,8 @@
       if (showRotationAxes) drawRotationAxes(geometry.rotationAxes || [], project, dpr);
       if (triangles.length) renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, bodyMotionAngleByVertex,
-        geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
+        geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.canonicalVertices,
+        geometry.featureEdges,
         geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
         wireframeColor, wireframeOpacity, dpr, Math.max(1.5 / scale, VIEWPORT_MESH_DEFLECTION),
         selectedFeatureId
@@ -888,7 +890,7 @@
     }
 
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, motionAngles,
-      vertexNormals, orientation, faceNormals, featureEdges, silhouetteCandidates, colors, triangleColors,
+      vertexNormals, orientation, faceNormals, canonicalVertices, featureEdges, silhouetteCandidates, colors, triangleColors,
       showWireframe, shaded,
       wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = [], overlayRanges = []) {
       const faceTotal = triangles.length / 3;
@@ -1018,6 +1020,8 @@
       const width = canvas.width, height = canvas.height;
       const drawEdge = (start, end, adjacentFaceA = -1, adjacentFaceB = -1) => {
         const startOffset = start * 3, endOffset = end * 3;
+        const canonicalStart = adjacentFaceA >= 0 && canonicalVertices ? canonicalVertices[start] : -1;
+        const canonicalEnd = adjacentFaceA >= 0 && canonicalVertices ? canonicalVertices[end] : -1;
         const x0 = screenX[start], y0 = screenY[start];
         const x1 = screenX[end], y1 = screenY[end];
         const dx = x1 - x0, dy = y1 - y0;
@@ -1048,8 +1052,21 @@
             const centerIndex = pixelY * width + pixelX;
             const centerSurfaceDepth = depthBuffer[centerIndex];
             const centerFace = depthFaceBuffer?.[centerIndex] ?? -1;
+            let incidentFace = centerFace === adjacentFaceA || centerFace === adjacentFaceB;
+            // At a silhouette vertex, the raster sample can land in another triangle
+            // touching the contour endpoint; it belongs to the local edge neighborhood.
+            if (!incidentFace && centerFace >= 0 && canonicalStart >= 0 && canonicalEnd >= 0) {
+              const faceOffset = centerFace * 3;
+              for (let corner = 0; corner < 3; corner += 1) {
+                const canonicalVertex = canonicalVertices[triangles[faceOffset + corner]];
+                if (canonicalVertex === canonicalStart || canonicalVertex === canonicalEnd) {
+                  incidentFace = true;
+                  break;
+                }
+              }
+            }
             if (centerSurfaceDepth !== -Infinity
-                && centerFace !== adjacentFaceA && centerFace !== adjacentFaceB) {
+                && !incidentFace) {
               visible = centerLineDepth - centerSurfaceDepth >= -depthTolerance;
             }
           }
@@ -1308,6 +1325,7 @@
           fitRadius: fitRadiusFromPositions(value.positions, fitCenter),
           featureEdges: explicitBodyEdges || rangedBodyEdges || meshEdges.featureEdges,
           silhouetteCandidates: meshEdges.silhouetteCandidates,
+          canonicalVertices: meshEdges.canonicalVertices,
           vertexNormals: smoothShading
             ? value.vertexNormals?.length === value.positions.length
               ? value.vertexNormals
