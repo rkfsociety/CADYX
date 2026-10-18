@@ -192,6 +192,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const massMaterials = { pla: 1.24, petg: 1.27, abs: 1.04, asa: 1.07, aluminum: 2.70, steel: 7.80, stainless: 8.00, copper: 8.94 };
     renderProps = selected => {
       renderGeometryProps(selected);
+      document.querySelector('#object-panel .cad3-mass-calculator')?.remove();
       if (!selected || selected.type === 'sketch') return;
       const body = selected.type === 'body' ? selected : state.byId.get(selected.body_id);
       const geometry = body?.geometry || selected.geometry;
@@ -203,7 +204,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const section = document.createElement('section');
       section.className = 'cad3-sec cad3-mass-calculator';
       section.innerHTML = '<h3>Вес детали</h3><dl class="cad3-grid"><dt>Материал</dt><dd><select data-mass-material aria-label="Материал детали"><option value="">Выберите материал</option><option value="pla">PLA · 1,24 г/см³</option><option value="petg">PETG · 1,27 г/см³</option><option value="abs">ABS · 1,04 г/см³</option><option value="asa">ASA · 1,07 г/см³</option><option value="aluminum">Алюминий · 2,70 г/см³</option><option value="steel">Сталь · 7,80 г/см³</option><option value="stainless">Нержавеющая сталь · 8,00 г/см³</option><option value="copper">Медь · 8,94 г/см³</option><option value="custom">Другая плотность</option></select></dd><dt>Плотность, г/см³</dt><dd><input data-mass-density type="number" min="0" step="any" inputmode="decimal" placeholder="Введите плотность" aria-label="Плотность материала, граммов на кубический сантиметр" disabled></dd><dt>Расчётная масса</dt><dd data-mass-result>Выберите материал</dd></dl><small class="cad3-mass-note">Оценка для цельного тела. Заполнение при 3D-печати не учитывается.</small>';
-      props.append(section);
+      const visibleGeometryPanel = document.querySelector('#object-panel .geometry-table-scroll');
+      (visibleGeometryPanel || props).prepend(section);
 
       const materialSelect = section.querySelector('[data-mass-material]');
       const densityInput = section.querySelector('[data-mass-density]');
