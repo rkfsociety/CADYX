@@ -337,6 +337,14 @@ class CadyxCore:
     ) -> dict[str, Any]:
         return self._engineering_validation.validate_body_thickness(project_id, body_id, expected_revision, minimum_thickness, tolerance, progress=progress, persist=persist, method=method)
 
+    def validate_body_specification(
+        self, project_id: str, expected_revision: Any, specification: Any,
+        *, persist: bool = False,
+    ) -> dict[str, Any]:
+        return self._engineering_validation.validate_model_specification(
+            project_id, expected_revision, specification, persist=persist,
+        )
+
     def _maybe_persist_validation(
         self, project_id: str, kind: str, result: dict[str, Any], persist: bool,
     ) -> dict[str, Any]:

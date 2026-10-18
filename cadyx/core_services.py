@@ -1043,6 +1043,26 @@ class RenderingCacheService(_CoreService):
 class EngineeringValidationService(_CoreService):
     """Run revision-bound engineering validation and persistence."""
 
+    def validate_model_specification(
+        self, project_id: str, expected_revision: Any, specification: Any,
+        *, persist: bool = False,
+    ) -> dict[str, Any]:
+        from .model_specifications import evaluate_core_check, evaluate_specification
+
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        self._check_revision(document, expected_revision)
+        if type(persist) is not bool:
+            raise ValidationError("persist must be a boolean.")
+        result = evaluate_specification(
+            specification,
+            revision=document.revision,
+            evaluate_check=lambda operation, arguments, revision: evaluate_core_check(
+                self.core, project_id, operation, arguments, revision,
+            ),
+        )
+        return self._maybe_persist_validation(project_id, "model_specification", result, persist)
+
     def validate_body_dimensions(
         self, project_id: str, body_id: str, expected_revision: Any,
         expected_dimensions: Any, tolerance: Any, *, persist: bool = False,

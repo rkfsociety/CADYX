@@ -6,6 +6,8 @@ from typing import Any
 
 from .errors import ValidationError
 
+SPECIFICATION_OPERATIONS = ("dimensions", "clearance", "preservation", "thickness")
+
 VALIDATION_OPERATIONS: dict[str, dict[str, Any]] = {
     "dimensions": {
         "tool_name": "cadyx_validate_body_dimensions",
@@ -138,6 +140,70 @@ VALIDATION_OPERATIONS: dict[str, dict[str, Any]] = {
         "minimum_thickness, and tolerance; optional fields are method and "
         "persist.",
     },
+}
+
+
+def _specification_check_schema(operation: str) -> dict[str, Any]:
+    contract = VALIDATION_OPERATIONS[operation]["input_schema"]
+    properties = contract["properties"]
+    argument_properties = {
+        name: value for name, value in properties.items()
+        if name not in {"expected_revision", "persist"}
+    }
+    required_arguments = [
+        name for name in contract["required"]
+        if name not in {"expected_revision", "persist"}
+    ]
+    return {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "minLength": 1, "maxLength": 120},
+            "operation": {"type": "string", "enum": [operation]},
+            "arguments": {
+                "type": "object",
+                "properties": argument_properties,
+                "required": required_arguments,
+                "additionalProperties": False,
+            },
+        },
+        "required": ["id", "operation", "arguments"],
+        "additionalProperties": False,
+    }
+
+
+_SPECIFICATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "schema_version": {"type": "integer", "enum": [1]},
+        "title": {"type": "string", "minLength": 1, "maxLength": 120},
+        "checks": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {"oneOf": [_specification_check_schema(name) for name in SPECIFICATION_OPERATIONS]},
+        },
+    },
+    "required": ["schema_version", "title", "checks"],
+    "additionalProperties": False,
+}
+
+VALIDATION_OPERATIONS["specification"] = {
+    "tool_name": "cadyx_validate_model_specification",
+    "description": "Evaluate a versioned declarative model specification using read-only dimension, clearance, preservation, and thickness checks at one exact saved revision; optionally persist the combined report.",
+    "method": "POST",
+    "path": "/api/v1/agent/projects/{id}/validations/specification",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "expected_revision": {"type": "integer", "minimum": 0},
+            "specification": _SPECIFICATION_SCHEMA,
+            "persist": {"type": "boolean"},
+        },
+        "required": ["expected_revision", "specification"],
+        "additionalProperties": False,
+    },
+    "defaults": {"persist": False},
+    "field_error": "Model specification validation requires expected_revision and a version 1 specification.",
 }
 
 

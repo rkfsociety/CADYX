@@ -79,6 +79,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/clearance", "agent_validate_clearance", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/preservation", "agent_validate_preservation", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/thickness", "agent_validate_thickness", "validation", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/specification", "agent_validate_specification", "validation", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/viewport", "agent_viewport", "viewport"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/viewport.png", "agent_viewport_png", "viewport"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/viewport/snapshot", "agent_viewport_snapshot", "viewport", "png"),
@@ -447,6 +448,18 @@ def _dispatch_validation(handler: Any, core: CadyxCore, route: RouteMatch, parse
         return
     body = handler._read_json()
     operation = name.removeprefix("agent_validate_")
+    if operation == "specification":
+        validate_request_fields(operation, body)
+        assert body is not None
+        result = core.observe_agent_operation(
+            project_id, "Проверяет спецификацию модели",
+            lambda: core.validate_body_specification(
+                project_id, body["expected_revision"], body["specification"],
+                persist=body.get("persist", False),
+            ),
+        )
+        handler._json(200, result)
+        return
     validate_request_fields(operation, body)
     assert body is not None
     if operation == "dimensions":

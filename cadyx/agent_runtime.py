@@ -15,6 +15,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
+from .api_contracts import VALIDATION_OPERATIONS
 from .core import CadyxCore
 from .errors import CadyxError, ValidationError
 from .lease_heartbeat import LeaseHeartbeat
@@ -243,6 +244,17 @@ class AgentRuntime:
                 project_id, "Получает 3D-сцену", lambda: self.core.render_project(project_id),
             )
 
+        def validate_specification(arguments: Mapping[str, Any]) -> dict[str, Any]:
+            if set(arguments) - {"specification", "persist"} or "specification" not in arguments:
+                raise ValidationError("validate_specification needs specification and optional persist fields.")
+            return self.core.observe_agent_operation(
+                project_id, "Проверяет спецификацию модели",
+                lambda: self.core.validate_body_specification(
+                    project_id, revision_state[0], arguments["specification"],
+                    persist=arguments.get("persist", False),
+                ),
+            )
+
         def execute_command(arguments: Mapping[str, Any]) -> dict[str, Any]:
             command = arguments.get("command")
             if not isinstance(command, dict):
@@ -332,6 +344,7 @@ class AgentRuntime:
             return _execute
 
         empty_schema = {"type": "object", "properties": {}, "additionalProperties": False}
+        specification_input = VALIDATION_OPERATIONS["specification"]["input_schema"]
         registered = {
             "list_capabilities": _RegisteredTool(
                 AgentToolSpec(
@@ -366,6 +379,22 @@ class AgentRuntime:
             "get_viewport": _RegisteredTool(
                 AgentToolSpec("get_viewport", "Read the project's current render scene.", empty_schema),
                 get_viewport,
+            ),
+            "validate_specification": _RegisteredTool(
+                AgentToolSpec(
+                    "validate_specification",
+                    "Check a versioned model requirements specification at the current document revision. This is read-only; persist optionally stores one combined validation report.",
+                    {
+                        "type": "object",
+                        "properties": {
+                            "specification": specification_input["properties"]["specification"],
+                            "persist": {"type": "boolean"},
+                        },
+                        "required": ["specification"],
+                        "additionalProperties": False,
+                    },
+                ),
+                validate_specification,
             ),
             "execute_command": _RegisteredTool(
                 AgentToolSpec(
