@@ -106,6 +106,20 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(detail["document"]["revision"], revision)
         self.assertEqual(detail["lock"]["state"], "FREE")
 
+    def test_check_project_mcp_read_only_and_strict(self) -> None:
+        project_id = self._create_project("MCP headless")
+        report = self._tool_value("cadyx_check_project", {
+            "project_id": project_id, "expected_revision": 0, "strict": True,
+            "require_assembly": True,
+        })
+        self.assertEqual(report["revision"], 0)
+        self.assertEqual(report["status"], "untested")
+        self.assertFalse(report["passed"])
+        self.assertEqual(next(s for s in report["stages"] if s["id"] == "assembly")["status"], "untested")
+        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(detail["lock"]["state"], "FREE")
+        self.assertEqual(detail["document"]["revision"], 0)
+
     def test_global_thickness_method_is_exposed_and_dispatched(self) -> None:
         tool = next(tool for tool in TOOLS if tool["name"] == "cadyx_validate_body_thickness")
         method_schema = tool["inputSchema"]["properties"]["method"]

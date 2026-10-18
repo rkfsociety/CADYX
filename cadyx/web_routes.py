@@ -70,6 +70,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/agent/projects", "agent_projects", "agent"),
     RouteSpec("POST", "/api/v1/agent/projects", "agent_project_create", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}", "agent_project_get", "agent"),
+    RouteSpec("GET", "/api/v1/agent/projects/{project_id}/inspection", "agent_inspection", "agent"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/dashboard", "agent_dashboard_get", "agent"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/dashboard", "agent_dashboard_post", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/activity", "agent_activity", "agent"),
@@ -83,6 +84,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/preservation", "agent_validate_preservation", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/thickness", "agent_validate_thickness", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/specification", "agent_validate_specification", "validation", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/project-check", "agent_validate_project_check", "validation", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/viewport", "agent_viewport", "viewport"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/viewport.png", "agent_viewport_png", "viewport"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/viewport/snapshot", "agent_viewport_snapshot", "viewport", "png"),
@@ -357,6 +359,28 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         _create_project(handler, core, agent_api=True)
     elif name == "agent_project_get":
         handler._json(200, core.observe_agent_operation(project_id, "Изучает модель", lambda: core.inspect_project(project_id)))
+    elif name == "agent_inspection":
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        allowed = {"section", "expected_revision", "kind", "body_id", "shape",
+                   "since_revision", "offset", "limit", "include_metrics"}
+        if set(query) - allowed or any(len(values) != 1 for values in query.values()):
+            raise ValidationError("Unknown or repeated compact inspection query parameter.")
+        options: dict[str, Any] = {}
+        for key in ("section", "kind", "body_id", "shape"):
+            if key in query:
+                options[key] = query[key][0]
+        for key in ("expected_revision", "since_revision", "offset", "limit"):
+            if key in query:
+                value = query[key][0]
+                if not value.isascii() or not value.isdecimal():
+                    raise ValidationError(f"{key} must be a nonnegative decimal integer.")
+                options[key] = int(value)
+        if "include_metrics" in query:
+            value = query["include_metrics"][0]
+            if value not in ("0", "1"):
+                raise ValidationError("include_metrics must be 0 or 1.")
+            options["include_metrics"] = value == "1"
+        handler._json(200, core.inspect_compact(project_id, **options))
     elif name == "agent_capability_develop":
         body = _require_json(handler)
         if set(body) != {"definition"} or not isinstance(body["definition"], dict):
@@ -509,6 +533,25 @@ def _dispatch_validation(handler: Any, core: CadyxCore, route: RouteMatch, parse
         return
     body = handler._read_json()
     operation = name.removeprefix("agent_validate_")
+    if operation == "project_check":
+        validate_request_fields(operation, body)
+        assert body is not None
+        result = core.observe_agent_operation(
+            project_id, "Проверяет проект",
+            lambda: core.validate_body_project_check(
+                project_id, body["expected_revision"],
+                specification=body.get("specification"), strict=body.get("strict", False),
+                export_body_id=body.get("export_body_id"),
+                require_assembly=body.get("require_assembly", False),
+                require_drawings=body.get("require_drawings", False),
+                deterministic_rebuild=body.get("deterministic_rebuild", False),
+                max_bodies=body.get("max_bodies", 128),
+                time_budget_seconds=body.get("time_budget_seconds", 30.0),
+                persist=body.get("persist", False),
+            ),
+        )
+        handler._json(200, result)
+        return
     if operation == "specification":
         validate_request_fields(operation, body)
         assert body is not None

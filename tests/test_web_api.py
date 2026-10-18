@@ -21,6 +21,20 @@ import cadyx.web as web_module
 
 
 class WebApiTests(unittest.TestCase):
+    def test_project_check_http_strict_and_revision_binding(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "HTTP headless"})
+        project_id = created["project"]["id"]
+        path = f"/api/v1/agent/projects/{project_id}/validations/project-check"
+        status, report = self.request(path, {"expected_revision": 0, "strict": True})
+        self.assertEqual(status, 200)
+        self.assertEqual(report["status"], "untested")
+        self.assertFalse(report["passed"])
+        self.assertEqual(len(report["stages"]), 6)
+        _, detail = self.request(f"/api/v1/agent/projects/{project_id}")
+        self.assertEqual((detail["document"]["revision"], detail["history"]), (0, []))
+        status, error = self.request(path, {"expected_revision": 1})
+        self.assertEqual((status, error["error"]), (409, "REVISION_CONFLICT"))
+
     def test_validation_routes_preserve_field_errors_and_core_delegation(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "Validation contracts"})
         project_id = created["project"]["id"]

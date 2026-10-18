@@ -230,6 +230,34 @@ VALIDATION_OPERATIONS["specification"] = {
     "field_error": "Model specification validation requires expected_revision and a version 1 specification.",
 }
 
+VALIDATION_OPERATIONS["project_check"] = {
+    "tool_name": "cadyx_check_project",
+    "description": "Run revision-bound headless project checks with pass/fail/untested stages and strict CI verdict.",
+    "method": "POST",
+    "path": "/api/v1/agent/projects/{id}/validations/project-check",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "expected_revision": {"type": "integer", "minimum": 0},
+            "specification": _SPECIFICATION_SCHEMA,
+            "strict": {"type": "boolean"},
+            "persist": {"type": "boolean"},
+            "export_body_id": {"type": "string", "minLength": 1},
+            "require_assembly": {"type": "boolean"},
+            "require_drawings": {"type": "boolean"},
+            "deterministic_rebuild": {"type": "boolean"},
+            "max_bodies": {"type": "integer", "minimum": 1, "maximum": 128},
+            "time_budget_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 120},
+        },
+        "required": ["expected_revision"],
+        "additionalProperties": False,
+    },
+    "defaults": {"strict": False, "persist": False, "require_assembly": False,
+                 "require_drawings": False, "deterministic_rebuild": False,
+                  "max_bodies": 128, "time_budget_seconds": 30.0},
+    "field_error": "Project check requires expected_revision and supported preflight options.",
+}
+
 
 def validate_request_fields(operation: str, body: dict[str, Any] | None) -> None:
     """Preserve HTTP field/error semantics without duplicating request field lists."""
