@@ -1035,6 +1035,7 @@
           let visible = true;
           if (depthBuffer && pixelX >= 0 && pixelX < width && pixelY >= 0 && pixelY < height) {
             let bestVisibilityMargin = -Infinity;
+            let hasDepthSample = false;
             const centerX = pixelX + 0.5, centerY = pixelY + 0.5;
             const centerFraction = lengthSquared
               ? Math.max(0, Math.min(1, ((centerX - x0) * dx + (centerY - y0) * dy) / lengthSquared))
@@ -1042,6 +1043,7 @@
             const centerLineDepth = startDepth + (endDepth - startDepth) * centerFraction;
             const centerSurfaceDepth = depthBuffer[pixelY * width + pixelX];
             if (centerSurfaceDepth !== -Infinity) {
+              hasDepthSample = true;
               bestVisibilityMargin = centerLineDepth - centerSurfaceDepth;
             }
             if (bestVisibilityMargin < -depthTolerance) {
@@ -1054,6 +1056,7 @@
                   if (sampleX < 0 || sampleX >= width) continue;
                   const surfaceDepth = depthBuffer[sampleY * width + sampleX];
                   if (surfaceDepth === -Infinity) continue;
+                  hasDepthSample = true;
                   const neighborX = sampleX + 0.5, neighborY = sampleY + 0.5;
                   const projectedFraction = lengthSquared
                     ? Math.max(0, Math.min(1, ((neighborX - x0) * dx + (neighborY - y0) * dy) / lengthSquared))
@@ -1063,9 +1066,9 @@
                 }
               }
             }
-            // Viewport mesh depth is approximate; bias exact B-rep edges toward visible
-            // only within that approximation error, while still rejecting occluded edges.
-            visible = bestVisibilityMargin >= -depthTolerance;
+            // The mesh may leave the rasterized silhouette uncovered; otherwise bias
+            // edges toward visible only within the mesh approximation error.
+            visible = !hasDepthSample || bestVisibilityMargin >= -depthTolerance;
           }
           if (visible) {
             if (!runStart) runStart = [x, y];
