@@ -155,7 +155,11 @@ class EditLeaseManager:
             }
 
     def snapshot_for_listing(self, project_id: str) -> dict[str, object]:
-        """Read a display-only lease snapshot without taking the document write lock."""
+        """Read a display-only lease snapshot without the document lease transaction.
+
+        SQLite needs a writable connection when a crashed writer leaves a hot rollback
+        journal. This SELECT does not modify lease content; opening the database lets
+        SQLite recover its journal and return the last committed snapshot."""
         path = self._project_directory(project_id) / ".cadyx-leases.sqlite3"
         if not path.parent.is_dir() or not (path.parent / "project.json").is_file():
             raise NotFoundError("Project was not found.")
@@ -167,7 +171,7 @@ class EditLeaseManager:
         connection: sqlite3.Connection | None = None
         try:
             connection = sqlite3.connect(
-                f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=0, isolation_level=None,
+                path, timeout=0, isolation_level=None,
             )
             table = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lease'"

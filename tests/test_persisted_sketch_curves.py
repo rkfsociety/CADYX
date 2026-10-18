@@ -147,3 +147,33 @@ class PersistedSketchCurveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class CoincidentProfileEndpointTests(unittest.TestCase):
+    def test_separate_line_and_arc_commands_form_closed_profile(self):
+        from cadyx.commands import CommandSystem
+        from cadyx.kernel import OCCTKernelAdapter
+        from cadyx.sketches import closed_profiles
+        document = Document.create()
+        system = CommandSystem(OCCTKernelAdapter())
+        sketch = system.execute(document, {"type":"create_sketch"})["sketch_id"]
+        system.execute(document, {"type":"add_sketch_arc_center", "sketch_id":sketch,
+            "center":{"x":0,"y":0}, "start":{"x":2,"y":0}, "end":{"x":0,"y":2}})
+        system.execute(document, {"type":"add_sketch_polyline", "sketch_id":sketch,
+            "points":[{"x":0,"y":2},{"x":0,"y":0},{"x":2,"y":0}], "closed":False})
+        before = document.to_dict()
+        _, profile = closed_profile(document.objects, sketch)
+        self.assertGreater(len(profile), 3)
+        self.assertEqual(len(closed_profiles(document.objects, sketch)[1]), 1)
+        self.assertEqual(document.to_dict(), before)
+
+    def test_coincident_branch_remains_invalid(self):
+        from cadyx.commands import CommandSystem
+        from cadyx.kernel import OCCTKernelAdapter
+        document = Document.create()
+        system = CommandSystem(OCCTKernelAdapter())
+        sketch = system.execute(document, {"type":"create_sketch"})["sketch_id"]
+        system.execute(document, {"type":"add_sketch_rectangle", "sketch_id":sketch,
+            "x":0,"y":0,"width":2,"height":2})
+        system.execute(document, {"type":"add_sketch_line", "sketch_id":sketch,
+            "start":{"x":0,"y":0},"end":{"x":1,"y":1}})
+        with self.assertRaises(ValidationError): closed_profile(document.objects, sketch)

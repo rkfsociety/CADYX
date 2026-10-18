@@ -9,6 +9,7 @@ from .advanced_features import _advanced_native, _raw_brep, _wrap_brep
 from .errors import NotFoundError, ValidationError
 from .models import Document
 from .native_kernel import NativeKernel
+from .thread_profiles import thread_tool
 
 
 CAPABILITIES = (
@@ -35,10 +36,10 @@ CAPABILITIES = (
     },
     {
         "type": "threaded_hole",
-        "description": "Cut an internal single-start ISO metric thread by subtracting CADYX's exact external metric-thread tool on an arbitrary axis.",
+        "description": "Cut a single-start ISO metric thread or a configurable trapezoidal-profile thread on an arbitrary axis.",
         "required": ["body_id", "origin", "axis", "major_diameter", "pitch", "length"],
-        "optional": ["handedness", "name"],
-        "constraints": ["length is measured from origin along axis; handedness is right or left; result must remain one valid solid."],
+        "optional": ["handedness", "thread_profile", "name"],
+        "constraints": ["length is measured from origin along axis; handedness is right or left; result must remain one valid solid.", "Optional thread_profile has type=trapezoidal, minor_diameter, crest_width and phase_degrees. The native OCCT operation cuts a swept helical groove; phase locates the thread crest in the local XY plane."],
     },
     {
         "type": "extrude_profile_on_plane",
@@ -472,11 +473,12 @@ def _execute(self, document: Document, command: dict[str, Any], *, progress=None
         handedness = command.get("handedness", "right")
         if handedness not in {"right", "left"}:
             raise ValidationError("handedness must be 'right' or 'left'.")
-        thread = self.kernel.create_metric_thread(
+        thread = thread_tool(self.kernel,
             major_diameter=major_diameter,
             pitch=pitch,
             length=length,
             handedness=handedness,
+            thread_profile=command.get("thread_profile"),
         )
         rotation_axis, angle, normalized_axis = _rotation_from_z(axis)
         tool = _agent_native(thread, 2, [*rotation_axis, angle, *origin])
@@ -488,6 +490,7 @@ def _execute(self, document: Document, command: dict[str, Any], *, progress=None
             "pitch": pitch,
             "length": length,
             "handedness": handedness,
+            **({"thread_profile": dict(command["thread_profile"])} if command.get("thread_profile") is not None else {}),
         }
 
     else:

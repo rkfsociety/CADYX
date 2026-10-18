@@ -40,6 +40,7 @@ class GeometryKernel(Protocol):
     def create_extruded_profile(
         self, profile: list[dict[str, float]], *, plane: str, depth: float, centered: bool = False,
         curve_points: list[dict[str, float]] | None = None,
+        segments: list[list[float]] | None = None,
     ) -> ProfileDescriptor: ...
 
     def create_extruded_profile_with_holes(
@@ -69,6 +70,7 @@ class GeometryKernel(Protocol):
     def create_revolved_profile(
         self, profile: list[dict[str, float]], *, angle_degrees: float,
         curve_points: list[dict[str, float]] | None = None,
+        segments: list[list[float]] | None = None,
     ) -> ProfileDescriptor: ...
 
     def fuse_profiles(self, base: GeometryDescriptor, tool: GeometryDescriptor) -> BooleanDescriptor: ...
@@ -165,12 +167,13 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
     def create_extruded_profile(
         self, profile: list[dict[str, float]], *, plane: str, depth: float, centered: bool = False,
         curve_points: list[dict[str, float]] | None = None,
+        segments: list[list[float]] | None = None,
     ) -> ProfileDescriptor:
         if type(centered) is not bool:
             raise ValidationError("centered must be a boolean.")
         return self._create_profile_geometry(profile, plane=plane, operation=0,
                                              amount=_positive_amount(depth, "depth"), centered=centered,
-                                             curve_points=curve_points)
+                                             curve_points=curve_points, segments=segments)
 
     def create_extruded_profile_with_holes(
         self, profiles: list[list[dict[str, float]]], *, plane: str, depth: float,
@@ -276,11 +279,12 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
     def create_revolved_profile(
         self, profile: list[dict[str, float]], *, angle_degrees: float,
         curve_points: list[dict[str, float]] | None = None,
+        segments: list[list[float]] | None = None,
     ) -> ProfileDescriptor:
         angle = _positive_amount(angle_degrees, "angle_degrees", maximum=360.0)
         return self._create_profile_geometry(profile, plane="XZ", operation=1,
                                              amount=math.radians(angle), angle_degrees=angle,
-                                             curve_points=curve_points)
+                                             curve_points=curve_points, segments=segments)
 
     def create_lofted_profiles(
         self, sections: list[list[dict[str, float]]], *, section_offsets: list[float],
@@ -395,10 +399,20 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
         profile: list[dict[str, float]], *, plane: str, operation: int,
         amount: float, angle_degrees: float | None = None, centered: bool = False,
         curve_points: list[dict[str, float]] | None = None,
+        segments: list[list[float]] | None = None,
     ) -> ProfileDescriptor:
         normalized, _ = _profile_values(profile, plane)
         amount = _positive_amount(amount, "operation amount")
-        if curve_points is None:
+        if segments is not None:
+            if curve_points is not None:
+                raise ValidationError("A profile cannot combine spline and analytic segment descriptors.")
+            from .profile_segments import segment_values
+            segments = segment_values(segments)
+            descriptor = {"kind": "extruded_profile" if operation == 0 else "revolved_profile",
+                          "profile": normalized, "profile_segments": segments, "plane": plane, "centered": centered}
+            descriptor["depth" if operation == 0 else "angle_degrees"] = amount if operation == 0 else angle_degrees
+            result = NativeKernel().geometry_graph(descriptor)
+        elif curve_points is None:
             result = NativeKernel().profile(normalized, operation=operation,
                                             plane=plane, amount=amount, centered=centered)
         else:
@@ -416,6 +430,8 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
             "profile": normalized,
             "volume": result["volume"],
         }
+        if segments is not None:
+            geometry["profile_segments"] = segments
         if curve_points is not None:
             geometry["profile_curve"] = "closed_periodic_bspline"
             geometry["profile_curve_points"] = curve_points

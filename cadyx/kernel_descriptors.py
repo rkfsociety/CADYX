@@ -43,6 +43,7 @@ class ProfileDescriptor(OCCTDescriptor):
     centered: NotRequired[bool]
     profile_curve: NotRequired[Literal["closed_catmull_rom", "closed_periodic_bspline"]]
     profile_curve_points: NotRequired[list[dict[str, float]]]
+    profile_segments: NotRequired[list[list[float]]]
 
 
 class CircleDescriptor(OCCTDescriptor):
@@ -252,6 +253,12 @@ class GeometryDescriptorValidation:
         curved = curve_type in {"closed_catmull_rom", "closed_periodic_bspline"}
         if curved:
             expected_fields.update({"profile_curve", "profile_curve_points"})
+        if "profile_segments" in geometry:
+            if curved:
+                raise ValidationError("Analytic and spline profile descriptors cannot be combined.")
+            from .profile_segments import segment_values
+            segment_values(geometry["profile_segments"])
+            expected_fields.add("profile_segments")
         if set(geometry) != expected_fields or geometry.get("kernel") != "occt-v1":
             raise ValidationError("Profile geometry descriptor is invalid.")
         profile, _ = _profile_values(geometry["profile"], geometry["plane"])
@@ -279,7 +286,9 @@ class GeometryDescriptorValidation:
             raise ValidationError("Saved geometry volume is invalid.") from exc
         if not math.isfinite(saved_volume) or saved_volume <= 0:
             raise ValidationError("Saved geometry volume is invalid.")
-        if curved:
+        if "profile_segments" in geometry:
+            actual = NativeKernel().geometry_graph(geometry)["volume"]
+        elif curved:
             _spline_control_values(geometry["profile_curve_points"], geometry["plane"])
             graph = dict(geometry)
             graph.pop("kernel", None)

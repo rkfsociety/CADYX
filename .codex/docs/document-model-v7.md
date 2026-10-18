@@ -330,9 +330,11 @@ profile on `XZ` about global Z. Revolution profiles must stay on one side of the
 axis and touch it so OCCT can form a solid. A sketch with one circle or full
 ellipse can be used as an extrusion profile; each is sampled into a 128-edge
 polygon. Elliptical arcs can join line and circular-arc edges to make a closed
-profile; they are sampled at no more than 2.8125-degree intervals. Full ellipses
-and elliptical arcs remain exact in the sketch and are sampled only for viewport
-and profile representations. Interpolating splines remain defined by their
+profile. A profile made from lines, circular arcs and elliptical arcs is passed
+to OCCT with exact conic edges; sampled profile points remain available for
+sketch validation and compatible descriptor data. Full ellipses remain exact in
+the sketch and are sampled for viewport and standalone full-profile operations.
+Interpolating splines remain defined by their
 ordered interpolated points and are sampled at 24 segments per span for display
 and profile use. Control-point B-splines use the same per-span display/profile
 sampling; Bezier curves use 24 segments over the full curve. Sweep paths use
@@ -354,8 +356,11 @@ Changes to an upstream profile or pad rebuild dependent chamfers and fillets in
 document order. Revolve features also store
 their profile's overall `outer_diameter` and `height`; `set_parameter` scales
 the closed XZ sketch in the radial or axial direction while preserving the
-revolution axis and bottom datum, then rebuilds the B-rep. The Geometry view
-shows these dimensions as editable inputs. Removing a sketch used by a solid feature is rejected. Profile
+revolution axis and bottom datum, then rebuilds the B-rep. Radial scaling
+transforms circular sketch arcs into exact elliptical arcs, which remain
+analytic in the rebuilt solid, including when restoring the original diameter.
+The Geometry view shows these dimensions as editable inputs. Removing a sketch
+used by a solid feature is rejected. Profile
 constraints still check the supplied geometry and do not solve it. The OCCT
 adapter rebuilds and validates each saved solid and derives viewport triangles
 from the B-rep. These are solids, not triangle-mesh imports.

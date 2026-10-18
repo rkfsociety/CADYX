@@ -86,8 +86,72 @@ class ParameterCommands:
                         raise ValidationError(f"Revolved profile has no positive {parameter_name}.")
                     scale = value / old_value
                     if parameter_name == "outer_diameter":
+                        original = {point["id"]: (point["x"], point["y"]) for point in sketch_points}
                         for point in sketch_points:
                             point["x"] *= scale
+                        def ellipse_point(cx, cy, major, minor, rotation, angle):
+                            cosine, sine = math.cos(rotation), math.sin(rotation)
+                            return (cx + major * math.cos(angle) * cosine - minor * math.sin(angle) * sine,
+                                    cy + major * math.cos(angle) * sine + minor * math.sin(angle) * cosine)
+                        def ellipse_parameter(x, y, cx, cy, major, minor, rotation):
+                            cosine, sine = math.cos(rotation), math.sin(rotation)
+                            dx, dy = x - cx, y - cy
+                            return math.atan2((-sine * dx + cosine * dy) / minor,
+                                              (cosine * dx + sine * dy) / major)
+                        for arc in document.objects:
+                            if (arc.get("sketch_id") != sketch_id
+                                    or arc.get("type") not in {"circle", "ellipse"}
+                                    or "sweep_radians" not in arc):
+                                continue
+                            if arc["type"] == "circle":
+                                cx, cy = original[arc["center_id"]]
+                                major = minor = arc["radius"]
+                                rotation = 0.0
+                                sx, sy = original[arc["start_id"]]
+                                start = math.atan2(sy - cy, sx - cx)
+                            else:
+                                cx, cy = arc["center_x"], arc["center_y"]
+                                major, minor = arc["major_radius"], arc["minor_radius"]
+                                rotation = arc["rotation_radians"]
+                                start = arc["start_angle_radians"]
+                            sweep = arc["sweep_radians"]
+                            cosine, sine = math.cos(rotation), math.sin(rotation)
+                            qxx = (major * major * cosine * cosine + minor * minor * sine * sine) * scale * scale
+                            qxy = (major * major - minor * minor) * cosine * sine * scale
+                            qyy = major * major * sine * sine + minor * minor * cosine * cosine
+                            trace = qxx + qyy
+                            discriminant = math.hypot(qxx - qyy, 2 * qxy)
+                            major_squared = (trace + discriminant) / 2
+                            minor_squared = (trace - discriminant) / 2
+                            if minor_squared <= 0 or not math.isfinite(major_squared):
+                                raise ValidationError("Diameter scaling produced a degenerate profile arc.")
+                            new_major, new_minor = math.sqrt(major_squared), math.sqrt(minor_squared)
+                            new_rotation = (0.0 if discriminant <= 1e-14 * max(1.0, trace)
+                                            else 0.5 * math.atan2(2 * qxy, qxx - qyy))
+                            new_cx, new_cy = cx * scale, cy
+                            old_end = start + sweep
+                            start_point = ellipse_point(cx, cy, major, minor, rotation, start)
+                            end_point = ellipse_point(cx, cy, major, minor, rotation, old_end)
+                            new_start = ellipse_parameter(start_point[0] * scale, start_point[1],
+                                                          new_cx, new_cy, new_major, new_minor, new_rotation)
+                            new_end = ellipse_parameter(end_point[0] * scale, end_point[1],
+                                                        new_cx, new_cy, new_major, new_minor, new_rotation)
+                            if abs(abs(sweep) - math.tau) <= 1e-9:
+                                new_sweep = math.copysign(math.tau, sweep)
+                            elif sweep > 0:
+                                new_sweep = (new_end - new_start) % math.tau
+                            else:
+                                new_sweep = -((new_start - new_end) % math.tau)
+                            if abs(new_sweep) <= 1e-10:
+                                raise ValidationError("Diameter scaling collapsed a profile arc sweep.")
+                            if arc["type"] == "circle":
+                                arc["id"] = "ellipse:" + arc["id"].split(":", 1)[1]
+                            arc.pop("radius", None)
+                            arc.pop("center_id", None)
+                            arc.update(type="ellipse", center_x=new_cx, center_y=new_cy,
+                                       major_radius=new_major, minor_radius=new_minor,
+                                       rotation_radians=new_rotation, start_angle_radians=new_start,
+                                       sweep_radians=new_sweep)
                     else:
                         bottom = min(point["y"] for point in sketch_points)
                         for point in sketch_points:

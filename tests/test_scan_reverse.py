@@ -184,3 +184,21 @@ class ScanReverseTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class STLAlignmentTests(unittest.TestCase):
+    def test_stl_alignment_restarts_from_saved_source_geometry(self):
+        raw = _box_mesh(x=2, y=10, z=1)
+        document, body_id, feature_id = _document_with_scan(raw)
+        feature = document.objects[1]
+        feature["operation"] = "import_stl"
+        feature["source"] = {"file": "reference.stl", "sha256": "0" * 64}
+        system = CommandSystem(_Kernel())
+        for scale in (2, 3, 1):
+            result = system.execute(document, {
+                "type": "align_scan", "body_id": body_id, "mode": "explicit",
+                "basis": [[1,0,0],[0,1,0],[0,0,1]], "origin": [0,0,0],
+                "scale": scale, "units": "unitless", "ground_z": True,
+            })
+            self.assertEqual(result["alignment"]["aligned_span"], [2*scale,10*scale,scale])
+            self.assertEqual(feature["source_geometry"], raw)
+            document.validate()

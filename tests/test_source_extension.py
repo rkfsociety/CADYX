@@ -37,7 +37,7 @@ class SourceExtensionTests(unittest.TestCase):
             sentinel.write_text("host-sentinel", encoding="utf-8")
             self.addCleanup(sentinel.unlink, missing_ok=True)
             test_module.write_text(
-                "import socket, tempfile, unittest\nfrom pathlib import Path\nfrom cadyx.probe import answer\n"
+                "import ctypes, socket, tempfile, unittest\nfrom pathlib import Path\nfrom cadyx.probe import answer\n"
                 "class ProbeTests(unittest.TestCase):\n"
                 "    def test_answer(self): self.assertEqual(answer(), 42)\n",
                 encoding="utf-8",
@@ -52,6 +52,11 @@ class SourceExtensionTests(unittest.TestCase):
                 + "        try: socket.create_connection(('1.1.1.1', 443), timeout=1)\n"
                 + "        except OSError: pass\n        else: self.fail('AppContainer used the network')\n"
                 + "        Path(tempfile.gettempdir(), 'scratch-write.txt').write_text('allowed', encoding='utf-8')\n"
+                + "        self.assertIsNotNone(ctypes.WinDLL('kernel32'))\n"
+                + "        with tempfile.TemporaryDirectory() as directory:\n"
+                + "            path = Path(directory) / 'nested.txt'\n"
+                + "            path.write_text('allowed', encoding='utf-8')\n"
+                + "            self.assertEqual(path.read_text(encoding='utf-8'), 'allowed')\n"
                 + "        protected = Path(__file__).parents[1] / 'cadyx' / 'probe.py'\n"
                 + "        try: protected.write_text('changed', encoding='utf-8')\n"
                 + "        except OSError: pass\n        else: self.fail('AppContainer wrote its read-only source')\n",

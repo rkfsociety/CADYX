@@ -27,6 +27,7 @@ from .scan import ScanProcessor
 from .self_evolving import SelfEvolvingCapabilityEngine
 from .source_extension import SourceExtensionEngine
 from .workspace import ProjectWorkspace
+from .profile_segments import sketch_segments
 from .sketches import (closed_profile, closed_profiles, closed_spline_profile,
                        generated_gear_curve_profiles, open_path)
 
@@ -527,18 +528,25 @@ class CadyxCore:
                         or feature_geometry != body.get("geometry") or not isinstance(parameters, dict)):
                     raise ValidationError("Pad feature geometry or source references are invalid.")
                 plane, profiles = closed_profiles(document.objects, sketch_id)
-                tool = (self.kernel.create_extruded_profile(
-                    profiles[0], plane=plane, depth=parameters["depth"], centered=parameters["centered"],
-                ) if len(profiles) == 1 else self.kernel.create_extruded_profile_with_holes(
-                    profiles, plane=plane, depth=parameters["depth"], centered=parameters["centered"],
-                ))
-                offset = sketch.get("section_offset", 0.0)
-                if offset:
-                    shift = [0.0, 0.0, 0.0]
-                    shift[2 if plane == "XY" and sketch.get("section_normal_axis") == "Z" else 1] = offset
-                    tool = self.kernel.translate_solid(tool, shift)
-                expected = self.kernel.fuse_profiles(source["geometry"], tool)
-                if expected != feature_geometry:
+                segments = sketch_segments(document.objects, sketch_id) if len(profiles) == 1 else None
+                # Legacy saved pads remain readable; their next edit migrates the wire.
+                for candidate_segments in ([segments, None] if segments is not None else [None]):
+                    options = {"segments": candidate_segments} if candidate_segments is not None else {}
+                    tool = (self.kernel.create_extruded_profile(
+                        profiles[0], plane=plane, depth=parameters["depth"], centered=parameters["centered"],
+                        **options,
+                    ) if len(profiles) == 1 else self.kernel.create_extruded_profile_with_holes(
+                        profiles, plane=plane, depth=parameters["depth"], centered=parameters["centered"],
+                    ))
+                    offset = sketch.get("section_offset", 0.0)
+                    if offset:
+                        shift = [0.0, 0.0, 0.0]
+                        shift[2 if plane == "XY" and sketch.get("section_normal_axis") == "Z" else 1] = offset
+                        tool = self.kernel.translate_solid(tool, shift)
+                    expected = self.kernel.fuse_profiles(source["geometry"], tool)
+                    if expected == feature_geometry:
+                        break
+                else:
                     raise ValidationError("Pad feature geometry is out of date with its source sketch or body.")
                 continue
             if item.get("operation") in {"fuse_bodies", "cut_bodies"}:

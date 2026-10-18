@@ -1,4 +1,15 @@
 #include "kernel_internal.hpp"
+#include <GC_MakeArcOfCircle.hxx>
+#include <GC_MakeArcOfEllipse.hxx>
+#include <gp_Elips.hxx>
+#include <GCE2d_MakeSegment.hxx>
+#include <Geom_CylindricalSurface.hxx>
+#include <Geom2d_TrimmedCurve.hxx>
+#include <BRepOffsetAPI_MakePipeShell.hxx>
+#include <BRepLib.hxx>
+#include <BRepCheck_Result.hxx>
+#include <gp_Pnt2d.hxx>
+#include <gp_Ax3.hxx>
 
 namespace cadyx::native {
 TopoDS_Shape EnsureOneSolid(const TopoDS_Shape& shape, const char* operation) {
@@ -221,6 +232,139 @@ TopoDS_Shape MakeMetricThread(double major_diameter, double pitch, double length
   return EnsureOneSolid(MakeFuse(core_builder.Shape(), loft.Shape()), "Metric thread");
 }
 
+
+
+TopoDS_Shape MakeProfiledThread(const double* values, size_t count, double length, int handedness) {
+  if (!values || count != 5 || !std::isfinite(length) || length <= 0
+      || (handedness != 1 && handedness != -1))
+    throw std::runtime_error("Invalid profiled thread inputs.");
+  for (size_t i = 0; i < count; ++i)
+    if (!std::isfinite(values[i])) throw std::runtime_error("Thread inputs must be finite.");
+  const double major = values[0] / 2, minor = values[1] / 2;
+  const double pitch = values[2], crest = values[3], phase = values[4];
+  if (minor <= 0 || major <= minor || pitch <= 0 || crest <= 0 || crest >= pitch || length < pitch)
+    throw std::runtime_error("Profiled thread dimensions are outside the supported range.");
+  const double start_z = -pitch;
+  const double end_z = length + pitch;
+  const double start_angle = handedness * kFullTurn * start_z / pitch + phase + kFullTurn / 2;
+  const double end_angle = handedness * kFullTurn * end_z / pitch + phase;
+  Handle(Geom_CylindricalSurface) cylinder = new Geom_CylindricalSurface(
+      gp_Ax3(gp_Pnt(0,0,0), gp_Dir(0,0,1)), minor);
+  Handle(Geom2d_TrimmedCurve) helix2d = GCE2d_MakeSegment(
+      gp_Pnt2d(start_angle, start_z), gp_Pnt2d(end_angle, end_z)).Value();
+  TopoDS_Edge helix_edge = BRepBuilderAPI_MakeEdge(helix2d, cylinder).Edge();
+  if (!BRepLib::BuildCurves3d(helix_edge, 1e-7))
+    throw std::runtime_error("OCCT could not construct the helical spine.");
+  TopoDS_Wire spine = BRepBuilderAPI_MakeWire(helix_edge).Wire();
+  auto point = [&](double radius, double dz) {
+    return gp_Pnt(radius * std::cos(start_angle), radius * std::sin(start_angle), start_z + dz);
+  };
+  const double radial_depth = major - minor;
+  const double margin = std::min(radial_depth * 0.1, crest * radial_depth / (2 * (pitch - crest)));
+  const double outer_radius = major + margin;
+  const double outer_half_width = (pitch - crest) / 2 * (outer_radius - minor) / radial_depth;
+  BRepBuilderAPI_MakePolygon profile;
+  profile.Add(point(minor, 0));
+  profile.Add(point(outer_radius, -outer_half_width));
+  profile.Add(point(outer_radius, outer_half_width));
+  profile.Close();
+  if (!profile.IsDone()) throw std::runtime_error("OCCT could not construct the thread profile.");
+  BRepOffsetAPI_MakePipeShell sweep(spine);
+  sweep.SetMode(true);
+  sweep.SetTolerance(1e-7, 1e-7, 1e-5);
+  sweep.Add(profile.Wire(), false, false);
+  sweep.Build();
+  if (!sweep.IsDone() || !sweep.MakeSolid())
+    throw std::runtime_error("OCCT could not sweep the thread profile along the helix.");
+  if (!BRepCheck_Analyzer(sweep.Shape()).IsValid())
+    throw std::runtime_error("The swept thread ridge is invalid before trimming.");
+  BRepPrimAPI_MakeCylinder blank(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), major, length);
+  TopoDS_Shape result = MakeCut(blank.Shape(), sweep.Shape());
+  if (!BRepCheck_Analyzer(result).IsValid())
+    throw std::runtime_error("The cylinder with its swept thread groove is invalid.");
+  return result;
+}
+
+TopoDS_Shape MakeAnalyticProfile(const double* data, size_t count,
+                                int operation, int plane, double amount, bool centered) {
+  if (!data || count < 21 || (operation != 0 && operation != 1) || (plane != 0 && plane != 1)
+      || !std::isfinite(amount) || amount <= 0
+      || (operation == 1 && (plane != 1 || centered || amount > kFullTurn + 1e-9)))
+    throw std::runtime_error("Invalid analytic profile operation.");
+  std::vector<std::pair<size_t, size_t>> segments;
+  for (size_t offset = 0; offset < count;) {
+    const double tag = data[offset];
+    const size_t stride = tag == 2 ? 14 : 7;
+    if ((tag != 0 && tag != 1 && tag != 2) || stride > count - offset)
+      throw std::runtime_error("Invalid analytic profile segment descriptor.");
+    for (size_t j = 0; j < stride; ++j)
+      if (!std::isfinite(data[offset + j]))
+        throw std::runtime_error("Analytic profile coordinates must be finite.");
+    if (tag == 2 && (data[offset + 9] < data[offset + 10] || data[offset + 10] <= 1e-7
+                     || std::abs(data[offset + 13]) <= 1e-10
+                     || std::abs(data[offset + 13]) > kFullTurn + 1e-9))
+      throw std::runtime_error("Invalid elliptical profile arc.");
+    segments.emplace_back(offset, stride);
+    offset += stride;
+  }
+  if (segments.size() < 3)
+    throw std::runtime_error("An analytic profile needs at least three connected segments.");
+  const double axial_offset = centered ? -amount / 2.0 : 0.0;
+  auto point = [&](double x, double y) {
+    return plane == 0 ? gp_Pnt(x, y, axial_offset) : gp_Pnt(x, axial_offset, y);
+  };
+  for (size_t index = 0; index < segments.size(); ++index) {
+    const size_t i = segments[index].first, next = segments[(index + 1) % segments.size()].first;
+    if (data[i + 5] != data[next + 1] || data[i + 6] != data[next + 2])
+      throw std::runtime_error("Analytic profile must be closed and connected.");
+  }
+  BRepBuilderAPI_MakeWire wire;
+  for (const auto& segment : segments) {
+    const size_t i = segment.first;
+    const gp_Pnt start = point(data[i + 1], data[i + 2]), end = point(data[i + 5], data[i + 6]);
+    if (start.Distance(end) <= 1e-7)
+      throw std::runtime_error("Analytic profile endpoints must be distinct.");
+    TopoDS_Edge edge;
+    if (data[i] == 0) {
+      edge = BRepBuilderAPI_MakeEdge(start, end).Edge();
+    } else if (data[i] == 1) {
+      GC_MakeArcOfCircle arc(start, point(data[i + 3], data[i + 4]), end);
+      if (!arc.IsDone()) throw std::runtime_error("Invalid circular profile arc.");
+      edge = BRepBuilderAPI_MakeEdge(arc.Value()).Edge();
+    } else {
+      const double rotation = data[i + 11];
+      const gp_Dir normal = plane == 0 ? gp_Dir(0, 0, 1) : gp_Dir(0, -1, 0);
+      const gp_Dir x_axis = plane == 0 ? gp_Dir(std::cos(rotation), std::sin(rotation), 0)
+                                       : gp_Dir(std::cos(rotation), 0, std::sin(rotation));
+      gp_Elips ellipse(gp_Ax2(point(data[i + 7], data[i + 8]), normal, x_axis),
+                       data[i + 9], data[i + 10]);
+      GC_MakeArcOfEllipse arc(ellipse, data[i + 12], data[i + 12] + data[i + 13], data[i + 13] > 0);
+      if (!arc.IsDone()) throw std::runtime_error("OCCT could not construct the elliptical profile arc.");
+      edge = BRepBuilderAPI_MakeEdge(arc.Value()).Edge();
+    }
+    wire.Add(edge);
+    if (!wire.IsDone()) throw std::runtime_error("OCCT could not connect analytic profile edges.");
+  }
+  BRepBuilderAPI_MakeFace face(wire.Wire());
+  if (!face.IsDone() || !BRepCheck_Analyzer(face.Face()).IsValid())
+    throw std::runtime_error("Analytic profile must form a valid planar face.");
+  TopoDS_Shape shape;
+  if (operation == 0) {
+    BRepPrimAPI_MakePrism prism(face.Face(), plane == 0 ? gp_Vec(0, 0, amount) : gp_Vec(0, amount, 0), true, true);
+    prism.Build();
+    if (!prism.IsDone()) throw std::runtime_error("OCCT could not extrude the analytic profile.");
+    shape = prism.Shape();
+  } else {
+    BRepPrimAPI_MakeRevol revol(face.Face(), gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), amount, true);
+    revol.Build();
+    if (!revol.IsDone()) throw std::runtime_error("OCCT could not revolve the analytic profile.");
+    shape = revol.Shape();
+  }
+  if (!BRepCheck_Analyzer(shape).IsValid())
+    throw std::runtime_error("Analytic profile produced an invalid solid.");
+  return EnsureOneSolid(shape, "Analytic profile");
+}
+
 TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
                              const double* coordinates, size_t coordinate_count,
                              const int* edge_indices, size_t edge_count,
@@ -254,6 +398,13 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
           throw std::runtime_error("Profile graph coordinates must be paired x/y values.");
         shape = MakeProfileShape(points, node.coordinate_count / 2, node.operation, node.plane,
                                  node.amount, node.centered != 0);
+        break;
+      case 16:
+        shape = MakeProfiledThread(points, node.coordinate_count, node.amount, node.operation);
+        break;
+      case 15:
+        shape = MakeAnalyticProfile(points, node.coordinate_count, node.operation, node.plane,
+                                    node.amount, node.centered != 0);
         break;
       case 12:
         if (node.coordinate_count % 2 != 0)

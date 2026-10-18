@@ -8,6 +8,7 @@ from uuid import uuid4
 from .advanced_features import _raw_brep
 from .errors import NotFoundError, ValidationError
 from .native_kernel import NativeKernel
+from .profile_segments import sketch_segments
 from .sketches import closed_profile, closed_profiles
 
 
@@ -99,7 +100,8 @@ def _execute(self, document, command, *, progress=None, project_id=None):
         raise ValidationError("centered must be a boolean.")
     if progress:
         progress({"phase": "build_tool_extrusion"})
-    tool = (self.kernel.create_extruded_profile(profiles[0], plane=plane, depth=depth, centered=centered)
+    tool = (self.kernel.create_extruded_profile(profiles[0], plane=plane, depth=depth, centered=centered,
+                                                   segments=sketch_segments(document.objects, sketch_id))
             if len(profiles) == 1 else
             self.kernel.create_extruded_profile_with_holes(profiles, plane=plane, depth=depth, centered=centered))
     axis = sketch.get("section_normal_axis")
@@ -116,4 +118,4 @@ def _execute(self, document, command, *, progress=None, project_id=None):
         raise ValidationError(f"Unsupported manufacturing feature: {kind!r}.")
     parameters = {"sketch_id": sketch_id, "depth": depth, "centered": centered}
     return _feature(document, source, kind, geometry, parameters, command.get("name"),
-                    source_sketch_id=sketch_id if kind == "pad_sketch_to_body" else None)
+                    source_sketch_id=sketch_id)

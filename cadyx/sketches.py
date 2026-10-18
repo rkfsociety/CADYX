@@ -427,6 +427,30 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
             raise ValidationError(f"Sketch constraint {item['id']} is not satisfied.")
 
 
+def _profile_endpoint_aliases(objects: list[dict[str, Any]], edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Join exactly coincident profile endpoints without mutating saved identities."""
+    by_id = {item["id"]: item for item in objects}
+    canonical: dict[tuple[float, float], str] = {}
+    aliases: dict[str, str] = {}
+    for edge in edges:
+        ids = (edge["point_ids"][0], edge["point_ids"][-1]) if edge["type"] == "spline" else (edge["start_id"], edge["end_id"])
+        for point_id in ids:
+            point = by_id[point_id]
+            key = (number(point["x"]), number(point["y"]))
+            aliases[point_id] = canonical.setdefault(key, point_id)
+    result = []
+    for edge in edges:
+        copied = dict(edge)
+        if edge["type"] == "spline":
+            copied["point_ids"] = list(edge["point_ids"])
+            copied["point_ids"][0] = aliases[edge["point_ids"][0]]
+            copied["point_ids"][-1] = aliases[edge["point_ids"][-1]]
+        else:
+            copied["start_id"], copied["end_id"] = aliases[edge["start_id"]], aliases[edge["end_id"]]
+        result.append(copied)
+    return result
+
+
 def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[dict[str, float]]]:
     """Return one closed line/arc loop or one sampled analytic conic from a sketch."""
     sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
@@ -483,7 +507,7 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
              "y": number(center["y"]) + radius * math.sin(math.tau * index / 128)}
             for index in range(128)
         ]
-    edges = lines + arcs + ellipse_arcs + splines
+    edges = _profile_endpoint_aliases(objects, lines + arcs + ellipse_arcs + splines)
     if circles or ellipses or len(edges) < 3:
         raise ValidationError("A profile operation needs one closed line/arc loop with at least 3 edges.")
 
@@ -591,6 +615,7 @@ def closed_profiles(
         if edges:
             raise ValidationError("A closed spline profile cannot be mixed into an open edge chain.")
 
+    edges = _profile_endpoint_aliases(objects, edges)
     components: list[list[dict[str, Any]]] = [[item] for item in standalone]
     components.extend([[item] for item in closed_splines])
     if edges:

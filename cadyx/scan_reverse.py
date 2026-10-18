@@ -23,7 +23,7 @@ SCAN_REVERSE_CAPABILITIES = (
         "required": ["body_id"],
         "optional": ["mode", "long_axis", "basis", "origin", "center", "axis_signs", "scale", "units", "translation", "ground_z", "name"],
         "constraints": [
-            "body_id must be a reconstruct_scan cadyx-mesh-v1 body.",
+            "body_id must be an imported PLY or STL cadyx-mesh-v1 reference body.",
             "PCA mode maps the dominant principal axis to long_axis (Y by default); explicit mode needs a right-handed orthonormal basis.",
             "scale is positive; units is unitless, mm, cm, m, or in. Existing alignment is recomputed from the unchanged source scan.",
         ],
@@ -74,10 +74,15 @@ def _mesh_body(document, body_id: Any) -> dict[str, Any]:
 
 def _scan_feature(document, body_id: str) -> dict[str, Any] | None:
     return next((item for item in document.objects
-                 if item.get("type") == "feature" and item.get("operation") == "reconstruct_scan"
+                 if item.get("type") == "feature" and item.get("operation") in {"reconstruct_scan", "import_stl"}
                  and item.get("body_id") == body_id), None)
 
 def _alignment_feature_source(self, feature: dict[str, Any]) -> dict[str, Any]:
+    if feature.get("operation") == "import_stl":
+        geometry = feature.get("source_geometry")
+        from .mesh_geometry import validate_mesh_geometry
+        validate_mesh_geometry(geometry)
+        return geometry
     source = feature.get("source")
     parameters = feature.get("parameters")
     if (not isinstance(source, dict) or not all(isinstance(source.get(key), str) for key in ("folder", "file", "sha256"))
@@ -95,10 +100,12 @@ def _align_scan(self, document, command: dict[str, Any], *, progress=None) -> di
     body = _mesh_body(document, command.get("body_id"))
     feature = _scan_feature(document, body["id"])
     if feature is None:
-        raise ValidationError("align_scan requires the original reconstruct_scan body, not an arbitrary mesh.")
+        raise ValidationError("align_scan requires an original imported PLY or STL reference body.")
     if progress:
         progress({"phase": "inspect_scan_alignment"})
     raw_geometry = _alignment_feature_source(self, feature) if feature.get("alignment") else body["geometry"]
+    if feature.get("operation") == "import_stl" and "source_geometry" not in feature:
+        feature["source_geometry"] = raw_geometry
     raw_mesh = tessellate_mesh_geometry(raw_geometry)
     source_bounds = _bounds(raw_mesh["positions"])
     record, _origin = _alignment_from_command(raw_mesh["positions"], command)

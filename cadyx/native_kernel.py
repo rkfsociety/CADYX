@@ -198,7 +198,9 @@ class NativeKernel:
                 try:
                     for relative in manifest["dll_directories"]:
                         directories.append(os.add_dll_directory(str(runtime / relative)))
-                    library = ctypes.CDLL(str(runtime / manifest["bridge"]))
+                    from .source_native import verified_bridge
+                    bridge = verified_bridge(runtime.parent, runtime) or runtime / manifest["bridge"]
+                    library = ctypes.CDLL(str(bridge))
                     functions, abi_manifest = _load_native_functions(library)
                     if functions["cadyx_kernel_version"]().decode("ascii") != manifest["occt_version"]:
                         raise RuntimeError("Native OCCT version differs from the runtime manifest.")
@@ -568,6 +570,16 @@ class NativeKernel:
             elif kind in {"extruded_profile", "revolved_profile"}:
                 operation = int(kind == "revolved_profile")
                 amount = value["depth"] if operation == 0 else math.radians(value["angle_degrees"])
+                segments = value.get("profile_segments")
+                if segments is not None:
+                    from .profile_segments import segment_values
+                    segments = segment_values(segments)
+                    node.update(type=15, operation=operation, plane=int(value["plane"] == "XZ"),
+                                centered=int(value.get("centered", False)), amount=amount,
+                                coordinate_offset=len(coordinates), coordinate_count=sum(len(segment) for segment in segments))
+                    coordinates.extend(coordinate for segment in segments for coordinate in segment)
+                    nodes.append(node)
+                    return len(nodes) - 1
                 profile_curve = value.get("profile_curve")
                 if profile_curve not in {None, "closed_catmull_rom", "closed_periodic_bspline"}:
                     raise ValidationError("Unsupported profile curve descriptor.")
@@ -637,6 +649,11 @@ class NativeKernel:
                 node.update(type=1, plane=int(value["plane"] == "XZ"), amount=value["radius"],
                             coordinate_offset=len(coordinates), coordinate_count=len(value["path"]) * 2)
                 coordinates.extend(coord for point in value["path"] for coord in (point["x"], point["y"]))
+            elif kind == "profiled_thread":
+                node.update(type=16, operation=-1 if value["handedness"] == "left" else 1,
+                            amount=value["length"], coordinate_offset=len(coordinates), coordinate_count=5)
+                coordinates.extend(value[key] for key in (
+                    "major_diameter", "minor_diameter", "pitch", "crest_width", "phase_radians"))
             elif kind == "metric_thread":
                 node.update(type=5, operation=1 if value["handedness"] == "right" else -1,
                             amount=value["length"], coordinate_offset=len(coordinates), coordinate_count=2)

@@ -85,7 +85,10 @@ class SourceExtensionEngine:
         parsed = PurePosixPath(relative_path)
         if parsed.is_absolute() or not parsed.parts or any(part in {".", ".."} for part in parsed.parts):
             raise ValidationError("Source path escapes the CADYX repository.")
+        from .source_native import NATIVE_SOURCE_NAMES
         allowed = (
+            len(parsed.parts) == 2 and parsed.parts[0] == "native" and parsed.name in NATIVE_SOURCE_NAMES
+            or
             len(parsed.parts) == 2 and parsed.parts[0] == "cadyx" and parsed.suffix == ".py"
             or len(parsed.parts) == 2 and parsed.parts[0] == "tests"
             and parsed.name.startswith("test_") and parsed.suffix == ".py"
@@ -94,7 +97,7 @@ class SourceExtensionEngine:
             or len(parsed.parts) == 2 and parsed.parts[0] == "docs" and parsed.suffix == ".md"
         )
         if not allowed:
-            raise ValidationError("Source extensions may only change Python modules/tests or Markdown documentation.")
+            raise ValidationError("Source extensions may only change Python modules/tests, existing native bridge sources, or Markdown documentation.")
         destination = _ROOT.joinpath(*parsed.parts)
         if destination.is_symlink() or destination.resolve().parent != destination.parent.resolve():
             raise ValidationError("Source extension targets cannot be symlinks or escape their approved directory.")
@@ -171,7 +174,8 @@ class SourceExtensionEngine:
                                "after": change["content"], "after_sha256": self._digest(encoded)})
         for name in tests:
             self._source_path(name.replace(".", "/") + ".py")
-            if not (_ROOT.joinpath(*name.split(".")) .with_suffix(".py")).is_file():
+            if (not (_ROOT.joinpath(*name.split(".")) .with_suffix(".py")).is_file()
+                    and name.replace(".", "/") + ".py" not in seen):
                 raise ValidationError(f"Requested test module does not exist: {name}.")
         with self._lock:
             with self._connection() as connection:
@@ -222,7 +226,8 @@ class SourceExtensionEngine:
             output = work_root / "result.json"
             log = work_root / "test-output.txt"
             runner.write_text(
-                "import json, sys, unittest\n"
+                "import json, sys, unittest, tempfile\n"
+                f"tempfile.tempdir = {str(work_root)!r}\n"
                 f"NAMES = {tests!r}\n"
                 f"OUT = {str(output)!r}\n"
                 f"LOG = {str(log)!r}\n"
@@ -234,7 +239,18 @@ class SourceExtensionEngine:
                 "sys.exit(0 if result.wasSuccessful() and result.testsRun > 0 else 1)\n",
                 encoding="utf-8", newline="",
             )
+            from .source_native import build_candidate, publish_verified
+            native_bridge = None
+            if any(change["path"].startswith("native/") for change in files):
+                native_bridge = build_candidate(source_root, work_root, self.runtime_root)
             python, read_only = build_scratch_runtime(source_root, work_root, self.runtime_root)
+            if native_bridge is not None:
+                runtime_manifest = source_root / ".runtime" / "manifest.json"
+                candidate_manifest = json.loads(runtime_manifest.read_text(encoding="utf-8"))
+                candidate_manifest["bridge"] = str(native_bridge.resolve())
+                runtime_manifest.write_text(json.dumps(candidate_manifest), encoding="utf-8")
+                read_only.append(native_bridge.parent)
+                native_digest = self._digest(native_bridge.read_bytes())
             allowed_env = {key: value for key, value in os.environ.items() if key.upper() in _ALLOWED_ENV}
             allowed_env.update({"PATH": str(python.parent), "TEMP": str(work_root), "TMP": str(work_root)})
             launch = run_appcontainer_process(
@@ -255,6 +271,10 @@ class SourceExtensionEngine:
                           "exit_code": launch["exit_code"],
                           "output": "Sandbox test runner exited without a result file."}
             report["passed"] = launch["exit_code"] == 0 and report.get("tests_run", 0) > 0 and not report.get("failures") and not report.get("errors")
+            if report["passed"] and native_bridge is not None:
+                if self._digest(native_bridge.read_bytes()) != native_digest:
+                    raise ValidationError("The native candidate changed during sandbox tests.")
+                publish_verified(source_root, self.runtime_root, native_bridge)
             if progress:
                 progress("TESTING TOOL", 0.7 if report["passed"] else 0.4)
             return report

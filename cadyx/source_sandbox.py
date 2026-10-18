@@ -66,7 +66,9 @@ def build_sandbox_spec(read_write: Sequence[str], read_only: Sequence[str]) -> b
     ro = add_string_vector(read_only)
     struct.pack_into("<I", buffer, table_start + 4, version - (table_start + 4))
     buffer[table_start + 8] = 1  # app_container
-    buffer[table_start + 9] = 1  # disallow_win32k_system_calls
+    # ctypes loads Windows DLLs whose initialization requires Win32k compatibility.
+    # AppContainer capabilities, filesystem mounts and the Job Object remain enforced.
+    buffer[table_start + 9] = 0
     buffer[table_start + 10] = 1  # least_privilege
     struct.pack_into("<I", buffer, table_start + 12, rw - (table_start + 12))
     struct.pack_into("<I", buffer, table_start + 16, ro - (table_start + 16))
@@ -190,7 +192,7 @@ def run_appcontainer_process(
         ctypes.c_uint32, ctypes.POINTER(ProcessInformation),
     ]
     create_sandbox.restype = ctypes.c_int
-    flags = 0x00000004 | 0x00000400  # CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT
+    flags = 0x08000000 | 0x00000004 | 0x00000400  # NO_WINDOW | SUSPENDED | UNICODE_ENVIRONMENT
     identity = "CadyxSource_" + uuid4().hex
     if not create_sandbox(
         str(application), command_line, None, None, 0, flags,
@@ -267,6 +269,11 @@ def build_scratch_runtime(source_root: Path, writable_root: Path, runtime_root: 
         "bridge": str((runtime_root / manifest["bridge"]).resolve()),
         "scan_bridge": str((runtime_root / manifest["scan_bridge"]).resolve()),
     }
+    from .source_native import verified_bridge
+    native_root = source_root if (source_root / "native").is_dir() else Path(__file__).resolve().parent.parent
+    tested_bridge = verified_bridge(native_root, runtime_root)
+    if tested_bridge is not None:
+        remapped["bridge"] = str(tested_bridge.resolve())
     sandbox_runtime = source_root / ".runtime"
     sandbox_runtime.mkdir(exist_ok=True)
     (sandbox_runtime / "manifest.json").write_text(

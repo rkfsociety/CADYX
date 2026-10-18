@@ -9,6 +9,7 @@ import math
 from typing import Any, Callable
 from .errors import ValidationError
 from .models import Document
+from .profile_segments import sketch_segments
 from .sketches import (closed_profile, closed_profiles, closed_spline_profile,
                        generated_gear_curve_profiles, open_path)
 
@@ -33,7 +34,8 @@ class RebuildCommands:
             plane, profiles = closed_profiles(document.objects, source_sketch_id)
             depth = parameters["depth"]
             centered = parameters.get("centered", False)
-            tool = (self.kernel.create_extruded_profile(profiles[0], plane=plane, depth=depth, centered=centered)
+            tool = (self.kernel.create_extruded_profile(profiles[0], plane=plane, depth=depth, centered=centered,
+                                                       segments=sketch_segments(document.objects, source_sketch_id))
                     if len(profiles) == 1 else
                     self.kernel.create_extruded_profile_with_holes(profiles, plane=plane, depth=depth,
                                                                    centered=centered))
@@ -74,6 +76,8 @@ class RebuildCommands:
                     profiles, plane=plane, depth=parameters["depth"],
                     centered=parameters.get("centered", False), curve_profiles=curve_profiles,
                 )
+            if curve_points is None:
+                options["segments"] = sketch_segments(document.objects, source_sketch_id)
             return self.kernel.create_extruded_profile(profile, **options)
         if operation == "revolve_sketch":
             if progress is not None:
@@ -83,6 +87,8 @@ class RebuildCommands:
             options = {"angle_degrees": parameters["angle_degrees"]}
             if curve_points is not None:
                 options["curve_points"] = curve_points
+            if curve_points is None:
+                options["segments"] = sketch_segments(document.objects, source_sketch_id)
             return self.kernel.create_revolved_profile(profile, **options)
         if operation == "loft_sketches":
             sketch_ids = parameters.get("section_sketch_ids")
@@ -255,9 +261,10 @@ class RebuildCommands:
                         parameters["countersink_diameter"], parameters["hole_diameter"], sink_depth])
                 else:
                     from .agent_authoring import _rotation_from_z
-                    thread = self.kernel.create_metric_thread(major_diameter=parameters["major_diameter"],
+                    from .thread_profiles import thread_tool
+                    thread = thread_tool(self.kernel, major_diameter=parameters["major_diameter"],
                         pitch=parameters["pitch"], length=parameters["length"],
-                        handedness=parameters["handedness"])
+                        handedness=parameters["handedness"], thread_profile=parameters.get("thread_profile"))
                     rotation_axis, angle, _ = _rotation_from_z(axis)
                     tool = _agent_native(thread, 2, [*rotation_axis, angle, *origin])
                     geometry = self.kernel.cut_solids(source["geometry"], tool)

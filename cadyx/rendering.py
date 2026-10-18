@@ -36,10 +36,12 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         if item.get("type") == "feature"
         for source_id in (
             [item.get("source_sketch_id")] if item.get("source_sketch_id")
+            else [item["parameters"]["sketch_id"]] if item.get("operation") in {"pocket_sketch", "rib_from_sketch"}
+            and isinstance(item.get("parameters", {}).get("sketch_id"), str)
             else item.get("source_sketch_ids", [])
         )
         if item.get("operation") in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches",
-                                      "pad_sketch_to_body"}
+                                      "pad_sketch_to_body", "pocket_sketch", "rib_from_sketch"}
     }
     feature_by_body = {item.get("body_id"): item for item in document.objects
                        if item.get("type") == "feature" and item.get("body_id")}
