@@ -70,6 +70,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/agent/projects", "agent_projects", "agent"),
     RouteSpec("POST", "/api/v1/agent/projects", "agent_project_create", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}", "agent_project_get", "agent"),
+    RouteSpec("GET", "/api/v1/agent/projects/{project_id}/inspection", "agent_inspection", "agent"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/dashboard", "agent_dashboard_get", "agent"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/dashboard", "agent_dashboard_post", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/activity", "agent_activity", "agent"),
@@ -358,6 +359,28 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         _create_project(handler, core, agent_api=True)
     elif name == "agent_project_get":
         handler._json(200, core.observe_agent_operation(project_id, "Изучает модель", lambda: core.inspect_project(project_id)))
+    elif name == "agent_inspection":
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        allowed = {"section", "expected_revision", "kind", "body_id", "shape",
+                   "since_revision", "offset", "limit", "include_metrics"}
+        if set(query) - allowed or any(len(values) != 1 for values in query.values()):
+            raise ValidationError("Unknown or repeated compact inspection query parameter.")
+        options: dict[str, Any] = {}
+        for key in ("section", "kind", "body_id", "shape"):
+            if key in query:
+                options[key] = query[key][0]
+        for key in ("expected_revision", "since_revision", "offset", "limit"):
+            if key in query:
+                value = query[key][0]
+                if not value.isascii() or not value.isdecimal():
+                    raise ValidationError(f"{key} must be a nonnegative decimal integer.")
+                options[key] = int(value)
+        if "include_metrics" in query:
+            value = query["include_metrics"][0]
+            if value not in ("0", "1"):
+                raise ValidationError("include_metrics must be 0 or 1.")
+            options["include_metrics"] = value == "1"
+        handler._json(200, core.inspect_compact(project_id, **options))
     elif name == "agent_capability_develop":
         body = _require_json(handler)
         if set(body) != {"definition"} or not isinstance(body["definition"], dict):

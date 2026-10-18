@@ -168,6 +168,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_prune_project_files", "description": "Remove user files recursively from an empty FREE project, retaining only the named direct source files.", "inputSchema": _schema({"project_id": _STRING, "keep_files": {"type": "array", "items": _STRING, "minItems": 1}}, ["project_id", "keep_files"])},
     {"name": "cadyx_delete_project", "description": "Delete a FREE project through the Agent API after its needed data has been preserved elsewhere.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_inspect_project", "description": "Read the saved model, revision, command history and lock state without acquiring a lease.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
+    {"name": "cadyx_inspect_compact", "description": "Read a revision-bound compact project summary, paginated entities/parameters/topology or history-referenced feature changes without B-rep or mesh payloads. Use expected_revision to stabilize pagination. Historical change lists are explicitly incomplete for indirect rebuilds.", "inputSchema": _schema({"project_id": _STRING, "section": {"enum": ["summary", "entities", "parameters", "topology", "changes"]}, "expected_revision": _INTEGER, "kind": _STRING, "body_id": _STRING, "shape": _STRING, "since_revision": _INTEGER, "offset": _INTEGER, "limit": {"type": "integer", "minimum": 1, "maximum": 100}, "include_metrics": {"type": "boolean"}}, ["project_id"])},
     {"name": "cadyx_capabilities", "description": "Discover supported Agent API routes, model commands, parameter names, documented constraints and error meanings.", "inputSchema": _schema()},
     {"name": "cadyx_propose_capability", "description": "Develop a persistent CADYX capability from a bounded composition of existing commands. CADYX tests it on isolated real geometry before it becomes available; arbitrary code is rejected.", "inputSchema": _schema({"project_id": _STRING, "definition": _OBJECT}, ["project_id", "definition"])},
     {"name": "cadyx_execute_capability", "description": "Run a geometry-tested persistent capability. Each contained Command System step receives its own revision-checked agent lease and visible operation event.", "inputSchema": _schema({"project_id": _STRING, "capability_id": _STRING, "expected_revision": _INTEGER, "arguments": _OBJECT}, ["project_id", "capability_id", "expected_revision", "arguments"])},
@@ -312,6 +313,11 @@ class MCPApplication:
             return json.loads(raw.decode("utf-8"))
         if name == "cadyx_inspect_project":
             return self.api.get(self._project(args["project_id"]))
+        if name == "cadyx_inspect_compact":
+            options = {key: str(int(value)) if key == "include_metrics" else value
+                       for key, value in args.items() if key != "project_id"}
+            suffix = "/inspection" + ("?" + urllib.parse.urlencode(options) if options else "")
+            return self.api.get(self._project(args["project_id"], suffix))
         if name == "cadyx_capabilities":
             return self.api.get("/api/v1/agent/capabilities")
         if name == "cadyx_propose_capability":

@@ -308,6 +308,13 @@ class CadyxCore:
             lambda: self.capability_registry.rollback(capability_id),
         )
 
+    def inspect_compact(self, project_id: str, **options: Any) -> dict[str, Any]:
+        from .compact_inspection import inspect_compact
+
+        # workspace.load returns a validated, migrated committed snapshot; do not
+        # copy its geometry or command payloads into a full inspect response.
+        return inspect_compact(self.workspace.load(project_id), self.kernel, **options)
+
     def inspect_project(self, project_id: str) -> dict[str, Any]:
         return self._lifecycle.inspect_project(project_id)
     def acquire_lease(self, project_id: str, owner_type: str, owner_id: str) -> dict[str, Any]:
