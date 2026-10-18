@@ -76,6 +76,17 @@ class HTTPConcurrencyTests(unittest.TestCase):
             time.sleep(0.01)
         return False
 
+    @staticmethod
+    def _wait_for_http_capacity(server: CadyxHTTPServer, timeout: float = 2.0) -> bool:
+        """Wait for the previous HTTP handler to finish releasing its request slot."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if server.try_acquire_request_slot():
+                server.release_request_slot()
+                return True
+            time.sleep(0.01)
+        return False
+
     def test_request_and_sse_budgets_are_independent(self) -> None:
         self.assertTrue(self.server.try_acquire_request_slot())
         self.assertFalse(self.server.try_acquire_request_slot())
@@ -132,6 +143,7 @@ class HTTPConcurrencyTests(unittest.TestCase):
                 connection.close()
 
             self.assertTrue(self._wait_for_sse_capacity(server))
+            self.assertTrue(self._wait_for_http_capacity(server))
             with urlopen(base_url + "/api/v1/health", timeout=2) as healthy:
                 self.assertEqual(healthy.status, 200)
 
@@ -154,6 +166,7 @@ class HTTPConcurrencyTests(unittest.TestCase):
 
                 self.assertFalse(server.try_acquire_sse_slot())
                 for path in ("/api/v1/health", "/api/v1/projects"):
+                    self.assertTrue(self._wait_for_http_capacity(server))
                     with urlopen(base_url + path, timeout=2) as response:
                         self.assertEqual(response.status, 200)
                         self.assertIsInstance(json.loads(response.read()), dict)
@@ -172,6 +185,7 @@ class HTTPConcurrencyTests(unittest.TestCase):
         with unauthorized.exception as error:
             self.assertEqual(error.code, 401)
 
+        self.assertTrue(self._wait_for_http_capacity(server))
         with self.assertRaises(HTTPError) as missing:
             urlopen(Request(
                 base_url + "/api/v1/events?project_id=missing",
@@ -180,6 +194,7 @@ class HTTPConcurrencyTests(unittest.TestCase):
         with missing.exception as error:
             self.assertEqual(error.code, 404)
 
+        self.assertTrue(self._wait_for_http_capacity(server))
         connection = HTTPConnection("127.0.0.1", server.server_port, timeout=2)
         try:
             connection.request("GET", "/api/v1/events", headers={"Authorization": "Bearer test-secret"})
@@ -187,6 +202,7 @@ class HTTPConcurrencyTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(response.readline(), b": CADYX event stream\n")
             self.assertEqual(response.readline(), b"\n")
+            self.assertTrue(self._wait_for_http_capacity(server))
             with urlopen(base_url + "/api/v1/health", timeout=2) as health:
                 self.assertEqual(health.status, 200)
             response.close()
