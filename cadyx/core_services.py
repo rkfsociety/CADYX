@@ -1063,6 +1063,133 @@ class EngineeringValidationService(_CoreService):
         )
         return self._maybe_persist_validation(project_id, "model_specification", result, persist)
 
+    def validate_planetary_kinematics(
+        self, project_id: str, expected_revision: Any, sun_sketch_id: Any,
+        planet_sketch_ids: Any, ring_sketch_id: Any,
+        sun_speed_radians_per_second: Any, ring_speed_radians_per_second: Any,
+        *, carrier_body_id: Any = None, persist: bool = False,
+    ) -> dict[str, Any]:
+        from .gear_kinematics import solve_planetary_gearset
+
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        self._check_revision(document, expected_revision)
+        if type(persist) is not bool:
+            raise ValidationError("persist must be a boolean.")
+        if (not isinstance(sun_sketch_id, str) or not sun_sketch_id
+                or not isinstance(ring_sketch_id, str) or not ring_sketch_id
+                or not isinstance(planet_sketch_ids, list) or len(planet_sketch_ids) < 2
+                or any(not isinstance(item, str) or not item for item in planet_sketch_ids)
+                or len(set(planet_sketch_ids)) != len(planet_sketch_ids)
+                or len({sun_sketch_id, ring_sketch_id, *planet_sketch_ids}) != len(planet_sketch_ids) + 2):
+            raise ValidationError("Planetary kinematics needs one sun, distinct planet sketches, and one ring sketch.")
+        if carrier_body_id is not None and (not isinstance(carrier_body_id, str) or not carrier_body_id):
+            raise ValidationError("carrier_body_id must be a non-empty body identifier when supplied.")
+
+        by_id = {item["id"]: item for item in document.objects if item.get("type") == "sketch"}
+
+        def profile(sketch_id: str, operation: str) -> dict[str, Any]:
+            sketch = by_id.get(sketch_id)
+            data = sketch.get("generated_gear_profile") if sketch else None
+            if not isinstance(data, dict) or data.get("operation") != operation or not isinstance(data.get("parameters"), dict):
+                raise ValidationError(f"Sketch {sketch_id!r} is not a saved {operation} profile.")
+            return data["parameters"]
+
+        sun = profile(sun_sketch_id, "add_sketch_involute_gear")
+        planets = [profile(sketch_id, "add_sketch_involute_gear") for sketch_id in planet_sketch_ids]
+        ring = profile(ring_sketch_id, "add_sketch_internal_involute_gear")
+        parameters = [sun, *planets, ring]
+        module_value = sun.get("module")
+        pressure = sun.get("pressure_angle_degrees")
+        for values in parameters:
+            if (values.get("module") != module_value
+                    or values.get("pressure_angle_degrees") != pressure
+                    or type(values.get("tooth_count")) is not int):
+                raise ValidationError("Planetary gear profiles must use matching module and pressure angle with integer tooth counts.")
+        if any(values["tooth_count"] != planets[0]["tooth_count"] for values in planets[1:]):
+            raise ValidationError("All planet gears in the train must use the same tooth count.")
+        center_x, center_y = sun.get("center_x"), sun.get("center_y")
+        if any(type(value) not in (int, float) or not math.isfinite(value)
+               for value in (center_x, center_y, ring.get("center_x"), ring.get("center_y"))):
+            raise ValidationError("Sun and ring profile centers must be finite coordinates.")
+        if (not math.isclose(center_x, ring["center_x"], abs_tol=1e-9)
+                or not math.isclose(center_y, ring["center_y"], abs_tol=1e-9)):
+            raise ValidationError("The sun and internal ring profile centers must coincide.")
+        angles = []
+        for values in planets:
+            x, y = values.get("center_x"), values.get("center_y")
+            if type(x) not in (int, float) or type(y) not in (int, float) or not math.isfinite(x) or not math.isfinite(y):
+                raise ValidationError("Planet centers must be finite coordinates.")
+            angles.append(math.degrees(math.atan2(y - center_y, x - center_x)) % 360.0)
+        result = solve_planetary_gearset(
+            module=module_value,
+            sun_teeth=sun["tooth_count"],
+            planet_teeth=planets[0]["tooth_count"],
+            ring_teeth=ring["tooth_count"],
+            planet_angles_degrees=angles,
+            sun_rotation_degrees=sun.get("rotation_degrees", 0.0),
+            planet_rotation_degrees=[values.get("rotation_degrees", 0.0) for values in planets],
+            ring_rotation_degrees=ring.get("rotation_degrees", 0.0),
+            sun_speed_radians_per_second=sun_speed_radians_per_second,
+            ring_speed_radians_per_second=ring_speed_radians_per_second,
+        )
+        bodies = {item["id"]: item for item in document.objects if item.get("type") == "body"}
+        body_for_sketch = {
+            item.get("parameters", {}).get("source_sketch_id"): item.get("body_id")
+            for item in document.objects
+            if item.get("type") == "feature" and item.get("operation") == "extrude_sketch"
+        }
+
+        def motion_track(sketch_id: str, values: dict[str, Any], *, spin: float, orbit: float) -> dict[str, Any]:
+            body_id = body_for_sketch.get(sketch_id)
+            if body_id not in bodies:
+                raise ValidationError(f"Gear sketch {sketch_id!r} needs a saved extruded body before kinematic validation.")
+            return {
+                "body_id": body_id,
+                "center_x": float(values["center_x"]),
+                "center_y": float(values["center_y"]),
+                "pivot_x": float(center_x),
+                "pivot_y": float(center_y),
+                "spin_speed_radians_per_second": spin,
+                "orbit_speed_radians_per_second": orbit,
+            }
+
+        motion_tracks = [motion_track(sun_sketch_id, sun,
+                                      spin=result["sun_speed_radians_per_second"], orbit=0.0)]
+        motion_tracks.extend(
+            motion_track(sketch_id, values,
+                         spin=result["planet_spin_speed_radians_per_second"],
+                         orbit=result["carrier_speed_radians_per_second"])
+            for sketch_id, values in zip(planet_sketch_ids, planets, strict=True)
+        )
+        motion_tracks.append(motion_track(ring_sketch_id, ring,
+                                          spin=result["ring_speed_radians_per_second"], orbit=0.0))
+        if carrier_body_id is not None:
+            if carrier_body_id not in bodies:
+                raise ValidationError("carrier_body_id must refer to an existing saved body.")
+            motion_tracks.append({
+                "body_id": carrier_body_id,
+                "center_x": float(center_x), "center_y": float(center_y),
+                "pivot_x": float(center_x), "pivot_y": float(center_y),
+                "spin_speed_radians_per_second": result["carrier_speed_radians_per_second"],
+                "orbit_speed_radians_per_second": 0.0,
+            })
+        result.update({
+            "revision": document.revision,
+            "gear_profile_ids": {
+                "sun": sun_sketch_id,
+                "planets": list(planet_sketch_ids),
+                "ring": ring_sketch_id,
+            },
+            "gear_profiles_sha256": geometry_sha256({
+                "sun": sun, "planets": planets, "ring": ring,
+                "planet_sketch_ids": planet_sketch_ids,
+            }),
+            "pressure_angle_degrees": pressure,
+            "motion_tracks": motion_tracks,
+        })
+        return self._maybe_persist_validation(project_id, "planetary_kinematics", result, persist)
+
     def validate_body_dimensions(
         self, project_id: str, body_id: str, expected_revision: Any,
         expected_dimensions: Any, tolerance: Any, *, persist: bool = False,

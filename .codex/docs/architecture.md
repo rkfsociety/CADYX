@@ -148,21 +148,43 @@ Only compatible `ready` entries are exposed for reuse. Each live command in a
 capability obtains and releases its own revision-protected agent lease, so
 completed steps remain saved and visible if a later step fails.
 
-The proposal format is deliberately data-only: it cannot import modules, run
-Python or shell, access files, install dependencies, or invoke project-wide
-destructive/import/export commands. It can compose existing bounded modeling
-commands, and its isolated test must produce a valid body in the active kernel.
-This gives an automatic discover-test-register-resume-reuse path for missing
-compositions. It does not let a running CADYX host synthesize or load arbitrary
-new Python/OCCT algorithms. Such a kernel/API gap still requires a trusted source
-change, the project checks, and a host restart; CADYX ships no model-provider or
-source-code sandbox that could safely automate that step. The operator MCP
-instructions and Agent Runtime system prompt expose this boundary explicitly.
+The default model-agent instructions first try a tested composition, then expose
+a source-development path when a missing algorithm needs code. The agent can read
+only approved `cadyx/*.py`, `tests/test_*.py`, and Markdown files. A proposal is
+revision-bound by each file's SHA-256, limited to 12 files, 256 KiB per file,
+2 MiB total, and eight existing `tests.test_*` modules. It cannot add
+dependencies or modify runtime/native binaries, project data, or configuration.
+
+Candidate files and selected tests are copied into a disposable tree. Windows
+`Experimental_CreateProcessInSandbox` runs the isolated Python interpreter in an
+AppContainer with no network capabilities, read-only candidate/runtime mounts,
+one explicitly writable scratch mount, no inherited handles, a one-process
+Job Object, a 180-second wall timeout, and a 2 GiB process-memory limit. The
+environment is allow-listed to standard Windows runtime variables. If the
+AppContainer API or a policy cannot be applied, the operation fails closed and
+does not execute the candidate. The current Windows host smoke/regression test
+verified scratch writes work while a host sentinel cannot be read or changed and
+outbound networking fails.
+
+Only after at least one selected test runs successfully with no failures or
+errors does CADYX write a durable checkpoint in `.cadyx-source-extensions.sqlite3`
+and atomically apply the exact base-hash-checked patch. Partial application is
+restored on error. A rollback restores only when every current file still matches
+the applied hash; human changes yield `SOURCE_REVISION_CONFLICT`. The Agent API
+exposes read, list, develop, and rollback routes under
+`/api/v1/agent/projects/{id}/source-extensions` and
+`/api/v1/agent/source-files/read`; the Agent Runtime and local MCP expose matching
+tools. A successful HTTP source integration schedules the managed host restart
+after returning its result. The saved model remains in the project and can be
+inspected after restart. This is a bounded trusted-source update path, not an
+arbitrary process/shell tool; source changes that need a new external dependency
+or native binary are out of scope.
 
 Capability lifecycle activities use the existing `agent.activity` SSE stream.
-The browser displays the missing command, capability name and reason, test
-result, and integration step in the workflow card. Current and previous test
-results also remain available through capability discovery after host restart.
+The browser receives the capability and source-development phase changes through
+the existing `agent.activity` SSE stream, including the function title, test
+result, and integration outcome. Current source-extension versions and lifecycle
+status persist across host restart.
 See [persistent capability tests](../../tests/test_self_evolving.py),
 [Agent Runtime lifecycle tests](../../tests/test_agent_runtime.py), and
 [Agent API tests](../../tests/test_web_api.py).
@@ -170,16 +192,44 @@ See [persistent capability tests](../../tests/test_self_evolving.py),
 ### Internal involute gear profile
 
 `add_sketch_internal_involute_gear` writes the closed internal-tooth cavity
-boundary as ordinary editable XY sketch geometry, with the module, tooth count,
-pressure angle, center, rotation and backlash returned in `gear_parameters`.
+boundary as an editable closed periodic XY sketch spline through generated
+points, with the module, tooth count, pressure angle, center, rotation and
+backlash returned in `gear_parameters`. External and internal gear extrusion use
+native periodic OCCT B-spline boundary edges interpolating those same points.
+The sketch stores one closed spline and its source points, not a polygon chain;
+parameter edits regenerate the spline, and legacy line-based gear sketches
+convert to the spline form on their next parameter rebuild.
 The command requires an existing outer circle and no other profiles in the same
 sketch, so `extrude_sketch` can preserve the ring as one outer contour plus one
 inner tooth contour. It uses the standard unshifted internal radii
 `pitch = module * teeth / 2`, `tip = pitch - module`, and
-`root = pitch + 1.25 * module`; the involute flank samples and circular tip/root
-segments are an editable polygonal approximation. The same undercut-count check
-as the external generator applies. This command creates a mesh-based sketch
-outline, but extrusion produces the usual validated editable OCCT B-rep.
+`root = pitch + 1.25 * module`; the generated control points sample the
+mathematical involute flank and circular tip/root segments. The OCCT edge is a
+periodic interpolating B-spline through those points, not an exact analytic
+involute curve or a certified tolerance fit. The same undercut-count check as
+the external generator applies. Extrusion produces a validated editable OCCT
+B-rep with a periodic B-spline cavity edge.
+
+### Planetary gear kinematics and viewport motion
+
+`POST /api/v1/agent/projects/{id}/validations/planetary-kinematics` reads
+generated external/internal gear profile metadata at an exact saved revision.
+It checks matching module/pressure angle, equal planet tooth counts, sun/planet
+and ring/planet pitch center distances, equal-spacing tooth indexing, and the
+saved angular phases at both meshes. The ideal rigid-body speed solver uses
+`(Ns + Nr) * planet_spacing / 360 = integer` for planet indexing and
+`wc = (Ns*ws + Nr*wr) / (Ns + Nr)` for carrier speed. It reports planet spin,
+pitch center distances, phase residuals, and whether planet spacing is balanced.
+This is an ideal kinematic constraint check; it does not solve elastic contact,
+backlash under load, force balance or manufacturing tolerances.
+
+The optional `animate_duration_ms` sends `viewport.body-motion` to the selected
+browser viewer. It temporarily rotates/orbits the existing saved B-rep bodies
+according to the solver tracks, then restores their saved pose when the bounded
+animation ends. It does not change document geometry or revision and is not a
+persistent assembly-joint record. Use `carrier_body_id` to animate the saved
+carrier with its computed speed. The operation contract and local MCP tool are
+generated from `cadyx/api_contracts.py`.
 
 ## Commands and geometry
 
@@ -247,8 +297,8 @@ and retains the XY/XZ sketch, point/line/circle/ellipse/spline primitives,
 atomic builders for polylines/polygons, rectangles, and circles, checked
 geometric/dimensional constraints, and linked OCCT extrusion, revolution, sweep,
 fuse, fillet, and external metric-thread features. The Command System also builds
-sampled involute spur-gear outlines from design parameters as ordinary XY sketch
-geometry; both operations use the existing Agent API and create no browser
+sampled involute spur-gear outlines from design parameters as editable closed
+periodic XY sketch splines; both operations use the existing Agent API and create no browser
 modeling controls. Their exact supported ranges and geometric approximations are
 documented in [Document Model v7](document-model-v7.md#engineering-profiles).
 Sketch references use stable typed

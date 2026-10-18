@@ -17,6 +17,7 @@ _SUPPORTED_VALIDATION_KINDS = {
     "body_clearance",
     "body_preservation",
     "body_thickness",
+    "planetary_kinematics",
 }
 
 

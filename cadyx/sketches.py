@@ -222,24 +222,33 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
                     raise ValidationError("Generated gear profile metadata is invalid.")
                 parameters = generated.get("parameters")
                 point_ids, line_ids = generated.get("point_ids"), generated.get("line_ids")
-                if not isinstance(parameters, dict) or not isinstance(point_ids, list) or not isinstance(line_ids, list):
+                spline_id = generated.get("spline_id")
+                if not isinstance(parameters, dict) or not isinstance(point_ids, list):
                     raise ValidationError("Generated gear profile metadata is incomplete.")
-                if len(point_ids) < 3 or len(point_ids) != len(line_ids):
-                    raise ValidationError("Generated gear profile must have matching closed point and line lists.")
-                if (len(set(point_ids)) != len(point_ids) or len(set(line_ids)) != len(line_ids)
-                        or set(point_ids).intersection(line_ids)):
-                    raise ValidationError("Generated gear profile element identifiers must be unique.")
+                if len(point_ids) < 3 or len(set(point_ids)) != len(point_ids):
+                    raise ValidationError("Generated gear profile must have at least three unique points.")
+                if isinstance(spline_id, str):
+                    spline = reference(spline_id, "spline", item["id"])
+                    if spline.get("mode") != "closed" or spline.get("point_ids") != point_ids:
+                        raise ValidationError("Generated gear spline must be one closed curve through its declared points.")
+                    if line_ids not in (None, []):
+                        raise ValidationError("A generated gear spline cannot also declare polygon edges.")
+                else:
+                    if not isinstance(line_ids, list) or len(point_ids) != len(line_ids):
+                        raise ValidationError("Legacy generated gear profiles need matching closed point and line lists.")
+                    if len(set(line_ids)) != len(line_ids) or set(point_ids).intersection(line_ids):
+                        raise ValidationError("Generated gear profile element identifiers must be unique.")
+                    for index, (point_id, line_id) in enumerate(zip(point_ids, line_ids, strict=True)):
+                        reference(point_id, "point", item["id"])
+                        line = reference(line_id, "line", item["id"])
+                        if line.get("start_id") != point_id or line.get("end_id") != point_ids[(index + 1) % len(point_ids)]:
+                            raise ValidationError("Generated gear profile lines must form the declared closed point loop.")
                 tooth_count = parameters.get("tooth_count")
                 if (isinstance(tooth_count, bool) or not isinstance(tooth_count, (int, float))
                         or not math.isfinite(tooth_count) or tooth_count < 3 or not float(tooth_count).is_integer()):
                     raise ValidationError("Generated gear tooth_count must be an integer of at least 3.")
                 for key in ("module", "pressure_angle_degrees", "center_x", "center_y", "rotation_degrees", "backlash"):
                     number(parameters.get(key))
-                for index, (point_id, line_id) in enumerate(zip(point_ids, line_ids, strict=True)):
-                    point = reference(point_id, "point", item["id"])
-                    line = reference(line_id, "line", item["id"])
-                    if line.get("start_id") != point_id or line.get("end_id") != point_ids[(index + 1) % len(point_ids)]:
-                        raise ValidationError("Generated gear profile lines must form the declared closed point loop.")
             continue
         sketch_id = item.get("sketch_id")
         typed_id(sketch_id, "sketch")
@@ -443,7 +452,10 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
         if (len(closed_splines) != 1 or len(splines) != 1 or lines or arcs or circles
                 or ellipse_arcs or ellipses):
             raise ValidationError("A closed spline profile must be the only non-construction sketch geometry.")
-        raise ValidationError("Closed spline profiles require curve-capable geometry-kernel support.")
+        sampled = spline_sample_points(closed_splines[0], {item["id"]: item for item in objects})
+        if sampled[0] == sampled[-1]:
+            sampled.pop()
+        return plane, sampled
 
     if not lines and not arcs and not splines:
         if ellipse_arcs:
@@ -576,11 +588,11 @@ def closed_profiles(
     standalone.extend(item for item in owned if item.get("type") == "ellipse" and "sweep_radians" not in item)
     closed_splines = [item for item in owned if item.get("type") == "spline" and item.get("mode") == "closed"]
     if closed_splines:
-        if len(closed_splines) != 1 or edges or standalone:
-            raise ValidationError("A closed spline profile must be the only non-construction sketch geometry.")
-        raise ValidationError("Closed spline profiles require curve-capable geometry-kernel support.")
+        if edges:
+            raise ValidationError("A closed spline profile cannot be mixed into an open edge chain.")
 
     components: list[list[dict[str, Any]]] = [[item] for item in standalone]
+    components.extend([[item] for item in closed_splines])
     if edges:
         adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for edge in edges:
@@ -634,11 +646,52 @@ def closed_profiles(
 def closed_spline_profile(
         objects: list[dict[str, Any]], sketch_id: str,
 ) -> tuple[str, list[dict[str, float]], list[dict[str, float]]] | None:
-    """Return sampled geometry and source vertices for a sole periodic spline."""
+    """Return a periodic spline profile or None when a sketch uses ordinary edges."""
     sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
     if sketch is None:
         raise ValidationError("A profile operation needs an existing sketch.")
     owned = [item for item in objects if item.get("sketch_id") == sketch_id]
+    generated = sketch.get("generated_gear_profile")
+    if isinstance(generated, dict) and generated.get("operation") == "add_sketch_involute_gear":
+        extra_closed_curves = [
+            item for item in owned
+            if item.get("type") in {"circle", "ellipse"} and not item.get("construction", False)
+        ]
+        if extra_closed_curves:
+            return None
+        point_ids, line_ids = generated.get("point_ids"), generated.get("line_ids")
+        spline_id = generated.get("spline_id")
+        if isinstance(spline_id, str):
+            spline = next((item for item in owned if item.get("id") == spline_id and item.get("type") == "spline"), None)
+            if (not isinstance(point_ids, list) or len(point_ids) < 3 or spline is None
+                    or spline.get("mode") != "closed" or spline.get("point_ids") != point_ids):
+                raise ValidationError("Generated involute gear spline metadata is inconsistent.")
+            profile_ids = set(point_ids) | {spline_id}
+            if any(item.get("type") != "constraint" and item.get("id") not in profile_ids for item in owned):
+                raise ValidationError("A generated involute gear spline must be the only profile in its sketch.")
+            by_id = {item["id"]: item for item in objects}
+            controls = [{"x": number(by_id[point_id]["x"]), "y": number(by_id[point_id]["y"])}
+                        for point_id in point_ids]
+            return sketch["plane"], controls, controls
+        if (not isinstance(point_ids, list) or not isinstance(line_ids, list)
+                or len(point_ids) < 3 or len(point_ids) != len(line_ids)):
+            raise ValidationError("Generated involute gear spline metadata is invalid.")
+        profile_ids = set(point_ids) | set(line_ids)
+        unexpected = [item for item in owned if item.get("type") != "constraint"
+                      and item.get("id") not in profile_ids]
+        if unexpected:
+            raise ValidationError("A generated involute gear spline must be the only profile in its sketch.")
+        by_id = {item["id"]: item for item in objects}
+        controls = []
+        for index, (point_id, line_id) in enumerate(zip(point_ids, line_ids, strict=True)):
+            point, line = by_id.get(point_id), by_id.get(line_id)
+            if (point is None or point.get("type") != "point" or line is None or line.get("type") != "line"
+                    or line.get("construction", False) or line.get("start_id") != point_id
+                    or line.get("end_id") != point_ids[(index + 1) % len(point_ids)]):
+                raise ValidationError("Generated involute gear spline points and source edges are inconsistent.")
+            controls.append({"x": number(point["x"]), "y": number(point["y"])})
+        return sketch["plane"], controls, controls
+
     splines = [item for item in owned if item.get("type") == "spline"
                and not item.get("construction", False)]
     closed_splines = [item for item in splines if item.get("mode") == "closed"]
@@ -648,6 +701,8 @@ def closed_spline_profile(
              and not item.get("construction", False) and item.get("extent", "segment") == "segment"]
     curves = [item for item in owned if item.get("type") in {"circle", "ellipse"}
               and not item.get("construction", False)]
+    if len(closed_splines) == 1 and len(splines) == 1 and not lines and curves:
+        return None
     if len(closed_splines) != 1 or len(splines) != 1 or lines or curves:
         raise ValidationError("A closed spline profile must be the only non-construction sketch geometry.")
     spline = closed_splines[0]
@@ -658,6 +713,66 @@ def closed_spline_profile(
     if sampled[0] == sampled[-1]:
         sampled.pop()
     return sketch["plane"], sampled, controls
+
+
+def generated_gear_curve_profiles(
+        objects: list[dict[str, Any]], sketch_id: str,
+        profiles: list[list[dict[str, float]]],
+) -> list[list[dict[str, float]] | None] | None:
+    """Return per-loop B-spline interpolation controls for a generated internal gear cavity."""
+    sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
+    generated = sketch.get("generated_gear_profile") if sketch else None
+    if isinstance(generated, dict) and generated.get("operation") == "add_sketch_involute_gear":
+        return None
+    if not isinstance(generated, dict) or generated.get("operation") not in {
+        "add_sketch_internal_involute_gear",
+    }:
+        return None
+    point_ids, line_ids = generated.get("point_ids"), generated.get("line_ids")
+    spline_id = generated.get("spline_id")
+    if isinstance(spline_id, str):
+        by_id = {item["id"]: item for item in objects}
+        spline = by_id.get(spline_id)
+        if (not isinstance(point_ids, list) or len(point_ids) < 3 or not isinstance(spline, dict)
+                or spline.get("type") != "spline" or spline.get("mode") != "closed"
+                or spline.get("point_ids") != point_ids):
+            raise ValidationError("Generated internal gear spline metadata is inconsistent.")
+        controls = [{"x": number(by_id[point_id]["x"]), "y": number(by_id[point_id]["y"])}
+                    for point_id in point_ids]
+        sampled = spline_sample_points(spline, by_id)
+        if sampled[0] == sampled[-1]:
+            sampled.pop()
+        matches = [
+            index for index, profile in enumerate(profiles)
+            if len(profile) == len(sampled)
+            and all(
+                abs(left["x"] - right["x"]) <= 1e-7 and abs(left["y"] - right["y"]) <= 1e-7
+                for left, right in zip(profile, sampled, strict=True)
+            )
+        ]
+        if len(matches) != 1:
+            raise ValidationError("The generated internal gear spline could not be matched to one closed sketch loop.")
+        curves: list[list[dict[str, float]] | None] = [None] * len(profiles)
+        curves[matches[0]] = controls
+        return curves
+    if not isinstance(point_ids, list) or not isinstance(line_ids, list) or len(point_ids) < 3 or len(point_ids) != len(line_ids):
+        raise ValidationError("Generated internal gear spline metadata is invalid.")
+    by_id = {item["id"]: item for item in objects}
+    controls = []
+    for index, (point_id, line_id) in enumerate(zip(point_ids, line_ids, strict=True)):
+        point, line = by_id.get(point_id), by_id.get(line_id)
+        if (point is None or point.get("type") != "point" or line is None or line.get("type") != "line"
+                or line.get("start_id") != point_id or line.get("end_id") != point_ids[(index + 1) % len(point_ids)]):
+            raise ValidationError("Generated internal gear spline points and source edges are inconsistent.")
+        controls.append({"x": number(point["x"]), "y": number(point["y"])})
+    target = {(point["x"], point["y"]) for point in controls}
+    matches = [index for index, profile in enumerate(profiles)
+               if len(profile) == len(controls) and {(point["x"], point["y"]) for point in profile} == target]
+    if len(matches) != 1:
+        raise ValidationError("The generated internal gear contour could not be matched to one closed sketch loop.")
+    curves: list[list[dict[str, float]] | None] = [None] * len(profiles)
+    curves[matches[0]] = controls
+    return curves
 
 
 def open_path(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, list[dict[str, float]]]:

@@ -16,7 +16,6 @@ from typing import Any
 from uuid import uuid4
 
 from .api_contracts import VALIDATION_OPERATIONS
-from .capabilities import COMMAND_CAPABILITIES
 
 _PROTOCOL_VERSION = "2025-11-25"
 _MAX_FILE_BYTES = 64 * 1024 * 1024
@@ -140,22 +139,12 @@ _STRING = {"type": "string", "minLength": 1}
 _NUMBER = {"type": "number"}
 _INTEGER = {"type": "integer", "minimum": 0}
 _OBJECT = {"type": "object"}
-_COMMAND = {"type": "object", "oneOf": [
-    {
-        "properties": {
-            "type": {
-                "type": "string",
-                "enum": [capability["type"]],
-            },
-            **{
-                field: capability.get("parameter_schemas", {}).get(field, {})
-                for field in [*capability.get("required", []), *capability.get("optional", [])]
-            },
-        },
-        "required": ["type"],
-    }
-    for capability in COMMAND_CAPABILITIES
-]}
+_COMMAND = {
+    "type": "object",
+    "properties": {"type": {"type": "string", "minLength": 1}},
+    "required": ["type"],
+    "additionalProperties": True,
+}
 TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_health", "description": "Check whether the local CADYX host is ready.", "inputSchema": _schema()},
     {"name": "cadyx_list_workspace", "description": "List saved CADYX projects and direct workspace folders with lock snapshots.", "inputSchema": _schema()},
@@ -171,6 +160,10 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_propose_capability", "description": "Develop a persistent CADYX capability from a bounded composition of existing commands. CADYX tests it on isolated real geometry before it becomes available; arbitrary code is rejected.", "inputSchema": _schema({"project_id": _STRING, "definition": _OBJECT}, ["project_id", "definition"])},
     {"name": "cadyx_execute_capability", "description": "Run a geometry-tested persistent capability. Each contained Command System step receives its own revision-checked agent lease and visible operation event.", "inputSchema": _schema({"project_id": _STRING, "capability_id": _STRING, "expected_revision": _INTEGER, "arguments": _OBJECT}, ["project_id", "capability_id", "expected_revision", "arguments"])},
     {"name": "cadyx_rollback_capability", "description": "Restore the previous tested registry checkpoint while the project is idle.", "inputSchema": _schema({"project_id": _STRING, "capability_id": _STRING}, ["project_id", "capability_id"])},
+    {"name": "cadyx_read_source_file", "description": "Read an approved CADYX source or test file and its SHA-256 for a source extension proposal.", "inputSchema": _schema({"path": _STRING}, ["path"])},
+    {"name": "cadyx_list_source_extensions", "description": "List persistent source extensions and test status in the local CADYX installation.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
+    {"name": "cadyx_develop_source_extension", "description": "Run focused source tests in a no-network Windows AppContainer, then checkpoint and apply the patch only on success.", "inputSchema": _schema({"project_id": _STRING, "proposal": _OBJECT}, ["project_id", "proposal"])},
+    {"name": "cadyx_rollback_source_extension", "description": "Restore a checked source-extension checkpoint without overwriting files changed since integration.", "inputSchema": _schema({"project_id": _STRING, "extension_id": _STRING}, ["project_id", "extension_id"])},
     {"name": "cadyx_list_project_files", "description": "List direct user files in a saved project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_read_project_file", "description": "Read a direct project file through the read-only Agent API; small images are returned as image content.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING}, ["project_id", "name"])},
     {"name": "cadyx_upload_project_step", "description": "Copy a local STEP file into a project through the Agent API without overwriting existing files or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
@@ -292,6 +285,15 @@ class MCPApplication:
                 self._project(args["project_id"], f"/capabilities/{capability_id}/rollback"),
                 {},
             )
+        if name == "cadyx_read_source_file":
+            return self.api.post("/api/v1/agent/source-files/read", {"path": args["path"]})
+        if name == "cadyx_list_source_extensions":
+            return self.api.get(self._project(args["project_id"], "/source-extensions"))
+        if name == "cadyx_develop_source_extension":
+            return self.api.post(self._project(args["project_id"], "/source-extensions"), {"proposal": args["proposal"]})
+        if name == "cadyx_rollback_source_extension":
+            extension_id = urllib.parse.quote(args["extension_id"], safe="")
+            return self.api.post(self._project(args["project_id"], f"/source-extensions/{extension_id}/rollback"), {})
         if name == "cadyx_list_project_files":
             return self.api.get(self._project(args["project_id"], "/files"))
         if name == "cadyx_read_project_file":
@@ -526,7 +528,7 @@ def handle_message(message: dict[str, Any], app: MCPApplication) -> dict[str, An
         if method == "initialize":
             requested = params.get("protocolVersion")
             protocol_version = requested if requested == _PROTOCOL_VERSION else _PROTOCOL_VERSION
-            result = {"protocolVersion": protocol_version, "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "cadyx-operator", "version": "1.0.0"}, "instructions": "Use CADYX tools for every project/model operation; never use shell, direct filesystem writes, or browser input to edit CAD. For every modeling task, inspect cadyx_capabilities and reuse a compatible registered capability. If an Agent API command reports CAPABILITY_MISSING, explain the need in cadyx_propose_capability, let CADYX test it on isolated real geometry, then invoke the registered capability and resume the original model. Proposals are restricted to compositions of existing commands; arbitrary code is not executed by the host. Inspect the current project and exact revision before each command. Mutations require the returned revision and an Agent API lease. Never replay a command after a lost response; inspect history, lock, and geometry. Use cadyx_stop_agent_work to fence active work."}
+            result = {"protocolVersion": protocol_version, "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "cadyx-operator", "version": "1.0.0"}, "instructions": "Use CADYX tools for every project/model operation; never use shell, direct filesystem writes, or browser input to edit CAD. For every modeling task, inspect cadyx_capabilities and reuse a compatible registered capability. If a required operation is missing, first determine whether a tested declarative capability can express it. If not, read the relevant source, propose focused tests and a bounded source patch with cadyx_develop_source_extension; CADYX runs tests only in its no-network Windows AppContainer and applies source only after success. A successful source update requires CADYX host restart before it is loaded; the saved model remains in its project. Inspect the current project and exact revision before each command. Mutations require the returned revision and an Agent API lease. Never replay a command after a lost response; inspect history, lock, and geometry. Use cadyx_stop_agent_work to fence active work."}
         elif method == "notifications/initialized" or method.startswith("notifications/"):
             return None
         elif method == "ping":

@@ -284,14 +284,18 @@ integer `tooth_count` of at least 3, `pressure_angle_degrees` from 5 through 45
 (default 20), optional `center_x`/`center_y`, `rotation_degrees`, and non-negative
 `backlash` less than half the circular pitch. The minimum tooth count is checked
 against the rack-undercut limit for the selected pressure angle. It adds one
-closed polygon as ordinary sketch points and lines and returns the calculated
-pitch, base, tip and root radii in `gear_parameters`. It models an unshifted
+editable closed periodic spline through sampled profile points and returns the
+calculated pitch, base, tip and root radii in `gear_parameters`. It models an unshifted
 external spur gear: `d=mz`, `db=d cos(alpha)`, `da=m(z+2)`, `df=m(z-2.5)`.
-Mating gears use center distance `m(z1+z2)/2` and a half-tooth-pitch phase offset.
-The flanks are sampled from the involute curve at 12 roll intervals; the saved
-sketch is therefore a line-segment approximation, not an analytic curve or a
-linked parametric gear feature. Profile shift, internal gears, helical gears,
-and cutter-generated root fillets are not represented.
+Mating external gears use center distance `m(z1+z2)/2` and a half-tooth-pitch
+phase offset. The editable sketch stores the closed periodic spline and its
+source interpolation points; the extruded B-rep uses a periodic OCCT B-spline
+interpolating those same points. Legacy saved line-based gear profiles remain
+readable and convert to closed splines on their next parameter rebuild.
+Internal gear cavity contours use the same spline edge in a multi-contour ring
+extrusion. The spline interpolates sampled involute/circular geometry; it is not
+an exact analytic involute or a certified deviation fit. Profile shift, helical
+gears and cutter-generated root fillets are not represented.
 
 `create_metric_thread` accepts positive `major_diameter`, `pitch`, and `length`
 (at least one pitch), optional `handedness` (`right` by
@@ -308,8 +312,8 @@ thread run-outs are not modeled. CADYX documents do not assign physical units;
 module, diameter and pitch use the document's coordinate units.
 
 These additions use the existing document v3 object and feature contracts and
-do not require a schema migration. Gear geometry remains ordinary editable
-sketch geometry; thread parameters remain on its feature. Reference formulas:
+do not require a schema migration. Gear geometry remains editable sketch
+geometry; thread parameters remain on its feature. Reference formulas:
 [ISO 724:2023](https://cdn.standards.iteh.ai/samples/85104/9815392ad8904c9aa23cf7727e7b1dde/ISO-724-2023.pdf),
 [spur gear geometry](https://technische-antriebselemente.de/en/tools/gear-geometry-calculator/).
 

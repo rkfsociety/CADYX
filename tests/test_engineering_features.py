@@ -6,6 +6,7 @@ import unittest
 
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
+from cadyx.sketches import closed_profiles, generated_gear_curve_profiles
 
 
 class EngineeringFeatureTests(unittest.TestCase):
@@ -95,7 +96,11 @@ class EngineeringFeatureTests(unittest.TestCase):
                 "rotation_degrees": rotation,
             })
             self.assertTrue(profile["closed"])
-            self.assertEqual(len(profile["point_ids"]), len(profile["line_ids"]))
+            self.assertIn("spline_id", profile)
+            sketch_objects = self.core.inspect_project(self.project_id)["document"]["objects"]
+            spline = next(item for item in sketch_objects if item["id"] == profile["spline_id"])
+            self.assertEqual(len(profile["point_ids"]), len(spline["point_ids"]))
+            self.assertEqual(spline["mode"], "closed")
             parameters = profile["gear_parameters"]
             self.assertAlmostEqual(parameters["pitch_radius"], module * teeth / 2)
             self.assertAlmostEqual(parameters["base_radius"], module * teeth / 2 * math.cos(math.radians(20)))
@@ -109,6 +114,14 @@ class EngineeringFeatureTests(unittest.TestCase):
 
         self.assertAlmostEqual(center_distance, pitch_radius + module * gear_teeth / 2)
         self.assertEqual([body["geometry"]["kind"] for body in bodies], ["extruded_profile"] * 2)
+        self.assertTrue(all(body["geometry"].get("profile_curve") == "closed_periodic_bspline"
+                            for body in bodies))
+        revision = self.core.inspect_project(self.project_id)["document"]["revision"]
+        clearance = self.core.validate_body_clearance(
+            self.project_id, bodies[0]["body_id"], bodies[1]["body_id"], revision,
+            minimum_clearance=0.0, tolerance=1e-5,
+        )
+        self.assertNotEqual(clearance["interference_status"], "interfering")
         scene = self.core.render_project(self.project_id)
         visible_bodies = [item for item in scene["objects"] if item["type"] == "body"]
         self.assertEqual([item["object_id"] for item in visible_bodies],
@@ -145,8 +158,26 @@ class EngineeringFeatureTests(unittest.TestCase):
         geometry = body["geometry"]
         self.assertEqual(geometry["kind"], "profile_with_holes")
         self.assertEqual(len(geometry["holes"]), 1)
+        self.assertEqual(len(geometry["curve_profiles"]), 2)
+        self.assertIsNone(geometry["curve_profiles"][0])
+        self.assertEqual(geometry["solid"]["tool"]["profile_curve"], "closed_periodic_bspline")
         self.assertGreater(geometry["volume"], 0)
         self.assertEqual(self.core.kernel.validate(geometry), None)
+
+    def test_external_gear_spline_can_share_a_sketch_with_a_bore_loop(self) -> None:
+        sketch_id = self.command({"type": "create_sketch", "name": "Bored gear", "plane": "XY"})["sketch_id"]
+        self.command({"type": "add_sketch_involute_gear", "sketch_id": sketch_id,
+                      "module": 2, "tooth_count": 18})
+        self.command({"type": "add_sketch_circle", "sketch_id": sketch_id,
+                      "x": 0, "y": 0, "radius": 5})
+        objects = self.core.inspect_project(self.project_id)["document"]["objects"]
+        _, profiles = closed_profiles(objects, sketch_id)
+        curves = generated_gear_curve_profiles(objects, sketch_id, profiles)
+        self.assertEqual(len(profiles), 2)
+        self.assertIsNone(curves)
+        sketch = next(item for item in objects if item.get("id") == sketch_id)
+        self.assertEqual(sorted(map(len, profiles)),
+                         sorted((len(sketch["generated_gear_profile"]["point_ids"]), 128)))
 
     def test_metric_thread_is_editable_single_solid_brep(self) -> None:
         result = self.command({

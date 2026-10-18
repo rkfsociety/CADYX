@@ -25,8 +25,10 @@ from .models import Document, OwnerType
 from .runtime_cache import RuntimeCachePolicy
 from .scan import ScanProcessor
 from .self_evolving import SelfEvolvingCapabilityEngine
+from .source_extension import SourceExtensionEngine
 from .workspace import ProjectWorkspace
-from .sketches import closed_profile, closed_profiles, open_path
+from .sketches import (closed_profile, closed_profiles, closed_spline_profile,
+                       generated_gear_curve_profiles, open_path)
 
 
 class CadyxCore:
@@ -61,6 +63,7 @@ class CadyxCore:
         self._engineering_validation = EngineeringValidationService(self)
         self.capability_registry = CapabilityRegistry(self.workspace.root / ".cadyx-capabilities.sqlite3")
         self.self_evolving = SelfEvolvingCapabilityEngine(self, self.capability_registry)
+        self.source_extensions = SourceExtensionEngine(self.workspace.root / ".cadyx-source-extensions.sqlite3")
 
     @contextmanager
     def _project_guard(self, project_id: str) -> Iterator[None]:
@@ -157,6 +160,37 @@ class CadyxCore:
         from .capabilities import agent_api_capabilities
 
         return agent_api_capabilities(self.self_evolving.available())
+
+    def read_agent_source_file(self, relative_path: str) -> dict[str, Any]:
+        return self.source_extensions.read_file(relative_path)
+
+    def list_agent_source_extensions(self) -> list[dict[str, Any]]:
+        return self.source_extensions.available()
+
+    def develop_agent_source_extension(
+        self, project_id: str, proposal: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.workspace.load(project_id)
+        title = proposal.get("title", "новая возможность") if isinstance(proposal, dict) else "новая возможность"
+        return self.observe_agent_operation(
+            project_id, f"Разрабатывает исходный код CADYX: {title}",
+            lambda report: self.source_extensions.develop(proposal, progress=report),
+            reports_progress=True,
+            detail_from_result=lambda result: {
+                "phase": "integration" if result.get("files_applied") else "testing",
+                "extension_id": result.get("id"), "title": title,
+                "tests_passed": result.get("tests", {}).get("passed", False),
+                "status": result.get("status"),
+            },
+        )
+
+    def rollback_agent_source_extension(self, project_id: str, extension_id: str) -> dict[str, Any]:
+        self.workspace.load(project_id)
+        return self.observe_agent_operation(
+            project_id, f"Откатывает исходный код CADYX: {extension_id}",
+            lambda: self.source_extensions.rollback(extension_id),
+            detail_from_result=lambda result: {"phase": "rollback", **result},
+        )
 
     def develop_agent_capability(self, project_id: str, definition: dict[str, Any]) -> dict[str, Any]:
         self.observe_agent_operation(
@@ -311,6 +345,22 @@ class CadyxCore:
         expected_dimensions: Any, tolerance: Any, *, persist: bool = False,
     ) -> dict[str, Any]:
         return self._engineering_validation.validate_body_dimensions(project_id, body_id, expected_revision, expected_dimensions, tolerance, persist=persist)
+
+    def validate_planetary_kinematics(
+        self, project_id: str, expected_revision: Any, sun_sketch_id: Any,
+        planet_sketch_ids: Any, ring_sketch_id: Any,
+        sun_speed_radians_per_second: Any, ring_speed_radians_per_second: Any,
+        *, carrier_body_id: Any = None, persist: bool = False,
+    ) -> dict[str, Any]:
+        return self._engineering_validation.validate_planetary_kinematics(
+            project_id, expected_revision, sun_sketch_id, planet_sketch_ids,
+            ring_sketch_id, sun_speed_radians_per_second, ring_speed_radians_per_second,
+            carrier_body_id=carrier_body_id, persist=persist,
+        )
+
+    def validate_body_planetary_kinematics(self, project_id: str, **values: Any) -> dict[str, Any]:
+        """Operation-named adapter for contract-driven validation dispatch."""
+        return self.validate_planetary_kinematics(project_id, **values)
 
     def validate_body_clearance(
         self, project_id: str, first_body_id: str, second_body_id: str,
@@ -693,15 +743,58 @@ class CadyxCore:
             parameters = item.get("parameters")
             if not isinstance(feature_geometry, dict) or not isinstance(parameters, dict):
                 raise ValidationError("Profile feature geometry is missing.")
+            source_sketch = by_id.get(source_id)
+            generated_gear = (source_sketch.get("generated_gear_profile")
+                              if isinstance(source_sketch, dict) else None)
+
+            def accepts_legacy_gear_geometry(plane: str) -> bool:
+                # Existing projects can contain valid gear B-reps produced before
+                # the editable spline sketch representation was introduced. Keep
+                # them readable; the next parameter rebuild regenerates the B-rep.
+                if (operation != "extrude_sketch" or not isinstance(generated_gear, dict)
+                        or generated_gear.get("operation") not in {
+                            "add_sketch_involute_gear", "add_sketch_internal_involute_gear",
+                        }):
+                    return False
+                return (feature_geometry.get("kind") in {"extruded_profile", "profile_with_holes"}
+                        and feature_geometry.get("plane") == plane
+                        and feature_geometry.get("depth") == parameters.get("depth")
+                        and feature_geometry.get("centered", False) == parameters.get("centered", False)
+                        and isinstance(feature_geometry.get("profile"), list))
+
+            spline_profile = closed_spline_profile(document.objects, source_id)
+            if spline_profile is not None:
+                plane, profile, curve_points = spline_profile
+                if operation == "extrude_sketch":
+                    expected = self.kernel.create_extruded_profile(
+                        profile, plane=plane, depth=parameters["depth"],
+                        centered=parameters.get("centered", False), curve_points=curve_points,
+                    )
+                else:
+                    expected = self.kernel.create_revolved_profile(
+                        profile, angle_degrees=parameters["angle_degrees"], curve_points=curve_points,
+                    )
+                if expected != feature_geometry:
+                    if accepts_legacy_gear_geometry(plane):
+                        continue
+                    raise ValidationError("Spline profile feature geometry is out of date with its source sketch or parameters.")
+                continue
             if operation == "extrude_sketch":
                 plane, profiles = closed_profiles(document.objects, source_id)
                 if len(profiles) > 1:
+                    curve_profiles = generated_gear_curve_profiles(document.objects, source_id, profiles)
                     expected = self.kernel.create_extruded_profile_with_holes(
                         profiles, plane=plane, depth=parameters["depth"],
                         centered=parameters.get("centered", False),
+                        curve_profiles=curve_profiles,
                     )
                     if expected != feature_geometry:
-                        raise ValidationError("Profile feature geometry is out of date with its source sketch or parameters.")
+                        if accepts_legacy_gear_geometry(plane):
+                            continue
+                        raise ValidationError(
+                            f"Profile feature geometry for {body.get('name') or item.get('body_id')} is out of date "
+                            "with its source sketch or parameters."
+                        )
                     continue
                 profile = profiles[0]
             else:

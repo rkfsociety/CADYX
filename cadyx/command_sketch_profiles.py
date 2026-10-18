@@ -37,15 +37,16 @@ class SketchProfileCommands:
             rotation_degrees=command.get("rotation_degrees", 0.0),
             backlash=command.get("backlash", 0.0),
         )
-        result = self._append_sketch_polyline(
-            document, sketch, points, closed=True,
-            operation="add_sketch_involute_gear", progress=progress,
+        result = self._add_sketch_spline(
+            document,
+            {"sketch_id": sketch["id"], "points": [{"x": x, "y": y} for x, y in points]},
+            mode="closed", progress=progress,
         )
         sketch["generated_gear_profile"] = {
             "operation": "add_sketch_involute_gear",
             "parameters": parameters,
             "point_ids": list(result["point_ids"]),
-            "line_ids": list(result["line_ids"]),
+            "spline_id": result["spline_id"],
         }
         result["gear_parameters"] = parameters
         return result
@@ -73,15 +74,16 @@ class SketchProfileCommands:
             rotation_degrees=command.get("rotation_degrees", 0.0),
             backlash=command.get("backlash", 0.0),
         )
-        result = self._append_sketch_polyline(
-            document, sketch, points, closed=True,
-            operation="add_sketch_internal_involute_gear", progress=progress,
+        result = self._add_sketch_spline(
+            document,
+            {"sketch_id": sketch["id"], "points": [{"x": x, "y": y} for x, y in points]},
+            mode="closed", progress=progress,
         )
         sketch["generated_gear_profile"] = {
             "operation": "add_sketch_internal_involute_gear",
             "parameters": parameters,
             "point_ids": list(result["point_ids"]),
-            "line_ids": list(result["line_ids"]),
+            "spline_id": result["spline_id"],
         }
         result["gear_parameters"] = parameters
         return result

@@ -1989,6 +1989,13 @@ function handleStreamEvent(type, event) {
     updateWorkspaceControls();
     return;
   }
+  if (type === "viewport.body-motion") {
+    if (projectId === selectedProjectId) {
+      modelViewer.animateBodyMotion(event.data?.tracks, event.data?.duration_ms);
+      orthographicViewers.forEach((view) => view.viewer.animateBodyMotion(event.data?.tracks, event.data?.duration_ms));
+    }
+    return;
+  }
   if (type === "project.deleted") {
     if (projectAddressPinned && projectId === selectedProjectId) window.location.assign("/");
     else scheduleWorkspaceRefresh();
@@ -2191,7 +2198,7 @@ folderFileList.addEventListener("click", (event) => {
 });
 
 const stream = new EventSource("/api/v1/events");
-const eventTypes = ["project.created", "project.deleted", "workspace.selection.changed", "workspace.agent-work", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera"];
+const eventTypes = ["project.created", "project.deleted", "workspace.selection.changed", "workspace.agent-work", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera", "viewport.body-motion"];
 for (const type of eventTypes) {
   stream.addEventListener(type, (message) => {
     try { handleStreamEvent(type, JSON.parse(message.data)); }

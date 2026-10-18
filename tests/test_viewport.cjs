@@ -333,5 +333,34 @@ animationFrames.shift()(animationTime);
 const threadEndHeight = rasterizedBounds ? rasterizedBounds.maxY - rasterizedBounds.minY : 0;
 assert.ok(threadMidHeight > threadStartHeight, "A metric thread grows along Z during its transition");
 assert.ok(threadEndHeight > threadMidHeight, "A metric thread transition reaches its full length");
-console.log("Viewport: Z-up, camera controls, sketch, revolve, sweep and thread transitions, zoom, refresh and fit passed.");
+const motionViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false,
+});
+motionViewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
+motionViewer.load({
+  positions: [2, 0, 0, 3, 0, 0, 2, 0, 1], triangles: [0, 1, 2], lines: [], points: [],
+  bounds: { min: [2, 0, 0], max: [3, 0, 1] },
+  bodyTriangleRanges: [{ objectId: "body:planet", start: 0, end: 1 }],
+});
+const motionBoundsBefore = rasterizedBounds;
+const motionResult = motionViewer.animateBodyMotion([{
+  body_id: "body:planet", center_x: 2, center_y: 0,
+  pivot_x: 2, pivot_y: 0,
+  spin_speed_radians_per_second: Math.PI,
+  orbit_speed_radians_per_second: 0,
+}], 1000);
+assert.equal(motionResult.body_count, 1);
+animationTime = 1050;
+animationFrames.pop()(animationTime);
+assert.notDeepEqual(rasterizedBounds, motionBoundsBefore,
+  "A revision-neutral body motion rotates its rendered triangles about the requested pivot");
+animationTime = 1200;
+animationFrames.pop()(animationTime);
+assert.notDeepEqual(rasterizedBounds, motionBoundsBefore,
+  "Gear motion remains animated across frames before its bounded duration ends");
+animationTime = 1600;
+animationFrames.pop()(animationTime);
+assert.deepEqual(rasterizedBounds, motionBoundsBefore,
+  "Temporary gear motion restores the saved viewport pose after its bounded duration");
+console.log("Viewport: Z-up, camera controls, sketch, solid transitions, temporary body motion, zoom, refresh and fit passed.");
 

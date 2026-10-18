@@ -161,7 +161,7 @@ class AgentRuntime:
         project_id: str,
         prompt: str,
         *,
-        system_prompt: str = "You are operating a CADYX project. Inspect the project before editing it and use the provided tools for all project changes. For every modeling task, check the available capabilities before planning dependent operations. If a required command is missing, inspect reusable capabilities, then use develop_capability to implement and geometry-test a safe composition of existing CADYX commands, register it, and resume the model. Never propose or execute arbitrary source code, shell commands, imports, file access, or dependency installation.",
+        system_prompt: str = "You are operating a CADYX project. Inspect the project before editing it and use the provided tools for all project changes. For every modeling task, check the available capabilities before planning dependent operations. If a required command is missing, inspect reusable capabilities and first try a tested composition of existing commands. If the required algorithm cannot be expressed by those commands, read the relevant CADYX source and propose a bounded source extension with focused tests; CADYX tests the patch in its no-network Windows AppContainer, checkpoints it, and applies it only after success. A source update needs a CADYX host restart before it is loaded; the Agent API schedules this restart after responding successfully. After restart, resume with the generic execute_command tool, which accepts new command types and lets Core validate their actual fields. Never use shell commands, external paths, new dependencies, or code that escapes the isolated source/test environment.",
         cancel_event: threading.Event | None = None,
     ) -> AgentRunResult:
         if not isinstance(prompt, str) or not prompt.strip():
@@ -337,6 +337,29 @@ class AgentRuntime:
                 "validated_reusable_capabilities": capability_engine.available(),
             }
 
+        def read_source_file(arguments: Mapping[str, Any]) -> dict[str, Any]:
+            if set(arguments) != {"path"} or not isinstance(arguments["path"], str):
+                raise ValidationError("read_source_file requires one repository-relative source path.")
+            guard.check()
+            return self.core.read_agent_source_file(arguments["path"])
+
+        def list_source_extensions(arguments: Mapping[str, Any]) -> list[dict[str, Any]]:
+            no_arguments(arguments)
+            guard.check()
+            return self.core.list_agent_source_extensions()
+
+        def develop_source_extension(arguments: Mapping[str, Any]) -> dict[str, Any]:
+            if set(arguments) != {"proposal"} or not isinstance(arguments["proposal"], Mapping):
+                raise ValidationError("develop_source_extension requires a complete source proposal object.")
+            guard.check()
+            return self.core.develop_agent_source_extension(project_id, dict(arguments["proposal"]))
+
+        def rollback_source_extension(arguments: Mapping[str, Any]) -> dict[str, Any]:
+            if set(arguments) != {"extension_id"} or not isinstance(arguments["extension_id"], str):
+                raise ValidationError("rollback_source_extension requires one extension id.")
+            guard.check()
+            return self.core.rollback_agent_source_extension(project_id, arguments["extension_id"])
+
         def execute_capability(capability_id: str) -> Callable[[Mapping[str, Any]], Any]:
             def _execute(arguments: Mapping[str, Any]) -> Any:
                 guard.check()
@@ -353,6 +376,28 @@ class AgentRuntime:
                     empty_schema,
                 ),
                 list_capabilities,
+            ),
+            "read_source_file": _RegisteredTool(
+                AgentToolSpec("read_source_file", "Read a bounded CADYX source file and its base SHA-256 for a revision-checked source proposal.", {
+                    "type": "object", "properties": {"path": {"type": "string"}},
+                    "required": ["path"], "additionalProperties": False,
+                }), read_source_file,
+            ),
+            "list_source_extensions": _RegisteredTool(
+                AgentToolSpec("list_source_extensions", "List persistent source extensions and their current lifecycle status.", empty_schema),
+                list_source_extensions,
+            ),
+            "develop_source_extension": _RegisteredTool(
+                AgentToolSpec("develop_source_extension", "Test a bounded CADYX source-code patch in a Windows AppContainer, then checkpoint and apply it only if focused tests pass.", {
+                    "type": "object", "properties": {"proposal": {"type": "object"}},
+                    "required": ["proposal"], "additionalProperties": False,
+                }), develop_source_extension,
+            ),
+            "rollback_source_extension": _RegisteredTool(
+                AgentToolSpec("rollback_source_extension", "Restore a source-extension checkpoint only if its patched files are unchanged since application.", {
+                    "type": "object", "properties": {"extension_id": {"type": "string"}},
+                    "required": ["extension_id"], "additionalProperties": False,
+                }), rollback_source_extension,
             ),
             "develop_capability": _RegisteredTool(
                 AgentToolSpec(

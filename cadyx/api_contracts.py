@@ -9,6 +9,30 @@ from .errors import ValidationError
 SPECIFICATION_OPERATIONS = ("dimensions", "clearance", "preservation", "thickness")
 
 VALIDATION_OPERATIONS: dict[str, dict[str, Any]] = {
+    "planetary_kinematics": {
+        "tool_name": "cadyx_validate_planetary_kinematics",
+        "description": "Check saved planetary gear profile geometry and tooth indexing, then calculate ideal sun, carrier, and planet angular speeds at an exact document revision.",
+        "method": "POST",
+        "path": "/api/v1/agent/projects/{id}/validations/planetary-kinematics",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "expected_revision": {"type": "integer", "minimum": 0},
+                "sun_sketch_id": {"type": "string", "minLength": 1},
+                "planet_sketch_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 2, "uniqueItems": True},
+                "ring_sketch_id": {"type": "string", "minLength": 1},
+                "carrier_body_id": {"type": "string", "minLength": 1},
+                "sun_speed_radians_per_second": {"type": "number"},
+                "ring_speed_radians_per_second": {"type": "number"},
+                "animate_duration_ms": {"type": "integer", "minimum": 0, "maximum": 60000},
+                "persist": {"type": "boolean"},
+            },
+            "required": ["expected_revision", "sun_sketch_id", "planet_sketch_ids", "ring_sketch_id", "sun_speed_radians_per_second", "ring_speed_radians_per_second"],
+            "additionalProperties": False,
+        },
+        "defaults": {"persist": False, "animate_duration_ms": 0},
+        "field_error": "Planetary kinematics requires an exact revision, one sun sketch, at least two distinct planet sketches, one ring sketch, and finite sun/ring speeds.",
+    },
     "dimensions": {
         "tool_name": "cadyx_validate_body_dimensions",
         "description": "Read-only axis-aligned bounding-box dimension check bound to an exact "

@@ -116,6 +116,9 @@
     let transition = null;
     let transitionFrame = 0;
     let cameraFrame = 0;
+    let bodyMotion = null;
+    let bodyMotionFrame = 0;
+    let bodyMotionAngleByVertex = new Float32Array(0);
     let sweepProgress = null;
     let loftProgress = null;
 
@@ -269,11 +272,29 @@
         return [width / 2 + right * scale + cameraPanX * dpr,
           height / 2 - up * scale + cameraPanY * dpr];
       };
+      const motionSeconds = bodyMotion
+        ? Math.min((performance.now() - bodyMotion.startedAt) / 1000, bodyMotion.durationSeconds) : 0;
+      if (!motionSeconds && bodyMotionAngleByVertex.length) bodyMotionAngleByVertex.fill(0);
       for (let index = 0; index < positions.length; index += 3) {
         let worldX = positions[index];
         let worldY = positions[index + 1];
         let worldZ = positions[index + 2];
         const vertex = index / 3;
+        const motionIndex = geometry.bodyMotionIndexByVertex?.[vertex] ?? -1;
+        const motion = motionIndex >= 0 ? geometry.bodyMotions?.[motionIndex] : null;
+        if (motion && motionSeconds > 0) {
+          const spin = motion.spinSpeed * motionSeconds;
+          const orbit = motion.orbitSpeed * motionSeconds;
+          bodyMotionAngleByVertex[vertex] = spin + orbit;
+          const spinCosine = Math.cos(spin), spinSine = Math.sin(spin);
+          const orbitCosine = Math.cos(orbit), orbitSine = Math.sin(orbit);
+          const localX = worldX - motion.centerX, localY = worldY - motion.centerY;
+          const orbitX = motion.centerX - motion.pivotX, orbitY = motion.centerY - motion.pivotY;
+          const centerX = motion.pivotX + orbitX * orbitCosine - orbitY * orbitSine;
+          const centerY = motion.pivotY + orbitX * orbitSine + orbitY * orbitCosine;
+          worldX = centerX + localX * spinCosine - localY * spinSine;
+          worldY = centerY + localX * spinSine + localY * spinCosine;
+        }
         if (transition?.vertexRange && vertex >= transition.vertexRange[0] && vertex < transition.vertexRange[1]) {
           if (transition.type === "revolve") {
             worldX *= progress;
@@ -302,7 +323,7 @@
       if (showWorldAxes) drawWorldAxes(project, radius, dpr);
       if (showRotationAxes) drawRotationAxes(geometry.rotationAxes || [], project, dpr);
       if (triangles.length) renderMesh(
-        triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
+        triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, bodyMotionAngleByVertex,
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
         wireframeColor, wireframeOpacity, dpr, 1.5 / scale,
@@ -846,7 +867,7 @@
       return true;
     }
 
-    function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress,
+    function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, motionAngles,
       vertexNormals, orientation, faceNormals, featureEdges, silhouetteCandidates, colors, triangleColors,
       showWireframe, shaded,
       wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = [], overlayRanges = []) {
@@ -855,7 +876,10 @@
       const smooth = vertexNormals && (!transition || progress >= 1);
       if (smooth) {
         for (let vertex = 0; vertex < vertexLight.length; vertex += 1) {
-          const worldX = vertexNormals[vertex * 3], worldY = vertexNormals[vertex * 3 + 1];
+          const angle = motionAngles?.[vertex] || 0;
+          const cosine = Math.cos(angle), sine = Math.sin(angle);
+          const baseX = vertexNormals[vertex * 3], baseY = vertexNormals[vertex * 3 + 1];
+          const worldX = baseX * cosine - baseY * sine, worldY = baseX * sine + baseY * cosine;
           const worldZ = vertexNormals[vertex * 3 + 2];
           const right = orientation[0] * worldX + orientation[1] * worldY + orientation[2] * worldZ;
           const depth = orientation[3] * worldX + orientation[4] * worldY + orientation[5] * worldZ;
@@ -1175,6 +1199,51 @@
         selectedBodyId = null;
         render();
       },
+      animateBodyMotion(tracks, durationMs) {
+        if (!Array.isArray(tracks) || !tracks.length || !Number.isFinite(durationMs)
+            || durationMs < 1 || durationMs > 60000 || !geometry?.bodyMotionIndexById) {
+          throw new Error("Invalid body motion request.");
+        }
+        const seen = new Set();
+        const bodyMotions = new Array(geometry.bodyMotionIndexById.size).fill(null);
+        const motions = tracks.map((track) => {
+          if (!track || typeof track.body_id !== "string" || seen.has(track.body_id)
+              || !geometry.bodyMotionIndexById.has(track.body_id)
+              || ![track.center_x, track.center_y, track.pivot_x, track.pivot_y,
+                track.spin_speed_radians_per_second, track.orbit_speed_radians_per_second].every(Number.isFinite)) {
+            throw new Error("Body motion needs unique visible body IDs and finite planar motion values.");
+          }
+          seen.add(track.body_id);
+          const motion = {
+            index: geometry.bodyMotionIndexById.get(track.body_id),
+            centerX: track.center_x, centerY: track.center_y,
+            pivotX: track.pivot_x, pivotY: track.pivot_y,
+            spinSpeed: track.spin_speed_radians_per_second,
+            orbitSpeed: track.orbit_speed_radians_per_second,
+          };
+          bodyMotions[motion.index] = motion;
+          return motion;
+        });
+        geometry.bodyMotions = bodyMotions;
+        bodyMotion = { motions, startedAt: performance.now(), durationSeconds: durationMs / 1000 };
+        const token = ++bodyMotionFrame;
+        const tick = (now) => {
+          if (token !== bodyMotionFrame || !bodyMotion) return;
+          render();
+          if (now - bodyMotion.startedAt < durationMs) requestAnimationFrame(tick);
+          else {
+            bodyMotion = null;
+            render();
+          }
+        };
+        requestAnimationFrame(tick);
+        return { body_count: motions.length, duration_ms: durationMs };
+      },
+      stopBodyMotion() {
+        bodyMotionFrame += 1;
+        bodyMotion = null;
+        render();
+      },
       getCamera() {
         return { orientation: cameraOrientation.slice(), zoom, panX: cameraPanX, panY: cameraPanY, projection: "orthographic" };
       },
@@ -1209,6 +1278,8 @@
         render();
       },
       load(value, { reset = true, transition: nextTransition = null, smoothShading = false } = {}) {
+        bodyMotionFrame += 1;
+        bodyMotion = null;
         const orbitCenter = orbitCenterFor(value);
         const fitCenter = orbitCenter || value.bounds.min.map((min, axis) => min / 2 + value.bounds.max[axis] / 2);
         const sourceTriangles = value.triangles || [];
@@ -1240,6 +1311,38 @@
             : null,
           faceNormals: smoothShading ? null : buildFaceNormals(value.positions, value.triangles || []),
         };
+        const bodyMotionIndexByVertex = new Int32Array(value.positions.length / 3).fill(-1);
+        const bodyMotionIndexById = new Map();
+        for (const range of value.bodyTriangleRanges || []) {
+          if (typeof range.objectId !== "string" || !Number.isInteger(range.start) || !Number.isInteger(range.end)) continue;
+          let bodyIndex = bodyMotionIndexById.get(range.objectId);
+          if (bodyIndex === undefined) {
+            bodyIndex = bodyMotionIndexById.size;
+            bodyMotionIndexById.set(range.objectId, bodyIndex);
+          }
+          for (let triangle = range.start; triangle < range.end; triangle += 1) {
+            for (let corner = 0; corner < 3; corner += 1) {
+              const vertex = value.triangles[triangle * 3 + corner];
+              if (Number.isInteger(vertex) && vertex >= 0 && vertex < bodyMotionIndexByVertex.length) {
+                bodyMotionIndexByVertex[vertex] = bodyIndex;
+              }
+            }
+          }
+        }
+        for (const range of value.bodyLineRanges || []) {
+          if (!Number.isInteger(range.start) || !Number.isInteger(range.end)) continue;
+          for (let line = range.start; line < range.end; line += 2) {
+            for (let endpoint = 0; endpoint < 2; endpoint += 1) {
+              const vertex = value.lines[line + endpoint];
+              const bodyIndex = bodyMotionIndexByVertex[vertex];
+              if (bodyIndex >= 0) bodyMotionIndexByVertex[vertex] = bodyIndex;
+            }
+          }
+        }
+        geometry.bodyMotionIndexByVertex = bodyMotionIndexByVertex;
+        geometry.bodyMotionIndexById = bodyMotionIndexById;
+        geometry.bodyMotions = new Array(bodyMotionIndexById.size).fill(null);
+        bodyMotionAngleByVertex = new Float32Array(value.positions.length / 3);
         vertexLight = geometry.vertexNormals ? new Float32Array(geometry.vertexNormals.length / 3) : new Float32Array(0);
         transition = animatedTransition ? {
           ...animatedTransition,

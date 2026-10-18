@@ -104,7 +104,7 @@ class PersistedSketchCurveTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             document.validate()
 
-    def test_closed_interpolating_spline_renders_and_refuses_polyline_profile(self):
+    def test_closed_interpolating_spline_renders_and_extracts_a_profile(self):
         vertices = [(10, 0), (3, 9), (-8, 6), (-8, -6), (3, -9)]
         document, spline_id = make_spline_document(vertices, mode="closed")
         document.validate()
@@ -122,8 +122,9 @@ class PersistedSketchCurveTests(unittest.TestCase):
             self.assertEqual(len(rendered["positions"]), len(sampled) * 3)
             self.assertEqual(len(rendered["lines"]), (len(sampled) - 1) * 2)
             self.assertEqual(rendered["positions"][:3], rendered["positions"][-3:])
-            with self.assertRaisesRegex(ValidationError, "curve-capable geometry-kernel"):
-                closed_profile(document.objects, document.objects[0]["id"])
+            plane, profile = closed_profile(document.objects, document.objects[0]["id"])
+            self.assertEqual(plane, "XY")
+            self.assertEqual(profile, sampled[:-1])
 
     def test_closed_interpolating_spline_uses_centripetal_spacing(self):
         vertices = [(0, 0), (4, 0), (4, 1), (0, 3)]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import struct
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -76,6 +77,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/topology", "agent_topology", "agent"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/validations", "agent_validations", "validation"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/dimensions", "agent_validate_dimensions", "validation", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/planetary-kinematics", "agent_validate_planetary_kinematics", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/clearance", "agent_validate_clearance", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/preservation", "agent_validate_preservation", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/thickness", "agent_validate_thickness", "validation", "json"),
@@ -99,6 +101,10 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities/check", "agent_capability_check", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities/{capability_id}/execute", "agent_capability_execute", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities/{capability_id}/rollback", "agent_capability_rollback", "agent", "json"),
+    RouteSpec("GET", "/api/v1/agent/projects/{project_id}/source-extensions", "agent_source_extensions", "agent"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/source-extensions", "agent_source_extension_develop", "agent", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/source-extensions/{extension_id}/rollback", "agent_source_extension_rollback", "agent", "json"),
+    RouteSpec("POST", "/api/v1/agent/source-files/read", "agent_source_file_read", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases/recover", "agent_lease_recover", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases/{lease_id}/heartbeat", "agent_lease_heartbeat", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases/{lease_id}/release", "agent_lease_release", "agent", "json"),
@@ -373,6 +379,38 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         if body:
             raise ValidationError("Capability rollback accepts an empty object only.")
         handler._json(200, core.rollback_agent_capability(project_id, route.params["capability_id"]))
+    elif name == "agent_source_file_read":
+        body = _require_json(handler)
+        if set(body) != {"path"} or not isinstance(body["path"], str):
+            raise ValidationError("Source-file read requires only a path string.")
+        handler._json(200, core.read_agent_source_file(body["path"]))
+    elif name == "agent_source_extensions":
+        handler._json(200, core.observe_agent_operation(
+            project_id, "Изучает проверенные исходные возможности", core.list_agent_source_extensions,
+        ))
+    elif name == "agent_source_extension_develop":
+        body = _require_json(handler)
+        if set(body) != {"proposal"} or not isinstance(body["proposal"], dict):
+            raise ValidationError("Source extension development requires only a proposal object.")
+        result = core.develop_agent_source_extension(project_id, body["proposal"])
+        if result.get("restart_required"):
+            script = Path(__file__).resolve().parent.parent / "scripts" / "restart-after-source-extension.ps1"
+            try:
+                subprocess.Popen(
+                    ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+                    cwd=script.parent.parent, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, close_fds=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                result["restart_scheduled"] = True
+            except OSError:
+                result["restart_scheduled"] = False
+        handler._json(201 if result.get("status") == "ready" else 200, result)
+    elif name == "agent_source_extension_rollback":
+        body = _require_json(handler)
+        if body:
+            raise ValidationError("Source extension rollback accepts an empty object only.")
+        handler._json(200, core.rollback_agent_source_extension(project_id, route.params["extension_id"]))
     elif name == "agent_dashboard_get":
         handler._json(200, core.agent_dashboard_snapshot(project_id))
     elif name == "agent_dashboard_post":
@@ -458,6 +496,35 @@ def _dispatch_validation(handler: Any, core: CadyxCore, route: RouteMatch, parse
                 persist=body.get("persist", False),
             ),
         )
+        handler._json(200, result)
+        return
+    if operation == "planetary_kinematics":
+        validate_request_fields(operation, body)
+        assert body is not None
+        result = core.observe_agent_operation(
+            project_id, "Проверяет кинематику планетарной передачи",
+            lambda: core.validate_body_planetary_kinematics(
+                project_id,
+                expected_revision=body["expected_revision"],
+                sun_sketch_id=body["sun_sketch_id"],
+                planet_sketch_ids=body["planet_sketch_ids"],
+                ring_sketch_id=body["ring_sketch_id"],
+                sun_speed_radians_per_second=body["sun_speed_radians_per_second"],
+                ring_speed_radians_per_second=body["ring_speed_radians_per_second"],
+                carrier_body_id=body.get("carrier_body_id"),
+                persist=body.get("persist", False),
+            ),
+        )
+        duration_ms = body.get("animate_duration_ms", 0)
+        if type(duration_ms) is not int or not 0 <= duration_ms <= 60000:
+            raise ValidationError("animate_duration_ms must be an integer from 0 to 60000.")
+        if duration_ms and result.get("status") == "pass":
+            core.events.publish("viewport.body-motion", project_id, {
+                "revision": result["revision"],
+                "duration_ms": duration_ms,
+                "tracks": result["motion_tracks"],
+            })
+            result["animation"] = {"status": "started", "duration_ms": duration_ms}
         handler._json(200, result)
         return
     validate_request_fields(operation, body)

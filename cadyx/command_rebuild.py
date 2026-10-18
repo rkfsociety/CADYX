@@ -9,7 +9,8 @@ import math
 from typing import Any, Callable
 from .errors import ValidationError
 from .models import Document
-from .sketches import closed_profile, closed_profiles, closed_spline_profile, open_path
+from .sketches import (closed_profile, closed_profiles, closed_spline_profile,
+                       generated_gear_curve_profiles, open_path)
 
 
 class RebuildCommands:
@@ -18,6 +19,7 @@ class RebuildCommands:
         profile: list[dict[str, float]] | None = None, plane: str | None = None,
         curve_points: list[dict[str, float]] | None = None,
         profiles: list[list[dict[str, float]]] | None = None,
+        curve_profiles: list[list[dict[str, float]] | None] | None = None,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         source_sketch_id = (feature.get("source_sketch_id") or parameters.get("source_sketch_id")
@@ -54,6 +56,7 @@ class RebuildCommands:
                 if operation == "extrude_sketch":
                     plane, profiles = closed_profiles(document.objects, source_sketch_id)
                     profile = profiles[0]
+                    curve_profiles = generated_gear_curve_profiles(document.objects, source_sketch_id, profiles)
                 else:
                     plane, profile = closed_profile(document.objects, source_sketch_id)
                 curve_points = None
@@ -69,7 +72,7 @@ class RebuildCommands:
             elif profiles is not None and len(profiles) > 1:
                 return self.kernel.create_extruded_profile_with_holes(
                     profiles, plane=plane, depth=parameters["depth"],
-                    centered=parameters.get("centered", False),
+                    centered=parameters.get("centered", False), curve_profiles=curve_profiles,
                 )
             return self.kernel.create_extruded_profile(profile, **options)
         if operation == "revolve_sketch":

@@ -434,9 +434,10 @@ class ParameterCommands:
             parameters = generated.get("parameters")
             old_points = generated.get("point_ids")
             old_lines = generated.get("line_ids")
+            spline_id = generated.get("spline_id")
             if (operation not in {"add_sketch_involute_gear", "add_sketch_internal_involute_gear"}
                     or not isinstance(parameters, dict) or not isinstance(old_points, list)
-                    or not isinstance(old_lines, list)):
+                    or (not isinstance(old_lines, list) and not isinstance(spline_id, str))):
                 raise ValidationError("Generated gear sketch metadata is invalid.")
             input_keys = {
                 "module", "tooth_count", "pressure_angle_degrees", "center_x", "center_y",
@@ -454,14 +455,14 @@ class ParameterCommands:
             points, rebuilt_parameters = generator(**gear_parameters)
             segments = len(points)
             point_ids = list(old_points[:segments])
-            line_ids = list(old_lines[:segments])
             point_ids.extend(f"point:{uuid4()}" for _ in range(segments - len(point_ids)))
-            line_ids.extend(f"line:{uuid4()}" for _ in range(segments - len(line_ids)))
+            if not isinstance(spline_id, str):
+                spline_id = f"spline:{uuid4()}"
 
             if progress is not None:
                 progress({"phase": "rebuild_generated_gear_profile"})
-            retained_ids = set(point_ids) | set(line_ids)
-            removed_ids = set(old_points) | set(old_lines)
+            retained_ids = set(point_ids) | {spline_id}
+            removed_ids = set(old_points) | set(old_lines or [])
             document.objects[:] = [
                 item for item in document.objects
                 if item.get("id") not in removed_ids or item.get("id") in retained_ids
@@ -474,12 +475,15 @@ class ParameterCommands:
                     item = {"id": point_id, "type": "point", "sketch_id": sketch_id}
                     elements.append(item)
                 item.update({"x": x, "y": y})
-            for index, line_id in enumerate(line_ids):
-                item = by_id.get(line_id)
-                if item is None:
-                    item = {"id": line_id, "type": "line", "sketch_id": sketch_id}
-                    elements.append(item)
-                item.update({"start_id": point_ids[index], "end_id": point_ids[(index + 1) % segments]})
+            spline = by_id.get(spline_id)
+            if spline is None:
+                spline = {"id": spline_id, "type": "spline", "sketch_id": sketch_id,
+                          "point_ids": point_ids, "mode": "closed"}
+                elements.append(spline)
+            elif spline.get("type") != "spline":
+                raise ValidationError("Generated gear spline identifier has the wrong object type.")
+            else:
+                spline["point_ids"] = point_ids
             if elements:
                 sketch_index = document.objects.index(sketch)
                 document.objects[sketch_index + 1:sketch_index + 1] = elements
@@ -487,7 +491,7 @@ class ParameterCommands:
                 "operation": operation,
                 "parameters": rebuilt_parameters,
                 "point_ids": point_ids,
-                "line_ids": line_ids,
+                "spline_id": spline_id,
             }
 
     def _rebuild_bound_feature(

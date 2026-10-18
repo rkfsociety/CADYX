@@ -61,6 +61,7 @@ class HoledProfileDescriptor(OCCTDescriptor):
     holes: list[list[dict[str, float]]]
     depth: float
     solid: SolidDescriptor
+    curve_profiles: NotRequired[list[list[dict[str, float]] | None]]
     centered: NotRequired[bool]
 
 
@@ -293,7 +294,9 @@ class GeometryDescriptorValidation:
 
     def _validate_profile_with_holes_geometry(self, geometry: GeometryDescriptor) -> None:
         if (set(geometry) not in ({"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume"},
-                                  {"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume", "centered"})
+                                  {"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume", "centered"},
+                                  {"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume", "curve_profiles"},
+                                  {"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume", "centered", "curve_profiles"})
                 or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "profile_with_holes"
                 or not isinstance(geometry.get("holes"), list) or not geometry["holes"]
                 or not isinstance(geometry.get("solid"), dict)):
@@ -304,6 +307,7 @@ class GeometryDescriptorValidation:
         expected = self.create_extruded_profile_with_holes(
             [geometry["profile"], *geometry["holes"]], plane=geometry["plane"],
             depth=geometry["depth"], centered=centered,
+            curve_profiles=geometry.get("curve_profiles"),
         )
         comparable = dict(geometry)
         expected.pop("volume", None)

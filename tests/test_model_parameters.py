@@ -9,6 +9,68 @@ from cadyx.semantic_selection import capture_edge_references, resolve_edge_refer
 
 
 class ModelParameterExpressionTests(unittest.TestCase):
+    def test_legacy_polyline_gear_converts_to_editable_closed_spline_on_rebuild(self):
+        system = CommandSystem(OCCTKernelAdapter())
+        document = Document.create()
+        system.execute(document, {"type": "create_model_parameter", "name": "GearTeeth",
+                                  "value": 20, "unit": "unitless"})
+        sketch_id = system.execute(document, {"type": "create_sketch", "name": "Legacy gear", "plane": "XY"})["sketch_id"]
+        system.execute(document, {"type": "add_sketch_involute_gear", "sketch_id": sketch_id,
+                                  "module": 2, "tooth_count": 20})
+        feature = system.execute(document, {"type": "extrude_sketch", "sketch_id": sketch_id, "depth": 8})
+        sketch = next(item for item in document.objects if item["id"] == sketch_id)
+        generated = sketch["generated_gear_profile"]
+        points = generated["point_ids"]
+        spline_id = generated["spline_id"]
+        spline_index = next(index for index, item in enumerate(document.objects) if item["id"] == spline_id)
+        document.objects.pop(spline_index)
+        line_ids = [f"line:legacy-{index}" for index in range(len(points))]
+        sketch_index = next(index for index, item in enumerate(document.objects) if item["id"] == sketch_id)
+        document.objects[sketch_index + 1:sketch_index + 1] = [
+            {"id": line_id, "type": "line", "sketch_id": sketch_id,
+             "start_id": point_id, "end_id": points[(index + 1) % len(points)]}
+            for index, (line_id, point_id) in enumerate(zip(line_ids, points, strict=True))
+        ]
+        generated.pop("spline_id")
+        generated["line_ids"] = line_ids
+        system.execute(document, {"type": "bind_model_parameter", "object_id": sketch_id,
+                                  "path": "generated_gear_profile.parameters.tooth_count",
+                                  "expression": "GearTeeth"})
+
+        system.execute(document, {"type": "set_model_parameter", "name": "GearTeeth", "value": 18})
+
+        sketch = next(item for item in document.objects if item["id"] == sketch_id)
+        generated = sketch["generated_gear_profile"]
+        self.assertIn("spline_id", generated)
+        self.assertNotIn("line_ids", generated)
+        spline = next(item for item in document.objects if item["id"] == generated["spline_id"])
+        self.assertEqual(spline["mode"], "closed")
+        rebuilt_body = next(item for item in document.objects if item["id"] == feature["body_id"])
+        self.assertEqual(rebuilt_body["geometry"]["profile_curve"], "closed_periodic_bspline")
+        document.validate()
+
+    def test_internal_gear_profile_rebuild_preserves_its_periodic_spline_cavity(self):
+        system = CommandSystem(OCCTKernelAdapter())
+        document = Document.create()
+        system.execute(document, {"type": "create_model_parameter", "name": "RingModule",
+                                 "value": 2, "unit": "mm"})
+        sketch_id = system.execute(document, {"type": "create_sketch", "name": "Ring gear", "plane": "XY"})["sketch_id"]
+        system.execute(document, {"type": "add_sketch_circle", "sketch_id": sketch_id,
+                                 "x": 0, "y": 0, "radius": 80})
+        system.execute(document, {"type": "add_sketch_internal_involute_gear", "sketch_id": sketch_id,
+                                 "module": 2, "tooth_count": 60})
+        body = system.execute(document, {"type": "extrude_sketch", "sketch_id": sketch_id, "depth": 8})
+        system.execute(document, {"type": "bind_model_parameter", "object_id": sketch_id,
+            "path": "generated_gear_profile.parameters.module", "expression": "RingModule"})
+        original_volume = body["geometry"]["volume"]
+
+        system.execute(document, {"type": "set_model_parameter", "name": "RingModule", "value": 2.1})
+
+        rebuilt = next(item for item in document.objects if item["id"] == body["body_id"])
+        self.assertEqual(rebuilt["geometry"]["solid"]["tool"]["profile_curve"], "closed_periodic_bspline")
+        self.assertNotAlmostEqual(rebuilt["geometry"]["volume"], original_volume, places=5)
+        document.validate()
+
     def test_gear_sketch_parameters_regenerate_profile_and_dependent_brep(self):
         system = CommandSystem(OCCTKernelAdapter())
         document = Document.create()
@@ -53,6 +115,10 @@ class ModelParameterExpressionTests(unittest.TestCase):
         body = next(item for item in document.objects if item["id"] == extruded["body_id"])
         self.assertEqual(sketch["generated_gear_profile"]["parameters"]["tooth_count"], 18)
         self.assertLess(len(sketch["generated_gear_profile"]["point_ids"]), old_point_count)
+        self.assertEqual(sketch["generated_gear_profile"]["spline_id"], next(
+            item["id"] for item in document.objects
+            if item["type"] == "spline" and item["sketch_id"] == sketch["id"]
+        ))
         self.assertNotAlmostEqual(body["geometry"]["volume"], old_volume, places=5)
         document.validate()
 

@@ -215,6 +215,7 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(any(route["path"] == "/api/v1/agent/projects/{id}/capabilities" for route in capabilities["routes"]))
         advertised = {item["type"] for item in capabilities["commands"]}
         self.assertEqual(len(advertised), len(capabilities["commands"]))
+
         self.assertIn("add_sketch_circle_tangent_to_line", advertised)
         self.assertIn("add_sketch_circle_tangent_to_two_lines", advertised)
         self.assertIn("add_sketch_circle_tangent_to_three_lines", advertised)
@@ -253,6 +254,32 @@ class WebApiTests(unittest.TestCase):
                 except Exception as exc:
                     self.assertNotIn("Unsupported command type", str(exc))
         self.assertEqual(before, self.core.workspace.workspace_revision_token())
+
+    def test_source_extension_read_discovery_and_restart_schedule(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Source extension API"})
+        project_id = created["project"]["id"]
+        status, source = self.request("/api/v1/agent/source-files/read", {"path": "cadyx/gear_kinematics.py"})
+        self.assertEqual(status, 200)
+        self.assertEqual(len(source["sha256"]), 64)
+        self.assertIn("solve_planetary_gearset", source["content"])
+        with urlopen(self.base_url + f"/api/v1/agent/projects/{project_id}/source-extensions", timeout=3) as response:
+            status, extensions = response.status, json.loads(response.read())
+        self.assertEqual(status, 200)
+        self.assertEqual(extensions, [])
+        self.assertTrue(any("source-extensions" in route["path"]
+                            for route in self.core.agent_capabilities()["routes"]))
+
+        with patch("cadyx.core.CadyxCore.develop_agent_source_extension",
+                   return_value={"status": "ready", "restart_required": True}) as develop, \
+             patch("cadyx.web_routes.subprocess.Popen") as restart:
+            status, result = self.request(
+                f"/api/v1/agent/projects/{project_id}/source-extensions",
+                {"proposal": {"id": "api_test", "title": "test"}},
+            )
+        self.assertEqual(status, 201)
+        self.assertTrue(result["restart_scheduled"])
+        develop.assert_called_once()
+        restart.assert_called_once()
 
     def test_agent_capability_lifecycle_is_available_through_agent_api(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "Capability API"})

@@ -45,6 +45,7 @@ class GeometryKernel(Protocol):
     def create_extruded_profile_with_holes(
         self, profiles: list[list[dict[str, float]]], *, plane: str, depth: float,
         centered: bool = False,
+        curve_profiles: list[list[dict[str, float]] | None] | None = None,
     ) -> HoledProfileDescriptor: ...
 
     def create_extruded_circle(
@@ -174,10 +175,18 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
     def create_extruded_profile_with_holes(
         self, profiles: list[list[dict[str, float]]], *, plane: str, depth: float,
         centered: bool = False,
+        curve_profiles: list[list[dict[str, float]] | None] | None = None,
     ) -> HoledProfileDescriptor:
         if type(centered) is not bool or not isinstance(profiles, list) or len(profiles) < 2:
             raise ValidationError("A multi-contour extrusion needs an outer contour and at least one hole.")
         normalized = [_profile_values(profile, plane)[0] for profile in profiles]
+        if curve_profiles is not None:
+            if not isinstance(curve_profiles, list) or len(curve_profiles) != len(normalized):
+                raise ValidationError("Curved profile controls must match the contour list.")
+            normalized_curves = [None if points is None else _spline_control_values(points, plane)
+                                 for points in curve_profiles]
+        else:
+            normalized_curves = [None] * len(normalized)
         def area(profile):
             return sum(point["x"] * profile[(i + 1) % len(profile)]["y"]
                        - profile[(i + 1) % len(profile)]["x"] * point["y"]
@@ -211,15 +220,21 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
         solid = (self.create_extruded_circle(outer_circle[0], outer_circle[1], plane=plane,
                                              depth=amount, centered=centered) if outer_circle else
                  self.create_extruded_profile(outer, plane=plane, depth=amount, centered=centered))
-        for hole in holes:
+        hole_indices = [index for index in range(len(normalized)) if index != outer_index]
+        for hole_index, hole in zip(hole_indices, holes, strict=True):
             hole_circle = circle(hole)
             tool = (self.create_extruded_circle(hole_circle[0], hole_circle[1], plane=plane,
                                                 depth=amount, centered=centered) if hole_circle else
-                    self.create_extruded_profile(hole, plane=plane, depth=amount, centered=centered))
+                    self.create_extruded_profile(hole, plane=plane, depth=amount, centered=centered,
+                                                 curve_points=normalized_curves[hole_index]))
             solid = self.cut_solids(solid, tool)
+        ordered_curves = [normalized_curves[outer_index],
+                          *(normalized_curves[index] for index in hole_indices)]
         geometry = {"kernel": self.kernel_id, "kind": "profile_with_holes", "plane": plane,
                     "profile": outer, "holes": holes, "depth": amount, "solid": solid,
                     "volume": solid["volume"]}
+        if any(points is not None for points in ordered_curves):
+            geometry["curve_profiles"] = ordered_curves
         if centered:
             geometry["centered"] = True
         return geometry
