@@ -439,7 +439,7 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
         if (node.edge_offset > edge_count || node.edge_count < 2 || node.edge_count > edge_count - node.edge_offset
             || node.coordinate_count % 3 != 0)
           throw std::runtime_error("Loft graph operation needs at least two section sizes.");
-        shape = MakeLoftShape(points, edges, node.edge_count, node.coordinate_count / 3);
+        shape = MakeLoftShape(points, edges, node.edge_count, node.coordinate_count / 3, node.plane);
         break;
       case 9:
         if (node.input_a < 0 || node.input_b < 0

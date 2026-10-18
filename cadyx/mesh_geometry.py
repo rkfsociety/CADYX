@@ -19,7 +19,6 @@ _MESH_KIND = "triangle_mesh"
 _MESH_ENCODING = "zlib-f32-u32-le-v1"
 _HEADER = struct.Struct("<4s6If")
 _MAX_VERTICES = 300_000
-_MAX_TRIANGLES = 100_000
 
 
 def geometry_from_native_buffer(buffer: bytes) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -38,8 +37,8 @@ def geometry_from_native_buffer(buffer: bytes) -> tuple[dict[str, Any], dict[str
         raise ValidationError("Native scan processor returned an invalid voxel size.")
     if input_vertices <= 0 or vertex_count < 3 or triangle_count < 1:
         raise ValidationError("Native scan processor returned an empty mesh.")
-    if vertex_count > _MAX_VERTICES or triangle_count > _MAX_TRIANGLES:
-        raise ValidationError("Native scan mesh exceeds the supported document size.")
+    if vertex_count > _MAX_VERTICES:
+        raise ValidationError("Native scan mesh exceeds the supported vertex count.")
 
     packed = zlib.compress(memoryview(buffer)[_HEADER.size :], level=6)
     geometry = {
@@ -75,8 +74,7 @@ def _decode_payload(geometry: dict[str, Any]) -> tuple[array, array]:
     vertex_count = geometry.get("vertex_count")
     triangle_count = geometry.get("triangle_count")
     if (type(vertex_count) is not int or type(triangle_count) is not int or
-            vertex_count < 3 or vertex_count > _MAX_VERTICES or
-            triangle_count < 1 or triangle_count > _MAX_TRIANGLES):
+            vertex_count < 3 or vertex_count > _MAX_VERTICES or triangle_count < 1):
         raise ValidationError("Triangle mesh counts are missing or invalid.")
     checksum = geometry.get("sha256")
     encoded = geometry.get("data")

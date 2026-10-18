@@ -786,14 +786,16 @@ class CadyxCore:
                 if (not isinstance(groups, list) or not groups
                         or [value for group in groups for value in group] != source_sketch_ids):
                     raise ValidationError("Loft feature contour groups do not match their source sketches.")
-                sections, offsets = [], []
+                sections, offsets, section_axes = [], [], []
                 for group in groups:
                     group_profiles, group_offsets = [], []
                     for sketch_id in group:
                         sketch = by_id.get(sketch_id)
-                        if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != "XZ"
-                                or sketch.get("section_normal_axis") != "Y"):
-                            raise ValidationError("Loft feature source sketches must be Y-normal XZ sections.")
+                        axis = sketch.get("section_normal_axis") if sketch else None
+                        expected_plane = "XZ" if axis == "Y" else "XY" if axis == "Z" else None
+                        if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != expected_plane):
+                            raise ValidationError("Loft feature source sketches must match their section normal axis.")
+                        section_axes.append(axis)
                         _, profile = closed_profile(document.objects, sketch_id)
                         group_profiles.append(profile)
                         group_offsets.append(sketch.get("section_offset"))
@@ -801,14 +803,17 @@ class CadyxCore:
                         raise ValidationError("Loft feature contour group has inconsistent section offsets.")
                     sections.append(group_profiles)
                     offsets.append(group_offsets[0])
+                if len(set(section_axes)) != 1 or section_axes[0] != parameters.get("section_axis", "Y"):
+                    raise ValidationError("Loft feature normal axis does not match its saved section sketches.")
                 if any(len(group) != 1 for group in sections):
                     expected = self.kernel.create_multicontour_loft(
-                        sections, section_offsets=offsets, compute_volume=False,
+                        sections, section_offsets=offsets, compute_volume=False, section_axis=section_axes[0],
                     )
                 else:
                     expected = self.kernel.create_lofted_profiles(
                         [group[0] for group in sections], section_offsets=offsets,
                         alignment=feature_geometry.get("profile_alignment", "independent-start-v1"),
+                        section_axis=section_axes[0],
                     )
                     if "profile_alignment" not in feature_geometry:
                         expected.pop("profile_alignment", None)

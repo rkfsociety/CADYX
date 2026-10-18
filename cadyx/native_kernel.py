@@ -616,7 +616,7 @@ class NativeKernel:
                     section_sizes.append(len(section))
                     coordinates.extend(coord for point in section
                                        for coord in (offset, point["x"], point["y"]))
-                node.update(type=8, coordinate_offset=start,
+                node.update(type=8, plane=int(value.get("section_axis", "Y") == "Z"), coordinate_offset=start,
                             coordinate_count=len(coordinates) - start,
                             edge_offset=len(edge_indices), edge_count=len(section_sizes))
                 edge_indices.extend(section_sizes)

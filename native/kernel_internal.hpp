@@ -165,7 +165,7 @@ std::string PeriodicSplineSamplesJson(const double* coordinates, size_t point_co
 TopoDS_Shape MakeClosedSplineProfileShape(const double* coordinates, size_t point_count, int operation, int plane, double amount, bool centered);
 TopoDS_Shape MakePeriodicSplineProfileShape(const double* coordinates, size_t point_count, int operation, int plane, double amount, bool centered);
 TopoDS_Shape MakePipeShape(const double* coordinates, size_t point_count, int plane, double radius);
-TopoDS_Shape MakeLoftShape(const double* coordinates, const int* section_sizes, size_t section_count, size_t coordinate_count);
+TopoDS_Shape MakeLoftShape(const double* coordinates, const int* section_sizes, size_t section_count, size_t coordinate_count, int section_axis);
 TopoDS_Edge MakeRuledRail(const double* coordinates, size_t point_count);
 TopoDS_Shape MakeRuledSolid(const double* coordinates, size_t coordinate_count, const int* patch_sizes, size_t patch_count, double tolerance);
 TopoDS_Shape EnsureOneSolid(const TopoDS_Shape& shape, const char* operation);

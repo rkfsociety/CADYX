@@ -3,6 +3,33 @@ from pathlib import Path
 from cadyx.errors import ValidationError
 
 class STLReferenceTests(unittest.TestCase):
+    def test_mesh_storage_accepts_more_than_100000_triangles(self):
+        from cadyx.mesh_geometry import geometry_from_native_buffer, validate_mesh_geometry
+        triangle_count = 100_001
+        vertices = struct.pack("<12f", 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1)
+        face = struct.pack("<3I", 0, 2, 1)
+        header = struct.pack("<4s6If", b"CYSM", 1, 4, triangle_count, 1,
+                             4, triangle_count, 0.75)
+        geometry, metadata = geometry_from_native_buffer(header + vertices + face * triangle_count)
+        self.assertEqual(geometry["triangle_count"], triangle_count)
+        self.assertEqual(metadata["output_triangles"], triangle_count)
+        validate_mesh_geometry(geometry)
+
+        from cadyx.scan_reverse_common import _pack_mesh
+        transformed = _pack_mesh([0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+                                  0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+                                 [0, 2, 1] * triangle_count)
+        self.assertEqual(transformed["triangle_count"], triangle_count)
+        validate_mesh_geometry(transformed)
+
+    def test_triangle_count_has_no_separate_ceiling(self):
+        from cadyx.stl_reference import _validate_triangle_count
+        for count in (1, 100_000, 436_942, 1_000_001):
+            _validate_triangle_count(count)
+        for count in (0, True):
+            with self.subTest(count=count), self.assertRaises(ValidationError):
+                _validate_triangle_count(count)
+
     def test_binary_and_solid_header_preserve_coordinates(self):
         from cadyx.stl_reference import parse_stl
         data = b"solid binary".ljust(80, b"\0") + struct.pack("<I", 1)

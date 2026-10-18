@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import unittest
 from unittest.mock import patch
 
@@ -23,6 +24,19 @@ class GeometryDescriptorTests(unittest.TestCase):
     def box(self, kernel: str = "occt-v1") -> dict:
         return {"kernel": kernel, "kind": "box", "volume": 30.0,
                 "dimensions": {"width": 2.0, "height": 3.0, "depth": 5.0}}
+
+    def test_z_normal_loft_uses_xy_profiles_and_z_offsets(self) -> None:
+        sections = []
+        for radius in (2.0, 3.0):
+            sections.append([{"x": radius * math.cos(math.tau * index / 24),
+                              "y": radius * math.sin(math.tau * index / 24)}
+                             for index in range(24)])
+        geometry = self.kernel.create_lofted_profiles(sections, section_offsets=[0.0, 10.0], section_axis="Z")
+        self.assertEqual(geometry["section_axis"], "Z")
+        bounds = NativeKernel().geometry_graph(geometry)["bounds"]
+        self.assertAlmostEqual(bounds["min"][2], 0.0, places=5)
+        self.assertAlmostEqual(bounds["max"][2], 10.0, places=5)
+        self.assertIsNone(self.kernel.validate(geometry))
 
     def test_legacy_and_current_json_round_trip_without_rewriting(self) -> None:
         self.assertIs(OCPKernelAdapter, OCCTKernelAdapter)

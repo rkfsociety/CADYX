@@ -290,6 +290,7 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
         self, sections: list[list[dict[str, float]]], *, section_offsets: list[float],
         alignment: str = "minimum-displacement-v2",
         compute_volume: bool = True,
+        section_axis: str = "Y",
     ) -> LoftDescriptor:
         if (not isinstance(sections, list) or len(sections) < 2
                 or not isinstance(section_offsets, list) or len(section_offsets) != len(sections)):
@@ -299,10 +300,13 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
             raise ValidationError("Loft profile alignment mode is unsupported.")
         if type(compute_volume) is not bool:
             raise ValidationError("compute_volume must be a boolean.")
+        if section_axis not in {"Y", "Z"}:
+            raise ValidationError("Loft section_axis must be Y or Z.")
+        plane = "XZ" if section_axis == "Y" else "XY"
         raw_sections = []
         offsets = []
         for section, offset in zip(sections, section_offsets, strict=True):
-            points, _ = _profile_values(section, "XZ")
+            points, _ = _profile_values(section, plane)
             raw_sections.append(points)
             offsets.append(_finite_coordinate(offset, "Loft section offset"))
         point_count = max(len(section) for section in raw_sections)
@@ -331,6 +335,8 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
             raise ValidationError("Loft section offsets must be strictly increasing.")
         payload = {"kernel": self.kernel_id, "kind": "lofted_profiles", "sections": normalized,
                    "section_offsets": offsets, "profile_alignment": alignment}
+        if section_axis != "Y":
+            payload["section_axis"] = section_axis
         payload["volume"] = NativeKernel().geometry_graph(payload)["volume"] if compute_volume else 0.0
         return payload
 

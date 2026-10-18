@@ -7,6 +7,8 @@ description: Create, inspect, revise, or reconstruct a CAD model in CADYX throug
 
 Use the `cadyx_*` MCP tools for every CADYX document operation: workspace selection, project creation, saved model inspection, files, topology, viewport/camera, dashboard and commands. The browser is a passive viewer. Do not use browser automation, direct project file edits, shell/HTTP as a bypass for document changes, or another CAD application.
 
+For reference-driven reconstruction, keep imported source/reference bodies hidden in the viewport and retain them only for comparison or validation. Follow `.codex/rules.md` for the project-specific source lifecycle.
+
 ## Prepare
 
 1. Call `cadyx_health`, `cadyx_get_selection`, `cadyx_list_workspace`, and `cadyx_capabilities`. If the host is unavailable, report that fact and point to the README host setup; do not infer current project state.

@@ -96,13 +96,17 @@ class RebuildCommands:
                     or not isinstance(parameters.get("section_offsets"), list)):
                 raise ValidationError("Loft feature section references are invalid.")
             groups = parameters.get("section_sketch_groups", [[value] for value in sketch_ids])
-            sections, offsets = [], []
+            sections, offsets, section_axes = [], [], []
             for group in groups:
                 group_profiles, group_offsets = [], []
                 for sketch_id in group:
                     sketch = next((item for item in document.objects if item.get("id") == sketch_id), None)
                     if sketch is None:
                         raise ValidationError("Loft section sketch is missing.")
+                    axis = sketch.get("section_normal_axis")
+                    if sketch.get("plane") != ("XZ" if axis == "Y" else "XY" if axis == "Z" else None):
+                        raise ValidationError("Loft section sketch plane does not match its normal axis.")
+                    section_axes.append(axis)
                     _, section = closed_profile(document.objects, sketch_id)
                     group_profiles.append(section)
                     group_offsets.append(sketch.get("section_offset"))
@@ -110,10 +114,13 @@ class RebuildCommands:
                     raise ValidationError("Loft section group has inconsistent section offsets.")
                 sections.append(group_profiles)
                 offsets.append(group_offsets[0])
+            if len(set(section_axes)) != 1:
+                raise ValidationError("Loft sections must use one normal axis.")
+            section_axis = section_axes[0]
             if any(len(group) != 1 for group in sections):
-                return self.kernel.create_multicontour_loft(sections, section_offsets=offsets)
+                return self.kernel.create_multicontour_loft(sections, section_offsets=offsets, section_axis=section_axis)
             return self.kernel.create_lofted_profiles(
-                [group[0] for group in sections], section_offsets=offsets,
+                [group[0] for group in sections], section_offsets=offsets, section_axis=section_axis,
             )
         raise ValidationError("Unsupported sketch feature operation.")
 

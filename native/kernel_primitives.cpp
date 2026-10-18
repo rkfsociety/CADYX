@@ -440,9 +440,9 @@ TopoDS_Shape MakePipeShape(const double* coordinates, size_t point_count, int pl
 }
 
 TopoDS_Shape MakeLoftShape(const double* coordinates, const int* section_sizes,
-                           size_t section_count, size_t coordinate_count) {
-  if (!coordinates || !section_sizes || section_count < 2)
-    throw std::runtime_error("A loft needs at least two sketch sections.");
+                           size_t section_count, size_t coordinate_count, int section_axis) {
+  if (!coordinates || !section_sizes || section_count < 2 || (section_axis != 0 && section_axis != 1))
+    throw std::runtime_error("A loft needs at least two sketch sections and a supported section axis.");
   BRepOffsetAPI_ThruSections loft(true, false, 1e-6);
   size_t offset = 0;
   for (size_t section = 0; section < section_count; ++section) {
@@ -456,19 +456,19 @@ TopoDS_Shape MakeLoftShape(const double* coordinates, const int* section_sizes,
     for (int point = 0; point < count; ++point) {
       const size_t current = offset + static_cast<size_t>(point);
       const size_t next = offset + static_cast<size_t>((point + 1) % count);
-      const double x = coordinates[3 * current + 1];
-      const double z = coordinates[3 * current + 2];
-      const double next_x = coordinates[3 * next + 1];
-      const double next_z = coordinates[3 * next + 2];
-      if (!std::isfinite(x) || !std::isfinite(z) || std::hypot(x - next_x, z - next_z) <= 1e-7)
+      const double first = coordinates[3 * current + 1];
+      const double second = coordinates[3 * current + 2];
+      const double next_first = coordinates[3 * next + 1];
+      const double next_second = coordinates[3 * next + 2];
+      if (!std::isfinite(first) || !std::isfinite(second)
+          || std::hypot(first - next_first, second - next_second) <= 1e-7)
         throw std::runtime_error("Loft section points must be finite and distinct.");
-      twice_area += x * next_z - next_x * z;
-      polygon.Add(gp_Pnt(x, station, z));
+      twice_area += first * next_second - next_first * second;
+      polygon.Add(section_axis == 0 ? gp_Pnt(first, station, second)
+                                    : gp_Pnt(first, second, station));
     }
     if (!std::isfinite(twice_area) || std::abs(twice_area) <= 1e-12)
       throw std::runtime_error("Loft section must enclose non-zero area.");
-  // Section sketches are stored in XZ coordinates; the native loft consumes
-  // xyz triples, with the section station supplied from a parallel offset buffer.
     polygon.Close();
     if (!polygon.IsDone()) throw std::runtime_error("OCCT could not close a loft section.");
     loft.AddWire(polygon.Wire());

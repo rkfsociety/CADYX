@@ -71,6 +71,7 @@ class LoftDescriptor(OCCTDescriptor):
     sections: list[list[dict[str, float]]]
     section_offsets: list[float]
     profile_alignment: NotRequired[str]
+    section_axis: NotRequired[Literal["Y", "Z"]]
 
 
 class MulticontourLoftDescriptor(OCCTDescriptor):
@@ -378,12 +379,18 @@ class GeometryDescriptorValidation:
         if (set(geometry) not in (
                     {"kernel", "kind", "sections", "section_offsets", "volume"},
                     {"kernel", "kind", "sections", "section_offsets", "volume", "profile_alignment"},
+                    {"kernel", "kind", "sections", "section_offsets", "volume", "profile_alignment", "section_axis"},
+                    {"kernel", "kind", "sections", "section_offsets", "volume", "profile_alignment", "section_axis"},
+                    {"kernel", "kind", "sections", "section_offsets", "volume", "profile_alignment", "section_axis"},
                 )
                 or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "lofted_profiles"):
             raise ValidationError("Loft geometry descriptor is invalid.")
+        axis = geometry.get("section_axis", "Y")
+        if axis not in {"Y", "Z"}:
+            raise ValidationError("Loft section axis must be Y or Z.")
         rebuilt = self.create_lofted_profiles(
             geometry.get("sections"), section_offsets=geometry.get("section_offsets"),
-            alignment=geometry.get("profile_alignment", "independent-start-v1"),
+            alignment=geometry.get("profile_alignment", "independent-start-v1"), section_axis=axis,
         )
         self._same_saved_volume(geometry, rebuilt["volume"])
 
@@ -395,7 +402,9 @@ class GeometryDescriptorValidation:
                        for branch in geometry["branches"])):
             raise ValidationError("Multi-contour loft geometry descriptor is invalid.")
         for branch in geometry["branches"]:
-            if (set(branch) != {"kernel", "kind", "sections", "section_offsets", "profile_alignment", "volume"}
+            if (set(branch) not in (
+                        {"kernel", "kind", "sections", "section_offsets", "profile_alignment", "volume"},
+                        {"kernel", "kind", "sections", "section_offsets", "profile_alignment", "section_axis", "volume"})
                     or branch.get("kernel") != self.kernel_id
                     or not isinstance(branch.get("sections"), list) or len(branch["sections"]) != 2
                     or not isinstance(branch.get("section_offsets"), list)
@@ -403,8 +412,11 @@ class GeometryDescriptorValidation:
                     or branch.get("profile_alignment") not in {
                         "independent-start-v1", "minimum-displacement-v1", "minimum-displacement-v2"}):
                 raise ValidationError("Multi-contour loft branch descriptor is invalid.")
+            axis = branch.get("section_axis", "Y")
+            if axis not in {"Y", "Z"}:
+                raise ValidationError("Loft section axis must be Y or Z.")
             for profile in branch["sections"]:
-                _profile_values(profile, "XZ")
+                _profile_values(profile, "XZ" if axis == "Y" else "XY")
             left, right = (_finite_coordinate(value, "Loft section offset")
                            for value in branch["section_offsets"])
             if right <= left:

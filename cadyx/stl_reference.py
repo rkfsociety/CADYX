@@ -11,13 +11,12 @@ from .errors import ValidationError
 from .mesh_geometry import geometry_from_native_buffer, mesh_bounds
 
 MAX_BYTES = 64 * 1024 * 1024
-MAX_TRIANGLES = 100_000
 CAPABILITIES = ({
     "type": "import_stl",
     "description": "Read a local STL reference without changing it; preserves source coordinates and units remain unspecified.",
     "required": ["source_path", "expected_sha256"],
     "optional": ["name"],
-    "constraints": ["Regular non-symlink local .stl, <=64 MiB, <=100000 triangles; exact source SHA-256 required. Output is a reference mesh, not an editable B-rep."],
+    "constraints": ["Regular non-symlink local .stl, <=64 MiB, exact source SHA-256 required. Output is a reference mesh, not an editable B-rep."],
 }, {
     "type": "set_body_visibility",
     "description": "Change body visibility without removing geometry or its references.",
@@ -26,14 +25,17 @@ CAPABILITIES = ({
 })
 ACTIVITY_ACTIONS = {"import_stl": "Импорт эталона STL", "set_body_visibility": "Изменяет видимость тела"}
 
+def _validate_triangle_count(count: int) -> None:
+    if type(count) is not int or count < 1:
+        raise ValidationError("STL triangle count must be positive.")
+
 def parse_stl(data: bytes):
     """Parse binary (including solid-prefixed headers) or strict ASCII STL."""
     if not data or len(data) > MAX_BYTES:
         raise ValidationError("STL must contain between 1 byte and 64 MiB.")
     if len(data) >= 84 and 84 + 50 * struct.unpack_from("<I", data, 80)[0] == len(data):
         count = struct.unpack_from("<I", data, 80)[0]
-        if not 1 <= count <= MAX_TRIANGLES:
-            raise ValidationError("STL triangle count exceeds the reference mesh limit.")
+        _validate_triangle_count(count)
         facets = [record[3:12] for record in struct.iter_unpack("<12fH", data[84:])]
     else:
         try:
@@ -55,13 +57,12 @@ def parse_stl(data: bytes):
                 if len(values) != 9 or lines[index + 5] != ["endloop"] or lines[index + 6] != ["endfacet"]:
                     raise ValueError()
                 facets.append(values)
-                if len(facets) > MAX_TRIANGLES:
-                    raise ValueError()
+                _validate_triangle_count(len(facets))
                 index += 7
             if index != len(lines) - 1 or lines[index][0] != "endsolid" or not facets:
                 raise ValueError()
         except (UnicodeError, ValueError, IndexError) as exc:
-            raise ValidationError("STL is malformed, truncated, or exceeds the triangle limit.") from exc
+            raise ValidationError("STL is malformed or truncated.") from exc
     vertices, triangles, lookup = [], [], {}
     for facet in facets:
         face = []

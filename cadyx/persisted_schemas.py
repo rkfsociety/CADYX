@@ -62,7 +62,9 @@ def _validate_loft(item: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> No
             or len(set(source_sketch_ids)) != len(source_sketch_ids)
             or not isinstance(parameters, dict)
             or set(parameters) not in ({"section_sketch_ids", "section_offsets"},
-                                        {"section_sketch_ids", "section_offsets", "section_sketch_groups"})
+                                        {"section_sketch_ids", "section_offsets", "section_sketch_groups"},
+                                        {"section_sketch_ids", "section_offsets", "section_axis"},
+                                        {"section_sketch_ids", "section_offsets", "section_axis", "section_sketch_groups"})
             or parameters.get("section_sketch_ids") != source_sketch_ids
             or not isinstance(groups, list) or len(groups) < 2
             or any(not isinstance(group, list) or not group
@@ -76,13 +78,18 @@ def _validate_loft(item: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> No
             or any(right <= left for left, right in zip(offsets, offsets[1:]))):
         raise ValidationError("Loft feature section offsets are invalid.")
     for group, offset in zip(groups, offsets, strict=True):
+        axes = set()
         for sketch_id in group:
             typed_id(sketch_id, "sketch")
             sketch = by_id.get(sketch_id)
-            if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != "XZ"
-                    or sketch.get("section_normal_axis") != "Y"
+            axis = sketch.get("section_normal_axis") if sketch else None
+            expected_plane = "XZ" if axis == "Y" else "XY" if axis == "Z" else None
+            if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != expected_plane
                     or sketch.get("section_offset") != offset):
                 raise ValidationError("Loft feature source sketch is missing or has changed section metadata.")
+            axes.add(axis)
+        if len(axes) != 1 or axes.pop() != parameters.get("section_axis", "Y"):
+            raise ValidationError("Loft feature section axis does not match its source sketches.")
 
 
 def _validate_ruled_shell(item: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> None:

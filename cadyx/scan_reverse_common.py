@@ -71,8 +71,8 @@ def _pack_mesh(positions: list[float], triangles: list[int]) -> dict[str, Any]:
     if len(positions) % 3 or len(triangles) % 3:
         raise ValidationError("Triangle mesh buffers are not aligned.")
     vertex_count, triangle_count = len(positions) // 3, len(triangles) // 3
-    if not 3 <= vertex_count <= 300_000 or not 1 <= triangle_count <= 100_000:
-        raise ValidationError("Transformed scan exceeds the cadyx-mesh-v1 size limits.")
+    if not 3 <= vertex_count <= 300_000 or triangle_count < 1:
+        raise ValidationError("Transformed scan exceeds the cadyx-mesh-v1 vertex limits.")
     native_positions = array("f", positions)
     native_triangles = array("I", triangles)
     if sys.byteorder != "little":

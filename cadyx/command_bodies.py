@@ -168,13 +168,16 @@ class BodyCommands:
         name = command.get("name", "Loft")
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
             raise ValidationError("Feature name must be a non-empty string of at most 120 characters.")
-        sections, offsets = [], []
+        sections, offsets, section_axes = [], [], []
         for group in section_groups:
             group_profiles, group_offsets = [], []
             for sketch_id in group:
                 sketch = self._find_sketch(document, sketch_id)
-                if sketch.get("plane") != "XZ" or sketch.get("section_normal_axis") != "Y":
-                    raise ValidationError("Loft sections must be XZ sketches extracted from Y-normal planes.")
+                axis = sketch.get("section_normal_axis")
+                expected_plane = "XZ" if axis == "Y" else "XY" if axis == "Z" else None
+                if sketch.get("plane") != expected_plane:
+                    raise ValidationError("Loft sections must be parallel XZ/Y-normal or XY/Z-normal sketches.")
+                section_axes.append(axis)
                 if not isinstance(sketch.get("section_offset"), (int, float)):
                     raise ValidationError("Each loft sketch must retain its source section offset.")
                 _, profile = closed_profile(document.objects, sketch_id)
@@ -186,15 +189,20 @@ class BodyCommands:
             offsets.append(group_offsets[0])
         if any(right <= left for left, right in zip(offsets, offsets[1:])):
             raise ValidationError("Loft station groups must be ordered by strictly increasing section_offset.")
+        if len(set(section_axes)) != 1:
+            raise ValidationError("All loft sections must use the same normal axis.")
+        section_axis = section_axes[0]
         if progress is not None:
             progress({"phase": "prepare_loft_sections"})
             progress({"phase": "kernel_loft"})
         geometry = (self.kernel.create_lofted_profiles(
-            [group[0] for group in sections], section_offsets=offsets,
+            [group[0] for group in sections], section_offsets=offsets, section_axis=section_axis,
         ) if all(len(group) == 1 for group in sections) else
-            self.kernel.create_multicontour_loft(sections, section_offsets=offsets))
+            self.kernel.create_multicontour_loft(sections, section_offsets=offsets, section_axis=section_axis))
         body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
         parameters = {"section_sketch_ids": sketch_ids, "section_offsets": offsets}
+        if section_axis != "Y":
+            parameters["section_axis"] = section_axis
         if any(len(group) > 1 for group in section_groups):
             parameters["section_sketch_groups"] = section_groups
         document.objects.extend([
@@ -248,13 +256,16 @@ class BodyCommands:
         flattened = [sketch_id for group in groups for sketch_id in group]
         if len(set(flattened)) != len(flattened):
             raise ValidationError("Loft section_groups must contain unique sketch IDs.")
-        offsets, profiles = [], []
+        offsets, profiles, section_axes = [], [], []
         for group in groups:
             group_offsets, group_profiles = [], []
             for sketch_id in group:
                 sketch = self._find_sketch(document, sketch_id)
-                if sketch.get("plane") != "XZ" or sketch.get("section_normal_axis") != "Y":
-                    raise ValidationError("Loft sections must be XZ sketches extracted from Y-normal planes.")
+                axis = sketch.get("section_normal_axis")
+                expected_plane = "XZ" if axis == "Y" else "XY" if axis == "Z" else None
+                if sketch.get("plane") != expected_plane:
+                    raise ValidationError("Loft sections must be parallel XZ/Y-normal or XY/Z-normal sketches.")
+                section_axes.append(axis)
                 group_offsets.append(_finite_number(sketch.get("section_offset"), "section_offset"))
                 _, profile = closed_profile(document.objects, sketch_id)
                 group_profiles.append(profile)
@@ -264,14 +275,19 @@ class BodyCommands:
             profiles.append(group_profiles)
         if any(right <= left for left, right in zip(offsets, offsets[1:])):
             raise ValidationError("Loft station groups must be ordered by strictly increasing section_offset.")
+        if len(set(section_axes)) != 1:
+            raise ValidationError("All loft sections must use the same normal axis.")
+        section_axis = section_axes[0]
         geometry = (self.kernel.create_lofted_profiles(
-            [group[0] for group in profiles], section_offsets=offsets,
+            [group[0] for group in profiles], section_offsets=offsets, section_axis=section_axis,
         ) if all(len(group) == 1 for group in profiles) else
-            self.kernel.create_multicontour_loft(profiles, section_offsets=offsets))
+            self.kernel.create_multicontour_loft(profiles, section_offsets=offsets, section_axis=section_axis))
         body = next((item for item in document.objects if item.get("id") == feature.get("body_id")), None)
         if body is None or body.get("type") != "body":
             raise ValidationError("Loft feature refers to a missing body.")
         section_groups = {"section_sketch_ids": flattened, "section_offsets": offsets}
+        if section_axis != "Y":
+            section_groups["section_axis"] = section_axis
         if any(len(group) > 1 for group in groups):
             section_groups["section_sketch_groups"] = groups
         feature["source_sketch_ids"] = flattened
