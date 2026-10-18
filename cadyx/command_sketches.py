@@ -498,13 +498,37 @@ def _handle_add_sketch_constraint(
     self: Any, document: Document, command: dict[str, Any], *,
     progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
 ) -> dict[str, Any]:
+    sketch_id = command.get("sketch_id")
+    self._find_sketch(document, sketch_id)
     object_id = f"constraint:{uuid4()}"
-    document.objects.append({
-        "id": object_id, "type": "constraint", "sketch_id": command.get("sketch_id"),
+    constraint = {
+        "id": object_id, "type": "constraint", "sketch_id": sketch_id,
         "kind": command.get("kind"), "references": command.get("references"),
         "value": command.get("value"),
-    })
-    return {"constraint_id": object_id}
+    }
+    if constraint["kind"] == "fixed" and isinstance(constraint["references"], list):
+        point = next((item for item in document.objects
+                      if item.get("id") == constraint["references"][0]), None)
+        if point is not None and point.get("type") == "point":
+            constraint["fixed_position"] = [point["x"], point["y"]]
+    if (constraint["kind"] == "tangent" and isinstance(constraint["references"], list)
+            and len(constraint["references"]) == 2
+            and all(isinstance(ref, str) for ref in constraint["references"])):
+        targets = {item.get("id"): item for item in document.objects}
+        first, second = (targets.get(ref) for ref in constraint["references"])
+        line, circle = (first, second) if first and first.get("type") == "line" else (second, first)
+        if line and circle and line.get("type") == "line" and circle.get("type") == "circle":
+            by_id = {item["id"]: item for item in document.objects}
+            start, end = by_id[line["start_id"]], by_id[line["end_id"]]
+            center = by_id[circle["center_id"]]
+            signed_distance = ((center["x"] - start["x"]) * (end["y"] - start["y"])
+                               - (center["y"] - start["y"]) * (end["x"] - start["x"]))
+            constraint["tangent_side"] = 1 if signed_distance >= 0 else -1
+    document.objects.append(constraint)
+    from .sketch_solver import solve_sketch
+    diagnostics = solve_sketch(document.objects, sketch_id, document.parameter_bindings)
+    self._rebuild_changed_features(document, {sketch_id}, progress=progress)
+    return {"constraint_id": object_id, "solver": diagnostics}
 
 
 def _handle_update_sketch_elements(
@@ -529,13 +553,16 @@ def _handle_update_sketch_elements(
         changes = update.get("changes")
         if not isinstance(changes, dict) or not changes or not changes.keys() <= fields[item["type"]]:
             raise ValidationError("Unsupported sketch element changes.")
-        item.update(changes)
+        item.update({key: _finite_number(value, f"Sketch {key}") for key, value in changes.items()})
     changed_sketches = {
         item["sketch_id"] for item in document.objects
         if item.get("id") in seen and item.get("type") in {"point", "circle"}
     }
+    from .sketch_solver import solve_sketch
+    diagnostics = {sketch_id: solve_sketch(document.objects, sketch_id, document.parameter_bindings)
+                   for sketch_id in sorted(changed_sketches)}
     self._rebuild_changed_features(document, changed_sketches, progress=progress)
-    return {"object_ids": sorted(seen)}
+    return {"object_ids": sorted(seen), "solver": diagnostics}
 
 
 def _handle_replace_sketch_profile(

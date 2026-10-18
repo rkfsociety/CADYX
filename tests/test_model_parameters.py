@@ -393,6 +393,30 @@ class ModelParameterExpressionTests(unittest.TestCase):
         self.assertEqual(feature["geometry"]["profile"][1]["x"], 160)
         document.validate()
 
+    def test_bound_sketch_coordinate_is_solved_before_profile_rebuild(self):
+        system = CommandSystem(OCCTKernelAdapter())
+        document = Document.create()
+        system.execute(document, {"type": "create_model_parameter", "name": "BaseWidth",
+                                  "value": 10, "unit": "mm"})
+        sketch = system.execute(document, {"type": "create_sketch", "plane": "XY"})["sketch_id"]
+        profile = system.execute(document, {"type": "add_sketch_polyline", "sketch_id": sketch,
+            "closed": True, "points": [{"x": 0, "y": 0}, {"x": 10, "y": 0},
+                                        {"x": 10, "y": 10}, {"x": 0, "y": 10}]})
+        extrusion = system.execute(document, {"type": "extrude_sketch", "sketch_id": sketch, "depth": 5})
+        system.execute(document, {"type": "add_sketch_constraint", "sketch_id": sketch,
+                                  "kind": "horizontal", "references": [profile["line_ids"][0]]})
+        system.execute(document, {"type": "bind_model_parameter", "object_id": profile["point_ids"][1],
+                                  "path": "x", "expression": "BaseWidth"})
+
+        system.execute(document, {"type": "set_model_parameter", "name": "BaseWidth", "value": 20})
+
+        points = {item["id"]: item for item in document.objects if item.get("type") == "point"}
+        self.assertAlmostEqual(points[profile["point_ids"][1]]["y"],
+                               points[profile["point_ids"][0]]["y"], delta=1e-7)
+        feature = next(item for item in document.objects if item.get("id") == extrusion["feature_id"])
+        self.assertEqual(feature["geometry"]["profile"][1]["x"], 20)
+        document.validate()
+
     def test_bound_counterbore_parameter_rebuilds_dependent_feature_atomically(self):
         system = CommandSystem(OCCTKernelAdapter())
         document = Document.create()

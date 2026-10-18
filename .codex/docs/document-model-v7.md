@@ -39,10 +39,14 @@ pre-date construction geometry.
 
 ## Constraint semantics
 
-Constraints check geometry; they do not solve or move geometry. The absolute
-tolerance is 1e-7 in the stored coordinate units, with no relative tolerance.
-CADYX does not yet assign physical units. Unsupported or unsatisfied constraints
-are rejected rather than retained as unresolved state.
+Constraints solve editable point coordinates and circle radii with a bounded,
+deterministic least-squares solver. A failed or inconsistent solve rejects the
+staged command before persistence. The solver handles at most 128 scalar
+variables, 256 constraints and 40 iterations per solve; each result reports
+status, degrees of freedom, iterations and maximum residual. The absolute
+residual tolerance is 1e-7 in stored coordinate units, with no relative
+tolerance. CADYX does not yet assign physical units. Conflict diagnostics name
+the constraints whose residuals remain unsatisfied.
 
 | kind | Ordered references | Invariant |
 | --- | --- | --- |
@@ -51,6 +55,28 @@ are rejected rather than retained as unresolved state.
 | coincident | two distinct point ids | Euclidean distance is zero within tolerance |
 | distance | two distinct point ids | Euclidean distance equals finite non-negative value |
 | radius | one circle | Radius equals finite positive value |
+| fixed | one point | Preserve its coordinates captured when the constraint is added |
+| parallel | two lines | Direction vectors are parallel |
+| perpendicular | two lines | Direction vectors are perpendicular |
+| equal | two lines or two circles | Line lengths or circle radii are equal |
+| angular | two lines | Signed angle from first to second equals value in degrees |
+| tangent | line and circle, or two circles | Supporting-line tangency or external circle tangency |
+| symmetry | two points and an axis line | Points mirror across the axis |
+
+`add_sketch_constraint` returns solver diagnostics. `update_sketch_elements`
+re-solves every affected sketch before rebuilding dependent features. Solver
+status is `under_constrained` when degrees of freedom remain, `fully_constrained`
+when no degrees remain without redundant equations, and `over_constrained` when
+the consistent system contains redundant equations. Independent boolean flags
+report under- and over-constraint together when both are present. Inconsistent
+systems fail with constraint IDs and residual witnesses. Fixed constraints anchor the sketch
+datum; without sufficient anchors a geometrically valid solution can retain
+rigid-body degrees of freedom.
+
+Sketch coordinates and circle radii controlled by named parameter bindings are
+treated as fixed inputs during solving. A constraint that conflicts with one of
+those bound values fails atomically; it does not silently rewrite the parameter
+target.
 
 ## Command API
 
@@ -361,7 +387,7 @@ transforms circular sketch arcs into exact elliptical arcs, which remain
 analytic in the rebuilt solid, including when restoring the original diameter.
 The Geometry view shows these dimensions as editable inputs. Removing a sketch
 used by a solid feature is rejected. Profile
-constraints still check the supplied geometry and do not solve it. The OCCT
+constraints are solved before dependent profile features rebuild. The OCCT
 adapter rebuilds and validates each saved solid and derives viewport triangles
 from the B-rep. These are solids, not triangle-mesh imports.
 
@@ -727,10 +753,10 @@ exact main viewport PNG from
 `GET /api/v1/agent/projects/{id}/viewport.png` when the browser has published a
 current frame; without one, the API uses the standalone server-rendered fallback.
 The regular viewport API remains available as JSON scene data. The command objects above create boxes and XY/XZ
-sketches, add sketch geometry and checked constraints, extrude or revolve closed
+sketches, add sketch geometry and solved constraints, extrude or revolve closed
 profiles, sweep circular sections along open sketches, fuse solid B-reps, fillet
 selected B-rep edges, change feature parameters or sketch elements, and remove
 unreferenced sketch objects. Every command uses the shared Command System, and the complete
-document is validated before the atomic save. Constraints check the supplied
-result but do not solve or move geometry. The browser exposes no
+document is validated before the atomic save. Constraint edits solve and move
+geometry within the same atomic document command. The browser exposes no
 project or model creation, editing, or deletion controls.

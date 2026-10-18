@@ -398,14 +398,36 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
         refs = item.get("references")
         expected = {"horizontal": ["line"], "vertical": ["line"],
                     "coincident": ["point", "point"], "distance": ["point", "point"],
-                    "radius": ["circle"]}
+                    "radius": ["circle"], "parallel": ["line", "line"],
+                    "perpendicular": ["line", "line"], "equal": ["same", "same"],
+                    "angular": ["line", "line"], "tangent": ["tangent", "tangent"],
+                    "symmetry": ["point", "point", "line"], "fixed": ["point"]}
         if not isinstance(kind, str) or kind not in expected:
             raise ValidationError("Unsupported sketch constraint.")
         if not isinstance(refs, list) or len(refs) != len(expected[kind]):
             raise ValidationError("Constraint reference count is invalid.")
-        targets = [reference(ref, target_kind, sketch_id) for ref, target_kind in zip(refs, expected[kind])]
-        if len(refs) == 2 and refs[0] == refs[1]:
-            raise ValidationError("Constraint must reference two distinct points.")
+        targets = []
+        for ref, target_kind in zip(refs, expected[kind], strict=True):
+            if target_kind == "same":
+                target = by_id.get(ref)
+                if (target is None or target.get("type") not in {"line", "circle"}
+                        or target.get("sketch_id") != sketch_id):
+                    raise ValidationError("Equal constraints need two lines or two circles in one sketch.")
+                targets.append(target)
+            elif target_kind == "tangent":
+                target = by_id.get(ref)
+                if (target is None or target.get("type") not in {"line", "circle"}
+                        or target.get("sketch_id") != sketch_id):
+                    raise ValidationError("Tangent constraints need lines or circles in one sketch.")
+                targets.append(target)
+            else:
+                targets.append(reference(ref, target_kind, sketch_id))
+        if kind == "equal" and targets[0]["type"] != targets[1]["type"]:
+            raise ValidationError("Equal constraints require two lines or two circles.")
+        if kind == "tangent" and {target["type"] for target in targets} not in ({"line", "circle"}, {"circle"}):
+            raise ValidationError("Tangent constraints require a line and circle or two circles.")
+        if len(set(refs)) != len(refs):
+            raise ValidationError("Constraint references must be distinct.")
         if kind in {"horizontal", "vertical"}:
             line = targets[0]
             a, b = by_id[line["start_id"]], by_id[line["end_id"]]
@@ -418,11 +440,61 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
             if value < 0:
                 raise ValidationError("Distance must be non-negative.")
             satisfied = close(distance, value)
-        else:
+        elif kind == "radius":
             value = number(item.get("value"))
             if value <= 0:
                 raise ValidationError("Radius constraint must be positive.")
             satisfied = close(targets[0]["radius"], value)
+        elif kind in {"parallel", "perpendicular", "equal", "angular"}:
+            a, b = targets
+            if a["type"] == "circle":
+                if kind != "equal":
+                    raise ValidationError("Parallel, perpendicular and angular constraints require lines.")
+                satisfied = close(a["radius"], b["radius"])
+            else:
+                a0, a1 = by_id[a["start_id"]], by_id[a["end_id"]]
+                b0, b1 = by_id[b["start_id"]], by_id[b["end_id"]]
+                ax, ay = a1["x"] - a0["x"], a1["y"] - a0["y"]
+                bx, by = b1["x"] - b0["x"], b1["y"] - b0["y"]
+                al, bl = math.hypot(ax, ay), math.hypot(bx, by)
+                if kind == "parallel":
+                    satisfied = close((ax * by - ay * bx) / (al * bl), 0)
+                elif kind == "perpendicular":
+                    satisfied = close((ax * bx + ay * by) / (al * bl), 0)
+                elif kind == "equal":
+                    satisfied = close(al, bl)
+                else:
+                    angle = math.atan2(ax * by - ay * bx, ax * bx + ay * by)
+                    delta = math.atan2(math.sin(angle - math.radians(number(item.get("value")))),
+                                       math.cos(angle - math.radians(number(item.get("value")))))
+                    satisfied = close(delta, 0)
+        elif kind == "tangent":
+            if targets[0]["type"] == targets[1]["type"] == "circle":
+                a, b = (by_id[targets[0]["center_id"]], by_id[targets[1]["center_id"]])
+                satisfied = close(math.hypot(a["x"] - b["x"], a["y"] - b["y"]),
+                                  targets[0]["radius"] + targets[1]["radius"])
+            else:
+                line, circle = (targets if targets[0]["type"] == "line" else targets[::-1])
+                start, end = by_id[line["start_id"]], by_id[line["end_id"]]
+                center = by_id[circle["center_id"]]
+                dx, dy = end["x"] - start["x"], end["y"] - start["y"]
+                distance = abs((center["x"] - start["x"]) * dy -
+                               (center["y"] - start["y"]) * dx) / math.hypot(dx, dy)
+                satisfied = close(distance, circle["radius"])
+        elif kind == "symmetry":
+            p, q, axis = targets
+            start, end = by_id[axis["start_id"]], by_id[axis["end_id"]]
+            dx, dy = end["x"] - start["x"], end["y"] - start["y"]
+            length = math.hypot(dx, dy)
+            mx, my = (p["x"] + q["x"]) / 2 - start["x"], (p["y"] + q["y"]) / 2 - start["y"]
+            satisfied = (close((mx * dy - my * dx) / length, 0)
+                         and close(((q["x"] - p["x"]) * dx + (q["y"] - p["y"]) * dy) / length, 0))
+        elif kind == "fixed":
+            position = item.get("fixed_position")
+            if not isinstance(position, list) or len(position) != 2:
+                raise ValidationError("Fixed point constraint needs its saved position.")
+            satisfied = close(targets[0]["x"], number(position[0])) and close(
+                targets[0]["y"], number(position[1]))
         if not satisfied:
             raise ValidationError(f"Sketch constraint {item['id']} is not satisfied.")
 

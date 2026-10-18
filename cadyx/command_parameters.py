@@ -464,6 +464,9 @@ class ParameterCommands:
         roots = [feature for feature in features if feature.get("source_body_id") not in produced_bodies]
         if sketch_ids:
             self._regenerate_generated_gear_profiles(document, sketch_ids, progress=progress)
+            from .sketch_solver import solve_sketch
+            for sketch_id in sorted(sketch_ids):
+                solve_sketch(document.objects, sketch_id, document.parameter_bindings)
             self._rebuild_changed_features(document, sketch_ids, progress=progress)
         changed_bodies: set[str] = set()
         for feature in sorted(roots, key=lambda item: feature_order[item["id"]]):

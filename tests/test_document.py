@@ -13,6 +13,7 @@ from cadyx.errors import LeaseRequiredError, ValidationError
 from cadyx.kernel import PrimitiveKernelAdapter
 from cadyx.models import Document
 from cadyx.sketches import closed_profile, open_path
+from cadyx.sketch_solver import solve_sketch
 
 
 class SketchDocumentTests(unittest.TestCase):
@@ -89,7 +90,10 @@ class SketchDocumentTests(unittest.TestCase):
     def test_constraints_and_atomic_edit_preserve_relationships_on_reload(self):
         horizontal = self.constraint("horizontal", [self.line])
         self.constraint("distance", [self.a, self.b], 3)
-        self.rejected(type="update_sketch_elements", updates=[{"object_id": self.b, "changes": {"y": 1}}])
+        result = self.command(type="update_sketch_elements", updates=[
+            {"object_id": self.b, "changes": {"y": 1}},
+        ])
+        self.assertIn(result["solver"][self.sketch]["status"], {"under_constrained", "fully_constrained"})
         self.command(type="update_sketch_elements", updates=[
             {"object_id": self.a, "changes": {"y": 1}},
             {"object_id": self.b, "changes": {"y": 1}},
@@ -103,25 +107,109 @@ class SketchDocumentTests(unittest.TestCase):
         self.assertEqual(by_id[self.line]["start_id"], self.a)
         self.assertEqual(by_id[self.b]["y"], 1)
 
-    def test_each_constraint_accepts_satisfied_and_rejects_unsatisfied_geometry(self):
+    def test_constraints_solve_geometry_and_preserve_relationships(self):
         c = self.point(0, 4)
-        same = self.point(0, 0)
         vertical = self.command(type="add_sketch_element", sketch_id=self.sketch,
                                 element_type="line", start_id=self.a, end_id=c)["object_id"]
         circle = self.command(type="add_sketch_element", sketch_id=self.sketch,
                               element_type="circle", center_id=self.a, radius=2)["object_id"]
-        for kind, good, bad, value in [
-            ("horizontal", [self.line], [vertical], None),
-            ("vertical", [vertical], [self.line], None),
-            ("coincident", [self.a, same], [self.a, self.b], None),
-            ("distance", [self.a, self.b], [self.a, c], 3),
-            ("radius", [circle], [circle], 2),
-        ]:
+        self.constraint("horizontal", [self.line])
+        self.constraint("vertical", [vertical])
+        result = self.command(type="update_sketch_elements", updates=[
+            {"object_id": self.b, "changes": {"y": 2}},
+            {"object_id": c, "changes": {"x": 3}},
+            {"object_id": circle, "changes": {"radius": 4}},
+        ])
+        self.assertEqual(result["solver"][self.sketch]["status"], "under_constrained")
+        objects = {item["id"]: item for item in self.core.inspect_project(self.project)["document"]["objects"]}
+        self.assertAlmostEqual(objects[self.a]["y"], objects[self.b]["y"], delta=1e-7)
+        self.assertAlmostEqual(objects[self.a]["x"], objects[c]["x"], delta=1e-7)
+        self.assertAlmostEqual(objects[circle]["radius"], 4, delta=1e-7)
+
+    def test_solver_reports_conflicting_constraint_witnesses_atomically(self):
+        self.constraint("horizontal", [self.line])
+        self.constraint("distance", [self.a, self.b], 3)
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ValidationError, "constraint:"):
+            self.constraint("vertical", [self.line])
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_solver_reports_fully_and_over_constrained_dof(self):
+        fixed = self.command(type="add_sketch_constraint", sketch_id=self.sketch,
+                             kind="fixed", references=[self.a])["solver"]
+        self.assertEqual(fixed["degrees_of_freedom"], 2)
+        horizontal = self.command(type="add_sketch_constraint", sketch_id=self.sketch,
+                                  kind="horizontal", references=[self.line])["solver"]
+        self.assertEqual(horizontal["degrees_of_freedom"], 1)
+        solved = self.command(type="add_sketch_constraint", sketch_id=self.sketch,
+                              kind="distance", references=[self.a, self.b], value=3)["solver"]
+        self.assertEqual(solved["status"], "fully_constrained")
+        self.assertEqual(solved["degrees_of_freedom"], 0)
+        redundant = self.command(type="add_sketch_constraint", sketch_id=self.sketch,
+                                 kind="horizontal", references=[self.line])["solver"]
+        self.assertEqual(redundant["status"], "over_constrained")
+
+    def test_solver_stays_within_iteration_budget_on_many_entities(self):
+        sketch_id = "sketch:budget"
+        objects = [{"id": sketch_id, "type": "sketch", "name": "Budget", "plane": "XY"}]
+        for index in range(16):
+            start_id, end_id = f"point:start-{index}", f"point:end-{index}"
+            line_id = f"line:{index}"
+            objects.extend([
+                {"id": start_id, "type": "point", "sketch_id": sketch_id,
+                 "x": float(index * 3), "y": float(index * 2)},
+                {"id": end_id, "type": "point", "sketch_id": sketch_id,
+                 "x": float(index * 3 + 2), "y": float(index * 2 + 0.25)},
+                {"id": line_id, "type": "line", "sketch_id": sketch_id,
+                 "start_id": start_id, "end_id": end_id},
+                {"id": f"constraint:{index}", "type": "constraint", "sketch_id": sketch_id,
+                 "kind": "horizontal", "references": [line_id], "value": None},
+            ])
+        diagnostics = solve_sketch(objects, sketch_id)
+        self.assertLessEqual(diagnostics["iterations"], 40)
+        self.assertLessEqual(diagnostics["max_residual"], 1e-7)
+        self.assertEqual(diagnostics["degrees_of_freedom"], 48)
+
+    def test_solver_handles_parallel_perpendicular_equal_angular_tangent_and_symmetry(self):
+        for kind, value in (("parallel", None), ("perpendicular", None),
+                            ("equal", None), ("angular", 90), ("symmetry", None)):
             with self.subTest(kind=kind):
-                self.constraint(kind, good, value)
-                self.rejected(type="add_sketch_constraint", sketch_id=self.sketch,
-                              kind=kind, references=bad, value=3 if kind == "radius" else value)
-        self.rejected(type="update_sketch_elements", updates=[{"object_id": circle, "changes": {"radius": 3}}])
+                sketch = self.command(type="create_sketch")["sketch_id"]
+                p1, p2 = self.command(type="add_sketch_element", sketch_id=sketch,
+                                      element_type="point", x=0, y=0)["object_id"], self.command(
+                    type="add_sketch_element", sketch_id=sketch, element_type="point", x=4, y=1)["object_id"]
+                p3, p4 = self.command(type="add_sketch_element", sketch_id=sketch,
+                                      element_type="point", x=0, y=3)["object_id"], self.command(
+                    type="add_sketch_element", sketch_id=sketch, element_type="point", x=2, y=6)["object_id"]
+                first = self.command(type="add_sketch_element", sketch_id=sketch,
+                                     element_type="line", start_id=p1, end_id=p2)["object_id"]
+                second = self.command(type="add_sketch_element", sketch_id=sketch,
+                                      element_type="line", start_id=p3, end_id=p4)["object_id"]
+                axis_start = self.command(type="add_sketch_element", sketch_id=sketch,
+                                          element_type="point", x=-2, y=0)["object_id"]
+                axis_end = self.command(type="add_sketch_element", sketch_id=sketch,
+                                        element_type="point", x=4, y=0)["object_id"]
+                axis = self.command(type="add_sketch_element", sketch_id=sketch,
+                                    element_type="line", start_id=axis_start, end_id=axis_end)["object_id"]
+                refs = [p1, p2, axis] if kind == "symmetry" else [first, second]
+                result = self.command(type="add_sketch_constraint", sketch_id=sketch,
+                                      kind=kind, references=refs, value=value)
+                self.assertIn(result["solver"]["status"],
+                              {"under_constrained", "fully_constrained", "over_constrained"})
+
+        sketch = self.command(type="create_sketch")["sketch_id"]
+        center_a = self.command(type="add_sketch_element", sketch_id=sketch, element_type="point",
+                                x=20, y=20)["object_id"]
+        center_b = self.command(type="add_sketch_element", sketch_id=sketch, element_type="point",
+                                x=30, y=20)["object_id"]
+        circle_a = self.command(type="add_sketch_element", sketch_id=sketch,
+                                element_type="circle", center_id=center_a, radius=3)["object_id"]
+        circle_b = self.command(type="add_sketch_element", sketch_id=sketch,
+                                element_type="circle", center_id=center_b, radius=5)["object_id"]
+        result = self.command(type="add_sketch_constraint", sketch_id=sketch,
+                              kind="tangent", references=[circle_a, circle_b])
+        self.assertIn(result["solver"]["status"],
+                      {"under_constrained", "fully_constrained", "over_constrained"})
 
     def test_invalid_geometry_references_and_constraint_inputs_are_atomic(self):
         other = self.command(type="create_sketch")["sketch_id"]

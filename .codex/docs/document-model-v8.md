@@ -77,5 +77,11 @@ ownership and parameter bindings; registered feature validators resolve source
 references against its shared object index. Sketch fields and constraints still
 use the existing batch `validate_sketches` validator. Kernel checks remain separate.
 
-This refactor changes no saved JSON fields or versions. Sequential copy-only
-migrations run before validation, including all supported v1–v7 upgrades to v8.
+Sketch constraints are solved by the bounded solver documented in [Document
+Model v7 constraint semantics](document-model-v7.md#constraint-semantics); a
+`fixed` constraint stores its captured point position, and named-parameter-bound
+coordinates remain fixed solver inputs. This adds no document version or
+migration; legacy checked constraints remain valid and are solved when edited.
+
+The document version remains v8; sequential copy-only migrations run before
+validation, including all supported v1–v7 upgrades to v8.
