@@ -1034,7 +1034,7 @@
           const pixelX = Math.floor(x), pixelY = Math.floor(y);
           let visible = true;
           if (depthBuffer && pixelX >= 0 && pixelX < width && pixelY >= 0 && pixelY < height) {
-            let closestDepthError = Infinity;
+            let bestVisibilityMargin = -Infinity;
             const centerX = pixelX + 0.5, centerY = pixelY + 0.5;
             const centerFraction = lengthSquared
               ? Math.max(0, Math.min(1, ((centerX - x0) * dx + (centerY - y0) * dy) / lengthSquared))
@@ -1042,9 +1042,9 @@
             const centerLineDepth = startDepth + (endDepth - startDepth) * centerFraction;
             const centerSurfaceDepth = depthBuffer[pixelY * width + pixelX];
             if (centerSurfaceDepth !== -Infinity) {
-              closestDepthError = Math.abs(centerLineDepth - centerSurfaceDepth);
+              bestVisibilityMargin = centerLineDepth - centerSurfaceDepth;
             }
-            if (closestDepthError > depthTolerance) {
+            if (bestVisibilityMargin < -depthTolerance) {
               for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
                 const sampleY = pixelY + offsetY;
                 if (sampleY < 0 || sampleY >= height) continue;
@@ -1059,11 +1059,13 @@
                     ? Math.max(0, Math.min(1, ((neighborX - x0) * dx + (neighborY - y0) * dy) / lengthSquared))
                     : fraction;
                   const lineDepth = startDepth + (endDepth - startDepth) * projectedFraction;
-                  closestDepthError = Math.min(closestDepthError, Math.abs(lineDepth - surfaceDepth));
+                  bestVisibilityMargin = Math.max(bestVisibilityMargin, lineDepth - surfaceDepth);
                 }
               }
             }
-            visible = closestDepthError <= depthTolerance;
+            // Viewport mesh depth is approximate; bias exact B-rep edges toward visible
+            // only within that approximation error, while still rejecting occluded edges.
+            visible = bestVisibilityMargin >= -depthTolerance;
           }
           if (visible) {
             if (!runStart) runStart = [x, y];
