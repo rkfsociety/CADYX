@@ -86,6 +86,10 @@ selecting a feature shows its dimensions without overlaying tessellation edges.
 When the document revision changes, tree selection follows the latest visible
 feature so its result dimensions stay attached to the current modeling action;
 manual selection remains in effect until the next revision.
+For solid B-rep features, the Geometry inspector estimates mass from the saved
+CAD volume and a user-entered material density in g/cm³:
+`mass_g = volume_mm3 * density_g_cm3 / 1000`. Triangle meshes do not show this
+calculation because they do not provide a validated solid volume.
 Clicking empty space in the feature tree clears the tree selection, viewport
 highlight, and selected-item properties.
 Object properties are not shown in a separate panel. Files is navigation item 06 and

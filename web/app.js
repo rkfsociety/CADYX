@@ -187,6 +187,45 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     function modelParameterSection(){const entries=Object.entries(state.parameters||{});if(!entries.length)return'';const rows=entries.map(([name,record])=>{const expression=state.bindings.find(item=>(item.expression.match(/[A-Za-z_][A-Za-z0-9_]*/g)||[]).includes(name));return`<dt title="${esc(expression?.expression||'')} ">${esc(name)}</dt><dd><input data-model-parameter="true" data-parameter="${esc(name)}" data-original-value="${Number(record.value)}" value="${Number(record.value)}"> ${esc(record.unit||'мм')}</dd>`}).join('');return`<section class="cad3-sec cad3-model-parameters"><h3>Параметры модели</h3><dl class="cad3-grid">${rows}</dl><button class="cad3-apply-model">ПЕРЕСТРОИТЬ МОДЕЛЬ</button></section>`}
     function applyModelParameterEdits(){const vals=[...props.querySelectorAll('input[data-model-parameter]')].filter(i=>Number.isFinite(Number(i.value))&&Number(i.value)!==Number(i.dataset.originalValue));if(!vals.length)return;const fields=document.createElement('div');for(const input of vals){const copy=document.createElement('input');copy.dataset.modelParameter='true';copy.dataset.parameter=input.dataset.parameter;copy.dataset.originalValue=input.dataset.originalValue;copy.value=input.value;fields.append(copy)}fields.append(document.createElement('button'));return applyGeometryDimensions(null,fields)}
     function renderProps(o){if(!o){props.innerHTML='<div class="cad3-empty">Выберите элемент в дереве модели.</div>';if(modelParameterSection())props.insertAdjacentHTML('afterbegin',modelParameterSection());props.querySelector('.cad3-apply-model')?.addEventListener('click',applyModelParameterEdits);return}if(o.type==='sketch'){props.innerHTML=`<div class="cad3-head"><span class="cad3-icon">${I.sketch}</span><div><strong>${esc(label(o.id))}</strong><small>Эскиз</small></div></div><section class="cad3-sec"><h3>Общие сведения</h3><dl class="cad3-grid"><dt>Плоскость</dt><dd>${esc(o.plane||'—')}</dd><dt>Состояние</dt><dd><span class="cad3-valid">● Корректно</span></dd></dl></section>`;props.insertAdjacentHTML('afterbegin',modelParameterSection());props.querySelector('.cad3-apply-model')?.addEventListener('click',applyModelParameterEdits);return}const body=state.byId.get(o.body_id),mesh=sceneBody(o.body_id),m=o.source_metrics||{},sk=state.byId.get(o.source_sketch_id);const general=`<dt>Тип элемента</dt><dd>${esc(opType(o))}</dd><dt>Операция</dt><dd>${esc(opType(o))}</dd><dt>Состояние</dt><dd><span class="cad3-valid">● Корректно</span></dd><dt>Тело</dt><dd>${esc(body?.name||o.body_id||'—')}</dd>${sk?`<dt>Исходный эскиз</dt><dd>${esc(label(sk.id))}</dd><dt>Направление</dt><dd>Перпендикулярно плоскости ${esc(sk.plane||'эскиза')}</dd>`:''}`;const result=`<dt>Вершины</dt><dd>${fmt((mesh?.positions?.length||0)/3)}</dd><dt>Грани</dt><dd>${fmt((mesh?.triangles?.length||0)/3)}</dd>${Number.isFinite(m.volume)?`<dt>Объём</dt><dd>${fmt(m.volume)} мм³</dd>`:''}${Number.isFinite(m.surface_area)?`<dt>Площадь поверхности</dt><dd>${fmt(m.surface_area)} мм²</dd>`:''}`;const dependency=deps(o);props.innerHTML=`<div class="cad3-head"><span class="cad3-icon">${opIcon(o)}</span><div><strong>${esc(label(o.id))}</strong><small>${esc(opType(o))}</small></div></div><section class="cad3-sec"><h3>Общие сведения</h3><dl class="cad3-grid">${general}</dl></section><section class="cad3-sec"><h3>Параметры</h3><dl class="cad3-grid">${parameterHtml(o)}</dl>${(editable[o.operation]||[]).some(k=>typeof o.parameters?.[k]==='number')?'<button class="cad3-apply">ПРИМЕНИТЬ ПАРАМЕТРЫ</button>':''}</section><section class="cad3-sec"><h3>Результат</h3><dl class="cad3-grid">${result}</dl></section><section class="cad3-sec"><h3>Зависимости</h3>${dependency.length?dependency.map(d=>`<button class="cad3-dep" data-dep="${d.id}"><span>${esc(label(d.id))}</span><small>${esc(d.role)}</small></button>`).join(''):'<div class="cad3-empty">Нет зависимостей.</div>'}</section>`;props.insertAdjacentHTML('afterbegin',modelParameterSection());props.querySelector('.cad3-apply-model')?.addEventListener('click',applyModelParameterEdits);props.querySelector('.cad3-apply')?.addEventListener('click',async()=>{const vals=[...props.querySelectorAll('input[data-p]')].map(i=>[i.dataset.p,{original:+i.dataset.original,next:+i.value}]).filter(([,v])=>Number.isFinite(v.next)&&v.next!==v.original);if(!vals.length)return;const fields=document.createElement('div');for(const [name,v] of vals){const i=document.createElement('input');i.dataset.parameter=name;i.dataset.originalValue=String(v.original);i.value=String(v.next);fields.append(i)}fields.append(document.createElement('button'));try{await applyGeometryDimensions(o.id,fields)}catch(e){console.error(e)}})}
+    const renderGeometryProps = renderProps;
+    const massDensityByBody = new Map();
+    renderProps = selected => {
+      renderGeometryProps(selected);
+      if (!selected || selected.type === 'sketch') return;
+      const body = selected.type === 'body' ? selected : state.byId.get(selected.body_id);
+      const geometry = body?.geometry || selected.geometry;
+      if (geometry?.kind === 'triangle_mesh') return;
+      const volume = [geometry?.volume, selected.source_metrics?.volume]
+        .find(value => typeof value === 'number' && Number.isFinite(value) && value > 0);
+      if (volume === undefined) return;
+
+      const section = document.createElement('section');
+      section.className = 'cad3-sec cad3-mass-calculator';
+      section.innerHTML = '<h3>Вес детали</h3><dl class="cad3-grid"><dt>Плотность материала</dt><dd><input data-mass-density type="number" min="0" step="any" inputmode="decimal" placeholder="г/см³" aria-label="Плотность материала, граммов на кубический сантиметр"></dd><dt>Расчётная масса</dt><dd data-mass-result>Укажите плотность</dd></dl>';
+      props.append(section);
+
+      const densityInput = section.querySelector('[data-mass-density]');
+      const massResult = section.querySelector('[data-mass-result]');
+      const bodyId = body?.id || selected.body_id || selected.id;
+      const savedDensity = massDensityByBody.get(bodyId);
+      if (savedDensity !== undefined) densityInput.value = String(savedDensity);
+      const updateMass = () => {
+        const density = Number(densityInput.value);
+        if (!densityInput.value || !Number.isFinite(density) || density <= 0) {
+          massDensityByBody.delete(bodyId);
+          massResult.textContent = 'Укажите плотность';
+          return;
+        }
+        massDensityByBody.set(bodyId, density);
+        const grams = volume * density / 1000;
+        const format = value => fmt(value);
+        massResult.textContent = grams < 1000
+          ? `${format(grams)} г`
+          : `${format(grams / 1000)} кг`;
+      };
+      densityInput.addEventListener('input', updateMass);
+      if (savedDensity !== undefined) updateMass();
+    };
     props.addEventListener('click',e=>{const b=e.target.closest('[data-dep]');if(b)select(b.dataset.dep,true)});
     const tabs=$('.cad-inspector-tabs');tabs?.addEventListener('click',()=>queueMicrotask(()=>{const active=$('.cad-inspector-tab[aria-selected=true]',tabs)?.dataset.cadInspector||'properties';props.hidden=active!=='properties'}));
     function select(id,reveal=false){if(!state.byId.has(id))return;const selected=state.byId.get(id);if(selected.type==='sketch'){const owner=state.objects.find(item=>item.type==='feature'&&(item.source_sketch_id===id||(item.source_sketch_ids||[]).includes(id)));if(owner)expandedFeatures.add(owner.id)}state.selected=id;state.selectionCleared=false;try{selectedObjectId=id}catch{}if(selected.type==='feature'&&['fillet_edges','variable_fillet_edges','chamfer_edges'].includes(selected.operation))modelViewer?.setSelectedFeature?.(selected.id);else modelViewer?.setSelectedBody?.(bodyFor(selected)?.id||null);renderTree();renderProps(selected);if(reveal)list?.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'nearest'});detail.dataset.v2Selection='true';syncOverlay()}
