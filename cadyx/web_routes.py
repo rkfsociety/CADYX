@@ -75,6 +75,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/activity", "agent_activity", "agent"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/comparison", "agent_comparison", "agent"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/topology", "agent_topology", "agent"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/topology/query", "agent_topology_query", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/validations", "agent_validations", "validation"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/dimensions", "agent_validate_dimensions", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/planetary-kinematics", "agent_validate_planetary_kinematics", "validation", "json"),
@@ -423,6 +424,13 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
     elif name == "agent_topology":
         body_id = parse_qs(parsed.query).get("body_id", [None])[0]
         handler._json(200, core.observe_agent_operation(project_id, "Изучает рёбра модели", lambda: core.inspect_body_topology(project_id, body_id)))
+    elif name == "agent_topology_query":
+        body = _require_json(handler)
+        if set(body) != {"body_id", "expected_revision", "query"}:
+            raise ValidationError("Topology query requires only body_id, expected_revision, and query.")
+        handler._json(200, core.query_body_topology(
+            project_id, body["body_id"], body["expected_revision"], body["query"],
+        ))
     elif name == "agent_rename":
         body = _require_json(handler)
         if set(body) != {"name"}:

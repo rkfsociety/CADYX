@@ -165,6 +165,7 @@ def agent_api_capabilities(reusable_capabilities: list[dict[str, Any]] | None = 
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/source-extensions", "description": "Test and integrate a bounded source patch in the fail-closed Windows AppContainer; schedules host restart after success."},
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/source-extensions/{extension_id}/rollback", "description": "Restore an unchanged source-extension checkpoint; refuses to overwrite later source edits."},
             {"method": "GET", "path": "/api/v1/agent/projects/{id}/topology?body_id=...", "description": "Current editable B-rep topology; refresh after upstream edits."},
+            {"method": "POST", "path": "/api/v1/agent/projects/{id}/topology/query", "description": "Read-only typed face/edge topology query at an exact saved revision; returns candidate list and ambiguity."},
             {"method": "GET", "path": "/api/v1/agent/projects/{id}/validations?limit=50", "description": "List up to 200 recent persisted validation records without changing the document revision."},
             *({key: operation[key] for key in ("method", "path", "description")}
               for operation in VALIDATION_OPERATIONS.values()),

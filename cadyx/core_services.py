@@ -988,7 +988,22 @@ class RenderingCacheService(_CoreService):
         if body is None:
             raise ValidationError("Topology inspection needs an existing body_id.")
         topology = self.kernel.topology(body["geometry"])
-        return {"body_id": body_id, **topology}
+        return {"body_id": body_id, "revision": document.revision, **topology}
+
+    def query_body_topology(
+        self, project_id: str, body_id: str, expected_revision: Any, query: Any,
+    ) -> dict[str, Any]:
+        from .topology_queries import query_topology
+
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        self._check_revision(document, expected_revision)
+        body = next((item for item in document.objects
+                     if item.get("id") == body_id and item.get("type") == "body"), None)
+        if body is None:
+            raise ValidationError("Topology query requires an existing body_id.")
+        result = query_topology(self.kernel.topology(body["geometry"]), query)
+        return {"body_id": body_id, "revision": document.revision, **result}
 
     def _remember_geometry_validation(self, project_id: str, document: Document) -> None:
         key = self._document_cache_key(project_id, document)

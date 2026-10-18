@@ -911,6 +911,41 @@ class WebApiTests(unittest.TestCase):
         with urlopen(self.base_url + "/assets/viewport.js", timeout=3) as response:
             self.assertIn(b"CadyxViewport", response.read())
 
+    def test_revision_bound_topology_query_does_not_mutate_project(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Query B-rep topology"})
+        project_id = created["project"]["id"]
+        lease = self.core.acquire_lease(project_id, "agent", "query-agent")
+        box = self.core.execute_command(project_id, lease["lease_id"], {
+            "type": "create_box", "width": 10, "height": 12, "depth": 14,
+        })
+        body_id = box["history_entry"]["result"]["body_id"]
+        revision = box["document"]["revision"]
+        path = f"/api/v1/agent/projects/{project_id}/topology/query"
+        before = self.core.inspect_project(project_id)
+        status, found = self.request(path, {
+            "body_id": body_id, "expected_revision": revision,
+            "query": {"entity": "face", "surface": "plane", "max_results": 2},
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(found["revision"], revision)
+        self.assertEqual(found["status"], "ambiguous")
+        self.assertEqual(found["match_count"], 6)
+        self.assertTrue(found["truncated"])
+        self.assertEqual([item["index"] for item in found["candidates"]], sorted(
+            item["index"] for item in found["candidates"]))
+        self.assertEqual(self.core.inspect_project(project_id), before)
+        status, error = self.request(path, {
+            "body_id": body_id, "expected_revision": revision + 1,
+            "query": {"entity": "face"},
+        })
+        self.assertEqual((status, error["error"]), (409, "REVISION_CONFLICT"))
+        status, error = self.request(path, {
+            "body_id": body_id, "expected_revision": revision,
+            "query": {"entity": "edge", "normal": {"vector": [0, 0, 1]}},
+        })
+        self.assertEqual((status, error["error"]), (400, "VALIDATION_ERROR"))
+        self.assertEqual(self.core.inspect_project(project_id), before)
+
     def test_agent_can_inspect_stable_unique_brep_edges_for_fillets(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "B-rep topology"})
         project_id = created["project"]["id"]
