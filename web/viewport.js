@@ -98,7 +98,6 @@
     const meshLayerContext = meshLayer.getContext("2d", { alpha: true });
     let meshImage = null;
     let meshDepth = new Float32Array(0);
-    let meshDepthFace = new Int32Array(0);
     let geometry = null;
     let selectedBodyId = null;
     let selectedFeatureId = null;
@@ -336,7 +335,7 @@
         triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, bodyMotionAngleByVertex,
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
-        wireframeColor, wireframeOpacity, dpr, Math.max(1.5 / scale, VIEWPORT_MESH_DEFLECTION),
+        wireframeColor, wireframeOpacity, dpr, Math.max(2.5 / scale, VIEWPORT_MESH_DEFLECTION),
         selectedFeatureId
           ? geometry.featureTriangleRanges?.filter((range) => range.featureId === selectedFeatureId) || []
           : geometry.bodyTriangleRanges?.filter((range) => range.objectId === selectedBodyId) || [],
@@ -669,10 +668,8 @@
         meshLayer.height = height;
         meshImage = meshLayerContext.createImageData(width, height);
         meshDepth = new Float32Array(width * height);
-        meshDepthFace = new Int32Array(width * height);
       }
       meshDepth.fill(-Infinity);
-      meshDepthFace.fill(-1);
       const pixels = meshImage.data;
       pixels.fill(0);
 
@@ -740,7 +737,6 @@
                   const depth = z0 * w0 + z1 * w1 + z2 * w2;
                   if (depth + 1e-7 >= meshDepth[pixelIndex]) {
                     meshDepth[pixelIndex] = depth;
-                    meshDepthFace[pixelIndex] = face;
                     const byteIndex = pixelIndex * 4;
                     const brightness = vertexLight
                       ? vertexLight[first] * w0 + vertexLight[second] * w1 + vertexLight[third] * w2
@@ -798,7 +794,6 @@
                 const depth = z0 * w0 + z1 * w1 + z2 * w2;
                 if (depth + 1e-7 >= meshDepth[pixelIndex]) {
                   meshDepth[pixelIndex] = depth;
-                  meshDepthFace[pixelIndex] = face;
                   const byteIndex = pixelIndex * 4;
                   const brightness = vertexLight
                     ? vertexLight[first] * w0 + vertexLight[second] * w1 + vertexLight[third] * w2
@@ -1014,9 +1009,8 @@
         }
       }
       const depthBuffer = depthBufferValid ? meshDepth : null;
-      const depthFaceBuffer = depthBufferValid ? meshDepthFace : null;
       const width = canvas.width, height = canvas.height;
-      const drawEdge = (start, end, adjacentFaceA = -1, adjacentFaceB = -1) => {
+      const drawEdge = (start, end, depthTest = true) => {
         const startOffset = start * 3, endOffset = end * 3;
         const x0 = screenX[start], y0 = screenY[start];
         const x1 = screenX[end], y1 = screenY[end];
@@ -1039,9 +1033,7 @@
           const x = x0 + dx * fraction, y = y0 + dy * fraction;
           const pixelX = Math.floor(x), pixelY = Math.floor(y);
           let visible = true;
-          if (depthBuffer && pixelX >= 0 && pixelX < width && pixelY >= 0 && pixelY < height) {
-            let bestVisibilityMargin = -Infinity;
-            let hasDepthSample = false;
+          if (depthTest && depthBuffer && pixelX >= 0 && pixelX < width && pixelY >= 0 && pixelY < height) {
             const centerX = pixelX + 0.5, centerY = pixelY + 0.5;
             const centerFraction = lengthSquared
               ? Math.max(0, Math.min(1, ((centerX - x0) * dx + (centerY - y0) * dy) / lengthSquared))
@@ -1049,38 +1041,9 @@
             const centerLineDepth = startDepth + (endDepth - startDepth) * centerFraction;
             const centerIndex = pixelY * width + pixelX;
             const centerSurfaceDepth = depthBuffer[centerIndex];
-            const centerFace = depthFaceBuffer?.[centerIndex] ?? -1;
-            if (centerSurfaceDepth !== -Infinity
-                && centerFace !== adjacentFaceA && centerFace !== adjacentFaceB) {
-              hasDepthSample = true;
-              bestVisibilityMargin = centerLineDepth - centerSurfaceDepth;
+            if (centerSurfaceDepth !== -Infinity) {
+              visible = centerLineDepth - centerSurfaceDepth >= -depthTolerance;
             }
-            if (bestVisibilityMargin < -depthTolerance) {
-              for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
-                const sampleY = pixelY + offsetY;
-                if (sampleY < 0 || sampleY >= height) continue;
-                for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
-                  if (offsetX === 0 && offsetY === 0) continue;
-                  const sampleX = pixelX + offsetX;
-                  if (sampleX < 0 || sampleX >= width) continue;
-                  const sampleIndex = sampleY * width + sampleX;
-                  const sampleFace = depthFaceBuffer?.[sampleIndex] ?? -1;
-                  if (sampleFace === adjacentFaceA || sampleFace === adjacentFaceB) continue;
-                  const surfaceDepth = depthBuffer[sampleIndex];
-                  if (surfaceDepth === -Infinity) continue;
-                  hasDepthSample = true;
-                  const neighborX = sampleX + 0.5, neighborY = sampleY + 0.5;
-                  const projectedFraction = lengthSquared
-                    ? Math.max(0, Math.min(1, ((neighborX - x0) * dx + (neighborY - y0) * dy) / lengthSquared))
-                    : fraction;
-                  const lineDepth = startDepth + (endDepth - startDepth) * projectedFraction;
-                  bestVisibilityMargin = Math.max(bestVisibilityMargin, lineDepth - surfaceDepth);
-                }
-              }
-            }
-            // The mesh may leave the rasterized silhouette uncovered; otherwise bias
-            // edges toward visible only within the mesh approximation error.
-            visible = !hasDepthSample || bestVisibilityMargin >= -depthTolerance;
           }
           if (visible) {
             if (!runStart) runStart = [x, y];
@@ -1133,7 +1096,9 @@
           const secondFace = faceFacing[silhouetteCandidates[index + 3]];
           if (firstFace === secondFace || firstFace === 0 && secondFace === 0) continue;
           const start = silhouetteCandidates[index], end = silhouetteCandidates[index + 1];
-          drawEdge(start, end, silhouetteCandidates[index + 2], silhouetteCandidates[index + 3]);
+          // Facing transitions define the projected silhouette; depth-testing these
+          // edge pixels against the mesh interior breaks the outline into dots.
+          drawEdge(start, end, false);
         }
         context.stroke();
         context.restore();
