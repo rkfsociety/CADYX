@@ -22,8 +22,13 @@ CAPABILITIES = ({
     "description": "Change body visibility without removing geometry or its references.",
     "required": ["body_id", "visible"], "optional": [],
     "constraints": ["visible must be a boolean; the body remains available for analysis."],
+}, {
+    "type": "rename_body",
+    "description": "Rename a body in the object tree.",
+    "required": ["body_id", "name"], "optional": [],
+    "constraints": ["name must contain 1 to 120 non-whitespace characters; geometry and references are unchanged."],
 })
-ACTIVITY_ACTIONS = {"import_stl": "Импорт эталона STL", "set_body_visibility": "Изменяет видимость тела"}
+ACTIVITY_ACTIONS = {"import_stl": "Импорт эталона STL", "set_body_visibility": "Изменяет видимость тела", "rename_body": "Переименовывает тело"}
 
 def _validate_triangle_count(count: int) -> None:
     if type(count) is not int or count < 1:
@@ -93,6 +98,15 @@ def parse_stl(data: bytes):
     return geometry, {**stats, "bounds": mesh_bounds(geometry), "units": "unitless"}
 
 def _execute(self, document, command, *, progress=None, project_id=None):
+    if command.get("type") == "rename_body":
+        name = command.get("name")
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Body name must contain 1 to 120 non-whitespace characters.")
+        body = next((item for item in document.objects if item.get("id") == command.get("body_id") and item.get("type") == "body"), None)
+        if body is None:
+            raise ValidationError("Body was not found.")
+        body["name"] = name.strip()
+        return {"body_id": body["id"], "name": body["name"]}
     if command.get("type") == "set_body_visibility":
         if type(command.get("visible")) is not bool:
             raise ValidationError("visible must be a boolean.")

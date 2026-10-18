@@ -79,3 +79,27 @@ class BodyVisibilityTests(unittest.TestCase):
         self.assertEqual(body["geometry"], {"unchanged":True})
         with self.assertRaises(ValidationError):
             _execute(None, document, {"type":"set_body_visibility","body_id":"body:test","visible":0})
+
+
+class BodyRenameTests(unittest.TestCase):
+    def test_rename_updates_only_body_name(self):
+        from cadyx.stl_reference import _execute
+        from cadyx.models import Document
+        document = Document.create()
+        body = {"id": "body:test", "type": "body", "name": "Old", "geometry": {"unchanged": True}}
+        document.objects.append(body)
+        result = _execute(None, document, {"type": "rename_body", "body_id": "body:test", "name": "  Base  "})
+        self.assertEqual(result, {"body_id": "body:test", "name": "Base"})
+        self.assertEqual(body["geometry"], {"unchanged": True})
+        self.assertEqual(body["name"], "Base")
+
+    def test_rename_rejects_invalid_names_and_missing_body(self):
+        from cadyx.stl_reference import _execute
+        from cadyx.models import Document
+        document = Document.create()
+        document.objects.append({"id": "body:test", "type": "body", "name": "Old"})
+        for name in ("", "   ", "x" * 121, None):
+            with self.subTest(name=name), self.assertRaises(ValidationError):
+                _execute(None, document, {"type": "rename_body", "body_id": "body:test", "name": name})
+        with self.assertRaises(ValidationError):
+            _execute(None, document, {"type": "rename_body", "body_id": "body:missing", "name": "Base"})
