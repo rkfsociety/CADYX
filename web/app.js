@@ -285,6 +285,21 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       overlay.width=Math.round(rect.width*dpr);overlay.height=Math.round(rect.height*dpr);
       const ctx=overlay.getContext('2d');ctx.clearRect(0,0,overlay.width,overlay.height);
       const o=state.byId.get(state.selected),P=projectSetup();
+      if(P){
+        ctx.save();ctx.font=`600 ${11*dpr}px var(--ui-font),sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+        for(const {body} of modelGroups()){
+          const mesh=sceneBody(body.id);if(!mesh?.positions?.length)continue;
+          const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];
+          for(let i=0;i<mesh.positions.length;i+=3)for(let axis=0;axis<3;axis++){min[axis]=Math.min(min[axis],mesh.positions[i+axis]);max[axis]=Math.max(max[axis],mesh.positions[i+axis])}
+          const anchor=P.p((min[0]+max[0])/2,(min[1]+max[1])/2,max[2]),text=body.name,padding=7*dpr,width=ctx.measureText(text).width+padding*2,height=22*dpr;
+          const x=Math.max(width/2+4*dpr,Math.min(overlay.width-width/2-4*dpr,anchor[0]));
+          const y=Math.max(height/2+4*dpr,anchor[1]-height);
+          ctx.fillStyle='rgba(9,15,19,.88)';ctx.strokeStyle='rgba(255,145,75,.72)';ctx.lineWidth=dpr;
+          ctx.beginPath();ctx.roundRect(x-width/2,y-height/2,width,height,5*dpr);ctx.fill();ctx.stroke();
+          ctx.fillStyle='#fff0e5';ctx.fillText(text,x,y);
+        }
+        ctx.restore();
+      }
       if(o?.type==='sketch'&&P){drawSelectedSketch(o,P,ctx,dpr);return}
       const body=bodyFor(o),m=sceneBody(body?.id);
       if(!m||!P)return;
