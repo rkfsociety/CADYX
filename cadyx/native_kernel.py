@@ -227,7 +227,13 @@ class NativeKernel:
 
     def _raise_native_error(self, result, error):
         if not result:
-            raise ValidationError(self._native_error(error))
+            raise ValidationError(
+                self._native_error(error), code="KERNEL_OPERATION_FAILED",
+                diagnostics={"category": "kernel", "failed_precondition":
+                             "the OCCT operation must produce valid supported geometry",
+                             "correction_hint":
+                             "Inspect profile closure, self-intersections, dimensions and source topology; no automatic repair was applied."},
+            )
 
     def _free_native_result(self, result):
         if result:
@@ -675,9 +681,11 @@ class NativeKernel:
                             or decoder.unused_data or decoder.unconsumed_tail):
                         raise ValueError("invalid compressed B-rep payload")
                 except (KeyError, TypeError, ValueError, zlib.error) as exc:
-                    raise ValidationError("Imported B-rep data is invalid or exceeds the 64 MB limit.") from exc
+                    raise ValidationError("Imported B-rep data is invalid or exceeds the 64 MB limit.",
+                                          code="KERNEL_OPERATION_FAILED") from exc
                 if not restored or len(brep_data) + len(restored) > 64 * 1024 * 1024:
-                    raise ValidationError("Imported B-rep data is empty or exceeds the 64 MB limit.")
+                    raise ValidationError("Imported B-rep data is empty or exceeds the 64 MB limit.",
+                                          code="RESOURCE_LIMIT" if len(brep_data) + len(restored) > 64 * 1024 * 1024 else "KERNEL_OPERATION_FAILED")
                 node.update(type=6, coordinate_offset=len(brep_data), coordinate_count=len(restored))
                 brep_data.extend(restored)
             else:
@@ -725,7 +733,8 @@ class NativeKernel:
 
     def import_step(self, source):
         if not isinstance(source, bytes) or not source or len(source) > 64 * 1024 * 1024:
-            raise ValidationError("STEP source is empty or exceeds the 64 MB limit.")
+            raise ValidationError("STEP source is empty or exceeds the 64 MB limit.",
+                                  code="RESOURCE_LIMIT" if isinstance(source, bytes) and len(source) > 64 * 1024 * 1024 else "KERNEL_OPERATION_FAILED")
         source_buffer = (ctypes.c_ubyte * len(source)).from_buffer_copy(source)
         error = ctypes.create_string_buffer(1024)
         result = self.library.cadyx_step_import(source_buffer, len(source), error, len(error))
@@ -738,13 +747,14 @@ class NativeKernel:
 
     def section_profile(self, brep, *, normal_axis, offset, max_points):
         if not isinstance(brep, bytes) or not brep or len(brep) > 64 * 1024 * 1024:
-            raise ValidationError("Section source B-rep is empty or exceeds the 64 MB limit.")
+            raise ValidationError("Section source B-rep is empty or exceeds the 64 MB limit.",
+                                  code="RESOURCE_LIMIT" if isinstance(brep, bytes) and len(brep) > 64 * 1024 * 1024 else "KERNEL_OPERATION_FAILED")
         axes = {"X": 0, "Y": 1, "Z": 2}
         if normal_axis not in axes:
             raise ValidationError("Section normal axis must be X, Y or Z.")
         if (isinstance(max_points, bool) or not isinstance(max_points, int)
                 or max_points < 16 or max_points > ctypes.c_size_t(-1).value):
-            raise ValidationError("Section sample limit must be at least 16 and fit the native size type.")
+            raise ValidationError("Section sample limit must be at least 16 and fit the native size type.", code="RESOURCE_LIMIT")
         source = (ctypes.c_ubyte * len(brep)).from_buffer_copy(brep)
         error = ctypes.create_string_buffer(1024)
         result = self.library.cadyx_section_profile(
@@ -760,7 +770,8 @@ class NativeKernel:
     @staticmethod
     def _export_brep_buffer(brep):
         if not isinstance(brep, bytes) or not brep or len(brep) > 64 * 1024 * 1024:
-            raise ValidationError("B-rep data is empty or exceeds the 64 MB limit.")
+            raise ValidationError("B-rep data is empty or exceeds the 64 MB limit.",
+                                  code="RESOURCE_LIMIT" if isinstance(brep, bytes) and len(brep) > 64 * 1024 * 1024 else "KERNEL_OPERATION_FAILED")
         return (ctypes.c_ubyte * len(brep)).from_buffer_copy(brep)
 
     def export_step_brep(self, brep):
@@ -809,7 +820,8 @@ class NativeKernel:
                     or decoder.unused_data or decoder.unconsumed_tail):
                 raise ValueError("invalid compressed B-rep payload")
         except (KeyError, TypeError, ValueError, zlib.error) as exc:
-            raise ValidationError("Imported B-rep data is invalid or exceeds the 64 MB limit.") from exc
+            raise ValidationError("Imported B-rep data is invalid or exceeds the 64 MB limit.",
+                                  code="KERNEL_OPERATION_FAILED") from exc
         expected_count = 6 if operation == "resize_thread_x" else 7
         if (not isinstance(parameters, (list, tuple)) or len(parameters) != expected_count
                 or any(isinstance(value, bool) or not isinstance(value, (int, float))

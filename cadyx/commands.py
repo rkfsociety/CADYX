@@ -58,5 +58,8 @@ class CommandSystem(
             raise ValidationError("command must be a JSON object.")
         kind = command.get("type")
         if not isinstance(kind, str) or kind not in COMMAND_REGISTRY.command_types:
-            raise ValidationError(f"Unsupported command type: {kind!r}.")
+            raise ValidationError(f"Unsupported command type: {kind!r}.", code="UNSUPPORTED_OPERATION",
+                                  diagnostics={"category": "unsupported_operation",
+                                               "failed_precondition": "command type must be present in the current capability registry",
+                                               "correction_hint": "Call the capability discovery route and use a listed command type."})
         return self._extension_execute(document, command, progress=progress, project_id=project_id)

@@ -376,6 +376,9 @@ class CadyxMCPServerTests(unittest.TestCase):
                 "command": {"type": "create_box", "width": 0, "height": 2, "depth": 3},
             })
         self.assertTrue(invalid["isError"])
+        self.assertEqual(invalid["structuredContent"]["error"], "VALIDATION_ERROR")
+        self.assertEqual(invalid["structuredContent"]["diagnostics"]["command_type"], "create_box")
+        self.assertEqual(invalid["structuredContent"]["diagnostics"]["revision"], 0)
         self.assertFalse(any(call.args[0].endswith("/stop") for call in post.call_args_list),
                          "A definite 4xx rejection must not trigger agent safe-stop.")
         detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})

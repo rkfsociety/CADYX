@@ -178,6 +178,8 @@ def make_request_handler(
                 dispatch_route(self, core, route, parsed)
             except CadyxError as exc:
                 self._json(exc.http_status, exc.as_dict())
+            except Exception:
+                self._json(500, {"error": "INTERNAL_ERROR", "message": "CADYX encountered an unexpected internal error."})
 
         def do_POST(self) -> None:
             parsed = urlsplit(self.path)
@@ -196,6 +198,8 @@ def make_request_handler(
                 self._json(exc.http_status, exc.as_dict())
             except (json.JSONDecodeError, UnicodeDecodeError):
                 self._json(400, {"error": "INVALID_JSON", "message": "Request body must be valid UTF-8 JSON."})
+            except Exception:
+                self._json(500, {"error": "INTERNAL_ERROR", "message": "CADYX encountered an unexpected internal error."})
 
         def do_DELETE(self) -> None:
             parsed = urlsplit(self.path)
@@ -209,6 +213,8 @@ def make_request_handler(
                 dispatch_route(self, core, route, parsed)
             except CadyxError as exc:
                 self._json(exc.http_status, exc.as_dict())
+            except Exception:
+                self._json(500, {"error": "INTERNAL_ERROR", "message": "CADYX encountered an unexpected internal error."})
 
         def _not_found(self) -> None:
             self._json(404, {"error": "NOT_FOUND", "message": "Route was not found."})

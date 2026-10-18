@@ -211,6 +211,33 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(saved["document"]["objects"], [])
         self.assertEqual(saved["history"], [])
 
+    def test_command_validation_errors_include_revision_and_safe_diagnostics(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Command diagnostics"})
+        project_id = created["project"]["id"]
+        _, acquired = self.request(f"/api/v1/agent/projects/{project_id}/leases", {"owner_id": "diagnostics-test"})
+        lease_id = acquired["lease"]["lease_id"]
+        status, error = self.request(
+            f"/api/v1/agent/projects/{project_id}/commands",
+            {"lease_id": lease_id, "expected_revision": 0,
+             "command": {"type": "create_box", "width": 0, "height": 2, "depth": 3}},
+        )
+        self.assertEqual((status, error["error"]), (400, "VALIDATION_ERROR"))
+        self.assertEqual(error["diagnostics"]["command_type"], "create_box")
+        self.assertEqual(error["diagnostics"]["revision"], 0)
+        self.assertEqual(error["diagnostics"]["category"], "validation")
+        self.assertIn("correction_hint", error["diagnostics"])
+        self.core.release_lease(project_id, lease_id)
+
+    def test_unexpected_http_error_uses_safe_generic_payload(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Safe error"})
+        project_id = created["project"]["id"]
+        with patch.object(self.core, "inspect_project",
+                          side_effect=RuntimeError(r"failure at C:\private\token=abc123")):
+            status, error = self.request(f"/api/v1/agent/projects/{project_id}")
+        self.assertEqual((status, error["error"]), (500, "INTERNAL_ERROR"))
+        self.assertNotIn("C:\\private", json.dumps(error))
+        self.assertNotIn("abc123", json.dumps(error))
+
     def test_agent_global_thickness_validation_returns_polyhedron_certificate(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "Global thickness"})
         project_id = created["project"]["id"]

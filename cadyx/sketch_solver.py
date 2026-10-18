@@ -31,14 +31,23 @@ def solve_sketch(
                 "iterations": 0, "max_residual": 0.0, "conflicts": [],
                 "under_constrained": degrees > 0, "over_constrained": False}
     if len(constraints) > _MAX_CONSTRAINTS:
-        raise ValidationError(f"Sketch solver limit exceeded: at most {_MAX_CONSTRAINTS} constraints.")
+        raise ValidationError(f"Sketch solver limit exceeded: at most {_MAX_CONSTRAINTS} constraints.",
+                              code="RESOURCE_LIMIT", diagnostics={"category": "resource_limit",
+                              "entity_ids": [item.get("id") for item in constraints if isinstance(item.get("id"), str)],
+                              "failed_precondition": "the sketch constraint count must stay within the solver budget",
+                              "measurements": {"constraint_count": len(constraints), "maximum": _MAX_CONSTRAINTS},
+                              "correction_hint": "Reduce the number of constraints in this solve to the documented limit."})
     variables: list[tuple[dict[str, Any], str]] = []
     for point in points:
         variables.extend(((point, "x"), (point, "y")))
     for circle in circles:
         variables.append((circle, "radius"))
     if len(variables) > _MAX_VARIABLES:
-        raise ValidationError(f"Sketch solver limit exceeded: at most {_MAX_VARIABLES} scalar variables.")
+        raise ValidationError(f"Sketch solver limit exceeded: at most {_MAX_VARIABLES} scalar variables.",
+                              code="RESOURCE_LIMIT", diagnostics={"category": "resource_limit",
+                              "failed_precondition": "the sketch scalar-variable count must stay within the solver budget",
+                              "measurements": {"variable_count": len(variables), "maximum": _MAX_VARIABLES},
+                              "correction_hint": "Reduce the number of free sketch variables to the documented limit."})
     by_id = {item["id"]: item for item in owned}
     initial = [float(item[field]) for item, field in variables]
     free_indices = [index for index, (item, field) in enumerate(variables)
@@ -236,7 +245,14 @@ def solve_sketch(
     if conflicts:
         set_values(initial)
         raise ValidationError("Sketch constraints are inconsistent or did not converge: " +
-                              ", ".join(f"{item['constraint_id']} ({item['residual']:.6g})" for item in conflicts))
+                              ", ".join(f"{item['constraint_id']} ({item['residual']:.6g})" for item in conflicts),
+                              code="SKETCH_CONSTRAINT_INCONSISTENT", diagnostics={
+                                  "category": "constraint_solver",
+                                  "entity_ids": [item["constraint_id"] for item in conflicts],
+                                  "failed_precondition": "all sketch constraint residuals must be within solver tolerance",
+                                  "measurements": {"conflicts": conflicts, "tolerance": _TOLERANCE,
+                                                   "iterations": iterations, "maximum_iterations": _MAX_ITERATIONS},
+                                  "correction_hint": "Review the listed constraint IDs and residuals; change the intended constraints or their references."})
     jac = jacobian(values, final)
     rank = _matrix_rank([[row[index] for index in free_indices] for row in jac])
     full_rank = _matrix_rank(jac)

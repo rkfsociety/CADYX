@@ -8,10 +8,27 @@ from pathlib import Path
 
 from cadyx.core import CadyxCore
 from cadyx.errors import ConflictError, ValidationError
+from cadyx.delivery import compare_step_metrics
 from cadyx.models import Document, OwnerType
 
 
 class CadDeliveryTests(unittest.TestCase):
+    def test_failed_step_round_trip_reports_measured_deviation(self) -> None:
+        source = {"brep_valid": True, "topology": {"solid_count": 1}, "volume": 100.0,
+                  "bounds": {"min": [0.0, 0.0, 0.0], "max": [10.0, 10.0, 10.0]}}
+        imported = {"brep_valid": True, "topology": {"solid_count": 1}, "volume": 99.0,
+                    "bounds": {"min": [0.0, 0.0, 0.0], "max": [10.0, 10.0, 10.1]}}
+        with self.assertRaises(ValidationError) as raised:
+            compare_step_metrics(source, imported)
+        error = raised.exception.as_dict()
+        self.assertEqual(error["error"], "EXPORT_VERIFICATION_FAILED")
+        self.assertEqual(error["diagnostics"]["category"], "export")
+        measurements = error["diagnostics"]["measurements"]
+        self.assertEqual(measurements["source_volume"], 100.0)
+        self.assertEqual(measurements["reimported_volume"], 99.0)
+        self.assertAlmostEqual(measurements["relative_volume_error"], 0.01)
+        self.assertAlmostEqual(measurements["bounds_max_deviation"], 0.1)
+
     def test_export_command_publishes_revision_bound_step_stl_and_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             core = CadyxCore(temporary)

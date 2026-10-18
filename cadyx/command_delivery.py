@@ -83,12 +83,13 @@ class DeliveryCommands:
         source_path = self.resolve_project_file(project_id, filename)
         source_size = source_path.stat().st_size
         if source_size > 64 * 1024 * 1024:
-            raise ValidationError("STEP source exceeds the 64 MB limit.")
+            raise ValidationError("STEP source exceeds the 64 MB limit.", code="RESOURCE_LIMIT")
         if progress is not None:
             progress({"phase": "read_step_source"})
         source = source_path.read_bytes()
         if not source or len(source) > 64 * 1024 * 1024:
-            raise ValidationError("STEP source is empty or exceeds the 64 MB limit.")
+            raise ValidationError("STEP source is empty or exceeds the 64 MB limit.",
+                                  code="RESOURCE_LIMIT" if len(source) > 64 * 1024 * 1024 else "KERNEL_OPERATION_FAILED")
         source_hash = hashlib.sha256(source).hexdigest()
         if progress is not None:
             progress({"phase": "transfer_step_geometry"})
@@ -175,7 +176,8 @@ class DeliveryCommands:
         step_data = exported.get("step") if isinstance(exported, dict) else None
         source_metrics = exported.get("metrics") if isinstance(exported, dict) else None
         if not isinstance(step_data, bytes) or not step_data or len(step_data) > 64 * 1024 * 1024:
-            raise ValidationError("STEP output is empty or exceeds the existing 64 MB round-trip limit.")
+            raise ValidationError("STEP output is empty or exceeds the existing 64 MB round-trip limit.",
+                                  code="RESOURCE_LIMIT" if isinstance(step_data, bytes) and len(step_data) > 64 * 1024 * 1024 else "EXPORT_VERIFICATION_FAILED")
         if not isinstance(source_metrics, dict):
             raise ValidationError("Geometry kernel did not return source B-rep metrics.")
         if progress is not None:

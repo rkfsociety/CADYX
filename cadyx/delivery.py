@@ -54,7 +54,21 @@ def compare_step_metrics(source: dict[str, Any], imported: dict[str, Any]) -> di
     passed = (math.isclose(source_volume, imported_volume, rel_tol=1e-8, abs_tol=1e-7)
               and bounds_max_deviation <= 1e-6)
     if not passed:
-        raise ValidationError("STEP round-trip changed the source solid's volume or bounds beyond tolerance.")
+        raise ValidationError(
+            "STEP round-trip changed the source solid's volume or bounds beyond tolerance.",
+            code="EXPORT_VERIFICATION_FAILED", diagnostics={
+                "category": "export", "failed_precondition":
+                "round-trip volume and bounds deviations must remain within the documented tolerances",
+                "measurements": {
+                    "source_volume": source_volume, "reimported_volume": imported_volume,
+                    "relative_volume_error": relative_volume_error,
+                    "bounds_max_deviation": bounds_max_deviation,
+                    "tolerances": {"volume_relative": 1e-8, "volume_absolute": 1e-7,
+                                   "bounds_absolute": 1e-6},
+                },
+                "correction_hint": "Inspect source and re-imported B-rep validity and measurements before attempting another export.",
+            },
+        )
     return {
         "status": "passed",
         "source_solid_count": source_topology["solid_count"],
@@ -73,7 +87,7 @@ def verify_binary_stl(data: bytes, *, source_volume: float, native_metrics: dict
     if not isinstance(data, bytes) or len(data) < 84:
         raise ValidationError("OCCT returned a truncated binary STL export.")
     if len(data) > 64 * 1024 * 1024:
-        raise ValidationError("STL output exceeds the 64 MB delivery limit.")
+        raise ValidationError("STL output exceeds the 64 MB delivery limit.", code="RESOURCE_LIMIT")
     triangle_count = struct.unpack_from("<I", data, 80)[0]
     if triangle_count == 0 or len(data) != 84 + triangle_count * 50:
         raise ValidationError("OCCT returned an invalid binary STL export.")

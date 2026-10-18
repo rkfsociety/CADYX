@@ -99,7 +99,12 @@ def _ply_counts(path: Path) -> tuple[int, int]:
     if vertices < 3:
         raise ValidationError("PLY scan must contain at least three vertices.")
     if vertices > _MAX_PLY_VERTICES or faces > _MAX_PLY_FACES:
-        raise ValidationError("PLY scan exceeds the 2M vertex or 5M face resource limit.")
+        raise ValidationError("PLY scan exceeds the 2M vertex or 5M face resource limit.",
+                              code="RESOURCE_LIMIT", diagnostics={"category": "resource_limit",
+                              "failed_precondition": "the PLY vertex and face counts must fit scan processing limits",
+                              "measurements": {"vertices": vertices, "faces": faces,
+                                               "maximum_vertices": 2_000_000, "maximum_faces": 5_000_000},
+                              "correction_hint": "Use a smaller scan or reduce its mesh density before import."})
     return vertices, faces
 
 
@@ -130,7 +135,10 @@ class ScanProcessor:
             raise ValidationError("Scan source must be a regular PLY file.")
         size = source.stat().st_size
         if size > _MAX_PLY_BYTES:
-            raise ValidationError("PLY source exceeds the 512 MiB processing limit.")
+            raise ValidationError("PLY source exceeds the 512 MiB processing limit.", code="RESOURCE_LIMIT",
+                                  diagnostics={"category": "resource_limit",
+                                               "failed_precondition": "the source PLY size must stay within the scan import budget",
+                                               "correction_hint": "Use a source PLY no larger than 512 MiB."})
         header_vertices, header_faces = _ply_counts(source)
         if progress is not None:
             progress({"phase": "hash_source", "source_kind": "triangle_mesh" if header_faces else "point_cloud"})

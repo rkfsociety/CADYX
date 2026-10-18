@@ -534,7 +534,8 @@ class CommandActivityService(_CoreService):
             self._publish_activity(project_id, activity)
             return event
         except Exception as exc:
-            activity.update({"state": "failed", "error": str(exc)})
+            safe_error = exc.as_dict()["message"] if isinstance(exc, CadyxError) else "CADYX encountered an unexpected internal error."
+            activity.update({"state": "failed", "error": safe_error})
             self._publish_activity(project_id, activity)
             raise
 
@@ -548,7 +549,7 @@ class CommandActivityService(_CoreService):
         detail_from_result: Callable[[Any], dict[str, Any]] | None = None,
     ) -> Any:
         """Expose an agent's read-only model inspection as a visual activity."""
-        self.workspace.load(project_id)
+        project = self.workspace.load(project_id)
         activity = {
             "operation_id": str(uuid4()),
             "kind": "observation",
@@ -577,7 +578,12 @@ class CommandActivityService(_CoreService):
 
             result = operation(report_progress) if reports_progress else operation()
         except Exception as exc:
-            activity.update({"state": "failed", "error": str(exc)})
+            if isinstance(exc, CadyxError):
+                exc.add_diagnostics(revision=project.get("document", {}).get("revision"))
+                safe_error = exc.as_dict()["message"]
+            else:
+                safe_error = "CADYX encountered an unexpected internal error."
+            activity.update({"state": "failed", "error": safe_error})
             self._publish_activity(project_id, activity)
             raise
         if detail_from_result is not None:
@@ -751,12 +757,45 @@ class CommandActivityService(_CoreService):
                         result["source_file_cleanup_error"] = str(cleanup_error)
                 self._remember_geometry_validation(project_id, document)
             except Exception as exc:
-                activity.update({"state": "failed", "error": str(exc)})
+                if isinstance(exc, CadyxError):
+                    if exc.code == "VALIDATION_ERROR":
+                        if command_name == "add_sketch_constraint":
+                            exc.code = "SKETCH_CONSTRAINT_INVALID"
+                        elif command_name in {"import_scan", "set_scan_parameter"}:
+                            exc.code = "SCAN_OPERATION_FAILED"
+                        elif command_name == "export_brep":
+                            exc.code = "EXPORT_VERIFICATION_FAILED"
+                    entity_ids = []
+                    for key in ("references", "face_keys", "edge_keys"):
+                        value = command.get(key) if isinstance(command, dict) else None
+                        if isinstance(value, list):
+                            entity_ids.extend(item for item in value if isinstance(item, str))
+                    exc.add_diagnostics(
+                        command_type=command_name,
+                        revision=project.get("document", {}).get("revision"),
+                        feature_id=command.get("feature_id") if isinstance(command, dict) else None,
+                        body_id=command.get("body_id") if isinstance(command, dict) else None,
+                        sketch_id=command.get("sketch_id") if isinstance(command, dict) else None,
+                        source_file=command.get("file") if isinstance(command, dict) else None,
+                        entity_ids=entity_ids or None,
+                    )
+                    error_code = exc.code
+                    error_message = exc.as_dict()["message"]
+                    error_diagnostics = exc.as_dict().get("diagnostics")
+                else:
+                    error_code = "INTERNAL_ERROR"
+                    error_message = "CADYX encountered an unexpected internal error."
+                    error_diagnostics = None
+                activity.update({"state": "failed", "error": error_message})
                 self._publish_activity(project_id, activity)
+                failure: dict[str, Any] = {"command": command_name, "actor_id": lease.owner_id,
+                                           "error": error_code, "message": error_message}
+                if error_diagnostics is not None:
+                    failure["diagnostics"] = error_diagnostics
                 self.events.publish(
                     "command.failed",
                     project_id,
-                    {"command": command_name, "actor_id": lease.owner_id, "message": str(exc)},
+                    failure,
                 )
                 raise
 
@@ -986,8 +1025,14 @@ class RenderingCacheService(_CoreService):
         body = next((item for item in document.objects
                      if item.get("id") == body_id and item.get("type") == "body"), None)
         if body is None:
-            raise ValidationError("Topology inspection needs an existing body_id.")
-        topology = self.kernel.topology(body["geometry"])
+            raise ValidationError("Topology inspection needs an existing body_id.",
+                                  diagnostics={"body_id": body_id, "revision": document.revision,
+                                               "failed_precondition": "the selected body must exist in the current saved document"})
+        try:
+            topology = self.kernel.topology(body["geometry"])
+        except CadyxError as exc:
+            exc.add_diagnostics(body_id=body_id, entity_id=body_id, revision=document.revision)
+            raise
         return {"body_id": body_id, "revision": document.revision, **topology}
 
     def query_body_topology(
@@ -997,12 +1042,22 @@ class RenderingCacheService(_CoreService):
 
         project = self.workspace.load(project_id)
         document = Document.from_dict(project["document"])
-        self._check_revision(document, expected_revision)
+        try:
+            self._check_revision(document, expected_revision)
+        except CadyxError as exc:
+            exc.add_diagnostics(revision=document.revision, expected_revision=expected_revision)
+            raise
         body = next((item for item in document.objects
                      if item.get("id") == body_id and item.get("type") == "body"), None)
         if body is None:
-            raise ValidationError("Topology query requires an existing body_id.")
-        result = query_topology(self.kernel.topology(body["geometry"]), query)
+            raise ValidationError("Topology query requires an existing body_id.",
+                                  diagnostics={"body_id": body_id, "revision": document.revision,
+                                               "failed_precondition": "the queried body must exist in the current saved document"})
+        try:
+            result = query_topology(self.kernel.topology(body["geometry"]), query)
+        except CadyxError as exc:
+            exc.add_diagnostics(body_id=body_id, revision=document.revision)
+            raise
         return {"body_id": body_id, "revision": document.revision, **result}
 
     def _remember_geometry_validation(self, project_id: str, document: Document) -> None:

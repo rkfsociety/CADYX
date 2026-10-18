@@ -16,7 +16,7 @@ from typing import Any, Mapping
 
 from .capabilities import COMMAND_CAPABILITIES
 from .capability_registry import CapabilityRegistry
-from .errors import ValidationError
+from .errors import CadyxError, ValidationError, public_text
 from .models import Document
 
 _BLOCKED_COMMANDS = {
@@ -127,7 +127,9 @@ class SelfEvolvingCapabilityEngine:
                     "capability_id": capability_id,
                     "failed_step": index,
                     "results": results,
-                    "error": {"error": type(exc).__name__, "message": str(exc)},
+                    "error": (exc.as_dict() if isinstance(exc, CadyxError) else {
+                        "error": "INTERNAL_ERROR", "message": public_text(str(exc)),
+                    }),
                 }
             if isinstance(result, dict) and "error" in result:
                 return {"status": "partial", "failed_step": index, "results": results, "error": result}

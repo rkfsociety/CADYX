@@ -130,8 +130,14 @@ class SketchDocumentTests(unittest.TestCase):
         self.constraint("horizontal", [self.line])
         self.constraint("distance", [self.a, self.b], 3)
         before = self.path.read_bytes()
-        with self.assertRaisesRegex(ValidationError, "constraint:"):
+        with self.assertRaisesRegex(ValidationError, "constraint:") as raised:
             self.constraint("vertical", [self.line])
+        error = raised.exception.as_dict()
+        self.assertEqual(error["error"], "SKETCH_CONSTRAINT_INCONSISTENT")
+        self.assertEqual(error["diagnostics"]["category"], "constraint_solver")
+        self.assertTrue(error["diagnostics"]["entity_ids"])
+        self.assertIn("conflicts", error["diagnostics"]["measurements"])
+        self.assertIn("correction_hint", error["diagnostics"])
         self.assertEqual(before, self.path.read_bytes())
 
     def test_solver_reports_fully_and_over_constrained_dof(self):

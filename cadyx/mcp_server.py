@@ -16,6 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 from .api_contracts import VALIDATION_OPERATIONS
+from .errors import public_data, public_text
 
 _PROTOCOL_VERSION = "2025-11-25"
 _MAX_FILE_BYTES = 64 * 1024 * 1024
@@ -34,6 +35,14 @@ class APIError(RuntimeError):
             super().__init__(f"CADYX API {status}" + (f" {code}" if code else "") + f": {message}")
         else:
             super().__init__(f"CADYX API {status}: {payload}")
+
+
+class TransportError(RuntimeError):
+    """A transport failure whose request outcome may be uncertain."""
+
+
+class OutcomeUncertainError(RuntimeError):
+    """A mutation response was ambiguous and requires inspection before retry."""
 
 
 class CadyxAPI:
@@ -82,9 +91,12 @@ class CadyxAPI:
                 payload = raw.decode("utf-8", errors="replace")
             raise APIError(exc.code, payload) from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise RuntimeError(f"CADYX API connection failed: {exc}") from exc
+            raise TransportError("CADYX API transport failed; the operation outcome may be uncertain.") from exc
         if content_type == _JSON:
-            return raw, json.loads(raw.decode("utf-8"))
+            try:
+                return raw, json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise TransportError("CADYX API returned an invalid JSON response; the operation outcome may be uncertain.") from exc
         return raw, metadata
 
     def get(self, path: str) -> Any:
@@ -228,8 +240,43 @@ class MCPApplication:
                     ))
                 return {"content": content}
             return {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False, separators=(",", ":"))}], "structuredContent": value}
-        except Exception as exc:
-            return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
+        except APIError as exc:
+            payload = exc.payload if isinstance(exc.payload, dict) else {}
+            error = {"error": payload.get("error", "HTTP_ERROR"),
+                     "message": public_text(str(payload.get("message", "CADYX API request failed."))),
+                     "http_status": exc.status}
+            if isinstance(payload.get("diagnostics"), dict):
+                error["diagnostics"] = public_data(payload["diagnostics"])
+            return {"content": [{"type": "text", "text": json.dumps(error, ensure_ascii=False, separators=(",", ":"))}],
+                    "structuredContent": error, "isError": True}
+        except TransportError as exc:
+            error = {"error": "TRANSIENT_TRANSPORT", "message": public_text(str(exc)),
+                     "diagnostics": {"category": "transport", "failed_precondition":
+                                     "the Agent API request must complete before its result can be confirmed",
+                                     "measurements": None,
+                                     "correction_hint": "Inspect the project revision, history and lease before retrying a mutation."}}
+            return {"content": [{"type": "text", "text": json.dumps(error, ensure_ascii=False, separators=(",", ":"))}],
+                    "structuredContent": error, "isError": True}
+        except OutcomeUncertainError as exc:
+            error = {"error": "OPERATION_OUTCOME_UNCERTAIN", "message": public_text(str(exc)),
+                     "diagnostics": {"category": "transport", "failed_precondition":
+                                     "the saved result must be inspected after an ambiguous operation response",
+                                     "measurements": None,
+                                     "correction_hint": "Inspect the current revision and command history before deciding whether to retry."}}
+            return {"content": [{"type": "text", "text": json.dumps(error, ensure_ascii=False, separators=(",", ":"))}],
+                    "structuredContent": error, "isError": True}
+        except (ValueError, TypeError) as exc:
+            error = {"error": "VALIDATION_ERROR", "message": public_text(str(exc)),
+                     "diagnostics": {"category": "validation", "failed_precondition":
+                                     "tool arguments must satisfy the declared MCP contract",
+                                     "measurements": None,
+                                     "correction_hint": "Check the tool schema and supplied argument values."}}
+            return {"content": [{"type": "text", "text": json.dumps(error, ensure_ascii=False, separators=(",", ":"))}],
+                    "structuredContent": error, "isError": True}
+        except Exception:
+            error = {"error": "INTERNAL_ERROR", "message": "CADYX encountered an unexpected internal error."}
+            return {"content": [{"type": "text", "text": json.dumps(error, ensure_ascii=False, separators=(",", ":"))}],
+                    "structuredContent": error, "isError": True}
 
     def _dispatch(self, name: str, args: dict[str, Any]) -> Any:
         if name == "cadyx_health":
@@ -372,7 +419,8 @@ class MCPApplication:
                     images.append((label, raw, meta["content_type"]))
                     descriptions.append({"project_id": project_id, "revision": revision, "status": "ready"})
                 except Exception as exc:
-                    descriptions.append({"project_id": project_id, "status": "unavailable", "error": str(exc)})
+                    descriptions.append({"project_id": project_id, "status": "unavailable",
+                                         "error": public_text(str(exc))})
             summary = json.dumps(descriptions, ensure_ascii=False, separators=(",", ":"))
             return ("images", f"Project thumbnails in request order; compare them with the reference image as the AI agent. {summary}", images)
         if name == "cadyx_move_camera":
@@ -464,9 +512,9 @@ class MCPApplication:
             # then require inspection; never issue the mutation a second time.
             try:
                 stopped = self.api.post(self._project(project_id, "/stop"), {"lease_id": lease_id})
-                raise RuntimeError(f"{exc}. CADYX safely stopped/validated the command boundary at revision {stopped.get('document', {}).get('revision')}; inspect history and geometry before deciding whether to retry.") from exc
+                raise OutcomeUncertainError(f"{exc}. CADYX safely stopped/validated the command boundary at revision {stopped.get('document', {}).get('revision')}; inspect history and geometry before deciding whether to retry.") from exc
             except APIError as stop_error:
-                raise RuntimeError(f"{exc}. Stop did not confirm a safe boundary ({stop_error}); inspect the current revision, history and lease before any retry.") from exc
+                raise OutcomeUncertainError(f"{exc}. Stop did not confirm a safe boundary ({stop_error}); inspect the current revision, history and lease before any retry.") from exc
         finally:
             with self._lease_guard:
                 stop_in_progress = project_id in self._stop_requests
@@ -496,12 +544,12 @@ class MCPApplication:
                 raise
             try:
                 stopped = self.api.post(self._project(project_id, "/stop"), {"lease_id": lease_id})
-                raise RuntimeError(
+                raise OutcomeUncertainError(
                     f"{exc}. CADYX safely stopped/validated the proposal boundary at revision "
                     f"{stopped.get('document', {}).get('revision')}; inspect the project before retrying."
                 ) from exc
             except APIError as stop_error:
-                raise RuntimeError(
+                raise OutcomeUncertainError(
                     f"{exc}. Stop did not confirm a safe proposal boundary ({stop_error}); "
                     "inspect revision, history and lease before any retry."
                 ) from exc
@@ -599,7 +647,7 @@ def handle_message(message: dict[str, Any], app: MCPApplication) -> dict[str, An
             return _error(request_id, -32601, f"Method not found: {method}") if request_id is not None else None
         return _response(request_id, result) if request_id is not None else None
     except Exception as exc:
-        return _error(request_id, -32603, str(exc)) if request_id is not None else None
+        return _error(request_id, -32603, public_text(str(exc))) if request_id is not None else None
 
 
 def main() -> int:
@@ -612,7 +660,7 @@ def main() -> int:
         try:
             value = future.result()
         except Exception as exc:
-            value = _error(request_id, -32603, str(exc))
+            value = _error(request_id, -32603, public_text(str(exc)))
         if value is not None:
             with write_lock:
                 sys.stdout.write(json.dumps(value, ensure_ascii=False, allow_nan=False) + "\n")

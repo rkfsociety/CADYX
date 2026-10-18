@@ -20,7 +20,7 @@ from .core_services import (
     RenderingCacheService,
     _ProjectAvailability,
 )
-from .errors import ConflictError, ValidationError
+from .errors import CadyxError, ConflictError, ValidationError
 from .events import EventBroker
 from .kernel import GeometryKernel, OCCTKernelAdapter
 from .lease import EditLeaseManager
@@ -448,7 +448,13 @@ class CadyxCore:
         if type(expected_revision) is not int or expected_revision < 0:
             raise ValidationError("expected_revision must be a non-negative integer.")
         if document.revision != expected_revision:
-            raise ConflictError("Saved revision changed; inspect the project before continuing.", code="REVISION_CONFLICT")
+            raise ConflictError(
+                "Saved revision changed; inspect the project before continuing.", code="REVISION_CONFLICT",
+                diagnostics={"category": "stale_state", "revision": document.revision,
+                             "expected_revision": expected_revision,
+                             "failed_precondition": "the command revision must equal the current saved document revision",
+                             "correction_hint": "Inspect the current project state and rebuild the request against its saved revision."},
+            )
 
     def resume_agent(self, project_id: str, owner_id: str, expected_revision: int) -> dict[str, Any]:
         return self._command_activity.resume_agent(project_id, owner_id, expected_revision)
@@ -630,7 +636,16 @@ class CadyxCore:
             # Validate each live B-rep once instead of rebuilding every prefix
             # of a long revolve/fuse/fillet chain on every read-only refresh.
             if geometry is not None and item.get("type") == "body" and item["id"] not in consumed_bodies:
-                self.kernel.validate(geometry)
+                try:
+                    self.kernel.validate(geometry)
+                except CadyxError as exc:
+                    if exc.code == "VALIDATION_ERROR":
+                        exc.code = "INVALID_GEOMETRY"
+                    exc.add_diagnostics(category="kernel", body_id=item["id"], entity_id=item["id"],
+                                        revision=document.revision,
+                                        failed_precondition="every saved body must pass the geometry-kernel validity check",
+                                        correction_hint="Inspect the body's feature inputs and topology, then revise the upstream modeling operation.")
+                    raise
             if item.get("type") != "feature":
                 continue
             if item.get("operation") == "pad_sketch_to_body":

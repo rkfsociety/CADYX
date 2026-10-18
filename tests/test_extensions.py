@@ -109,6 +109,8 @@ class ExtensionRegistryTests(unittest.TestCase):
                 with self.assertRaises(ValidationError) as error:
                     system.execute(Document.create(), command)
                 self.assertEqual(str(error.exception), message)
+                expected = "UNSUPPORTED_OPERATION" if isinstance(command, dict) and command.get("type") != "base" else "VALIDATION_ERROR"
+                self.assertEqual(error.exception.code, expected)
 
     def test_handlers_are_usable_without_installation(self):
         from cadyx.advanced_features import _execute

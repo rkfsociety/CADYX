@@ -66,8 +66,10 @@ class TopologyQueryTests(unittest.TestCase):
         kernel = Mock()
         kernel.topology.return_value = {"faces":[{"index":1,"semantic_key":"same"},
                                                   {"index":2,"semantic_key":"same"}]}
-        with self.assertRaisesRegex(ConflictError, "ambiguous"):
+        with self.assertRaisesRegex(ConflictError, "ambiguous") as ambiguous:
             _resolve(kernel, {}, keys=["same"], collection="faces")
+        self.assertEqual(ambiguous.exception.as_dict()["diagnostics"]["category"], "topology_selection")
+        self.assertEqual(ambiguous.exception.as_dict()["diagnostics"]["entity_ids"], ["same"])
         with self.assertRaisesRegex(ConflictError, "Topology changed"):
             _resolve(kernel, {}, keys=["missing"], collection="faces")
 
@@ -76,11 +78,15 @@ class TopologyQueryTests(unittest.TestCase):
         document.objects.append({"id":"body:test","type":"body","name":"Box",
                                  "feature_ids":[],"geometry":{}})
         handler, system = Mock(), Mock()
-        with self.assertRaises(ConflictError):
+        with self.assertRaises(ConflictError) as stale:
             execute_with_selection(handler, system, document,
                                    {"type":"fillet_edges","body_id":"body:test",
                                     "edge_indices":[0],"radius":1,
                                     "topology_revision":document.revision+1})
+        diagnostics = stale.exception.as_dict()["diagnostics"]
+        self.assertEqual(stale.exception.code, "TOPOLOGY_CHANGED")
+        self.assertEqual(diagnostics["revision"], document.revision)
+        self.assertEqual(diagnostics["expected_topology_revision"], document.revision + 1)
         handler.assert_not_called()
 
 

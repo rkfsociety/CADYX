@@ -30,13 +30,19 @@ def _resolve(kernel, geometry: dict[str, Any], *, keys: list[str], collection: s
     if missing:
         raise ConflictError(
             "Topology changed and semantic selectors no longer resolve: " + ", ".join(missing)
-            + ". Inspect topology again before editing.", code="TOPOLOGY_CHANGED"
+            + ". Inspect topology again before editing.", code="TOPOLOGY_CHANGED",
+            diagnostics={"category": "topology_selection", "entity_ids": missing,
+                         "failed_precondition": "every semantic selector must resolve against current topology",
+                         "correction_hint": "Refresh the current topology and review the unmatched selectors before editing."},
         )
     ambiguous = [key for key in keys if len(by_key[key]) != 1]
     if ambiguous:
         raise ConflictError(
             "Topology selection is ambiguous: " + ", ".join(ambiguous)
-            + ". Use explicit indices with the current topology_revision.", code="TOPOLOGY_AMBIGUOUS"
+            + ". Use explicit indices with the current topology_revision.", code="TOPOLOGY_AMBIGUOUS",
+            diagnostics={"category": "topology_selection", "entity_ids": ambiguous,
+                         "failed_precondition": "each semantic selector must resolve to exactly one current entity",
+                         "correction_hint": "Inspect the candidates and select a unique entity at the current topology revision."},
         )
     return [by_key[key][0] for key in keys]
 
@@ -128,7 +134,12 @@ def execute_with_selection(next_execute, self, document, command, *, progress=No
                     raise ValidationError("topology_revision must be a non-negative integer.")
                 if revision != document.revision:
                     raise ConflictError("Topology revision is stale; inspect again before editing.",
-                                        code="TOPOLOGY_CHANGED")
+                                        code="TOPOLOGY_CHANGED", diagnostics={
+                                            "category": "topology_selection",
+                                            "revision": document.revision,
+                                            "expected_topology_revision": revision,
+                                            "failed_precondition": "the selected topology revision must match the current document revision",
+                                            "correction_hint": "Inspect the body's current topology and recreate the selection against that revision."})
             if selector[0] in command:
                 resolved = _resolve(self.kernel, edge_source_geometry,
                                     keys=_keys(command[selector[0]], selector[0]), collection=selector[2])
