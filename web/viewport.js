@@ -693,24 +693,40 @@
             blue = Math.round(blue + (236 - blue) * glow);
           }
           for (let y = minY; y <= maxY; y += 1) {
-            let w0 = rowW0, w1 = rowW1, w2 = rowW2;
-            let pixelIndex = y * width + minX;
-            for (let x = minX; x <= maxX; x += 1) {
-              if (w0 >= -1e-7 && w1 >= -1e-7 && w2 >= -1e-7) {
-                const depth = z0 * w0 + z1 * w1 + z2 * w2;
-                if (depth + 1e-7 >= meshDepth[pixelIndex]) {
-                  meshDepth[pixelIndex] = depth;
-                  const byteIndex = pixelIndex * 4;
-                  pixels[byteIndex] = red;
-                  pixels[byteIndex + 1] = green;
-                  pixels[byteIndex + 2] = blue;
-                  pixels[byteIndex + 3] = 255;
+            let spanStart = 0, spanEnd = maxX - minX;
+            if (w0StepX > 0) spanStart = Math.max(spanStart, Math.ceil((-1e-7 - rowW0) / w0StepX) - 1);
+            else if (w0StepX < 0) spanEnd = Math.min(spanEnd, Math.floor((-1e-7 - rowW0) / w0StepX) + 1);
+            else if (rowW0 < -1e-7) spanStart = spanEnd + 1;
+            if (w1StepX > 0) spanStart = Math.max(spanStart, Math.ceil((-1e-7 - rowW1) / w1StepX) - 1);
+            else if (w1StepX < 0) spanEnd = Math.min(spanEnd, Math.floor((-1e-7 - rowW1) / w1StepX) + 1);
+            else if (rowW1 < -1e-7) spanStart = spanEnd + 1;
+            if (w2StepX > 0) spanStart = Math.max(spanStart, Math.ceil((-1e-7 - rowW2) / w2StepX) - 1);
+            else if (w2StepX < 0) spanEnd = Math.min(spanEnd, Math.floor((-1e-7 - rowW2) / w2StepX) + 1);
+            else if (rowW2 < -1e-7) spanStart = spanEnd + 1;
+            spanStart = Math.max(0, spanStart);
+            spanEnd = Math.min(maxX - minX, spanEnd);
+            if (spanStart <= spanEnd) {
+              let w0 = rowW0 + spanStart * w0StepX;
+              let w1 = rowW1 + spanStart * w1StepX;
+              let w2 = rowW2 + spanStart * w2StepX;
+              let pixelIndex = y * width + minX + spanStart;
+              for (let x = spanStart; x <= spanEnd; x += 1) {
+                if (w0 >= -1e-7 && w1 >= -1e-7 && w2 >= -1e-7) {
+                  const depth = z0 * w0 + z1 * w1 + z2 * w2;
+                  if (depth + 1e-7 >= meshDepth[pixelIndex]) {
+                    meshDepth[pixelIndex] = depth;
+                    const byteIndex = pixelIndex * 4;
+                    pixels[byteIndex] = red;
+                    pixels[byteIndex + 1] = green;
+                    pixels[byteIndex + 2] = blue;
+                    pixels[byteIndex + 3] = 255;
+                  }
                 }
+                pixelIndex += 1;
+                w0 += w0StepX;
+                w1 += w1StepX;
+                w2 += w2StepX;
               }
-              pixelIndex += 1;
-              w0 += w0StepX;
-              w1 += w1StepX;
-              w2 += w2StepX;
             }
             rowW0 += w0StepY;
             rowW1 += w1StepY;
@@ -723,39 +739,55 @@
         const faceColor = face * 3;
 
         for (let y = minY; y <= maxY; y += 1) {
-          let w0 = rowW0, w1 = rowW1, w2 = rowW2;
-          let pixelIndex = y * width + minX;
-          for (let x = minX; x <= maxX; x += 1) {
-            if (w0 >= -1e-7 && w1 >= -1e-7 && w2 >= -1e-7) {
-              const depth = z0 * w0 + z1 * w1 + z2 * w2;
-              if (depth + 1e-7 >= meshDepth[pixelIndex]) {
-                meshDepth[pixelIndex] = depth;
-                const byteIndex = pixelIndex * 4;
-                let pixelRed = triangleColors
-                  ? Math.round(triangleColors[faceColor] * brightness)
-                  : Math.round((colors[color0] * w0 + colors[color1] * w1 + colors[color2] * w2) * brightness);
-                let pixelGreen = triangleColors
-                  ? Math.round(triangleColors[faceColor + 1] * brightness)
-                  : Math.round((colors[color0 + 1] * w0 + colors[color1 + 1] * w1 + colors[color2 + 1] * w2) * brightness);
-                let pixelBlue = triangleColors
-                  ? Math.round(triangleColors[faceColor + 2] * brightness)
-                  : Math.round((colors[color0 + 2] * w0 + colors[color1 + 2] * w1 + colors[color2 + 2] * w2) * brightness);
-                if (forming && progress < 1) {
-                  const glow = (1 - progress) * 0.38;
-                  pixelRed = Math.round(pixelRed + (112 - pixelRed) * glow);
-                  pixelGreen = Math.round(pixelGreen + (218 - pixelGreen) * glow);
-                  pixelBlue = Math.round(pixelBlue + (236 - pixelBlue) * glow);
+          let spanStart = 0, spanEnd = maxX - minX;
+          if (w0StepX > 0) spanStart = Math.max(spanStart, Math.ceil((-1e-7 - rowW0) / w0StepX) - 1);
+          else if (w0StepX < 0) spanEnd = Math.min(spanEnd, Math.floor((-1e-7 - rowW0) / w0StepX) + 1);
+          else if (rowW0 < -1e-7) spanStart = spanEnd + 1;
+          if (w1StepX > 0) spanStart = Math.max(spanStart, Math.ceil((-1e-7 - rowW1) / w1StepX) - 1);
+          else if (w1StepX < 0) spanEnd = Math.min(spanEnd, Math.floor((-1e-7 - rowW1) / w1StepX) + 1);
+          else if (rowW1 < -1e-7) spanStart = spanEnd + 1;
+          if (w2StepX > 0) spanStart = Math.max(spanStart, Math.ceil((-1e-7 - rowW2) / w2StepX) - 1);
+          else if (w2StepX < 0) spanEnd = Math.min(spanEnd, Math.floor((-1e-7 - rowW2) / w2StepX) + 1);
+          else if (rowW2 < -1e-7) spanStart = spanEnd + 1;
+          spanStart = Math.max(0, spanStart);
+          spanEnd = Math.min(maxX - minX, spanEnd);
+          if (spanStart <= spanEnd) {
+            let w0 = rowW0 + spanStart * w0StepX;
+            let w1 = rowW1 + spanStart * w1StepX;
+            let w2 = rowW2 + spanStart * w2StepX;
+            let pixelIndex = y * width + minX + spanStart;
+            for (let x = spanStart; x <= spanEnd; x += 1) {
+              if (w0 >= -1e-7 && w1 >= -1e-7 && w2 >= -1e-7) {
+                const depth = z0 * w0 + z1 * w1 + z2 * w2;
+                if (depth + 1e-7 >= meshDepth[pixelIndex]) {
+                  meshDepth[pixelIndex] = depth;
+                  const byteIndex = pixelIndex * 4;
+                  let pixelRed = triangleColors
+                    ? Math.round(triangleColors[faceColor] * brightness)
+                    : Math.round((colors[color0] * w0 + colors[color1] * w1 + colors[color2] * w2) * brightness);
+                  let pixelGreen = triangleColors
+                    ? Math.round(triangleColors[faceColor + 1] * brightness)
+                    : Math.round((colors[color0 + 1] * w0 + colors[color1 + 1] * w1 + colors[color2 + 1] * w2) * brightness);
+                  let pixelBlue = triangleColors
+                    ? Math.round(triangleColors[faceColor + 2] * brightness)
+                    : Math.round((colors[color0 + 2] * w0 + colors[color1 + 2] * w1 + colors[color2 + 2] * w2) * brightness);
+                  if (forming && progress < 1) {
+                    const glow = (1 - progress) * 0.38;
+                    pixelRed = Math.round(pixelRed + (112 - pixelRed) * glow);
+                    pixelGreen = Math.round(pixelGreen + (218 - pixelGreen) * glow);
+                    pixelBlue = Math.round(pixelBlue + (236 - pixelBlue) * glow);
+                  }
+                  pixels[byteIndex] = pixelRed;
+                  pixels[byteIndex + 1] = pixelGreen;
+                  pixels[byteIndex + 2] = pixelBlue;
+                  pixels[byteIndex + 3] = 255;
                 }
-                pixels[byteIndex] = pixelRed;
-                pixels[byteIndex + 1] = pixelGreen;
-                pixels[byteIndex + 2] = pixelBlue;
-                pixels[byteIndex + 3] = 255;
               }
+              pixelIndex += 1;
+              w0 += w0StepX;
+              w1 += w1StepX;
+              w2 += w2StepX;
             }
-            pixelIndex += 1;
-            w0 += w0StepX;
-            w1 += w1StepX;
-            w2 += w2StepX;
           }
           rowW0 += w0StepY;
           rowW1 += w1StepY;
