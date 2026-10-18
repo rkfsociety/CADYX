@@ -1,5 +1,6 @@
 (() => {
   const MAX_PREVIEW_POINTS = 24000;
+  const INTERACTIVE_RENDER_SCALE = 0.6;
   const meshEdgesCache = new WeakMap();
   const multiplyMatrices = (left, right) => [
     left[0] * right[0] + left[1] * right[3] + left[2] * right[6],
@@ -104,6 +105,7 @@
     let cameraPanX = 0;
     let cameraPanY = 0;
     let drag = null;
+    let dragMoved = false;
     let camera = new Float64Array(0);
     let screenX = new Float64Array(0);
     let screenY = new Float64Array(0);
@@ -224,7 +226,7 @@
     function render() {
       const rect = canvas.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2) * (drag ? INTERACTIVE_RENDER_SCALE : 1);
       const width = Math.round(rect.width * dpr);
       const height = Math.round(rect.height * dpr);
       if (canvas.width !== width || canvas.height !== height) {
@@ -1076,12 +1078,14 @@
       } else {
         return;
       }
+      dragMoved = false;
       canvas.setPointerCapture(event.pointerId);
       canvas.classList.add("dragging");
       canvas.style.cursor = "grabbing";
     });
     canvas.addEventListener("pointermove", (event) => {
       if (!drag) return;
+      dragMoved = true;
       if (drag.type === "pan") {
         cameraPanX += event.clientX - drag.clientX;
         cameraPanY += event.clientY - drag.clientY;
@@ -1095,9 +1099,12 @@
       scheduleCameraRender();
     });
     const stopDrag = () => {
+      if (!drag) return;
       drag = null;
       canvas.classList.remove("dragging");
       canvas.style.removeProperty("cursor");
+      if (dragMoved) render();
+      dragMoved = false;
     };
     canvas.addEventListener("pointerup", stopDrag);
     canvas.addEventListener("pointercancel", stopDrag);
