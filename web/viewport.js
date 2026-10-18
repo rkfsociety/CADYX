@@ -1,6 +1,7 @@
 (() => {
   const MAX_PREVIEW_POINTS = 24000;
   const INTERACTIVE_RENDER_SCALE = 0.6;
+  const VIEWPORT_MESH_DEFLECTION = 0.01;
   const meshEdgesCache = new WeakMap();
   const multiplyMatrices = (left, right) => [
     left[0] * right[0] + left[1] * right[3] + left[2] * right[6],
@@ -183,12 +184,16 @@
         const key = low * canonicalVertexCount + high;
         const edge = edges.get(key);
         if (!edge) {
-          edges.set(key, { start, end, normalX, normalY, normalZ,
+          edges.set(key, { start, end, canonicalStart, canonicalEnd, normalX, normalY, normalZ,
             firstFace: faceIndex, secondFace: -1, count: 1, crease: false });
           return;
         }
         const cosine = edge.normalX * normalX + edge.normalY * normalY + edge.normalZ * normalZ;
         if (cosine < creaseCosine) edge.crease = true;
+        if (edge.count === 1) {
+          edge.secondStart = canonicalStart === edge.canonicalStart ? start : end;
+          edge.secondEnd = canonicalEnd === edge.canonicalEnd ? end : start;
+        }
         edge.count += 1;
         if (edge.count === 2) edge.secondFace = faceIndex;
       };
@@ -214,15 +219,19 @@
       }
       const featureEdges = [];
       const silhouetteCandidates = [];
+      const smoothVertexPairs = [];
       for (const edge of edges.values()) {
         if (edge.count === 1 || edge.crease) featureEdges.push(edge.start, edge.end);
         else if (edge.count === 2) {
           silhouetteCandidates.push(edge.start, edge.end, edge.firstFace, edge.secondFace);
+          if (edge.start !== edge.secondStart) smoothVertexPairs.push(edge.start, edge.secondStart);
+          if (edge.end !== edge.secondEnd) smoothVertexPairs.push(edge.end, edge.secondEnd);
         }
       }
       return {
         featureEdges: Uint32Array.from(featureEdges),
         silhouetteCandidates: Uint32Array.from(silhouetteCandidates),
+        smoothVertexPairs: Uint32Array.from(smoothVertexPairs),
       };
     }
 
@@ -326,7 +335,7 @@
         triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, bodyMotionAngleByVertex,
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
-        wireframeColor, wireframeOpacity, dpr, 1.5 / scale,
+        wireframeColor, wireframeOpacity, dpr, Math.max(1.5 / scale, VIEWPORT_MESH_DEFLECTION),
         selectedFeatureId
           ? geometry.featureTriangleRanges?.filter((range) => range.featureId === selectedFeatureId) || []
           : geometry.bodyTriangleRanges?.filter((range) => range.objectId === selectedBodyId) || [],
@@ -650,7 +659,7 @@
     }
 
     function rasterizeShadedMesh(visibleFaces, triangles, camera, progress,
-      colors = null, triangleColors = null, selectedRanges = [], overlayRanges = []) {
+      colors = null, triangleColors = null, selectedRanges = [], overlayRanges = [], vertexLight = null) {
       const isOverlayFace = (face) => overlayRanges.some((range) => face >= range.start && face < range.end);
       if (!meshLayerContext || !canvas.width || !canvas.height) return false;
       const width = canvas.width, height = canvas.height;
@@ -697,7 +706,7 @@
         const z1 = camera[second * 3 + 2];
         const z2 = camera[third * 3 + 2];
 
-        const brightness = faceRecords[offset + 7];
+        const faceBrightness = faceRecords[offset + 7];
         const vertexRange = transition?.vertexRange;
         const forming = vertexRange
           && first >= vertexRange[0] && first < vertexRange[1]
@@ -705,14 +714,6 @@
           && third >= vertexRange[0] && third < vertexRange[1];
 
         if (!colors && !triangleColors) {
-          const steel = Math.round(60 + brightness * 125);
-          let red = Math.round(steel * 0.9), blue = Math.round(steel * 1.12), green = steel;
-          if (forming && progress < 1) {
-            const glow = (1 - progress) * 0.38;
-            red = Math.round(red + (112 - red) * glow);
-            green = Math.round(green + (218 - green) * glow);
-            blue = Math.round(blue + (236 - blue) * glow);
-          }
           for (let y = minY; y <= maxY; y += 1) {
             let spanStart = 0, spanEnd = maxX - minX;
             if (w0StepX > 0) spanStart = Math.max(spanStart, Math.ceil((-1e-7 - rowW0) / w0StepX) - 1);
@@ -737,6 +738,17 @@
                   if (depth + 1e-7 >= meshDepth[pixelIndex]) {
                     meshDepth[pixelIndex] = depth;
                     const byteIndex = pixelIndex * 4;
+                    const brightness = vertexLight
+                      ? vertexLight[first] * w0 + vertexLight[second] * w1 + vertexLight[third] * w2
+                      : faceBrightness;
+                    const steel = Math.round(60 + brightness * 125);
+                    let red = Math.round(steel * 0.9), green = steel, blue = Math.round(steel * 1.12);
+                    if (forming && progress < 1) {
+                      const glow = (1 - progress) * 0.38;
+                      red = Math.round(red + (112 - red) * glow);
+                      green = Math.round(green + (218 - green) * glow);
+                      blue = Math.round(blue + (236 - blue) * glow);
+                    }
                     pixels[byteIndex] = red;
                     pixels[byteIndex + 1] = green;
                     pixels[byteIndex + 2] = blue;
@@ -783,6 +795,9 @@
                 if (depth + 1e-7 >= meshDepth[pixelIndex]) {
                   meshDepth[pixelIndex] = depth;
                   const byteIndex = pixelIndex * 4;
+                  const brightness = vertexLight
+                    ? vertexLight[first] * w0 + vertexLight[second] * w1 + vertexLight[third] * w2
+                    : faceBrightness;
                   let pixelRed = triangleColors
                     ? Math.round(triangleColors[faceColor] * brightness)
                     : Math.round((colors[color0] * w0 + colors[color1] * w1 + colors[color2] * w2) * brightness);
@@ -945,7 +960,7 @@
       const visibleFaces = faceOrder.subarray(0, visibleCount);
       const depthBufferValid = shaded
         && rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors, triangleColors,
-          selectedRanges, overlayRanges);
+          selectedRanges, overlayRanges, smooth ? vertexLight : null);
       if (shaded && !depthBufferValid) {
         visibleFaces.sort((left, right) => faceRecords[left * 8 + 6] - faceRecords[right * 8 + 6]);
         for (const face of visibleFaces) {
@@ -1307,7 +1322,8 @@
           silhouetteCandidates: meshEdges.silhouetteCandidates,
           vertexNormals: smoothShading
             ? value.vertexNormals?.length === value.positions.length
-              ? value.vertexNormals : buildVertexNormals(value.positions, value.triangles || [])
+              ? value.vertexNormals
+              : buildVertexNormals(value.positions, value.triangles || [], meshEdges.smoothVertexPairs)
             : null,
           faceNormals: smoothShading ? null : buildFaceNormals(value.positions, value.triangles || []),
         };
@@ -1485,7 +1501,7 @@
       };
     }
 
-    function buildVertexNormals(positions, triangles) {
+    function buildVertexNormals(positions, triangles, smoothVertexPairs = []) {
       if (!triangles.length) return null;
       const normals = new Float64Array(positions.length);
       for (let face = 0; face < triangles.length; face += 3) {
@@ -1507,11 +1523,36 @@
         normals[third + 1] += ny;
         normals[third + 2] += nz;
       }
+      const parents = new Uint32Array(positions.length / 3);
+      for (let vertex = 0; vertex < parents.length; vertex += 1) parents[vertex] = vertex;
+      const findRoot = (vertex) => {
+        let root = vertex;
+        while (parents[root] !== root) root = parents[root];
+        while (parents[vertex] !== vertex) {
+          const next = parents[vertex];
+          parents[vertex] = root;
+          vertex = next;
+        }
+        return root;
+      };
+      for (let index = 0; index + 1 < smoothVertexPairs.length; index += 2) {
+        const firstRoot = findRoot(smoothVertexPairs[index]);
+        const secondRoot = findRoot(smoothVertexPairs[index + 1]);
+        if (firstRoot !== secondRoot) parents[secondRoot] = firstRoot;
+      }
+      const sharedNormals = new Float64Array(normals.length);
+      for (let vertex = 0; vertex < parents.length; vertex += 1) {
+        const source = vertex * 3, target = findRoot(vertex) * 3;
+        sharedNormals[target] += normals[source];
+        sharedNormals[target + 1] += normals[source + 1];
+        sharedNormals[target + 2] += normals[source + 2];
+      }
       for (let index = 0; index < normals.length; index += 3) {
-        const length = Math.hypot(normals[index], normals[index + 1], normals[index + 2]) || 1;
-        normals[index] /= length;
-        normals[index + 1] /= length;
-        normals[index + 2] /= length;
+        const root = findRoot(index / 3) * 3;
+        const length = Math.hypot(sharedNormals[root], sharedNormals[root + 1], sharedNormals[root + 2]) || 1;
+        normals[index] = sharedNormals[root] / length;
+        normals[index + 1] = sharedNormals[root + 1] / length;
+        normals[index + 2] = sharedNormals[root + 2] / length;
       }
       return normals;
     }

@@ -113,10 +113,10 @@ std::string ShapeJson(const TopoDS_Shape& shape, int mesh, int topology = 0,
        << ",\"vertex_count\":" << vertex_count << "}";
   if (mesh) {
     // This mesh is only for the live viewport; the editable B-rep remains exact.
-    // Fine linear and angular tolerances keep small curved details legible at
-    // desktop viewport sizes without changing the source geometry.
-    constexpr double kViewportLinearDeflection = 0.04;
-    constexpr double kViewportAngularDeflection = 0.2;
+    // Keep curved faces and exact B-rep edge overlays aligned at close zoom;
+    // this affects only the display mesh, never the editable source geometry.
+    constexpr double kViewportLinearDeflection = 0.01;
+    constexpr double kViewportAngularDeflection = 0.1;
     BRepMesh_IncrementalMesh mesher(shape, kViewportLinearDeflection, false,
                                     kViewportAngularDeflection, false);
     if (!mesher.IsDone()) throw std::runtime_error("OCCT could not tessellate the solid.");
