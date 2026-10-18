@@ -50,12 +50,12 @@ returned as body `lines`; periodic seams and edges between adjacent faces whose
 local normals differ by less than 30 degrees are omitted. The browser draws
 these feature curves with the shaded depth buffer, so rear edges do not draw
 through front faces. Smooth-surface silhouette contours are derived from
-triangle facing and drawn over the shaded mesh without depth testing, avoiding
-gaps where raster coverage misses the boundary; on a strongly concave mesh, an
-occluded silhouette may remain visible. Triangle tessellation seams are never
-treated as feature edges. Triangle-mesh bodies have no B-rep feature edges and
-therefore show only their view-dependent silhouette. Active sketch lines and
-points remain overlays and are not hidden-line tested.
+triangle facing and checked against the shaded depth buffer at the same pixel;
+the two incident faces are excluded from that check so the contour does not
+occlude itself. Triangle tessellation seams are never treated as feature edges.
+Triangle-mesh bodies have no B-rep feature edges and therefore show only their
+view-dependent, depth-tested silhouette. Active sketch lines and points remain
+overlays and are not hidden-line tested.
 Editable OCCT solids include boxes, closed-profile extrusions and
 revolutions, swept pipes, Boolean fuses, fillets, and external metric threads.
 Generated involute spur gears render as ordinary XY sketch linework until
