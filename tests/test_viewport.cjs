@@ -53,6 +53,7 @@ const canvas = {
   getContext() { return context; },
   getBoundingClientRect() { return { left: 0, top: 0, width: 600, height: 400 }; },
   classList: { add() {}, remove() {} },
+  style: { removeProperty() {} },
   addEventListener(name, handler) { events[name] = handler; },
   setPointerCapture() {},
 };
@@ -87,18 +88,24 @@ const isRotationMatrix = (matrix) => {
   }
   return true;
 };
-const initialRenderCalls = renderCalls;
-events.pointerdown({ clientX: 300, clientY: 200, pointerId: 1 });
+events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 1 });
 events.pointermove({ clientX: 300, clientY: 220 });
 events.pointermove({ clientX: 300, clientY: 230 });
+assert.equal(animationFrames.length, 1, "A burst of camera events is coalesced into one animation frame");
+animationFrames.shift()(animationTime);
+assert.equal(canvas.width, 360, "Interactive orbit reduces the backing width while dragging");
+assert.equal(canvas.height, 240, "Interactive orbit reduces the backing height while dragging");
+assert.equal(canvas.width * canvas.height, 600 * 400 * 0.36,
+  "Interactive orbit rasterizes 36% as many pixels as the full-resolution viewport");
+const interactiveRenderCalls = renderCalls;
 events.pointerup();
+assert.equal(canvas.width, 600, "Releasing the pointer restores full-resolution width");
+assert.equal(canvas.height, 400, "Releasing the pointer restores full-resolution height");
+assert.equal(renderCalls, interactiveRenderCalls + 1, "Pointer release renders one crisp full-resolution frame");
 const downward = viewer.getCamera();
 assert.notDeepEqual(downward.orientation, initial.orientation, "Dragging rotates the camera");
 assert.ok(isRotationMatrix(downward.orientation), "Drag keeps the full camera orientation orthonormal");
-assert.equal(animationFrames.length, 1, "A burst of camera events is coalesced into one animation frame");
-animationFrames.shift()(animationTime);
-assert.equal(renderCalls, initialRenderCalls + 1, "A camera event burst triggers one render, not one render per input event");
-events.pointerdown({ clientX: 300, clientY: 230, pointerId: 1 });
+events.pointerdown({ button: 0, clientX: 300, clientY: 230, pointerId: 1 });
 events.pointermove({ clientX: 300, clientY: 220 });
 events.pointermove({ clientX: 300, clientY: 200 });
 events.pointerup();
@@ -106,13 +113,13 @@ animationFrames.shift()(animationTime);
 assert.ok(viewer.getCamera().orientation.every((value, index) => Math.abs(value - initial.orientation[index]) < 1e-12),
   "Reverse drag restores the full camera orientation");
 viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
-events.pointerdown({ clientX: 300, clientY: 200, pointerId: 1 });
+events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 1 });
 for (let y = 210; y <= 400; y += 10) events.pointermove({ clientX: 300, clientY: y });
 events.pointerup();
 animationFrames.shift()(animationTime);
 assert.ok(viewer.getCamera().orientation[8] < -0.999,
   "Trackball drag passes through the former pitch limit and turns the camera upside down");
-events.pointerdown({ clientX: 300, clientY: 400, pointerId: 1 });
+events.pointerdown({ button: 0, clientX: 300, clientY: 400, pointerId: 1 });
 for (let y = 410; y <= 600; y += 10) events.pointermove({ clientX: 300, clientY: y });
 events.pointerup();
 animationFrames.shift()(animationTime);
