@@ -98,6 +98,8 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/resume", "agent_resume", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases", "agent_lease", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands", "agent_command", "agent", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands/preview", "agent_commands_preview", "agent", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands/commit", "agent_commands_commit", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities", "agent_capability_develop", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities/check", "agent_capability_check", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities/{capability_id}/execute", "agent_capability_execute", "agent", "json"),
@@ -430,6 +432,19 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
             raise ValidationError("Topology query requires only body_id, expected_revision, and query.")
         handler._json(200, core.query_body_topology(
             project_id, body["body_id"], body["expected_revision"], body["query"],
+        ))
+    elif name == "agent_commands_preview":
+        body = _require_json(handler)
+        if set(body) != {"expected_revision", "commands"}:
+            raise ValidationError("Command preview requires expected_revision and commands.")
+        handler._json(200, core.preview_commands(project_id, body["expected_revision"], body["commands"]))
+    elif name == "agent_commands_commit":
+        body = _require_json(handler)
+        if set(body) != {"expected_revision", "proposal_id", "lease_id"}:
+            raise ValidationError("Command commit requires expected_revision, proposal_id, and lease_id.")
+        handler._json(200, core.commit_command_proposal(
+            project_id, body["lease_id"], body["expected_revision"], body["proposal_id"],
+            expected_owner_type=OwnerType.AGENT,
         ))
     elif name == "agent_rename":
         body = _require_json(handler)

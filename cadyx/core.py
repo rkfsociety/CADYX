@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import copy
 import math
+import threading
+import time
+from uuid import uuid4
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterator, Literal
@@ -65,6 +68,8 @@ class CadyxCore:
         self.capability_registry = CapabilityRegistry(self.workspace.root / ".cadyx-capabilities.sqlite3")
         self.self_evolving = SelfEvolvingCapabilityEngine(self, self.capability_registry)
         self.source_extensions = SourceExtensionEngine(self.workspace.root / ".cadyx-source-extensions.sqlite3")
+        self._command_proposals: dict[str, dict[str, Any]] = {}
+        self._proposal_guard = threading.RLock()
 
     @contextmanager
     def _project_guard(self, project_id: str) -> Iterator[None]:
@@ -458,6 +463,112 @@ class CadyxCore:
         expected_revision: int | None = None,
     ) -> dict[str, Any]:
         return self._command_activity.execute_command(project_id, lease_id, command, expected_owner_type=expected_owner_type, expected_revision=expected_revision)
+
+    def preview_commands(self, project_id: str, expected_revision: int, commands: list[dict[str, Any]]) -> dict[str, Any]:
+        """Validate an ordered command batch on an isolated copy without saving it."""
+        if not isinstance(commands, list) or not commands or len(commands) > 100:
+            raise ValidationError("commands must contain between 1 and 100 command objects.")
+        with self._project_guard(project_id):
+            self._require_project_policy(project_id, "read", "Project is not available for preview.")
+            project = self.workspace.load(project_id)
+            saved = Document.from_dict(project["document"])
+            self._check_revision(saved, expected_revision)
+            staged = Document.from_dict(saved.to_dict())
+            # File publishing and source removal are intentionally unavailable in previews.
+            preview_system = CommandSystem(self.kernel, resolve_scan=self.workspace.resolve_folder_file,
+                                           resolve_project_file=self.workspace.resolve_project_file)
+            results = []
+            for command in commands:
+                if not isinstance(command, dict):
+                    raise ValidationError("Every preview command must be an object.")
+                if command.get("type") in {"import_scan", "set_scan_parameter", "export_brep"} or (
+                    command.get("type") == "remove_body" and command.get("remove_source_file") is True
+                ):
+                    raise ValidationError("This command has external file effects and cannot be previewed.")
+                results.append(preview_system.execute(staged, copy.deepcopy(command), project_id=project_id))
+                staged.validate()
+                self._validate_geometry(staged)
+            staged.revision = saved.revision + len(commands)
+            staged.validate()
+            self._validate_geometry(staged)
+            before = {item["id"]: item for item in saved.objects}
+            after = {item["id"]: item for item in staged.objects}
+            added = [copy.deepcopy(after[key]) for key in sorted(after.keys() - before.keys())]
+            changed = [copy.deepcopy(after[key]) for key in sorted(before.keys() & after.keys())
+                       if before[key] != after[key]]
+            proposal_id = str(uuid4())
+            proposal = {"project_id": project_id, "revision": saved.revision,
+                        "commands": copy.deepcopy(commands), "document": staged.to_dict(),
+                        "results": copy.deepcopy(results), "created_at": time.time()}
+            with self._proposal_guard:
+                if len(self._command_proposals) >= 128:
+                    self._command_proposals.pop(next(iter(self._command_proposals)))
+                self._command_proposals[proposal_id] = proposal
+            return {"proposal_id": proposal_id, "revision": saved.revision,
+                    "prospective_revision": staged.revision, "results": results,
+                    "measurements": [copy.deepcopy(result) for result in results], "warnings": [],
+                    "dependency_effects": [item for item in added + changed if item.get("type") == "feature"],
+                    "document": staged.to_dict(),
+                    "diff": {"added_ids": sorted(after.keys() - before.keys()), "added": added,
+                             "removed_ids": sorted(before.keys() - after.keys()),
+                             "changed_ids": sorted(key for key in before.keys() & after.keys() if before[key] != after[key]),
+                             "changed": changed}}
+
+    def commit_command_proposal(self, project_id: str, lease_id: str, expected_revision: int,
+                                proposal_id: str, *, expected_owner_type: OwnerType = OwnerType.AGENT) -> dict[str, Any]:
+        """Atomically apply a previously previewed batch under a fresh lease."""
+        with self._project_guard(project_id):
+            lease = self.leases.require(project_id, lease_id)
+            if lease.owner_type is not expected_owner_type:
+                raise ConflictError("This API requires an agent edit lease.", code="PROJECT_LOCKED")
+            self.leases.check_agent_command(project_id, lease.lease_id)
+            self._require_project_policy(project_id, "write", "Project has an operation in progress.", valid_lease=True)
+            project = self.workspace.load(project_id)
+            saved = Document.from_dict(project["document"])
+            self._check_revision(saved, expected_revision)
+            with self._proposal_guard:
+                proposal = self._command_proposals.get(proposal_id)
+            if proposal is None or proposal["project_id"] != project_id or proposal["revision"] != expected_revision:
+                raise ConflictError("Proposal is missing, already consumed, or bound to another revision.", code="PROPOSAL_STALE")
+            if lease.acquired_at <= proposal["created_at"]:
+                raise ConflictError("Commit requires an agent lease acquired after the preview.", code="PROPOSAL_LEASE_REQUIRED")
+            staged = Document.from_dict(proposal["document"])
+            results = copy.deepcopy(proposal["results"])
+            if staged.revision != saved.revision + len(results):
+                raise ConflictError("Proposal receipt is inconsistent; preview the batch again.", code="PROPOSAL_STALE")
+            staged.validate()
+            self._validate_geometry(staged)
+            next_project = copy.deepcopy(project)
+            next_project["document"] = staged.to_dict()
+            next_project["history"].extend({"actor_type": lease.owner_type.value, "actor_id": lease.owner_id,
+                                            "command": copy.deepcopy(command), "timestamp": datetime.now(timezone.utc).isoformat(),
+                                            "result": copy.deepcopy(result), "revision": saved.revision + index}
+                                           for index, (command, result) in enumerate(zip(proposal["commands"], results), 1))
+            next_project["modified_at"] = datetime.now(timezone.utc).isoformat()
+            self.workspace.save(next_project)
+            with self._proposal_guard:
+                self._command_proposals.pop(proposal_id, None)
+            for index, (command, result) in enumerate(zip(proposal["commands"], results), 1):
+                operation_id = str(uuid4())
+                receipt = {"schema_version": 2, "operation_id": operation_id,
+                           "revision": saved.revision + index, "command": command.get("type"),
+                           "outcome": "completed"}
+                if isinstance(result.get("feature_id"), str):
+                    receipt["feature_id"] = result["feature_id"]
+                self.events.publish("command.started", project_id, {
+                    "command": command.get("type"), "actor_id": lease.owner_id,
+                    "actor_type": lease.owner_type.value, "operation_id": operation_id,
+                })
+                self.events.publish("agent.activity", project_id, {
+                    "operation_id": operation_id, "actor_type": lease.owner_type.value,
+                    "actor_id": lease.owner_id, "action": self.commands.activity_action(command.get("type")),
+                    "command": command.get("type"), "state": "completed", "phase": "completed",
+                    "steps": [{"phase": "completed", "state": "completed"}], "result": result,
+                    "error": None, "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+                self.events.publish("command.completed", project_id, receipt)
+            self.events.publish("document.changed", project_id, {"revision": staged.revision})
+            return {"document": staged.to_dict(), "results": results, "revision": staged.revision}
 
     def _publish_activity(self, project_id: str, activity: dict[str, Any]) -> None:
         steps = activity.setdefault("steps", [])

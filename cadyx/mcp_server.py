@@ -189,6 +189,8 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_report_dashboard", "description": "Publish honest Russian workflow progress and queue state; this does not mutate the CAD document.", "inputSchema": _schema({"project_id": _STRING, "workflow": {"anyOf": [_OBJECT, {"type": "null"}]}, "tasks": {"type": "array", "items": _OBJECT}}, ["project_id", "workflow", "tasks"])},
     {"name": "cadyx_get_activity", "description": "Read recent real modeling operation states and results.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_execute_command", "description": "Execute one Command System operation: checks expected_revision, takes an agent lease immediately before the call, and releases it afterward. Never retries a command whose response was lost.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER, "command": _COMMAND}, ["project_id", "expected_revision", "command"])},
+    {"name": "cadyx_preview_commands", "description": "Preview an ordered batch on an isolated document copy without saving project state or publishing files; returns a revision-bound single-use proposal.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER, "commands": {"type": "array", "items": _COMMAND, "minItems": 1, "maxItems": 100}}, ["project_id", "expected_revision", "commands"])},
+    {"name": "cadyx_commit_command_proposal", "description": "Atomically commit a preview proposal under a fresh agent lease and exact revision; never retry after an ambiguous response.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER, "proposal_id": _STRING}, ["project_id", "expected_revision", "proposal_id"])},
     {"name": "cadyx_stop_agent_work", "description": "Set the existing safe stop fence for work owned by this MCP session; waits for any admitted atomic command and validates the saved state.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_resume_agent_work", "description": "Resume after a confirmed FREE state and current revision; the next command uses the validated revision and releases the new lease.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER}, ["project_id", "expected_revision"])},
     {"name": "cadyx_recover_expired_lease", "description": "Recover a stale lease only when the Agent API currently confirms it expired; Core validates the saved document before release.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
@@ -396,6 +398,13 @@ class MCPApplication:
                 )
             result["command_result"] = _compact_command_response(result["command_result"])
             return result
+        if name == "cadyx_preview_commands":
+            return self.api.post(self._project(args["project_id"], "/commands/preview"),
+                                 {"expected_revision": args["expected_revision"], "commands": args["commands"]})
+        if name == "cadyx_commit_command_proposal":
+            return self._commit_command_proposal(
+                args["project_id"], args["expected_revision"], args["proposal_id"],
+            )
         if name == "cadyx_stop_agent_work":
             return self._stop_agent_work(args["project_id"])
         if name == "cadyx_resume_agent_work":
@@ -466,6 +475,45 @@ class MCPApplication:
                     self.api.post(self._project(project_id, f"/leases/{urllib.parse.quote(lease_id, safe='')}/release"), {})
                 except (APIError, RuntimeError):
                     # A successful stop may already have released this same lease.
+                    latest = self.api.get(self._project(project_id))
+                    if latest["lock"].get("state") != "FREE":
+                        raise
+            with self._lease_guard:
+                if self._active_leases.get(project_id) == lease_id:
+                    self._active_leases.pop(project_id, None)
+
+    def _commit_command_proposal(self, project_id: str, expected_revision: int, proposal_id: str) -> Any:
+        lease_result = self.api.post(self._project(project_id, "/leases"), {"owner_id": self.owner_id})
+        lease_id = lease_result["lease"]["lease_id"]
+        with self._lease_guard:
+            self._active_leases[project_id] = lease_id
+        try:
+            return self.api.post(self._project(project_id, "/commands/commit"), {
+                "lease_id": lease_id, "expected_revision": expected_revision, "proposal_id": proposal_id,
+            })
+        except Exception as exc:
+            if isinstance(exc, APIError) and exc.status in _DEFINITIVE_COMMAND_REJECTION_STATUSES:
+                raise
+            try:
+                stopped = self.api.post(self._project(project_id, "/stop"), {"lease_id": lease_id})
+                raise RuntimeError(
+                    f"{exc}. CADYX safely stopped/validated the proposal boundary at revision "
+                    f"{stopped.get('document', {}).get('revision')}; inspect the project before retrying."
+                ) from exc
+            except APIError as stop_error:
+                raise RuntimeError(
+                    f"{exc}. Stop did not confirm a safe proposal boundary ({stop_error}); "
+                    "inspect revision, history and lease before any retry."
+                ) from exc
+        finally:
+            with self._lease_guard:
+                stop_in_progress = project_id in self._stop_requests
+            if not stop_in_progress:
+                try:
+                    self.api.post(
+                        self._project(project_id, f"/leases/{urllib.parse.quote(lease_id, safe='')}/release"), {},
+                    )
+                except (APIError, RuntimeError):
                     latest = self.api.get(self._project(project_id))
                     if latest["lock"].get("state") != "FREE":
                         raise

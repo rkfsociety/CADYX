@@ -165,6 +165,52 @@ class WebApiTests(unittest.TestCase):
         status, activity = self.request(f"/api/v1/agent/projects/{project_id}/activity")
         self.assertEqual((status, activity["activities"][-1]["state"]), (200, "completed"))
 
+    def test_command_batch_preview_isolated_and_proposal_commits_once(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Batch preview"})
+        project_id = created["project"]["id"]
+        commands = [{"type": "create_sketch"}, {"type": "create_sketch", "plane": "XZ"}]
+        status, preview = self.request(
+            f"/api/v1/agent/projects/{project_id}/commands/preview",
+            {"expected_revision": 0, "commands": commands},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(preview["revision"], 0)
+        self.assertEqual(preview["prospective_revision"], 2)
+        self.assertEqual(len(preview["diff"]["added_ids"]), 2)
+        _, detail = self.request(f"/api/v1/agent/projects/{project_id}")
+        self.assertEqual((detail["document"]["revision"], detail["history"]), (0, []))
+
+        _, acquired = self.request(f"/api/v1/agent/projects/{project_id}/leases", {"owner_id": "batch-test"})
+        lease_id = acquired["lease"]["lease_id"]
+        status, committed = self.request(
+            f"/api/v1/agent/projects/{project_id}/commands/commit",
+            {"lease_id": lease_id, "expected_revision": 0, "proposal_id": preview["proposal_id"]},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(committed["revision"], 2)
+        self.assertEqual(len(committed["document"]["objects"]), 2)
+        self.assertEqual(len(self.core.workspace.load(project_id)["history"]), 2)
+        status, error = self.request(
+            f"/api/v1/agent/projects/{project_id}/commands/commit",
+            {"lease_id": lease_id, "expected_revision": 2, "proposal_id": preview["proposal_id"]},
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(error["error"], "PROPOSAL_STALE")
+        self.core.release_lease(project_id, lease_id)
+
+    def test_invalid_command_batch_preview_never_changes_saved_project(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Rejected batch preview"})
+        project_id = created["project"]["id"]
+        status, _ = self.request(
+            f"/api/v1/agent/projects/{project_id}/commands/preview",
+            {"expected_revision": 0, "commands": [{"type": "create_sketch"}, {"type": "not_a_command"}]},
+        )
+        self.assertEqual(status, 400)
+        saved = self.core.workspace.load(project_id)
+        self.assertEqual(saved["document"]["revision"], 0)
+        self.assertEqual(saved["document"]["objects"], [])
+        self.assertEqual(saved["history"], [])
+
     def test_agent_global_thickness_validation_returns_polyhedron_certificate(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "Global thickness"})
         project_id = created["project"]["id"]

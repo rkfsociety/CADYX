@@ -2,6 +2,8 @@
 
 - Confirmed: typed read-only face/edge geometry queries are exposed at Agent API POST `/api/v1/agent/projects/{id}/topology/query` and MCP `cadyx_query_topology`. Queries bind to a saved revision and report explicit candidate counts and ambiguity; stale mutation `topology_revision` and colliding semantic keys fail closed. See [geometric queries](docs/architecture.md#revision-bound-geometric-topology-queries) and `cadyx/topology_queries.py`.
 
+- Confirmed: Agent API command batches can be previewed on an isolated document copy at `/commands/preview`, then committed once through `/commands/commit` under an agent lease acquired after preview and the exact saved revision. Proposals are process-local, capped at 128, and invalidated by restart/eviction; batches containing scan-file publication, export, or source-file removal are rejected in preview. Commit persists the exact staged document and per-command history atomically. See `cadyx/core.py`, `cadyx/web_routes.py`, and `cadyx/mcp_server.py`.
+
 - User direction: reference-driven model creation and study should also improve CADYX. Look for concrete workflow or capability gaps while modeling; implement and verify relevant improvements, document reusable confirmed behavior in canonical docs, and keep source-specific measurements and transcripts in the individual CADYX project rather than shared memory. Persistent instruction: [rules](rules.md).
 
 - Confirmed: CADYX uses a project-local Python 3.15 runtime and a native OCCT C ABI bridge on Windows x64. Reproducible setup and reviewed stable versions: `scripts/setup-runtime.ps1`, `scripts/runtime-versions.json`; runtime artifacts stay in ignored `.runtime/`. See [setup](../README.md).

@@ -177,6 +177,8 @@ def agent_api_capabilities(reusable_capabilities: list[dict[str, Any]] | None = 
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/leases/{lease_id}/heartbeat|release", "description": "Maintain or release an existing lease."},
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/leases/recover", "description": "Validated stale-lease recovery; call only after API confirms expiration."},
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/commands", "description": "Execute through the Core Command System; commands require a current agent lease; pass expected_revision."},
+            {"method": "POST", "path": "/api/v1/agent/projects/{id}/commands/preview", "description": "Preview an ordered batch on an isolated document copy; no project files or saved state are changed."},
+            {"method": "POST", "path": "/api/v1/agent/projects/{id}/commands/commit", "description": "Atomically commit a single-use preview proposal under a fresh agent lease and exact expected_revision."},
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/stop|resume", "description": "Validated stop fence and revision-checked agent resume."},
         ],
         "commands": deepcopy(list(COMMAND_CAPABILITIES)),
