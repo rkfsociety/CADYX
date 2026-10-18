@@ -69,6 +69,11 @@ class CadyxAPI:
             with urllib.request.urlopen(request, timeout=600) as response:
                 raw = response.read()
                 content_type = response.headers.get_content_type()
+                metadata = {
+                    "content_type": content_type,
+                    "document_revision": response.headers.get("X-CADYX-Document-Revision"),
+                    "viewport_source": response.headers.get("X-CADYX-Viewport-Source"),
+                }
         except urllib.error.HTTPError as exc:
             with exc:
                 raw = exc.read()
@@ -81,7 +86,7 @@ class CadyxAPI:
             raise RuntimeError(f"CADYX API connection failed: {exc}") from exc
         if content_type == _JSON:
             return raw, json.loads(raw.decode("utf-8"))
-        return raw, {"content_type": content_type}
+        return raw, metadata
 
     def get(self, path: str) -> Any:
         return self.request("GET", path)[1]
@@ -184,6 +189,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_list_validation_records", "description": "List recent durable validation records for a project without changing its document revision.", "inputSchema": _schema({"project_id": _STRING, "limit": {"type": "integer", "minimum": 1, "maximum": 200}}, ["project_id"])},
     {"name": "cadyx_get_viewport", "description": "Read validated viewport scene data for the saved project revision.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_get_viewport_image", "description": "Get the saved model's viewport PNG as an MCP image the model can inspect.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
+    {"name": "cadyx_get_project_thumbnail_batch", "description": "Get server-rendered thumbnails for up to eight saved projects in one MCP call so the AI agent can visually compare them with a reference image. Returns each project ID and thumbnail revision; it does not rank or select projects.", "inputSchema": _schema({"project_ids": {"type": "array", "items": _STRING, "minItems": 1, "maxItems": 8, "uniqueItems": True}}, ["project_ids"])},
     {"name": "cadyx_move_camera", "description": "Animate the selected browser viewport camera; this does not mutate the CAD document.", "inputSchema": _schema({"project_id": _STRING, "yaw_delta": _NUMBER, "pitch_delta": _NUMBER, "zoom_factor": _NUMBER, "duration_ms": {"type": "integer", "minimum": 0, "maximum": 5000}}, ["project_id", "yaw_delta"])},
     {"name": "cadyx_get_dashboard", "description": "Read the project's persisted agent workflow and task report.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_report_dashboard", "description": "Publish honest Russian workflow progress and queue state; this does not mutate the CAD document.", "inputSchema": _schema({"project_id": _STRING, "workflow": {"anyOf": [_OBJECT, {"type": "null"}]}, "tasks": {"type": "array", "items": _OBJECT}}, ["project_id", "workflow", "tasks"])},
@@ -217,6 +223,14 @@ class MCPApplication:
                     {"type": "text", "text": value[1]},
                     {"type": "image", "data": base64.b64encode(value[2]).decode("ascii"), "mimeType": value[3]},
                 ]}
+            if isinstance(value, tuple) and value and value[0] == "images":
+                content = [{"type": "text", "text": value[1]}]
+                for caption, image_bytes, mime_type in value[2]:
+                    content.extend((
+                        {"type": "text", "text": caption},
+                        {"type": "image", "data": base64.b64encode(image_bytes).decode("ascii"), "mimeType": mime_type},
+                    ))
+                return {"content": content}
             return {"content": [{"type": "text", "text": json.dumps(value, ensure_ascii=False, separators=(",", ":"))}], "structuredContent": value}
         except Exception as exc:
             return {"content": [{"type": "text", "text": str(exc)}], "isError": True}
@@ -326,6 +340,31 @@ class MCPApplication:
         if name == "cadyx_get_viewport_image":
             raw, meta = self.api.request("GET", self._project(args["project_id"], "/viewport.png"))
             return ("image", "CADYX viewport PNG (server or current browser frame).", raw, meta["content_type"])
+        if name == "cadyx_get_project_thumbnail_batch":
+            project_ids = args.get("project_ids")
+            if (
+                not isinstance(project_ids, list)
+                or not 1 <= len(project_ids) <= 8
+                or any(not isinstance(project_id, str) or not project_id.strip() for project_id in project_ids)
+                or len(set(project_ids)) != len(project_ids)
+            ):
+                raise ValueError("project_ids must contain 1 to 8 unique non-empty project IDs.")
+            images = []
+            descriptions = []
+            for project_id in project_ids:
+                try:
+                    raw, meta = self.api.request(
+                        "GET", self._project(project_id, "/viewport.png?thumbnail=1"),
+                    )
+                    revision = meta.get("document_revision")
+                    source = meta.get("viewport_source") or "server-thumbnail"
+                    label = f"Project {project_id}; revision {revision or 'unknown'}; source {source}."
+                    images.append((label, raw, meta["content_type"]))
+                    descriptions.append({"project_id": project_id, "revision": revision, "status": "ready"})
+                except Exception as exc:
+                    descriptions.append({"project_id": project_id, "status": "unavailable", "error": str(exc)})
+            summary = json.dumps(descriptions, ensure_ascii=False, separators=(",", ":"))
+            return ("images", f"Project thumbnails in request order; compare them with the reference image as the AI agent. {summary}", images)
         if name == "cadyx_move_camera":
             keys = ("yaw_delta", "pitch_delta", "zoom_factor", "duration_ms")
             body = {key: args[key] for key in keys if key in args}
