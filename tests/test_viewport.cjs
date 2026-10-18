@@ -318,6 +318,29 @@ explicitEdgeViewer.load({
 });
 assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 1,
   "A depth-tested B-rep edge stays continuous along the boundary of its own shaded face");
+for (const [yaw, pitch] of [[0.3, 0.2], [1.1, -0.35], [2.4, 0.4], [4.2, -0.25]]) {
+  explicitEdgeViewer.setCamera({ yaw, pitch, zoom: 1, projection: "orthographic" });
+  assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 1,
+    `A B-rep boundary stays continuous while orbiting at yaw ${yaw} and pitch ${pitch}`);
+}
+explicitEdgeViewer.load({
+  type: "body",
+  positions: [-1, 0, 0, 1, 0, 0, 1, 0, 1, -1, 0, 1, -0.5, -0.015, 0.5, 0.5, -0.015, 0.5],
+  triangles: [0, 1, 2, 0, 2, 3], lines: [4, 5], points: [],
+  bounds: { min: [-1, -0.015, 0], max: [1, 0, 1] },
+});
+explicitEdgeViewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
+assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 1,
+  "A sampled B-rep boundary stays visible within the combined mesh and edge tessellation deflection");
+explicitEdgeViewer.load({
+  type: "body",
+  positions: [-1, 0, 0, 1, 0, 0, 1, 0, 1, -1, 0, 1, -0.5, -0.03, 0.5, 0.5, -0.03, 0.5],
+  triangles: [0, 1, 2, 0, 2, 3], lines: [4, 5], points: [],
+  bounds: { min: [-1, -0.03, 0], max: [1, 0, 1] },
+});
+explicitEdgeViewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
+assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 0,
+  "Depth testing still hides a B-rep line farther behind the shaded face than the tessellation tolerance");
 const transientEdgeViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
   showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: true,
 });

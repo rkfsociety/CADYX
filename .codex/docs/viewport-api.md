@@ -49,7 +49,9 @@ exports. OCCT B-rep edges are sampled at a 0.01 document-unit deflection and
 returned as body `lines`; periodic seams and edges between adjacent faces whose
 local normals differ by less than 30 degrees are omitted. The browser draws
 these feature curves against the shaded depth buffer, so rear edges do not draw
-through front faces. Smooth-surface silhouette contours are derived from
+through front faces. The edge depth tolerance accounts for the combined 0.01
+unit display-mesh and edge-sampling deflections; lines farther behind the
+surface remain hidden. Smooth-surface silhouette contours are derived from
 triangle facing and checked against the shaded depth buffer; depth is
 interpolated on the nearest rasterized triangles covering each line
 sample, including nearby pixel samples when the line falls on a raster coverage

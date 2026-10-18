@@ -343,7 +343,8 @@
         geometry.featureEdgeFaces,
         geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
         Boolean(drag),
-        wireframeColor, wireframeOpacity, dpr, Math.max(1.5 / scale, VIEWPORT_MESH_DEFLECTION),
+        wireframeColor, wireframeOpacity, dpr,
+        Math.max(1.5 / scale, 2 * VIEWPORT_MESH_DEFLECTION),
         selectedFeatureId
           ? geometry.featureTriangleRanges?.filter((range) => range.featureId === selectedFeatureId) || []
           : geometry.bodyTriangleRanges?.filter((range) => range.objectId === selectedBodyId) || [],
