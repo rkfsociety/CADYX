@@ -171,6 +171,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_list_folder_files", "description": "List direct user files in a workspace folder.", "inputSchema": _schema({"folder_name": _STRING}, ["folder_name"])},
     {"name": "cadyx_read_folder_file", "description": "Read a direct workspace file through the read-only API; small images are returned as image content.", "inputSchema": _schema({"folder_name": _STRING, "name": _STRING}, ["folder_name", "name"])},
     {"name": "cadyx_inspect_topology", "description": "Inspect current editable B-rep edges before a fillet. Refresh topology after any upstream edit.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING}, ["project_id", "body_id"])},
+    {"name": "cadyx_query_topology", "description": "Read-only exact-revision face/edge geometry filters; returns candidate count, ambiguity and sorted matches without automatic selection.", "inputSchema": _schema({"project_id": _STRING, "body_id": _STRING, "expected_revision": _INTEGER, "query": {"type": "object", "properties": {"entity": {"enum": ["face", "edge"]}}, "required": ["entity"], "additionalProperties": True}}, ["project_id", "body_id", "expected_revision", "query"])},
     *(
         {"name": operation["tool_name"], "description": operation["description"],
          "inputSchema": _schema(
@@ -325,6 +326,11 @@ class MCPApplication:
             project_id = urllib.parse.quote(args["project_id"], safe="")
             body_id = urllib.parse.quote(args["body_id"], safe="")
             return self.api.get(f"/api/v1/agent/projects/{project_id}/topology?body_id={body_id}")
+        if name == "cadyx_query_topology":
+            return self.api.post(self._project(args["project_id"], "/topology/query"), {
+                "body_id": args["body_id"], "expected_revision": args["expected_revision"],
+                "query": args["query"],
+            })
         for operation in VALIDATION_OPERATIONS.values():
             if name == operation["tool_name"]:
                 body = {field: args[field] for field in operation["input_schema"]["required"]}

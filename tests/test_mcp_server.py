@@ -81,6 +81,31 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(image["content"][1]["mimeType"], "image/png")
         self.assertTrue(image["content"][1]["data"])
 
+    def test_topology_query_mcp_forwards_revision_and_read_only_results(self) -> None:
+        project_id = self._create_project("Query geometry")
+        created = self._tool_value("cadyx_execute_command", {
+            "project_id": project_id, "expected_revision": 0,
+            "command": {"type": "create_box", "width": 4, "height": 6, "depth": 8},
+        })
+        body_id = created["command_result"]["history_entry"]["result"]["body_id"]
+        revision = created["revision"]
+        response = self._tool_value("cadyx_query_topology", {
+            "project_id": project_id, "body_id": body_id, "expected_revision": revision,
+            "query": {"entity": "face", "surface": "plane"},
+        })
+        self.assertEqual(response["revision"], revision)
+        self.assertEqual(response["status"], "ambiguous")
+        self.assertEqual(response["match_count"], 6)
+        stale = self.app.call_tool("cadyx_query_topology", {
+            "project_id": project_id, "body_id": body_id, "expected_revision": revision - 1,
+            "query": {"entity": "face"},
+        })
+        self.assertTrue(stale["isError"])
+        self.assertIn("REVISION_CONFLICT", stale["content"][0]["text"])
+        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(detail["document"]["revision"], revision)
+        self.assertEqual(detail["lock"]["state"], "FREE")
+
     def test_global_thickness_method_is_exposed_and_dispatched(self) -> None:
         tool = next(tool for tool in TOOLS if tool["name"] == "cadyx_validate_body_thickness")
         method_schema = tool["inputSchema"]["properties"]["method"]

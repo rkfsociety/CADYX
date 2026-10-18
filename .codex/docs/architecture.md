@@ -450,3 +450,41 @@ The development sequence, including authenticated LAN access and the prerequisit
 ### Scan buffer and PLY preview performance
 
 Packed scan geometry compression and decoding use buffer views to avoid intermediate full-payload byte copies; decoded arrays remain independently owned. Reusing a generated PLY hashes the existing file incrementally rather than loading it into memory. Browser PLY previews resolve coordinate readers once, skip unsampled polygon and unused list payloads by byte length, and verify that skipped payloads fit the input. Vertex data is checked before allocating its preview array. Sampling and triangulation remain unchanged; this preview is not a full validator of unsampled face indices. Regression coverage lives in `tests/test_ply_preview.cjs` and the portable scan tests.
+
+### Revision-bound geometric topology queries
+
+External agents may use POST `/api/v1/agent/projects/{id}/topology/query`
+(MCP `cadyx_query_topology`) with a `body_id`, exact `expected_revision`
+and typed `query`:
+
+```json
+{"body_id":"body:...","expected_revision":4,"query":{
+  "entity":"face","surface":"cylinder",
+  "radius":{"value":2.5,"tolerance":0.01},
+  "axis":{"origin":[0,0,0],"direction":[0,0,1],"tolerance":0.01}
+}}
+```
+
+`entity` must be `face` or `edge`. Supported filters include `surface`,
+`curve`, `radius`, `diameter`, `area`, `length`, `orientation`,
+`normal`, `position`, `center_in_box` and `axis`. Scalar filters use
+`value` and absolute `tolerance` in model units (area uses square units).
+Direction filters use `vector` and optional `mode` (`aligned`, `parallel`,
+`perpendicular`) and `angle_tolerance_degrees` (default 1 degree).
+`position` uses a `point` and `tolerance` to match the entity's centroid;
+`center_in_box` tests only the centroid and does not certify that the
+whole face/edge is enclosed. `axis` matches analytic axis position and
+orientation using `origin`, `direction` and distance `tolerance`.
+Missing analytic descriptors do not match. `max_results` limits the returned
+prefix (default 100, maximum 500), not the counted matches.
+
+The read-only result includes saved document `revision`, deterministic
+index-ordered `candidates`, `match_count`, `truncated` and `status`
+(`no_match`, `unique`, `ambiguous`). Candidate confidence is descriptive
+(`descriptor_within_tolerance`), not a measured probability.
+Agents must explicitly choose an index or a uniquely resolving semantic key;
+fingerprints are not permanent topology IDs. For face/edge mutation commands,
+pass `topology_revision` equal to the inspected saved revision along with
+the usual command `expected_revision` and a fresh edit lease. A stale topology
+revision returns `TOPOLOGY_CHANGED`; a duplicated semantic fingerprint
+returns `TOPOLOGY_AMBIGUOUS`, without applying the command.

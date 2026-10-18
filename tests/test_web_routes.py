@@ -31,6 +31,8 @@ class WebRouteTableTests(unittest.TestCase):
             ("GET", "/api/v1/projects/p-1/viewport.png", "project_viewport_png", {"project_id": "p-1"}),
             ("POST", "/api/v1/agent/projects/p-2/validations/thickness", "agent_validate_thickness",
              {"project_id": "p-2"}),
+            ("POST", "/api/v1/agent/projects/p-2/topology/query", "agent_topology_query",
+             {"project_id": "p-2"}),
             ("POST", "/api/v1/agent/projects/p-2/leases/l-3/heartbeat", "agent_lease_heartbeat",
              {"project_id": "p-2", "lease_id": "l-3"}),
             ("DELETE", "/api/v1/agent/projects/p-2/files/input%20part.step", "agent_project_file_delete",

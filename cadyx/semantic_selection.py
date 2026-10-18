@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from .errors import ValidationError
+from .errors import ConflictError, ValidationError
 
 
 
@@ -21,14 +21,24 @@ def _resolve(kernel, geometry: dict[str, Any], *, keys: list[str], collection: s
     items = topology.get(collection)
     if not isinstance(items, list):
         raise ValidationError(f"Current topology does not expose {collection}.")
-    by_key = {item.get("semantic_key"): item.get("index") for item in items if isinstance(item, dict)}
+    by_key: dict[str, list[int]] = {}
+    for item in items:
+        if (isinstance(item, dict) and isinstance(item.get("semantic_key"), str)
+                and type(item.get("index")) is int):
+            by_key.setdefault(item["semantic_key"], []).append(item["index"])
     missing = [key for key in keys if key not in by_key]
     if missing:
-        raise ValidationError(
+        raise ConflictError(
             "Topology changed and semantic selectors no longer resolve: " + ", ".join(missing)
-            + ". Inspect topology again before editing."
+            + ". Inspect topology again before editing.", code="TOPOLOGY_CHANGED"
         )
-    return [by_key[key] for key in keys]
+    ambiguous = [key for key in keys if len(by_key[key]) != 1]
+    if ambiguous:
+        raise ConflictError(
+            "Topology selection is ambiguous: " + ", ".join(ambiguous)
+            + ". Use explicit indices with the current topology_revision.", code="TOPOLOGY_AMBIGUOUS"
+        )
+    return [by_key[key][0] for key in keys]
 
 
 def capture_edge_references(kernel, geometry: dict[str, Any], indices: list[int]) -> list[dict[str, Any]]:
@@ -112,6 +122,13 @@ def execute_with_selection(next_execute, self, document, command, *, progress=No
             if source is None or not isinstance(source.get("geometry"), dict):
                 raise ValidationError("Semantic selection requires an existing editable body.")
             edge_source_geometry = source["geometry"]
+            if "topology_revision" in command:
+                revision = command["topology_revision"]
+                if type(revision) is not int or revision < 0:
+                    raise ValidationError("topology_revision must be a non-negative integer.")
+                if revision != document.revision:
+                    raise ConflictError("Topology revision is stale; inspect again before editing.",
+                                        code="TOPOLOGY_CHANGED")
             if selector[0] in command:
                 resolved = _resolve(self.kernel, edge_source_geometry,
                                     keys=_keys(command[selector[0]], selector[0]), collection=selector[2])
@@ -143,12 +160,12 @@ def refine_capabilities(contracts):
         item = dict(item)
         kind = item.get("type")
         if kind in {"shell_body", "draft_faces"}:
-            item["optional"] = list(dict.fromkeys([*(item.get("optional") or []), "face_keys"]))
+            item["optional"] = list(dict.fromkeys([*(item.get("optional") or []), "face_keys", "topology_revision"]))
             item["constraints"] = [*(item.get("constraints") or []),
-                                   "face_keys may replace face_indices using semantic_key values from topology."]
+                                   "face_keys may replace face_indices using unique semantic_key values; topology_revision fences inspected face choices."]
         elif kind in {"chamfer_edges", "variable_fillet_edges", "fillet_edges"}:
-            item["optional"] = list(dict.fromkeys([*(item.get("optional") or []), "edge_keys"]))
+            item["optional"] = list(dict.fromkeys([*(item.get("optional") or []), "edge_keys", "topology_revision"]))
             item["constraints"] = [*(item.get("constraints") or []),
-                                   "edge_keys may replace edge_indices using semantic_key values from topology."]
+                                   "edge_keys may replace edge_indices using unique semantic_key values; topology_revision fences inspected edge choices."]
         rewritten.append(item)
     return tuple(rewritten)

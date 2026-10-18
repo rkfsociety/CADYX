@@ -341,6 +341,11 @@ class CadyxCore:
     def inspect_body_topology(self, project_id: str, body_id: str) -> dict[str, Any]:
         return self._rendering.inspect_body_topology(project_id, body_id)
 
+    def query_body_topology(
+        self, project_id: str, body_id: str, expected_revision: Any, query: Any,
+    ) -> dict[str, Any]:
+        return self._rendering.query_body_topology(project_id, body_id, expected_revision, query)
+
     def validate_body_dimensions(
         self, project_id: str, body_id: str, expected_revision: Any,
         expected_dimensions: Any, tolerance: Any, *, persist: bool = False,
