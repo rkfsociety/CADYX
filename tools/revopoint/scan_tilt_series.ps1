@@ -1,5 +1,6 @@
 param(
-    [string]$ProjectPath = (Join-Path (Split-Path -Parent $PSScriptRoot) '..\projects\Kobra S1 Back Cover'),
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectPath,
     [ValidateScript({ $_ -gt 0 })]
     [double]$DisparityScale = 256,
     [string]$RunId = ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))
@@ -12,11 +13,18 @@ $captureExe = Join-Path $toolRoot 'build\CaptureY16.exe'
 $turntableExe = Join-Path $toolRoot 'build\TurntableController.exe'
 $calibration = Join-Path $toolRoot 'calibration\Q.bin'
 $liveRaw = Join-Path $repoRoot 'projects\.revopoint-live.raw'
+$workspaceRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'projects')).TrimEnd([char[]]@('\', '/'))
 $ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
+$ProjectPath = [IO.Path]::GetFullPath($ProjectPath).TrimEnd([char[]]@('\', '/'))
+$projectParent = [IO.Path]::GetDirectoryName($ProjectPath)
+if (-not [string]::Equals($projectParent.TrimEnd([char[]]@('\', '/')), $workspaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Scan target must be one existing direct CADYX project folder under $workspaceRoot."
+}
 $projectRecord = Get-Content -LiteralPath (Join-Path $ProjectPath 'project.json') -Raw | ConvertFrom-Json
-
-if ($projectRecord.name -ne 'Kobra S1 Back Cover') {
-    throw "Scan target must be the existing Kobra S1 Back Cover project; found '$($projectRecord.name)'."
+$projectId = [guid]::Empty
+if ($projectRecord.format -ne 'cadyx-project' -or
+    -not [guid]::TryParse([string]$projectRecord.id, [ref]$projectId)) {
+    throw "Scan target is not a valid CADYX project folder: $ProjectPath"
 }
 foreach ($path in @($captureExe, $turntableExe, $calibration)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required scanner input is missing: $path" }
@@ -92,9 +100,9 @@ function Get-HomeDelta([double]$Angle) {
     return $normalized
 }
 
-function Confirm-Home([string]$Phase, [double]$ExpectedTilt = 0) {
+function Confirm-Home([string]$Phase, [double]$ExpectedTilt = 0, [double]$TiltTolerance = 0.5) {
     $state = Read-TableState
-    if ([math]::Abs((Get-HomeDelta $state.rotation)) -gt 1.0 -or [math]::Abs($state.tilt - $ExpectedTilt) -gt 0.5) {
+    if ([math]::Abs((Get-HomeDelta $state.rotation)) -gt 1.0 -or [math]::Abs($state.tilt - $ExpectedTilt) -gt $TiltTolerance) {
         throw "$Phase did not finish at the home position (rotation=$($state.rotation), tilt=$($state.tilt))."
     }
 }
@@ -105,7 +113,7 @@ function Get-ValidatedCaptureRows([string]$PoseCsv, [double]$ExpectedTilt) {
     $baseAngle = [double]$rows[0].angle_degrees
     for ($index = 0; $index -lt $rows.Count; $index++) {
         $row = $rows[$index]
-        if ([math]::Abs([double]$row.tilt_degrees - $ExpectedTilt) -gt 0.5) {
+        if ([math]::Abs([double]$row.tilt_degrees - $ExpectedTilt) -gt 1.0) {
             throw "Pose log contains tilt $($row.tilt_degrees), expected $ExpectedTilt degrees."
         }
         $angleError = Get-HomeDelta ([double]$row.angle_degrees - ($baseAngle + 30.0 * $index))
@@ -159,7 +167,7 @@ try {
         Write-Host "=== Tilt $tilt degrees: 12 stationary depth captures over a full turn ==="
         $tiltOutput = Invoke-Controller -Arguments @('tilt', $tilt.ToString('0', [Globalization.CultureInfo]::InvariantCulture))
         $tiltMatch = [regex]::Match($tiltOutput, 'tilt after:\s*(-?\d+(?:\.\d+)?)\s*deg')
-        if (-not $tiltMatch.Success -or [math]::Abs([double]$tiltMatch.Groups[1].Value - $tilt) -gt 0.5) {
+        if (-not $tiltMatch.Success -or [math]::Abs([double]$tiltMatch.Groups[1].Value - $tilt) -gt 1.0) {
             throw "Turntable did not confirm tilt $tilt degrees."
         }
 
@@ -169,7 +177,7 @@ try {
             $poseCsv, $captureExe, $prefix, $calibration,
             $DisparityScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw
         ) | Out-Null
-        Confirm-Home "Tilt $tilt capture pass" $tilt
+        Confirm-Home "Tilt $tilt capture pass" $tilt 1.0
         $captureRows = @(Get-ValidatedCaptureRows -PoseCsv $poseCsv -ExpectedTilt $tilt)
         $manifest.passes += [ordered]@{
             tilt_degrees = $tilt

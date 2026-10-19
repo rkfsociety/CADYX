@@ -22,6 +22,7 @@ internal static class Program
     private const double MaxDegreesPerCommand = 30.0;
     private const double MinRotationPeriodSeconds = 18.0;
     private const double MaxRotationPeriodSeconds = 90.0;
+    private const double TiltSetpointToleranceDegrees = 1.0;
 
     private sealed class Connection : IDisposable
     {
@@ -241,7 +242,7 @@ internal static class Program
                     double baselineAngle = currentAngle;
                     if (operation == "sweep" && Math.Abs(baselineTilt) > 0.5)
                         throw new InvalidOperationException("Rotation-only sweep requires zero tilt.");
-                    if (operation == "capture-sweep" && Math.Abs(baselineTilt - scanCapture.ExpectedTilt) > 0.5)
+                    if (operation == "capture-sweep" && Math.Abs(baselineTilt - scanCapture.ExpectedTilt) > TiltSetpointToleranceDegrees)
                         throw new InvalidOperationException("Turntable tilt does not match the requested scan-pass tilt; no rotation command was sent.");
                     if (operation == "capture-sweep" && Math.Abs(SignedAngleDelta(0, currentAngle)) > 1.0)
                         throw new InvalidOperationException("Each capture-sweep must start at the rotation home position.");
@@ -355,7 +356,7 @@ internal static class Program
                 {
                     await Task.Delay(300);
                     string response = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
-                    if (TryAngle(response, out tiltAfter) && Math.Abs(tiltAfter - degrees) <= 1.0)
+                    if (TryAngle(response, out tiltAfter) && Math.Abs(tiltAfter - degrees) <= TiltSetpointToleranceDegrees)
                     {
                         Console.WriteLine("tilt after: " + tiltAfter.ToString("F1", CultureInfo.InvariantCulture) + " deg");
                         return 0;

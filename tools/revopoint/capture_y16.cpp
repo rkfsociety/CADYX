@@ -357,16 +357,19 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
               out.write(reinterpret_cast<const char*>(frames.back().data()), static_cast<std::streamsize>(frames.back().size()));
               if (!out) throw std::runtime_error("Could not update live frame file."); }
             bool published = false;
+            DWORD publish_error = ERROR_SUCCESS;
             for (int attempt = 0; attempt < 20; ++attempt) {
                 if (MoveFileExW(temporary.c_str(), live_raw_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
                     published = true;
                     break;
                 }
-                const DWORD error = GetLastError();
-                if (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION) break;
+                publish_error = GetLastError();
+                if (publish_error != ERROR_SHARING_VIOLATION && publish_error != ERROR_LOCK_VIOLATION
+                    && publish_error != ERROR_ACCESS_DENIED) break;
                 Sleep(10);
             }
-            if (!published) throw std::runtime_error("Could not atomically publish live frame file.");
+            if (!published) throw std::runtime_error("Could not atomically publish live frame file (Win32 "
+                + std::to_string(publish_error) + ").");
         }
         if (frames.size() == 1 && !ready_file.empty()) {
             if (!ready_file.parent_path().empty()) std::filesystem::create_directories(ready_file.parent_path());

@@ -53,12 +53,19 @@ def read_ascii_ply(path: Path) -> list[tuple[float, float, float]]:
 
 
 def rotate_to_zero(point: tuple[float, float, float], angle_degrees: float,
-                   pivot_x: float, pivot_y: float, rotation_sign: int) -> tuple[float, float, float]:
+                   pivot_a: float, pivot_b: float, rotation_sign: int,
+                   axis: str) -> tuple[float, float, float]:
     angle = math.radians(rotation_sign * angle_degrees)
     cosine, sine = math.cos(angle), math.sin(angle)
     x, y, z = point
-    dx, dy = x - pivot_x, y - pivot_y
-    return pivot_x + cosine * dx - sine * dy, pivot_y + sine * dx + cosine * dy, z
+    if axis == "x":
+        dy, dz = y - pivot_a, z - pivot_b
+        return x, pivot_a + cosine * dy - sine * dz, pivot_b + sine * dy + cosine * dz
+    if axis == "y":
+        dz, dx = z - pivot_a, x - pivot_b
+        return pivot_b + cosine * dx + sine * dz, y, pivot_a - sine * dx + cosine * dz
+    dx, dy = x - pivot_a, y - pivot_b
+    return pivot_a + cosine * dx - sine * dy, pivot_b + sine * dx + cosine * dy, z
 
 
 def build_spatial_grid(points: Iterable[tuple[float, float, float]], cell_size: float
@@ -85,12 +92,12 @@ def matches_within(point: tuple[float, float, float], grid: dict,
 
 def score_pivot(pairs: list[tuple[dict, list[tuple[float, float, float]], float]],
                 pivot_x: float, pivot_y: float, rotation_sign: int,
-                cell_size: float) -> tuple[float, float]:
+                cell_size: float, axis: str) -> tuple[float, float]:
     within_two: list[float] = []
     within_five: list[float] = []
     for target_grid, source_points, angle_delta in pairs:
         for point in source_points:
-            aligned = rotate_to_zero(point, angle_delta, pivot_x, pivot_y, rotation_sign)
+            aligned = rotate_to_zero(point, angle_delta, pivot_x, pivot_y, rotation_sign, axis)
             hit_two = matches_within(aligned, target_grid, cell_size, 2.0 ** 2)
             hit_five = hit_two or matches_within(aligned, target_grid, cell_size, 5.0 ** 2)
             within_two.append(float(hit_two))
@@ -114,30 +121,34 @@ def estimate_pivot(clouds: list[list[tuple[float, float, float]]],
     if len(training) < 2 or not validation:
         raise ValueError("Need at least four usable views to fit and validate the pivot.")
 
-    median_x = statistics.median(point[0] for cloud in clouds for point in cloud[::arguments.match_stride])
-    median_y = statistics.median(point[1] for cloud in clouds for point in cloud[::arguments.match_stride])
+    axis = arguments.rotation_axis
+    coordinate_indices = {"x": (1, 2), "y": (2, 0), "z": (0, 1)}[axis]
+    median_a = statistics.median(point[coordinate_indices[0]]
+                                for cloud in clouds for point in cloud[::arguments.match_stride])
+    median_b = statistics.median(point[coordinate_indices[1]]
+                                for cloud in clouds for point in cloud[::arguments.match_stride])
 
     radius = arguments.pivot_search_radius
     coarse = arguments.pivot_search_step
-    xs = _grid_values(median_x - radius, median_x + radius, coarse)
-    ys = _grid_values(median_y - radius, median_y + radius, coarse)
+    xs = _grid_values(median_a - radius, median_a + radius, coarse)
+    ys = _grid_values(median_b - radius, median_b + radius, coarse)
     best_x = best_y = 0.0
     best_score = (-1.0, -1.0)
     for pivot_x in xs:
         for pivot_y in ys:
-            score = score_pivot(training, pivot_x, pivot_y, arguments.rotation_sign, 5.0)
+            score = score_pivot(training, pivot_x, pivot_y, arguments.rotation_sign, 5.0, axis)
             if score > best_score:
                 best_x, best_y, best_score = pivot_x, pivot_y, score
 
     fine_step = min(1.0, coarse)
     for pivot_x in _grid_values(best_x - coarse, best_x + coarse, fine_step):
         for pivot_y in _grid_values(best_y - coarse, best_y + coarse, fine_step):
-            score = score_pivot(training, pivot_x, pivot_y, arguments.rotation_sign, 5.0)
+            score = score_pivot(training, pivot_x, pivot_y, arguments.rotation_sign, 5.0, axis)
             if score > best_score:
                 best_x, best_y, best_score = pivot_x, pivot_y, score
 
-    train_score = score_pivot(training, best_x, best_y, arguments.rotation_sign, 5.0)
-    validation_score = score_pivot(validation, best_x, best_y, arguments.rotation_sign, 5.0)
+    train_score = score_pivot(training, best_x, best_y, arguments.rotation_sign, 5.0, axis)
+    validation_score = score_pivot(validation, best_x, best_y, arguments.rotation_sign, 5.0, axis)
     scores = {
         "fit_pairs_mean_within_2_units": train_score[0],
         "fit_pairs_mean_within_5_units": train_score[1],
@@ -162,13 +173,14 @@ def write_ply(path: Path, points: list[tuple[float, float, float]]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Estimate a Z-axis table pivot from held-out view overlaps and fuse scan_360 PLY views.")
+    parser = argparse.ArgumentParser(description="Estimate a principal-axis turntable pivot from held-out view overlaps and fuse scan_360 PLY views.")
     parser.add_argument("scan_folder", type=Path, help="Folder created by tools/revopoint/scan_360.ps1")
     parser.add_argument("--voxel-size", type=float, default=0.5, help="Voxel size in unverified Q coordinate units (default: 0.5)")
     parser.add_argument("--match-stride", type=int, default=64, help="Use every Nth PLY point for pivot fitting (default: 64)")
-    parser.add_argument("--pivot-search-radius", type=float, default=20.0, help="XY search radius around the median cloud center (default: 20)")
-    parser.add_argument("--pivot-search-step", type=float, default=4.0, help="Coarse XY search step; local refinement uses up to 1 unit (default: 4)")
-    parser.add_argument("--rotation-sign", type=int, choices=(-1, 1), default=-1, help="Transform views back to the first pose with this Z rotation sign (default: -1)")
+    parser.add_argument("--rotation-axis", choices=("x", "y", "z"), default="z", help="Principal camera-coordinate axis to test (default: z)")
+    parser.add_argument("--pivot-search-radius", type=float, default=20.0, help="Pivot search radius in the plane perpendicular to the selected axis (default: 20)")
+    parser.add_argument("--pivot-search-step", type=float, default=4.0, help="Coarse pivot search step; local refinement uses up to 1 unit (default: 4)")
+    parser.add_argument("--rotation-sign", type=int, choices=(-1, 1), default=-1, help="Transform views back to the first pose with this rotation sign (default: -1)")
     parser.add_argument("--output-prefix", default="approx_fused_candidate", help="Output basename inside scan_folder")
     arguments = parser.parse_args()
     if arguments.voxel_size <= 0 or arguments.match_stride <= 0 or arguments.pivot_search_radius <= 0 or arguments.pivot_search_step <= 0:
@@ -197,12 +209,13 @@ def main() -> int:
             raise ValueError(f"No finite points in {frame['ply_file']}")
         clouds.append(cloud)
 
-    pivot_x, pivot_y, validation = estimate_pivot(clouds, angle_values, arguments)
+    pivot_a, pivot_b, validation = estimate_pivot(clouds, angle_values, arguments)
     merged: list[tuple[float, float, float]] = []
     input_counts: list[int] = []
     for cloud, angle in zip(clouds, angle_values):
         input_counts.append(len(cloud))
-        merged.extend(rotate_to_zero(point, angle, pivot_x, pivot_y, arguments.rotation_sign)
+        merged.extend(rotate_to_zero(point, angle, pivot_a, pivot_b, arguments.rotation_sign,
+                                     arguments.rotation_axis)
                       for point in cloud)
 
     voxel_points: dict[tuple[int, int, int], tuple[float, float, float]] = {}
@@ -220,6 +233,9 @@ def main() -> int:
     write_ply(output_ply, fused)
     bounds_min = [min(point[axis] for point in fused) for axis in range(3)]
     bounds_max = [max(point[axis] for point in fused) for axis in range(3)]
+    pivot_coordinates = {"x": (None, pivot_a, pivot_b),
+                         "y": (pivot_b, None, pivot_a),
+                         "z": (pivot_a, pivot_b, None)}[arguments.rotation_axis]
     result = {
         "status": "experimental_candidate_unvalidated",
         "source_manifest": manifest_path.name,
@@ -228,16 +244,16 @@ def main() -> int:
         "source_point_counts": input_counts,
         "input_points": len(merged),
         "output_points": len(fused),
-        "axis_assumption": "camera Z axis",
+        "axis_assumption": f"camera {arguments.rotation_axis.upper()} axis (selected for diagnostics; physical alignment is uncalibrated)",
         "rotation_sign": arguments.rotation_sign,
-        "pivot_xyz_in_Q_coordinates": [pivot_x, pivot_y, 0.0],
+        "pivot_xyz_in_Q_coordinates": pivot_coordinates,
         "pivot_fit_pairs": "even-index adjacent pairs",
         "pivot_validation_pairs": "odd-index adjacent pairs held out",
         "pivot_overlap_validation": validation,
         "voxel_size_in_unverified_Q_units": arguments.voxel_size,
         "bounds_min": bounds_min,
         "bounds_max": bounds_max,
-        "limitations": "The disparity scale and physical units are unverified. Z-axis alignment assumes the camera Z axis matches the turntable axis. A single zero-tilt sweep does not cover occluded or underside surfaces; this point cloud is not a validated complete scan or mesh.",
+        "limitations": "The disparity scale and physical units are unverified. The selected principal camera axis is only a diagnostic hypothesis; physical table-axis alignment has not been calibrated. A single zero-tilt sweep does not cover occluded or underside surfaces; this point cloud is not a validated complete scan or mesh.",
     }
     output_json.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))

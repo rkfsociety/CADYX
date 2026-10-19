@@ -104,6 +104,23 @@ The initial CADYX reconstruction had 24,641 vertices and 49,979 triangles. Subse
 
 The mesh and source cloud have similar PCA eigenvalues for their thinnest dimension (14.1 vs. 15.6 coordinate-units²). This indicates the thin, plate-like shape is already present in the fused input, rather than being created only by Poisson reconstruction. It still does not prove the object itself is fully covered: the underside and occluded surfaces are not validated.
 
+## Two-frame fusion with a known table pose
+
+When the table angle is measured and an axis/pivot estimate is available, fuse two saved point-only PLY files with an arbitrary 3D axis:
+
+```powershell
+$run = Join-Path $PWD 'projects\revopoint_single_frame_20261019'
+python .\tools\revopoint\fuse_known_pose_pair.py `
+    (Join-Path $run 'depthcam_0deg_001.ply') `
+    (Join-Path $run 'depthcam_15deg_001.ply') `
+    (Join-Path $run 'fused_pair_0_15deg.ply') `
+    --table-angle-deg 15 `
+    --axis -0.001874 -0.154783 0.987947 `
+    --pivot 34.941 -19.133 117.392
+```
+
+The tool rotates the second frame by the negative measured table angle, reports sampled bidirectional overlap at 1/2/5 Q units, voxel-averages the merged points, and writes a JSON provenance file beside the PLY. It refuses to replace either source or an existing output. Supply an independently measured angle and a justified axis/pivot; this run reuses the prior marker-registered axis/pivot and is therefore a provisional registration. Its Q scale remains unverified and the result covers only the surfaces visible in these two views.
+
 List the camera's advertised native modes with:
 
 ```powershell

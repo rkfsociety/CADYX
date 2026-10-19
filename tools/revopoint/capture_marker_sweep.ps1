@@ -1,4 +1,7 @@
 param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectPath,
+
     [ValidatePattern('^[A-Za-z0-9_-]+$')]
     [string]$OutputFolderName = ('revopoint_marker_sweep_' + (Get-Date -Format 'yyyyMMdd_HHmmss')),
 
@@ -13,7 +16,19 @@ $ErrorActionPreference = 'Stop'
 $toolRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $toolRoot '..\..')).Path
 $workspaceRoot = Join-Path $repoRoot 'projects'
-$outputDirectory = Join-Path $workspaceRoot $OutputFolderName
+$workspaceRoot = [IO.Path]::GetFullPath($workspaceRoot).TrimEnd([char[]]@('\', '/'))
+$ProjectPath = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $ProjectPath).Path).TrimEnd([char[]]@('\', '/'))
+$projectParent = [IO.Path]::GetDirectoryName($ProjectPath)
+if (-not [string]::Equals($projectParent.TrimEnd([char[]]@('\', '/')), $workspaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Scan target must be one existing direct CADYX project folder under $workspaceRoot."
+}
+$projectRecord = Get-Content -LiteralPath (Join-Path $ProjectPath 'project.json') -Raw | ConvertFrom-Json
+$projectId = [guid]::Empty
+if ($projectRecord.format -ne 'cadyx-project' -or
+    -not [guid]::TryParse([string]$projectRecord.id, [ref]$projectId)) {
+    throw "Scan target is not a valid CADYX project folder: $ProjectPath"
+}
+$outputDirectory = Join-Path $ProjectPath $OutputFolderName
 $captureY16 = Join-Path $toolRoot 'build\CaptureY16.exe'
 $captureRgb = Join-Path $toolRoot 'build\CaptureRgb.exe'
 $turntable = Join-Path $toolRoot 'build\TurntableController.exe'

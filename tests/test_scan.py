@@ -1,4 +1,5 @@
 import hashlib
+import os
 import struct
 import tempfile
 import unittest
@@ -34,9 +35,13 @@ class _FakeNative:
 
     def __init__(self):
         self.source_has_faces = None
+        self.source_path = None
+        self.source_bytes = None
 
     def process(self, path, parameters, *, source_has_faces, progress=None):
         self.source_has_faces = source_has_faces
+        self.source_path = Path(path)
+        self.source_bytes = self.source_path.read_bytes()
         if progress is not None:
             progress({"phase": "read_source"})
             progress({"phase": "serialize_mesh"})
@@ -127,6 +132,31 @@ class ScanGeometryTests(unittest.TestCase):
         self.assertEqual(source_hash, original_hash)
         self.assertEqual(stats["source_kind"], "point_cloud")
         validate_mesh_geometry(geometry)
+
+    @unittest.skipUnless(os.name == "nt", "Windows native scan paths use the ASCII staging copy")
+    def test_unicode_workspace_path_uses_verified_ascii_native_copy(self):
+        header = (
+            b"ply\nformat ascii 1.0\nelement vertex 4\n"
+            b"property float x\nproperty float y\nproperty float z\nend_header\n"
+        )
+        source_bytes = header + b"0 0 0\n1 0 0\n0 1 0\n0 0 1\n"
+        native = _FakeNative()
+        with tempfile.TemporaryDirectory() as temporary:
+            source_folder = Path(temporary) / "Исходные кадры"
+            source_folder.mkdir()
+            source_path = source_folder / "облако.ply"
+            source_path.write_bytes(source_bytes)
+
+            geometry, stats, source_hash = ScanProcessor(native).reconstruct(source_path, {})
+
+            self.assertNotEqual(native.source_path, source_path)
+            self.assertTrue(native.source_path.as_posix().isascii())
+            self.assertFalse(native.source_path.exists())
+            self.assertEqual(native.source_bytes, source_bytes)
+            self.assertEqual(source_path.read_bytes(), source_bytes)
+            self.assertEqual(source_hash, hashlib.sha256(source_bytes).hexdigest())
+            self.assertEqual(stats["source_kind"], "point_cloud")
+            validate_mesh_geometry(geometry)
 
 
 class ScanCommandTests(unittest.TestCase):

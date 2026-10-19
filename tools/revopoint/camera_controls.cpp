@@ -117,13 +117,104 @@ int RunDevices() {
     return 0;
 }
 
-int Run() {
+int SetBrightness(const std::wstring& cameraPrefix, long requestedValue) {
+    ComPtr<ICreateDevEnum> deviceEnumerator;
+    HRESULT hr = CoCreateInstance(CLSID_SystemDeviceEnum, nullptr, CLSCTX_INPROC_SERVER,
+                                  IID_PPV_ARGS(&deviceEnumerator));
+    if (FAILED(hr)) {
+        std::wcerr << L"Could not create DirectShow device enumerator.\n";
+        return 1;
+    }
+    ComPtr<IEnumMoniker> cameras;
+    hr = deviceEnumerator->CreateClassEnumerator(CLSID_VideoInputDeviceCategory, &cameras, 0);
+    if (hr != S_OK) {
+        std::wcerr << L"No DirectShow video-capture devices were enumerated.\n";
+        return 1;
+    }
+
+    ComPtr<IMoniker> moniker;
+    while (cameras->Next(1, &moniker, nullptr) == S_OK) {
+        const std::wstring name = FriendlyName(moniker.Get());
+        if (name.rfind(cameraPrefix, 0) != 0) {
+            moniker.Reset();
+            continue;
+        }
+        ComPtr<IBaseFilter> filter;
+        hr = moniker->BindToObject(nullptr, nullptr, IID_PPV_ARGS(&filter));
+        if (FAILED(hr)) {
+            std::wcerr << L"Could not bind camera filter for " << name << L".\n";
+            return 1;
+        }
+        ComPtr<IAMVideoProcAmp> controls;
+        hr = filter.As(&controls);
+        if (FAILED(hr) || !controls) {
+            std::wcerr << L"IAMVideoProcAmp is unavailable for " << name << L".\n";
+            return 1;
+        }
+
+        long minimum = 0, maximum = 0, step = 0, defaultValue = 0, capabilities = 0;
+        hr = controls->GetRange(VideoProcAmp_Brightness, &minimum, &maximum, &step,
+                                &defaultValue, &capabilities);
+        if (FAILED(hr)) {
+            std::wcerr << L"Brightness range is unavailable for " << name << L".\n";
+            return 1;
+        }
+        if ((capabilities & VideoProcAmp_Flags_Manual) == 0 || requestedValue < minimum ||
+            requestedValue > maximum || step <= 0 || (requestedValue - minimum) % step != 0) {
+            std::wcerr << L"Brightness value is unsupported by " << name << L"; range="
+                       << minimum << L".." << maximum << L" step=" << step << L".\n";
+            return 2;
+        }
+
+        long before = 0, beforeFlags = 0;
+        controls->Get(VideoProcAmp_Brightness, &before, &beforeFlags);
+        hr = controls->Set(VideoProcAmp_Brightness, requestedValue, VideoProcAmp_Flags_Manual);
+        if (FAILED(hr)) {
+            std::wcerr << L"Could not set brightness for " << name << L" (HRESULT 0x"
+                       << std::hex << hr << std::dec << L").\n";
+            return 1;
+        }
+        long after = 0, afterFlags = 0;
+        hr = controls->Get(VideoProcAmp_Brightness, &after, &afterFlags);
+        if (FAILED(hr) || after != requestedValue ||
+            (afterFlags & VideoProcAmp_Flags_Manual) == 0) {
+            std::wcerr << L"Brightness write did not verify on " << name << L".\n";
+            return 1;
+        }
+        std::wcout << L"Camera: " << name << L"\nBrightness: " << before << L" -> "
+                   << after << L" (manual)\n";
+        return 0;
+    }
+    std::wcerr << L"No camera name starts with " << cameraPrefix << L".\n";
+    return 1;
+}
+
+int Run(int argc, wchar_t** argv) {
     const HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(hr)) {
         std::wcerr << L"CoInitializeEx failed: 0x" << std::hex << hr << L"\n";
         return 1;
     }
-    const int result = RunDevices();
+    int result = 0;
+    if (argc == 1) {
+        result = RunDevices();
+    } else if (argc == 4 && std::wstring(argv[1]) == L"--set-brightness") {
+        std::size_t parsed = 0;
+        try {
+            const long value = std::stol(argv[3], &parsed);
+            if (parsed != std::wstring(argv[3]).size()) {
+                throw std::invalid_argument("trailing characters");
+            }
+            result = SetBrightness(argv[2], value);
+        } catch (const std::exception&) {
+            std::wcerr << L"Brightness must be an integer.\n";
+            result = 2;
+        }
+    } else {
+        std::wcerr << L"Usage: CameraControls.exe [--set-brightness <camera-prefix> <value>]\n"
+                   << L"The default invocation only reads controls.\n";
+        result = 2;
+    }
     CoUninitialize();
     return result;
 }
@@ -131,9 +222,5 @@ int Run() {
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc != 1) {
-        std::wcerr << L"CameraControls.exe only reads standard DirectShow camera controls.\n";
-        return 2;
-    }
-    return Run();
+    return Run(argc, argv);
 }

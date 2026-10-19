@@ -184,7 +184,9 @@
       let yaw = .55, pitch = .55, drag = null;
       const scannerQuery = new URLSearchParams(location.search);
       const singleFrame = scannerQuery.get("cloud_kind") === "single";
-      const frameAngle = Number(scannerQuery.get("cloud_angle_deg"));
+      const provisionalFusion = scannerQuery.get("cloud_kind") === "provisional_fusion";
+      const frameAngleValue = scannerQuery.get("cloud_angle_deg");
+      const frameAngle = frameAngleValue === null ? null : Number(frameAngleValue);
 
       function setMode(mode) {
         const isCloud = mode === "cloud";
@@ -286,7 +288,9 @@
         yaw = 0;
         pitch = 0;
         setMode("cloud");
-        document.querySelector("#scanner-title").textContent = singleFrame ? "ОБЛАКО ТОЧЕК · ОДИН КАДР" : "ОБЛАКО ТОЧЕК · СШИТОЕ";
+        document.querySelector("#scanner-title").textContent = singleFrame
+          ? "ОБЛАКО ТОЧЕК · ОДИН КАДР"
+          : provisionalFusion ? "ОБЛАКО ТОЧЕК · ПРЕДВАРИТЕЛЬНО СШИТОЕ" : "СОХРАНЁННОЕ ОБЛАКО ТОЧЕК";
         depthMode.hidden = true;
         cloudMode.hidden = true;
         drawCloud(points);
@@ -295,7 +299,7 @@
         rate.textContent = "—";
         age.textContent = singleFrame
           ? Number.isFinite(frameAngle) ? `ОДИН КАДР · СТОЛ ${frameAngle >= 0 ? "+" : ""}${frameAngle}° · НЕ СШИТ` : "ОДИН КАДР · НЕ СШИТ"
-          : "КАДРЫ УЖЕ СОВМЕЩЕНЫ";
+          : provisionalFusion ? "ДВА КАДРА · РЕГИСТРАЦИЯ ПРЕДВАРИТЕЛЬНАЯ" : "СОХРАНЁННОЕ ОБЛАКО · СТАТУС СШИВКИ НЕ УКАЗАН";
         cloudInfo.textContent = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · КАЛИБРОВКА МАСШТАБА НЕ ПРОВЕРЕНА`;
       }
 

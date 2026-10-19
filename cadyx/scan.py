@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
+import shutil
+import tempfile
 from pathlib import Path
-from typing import Any, Callable
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator
 
 from .errors import ValidationError
 from .mesh_geometry import geometry_from_native_buffer
@@ -24,6 +28,40 @@ _MAX_PLY_BYTES = 512 * 1024 * 1024
 _MAX_PLY_HEADER_BYTES = 64 * 1024
 _MAX_PLY_VERTICES = 2_000_000
 _MAX_PLY_FACES = 5_000_000
+
+
+@contextmanager
+def _native_scan_source(source: Path, source_hash: str) -> Iterator[Path]:
+    """Give the Windows Open3D reader an ASCII path when the workspace is Unicode."""
+    if os.name != "nt" or source.as_posix().isascii():
+        yield source
+        return
+
+    temp_roots = (
+        Path(tempfile.gettempdir()),
+        Path(__file__).resolve().parents[1] / ".runtime",
+    )
+    temp_root = next((root for root in temp_roots if root.as_posix().isascii()), None)
+    if temp_root is None:
+        raise ValidationError("Windows scan processing requires an ASCII temporary directory.")
+
+    try:
+        temp_root.mkdir(parents=True, exist_ok=True)
+        temporary = tempfile.TemporaryDirectory(prefix="cadyx-scan-", dir=temp_root)
+    except OSError as exc:
+        raise ValidationError(f"Could not prepare a temporary scan source: {exc}.") from exc
+
+    with temporary as directory:
+        native_source = Path(directory) / "source.ply"
+        try:
+            shutil.copyfile(source, native_source)
+        except OSError as exc:
+            raise ValidationError(f"Could not copy the scan for native processing: {exc}.") from exc
+        if _sha256_file(native_source) != source_hash:
+            raise ValidationError("Temporary scan copy failed its source-hash check.")
+        if not native_source.as_posix().isascii():
+            raise ValidationError("Temporary scan path is not ASCII; native processing was not started.")
+        yield native_source
 
 
 def normalize_scan_parameters(value: Any) -> dict[str, float | int]:
@@ -150,12 +188,13 @@ class ScanProcessor:
         if progress is not None:
             progress({"phase": "prepare_parameters", "parameters": normalized})
         native = self.native if self.native is not None else NativeScan()
-        result = native.process(
-            source,
-            normalized,
-            source_has_faces=header_faces > 0,
-            progress=progress,
-        )
+        with _native_scan_source(source, source_hash) as native_source:
+            result = native.process(
+                native_source,
+                normalized,
+                source_has_faces=header_faces > 0,
+                progress=progress,
+            )
         if progress is not None:
             progress({"phase": "verify_source"})
         if _sha256_file(source) != source_hash:
