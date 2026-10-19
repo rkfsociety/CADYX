@@ -61,9 +61,10 @@ Distinct source bodies are tessellated once per scene; instances expand only
 transport-side transformed vertices. Display traversal is bounded to 32 nested
 levels and 4096 part occurrences. Oversized graphs fail explicitly.
 
-**Limits:** no cross-project linked parts, independent units or general unit
+**Limits in v9:** no cross-project linked parts, independent units or general unit
 conversion, assembly mate/kinematic constraints, assembly mass/inertia, motion
-collision validation, exact assembly STEP export, or browser editing.
+collision validation, exact assembly STEP export, or browser editing. In current
+Document v10, mates are defined in [the v10 contract](document-model-v10.md).
 The rendering path is an expanded mesh scene rather than GPU instancing;
 persistent source B-reps remain shared. Windows native CI and browser
 regressions are required before asserting production compatibility.

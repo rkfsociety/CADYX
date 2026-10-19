@@ -56,10 +56,10 @@ def validate_mate_records(graph: dict[str, Any]) -> None:
                 or len(mate["name"].strip()) > 120):
             raise ValidationError("Assembly mate name must contain 1–120 characters.")
         kind = mate["kind"]
-        if kind not in MATE_DOF:
+        if not isinstance(kind, str) or kind not in MATE_DOF:
             raise ValidationError("Unsupported assembly mate kind.")
         a, b = mate["a_instance_id"], mate["b_instance_id"]
-        if a not in instances or b not in instances or a == b:
+        if not isinstance(a, str) or not isinstance(b, str) or a not in instances or b not in instances or a == b:
             raise ValidationError("Mate must reference two distinct existing instances.")
         if instances[a]["parent_id"] != instances[b]["parent_id"]:
             raise ValidationError("Mate instances must share the same parent assembly.")

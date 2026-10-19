@@ -6,14 +6,14 @@ from typing import Any
 
 from .errors import ValidationError
 
-ASSEMBLY_VERSION = 1
+ASSEMBLY_VERSION = 2
 IDENTITY_ROTATION = [1.0, 0.0, 0.0, 0.0]
 IDENTITY_TRANSLATION = [0.0, 0.0, 0.0]
 
 
 def empty_assembly() -> dict[str, Any]:
     return {"version": ASSEMBLY_VERSION, "units": "mm",
-            "parts": [], "subassemblies": [], "instances": []}
+            "parts": [], "subassemblies": [], "instances": [], "mates": []}
 
 
 def _name(record: dict[str, Any], label: str) -> None:
@@ -39,14 +39,14 @@ def validate_transform(translation: Any, rotation: Any) -> None:
 
 def validate_assembly(graph: Any, objects: list[dict[str, Any]]) -> None:
     if not isinstance(graph, dict) or set(graph) != {
-        "version", "units", "parts", "subassemblies", "instances"
+        "version", "units", "parts", "subassemblies", "instances", "mates"
     }:
         raise ValidationError("Assembly graph must have version, units, parts, subassemblies and instances.")
     if type(graph["version"]) is not int or graph["version"] != ASSEMBLY_VERSION:
         raise ValidationError("Unsupported assembly graph version.")
     if graph["units"] != "mm":
         raise ValidationError("Assembly placement units must be mm.")
-    for key in ("parts", "subassemblies", "instances"):
+    for key in ("parts", "subassemblies", "instances", "mates"):
         if not isinstance(graph[key], list):
             raise ValidationError(f"Assembly {key} must be a list.")
     bodies = {item["id"] for item in objects if item.get("type") == "body"}
@@ -111,6 +111,9 @@ def validate_assembly(graph: Any, objects: list[dict[str, Any]]) -> None:
 
     for node in sorted(subassemblies):
         visit(node)
+
+    from .assembly_mates import inspect_assembly_mates
+    inspect_assembly_mates(graph)
 
 
 def _rotate(rotation: list[float], point: list[float]) -> list[float]:

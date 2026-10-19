@@ -2,6 +2,8 @@
 
 # CADYX project memory
 
+- Implemented in source on 2026-10-19 (no local tests; CI pending): Document v10 / assembly v2 introduces deterministic, caller-invoked assembly mates between sibling part or subassembly instances, with local frames, revolute/slider/cylindrical coordinate inputs, saved poses, connected-component DOF, redundant-cycle diagnostics and fail-closed conflicting loops. Core inspection returns `assembly_kinematics`; edits use standard leased Command System/Agent API/MCP. It does not simulate constrained nonlinear mechanisms, fuse geometry or ground assemblies globally. Canonical contract: [assembly mate model](docs/document-model-v10.md); implementation: `cadyx/assembly_mates.py`.
+
 - Confirmed: optional `deterministic_rebuild` on revision-bound `check_project` performs isolated saved/cold/warm feature reconstruction with canonical inputs/graph fingerprints, B-rep metrics and descriptor hashes. Unsupported feature families and equal-metric hash mismatches report `untested`, not proof of shape equality. Cold means a fresh document copy within one host, not a new process. Available through Core/API/MCP/CLI; see [project-check contract](docs/project-checks.md).
 
 - Confirmed: caller-driven `check_project` composes persisted document/reference validation, native geometry checks, optional model specifications and OCCT delivery eligibility preflight without modifying the CAD revision. Core, Agent API, MCP and `python -m cadyx.check_project` expose per-stage pass/fail/untested and strict CI exit verdicts; missing assembly/drawing backends and unverified STEP round-trips are not claimed. See [project checks](docs/project-checks.md).

@@ -31,9 +31,9 @@ class AssemblyTests(unittest.TestCase):
         before = copy.deepcopy(old)
         new = migrate_document(old)
         self.assertEqual(old, before)
-        self.assertEqual(new["version"], 9)
-        self.assertEqual(new["assembly"], {"version": 1, "units": "mm",
-                                         "parts": [], "subassemblies": [], "instances": []})
+        self.assertEqual(new["version"], 10)
+        self.assertEqual(new["assembly"], {"version": 2, "units": "mm",
+                                         "parts": [], "subassemblies": [], "instances": [], "mates": []})
         self.assertEqual(Document.from_dict(new).to_dict(), new)
 
     def test_nested_repeated_part_instances_and_render(self):
