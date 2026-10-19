@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#090d11">
   <title>CADYX — Сканер</title>
+  <script>if(new URLSearchParams(location.search).get("embed")==="1")document.documentElement.dataset.scannerEmbed="true";</script>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/assets/style.css">
   <style>
@@ -93,6 +94,19 @@
     .scanner-hint { align-self: start; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: #111920; color: var(--muted); font: 12px/1.55 var(--ui-font); }
     .scanner-hint strong { display: block; margin-bottom: 8px; color: #dce3e7; font-size: 11px; letter-spacing: .02em; }
     .scanner-hint code { color: #ffad73; font: 11px var(--mono); overflow-wrap: anywhere; }
+    html[data-scanner-embed="true"] body { grid-template-rows: 38px minmax(0, 1fr); }
+    html[data-scanner-embed="true"] .topbar { height: 38px; grid-template-columns: minmax(0, 1fr); grid-template-areas: "end"; padding: 0 10px; }
+    html[data-scanner-embed="true"] .topbar-start,
+    html[data-scanner-embed="true"] .topbar-project,
+    html[data-scanner-embed="true"] .topbar-end > .button,
+    html[data-scanner-embed="true"] .scanner-inspector { display: none; }
+    html[data-scanner-embed="true"] .topbar-end { justify-content: flex-start; }
+    html[data-scanner-embed="true"] .scanner-shell { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; }
+    html[data-scanner-embed="true"] .scanner-view { grid-template-rows: 34px minmax(0, 1fr) 27px; border: 0; border-radius: 0; }
+    html[data-scanner-embed="true"] .scanner-view .panel-heading { min-height: 34px; padding: 0 10px; }
+    html[data-scanner-embed="true"] .scanner-stage { padding: 4px; }
+    html[data-scanner-embed="true"] .screen { width: min(100%, 1120px); height: 100%; max-height: none; aspect-ratio: auto; }
+    html[data-scanner-embed="true"] .scanner-view-footer { gap: 5px; padding: 0 8px; font-size: 9px; }
     @media (max-width: 760px) {
       .topbar { padding: 0 10px; }
       .topbar-start { padding-right: 10px; }
@@ -168,6 +182,9 @@
       const image = context.createImageData(640, 400);
       let lastMtime = "", lastArrival = 0, intervals = [], qMatrix = null;
       let yaw = .55, pitch = .55, drag = null;
+      const scannerQuery = new URLSearchParams(location.search);
+      const singleFrame = scannerQuery.get("cloud_kind") === "single";
+      const frameAngle = Number(scannerQuery.get("cloud_angle_deg"));
 
       function setMode(mode) {
         const isCloud = mode === "cloud";
@@ -220,15 +237,66 @@
           minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
         }
         const spanX = Math.max(1e-6, maxX - minX), spanY = Math.max(1e-6, maxY - minY);
-        const scale = Math.min(590 / spanX, 350 / spanY);
-        const offsetX = 320 - (minX + maxX) * scale / 2, offsetY = 200 + (minY + maxY) * scale / 2;
+        const scale = Math.min(500 / spanX, 290 / spanY);
+        const offsetX = 320 - (minX + maxX) * scale / 2, offsetY = 200 - (minY + maxY) * scale / 2;
         const spanZ = Math.max(1e-6, maxZ - minZ);
         for (const p of projected) {
-          const x = offsetX + p[0] * scale, y = offsetY - p[1] * scale;
+          const x = offsetX + p[0] * scale, y = offsetY + p[1] * scale;
           const t = (p[2] - minZ) / spanZ;
-          c.fillStyle = `rgb(255,${Math.round(104 + 60 * t)},${Math.round(28 + 35 * t)})`;
-          c.fillRect(x, y, 2, 2);
+          c.fillStyle = `hsl(${Math.round(95 + 175 * t)} 88% 58%)`;
+          c.fillRect(x, y, 1.15, 1.15);
         }
+      }
+
+      async function loadSavedCloud() {
+        const query = new URLSearchParams({ folder: scannerQuery.get("cloud_folder"), file: scannerQuery.get("cloud_file") });
+        const response = await fetch(`/api/v1/scanner/point-cloud?${query}`, { cache: "no-store" });
+        if (!response.ok) throw Error(`Не удалось открыть облако (HTTP ${response.status}).`);
+        const content = await response.text();
+        const marker = content.indexOf("end_header");
+        if (marker < 0) throw Error("PLY не содержит end_header.");
+        const header = content.slice(0, marker).split(/\r?\n/);
+        let vertexCount = 0, inVertices = false;
+        const properties = [];
+        for (const line of header) {
+          const fields = line.trim().split(/\s+/);
+          if (fields[0] === "format" && fields[1] !== "ascii") throw Error("Поддерживается только ASCII PLY.");
+          if (fields[0] === "element") {
+            inVertices = fields[1] === "vertex";
+            if (fields[1] === "face" && Number(fields[2]) !== 0) throw Error("Для предпросмотра нужен PLY без граней.");
+            if (inVertices) vertexCount = Number(fields[2]);
+          } else if (fields[0] === "property" && inVertices) {
+            properties.push(fields.at(-1));
+          }
+        }
+        if (!Number.isInteger(vertexCount) || vertexCount < 3 || vertexCount > 250000
+            || !["x", "y", "z"].every(name => properties.includes(name))) {
+          throw Error("PLY должен содержать от 3 до 250 000 точек с координатами xyz.");
+        }
+        const columns = ["x", "y", "z"].map(name => properties.indexOf(name));
+        const rows = content.slice(marker + "end_header".length).trim().split(/\r?\n/);
+        const points = [];
+        for (let i = 0; i < vertexCount; i++) {
+          const fields = rows[i]?.trim().split(/\s+/) || [];
+          const point = columns.map(index => Number(fields[index]));
+          if (point.length === 3 && point.every(Number.isFinite)) points.push(point);
+        }
+        if (points.length < 3) throw Error("В PLY недостаточно корректных точек.");
+        window.latestCloud = points;
+        yaw = 0;
+        pitch = 0;
+        setMode("cloud");
+        document.querySelector("#scanner-title").textContent = singleFrame ? "ОБЛАКО ТОЧЕК · ОДИН КАДР" : "ОБЛАКО ТОЧЕК · СШИТОЕ";
+        depthMode.hidden = true;
+        cloudMode.hidden = true;
+        drawCloud(points);
+        state.textContent = "СОХРАНЁННОЕ ОБЛАКО";
+        state.dataset.live = "false";
+        rate.textContent = "—";
+        age.textContent = singleFrame
+          ? Number.isFinite(frameAngle) ? `ОДИН КАДР · СТОЛ ${frameAngle >= 0 ? "+" : ""}${frameAngle}° · НЕ СШИТ` : "ОДИН КАДР · НЕ СШИТ"
+          : "КАДРЫ УЖЕ СОВМЕЩЕНЫ";
+        cloudInfo.textContent = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · КАЛИБРОВКА МАСШТАБА НЕ ПРОВЕРЕНА`;
       }
 
       async function poll() {
@@ -317,7 +385,11 @@
           setTimeout(poll, 80);
         }
       }
-      poll();
+      if (scannerQuery.has("cloud_folder") && scannerQuery.has("cloud_file")) {
+        loadSavedCloud().catch(error => { state.textContent = error.message; state.dataset.live = "false"; });
+      } else {
+        poll();
+      }
     })();
   </script>
 </body>

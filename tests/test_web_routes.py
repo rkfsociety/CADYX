@@ -4,10 +4,24 @@ from __future__ import annotations
 
 import unittest
 
-from cadyx.web_routes import match_route, route_specs
+from cadyx.errors import ValidationError
+from cadyx.web_routes import _scanner_point_cloud_vertex_count, match_route, route_specs
 
 
 class WebRouteTableTests(unittest.TestCase):
+    def test_scanner_point_cloud_header_requires_bounded_ascii_points_without_faces(self) -> None:
+        header = (
+            b"ply\nformat ascii 1.0\nelement vertex 3\n"
+            b"property float x\nproperty float y\nproperty float z\nend_header\n"
+        )
+        self.assertEqual(_scanner_point_cloud_vertex_count(header), 3)
+        with self.assertRaisesRegex(ValidationError, "point-only PLY"):
+            _scanner_point_cloud_vertex_count(
+                header.replace(b"element vertex 3", b"element vertex 3\nelement face 1")
+            )
+        with self.assertRaisesRegex(ValidationError, "ASCII point-only PLY"):
+            _scanner_point_cloud_vertex_count(header.replace(b"format ascii", b"format binary_little_endian"))
+
     def test_route_inventory_has_unique_method_templates_and_names(self) -> None:
         specs = route_specs()
         self.assertEqual(len({(spec.method, spec.template) for spec in specs}), len(specs))

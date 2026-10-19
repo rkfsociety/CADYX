@@ -96,6 +96,41 @@ class WebApiTests(unittest.TestCase):
             with error:
                 return error.code, json.loads(error.read())
 
+    def get_binary(self, path: str) -> tuple[int, dict[str, str], bytes]:
+        try:
+            with urlopen(self.base_url + path, timeout=3) as response:
+                return response.status, dict(response.headers.items()), response.read()
+        except HTTPError as error:
+            with error:
+                return error.code, dict(error.headers.items()), error.read()
+
+    def test_scanner_preview_serves_only_bounded_ascii_point_clouds(self) -> None:
+        folder = self.core.workspace.root / "scan-samples"
+        folder.mkdir()
+        source = folder / "reference.ply"
+        payload = (
+            b"ply\nformat ascii 1.0\nelement vertex 3\n"
+            b"property float x\nproperty float y\nproperty float z\nend_header\n"
+            b"0 0 0\n1 0 0\n0 1 0\n"
+        )
+        source.write_bytes(payload)
+        query = "?folder=scan-samples&file=reference.ply"
+
+        status, headers, body = self.get_binary("/api/v1/scanner/point-cloud" + query)
+        self.assertEqual((status, body), (200, payload))
+        normalized_headers = {name.casefold(): value for name, value in headers.items()}
+        self.assertEqual(normalized_headers["x-cadyx-point-count"], "3")
+        self.assertEqual(normalized_headers["cache-control"], "no-store")
+
+        mesh = folder / "mesh.ply"
+        mesh.write_bytes(payload.replace(b"element vertex 3", b"element vertex 3\nelement face 1"))
+        status, _, error = self.get_binary("/api/v1/scanner/point-cloud?folder=scan-samples&file=mesh.ply")
+        self.assertEqual(status, 400)
+        self.assertIn(b"point-only PLY", error)
+
+        status, _, error = self.get_binary("/api/v1/scanner/point-cloud?folder=scan-samples&file=..%2Freference.ply")
+        self.assertIn(status, {400, 404})
+
     def test_agent_project_can_be_created_without_changing_selection_and_receive_step(self) -> None:
         _, current = self.request("/api/v1/agent/projects", {"name": "Current project"})
         current_id = current["project"]["id"]

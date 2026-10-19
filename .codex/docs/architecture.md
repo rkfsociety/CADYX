@@ -4,6 +4,8 @@
 
 CADYX is AI-first: agents use a versioned API and the shared Core command system. The browser is a read-only, full-window detail viewer; agents create projects and edit models through the Agent API, while human API clients can use the Web API's lease-protected write routes. The object tree is in Geometry; project-file browsing is gated by the active agent lock and activity. The browser does not call a geometry kernel or own CAD state. It renders the live model and a single-line current-action/result status without a raw command or transcript feed.
 
+The embedded Revopoint panel can display either the live depth frame or a saved ASCII point-only PLY from a workspace folder. Saved clouds are rendered directly as points through the read-only `/api/v1/scanner/point-cloud` endpoint; this preview does not convert them into a triangle mesh or claim metric scale.
+
 ```text
 Provider adapter (future) -> Agent Runtime -> CADYX Core -> Command System -> Document
 External agent -----------------------> Agent API -> CADYX Core -> Project Workspace

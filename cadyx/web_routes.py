@@ -48,6 +48,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/workspace/folders/{folder}/files", "folder_files", "files"),
     RouteSpec("GET", "/api/v1/workspace/folders/{folder}/files/{filename}", "folder_file", "files"),
     RouteSpec("GET", "/api/v1/scanner/live-frame", "scanner_live_frame", "scanner"),
+    RouteSpec("GET", "/api/v1/scanner/point-cloud", "scanner_point_cloud", "scanner"),
     RouteSpec("GET", "/api/v1/scanner/calibration", "scanner_calibration", "scanner"),
     RouteSpec("GET", "/api/v1/projects", "projects", "project"),
     RouteSpec("POST", "/api/v1/projects", "project_create", "project", "json"),
@@ -245,8 +246,72 @@ def _dispatch_workspace(handler: Any, core: CadyxCore, route: RouteMatch, parsed
         raise RuntimeError(f"Unhandled workspace route: {name}")
 
 
+def _scanner_point_cloud_vertex_count(header: bytes) -> int:
+    if len(header) > 64 * 1024 or not header.rstrip().endswith(b"end_header"):
+        raise ValidationError("Point-cloud preview PLY has an invalid or oversized header.")
+    try:
+        header_lines = header.decode("ascii").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValidationError("Point-cloud preview PLY header must be ASCII.") from exc
+    vertex_count = 0
+    face_count = 0
+    vertex_properties: set[str] = set()
+    current_element = ""
+    ascii_format = False
+    for line in header_lines:
+        fields = line.split()
+        if len(fields) >= 2 and fields[0] == "format":
+            ascii_format = fields[1] == "ascii"
+        elif len(fields) == 3 and fields[0] == "element":
+            current_element = fields[1]
+            if current_element in {"vertex", "face"}:
+                try:
+                    count = int(fields[2])
+                except ValueError as exc:
+                    raise ValidationError("Point-cloud preview PLY element count is invalid.") from exc
+                if count < 0:
+                    raise ValidationError("Point-cloud preview PLY element count cannot be negative.")
+                if current_element == "vertex":
+                    vertex_count = count
+                else:
+                    face_count = count
+        elif len(fields) >= 3 and fields[0] == "property" and current_element == "vertex":
+            vertex_properties.add(fields[-1])
+    if (not ascii_format or face_count != 0 or not 3 <= vertex_count <= 250_000 or
+            not {"x", "y", "z"}.issubset(vertex_properties)):
+        raise ValidationError("Point-cloud preview requires an ASCII point-only PLY with xyz vertices (maximum 250,000 points).")
+    return vertex_count
+
+
+def _resolve_scanner_point_cloud(core: CadyxCore, query_string: str) -> tuple[Path, int]:
+    query = parse_qs(query_string, keep_blank_values=True)
+    folder_values, file_values = query.get("folder", []), query.get("file", [])
+    if (len(folder_values) != 1 or len(file_values) != 1 or
+            not folder_values[0].strip() or not file_values[0].strip()):
+        raise ValidationError("Point-cloud preview requires one workspace folder and PLY filename.")
+    folder, filename = folder_values[0], file_values[0]
+    if Path(filename).name != filename or Path(filename).suffix.casefold() != ".ply":
+        raise ValidationError("Point-cloud preview requires a direct PLY filename.")
+    source = core.workspace.resolve_folder_file(folder, filename)
+    if source.stat().st_size > 32 * 1024 * 1024:
+        raise ValidationError("Point-cloud preview PLY exceeds the 32 MiB display limit.")
+    try:
+        with source.open("rb") as stream:
+            header = bytearray()
+            while len(header) <= 64 * 1024:
+                line = stream.readline(4096)
+                if not line:
+                    break
+                header.extend(line)
+                if line.strip() == b"end_header":
+                    break
+    except OSError as exc:
+        raise ValidationError("Point-cloud preview PLY could not be read.") from exc
+    vertex_count = _scanner_point_cloud_vertex_count(bytes(header))
+    return source, vertex_count
+
+
 def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: SplitResult) -> None:
-    del parsed
     if route.spec.name == "scanner_live_frame":
         frame_path = core.workspace.root / ".revopoint-live.raw"
         if not frame_path.is_file() or frame_path.stat().st_size != 640 * 400 * 2:
@@ -263,6 +328,18 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
         handler.end_headers()
         handler.wfile.write(payload)
         return
+    if route.spec.name == "scanner_point_cloud":
+        source, vertex_count = _resolve_scanner_point_cloud(core, parsed.query)
+        payload = source.read_bytes()
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/octet-stream")
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("X-CADYX-Point-Count", str(vertex_count))
+        handler.end_headers()
+        handler.wfile.write(payload)
+        return
+    del parsed
     calibration_path = Path(__file__).resolve().parent.parent / "tools" / "revopoint" / "calibration" / "Q.bin"
     calibration = calibration_path.read_bytes()
     if len(calibration) != 64:
