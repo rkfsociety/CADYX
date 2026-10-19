@@ -35,8 +35,8 @@ class MigrationTests(unittest.TestCase):
     def test_migration_preserves_snapshot_and_is_idempotent(self):
         original = copy.deepcopy(self.legacy)
         expected = copy.deepcopy(original)
-        expected["document"]["version"] = 9
-        expected["document"]["assembly"] = {"version": 1, "units": "mm", "parts": [], "subassemblies": [], "instances": []}
+        expected["document"]["version"] = 10
+        expected["document"]["assembly"] = {"version": 2, "units": "mm", "parts": [], "subassemblies": [], "instances": [], "mates": []}
         expected["document"]["model_parameters"] = {}
         expected["document"]["parameter_bindings"] = []
         migrated = migrate_project(self.legacy)
@@ -51,8 +51,8 @@ class MigrationTests(unittest.TestCase):
         document = {"id": "document:legacy", "version": 7, "revision": 3, "objects": []}
         migrated = migrate_document(document)
 
-        self.assertEqual(migrated["version"], 9)
-        self.assertEqual(migrated["assembly"]["version"], 1)
+        self.assertEqual(migrated["version"], 10)
+        self.assertEqual(migrated["assembly"]["version"], 2)
         self.assertEqual(migrated["model_parameters"], {})
         self.assertEqual(migrated["parameter_bindings"], [])
         self.assertEqual(document["version"], 7)
@@ -68,7 +68,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_reads_failed_commands_and_failed_save_preserve_bytes(self):
         before = self.path.read_bytes()
-        self.assertEqual(self.core.workspace.load(self.id)["document"]["version"], 9)
+        self.assertEqual(self.core.workspace.load(self.id)["document"]["version"], 10)
         self.core.list_projects()
         self.core.inspect_project(self.id)
         self.core.heartbeat(self.id, self.lease)
@@ -89,7 +89,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(saved["document"]["objects"][:-1], self.legacy["document"]["objects"])
         self.assertEqual(saved["document"]["id"], self.legacy["document"]["id"])
         self.assertEqual(saved["document"]["revision"], 2)
-        self.assertEqual(saved["document"]["version"], 8)
+        self.assertEqual(saved["document"]["version"], 10)
         reloaded = CadyxCore(self.temp.name, kernel=PrimitiveKernelAdapter()).inspect_project(self.id)
         self.assertEqual(reloaded["document"], saved["document"])
         self.assertEqual(reloaded["history"], saved["history"])

@@ -369,6 +369,8 @@ class ProjectLifecycleService(_CoreService):
         return selected
 
     def inspect_project(self, project_id: str) -> dict[str, Any]:
+        from .assembly_mates import inspect_assembly_mates
+
         with self._project_lifecycle_lock(project_id):
             # project.json is atomically replaced, so read-only viewers can safely
             # inspect the last committed revision while an agent edits its next one.

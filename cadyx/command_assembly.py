@@ -1,10 +1,12 @@
 """Assembly commands; the Core owns the shared revision/lease/save transaction."""
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Callable
 from uuid import uuid4
 
 from .assemblies import IDENTITY_ROTATION, IDENTITY_TRANSLATION, validate_assembly
+from .assembly_mates import IDENTITY_FRAME, solve_assembly_mates
 from .errors import NotFoundError, ValidationError
 from .models import Document
 
@@ -79,9 +81,10 @@ class AssemblyCommands:
         for key in ("translation", "rotation"):
             if key in command:
                 instance[key] = command[key].copy() if isinstance(command[key], list) else command[key]
+        diagnostics = solve_assembly_mates(document.assembly, anchor_instance_id=instance["id"])
         validate_assembly(document.assembly, document.objects)
         return {"instance_id": instance["id"], "translation": instance["translation"],
-                "rotation": instance["rotation"]}
+                "rotation": instance["rotation"], "kinematics": diagnostics}
 
     @staticmethod
     def _remove_assembly_instance(document: Document, command: dict[str, Any]) -> dict[str, Any]:
@@ -90,6 +93,10 @@ class AssemblyCommands:
         index = next((i for i, entry in enumerate(entries) if entry["id"] == command["instance_id"]), None)
         if index is None:
             raise NotFoundError("Assembly instance does not exist.")
+        if any(mate["a_instance_id"] == command["instance_id"]
+               or mate["b_instance_id"] == command["instance_id"]
+               for mate in document.assembly["mates"]):
+            raise ValidationError("Remove the attached assembly mates before removing the instance.")
         return {"removed_instance_id": entries.pop(index)["id"]}
 
     @staticmethod
@@ -107,6 +114,64 @@ class AssemblyCommands:
                 return {"removed_component_id": target}
         raise NotFoundError("Assembly part or subassembly does not exist.")
 
+    @staticmethod
+    def _add_assembly_mate(document: Document, command: dict[str, Any]) -> dict[str, Any]:
+        _fields(command, {"kind", "a_instance_id", "b_instance_id"},
+                {"name", "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation"})
+        mate = {
+            "id": f"mate:{uuid4()}",
+            "name": _text(command.get("name", command["kind"]), "Mate name"),
+            "kind": command["kind"],
+            "a_instance_id": command["a_instance_id"],
+            "b_instance_id": command["b_instance_id"],
+            "frame_a": deepcopy(command.get("frame_a", IDENTITY_FRAME)),
+            "frame_b": deepcopy(command.get("frame_b", IDENTITY_FRAME)),
+            "angle_deg": command.get("angle_deg", 0.0),
+            "offset_mm": command.get("offset_mm", 0.0),
+            "orientation": deepcopy(command.get("orientation", IDENTITY_ROTATION)),
+        }
+        document.assembly["mates"].append(mate)
+        diagnostics = solve_assembly_mates(document.assembly, anchor_instance_id=mate["a_instance_id"])
+        validate_assembly(document.assembly, document.objects)
+        return {"mate_id": mate["id"], "kind": mate["kind"], "kinematics": diagnostics}
+
+    @staticmethod
+    def _set_assembly_mate(document: Document, command: dict[str, Any]) -> dict[str, Any]:
+        _fields(command, {"mate_id"},
+                {"name", "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation"})
+        if len(command) == 2:
+            raise ValidationError("Mate update requires at least one changed field.")
+        mate = next((item for item in document.assembly["mates"]
+                     if item["id"] == command["mate_id"]), None)
+        if mate is None:
+            raise NotFoundError("Assembly mate does not exist.")
+        for key in ("frame_a", "frame_b", "orientation", "angle_deg", "offset_mm"):
+            if key in command:
+                mate[key] = deepcopy(command[key])
+        if "name" in command:
+            mate["name"] = _text(command["name"], "Mate name")
+        diagnostics = solve_assembly_mates(document.assembly, anchor_instance_id=mate["a_instance_id"])
+        validate_assembly(document.assembly, document.objects)
+        return {"mate_id": mate["id"], "kinematics": diagnostics}
+
+    @staticmethod
+    def _remove_assembly_mate(document: Document, command: dict[str, Any]) -> dict[str, Any]:
+        _fields(command, {"mate_id"})
+        mates = document.assembly["mates"]
+        index = next((i for i, mate in enumerate(mates)
+                      if mate["id"] == command["mate_id"]), None)
+        if index is None:
+            raise NotFoundError("Assembly mate does not exist.")
+        return {"removed_mate_id": mates.pop(index)["id"]}
+
+    @staticmethod
+    def _solve_assembly_mates(document: Document, command: dict[str, Any]) -> dict[str, Any]:
+        _fields(command, set(), {"anchor_instance_id"})
+        report = solve_assembly_mates(document.assembly,
+                                      anchor_instance_id=command.get("anchor_instance_id"))
+        validate_assembly(document.assembly, document.objects)
+        return report
+
 
 def _call(method: str) -> Callable[..., dict[str, Any]]:
     def handler(self: AssemblyCommands, document: Document, command: dict[str, Any], *,
@@ -123,4 +188,8 @@ COMMAND_HANDLERS = {
     "transform_assembly_instance": _call("_transform_assembly_instance"),
     "remove_assembly_instance": _call("_remove_assembly_instance"),
     "remove_assembly_component": _call("_remove_assembly_component"),
+    "add_assembly_mate": _call("_add_assembly_mate"),
+    "set_assembly_mate": _call("_set_assembly_mate"),
+    "remove_assembly_mate": _call("_remove_assembly_mate"),
+    "solve_assembly_mates": _call("_solve_assembly_mates"),
 }
