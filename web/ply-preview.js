@@ -1389,8 +1389,11 @@ function handleRefreshError(error) {
 }
 
 function scheduleWorkspaceRefresh(delayMs = 60) {
+  // Keep the first refresh deadline; a burst of SSE notifications must not postpone scene sync forever.
+  if (refreshTimer) return;
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => {
+    refreshTimer = null;
     refreshWorkspace().catch(handleRefreshError);
   }, delayMs);
 }
@@ -1574,6 +1577,7 @@ async function refreshDetail() {
   });
   let transition = pendingViewportTransition?.projectId === projectId
     ? { ...pendingViewportTransition } : null;
+  transition = window.CadyxViewport.transitionForRevision(transition, scene.revision);
   if (transition?.featureId) {
     const feature = objectsById.get(transition.featureId);
     transition.bodyId = feature?.body_id;
@@ -1628,6 +1632,16 @@ async function refreshDetail() {
       }
       if (transition?.bodyId === object.object_id) {
         transition.vertexRange = [offset, offset + object.positions.length / 3];
+        if (transition.type === "brep") {
+          transition.center = [0, 1, 2].map((axis) => {
+            let min = Infinity, max = -Infinity;
+            for (let index = axis; index < object.positions.length; index += 3) {
+              min = Math.min(min, object.positions[index]);
+              max = Math.max(max, object.positions[index]);
+            }
+            return min / 2 + max / 2;
+          });
+        }
         targetFound = true;
       } else if (transition?.type === "sketch-point" && transition.objectId === object.object_id && object.points.length) {
         transition.pointIndex = pointOffset + object.points[0];
@@ -2022,11 +2036,13 @@ function handleStreamEvent(type, event) {
     if (activities.length > 128) activities.splice(0, activities.length - 128);
     activitiesByProject.set(projectId, activities);
     const viewportUpdate = window.CadyxViewport.viewportUpdateForAgentActivity(
-      projectId, selectedProjectId, data,
+      projectId, selectedProjectId, data, activeSketchId,
     );
     if (viewportUpdate) {
       activeSketchId = viewportUpdate.activeSketchId;
-      pendingViewportTransition = viewportUpdate.transition;
+      pendingViewportTransition = viewportUpdate.transition
+        ? { ...viewportUpdate.transition, expectedRevision: renderedSceneRevision + 1 } : null;
+      selectObjectFromResult(projectId, data.result);
     }
     if (projectId === selectedProjectId) renderAgentActivity(activities, agentLocksByProject.get(projectId));
     else if (primaryGrid.dataset.view === "projects") renderProjects();
@@ -2044,149 +2060,11 @@ function handleStreamEvent(type, event) {
     dashboardsByProject.set(projectId, data);
     if (projectId === selectedProjectId) renderAgentDashboard(data);
   } else if (type === "command.completed") {
-    const historyEntry = data.history_entry || data;
-    const command = historyEntry.command || data.command || {};
-    const result = historyEntry.result || data.result || {};
-    if (projectId === selectedProjectId) {
-      if (command.type === "create_sketch") {
-        activeSketchId = result.sketch_id || null;
-        pendingViewportTransition = null;
-      } else if (command.type === "add_sketch_element") {
-        activeSketchId = command.sketch_id || activeSketchId;
-        pendingViewportTransition = {
-          projectId, objectId: result.object_id,
-          type: command.element_type === "point" ? "sketch-point" : "sketch-lines",
-          durationMs: command.element_type === "circle" ? 700 : 460,
-        };
-      } else if (["add_sketch_point", "add_sketch_construction_point"].includes(command.type)) {
-        activeSketchId = command.sketch_id || activeSketchId;
-        pendingViewportTransition = { projectId, objectId: result.point_id, type: "sketch-point", durationMs: 460 };
-      } else if ([
-        "add_sketch_segment", "add_sketch_line", "add_sketch_infinite_line", "add_sketch_centerline",
-        "add_sketch_construction_line", "add_sketch_polyline", "add_sketch_line_chain", "add_sketch_rectangle",
-        "add_sketch_rectangle_center", "add_sketch_rectangle_three_points", "add_sketch_rotated_rectangle",
-        "add_sketch_parallelogram", "add_sketch_regular_polygon", "add_sketch_inscribed_polygon",
-        "add_sketch_circumscribed_polygon", "add_sketch_polygon_from_center", "add_sketch_rounded_rectangle",
-        "add_sketch_circle_diameter",
-        "add_sketch_ellipse", "add_sketch_ellipse_center", "add_sketch_ellipse_three_points",
-        "add_sketch_elliptical_arc",
-        "add_sketch_spline",
-        "add_sketch_spline_control_points",
-        "add_sketch_bspline", "add_sketch_bezier_curve",
-        "add_sketch_spiral", "add_sketch_parametric_curve", "add_sketch_coordinate_curve",
-        "add_sketch_circle_two_points", "add_sketch_circle_three_points", "add_sketch_circle_tangent_to_line",
-        "add_sketch_circle_tangent_to_two_lines", "add_sketch_circle_tangent_to_three_lines",
-        "add_sketch_arc_center", "add_sketch_arc_three_points", "add_sketch_arc_start_center_end",
-        "add_sketch_arc_radius", "add_sketch_arc_tangent", "add_sketch_involute_gear",
-        "add_sketch_slot", "add_sketch_slot_by_centers", "add_sketch_slot_total_length",
-        "add_sketch_slot_centered",
-        "add_sketch_arc_slot_three_points", "add_sketch_arc_slot_center", "add_sketch_arc_slot_tangent",
-        "mirror_sketch_elements", "pattern_sketch_elements",
-      ].includes(command.type)) {
-        activeSketchId = command.sketch_id || activeSketchId;
-        const transitionSegments = (result.line_ids?.length || 0) + (result.circle_ids?.length || 0) * 16;
-        pendingViewportTransition = activeSketchId ? {
-          projectId, sketchId: activeSketchId, allSketchLines: true,
-          type: "sketch-lines", durationMs: Math.min(1800, Math.max(460, 250 + transitionSegments * 20)),
-        } : null;
-      } else if (command.type === "add_sketch_circle") {
-        activeSketchId = command.sketch_id || activeSketchId;
-        pendingViewportTransition = {
-          projectId, objectId: result.circle_id, type: "sketch-lines", durationMs: 700,
-        };
-      } else if (command.type === "add_sketch_constraint") {
-        activeSketchId = command.sketch_id || activeSketchId;
-        pendingViewportTransition = null;
-      } else if (command.type === "update_sketch_elements") {
-        const edited = command.updates?.[0]?.object_id;
-        const source = currentObjects.find((item) => item.id === edited);
-        activeSketchId = source?.sketch_id || activeSketchId;
-        pendingViewportTransition = activeSketchId ? {
-          projectId, sketchId: activeSketchId, allSketchLines: true,
-          type: "sketch-lines", durationMs: 700,
-        } : null;
-      } else if (command.type === "replace_sketch_profile") {
-        activeSketchId = command.sketch_id || null;
-        pendingViewportTransition = activeSketchId ? {
-          projectId, sketchId: activeSketchId, allSketchLines: true,
-          type: "sketch-lines", durationMs: 1600,
-        } : null;
-      } else if (command.type === "replace_sketch_path") {
-        activeSketchId = command.sketch_id || null;
-        pendingViewportTransition = activeSketchId ? {
-          projectId, sketchId: activeSketchId, allSketchLines: true,
-          type: "sketch-lines", durationMs: 1800,
-        } : null;
-      } else if (command.type === "create_sketch_from_section") {
-        const sketches = Array.isArray(result.sketches) ? result.sketches : [];
-        const largest = sketches.reduce((selected, sketch) =>
-          !selected || (sketch.sample_count || 0) > (selected.sample_count || 0) ? sketch : selected, null);
-        activeSketchId = largest?.sketch_id || null;
-        pendingViewportTransition = activeSketchId ? {
-          projectId, sketchId: activeSketchId, allSketchLines: true,
-          type: "sketch-lines", durationMs: 1600,
-        } : null;
-      } else if (command.type === "remove_sketch_object") {
-        if (command.object_id === activeSketchId) activeSketchId = null;
-        pendingViewportTransition = null;
-      } else if (["extrude_sketch", "revolve_sketch"].includes(command.type)) {
-        activeSketchId = null;
-        pendingViewportTransition = {
-          projectId, bodyId: result.body_id,
-          type: command.type === "extrude_sketch" ? "extrude" : "revolve",
-          plane: result.geometry?.plane || "XZ", durationMs: 1400,
-        };
-      } else if (command.type === "loft_sketches") {
-        activeSketchId = null;
-        pendingViewportTransition = {
-          projectId, bodyId: result.body_id, type: "loft",
-          sectionOffsets: result.geometry?.section_offsets || [], durationMs: 1800,
-        };
-      } else if (command.type === "create_ruled_shell") {
-        activeSketchId = null;
-        pendingViewportTransition = { projectId, bodyId: result.body_id, type: "brep", durationMs: 1500 };
-      } else if (command.type === "remove_body") {
-        activeSketchId = null;
-        pendingViewportTransition = null;
-        if (selectedObjectId === command.body_id) selectedObjectId = null;
-      } else if (command.type === "create_metric_thread") {
-        activeSketchId = null;
-        pendingViewportTransition = { projectId, bodyId: result.body_id, type: "thread", durationMs: 1800 };
-      } else if (command.type === "fuse_bodies") {
-        activeSketchId = null;
-        pendingViewportTransition = {
-          projectId, bodyId: result.body_id, type: "fuse", durationMs: 1200,
-        };
-      } else if (command.type === "sweep_sketch") {
-        activeSketchId = null;
-        pendingViewportTransition = {
-          projectId, bodyId: result.body_id, type: "sweep", plane: result.geometry?.plane || "XZ",
-          path: result.geometry?.path || [], durationMs: 1800,
-        };
-      } else if (command.type === "fillet_edges") {
-        activeSketchId = null;
-        pendingViewportTransition = { projectId, bodyId: result.body_id, type: "fillet", durationMs: 1500 };
-      } else if (["resize_imported_thread", "transform_imported_brep"].includes(command.type)) {
-        activeSketchId = null;
-        pendingViewportTransition = { projectId, bodyId: result.body_id, type: "brep", durationMs: 1500 };
-      } else if (command.type === "set_parameter" && result.geometry?.kind) {
-        const transitionType = result.geometry.kind === "revolved_profile" ? "revolve"
-          : result.geometry.kind === "extruded_profile" ? "extrude"
-          : result.geometry.kind === "swept_pipe" ? "sweep"
-          : result.geometry.kind === "lofted_profiles" ? "loft"
-          : result.geometry.kind === "metric_thread" ? "thread"
-          : result.geometry.kind === "filleted_solid" ? "fillet"
-          : ["fused_profiles", "fused_solids"].includes(result.geometry.kind) ? "fuse" : null;
-        pendingViewportTransition = transitionType ? {
-          projectId, featureId: result.feature_id, type: transitionType,
-          plane: result.geometry.plane || "XZ", path: result.geometry.path || [], durationMs: 1400,
-        } : null;
-        activeSketchId = null;
-      }
-    }
-    selectObjectFromResult(projectId, result);
-    scheduleWorkspaceRefresh();
+    // command.completed is a bounded receipt; the full result and animation plan arrive in agent.activity.
+    if (projectId === selectedProjectId) scheduleWorkspaceRefresh();
   } else if (type === "document.changed") {
+    if (projectId === selectedProjectId && Number.isInteger(data.revision))
+      pendingViewportTransition = window.CadyxViewport.transitionForRevision(pendingViewportTransition, data.revision);
     scheduleWorkspaceRefresh();
   } else if (type === "viewport.camera") {
     if (projectId === selectedProjectId) animateModelCamera(data);
@@ -2222,6 +2100,12 @@ for (const type of eventTypes) {
 stream.addEventListener("open", () => {
   activitiesByProject.clear();
   activityRevisionsByProject.clear();
+  // SSE does not replay history. Force a fresh snapshot and discard transitions from the old stream.
+  pendingViewportTransition = null;
+  activeSketchId = null;
+  selectedObjectId = null;
+  detailedProjectModifiedAt = null;
+  scheduleWorkspaceRefresh(0);
   checkAutomaticUpdates();
 });
 document.addEventListener("visibilitychange", () => {

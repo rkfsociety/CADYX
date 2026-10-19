@@ -66,6 +66,13 @@ const sandbox = {
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"), sandbox);
 const viewer = sandbox.window.CadyxViewport.createViewer(canvas, { showCoordinateGizmo: false });
 const activityUpdate = sandbox.window.CadyxViewport.viewportUpdateForAgentActivity;
+const transitionForRevision = sandbox.window.CadyxViewport.transitionForRevision;
+const expectedTransition = { expectedRevision: 8, type: "extrude" };
+assert.equal(transitionForRevision(expectedTransition, 8), expectedTransition,
+  "A command transition is retained for its exact committed revision");
+assert.equal(transitionForRevision(expectedTransition, 9), null,
+  "A later scene revision never replays an animation for a skipped command");
+assert.equal(transitionForRevision(null, 8), null);
 const sketchUpdate = activityUpdate("project-1", "project-1", {
   state: "completed", command: "create_sketch", result: { sketch_id: "sketch-1" },
 });
@@ -77,6 +84,39 @@ const rectangleUpdate = activityUpdate("project-1", "project-1", {
 });
 assert.equal(rectangleUpdate.transition.allSketchLines, true);
 assert.equal(rectangleUpdate.transition.durationMs, 460);
+const slotUpdate = activityUpdate("project-1", "project-1", {
+  state: "completed", command: "add_sketch_slot_centered",
+  result: { sketch_id: "sketch-1", point_ids: ["point-1", "point-2", "point-3", "point-4"],
+    line_ids: ["line-1", "line-2"], circle_ids: ["circle-1", "circle-2"] },
+});
+assert.equal(slotUpdate.activeSketchId, "sketch-1");
+assert.equal(slotUpdate.transition.allSketchLines, true,
+  "Analytic slot contours animate from the completed activity result");
+assert.equal(slotUpdate.transition.durationMs, 930,
+  "Slot animation accounts for line strokes and circular arcs");
+const arcUpdate = activityUpdate("project-1", "project-1", {
+  state: "completed", command: "add_sketch_arc_slot_three_points",
+  result: { sketch_id: "sketch-1", line_ids: ["line-1", "line-2"], circle_ids: ["circle-1"] },
+});
+assert.equal(arcUpdate.transition.type, "sketch-lines",
+  "Arc slot commands receive a transition from their actual operation result");
+const pointUpdate = activityUpdate("project-1", "project-1", {
+  state: "completed", command: "add_sketch_point",
+  result: { sketch_id: "sketch-1", point_id: "point-9" },
+});
+assert.equal(pointUpdate.transition.objectId, "point-9");
+assert.equal(pointUpdate.transition.type, "sketch-point");
+const objectUpdate = activityUpdate("project-1", "project-1", {
+  state: "completed", command: "add_sketch_element", result: { object_id: "circle:1" },
+}, "sketch-1");
+assert.equal(objectUpdate.activeSketchId, "sketch-1",
+  "Element results without a sketch ID retain the active sketch");
+assert.equal(objectUpdate.transition.type, "sketch-lines");
+const editedSketchUpdate = activityUpdate("project-1", "project-1", {
+  state: "completed", command: "update_sketch_elements", result: { object_ids: ["point:1"] },
+}, "sketch-1");
+assert.equal(editedSketchUpdate.transition.sketchId, "sketch-1",
+  "Updates with only changed object IDs continue animating their source sketch");
 const padUpdate = activityUpdate("project-1", "project-1", {
   state: "completed", command: "pad_sketch_to_body",
   result: { body_id: "body-1", feature_id: "feature-1" },

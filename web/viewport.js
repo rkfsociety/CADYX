@@ -3,7 +3,7 @@
   const INTERACTIVE_RENDER_SCALE = 0.6;
   const VIEWPORT_MESH_DEFLECTION = 0.01;
   const meshEdgesCache = new WeakMap();
-  function viewportUpdateForAgentActivity(projectId, selectedProjectId, activity) {
+  function viewportUpdateForAgentActivity(projectId, selectedProjectId, activity, currentSketchId = null) {
     if (projectId !== selectedProjectId || activity?.state !== "completed"
         || typeof activity.command !== "string") return null;
     const result = activity.result || {};
@@ -11,15 +11,60 @@
     if (command === "create_sketch") {
       return { activeSketchId: result.sketch_id || null, transition: null };
     }
-    if (command === "add_sketch_rectangle") {
-      return { activeSketchId: result.sketch_id || null, transition: result.sketch_id ? {
-        projectId, sketchId: result.sketch_id, allSketchLines: true,
-        type: "sketch-lines", durationMs: Math.min(1800, Math.max(460, 250 + (result.line_ids?.length || 0) * 20)),
+    const sketchLineCommands = new Set([
+      "add_sketch_segment", "add_sketch_line", "add_sketch_infinite_line", "add_sketch_centerline",
+      "add_sketch_construction_line", "add_sketch_polyline", "add_sketch_line_chain", "add_sketch_rectangle",
+      "add_sketch_rectangle_center", "add_sketch_rectangle_three_points", "add_sketch_rectangle_two_corners",
+      "add_sketch_rotated_rectangle", "add_sketch_parallelogram", "add_sketch_regular_polygon",
+      "add_sketch_inscribed_polygon", "add_sketch_circumscribed_polygon", "add_sketch_polygon_from_center",
+      "add_sketch_rounded_rectangle", "add_sketch_circle_diameter", "add_sketch_ellipse",
+      "add_sketch_ellipse_center", "add_sketch_ellipse_three_points", "add_sketch_elliptical_arc",
+      "add_sketch_spline", "add_sketch_spline_control_points", "add_sketch_bspline",
+      "add_sketch_bezier_curve", "add_sketch_spiral", "add_sketch_parametric_curve",
+      "add_sketch_coordinate_curve", "add_sketch_circle_two_points", "add_sketch_circle_three_points",
+      "add_sketch_circle_tangent_to_line", "add_sketch_circle_tangent_to_two_lines",
+      "add_sketch_circle_tangent_to_three_lines", "add_sketch_arc_center", "add_sketch_arc_three_points",
+      "add_sketch_arc_start_center_end", "add_sketch_arc_radius", "add_sketch_arc_tangent",
+      "add_sketch_involute_gear", "add_sketch_slot", "add_sketch_slot_by_centers",
+      "add_sketch_slot_total_length", "add_sketch_slot_centered", "add_sketch_arc_slot_three_points",
+      "add_sketch_arc_slot_center", "add_sketch_arc_slot_tangent", "mirror_sketch_elements",
+      "pattern_sketch_elements",
+    ]);
+    if (command === "add_sketch_point" || command === "add_sketch_construction_point") {
+      const pointId = result.point_id || result.object_id;
+      return { activeSketchId: result.sketch_id || null, transition: pointId ? {
+        projectId, objectId: pointId, type: "sketch-point", durationMs: 460,
+      } : null };
+    }
+    if (command === "add_sketch_element") {
+      const objectId = result.object_id;
+      const elementType = objectId?.split(":", 1)[0];
+      return { activeSketchId: result.sketch_id || currentSketchId, transition: objectId ? {
+        projectId, objectId, type: elementType === "point" ? "sketch-point" : "sketch-lines",
+        durationMs: elementType === "circle" ? 700 : 460,
       } : null };
     }
     if (command === "add_sketch_circle") {
       return { activeSketchId: result.sketch_id || null, transition: result.circle_id ? {
         projectId, objectId: result.circle_id, type: "sketch-lines", durationMs: 700,
+      } : null };
+    }
+    if (sketchLineCommands.has(command)) {
+      const sketchId = result.sketch_id || null;
+      const lineCount = (result.line_ids?.length || 0) + (result.circle_ids?.length || 0) * 16;
+      return { activeSketchId: result.sketch_id || null, transition: result.sketch_id ? {
+        projectId, sketchId, allSketchLines: true, type: "sketch-lines",
+        durationMs: Math.min(1800, Math.max(460, 250 + lineCount * 20)),
+      } : null };
+    }
+    if (command === "remove_sketch_object" || command === "add_sketch_constraint") {
+      return { activeSketchId: result.sketch_id || currentSketchId, transition: null };
+    }
+    if (["replace_sketch_profile", "replace_sketch_path", "update_sketch_elements"].includes(command)) {
+      const sketchId = result.sketch_id || currentSketchId;
+      return { activeSketchId: sketchId, transition: sketchId ? {
+        projectId, sketchId, allSketchLines: true, type: "sketch-lines",
+        durationMs: command === "replace_sketch_path" ? 1800 : command === "replace_sketch_profile" ? 1600 : 700,
       } : null };
     }
     if (["extrude_sketch", "revolve_sketch"].includes(command)) {
@@ -39,7 +84,17 @@
         projectId, bodyId: result.body_id, type: "fillet", durationMs: 1500,
       } : null };
     }
+    if (typeof result.body_id === "string") {
+      return { activeSketchId: null, transition: {
+        projectId, bodyId: result.body_id, type: "brep", durationMs: 1000,
+      } };
+    }
     return null;
+  }
+  function transitionForRevision(transition, revision) {
+    if (!transition) return null;
+    return Number.isInteger(transition.expectedRevision) && transition.expectedRevision !== revision
+      ? null : transition;
   }
   const multiplyMatrices = (left, right) => [
     left[0] * right[0] + left[1] * right[3] + left[2] * right[6],
@@ -361,6 +416,10 @@
           } else if (transition.type === "fuse" && transition.growAxis === 2
               && worldZ > transition.growOrigin) {
             worldZ = transition.growOrigin + (worldZ - transition.growOrigin) * progress;
+          } else if (transition.type === "brep" && transition.center) {
+            worldX = transition.center[0] + (worldX - transition.center[0]) * progress;
+            worldY = transition.center[1] + (worldY - transition.center[1]) * progress;
+            worldZ = transition.center[2] + (worldZ - transition.center[2]) * progress;
           }
         }
         const x = worldX - center[0];
@@ -1641,5 +1700,5 @@
     }
   }
 
-  window.CadyxViewport = { createViewer, viewportUpdateForAgentActivity };
+  window.CadyxViewport = { createViewer, viewportUpdateForAgentActivity, transitionForRevision };
 })();
