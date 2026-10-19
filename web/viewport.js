@@ -3,6 +3,44 @@
   const INTERACTIVE_RENDER_SCALE = 0.6;
   const VIEWPORT_MESH_DEFLECTION = 0.01;
   const meshEdgesCache = new WeakMap();
+  function viewportUpdateForAgentActivity(projectId, selectedProjectId, activity) {
+    if (projectId !== selectedProjectId || activity?.state !== "completed"
+        || typeof activity.command !== "string") return null;
+    const result = activity.result || {};
+    const command = activity.command;
+    if (command === "create_sketch") {
+      return { activeSketchId: result.sketch_id || null, transition: null };
+    }
+    if (command === "add_sketch_rectangle") {
+      return { activeSketchId: result.sketch_id || null, transition: result.sketch_id ? {
+        projectId, sketchId: result.sketch_id, allSketchLines: true,
+        type: "sketch-lines", durationMs: Math.min(1800, Math.max(460, 250 + (result.line_ids?.length || 0) * 20)),
+      } : null };
+    }
+    if (command === "add_sketch_circle") {
+      return { activeSketchId: result.sketch_id || null, transition: result.circle_id ? {
+        projectId, objectId: result.circle_id, type: "sketch-lines", durationMs: 700,
+      } : null };
+    }
+    if (["extrude_sketch", "revolve_sketch"].includes(command)) {
+      return { activeSketchId: null, transition: result.body_id ? {
+        projectId, bodyId: result.body_id, type: command === "extrude_sketch" ? "extrude" : "revolve",
+        plane: result.geometry?.plane || "XZ", durationMs: 1400,
+      } : null };
+    }
+    if (["pad_sketch_to_body", "rib_from_sketch", "fuse_bodies"].includes(command)) {
+      return { activeSketchId: null, transition: result.body_id ? {
+        projectId, bodyId: result.body_id, featureId: result.feature_id || null,
+        type: "fuse", durationMs: 1200,
+      } : null };
+    }
+    if (command === "fillet_edges") {
+      return { activeSketchId: null, transition: result.body_id ? {
+        projectId, bodyId: result.body_id, type: "fillet", durationMs: 1500,
+      } : null };
+    }
+    return null;
+  }
   const multiplyMatrices = (left, right) => [
     left[0] * right[0] + left[1] * right[3] + left[2] * right[6],
     left[0] * right[1] + left[1] * right[4] + left[2] * right[7],
@@ -320,6 +358,9 @@
             else worldZ *= progress;
           } else if (transition.type === "thread") {
             worldZ *= progress;
+          } else if (transition.type === "fuse" && transition.growAxis === 2
+              && worldZ > transition.growOrigin) {
+            worldZ = transition.growOrigin + (worldZ - transition.growOrigin) * progress;
           }
         }
         const x = worldX - center[0];
@@ -1600,5 +1641,5 @@
     }
   }
 
-  window.CadyxViewport = { createViewer };
+  window.CadyxViewport = { createViewer, viewportUpdateForAgentActivity };
 })();

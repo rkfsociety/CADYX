@@ -1577,6 +1577,12 @@ async function refreshDetail() {
   if (transition?.featureId) {
     const feature = objectsById.get(transition.featureId);
     transition.bodyId = feature?.body_id;
+    const sourceBody = feature?.source_body_id && objectsById.get(feature.source_body_id);
+    if (transition.type === "fuse" && sourceBody?.geometry?.plane === "XY"
+        && Number.isFinite(sourceBody.geometry.depth)) {
+      transition.growAxis = 2;
+      transition.growOrigin = sourceBody.geometry.depth;
+    }
   }
   if (renderedSceneKey !== key) {
     const positions = [], bodyPositions = [], triangles = [], lines = [], points = [], rotationAxes = [];
@@ -2015,6 +2021,13 @@ function handleStreamEvent(type, event) {
     else activities[existing] = data;
     if (activities.length > 128) activities.splice(0, activities.length - 128);
     activitiesByProject.set(projectId, activities);
+    const viewportUpdate = window.CadyxViewport.viewportUpdateForAgentActivity(
+      projectId, selectedProjectId, data,
+    );
+    if (viewportUpdate) {
+      activeSketchId = viewportUpdate.activeSketchId;
+      pendingViewportTransition = viewportUpdate.transition;
+    }
     if (projectId === selectedProjectId) renderAgentActivity(activities, agentLocksByProject.get(projectId));
     else if (primaryGrid.dataset.view === "projects") renderProjects();
     if (projectId === selectedProjectId && data.state === "running") {

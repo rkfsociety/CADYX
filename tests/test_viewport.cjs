@@ -65,6 +65,29 @@ const sandbox = {
 };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"), sandbox);
 const viewer = sandbox.window.CadyxViewport.createViewer(canvas, { showCoordinateGizmo: false });
+const activityUpdate = sandbox.window.CadyxViewport.viewportUpdateForAgentActivity;
+const sketchUpdate = activityUpdate("project-1", "project-1", {
+  state: "completed", command: "create_sketch", result: { sketch_id: "sketch-1" },
+});
+assert.equal(sketchUpdate.activeSketchId, "sketch-1");
+assert.equal(sketchUpdate.transition, null);
+const rectangleUpdate = activityUpdate("project-1", "project-1", {
+  state: "completed", command: "add_sketch_rectangle",
+  result: { sketch_id: "sketch-1", line_ids: ["line-1", "line-2", "line-3", "line-4"] },
+});
+assert.equal(rectangleUpdate.transition.allSketchLines, true);
+assert.equal(rectangleUpdate.transition.durationMs, 460);
+const padUpdate = activityUpdate("project-1", "project-1", {
+  state: "completed", command: "pad_sketch_to_body",
+  result: { body_id: "body-1", feature_id: "feature-1" },
+});
+assert.equal(padUpdate.activeSketchId, null);
+assert.equal(padUpdate.transition.type, "fuse");
+assert.equal(padUpdate.transition.featureId, "feature-1");
+assert.equal(activityUpdate("project-1", "project-2", {
+  state: "completed", command: "pad_sketch_to_body",
+  result: { body_id: "body-1", feature_id: "feature-1" },
+}), null, "Events for another project cannot animate the selected viewer");
 const geometry = {
   positions: [0, 0, 0, 0, 0, 1, 1, 0, 0], triangles: [], lines: [0, 1], points: [0, 1],
   bounds: { min: [0, 0, 0], max: [1, 1, 1] },
