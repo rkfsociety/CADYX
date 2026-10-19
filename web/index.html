@@ -34,8 +34,8 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .topbar {
   z-index: 20;
   height: 58px;
-  grid-template-columns: auto minmax(220px, 1fr) auto;
-  grid-template-areas: "brand project sync";
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, auto) auto;
+  grid-template-areas: "brand project lock sync";
   gap: 0;
   padding: 0 18px 0 20px;
   border-bottom: 1px solid var(--line);
@@ -96,6 +96,19 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .topbar-sync .project-light { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; background: transparent; box-shadow: none; color: var(--dim); }
 .topbar-sync .project-light.active { background: transparent; box-shadow: none; color: var(--text); }
 .topbar-sync .project-light svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.topbar .workspace-lock-status {
+  grid-area: lock;
+  position: static;
+  z-index: auto;
+  max-width: min(38vw, 500px);
+  margin: 0 12px;
+  padding: 5px 8px;
+  overflow: hidden;
+  border-color: #704d26;
+  background: #1c140bde;
+  font-size: 8px;
+  line-height: 1.35;
+}
 
 .app-shell { height: calc(100vh - 58px); height: calc(100dvh - 58px); }
 .workspace { background: var(--canvas); }
@@ -173,18 +186,6 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 }
 .section-sidebar > .sidebar-heading,
 .section-sidebar > .sidebar-project { display: none !important; }
-.workspace-lock-status {
-  position: absolute;
-  z-index: 16;
-  top: calc(var(--cadyx-tabs-height) + 8px);
-  left: calc(var(--cadyx-tree-width) + 12px);
-  max-width: 420px;
-  margin: 0;
-  padding: 7px 9px;
-  border-color: #704d26;
-  background: #1c140bde;
-  font-size: 8px;
-}
 .cad-model-tree {
   display: grid;
   height: 100%;
@@ -552,7 +553,8 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 @media (max-width: 900px) {
   :root { --cadyx-tree-width: 190px; --cadyx-inspector-width: 260px; }
   .topbar-sync { display: none; }
-  .topbar { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "brand project"; }
+  .topbar { grid-template-columns: auto minmax(0, 1fr) minmax(0, 40vw); grid-template-areas: "brand project lock"; }
+  .topbar .workspace-lock-status { max-width: calc(40vw - 16px); margin: 0 8px; }
   .header-revision { display: none; }
   .primary-grid[data-view="overview"] { grid-template-columns: minmax(0, 1fr); }
   .primary-grid[data-view="overview"] > .inspector-column { display: none; }
@@ -600,6 +602,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
         </div>
         <div class="header-revision"><span class="topbar-label">РЕВИЗИЯ</span><strong id="document-revision">—</strong></div>
       </div>
+      <p id="workspace-lock-status" class="workspace-lock-status" role="status" aria-live="polite" hidden></p>
     </header>
 
     <div class="app-shell">
@@ -624,7 +627,6 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
               <button id="files-nav" class="nav-item" type="button" data-workspace-view="files" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">06</span><span class="nav-copy"><strong>Файлы</strong><small>Файлы проекта</small></span></button>
               <button id="projects-nav" class="nav-item" type="button" data-workspace-view="projects" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">07</span><span class="nav-copy"><strong>Проекты</strong><small>Сохранённые проекты</small></span></button>
             </nav>
-            <p id="workspace-lock-status" class="workspace-lock-status" role="status" aria-live="polite" hidden></p>
             <div class="sidebar-project"><span class="section-label">АКТИВНЫЙ РЕСУРС</span><strong id="sidebar-project-name">—</strong></div>
           </aside>
 
