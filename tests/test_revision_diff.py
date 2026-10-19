@@ -132,6 +132,24 @@ class RevisionGeometryTests(unittest.TestCase):
         self.assertEqual(result["geometry"]["reports"], [])
         self.assertEqual(self.kernel.calls, 0)
 
+    def test_new_and_removed_body_volume_is_separate_not_global_union(self):
+        original = document(objects=[
+            {"id": "body:old", "type": "body",
+             "geometry": {"kernel": "occt-v1", "volume": 7, "faces": 6}},
+        ])
+        updated = document(1, objects=[
+            {"id": "body:new", "type": "body",
+             "geometry": {"kernel": "occt-v1", "volume": 13, "faces": 8}},
+        ])
+        report = compare_documents(original, updated, self.kernel)
+        unmatched = report["geometry"]["unmatched_body_reports"]
+        self.assertEqual([(row["change"], row["volume"]) for row in unmatched],
+                         [("removed", 7), ("added", 13)])
+        self.assertEqual(report["geometry"]["added_removed_bodies"],
+                         "standalone_volume_only_no_global_union")
+        self.assertEqual(report["status"], "partial")
+        self.assertEqual(self.kernel.calls, 0)
+
     def test_mesh_explicitly_untested_and_tolerance_validated(self):
         old = document(objects=[{"id": "body:m", "type": "body",
                                 "geometry": {"kernel": "cadyx-mesh-v1", "vertices": [1]}}])

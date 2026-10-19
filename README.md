@@ -84,6 +84,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - `GET /api/v1/health` for minimal unauthenticated readiness
 - `GET /api/v1/projects` and `GET /api/v1/agent/projects` (CADYX project records plus `folders` for immediate project directories); agent project creation uses `POST /api/v1/agent/projects`
 - `GET /api/v1/agent/capabilities` for machine-readable routes, supported model command names/parameter guides, known errors and limitations
+- `GET /api/v1/agent/projects/{id}/revisions` lists comparable saved model checkpoints; `POST /api/v1/agent/projects/{id}/revisions/compare` compares saved revisions or uncommitted preview proposals using read-only geometry-aware measurements. See [revision comparison](docs/revision-comparison.md).
 - `GET /api/v1/projects/{id}`
 - `GET /api/v1/projects/{id}/dashboard` reads the agent workflow/task snapshot; `POST /api/v1/agent/projects/{id}/dashboard` replaces it with agent-reported progress, ETA and task states
 - `GET /api/v1/projects/{id}/viewport` and its Agent API equivalent return the same read-only render scene
