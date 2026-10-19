@@ -389,7 +389,9 @@ def make_request_handler(
             try:
                 if project_id:
                     core.inspect_project(project_id)
-                subscriber_id, subscriber = core.events.subscribe(project_id)
+                subscriber_id, subscriber = core.events.subscribe(
+                    project_id, last_event_id=self.headers.get("Last-Event-ID"),
+                )
                 # SSE owns its separate permit after authentication and enrollment.
                 # The connection is never reused as an ordinary HTTP request.
                 self.close_connection = True
@@ -421,7 +423,7 @@ def make_request_handler(
                         next_keepalive = time.monotonic() + _SSE_KEEPALIVE_SECONDS
                         continue
                     payload = json.dumps(item.as_dict(), ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-                    frame = f"id: {item.id}\nevent: {item.event}\ndata: {payload}\n\n"
+                    frame = f"id: {core.events.event_cursor(item.id)}\nevent: {item.event}\ndata: {payload}\n\n"
                     self.wfile.write(frame.encode("utf-8"))
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, OSError):

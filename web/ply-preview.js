@@ -2155,6 +2155,17 @@ folderFileList.addEventListener("click", (event) => {
 });
 
 const stream = new EventSource("/api/v1/events");
+// A gap means the bounded replay was incomplete; fetch authoritative state.
+stream.addEventListener("stream.gap", () => {
+  activitiesByProject.clear();
+  activityRevisionsByProject.clear();
+  pendingViewportTransition = null;
+  activeSketchId = null;
+  selectedObjectId = null;
+  detailedProjectModifiedAt = null;
+  scheduleWorkspaceRefresh(0);
+  checkAutomaticUpdates();
+});
 const eventTypes = ["project.created", "project.deleted", "workspace.selection.changed", "workspace.agent-work", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera", "viewport.body-motion"];
 for (const type of eventTypes) {
   stream.addEventListener(type, (message) => {
@@ -2166,7 +2177,7 @@ for (const type of eventTypes) {
 stream.addEventListener("open", () => {
   activitiesByProject.clear();
   activityRevisionsByProject.clear();
-  // SSE does not replay history. Force a fresh snapshot and discard transitions from the old stream.
+  // Refresh authoritative state as a fallback even with bounded replay.
   pendingViewportTransition = null;
   activeSketchId = null;
   selectedObjectId = null;
