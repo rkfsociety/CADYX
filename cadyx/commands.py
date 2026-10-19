@@ -66,4 +66,10 @@ class CommandSystem(
                                   diagnostics={"category": "unsupported_operation",
                                                "failed_precondition": "command type must be present in the current capability registry",
                                                "correction_hint": "Call the capability discovery route and use a listed command type."})
-        return self._extension_execute(document, command, progress=progress, project_id=project_id)
+        previous_index = document._command_object_index
+        document._command_object_index = {item["id"]: item for item in document.objects
+                                         if isinstance(item, dict) and isinstance(item.get("id"), str)}
+        try:
+            return self._extension_execute(document, command, progress=progress, project_id=project_id)
+        finally:
+            document._command_object_index = previous_index

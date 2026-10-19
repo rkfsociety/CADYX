@@ -246,9 +246,9 @@ class BodyCommands:
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         feature_id = command.get("feature_id")
-        feature = next((item for item in document.objects
-                        if item.get("id") == feature_id and item.get("type") == "feature"
-                        and item.get("operation") == "loft_sketches"), None)
+        feature = document.find_object(feature_id, "feature")
+        if feature is not None and feature.get("operation") != "loft_sketches":
+            feature = None
         if feature is None:
             raise NotFoundError("Loft feature was not found.")
         groups = command.get("section_groups")
@@ -285,7 +285,7 @@ class BodyCommands:
             [group[0] for group in profiles], section_offsets=offsets, section_axis=section_axis,
         ) if all(len(group) == 1 for group in profiles) else
             self.kernel.create_multicontour_loft(profiles, section_offsets=offsets, section_axis=section_axis))
-        body = next((item for item in document.objects if item.get("id") == feature.get("body_id")), None)
+        body = document.find_object(feature.get("body_id"), "body")
         if body is None or body.get("type") != "body":
             raise ValidationError("Loft feature refers to a missing body.")
         section_groups = {"section_sketch_ids": flattened, "section_offsets": offsets}
@@ -367,8 +367,7 @@ class BodyCommands:
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         source_id = command.get("body_id")
-        source = next((item for item in document.objects
-                       if item.get("id") == source_id and item.get("type") == "body"), None)
+        source = document.find_object(source_id, "body")
         if source is None:
             raise NotFoundError("Imported thread source body was not found.")
         if source_id in self._consumed_body_ids(document):
@@ -416,8 +415,7 @@ class BodyCommands:
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         source_id = command.get("body_id")
-        source = next((item for item in document.objects
-                       if item.get("id") == source_id and item.get("type") == "body"), None)
+        source = document.find_object(source_id, "body")
         if source is None:
             raise NotFoundError("Imported B-rep source body was not found.")
         if source_id in self._consumed_body_ids(document):
@@ -492,8 +490,7 @@ class BodyCommands:
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         source_id = command.get("body_id")
-        source = next((item for item in document.objects
-                       if item.get("id") == source_id and item.get("type") == "body"), None)
+        source = document.find_object(source_id, "body")
         if source is None:
             raise NotFoundError("Fillet source body was not found.")
         if source_id in self._consumed_body_ids(document):

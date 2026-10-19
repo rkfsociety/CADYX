@@ -24,7 +24,7 @@ class MigrationTests(unittest.TestCase):
         self.core.execute_command(self.id, self.lease,
                                   {"type": "create_box", "width": 2, "height": 3, "depth": 4})
         self.path = self.core.workspace._project_dir(self.id) / "project.json"
-        self.legacy = json.loads(self.path.read_text())
+        self.legacy = self.core.workspace.load(self.id)
         self.legacy["document"]["version"] = 1
         self.legacy["document"].pop("assembly", None)  # Actual v1 had no assembly graph.
         self.legacy["extension"] = {"source": "preserve"}
@@ -83,7 +83,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), before)
         self.assertEqual(list(self.path.parent.glob("*.tmp")), [])
         self.core.execute_command(self.id, self.lease, {"type": "create_sketch"})
-        saved = json.loads(self.path.read_text())
+        saved = self.core.workspace.load(self.id)
         for key in ("format", "version", "id", "name", "created_at", "extension"):
             self.assertEqual(saved[key], self.legacy[key])
         self.assertEqual(saved["history"][:-1], self.legacy["history"])

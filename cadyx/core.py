@@ -194,7 +194,7 @@ class CadyxCore:
     def develop_agent_source_extension(
         self, project_id: str, proposal: dict[str, Any],
     ) -> dict[str, Any]:
-        self.workspace.load(project_id)
+        self.workspace.load(project_id, include_history=False)
         title = proposal.get("title", "новая возможность") if isinstance(proposal, dict) else "новая возможность"
         return self.observe_agent_operation(
             project_id, f"Разрабатывает исходный код CADYX: {title}",
@@ -209,7 +209,7 @@ class CadyxCore:
         )
 
     def rollback_agent_source_extension(self, project_id: str, extension_id: str) -> dict[str, Any]:
-        self.workspace.load(project_id)
+        self.workspace.load(project_id, include_history=False)
         return self.observe_agent_operation(
             project_id, f"Откатывает исходный код CADYX: {extension_id}",
             lambda: self.source_extensions.rollback(extension_id),
@@ -328,7 +328,10 @@ class CadyxCore:
 
         # workspace.load returns a validated, migrated committed snapshot; do not
         # copy its geometry or command payloads into a full inspect response.
-        return inspect_compact(self.workspace.load(project_id), self.kernel, **options)
+        include_history = options.get("section", "summary") == "changes"
+        return inspect_compact(
+            self.workspace.load(project_id, include_history=include_history), self.kernel, **options,
+        )
 
     def inspect_project(self, project_id: str) -> dict[str, Any]:
         return self._lifecycle.inspect_project(project_id)
@@ -556,10 +559,10 @@ class CadyxCore:
             raise ValidationError("commands must contain between 1 and 100 command objects.")
         with self._project_guard(project_id):
             self._require_project_policy(project_id, "read", "Project is not available for preview.")
-            project = self.workspace.load(project_id)
-            saved = Document.from_dict(project["document"])
+            project = self.workspace.load(project_id, include_history=False)
+            saved = Document.from_validated_dict(project["document"])
             self._check_revision(saved, expected_revision)
-            staged = Document.from_dict(saved.to_dict())
+            staged = saved.clone()
             # File publishing and source removal are intentionally unavailable in previews.
             preview_system = CommandSystem(self.kernel, resolve_scan=self.workspace.resolve_folder_file,
                                            resolve_project_file=self.workspace.resolve_project_file)
@@ -584,7 +587,7 @@ class CadyxCore:
                        if before[key] != after[key]]
             proposal_id = str(uuid4())
             proposal = {"project_id": project_id, "revision": saved.revision,
-                        "commands": copy.deepcopy(commands), "document": staged.to_dict(),
+                        "commands": copy.deepcopy(commands), "document": staged.to_dict(copy_objects=False),
                         "results": copy.deepcopy(results), "created_at": time.time()}
             with self._proposal_guard:
                 if len(self._command_proposals) >= 128:
@@ -609,8 +612,8 @@ class CadyxCore:
                 raise ConflictError("This API requires an agent edit lease.", code="PROJECT_LOCKED")
             self.leases.check_agent_command(project_id, lease.lease_id)
             self._require_project_policy(project_id, "write", "Project has an operation in progress.", valid_lease=True)
-            project = self.workspace.load(project_id)
-            saved = Document.from_dict(project["document"])
+            project = self.workspace.load(project_id, include_history=False)
+            saved = Document.from_validated_dict(project["document"])
             self._check_revision(saved, expected_revision)
             with self._proposal_guard:
                 proposal = self._command_proposals.get(proposal_id)
@@ -618,20 +621,23 @@ class CadyxCore:
                 raise ConflictError("Proposal is missing, already consumed, or bound to another revision.", code="PROPOSAL_STALE")
             if lease.acquired_at <= proposal["created_at"]:
                 raise ConflictError("Commit requires an agent lease acquired after the preview.", code="PROPOSAL_LEASE_REQUIRED")
-            staged = Document.from_dict(proposal["document"])
+            staged = Document.from_validated_dict(proposal["document"])
             results = copy.deepcopy(proposal["results"])
             if staged.revision != saved.revision + len(results):
                 raise ConflictError("Proposal receipt is inconsistent; preview the batch again.", code="PROPOSAL_STALE")
             staged.validate()
             self._validate_geometry(staged)
-            next_project = copy.deepcopy(project)
-            next_project["document"] = staged.to_dict()
+            next_project = dict(project)
+            validated_history_prefix = project.get("_history_count", 0) + len(project["history"])
+            next_project["document"] = staged.to_dict(copy_objects=False)
             next_project["history"].extend({"actor_type": lease.owner_type.value, "actor_id": lease.owner_id,
                                             "command": copy.deepcopy(command), "timestamp": datetime.now(timezone.utc).isoformat(),
                                             "result": copy.deepcopy(result), "revision": saved.revision + index}
                                            for index, (command, result) in enumerate(zip(proposal["commands"], results), 1))
             next_project["modified_at"] = datetime.now(timezone.utc).isoformat()
-            self.workspace.save(next_project)
+            self.workspace.save(
+                next_project, validated_history_prefix=validated_history_prefix, document_validated=True,
+            )
             with self._proposal_guard:
                 self._command_proposals.pop(proposal_id, None)
             for index, (command, result) in enumerate(zip(proposal["commands"], results), 1):

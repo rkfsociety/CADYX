@@ -242,8 +242,8 @@ class ProjectLifecycleService(_CoreService):
                 "file_management",
                 "STEP references can only be removed from a free project with no running operation.",
             )
-            project = self.workspace.load(project_id)
-            document = Document.from_dict(project["document"])
+            project = self.workspace.load(project_id, include_history=False)
+            document = Document.from_validated_dict(project["document"])
             still_used = any(
                 item.get("type") == "feature"
                 and item.get("operation") == "import_step"
@@ -261,8 +261,8 @@ class ProjectLifecycleService(_CoreService):
                 "file_management",
                 "Project files can only be pruned from a free project with no running operation.",
             )
-            project = self.workspace.load(project_id)
-            document = Document.from_dict(project["document"])
+            project = self.workspace.load(project_id, include_history=False)
+            document = Document.from_validated_dict(project["document"])
             if document.objects:
                 raise ConflictError("Clear model geometry through the Command System before pruning project files.", code="FILE_IN_USE")
             return self.workspace.prune_project_files(project_id, keep_files)
@@ -384,7 +384,7 @@ class ProjectLifecycleService(_CoreService):
             # project.json is atomically replaced, so read-only viewers can safely
             # inspect the last committed revision while an agent edits its next one.
             project = self.workspace.load(project_id)
-            document = Document.from_dict(project["document"])
+            document = Document.from_validated_dict(project["document"])
             self._validate_geometry_once(project_id, document)
             availability = self._project_availability(project_id, nonblocking=True)
             if not availability.permits("read"):
@@ -458,12 +458,12 @@ class CommandActivityService(_CoreService):
                 self.release_lease(project_id, lease["lease_id"])
 
     def agent_dashboard_snapshot(self, project_id: str) -> dict[str, Any]:
-        self.workspace.load(project_id)
+        self.workspace.load(project_id, include_history=False)
         return self.events.agent_dashboard_snapshot(project_id)
 
     def report_agent_dashboard(self, project_id: str, report: dict[str, Any]) -> dict[str, Any]:
         """Publish agent progress and tasks; elapsed time is tracked by the dashboard store."""
-        self.workspace.load(project_id)
+        self.workspace.load(project_id, include_history=False)
         if not isinstance(report, dict) or set(report) != {"workflow", "tasks"}:
             raise ValidationError("Dashboard reports must contain workflow and tasks only.")
 
@@ -552,7 +552,7 @@ class CommandActivityService(_CoreService):
 
     def acquire_lease(self, project_id: str, owner_type: str, owner_id: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
-            self.workspace.load(project_id)
+            self.workspace.load(project_id, include_history=False)
             availability = self._project_availability(project_id)
             if (
                 not availability.permits("write")
@@ -578,7 +578,7 @@ class CommandActivityService(_CoreService):
         }
         self._publish_activity(project_id, activity)
         try:
-            self.workspace.load(project_id)
+            self.workspace.load(project_id, include_history=False)
             for name, value, limit in (("yaw_delta", yaw_delta, math.tau),
                                        ("pitch_delta", pitch_delta, 0.5),
                                        ("zoom_factor", zoom_factor, 2.0)):
@@ -620,7 +620,7 @@ class CommandActivityService(_CoreService):
         detail_from_result: Callable[[Any], dict[str, Any]] | None = None,
     ) -> Any:
         """Expose an agent's read-only model inspection as a visual activity."""
-        project = self.workspace.load(project_id)
+        project = self.workspace.load(project_id, include_history=False)
         activity = {
             "operation_id": str(uuid4()),
             "kind": "observation",
@@ -667,7 +667,7 @@ class CommandActivityService(_CoreService):
 
     def heartbeat(self, project_id: str, lease_id: str) -> dict[str, Any]:
         with self._project_guard(project_id):
-            self.workspace.load(project_id)
+            self.workspace.load(project_id, include_history=False)
             lease = self.leases.heartbeat(project_id, lease_id)
             return lease.as_dict()
 
@@ -682,7 +682,7 @@ class CommandActivityService(_CoreService):
         """Release only after reloading and validating the last atomic project save."""
         with self._project_guard(project_id):
             project = self.workspace.load(project_id)
-            document = Document.from_dict(project["document"])
+            document = Document.from_validated_dict(project["document"])
             self._validate_geometry(document)
             lease = self.leases.release_expired(project_id)
             snapshot = self.leases.snapshot(project_id)
@@ -720,8 +720,8 @@ class CommandActivityService(_CoreService):
         self, project_id: str, owner_id: str, expected_revision: int, *, compact_response: bool = False,
     ) -> dict[str, Any]:
         with self._project_guard(project_id):
-            project = self.workspace.load(project_id)
-            document = Document.from_dict(project["document"])
+            project = self.workspace.load(project_id, include_history=False)
+            document = Document.from_validated_dict(project["document"])
             # Resuming grants a new editing lease, so recheck geometry at this
             # explicit state transition rather than relying on viewer caching.
             # Keep the validated snapshot in Core; do not serialize its B-rep or
@@ -779,15 +779,15 @@ class CommandActivityService(_CoreService):
                 "Project has an operation in progress; retry later.",
                 valid_lease=True,
             )
-            project = self.workspace.load(project_id)
+            project = self.workspace.load(project_id, include_history=False)
             if command_name == "export_brep" and expected_revision is None:
                 raise ValidationError("export_brep requires expected_revision to bind files to a saved document revision.")
             if lease.owner_type is OwnerType.AGENT:
                 revision_required = self.leases.check_agent_command(project_id, lease.lease_id)
                 if revision_required or expected_revision is not None:
-                    self._check_revision(Document.from_dict(project["document"]), expected_revision)
+                    self._check_revision(Document.from_validated_dict(project["document"]), expected_revision)
             elif expected_revision is not None:
-                self._check_revision(Document.from_dict(project["document"]), expected_revision)
+                self._check_revision(Document.from_validated_dict(project["document"]), expected_revision)
             if command_name in {"resize_imported_thread", "export_brep"}:
                 # OCCT operations on complex imported NURBS can outlast the
                 # normal lease window; the project transaction prevents
@@ -821,7 +821,7 @@ class CommandActivityService(_CoreService):
                 self._publish_activity(project_id, activity)
 
             try:
-                document = Document.from_dict(project["document"])
+                document = Document.from_validated_dict(project["document"])
                 result = self.commands.execute(document, command, progress=report_progress, project_id=project_id)
                 activity["result"] = copy.deepcopy(result)
                 activity["phase"] = "validate_document"
@@ -837,13 +837,16 @@ class CommandActivityService(_CoreService):
                     "result": copy.deepcopy(result),
                     "revision": document.revision,
                 }
-                next_project = copy.deepcopy(project)
-                next_project["document"] = document.to_dict()
+                next_project = dict(project)
+                validated_history_prefix = project.get("_history_count", 0) + len(project["history"])
+                next_project["document"] = document.to_dict(copy_objects=False)
                 next_project["history"].append(history_entry)
                 next_project["modified_at"] = utc_now()
                 activity["phase"] = "save_document"
                 self._publish_activity(project_id, activity)
-                self.workspace.save(next_project)
+                self.workspace.save(
+                    next_project, validated_history_prefix=validated_history_prefix, document_validated=True,
+                )
                 staged_source = result.get("source_file_to_remove")
                 if staged_source:
                     try:
@@ -944,7 +947,9 @@ class RenderingCacheService(_CoreService):
 
     def compare_bodies(self, project_id: str, original_id: str | None = None, modified_id: str | None = None) -> dict:
         explicit_selection = original_id is not None or modified_id is not None
-        document = Document.from_dict(self.workspace.load(project_id)["document"])
+        document = Document.from_validated_dict(
+            self.workspace.load(project_id, include_history=False)["document"],
+        )
         bodies = {item["id"]: item for item in document.objects if item.get("type") == "body"}
         if len(bodies) < 2:
             return {"revision": document.revision, "available": False}
@@ -1007,8 +1012,8 @@ class RenderingCacheService(_CoreService):
             if cached_scene is not None:
                 self._scene_cache.move_to_end(key)
                 return key, cached_scene
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
+        project = self.workspace.load(project_id, include_history=False)
+        document = Document.from_validated_dict(project["document"])
         self._validate_geometry_once(project_id, document)
         scene = render_scene(document, self.kernel)
         with self._geometry_cache_guard:
@@ -1130,8 +1135,8 @@ class RenderingCacheService(_CoreService):
         return self.render_project_png_with_source(project_id)[0]
 
     def inspect_body_topology(self, project_id: str, body_id: str) -> dict[str, Any]:
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
+        project = self.workspace.load(project_id, include_history=False)
+        document = Document.from_validated_dict(project["document"])
         body = next((item for item in document.objects
                      if item.get("id") == body_id and item.get("type") == "body"), None)
         if body is None:
@@ -1150,8 +1155,8 @@ class RenderingCacheService(_CoreService):
     ) -> dict[str, Any]:
         from .topology_queries import query_topology
 
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
+        project = self.workspace.load(project_id, include_history=False)
+        document = Document.from_validated_dict(project["document"])
         try:
             self._check_revision(document, expected_revision)
         except CadyxError as exc:
@@ -1229,8 +1234,8 @@ class EngineeringValidationService(_CoreService):
     ) -> dict[str, Any]:
         from .model_specifications import evaluate_core_check, evaluate_specification
 
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
+        project = self.workspace.load(project_id, include_history=False)
+        document = Document.from_validated_dict(project["document"])
         self._check_revision(document, expected_revision)
         if type(persist) is not bool:
             raise ValidationError("persist must be a boolean.")
@@ -1251,8 +1256,8 @@ class EngineeringValidationService(_CoreService):
     ) -> dict[str, Any]:
         from .gear_kinematics import solve_planetary_gearset
 
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
+        project = self.workspace.load(project_id, include_history=False)
+        document = Document.from_validated_dict(project["document"])
         self._check_revision(document, expected_revision)
         if type(persist) is not bool:
             raise ValidationError("persist must be a boolean.")
@@ -1374,8 +1379,8 @@ class EngineeringValidationService(_CoreService):
         self, project_id: str, body_id: str, expected_revision: Any,
         expected_dimensions: Any, tolerance: Any, *, persist: bool = False,
     ) -> dict[str, Any]:
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
+        project = self.workspace.load(project_id, include_history=False)
+        document = Document.from_validated_dict(project["document"])
         self._check_revision(document, expected_revision)
         if type(persist) is not bool:
             raise ValidationError("persist must be a boolean.")
@@ -1436,8 +1441,8 @@ class EngineeringValidationService(_CoreService):
         expected_revision: Any, minimum_clearance: Any, tolerance: Any,
         *, progress: Callable[[str, float], None] | None = None, persist: bool = False,
     ) -> dict[str, Any]:
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
+        project = self.workspace.load(project_id, include_history=False)
+        document = Document.from_validated_dict(project["document"])
         self._check_revision(document, expected_revision)
         if type(persist) is not bool:
             raise ValidationError("persist must be a boolean.")
@@ -1536,8 +1541,8 @@ class EngineeringValidationService(_CoreService):
     ) -> dict[str, Any]:
         from .assembly_fit import evaluate_assembly_fit
 
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
+        project = self.workspace.load(project_id, include_history=False)
+        document = Document.from_validated_dict(project["document"])
         self._check_revision(document, expected_revision)
         if type(persist) is not bool:
             raise ValidationError("persist must be a boolean.")
@@ -1565,8 +1570,8 @@ class EngineeringValidationService(_CoreService):
     ) -> dict[str, Any]:
         from .assembly_mass import evaluate_assembly_mass_properties
 
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
+        project = self.workspace.load(project_id, include_history=False)
+        document = Document.from_validated_dict(project["document"])
         self._check_revision(document, expected_revision)
         if type(persist) is not bool:
             raise ValidationError("persist must be a boolean.")
@@ -1590,8 +1595,8 @@ class EngineeringValidationService(_CoreService):
         expected_revision: Any, maximum_lost_volume: Any, tolerance: Any,
         *, persist: bool = False,
     ) -> dict[str, Any]:
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
+        project = self.workspace.load(project_id, include_history=False)
+        document = Document.from_validated_dict(project["document"])
         self._check_revision(document, expected_revision)
         if type(persist) is not bool:
             raise ValidationError("persist must be a boolean.")
@@ -1676,8 +1681,8 @@ class EngineeringValidationService(_CoreService):
         progress: Callable[[str, float], None] | None = None, persist: bool = False,
         method: str = "sampled",
     ) -> dict[str, Any]:
-        project = self.workspace.load(project_id)
-        document = Document.from_dict(project["document"])
+        project = self.workspace.load(project_id, include_history=False)
+        document = Document.from_validated_dict(project["document"])
         self._check_revision(document, expected_revision)
         if type(persist) is not bool:
             raise ValidationError("persist must be a boolean.")

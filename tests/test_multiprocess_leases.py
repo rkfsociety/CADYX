@@ -24,16 +24,16 @@ def worker(root, project_id, action, args, now, output, start=None, entered=None
     if entered is not None:
         original = core.workspace.save
 
-        def save(project):
+        def save(project, **kwargs):
             if action == "saved_crash":
-                original(project)
+                original(project, **kwargs)
             entered.set()
             if not finish.wait(10):
                 raise RuntimeError("Test command was not released")
             if action == "failed_save":
                 raise ValidationError("Save rejected by test")
             if action != "saved_crash":
-                original(project)
+                original(project, **kwargs)
 
         core.workspace.save = save
     try:

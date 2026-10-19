@@ -20,7 +20,28 @@ Every project lives at `projects/<project-name>/project.json`. Newly created pro
 }
 ```
 
-The document and its successful command history are replaced together using a temporary file and an atomic filesystem replace. Edit leases are stored separately in a per-project `.cadyx-leases.sqlite3` runtime sidecar; live host sessions and leases are not serialized into `project.json`. See the [local multi-process lease contract](architecture.md#edit-leases) for lifecycle and backup restrictions. Unknown project or document versions are rejected rather than silently interpreted.
+The document and its successful command history are committed together. `project.json` is replaced atomically; history entries are appended to `.cadyx-history.jsonl` and fsynced before the project snapshot advances its committed history count and byte offset. A crash before the snapshot replacement leaves an ignored journal tail; a crash after it leaves the durable history and document revision together. Edit leases are stored separately in a per-project `.cadyx-leases.sqlite3` runtime sidecar; live host sessions and leases are not serialized into `project.json`. See the [local multi-process lease contract](architecture.md#edit-leases) for lifecycle and backup restrictions. Unknown project or document versions are rejected rather than silently interpreted.
+
+The private `$cadyx_storage` envelope stores the history journal pointer.
+Imported B-rep descriptors are stored once as hidden content-addressed
+`.cadyx-brep-<sha256>.json` files in the project directory; document and history
+geometry fields hold references. Workspace loading verifies referenced blobs
+and expands them, then loads the committed history prefix, before validation or
+API responses. Callers continue to see the ordinary project document and full
+command results. Legacy records with inline history and no storage envelope
+remain readable; their history moves to the journal on the next successful save.
+Any uncommitted journal tail is excluded by the saved byte offset and is
+truncated before a later append. Backups and project copies must include the
+complete project directory, including its hidden `.cadyx-*` files.
+Command execution, preview, and project-list summaries load the committed
+document plus the history pointer without parsing old journal entries. Full
+project inspection and compact history-change pages read and validate the
+committed history.
+The JSON example above describes the expanded project view. After the first
+successful command, the on-disk envelope stores `history: {file, count, bytes}`
+under `$cadyx_storage`; the history array is reconstructed from the journal when
+the workspace loads the project. A newly created empty project may retain the
+inline empty `history` array until its first command is committed.
 
 ## Existing workspace directories
 

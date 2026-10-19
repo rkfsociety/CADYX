@@ -238,6 +238,7 @@ class WebApiTests(unittest.TestCase):
                 saved = json.loads(path.read_text())
                 self.assertEqual(saved["version"], 1)
                 self.assertEqual(saved["document"]["version"], 11)
+                saved = self.core.workspace.load(project_id)
                 self.assertEqual(saved["history"][0]["actor_type"], owner)
                 self.core.release_lease(project_id, lease)
 

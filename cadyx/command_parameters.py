@@ -24,10 +24,7 @@ class ParameterCommands:
     ) -> dict[str, Any]:
         feature_id = command.get("feature_id")
         parameter_name = command.get("name")
-        feature = next(
-            (item for item in document.objects if item.get("id") == feature_id and item.get("type") == "feature"),
-            None,
-        )
+        feature = document.find_object(feature_id, "feature")
         if feature is None or feature.get("operation") != "create_box":
             if feature is None:
                 raise NotFoundError("Editable feature was not found.")
@@ -45,8 +42,7 @@ class ParameterCommands:
                 if progress is not None:
                     progress({"phase": "kernel_metric_thread"})
                 geometry = self.kernel.create_metric_thread(**parameters)
-                body = next((item for item in document.objects
-                             if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+                body = document.find_object(feature.get("body_id"), "body")
                 if body is None:
                     raise ValidationError("Metric thread feature refers to a missing body.")
                 feature["parameters"], feature["geometry"], body["geometry"] = parameters, geometry, geometry
@@ -160,8 +156,7 @@ class ParameterCommands:
                 if progress is not None:
                     progress({"phase": "prepare_profile"})
                 geometry = self._profile_geometry(document, feature, parameters, progress=progress)
-                body = next((item for item in document.objects
-                             if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+                body = document.find_object(feature.get("body_id"), "body")
                 if body is None:
                     raise ValidationError("Profile feature refers to a missing body.")
                 feature["parameters"] = parameters
@@ -176,8 +171,7 @@ class ParameterCommands:
                 parameters["radius"] = value
                 plane, path = open_path(document.objects, feature.get("source_sketch_id"))
                 geometry = self.kernel.create_swept_pipe(path, plane=plane, radius=value)
-                body = next((item for item in document.objects
-                             if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+                body = document.find_object(feature.get("body_id"), "body")
                 if body is None:
                     raise ValidationError("Sweep feature refers to a missing body.")
                 feature["parameters"], feature["geometry"], body["geometry"] = parameters, geometry, geometry
@@ -187,10 +181,8 @@ class ParameterCommands:
                 value = _number(command.get("value"), "distance", positive=True)
                 parameters = dict(feature["parameters"])
                 parameters["distance"] = value
-                source = next((item for item in document.objects
-                               if item.get("id") == feature.get("source_body_id") and item.get("type") == "body"), None)
-                body = next((item for item in document.objects
-                             if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+                source = document.find_object(feature.get("source_body_id"), "body")
+                body = document.find_object(feature.get("body_id"), "body")
                 if source is None or body is None:
                     raise ValidationError("Chamfer feature refers to a missing source or result body.")
                 from .advanced_features import _advanced_native
@@ -202,10 +194,8 @@ class ParameterCommands:
                 value = _number(command.get("value"), "radius")
                 parameters = dict(feature["parameters"])
                 parameters["radius"] = value
-                source = next((item for item in document.objects
-                               if item.get("id") == feature.get("source_body_id") and item.get("type") == "body"), None)
-                body = next((item for item in document.objects
-                             if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+                source = document.find_object(feature.get("source_body_id"), "body")
+                body = document.find_object(feature.get("body_id"), "body")
                 if source is None or body is None:
                     raise ValidationError("Fillet feature refers to a missing body.")
                 geometry = self.kernel.create_fillet(source["geometry"],
@@ -245,10 +235,8 @@ class ParameterCommands:
                                  "count, angle_step_degrees, and full_circle" if operation == "circular_pattern_body"
                                  else "diameter and depth")
                     raise ValidationError(f"Only {supported} parameters are supported for this feature.")
-                source = next((item for item in document.objects
-                               if item.get("id") == feature.get("source_body_id") and item.get("type") == "body"), None)
-                body = next((item for item in document.objects
-                             if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+                source = document.find_object(feature.get("source_body_id"), "body")
+                body = document.find_object(feature.get("body_id"), "body")
                 if source is None or body is None:
                     raise ValidationError("Advanced feature refers to a missing source or result body.")
                 operation_id = {"linear_pattern_body": 6, "circular_pattern_body": 7,
@@ -278,10 +266,7 @@ class ParameterCommands:
         geometry = self.kernel.create_box(**parameters)
         feature["parameters"] = parameters
         feature["geometry"] = geometry
-        body = next(
-            (item for item in document.objects if item.get("id") == feature.get("body_id") and item.get("type") == "body"),
-            None,
-        )
+        body = document.find_object(feature.get("body_id"), "body")
         if body is None:
             raise ValidationError("Box feature refers to a missing body.")
         body["geometry"] = geometry
@@ -383,7 +368,7 @@ class ParameterCommands:
             raise ValidationError("Parameter binding needs object_id, path, and expression strings.")
         staged = deepcopy(document)
         self._prepare_edge_references(staged)
-        target = next((item for item in staged.objects if item.get("id") == object_id), None)
+        target = staged.find_object(object_id)
         if target is None:
             raise NotFoundError("Parameter binding target was not found.")
         result = evaluate_expression(expression, self._model_parameter_values(staged))
@@ -567,14 +552,12 @@ class ParameterCommands:
         progress: Callable[[dict[str, Any]], None] | None = None,
         rebuild_derived: bool = True,
     ) -> None:
-        feature = next((item for item in document.objects
-                        if item.get("id") == feature_id and item.get("type") == "feature"), None)
+        feature = document.find_object(feature_id, "feature")
         if feature is None:
             raise NotFoundError("Bound feature was not found.")
         operation = feature.get("operation")
         parameters = feature.get("parameters")
-        body = next((item for item in document.objects
-                     if item.get("id") == feature.get("body_id") and item.get("type") == "body"), None)
+        body = document.find_object(feature.get("body_id"), "body")
         if body is None or not isinstance(parameters, dict):
             raise ValidationError("Bound feature is missing its result body or parameters.")
         if operation == "create_box":
@@ -604,8 +587,7 @@ class ParameterCommands:
             rotation_axis, angle, _, _ = _workplane_rotation(normal, x_axis)
             geometry = _agent_native(temporary, 2, [*rotation_axis, angle, *origin])
         elif operation in {"boss", "hole", "linear_pattern_body", "circular_pattern_body"}:
-            source = next((item for item in document.objects
-                           if item.get("id") == feature.get("source_body_id") and item.get("type") == "body"), None)
+            source = document.find_object(feature.get("source_body_id"), "body")
             if source is None:
                 raise ValidationError("Bound feature source body was not found.")
             operation_id = {"linear_pattern_body": 6, "circular_pattern_body": 7,

@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 from cadyx.errors import NotFoundError
 from cadyx.workspace import ProjectWorkspace
@@ -58,6 +59,33 @@ class ProjectWorkspaceTests(unittest.TestCase):
         self.assertEqual(saved["document"], document_before)
         self.assertEqual(saved["history"], [])
         self.assertEqual([item["id"] for item in ProjectWorkspace(self.root).list()], [project["id"]])
+
+    def test_rename_preserves_external_history_and_geometry_blobs(self) -> None:
+        project = self.workspace.create("Stored project")
+        project = self.workspace.load(project["id"])
+        project["document"]["revision"] = 1
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        geometry = {"kernel": "occt-v1", "kind": "imported_brep", "data": "QUJD", "volume": 1.0,
+                    "brep_valid": True}
+        project["document"]["objects"] = [
+            {"id": body_id, "type": "body", "name": "Imported", "feature_ids": [feature_id],
+             "geometry": geometry},
+            {"id": feature_id, "type": "feature", "operation": "test_geometry", "body_id": body_id,
+             "geometry": geometry},
+        ]
+        project["history"].append({
+            "actor_type": "system", "actor_id": "test", "command": {"type": "import_step"},
+            "timestamp": "2026-10-19T00:00:00+00:00", "revision": 1,
+            "result": {"geometry": geometry},
+        })
+        self.workspace.save(project)
+
+        renamed = self.workspace.rename(project["id"], "Renamed stored project")
+        restored = ProjectWorkspace(self.root).load(project["id"])
+
+        self.assertEqual(renamed["name"], "Renamed stored project")
+        self.assertEqual(restored["history"][0]["result"]["geometry"], geometry)
+        self.assertEqual(len(list(self.workspace._project_dir(project["id"]).glob(".cadyx-brep-*.json"))), 1)
 
     def test_rename_chooses_available_directory_without_overwriting(self) -> None:
         project = self.workspace.create("Old name")
@@ -139,6 +167,69 @@ class ProjectWorkspaceTests(unittest.TestCase):
 
         self.assertEqual(replace.call_count, 2)
         self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"new": True})
+
+    def test_project_storage_deduplicates_repeated_imported_brep_and_loads_full_history(self) -> None:
+        project = self.workspace.create("B-rep storage")
+        geometry = {
+            "kernel": "occt-v1", "kind": "imported_brep", "data": "A" * 12000,
+            "volume": 1.0, "brep_valid": True,
+        }
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        project["document"]["revision"] = 1
+        project["document"]["objects"] = [
+            {"id": body_id, "type": "body", "name": "Imported", "feature_ids": [feature_id],
+             "geometry": geometry},
+            {"id": feature_id, "type": "feature", "operation": "test_geometry", "body_id": body_id,
+             "geometry": geometry},
+        ]
+        project["history"] = [{
+            "actor_type": "system", "actor_id": "test", "command": {"type": "import_step"},
+            "timestamp": "2026-10-19T00:00:00+00:00", "revision": 1,
+            "result": {"body_id": body_id, "geometry": geometry},
+        }]
+
+        self.workspace.save(project)
+        project_file = self.workspace._project_dir(project["id"]) / "project.json"
+        stored = json.loads(project_file.read_text(encoding="utf-8"))
+        restored = self.workspace.load(project["id"])
+
+        self.assertEqual(stored["$cadyx_storage"]["history"]["count"], 1)
+        geometry_ref = stored["document"]["objects"][0]["geometry"]
+        self.assertEqual(geometry_ref, stored["document"]["objects"][1]["geometry"])
+        self.assertEqual(len(list(project_file.parent.glob(".cadyx-brep-*.json"))), 1)
+        history_path = project_file.parent / ".cadyx-history.jsonl"
+        history_record = json.loads(history_path.read_text(encoding="utf-8").splitlines()[0])
+        self.assertEqual(history_record["result"]["geometry"], geometry_ref)
+        self.assertNotIn("A" * 1000, project_file.read_text(encoding="utf-8"))
+        self.assertNotIn("A" * 1000, history_path.read_text(encoding="utf-8"))
+        self.assertEqual(restored["document"]["objects"][0]["geometry"], geometry)
+        self.assertEqual(restored["document"]["objects"][1]["geometry"], geometry)
+        self.assertEqual(restored["history"][0]["result"]["geometry"], geometry)
+
+        with history_path.open("ab") as stream:
+            stream.write(b'{"torn":')
+        loaded = self.workspace.load(project["id"], include_history=False)
+        self.assertEqual(loaded["history"], [])
+        self.assertEqual(loaded["_history_count"], 1)
+        loaded["document"]["revision"] = 2
+        next_entry = dict(restored["history"][0])
+        next_entry["revision"] = 2
+        loaded["history"].append(next_entry)
+        with patch("cadyx.workspace_projects.ProjectRecordStore.write_atomic", side_effect=OSError("replace failed")):
+            with self.assertRaisesRegex(OSError, "replace failed"):
+                self.workspace.save(loaded, validated_history_prefix=1)
+
+        self.assertEqual(len(self.workspace.load(project["id"])["history"]), 1)
+        loaded = self.workspace.load(project["id"], include_history=False)
+        loaded["document"]["revision"] = 2
+        next_entry = dict(restored["history"][0])
+        next_entry["revision"] = 2
+        loaded["history"].append(next_entry)
+        self.workspace.save(loaded, validated_history_prefix=1)
+
+        recovered = self.workspace.load(project["id"])
+        self.assertEqual([entry["revision"] for entry in recovered["history"]], [1, 2])
+        self.assertTrue(history_path.read_bytes().endswith(b"\n"))
 
     def test_legacy_uuid_folder_remains_readable_and_folder_api_hides_project_metadata(self) -> None:
         project = self.workspace.create("Старая кружка")

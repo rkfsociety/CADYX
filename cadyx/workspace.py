@@ -15,7 +15,6 @@ from typing import Any, Iterator
 from uuid import uuid4
 
 from .errors import ConflictError, NotFoundError, ValidationError
-from .migrations import migrate_project
 from .workspace_files import WorkspaceArtifactStore, _is_single_path_segment
 from .workspace_groups import ProjectGroupStore
 from .workspace_projects import ProjectRecordStore, _PROJECT_ID
@@ -168,7 +167,8 @@ class ProjectWorkspace:
         project["modified_at"] = utc_now()
         try:
             source.rename(target)
-            self._projects.write_atomic(target / "project.json", project)
+            self._projects.invalidate_history_state(target / "project.json")
+            self._projects.save(target, project)
         except OSError as exc:
             if target.exists() and not source.exists():
                 try:
@@ -191,19 +191,28 @@ class ProjectWorkspace:
     def _new_project_record(project_id: str, name: str) -> dict[str, Any]:
         return ProjectRecordStore.new_record(project_id, name, timestamp=utc_now())
 
-    def load(self, project_id: str) -> dict[str, Any]:
-        return self._load_project_from_directory(self._project_dir(project_id), project_id)
+    def load(self, project_id: str, *, include_history: bool = True) -> dict[str, Any]:
+        return self._load_project_from_directory(
+            self._project_dir(project_id), project_id, include_history=include_history,
+        )
 
-    def _load_project_from_directory(self, directory: Path, project_id: str) -> dict[str, Any]:
-        project = self._projects.load(directory, project_id)
+    def _load_project_from_directory(
+        self, directory: Path, project_id: str, *, include_history: bool = True,
+    ) -> dict[str, Any]:
+        project = self._projects.load(directory, project_id, include_history=include_history)
         self._remember_project_path(project_id, directory)
         return project
 
-    def save(self, project: dict[str, Any]) -> None:
-        project = migrate_project(project)
+    def save(
+        self, project: dict[str, Any], *, validated_history_prefix: int = 0,
+        document_validated: bool = False,
+    ) -> None:
         project_id = project.get("id") if isinstance(project, dict) else None
         project_dir = self._project_dir(project_id)
-        self._projects.save(project_dir, project)
+        self._projects.save(
+            project_dir, project, validated_history_prefix=validated_history_prefix,
+            document_validated=document_validated,
+        )
 
     def record_validation(
         self, project_id: str, kind: str, result: dict[str, Any]
@@ -233,7 +242,7 @@ class ProjectWorkspace:
                     code="DUPLICATE_PROJECT_ID",
                 )
             seen_ids.add(project_id)
-            projects.append(self._load_project_from_directory(entry, project_id))
+            projects.append(self._load_project_from_directory(entry, project_id, include_history=False))
         projects.sort(key=lambda item: (item["name"].casefold(), item["id"]))
         return projects
 

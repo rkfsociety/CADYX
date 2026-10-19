@@ -12,6 +12,7 @@ from cadyx.core import CadyxCore
 from cadyx.errors import LeaseRequiredError, ValidationError
 from cadyx.kernel import PrimitiveKernelAdapter
 from cadyx.models import Document
+from cadyx.migrations import DOCUMENT_VERSION
 from cadyx.sketches import closed_profile, open_path
 from cadyx.sketch_solver import solve_sketch
 
@@ -499,12 +500,13 @@ class SketchDocumentTests(unittest.TestCase):
         lease = self.core.acquire_lease(project, "human", "legacy")["lease_id"]
         box = self.core.execute_command(project, lease, {"type": "create_box", "width": 2, "height": 3, "depth": 4})
         path = self.core.workspace._project_dir(project) / "project.json"
-        legacy = json.loads(path.read_text())
+        legacy = self.core.workspace.load(project)
         legacy["document"]["version"] = 1
+        legacy["document"].pop("assembly", None)
         path.write_text(json.dumps(legacy))
         before = path.read_bytes()
         inspected = self.core.inspect_project(project)
-        self.assertEqual(inspected["document"]["version"], 9)
+        self.assertEqual(inspected["document"]["version"], DOCUMENT_VERSION)
         self.assertEqual(inspected["document"]["objects"], legacy["document"]["objects"])
         self.assertEqual(inspected["history"], legacy["history"])
         self.assertEqual(path.read_bytes(), before)
@@ -513,8 +515,8 @@ class SketchDocumentTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), before)
         feature = box["history_entry"]["result"]["feature_id"]
         self.core.execute_command(project, lease, {"type": "set_parameter", "feature_id": feature, "name": "width", "value": 5})
-        persisted = json.loads(path.read_text())
-        self.assertEqual(persisted["document"]["version"], 8)
+        persisted = self.core.workspace.load(project)
+        self.assertEqual(persisted["document"]["version"], DOCUMENT_VERSION)
         self.assertEqual(persisted["history"][0], legacy["history"][0])
         self.assertEqual(persisted["document"]["objects"][1]["id"], feature)
 

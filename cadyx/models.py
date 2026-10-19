@@ -39,6 +39,7 @@ class Document:
     model_parameters: dict[str, dict[str, Any]] = field(default_factory=dict)
     parameter_bindings: list[dict[str, str]] = field(default_factory=list)
     assembly: dict[str, Any] = field(default_factory=empty_assembly)
+    _command_object_index: dict[str, dict[str, Any]] | None = field(default=None, init=False, repr=False)
 
     @classmethod
     def create(cls) -> Document:
@@ -64,16 +65,81 @@ class Document:
         document.validate()
         return document
 
-    def to_dict(self) -> dict[str, Any]:
+    @classmethod
+    def from_current_dict(cls, value: dict[str, Any]) -> Document:
+        """Bind and validate a current-version snapshot without migrating or copying it."""
+        if not isinstance(value, dict) or value.get("version") != DOCUMENT_VERSION:
+            raise ValidationError("Document is not in the current version.")
+        document = cls(
+            id=value.get("id", ""),
+            version=value["version"],
+            revision=value.get("revision", 0),
+            objects=value.get("objects", []),
+            model_parameters=value.get("model_parameters", {}),
+            parameter_bindings=value.get("parameter_bindings", []),
+            assembly=value.get("assembly", empty_assembly()),
+        )
+        document.validate()
+        return document
+
+    @classmethod
+    def from_validated_dict(cls, value: dict[str, Any]) -> Document:
+        """Bind a current snapshot already validated by ProjectRecordStore.load."""
+        if not isinstance(value, dict) or type(value.get("version")) is not int or value["version"] != DOCUMENT_VERSION:
+            raise ValidationError("Document is not in the current version.")
+        return cls(
+            id=value.get("id", ""),
+            version=value["version"],
+            revision=value.get("revision", 0),
+            objects=value.get("objects", []),
+            model_parameters=value.get("model_parameters", {}),
+            parameter_bindings=value.get("parameter_bindings", []),
+            assembly=value.get("assembly", empty_assembly()),
+        )
+
+    def to_dict(self, *, copy_objects: bool = True) -> dict[str, Any]:
+        objects = deepcopy(self.objects) if copy_objects else self.objects
+        model_parameters = deepcopy(self.model_parameters) if copy_objects else self.model_parameters
+        parameter_bindings = deepcopy(self.parameter_bindings) if copy_objects else self.parameter_bindings
+        assembly = deepcopy(self.assembly) if copy_objects else self.assembly
         return {
             "id": self.id,
             "version": self.version,
             "revision": self.revision,
-            "objects": deepcopy(self.objects),
-            "model_parameters": deepcopy(self.model_parameters),
-            "parameter_bindings": deepcopy(self.parameter_bindings),
-            "assembly": deepcopy(self.assembly),
+            "objects": objects,
+            "model_parameters": model_parameters,
+            "parameter_bindings": parameter_bindings,
+            "assembly": assembly,
         }
+
+    def clone(self) -> Document:
+        """Return an isolated copy of an already-current, already-validated document."""
+        return Document(
+            id=self.id,
+            version=self.version,
+            revision=self.revision,
+            objects=deepcopy(self.objects),
+            model_parameters=deepcopy(self.model_parameters),
+            parameter_bindings=deepcopy(self.parameter_bindings),
+            assembly=deepcopy(self.assembly),
+        )
+
+    def find_object(self, object_id: str, object_type: str | None = None) -> dict[str, Any] | None:
+        """Find an object, using the command-scoped id index when one is active."""
+        if self._command_object_index is not None:
+            item = self._command_object_index.get(object_id)
+            if item is not None and item.get("id") != object_id:
+                item = None
+            if item is None:
+                # Commands can create objects or replace an id while running.
+                item = next((candidate for candidate in self.objects
+                             if candidate.get("id") == object_id), None)
+        else:
+            item = next((candidate for candidate in self.objects
+                         if candidate.get("id") == object_id), None)
+        if item is not None and object_type is not None and item.get("type") != object_type:
+            return None
+        return item
 
     def validate(self) -> None:
         typed_id(self.id, "document")

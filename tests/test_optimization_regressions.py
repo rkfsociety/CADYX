@@ -5,14 +5,31 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from cadyx.curve_editing import _latest_version
+from cadyx.commands import CommandSystem
 from cadyx.errors import ValidationError
 from cadyx.events import EventBroker
+from cadyx.kernel import PrimitiveKernelAdapter
 from cadyx.models import Document
 
 
 class _MembershipTrap(list):
     def __contains__(self, value):
         raise AssertionError(f"linear feature-id membership scan used for {value!r}")
+
+
+class _ObjectScanTrap(list):
+    def __iter__(self):
+        raise AssertionError("linear document object lookup used")
+
+
+class _CountingObjectList(list):
+    def __init__(self, values):
+        super().__init__(values)
+        self.iterations = 0
+
+    def __iter__(self):
+        self.iterations += 1
+        return super().__iter__()
 
 
 class _UnexpectedTraceLookup(dict):
@@ -49,6 +66,34 @@ class OptimizationRegressionTests(unittest.TestCase):
         )
 
         document.validate()
+
+    def test_document_clone_isolated_and_id_index_avoids_object_scan(self):
+        object_id = f"body:{uuid4()}"
+        item = {"id": object_id, "type": "body", "name": "Original", "feature_ids": []}
+        document = Document(id=f"document:{uuid4()}", objects=[item])
+        clone = document.clone()
+        clone.objects[0]["name"] = "Clone"
+
+        self.assertEqual(document.objects[0]["name"], "Original")
+        isolated = document.to_dict()
+        persistence_view = document.to_dict(copy_objects=False)
+        self.assertIsNot(isolated["objects"], document.objects)
+        self.assertIs(persistence_view["objects"], document.objects)
+        document._command_object_index = {object_id: item}
+        document.objects = _ObjectScanTrap()
+        self.assertIs(document.find_object(object_id, "body"), item)
+        self.assertIsNone(document.find_object(object_id, "feature"))
+
+    def test_command_builds_one_object_id_index_for_all_reference_lookups(self):
+        object_id = f"body:{uuid4()}"
+        item = {"id": object_id, "type": "body"}
+        objects = _CountingObjectList([item])
+        document = Document(id=f"document:{uuid4()}", objects=objects)
+        commands = CommandSystem(PrimitiveKernelAdapter())
+        commands._extension_execute = lambda staged, command, **kwargs: staged.find_object(object_id)
+
+        self.assertIs(commands.execute(document, {"type": "create_sketch"}), item)
+        self.assertEqual(objects.iterations, 1)
 
     def test_dashboard_publish_scans_active_projects_once_and_keeps_input_isolated(self):
         broker = _CountingEventBroker()

@@ -28,8 +28,7 @@ class RebuildCommands:
                             or parameters.get("sketch_id"))
         operation = feature.get("operation")
         if operation in {"pad_sketch_to_body", "rib_from_sketch", "pocket_sketch"}:
-            sketch = next((item for item in document.objects if item.get("id") == source_sketch_id
-                           and item.get("type") == "sketch"), None)
+            sketch = document.find_object(source_sketch_id, "sketch")
             if sketch is None:
                 raise ValidationError("Manufacturing feature source sketch is missing.")
             plane, profiles = closed_profiles(document.objects, source_sketch_id)
@@ -49,8 +48,7 @@ class RebuildCommands:
                 shift = [0.0, 0.0, 0.0]
                 shift[2 if plane == "XY" and axis == "Z" else 1] = offset
                 tool = self.kernel.translate_solid(tool, shift)
-            source_body = next((item for item in document.objects if item.get("id") == feature.get("source_body_id")
-                                and item.get("type") == "body"), None)
+            source_body = document.find_object(feature.get("source_body_id"), "body")
             if source_body is None:
                 raise ValidationError("Manufacturing feature source body is missing.")
             if operation == "pocket_sketch":
@@ -106,7 +104,7 @@ class RebuildCommands:
             for group in groups:
                 group_profiles, group_offsets = [], []
                 for sketch_id in group:
-                    sketch = next((item for item in document.objects if item.get("id") == sketch_id), None)
+                    sketch = document.find_object(sketch_id)
                     if sketch is None:
                         raise ValidationError("Loft section sketch is missing.")
                     axis = sketch.get("section_normal_axis")
