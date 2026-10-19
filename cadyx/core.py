@@ -443,6 +443,55 @@ class CadyxCore:
     ) -> dict[str, Any]:
         return self._engineering_validation.validate_body_thickness(project_id, body_id, expected_revision, minimum_thickness, tolerance, progress=progress, persist=persist, method=method)
 
+    def list_revision_checkpoints(
+        self, project_id: str, *, offset: int = 0, limit: int = 50,
+    ) -> dict[str, Any]:
+        """List actual archived model checkpoints, not inferred history states."""
+        project = self.workspace.load(project_id)
+        return self.workspace.revision_archive(project_id).list(project, offset=offset, limit=limit)
+
+    def compare_model_revisions(
+        self, project_id: str, before: dict[str, Any], after: dict[str, Any], *,
+        expected_revision: int, absolute_tolerance: float = 1e-8,
+        relative_tolerance: float = 1e-9,
+    ) -> dict[str, Any]:
+        """Compare two saved revisions or in-memory previews without a write lease."""
+        from .revision_diff import compare_documents
+
+        project = self.workspace.load(project_id)
+        self._check_revision(Document.from_dict(project["document"]), expected_revision)
+        archive = self.workspace.revision_archive(project_id)
+
+        def resolve(selector: Any) -> dict[str, Any]:
+            if not isinstance(selector, dict) or len(selector) != 1:
+                raise ValidationError("Each comparison selector needs exactly revision or proposal_id.")
+            if "revision" in selector:
+                return Document.from_dict(archive.load(project, selector["revision"])).to_dict()
+            if "proposal_id" in selector:
+                proposal_id = selector["proposal_id"]
+                if not isinstance(proposal_id, str) or not proposal_id:
+                    raise ValidationError("proposal_id must be nonempty text.")
+                with self._proposal_guard:
+                    proposal = self._command_proposals.get(proposal_id)
+                    if proposal is None or proposal["project_id"] != project_id:
+                        raise ValidationError("Proposal is unavailable for this project.",
+                                              code="REVISION_UNAVAILABLE")
+                    document = copy.deepcopy(proposal["document"])
+                return Document.from_dict(document).to_dict()
+            raise ValidationError("Comparison selector must contain revision or proposal_id.")
+
+        first = resolve(before)
+        second = resolve(after)
+        result = compare_documents(
+            first, second, self.kernel,
+            absolute_tolerance=absolute_tolerance, relative_tolerance=relative_tolerance,
+        )
+        result["project_id"] = project_id
+        result["current_revision"] = project["document"]["revision"]
+        result["selectors"] = {"before": copy.deepcopy(before), "after": copy.deepcopy(after)}
+        result["snapshot_provenance"] = "saved_archive_or_process_local_preview"
+        return result
+
     def check_project(
         self, project_id: str, expected_revision: Any, **options: Any,
     ) -> dict[str, Any]:
