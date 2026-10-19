@@ -49,7 +49,7 @@
 @media(max-width:920px){.primary-grid[data-view=overview]>.inspector-column{display:none!important}}
 body:has(#primary-grid[data-view="projects"]) .topbar{grid-template-columns:auto minmax(0,1fr) auto!important;grid-template-areas:"brand project sync"!important;gap:0;padding-right:22px!important;border-bottom:0!important}
 body:has(#primary-grid[data-view="projects"]) .topbar-project{justify-self:end;min-width:max-content;align-items:center;gap:12px;padding:0;border:0}
-body:has(#primary-grid[data-view="projects"]) .agent-owner-chip{display:inline-flex;height:32px;align-items:center;justify-content:center;box-sizing:border-box;line-height:1;white-space:nowrap}
+
 body:has(#primary-grid[data-view="projects"]) .topbar-project>.project-light,body:has(#primary-grid[data-view="projects"]) .topbar-project>.topbar-project-copy{display:none!important}
 body:has(#primary-grid[data-view="projects"]) .project-detail{grid-template-columns:56px minmax(0,1fr)!important}
 body:has(#primary-grid[data-view="projects"]) .section-sidebar{display:none!important}

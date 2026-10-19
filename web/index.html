@@ -93,32 +93,6 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .header-revision::before { content: "РЕВ"; color: var(--dim); font: 10px var(--mono); letter-spacing: .08em; }
 .header-revision .topbar-label { display: none; }
 .header-revision strong { color: var(--muted); font: 11px var(--mono); }
-.agent-owner-chip {
-  position: relative;
-  display: inline-flex;
-  min-width: 52px;
-  min-height: 32px;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  padding: 5px 11px;
-  border: 1px solid #6c3a1d;
-  border-radius: 6px;
-  color: #ffad73;
-  background: #22140c;
-  font: 700 11px var(--mono);
-  letter-spacing: .05em;
-}
-.agent-owner-indicator { position: absolute; left: 8px; top: 50%; line-height: 1; transform: translateY(-50%); }
-.agent-owner-label { position: absolute; left: 50%; top: 50%; line-height: 1; text-align: center; transform: translate(-50%, -50%); }
-.agent-owner-chip[data-state="running"] {
-  border-color: #347c66;
-  color: var(--agent);
-  background: #10241f;
-  box-shadow: 0 0 18px #63d2ae14;
-}
-.agent-owner-chip[data-state="warning"] { border-color: #7a5a2b; color: var(--warning); background: #20180d; }
-.agent-owner-chip[data-state="failed"] { border-color: #744044; color: var(--danger); background: #201012; }
 .topbar-sync .project-light { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; background: transparent; box-shadow: none; color: var(--dim); }
 .topbar-sync .project-light.active { background: transparent; box-shadow: none; color: var(--text); }
 .topbar-sync .project-light svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -625,7 +599,6 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
           <div class="project-id-copy-row"><small id="project-short-id" class="project-short-id">—</small><button id="copy-project-id" class="copy-project-id" type="button" disabled title="Скопировать UUID проекта" aria-label="Скопировать UUID проекта">Копировать UUID</button></div>
         </div>
         <div class="header-revision"><span class="topbar-label">РЕВИЗИЯ</span><strong id="document-revision">—</strong></div>
-        <span id="agent-owner-chip" class="agent-owner-chip" data-state="idle"><span class="agent-owner-indicator" aria-hidden="true">○</span><span class="agent-owner-label">ИИ</span></span>
       </div>
     </header>
 
@@ -750,17 +723,12 @@ window.addEventListener("DOMContentLoaded", () => {
   const orthographic = document.querySelector(".orthographic-panel");
   const fourViewsButton = document.querySelector("#viewport-four-views");
   const workflowToggle = document.querySelector("#workflow-toggle");
-  const ownerChip = document.querySelector("#agent-owner-chip");
-  const ownerIndicator = ownerChip?.querySelector(".agent-owner-indicator");
-  const ownerLabel = ownerChip?.querySelector(".agent-owner-label");
   const copyProjectIdButton = document.querySelector("#copy-project-id");
   const documentKind = document.querySelector("#document-kind");
-  const lockStatus = document.querySelector("#workspace-lock-status");
-  const agentState = document.querySelector("#agent-state");
   const sourceProjectName = document.querySelector("#sidebar-project-name");
   const geometryRows = document.querySelector("#geometry-rows");
 
-  if (!detail || !grid || !sidebar || !navigation || !inspector || !workflow || !orthographic || !fourViewsButton || !workflowToggle || !ownerChip || !ownerIndicator || !ownerLabel) return;
+  if (!detail || !grid || !sidebar || !navigation || !inspector || !workflow || !orthographic || !fourViewsButton || !workflowToggle) return;
 
   /* Promote workspace navigation to the CAD workspace tab bar. */
   detail.prepend(navigation);
@@ -940,22 +908,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const syncShellState = () => {
     const locked = detail.dataset.controlsLocked === "true";
-    const reason = lockStatus?.textContent?.trim() || "";
-    const state = agentState?.dataset.state || "idle";
     const hasProject = !detail.hidden;
-    let indicator = "○";
-    let chipState = "idle";
-    let aiState = "idle";
-    if (!hasProject) indicator = "○";
-    else if (locked && /ИИ-АГЕНТ|АГЕНТ РАБОТАЕТ/.test(reason)) { indicator = "●"; chipState = "running"; aiState = "running"; }
-    else if (locked && /ВОССТАНОВЛЕНИЕ/.test(reason)) { indicator = "!"; chipState = "failed"; aiState = "failed"; }
-    else if (locked) { indicator = "◌"; chipState = "warning"; aiState = "warning"; }
-    else if (state === "failed") { indicator = "!"; chipState = "failed"; aiState = "failed"; }
-    else if (state === "running") { indicator = "●"; chipState = "running"; aiState = "running"; }
-    ownerIndicator.textContent = indicator;
-    ownerLabel.textContent = "ИИ";
-    ownerChip.dataset.state = chipState;
-    detail.dataset.aiState = aiState;
     fourViewsButton.disabled = locked;
     workflowToggle.disabled = locked;
     if (copyProjectIdButton) copyProjectIdButton.disabled = locked || !hasProject || documentKind?.textContent?.trim() !== "ПРОЕКТ";
@@ -964,8 +917,6 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const stateObserver = new MutationObserver(syncShellState);
   stateObserver.observe(detail, { attributes: true, attributeFilter: ["hidden", "data-controls-locked"] });
-  if (lockStatus) stateObserver.observe(lockStatus, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
-  if (agentState) stateObserver.observe(agentState, { attributes: true, attributeFilter: ["data-state"], childList: true, characterData: true, subtree: true });
   const viewObserver = new MutationObserver(() => { if (grid.dataset.view !== "overview" && grid.dataset.fourViews === "true") setFourViews(false); });
   viewObserver.observe(grid, { attributes: true, attributeFilter: ["data-view"] });
 
