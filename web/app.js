@@ -140,6 +140,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
 @media(max-width:760px){.projects-page-heading{padding:18px 14px 10px}.projects-list{padding:6px 14px 16px}.projects-toolbar select{width:145px}.projects-create-group{margin-left:auto}#projects-panel[data-layout="list"] .workspace-project-card{grid-template-columns:minmax(110px,34%) minmax(0,1fr);grid-template-rows:auto auto auto}.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-thumbnail{grid-column:1;grid-row:1/4;height:140px}.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-card-heading,.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-meta{grid-column:2}.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-actions{grid-column:2;grid-row:3;min-width:0;flex-direction:row}}
 @media(max-width:680px){:root{--cadyx-rail-width:48px;--cadyx-tree-width:52px}.project-detail{grid-template-columns:48px 52px minmax(0,1fr)!important}.project-detail[data-tree-collapsed=true]{grid-template-columns:48px 48px minmax(0,1fr)!important}.cad3-rail{gap:4px;padding:8px 4px}.cad3-rail button{width:36px;height:36px}}
 `;
+    style.textContent += '.cad3-model-tabs[hidden]{display:none!important}';
     document.head.appendChild(style);
     if(!$('.cad3-headrail')){const h=document.createElement('div');h.className='cad3-headrail';h.innerHTML=I.model;$('.topbar')?.prepend(h)}
     if(!$('.cad3-rail')){const r=document.createElement('nav');r.className='cad3-rail';r.setAttribute('aria-label','Основная навигация');r.innerHTML=`<button data-view="geometry" title="Геометрия">${I.model}</button><button data-view="files" title="Файлы">${I.files}</button><button data-view="projects" title="Проекты">${I.projects}</button><button data-view="activity" title="Активность">${I.activity}</button>`;detail.prepend(r);const syncRail=()=>{$$('[data-view]',r).forEach(b=>{const view=b.dataset.view,src=nav.querySelector(`[data-workspace-view="${view}"]`),active=view===(grid.dataset.view||'overview');b.setAttribute('aria-label',b.title);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');b.dataset.on=String(active);b.disabled=!src||src.disabled})};r.addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b||b.disabled)return;nav.querySelector(`[data-workspace-view="${b.dataset.view}"]`)?.click()});new MutationObserver(syncRail).observe(grid,{attributes:true,attributeFilter:['data-view']});new MutationObserver(syncRail).observe(nav,{subtree:true,attributes:true,attributeFilter:['disabled','aria-current']});syncRail()}
@@ -148,7 +149,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const rootIcon=$('.cad-tree-root-row .cad-tree-icon');if(rootIcon)rootIcon.innerHTML=I.model;
     let props=$('.cad3-props');if(!props){props=document.createElement('section');props.className='cad3-props cad-inspector-pane';inspector.append(props)}
     const overlay=document.createElement('canvas');overlay.className='cad3-overlay';panel.append(overlay);
-    const state={objects:[],byId:new Map(),scene:null,labels:new Map(),selected:null,selectionCleared:false,rev:null,project:null,parameters:{},bindings:[],activeModelBodyId:null};
+    const state={objects:[],byId:new Map(),scene:null,labels:new Map(),selected:null,selectionCleared:false,rev:null,project:null,parameters:{},bindings:[],assembly:null,activeModelBodyId:null};
     const opType=o=>meta[o?.operation]?.[0]||(o?.operation?`Операция: ${String(o.operation).replace(/_/g,' ')}`:'Элемент'), opIcon=o=>I[meta[o?.operation]?.[1]||'model'];
     function featureDetails(o){const p=o.parameters||{},fmt=v=>Number.isFinite(Number(v))?new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(Number(v)):null,mm=v=>{const n=fmt(v);return n===null?null:`${n} мм`},pos=Array.isArray(p.origin)?p.origin.slice(0,2).map((v,i)=>`${i?'Y':'X'}${fmt(v)}`).filter(x=>!x.endsWith('null')).join(', '):'';let d=[];switch(o.operation){case'create_box':d=[mm(p.width),mm(p.height),mm(p.depth)].filter(Boolean);return d.length?d.join(' × '):'';case'extrude_sketch':case'pad_sketch_to_body':case'rib_from_sketch':case'pocket_sketch':case'extrude_profile_on_plane':d=[mm(p.depth)];break;case'revolve_sketch':d=[p.angle_degrees==null?null:`${fmt(p.angle_degrees)}°`];break;case'boss':d=[p.diameter==null?null:`Ø${mm(p.diameter)}`,mm(p.depth)];break;case'hole':case'through_hole':case'counterbore_hole':case'countersink_hole':case'threaded_hole':d=[p.diameter==null?null:`Ø${mm(p.diameter)}`,p.hole_depth==null?null:mm(p.hole_depth),p.thread_size||null];break;case'fillet_edges':d=[p.radius==null?null:`R${mm(p.radius)}`];break;case'variable_fillet_edges':d=[p.start_radius==null?null:`R${mm(p.start_radius)}`,p.end_radius==null?null:`R${mm(p.end_radius)}`];break;case'chamfer_edges':d=[mm(p.distance)];break;case'shell_body':case'offset_body':d=[mm(p.thickness??p.offset)];break;case'draft_faces':d=[p.angle_degrees==null?null:`${fmt(p.angle_degrees)}°`];break;case'linear_pattern_body':case'circular_pattern_body':d=[p.count==null?null:`${fmt(p.count)} шт.`];break;default:return''}if(pos)d.push(pos);return d.filter(Boolean).join(' · ')}
     function makeLabels(){state.labels.clear();const count={sketch:0};const ops={};for(const o of state.objects){if(o.type==='sketch')state.labels.set(o.id,o.name&&o.name!=='Sketch'?o.name:`Эскиз ${String(++count.sketch).padStart(3,'0')}`);if(o.type==='feature'){const base=opType(o);ops[base]=(ops[base]||0)+1;const details=featureDetails(o);state.labels.set(o.id,o.name||`${base} ${String(ops[base]).padStart(3,'0')}${details?` · ${details}`:''}`)}}}
@@ -157,6 +158,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const sceneBody=id=>state.scene?.objects?.find(x=>x.object_id===id);
     function deps(o){if(!o)return[];const d=[];const add=(id,role)=>{if(id&&state.byId.has(id))d.push({id,role})};add(o.source_sketch_id,'Профиль');(o.source_sketch_ids||[]).forEach(id=>add(id,'Сечение'));add(o.source_body_id,'Исходное тело');add(o.base_body_id,'Основное тело');add(o.tool_body_id,'Инструментальное тело');for(const x of state.objects){if(x===o||x.type!=='feature')continue;if(x.source_sketch_id===o.id||(x.source_sketch_ids||[]).includes(o.id)||x.source_body_id===o.body_id||x.base_body_id===o.body_id||x.tool_body_id===o.body_id)add(x.id,'Используется в')}return d}
     const expandedFeatures=new Set();
+    const hasAssemblyStructure=()=>Boolean(state.assembly&&((state.assembly.instances||[]).length||(state.assembly.subassemblies||[]).length));
     function modelGroups(){
       const features=state.objects.filter(o=>o.type==='feature'),byBody=new Map(features.map(feature=>[feature.body_id,feature])),consumed=new Set();
       for(const feature of features)for(const id of [feature.source_body_id,feature.base_body_id,feature.tool_body_id])if(id)consumed.add(id);
@@ -167,34 +169,39 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if(!list)return;
       const query=(search?.value||'').toLowerCase().trim(),groups=modelGroups();
       if(!groups.some(group=>group.body.id===state.activeModelBodyId))state.activeModelBodyId=groups[0]?.body.id||null;
+      const modelSelectorVisible=hasAssemblyStructure()&&groups.length>1;
+      if(modelTabs)modelTabs.hidden=!modelSelectorVisible;
       modelTabs?.replaceChildren();
-      for(const group of groups){const tab=document.createElement('button');tab.type='button';tab.className='cad3-model-tab';tab.setAttribute('role','tab');tab.dataset.bodyId=group.body.id;tab.setAttribute('aria-selected',String(group.body.id===state.activeModelBodyId));tab.title=group.body.name;tab.textContent=group.body.name;tab.onclick=()=>{state.activeModelBodyId=group.body.id;renderTree()};modelTabs?.append(tab)}
+      if(modelSelectorVisible)for(const group of groups){const tab=document.createElement('button');tab.type='button';tab.className='cad3-model-tab';tab.setAttribute('role','tab');tab.dataset.bodyId=group.body.id;tab.setAttribute('aria-selected',String(group.body.id===state.activeModelBodyId));tab.title=group.body.name;tab.textContent=group.body.name;tab.onclick=()=>{state.activeModelBodyId=group.body.id;renderTree()};modelTabs?.append(tab)}
       list.replaceChildren();
-      const active=groups.find(group=>group.body.id===state.activeModelBodyId);if(!active)return;
-      const modelTitle=document.createElement('div');modelTitle.className='cad3-model-title';modelTitle.textContent=active.body.name;list.append(modelTitle);
-      const features=active.features;
-      for(const feature of features){
-        const sketchIds=[...new Set([feature.source_sketch_id,...(feature.source_sketch_ids||[])].filter(id=>state.byId.get(id)?.type==='sketch'))];
-        const sketchObjects=sketchIds.map(id=>state.byId.get(id));
-        const featureName=label(feature.id),matchesFeature=!query||featureName.toLowerCase().includes(query)||active.body.name.toLowerCase().includes(query);
-        const matchingSketches=sketchObjects.filter(sk=>!query||label(sk.id).toLowerCase().includes(query));
-        if(!matchesFeature&&matchingSketches.length===0)continue;
-        const node=document.createElement('div');node.className='cad3-tree-node';
-        const row=document.createElement('div');row.className='cad3-tree-parent-row';
-        const expanded=expandedFeatures.has(feature.id)||(!matchesFeature&&matchingSketches.length>0);
-        const disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-tree-disclosure';disclosure.disabled=!sketchObjects.length;disclosure.setAttribute('aria-label',expanded?'Свернуть исходные эскизы':'Показать исходные эскизы');disclosure.setAttribute('aria-expanded',String(expanded));disclosure.innerHTML='<span class="cad-tree-chevron">+</span>';
-        disclosure.onclick=()=>{if(expandedFeatures.has(feature.id))expandedFeatures.delete(feature.id);else expandedFeatures.add(feature.id);renderTree()};
-        const button=document.createElement('button');button.className='cad-tree-feature';button.type='button';button.dataset.id=feature.id;button.dataset.selected=String(feature.id===state.selected);button.innerHTML=`<span class="cad3-icon">${opIcon(feature)}</span><span class="cad-tree-label">${esc(featureName)}</span>`;button.onclick=()=>select(feature.id);
-        row.append(disclosure,button);node.append(row);
-        if(sketchObjects.length){const children=document.createElement('div');children.className='cad3-tree-children';children.hidden=!expanded;
-          for(const sketch of sketchObjects){if(query&&!matchesFeature&&!matchingSketches.includes(sketch))continue;const child=document.createElement('button');child.className='cad-tree-feature cad3-sketch-child';child.type='button';child.dataset.id=sketch.id;child.dataset.selected=String(sketch.id===state.selected);child.innerHTML=`<span class="cad3-icon">${I.sketch}</span><span class="cad-tree-label">${esc(label(sketch.id))}</span>`;child.onclick=()=>select(sketch.id,true);children.append(child)}
-          node.append(children);
+      const active=groups.find(group=>group.body.id===state.activeModelBodyId);
+      const visibleGroups=modelSelectorVisible?(active?[active]:[]):groups;
+      for(const group of visibleGroups){
+        const modelTitle=document.createElement('div');modelTitle.className='cad3-model-title';modelTitle.textContent=group.body.name;list.append(modelTitle);
+        const features=group.features;
+        for(const feature of features){
+          const sketchIds=[...new Set([feature.source_sketch_id,...(feature.source_sketch_ids||[])].filter(id=>state.byId.get(id)?.type==='sketch'))];
+          const sketchObjects=sketchIds.map(id=>state.byId.get(id));
+          const featureName=label(feature.id),matchesFeature=!query||featureName.toLowerCase().includes(query)||group.body.name.toLowerCase().includes(query);
+          const matchingSketches=sketchObjects.filter(sk=>!query||label(sk.id).toLowerCase().includes(query));
+          if(!matchesFeature&&matchingSketches.length===0)continue;
+          const node=document.createElement('div');node.className='cad3-tree-node';
+          const row=document.createElement('div');row.className='cad3-tree-parent-row';
+          const expanded=expandedFeatures.has(feature.id)||(!matchesFeature&&matchingSketches.length>0);
+          const disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-tree-disclosure';disclosure.disabled=!sketchObjects.length;disclosure.setAttribute('aria-label',expanded?'Свернуть исходные эскизы':'Показать исходные эскизы');disclosure.setAttribute('aria-expanded',String(expanded));disclosure.innerHTML='<span class="cad-tree-chevron">+</span>';
+          disclosure.onclick=()=>{if(expandedFeatures.has(feature.id))expandedFeatures.delete(feature.id);else expandedFeatures.add(feature.id);renderTree()};
+          const button=document.createElement('button');button.className='cad-tree-feature';button.type='button';button.dataset.id=feature.id;button.dataset.selected=String(feature.id===state.selected);button.innerHTML=`<span class="cad3-icon">${opIcon(feature)}</span><span class="cad-tree-label">${esc(featureName)}</span>`;button.onclick=()=>select(feature.id);
+          row.append(disclosure,button);node.append(row);
+          if(sketchObjects.length){const children=document.createElement('div');children.className='cad3-tree-children';children.hidden=!expanded;
+            for(const sketch of sketchObjects){if(query&&!matchesFeature&&!matchingSketches.includes(sketch))continue;const child=document.createElement('button');child.className='cad-tree-feature cad3-sketch-child';child.type='button';child.dataset.id=sketch.id;child.dataset.selected=String(sketch.id===state.selected);child.innerHTML=`<span class="cad3-icon">${I.sketch}</span><span class="cad-tree-label">${esc(label(sketch.id))}</span>`;child.onclick=()=>select(sketch.id,true);children.append(child)}
+            node.append(children);
+          }
+          list.append(node);
         }
-        list.append(node);
+        const hasSketches=features.some(feature=>feature.source_sketch_id||feature.source_sketch_ids?.length);
+        if(!hasSketches){const note=document.createElement('div');note.className='cad3-model-note';note.textContent='Редактируемого эскиза нет: основа детали импортирована из STEP.';list.append(note)}
       }
-      const hasSketches=features.some(feature=>feature.source_sketch_id||feature.source_sketch_ids?.length);
-      if(!hasSketches){const note=document.createElement('div');note.className='cad3-model-note';note.textContent='Редактируемого эскиза нет: основа детали импортирована из STEP.';list.append(note)}
-      const empty=$('#cad-tree-empty');if(empty)empty.hidden=!!features.length;
+      const empty=$('#cad-tree-empty');if(empty)empty.hidden=visibleGroups.some(group=>group.features.length>0);
     }
     search?.addEventListener('input',renderTree);
     function parameterHtml(o){const entries=Object.entries(o.parameters||{}).filter(([k])=>k!=='section_sketch_ids'&&k!=='section_sketch_groups');if(!entries.length)return'<dt>Параметры</dt><dd>Нет</dd>';return entries.map(([k,v])=>{const edit=(editable[o.operation]||[]).includes(k)&&typeof v==='number';const unit=k.includes('angle')?'°':typeof v==='number'?'мм':'';return`<dt>${esc(pLabel[k]||k)}</dt><dd>${edit?`<input data-p="${k}" data-original="${v}" value="${v}"> ${unit}`:esc(Array.isArray(v)?v.join(', '):v)}</dd>`}).join('')}
@@ -414,7 +421,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     canvas.addEventListener('pointerup',e=>{if(down?.pointerId!==e.pointerId)return;const click=e.button===0&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<6;down=null;if(click)pick(e)},true);
     canvas.addEventListener('pointercancel',()=>{down=null},true);
     const toolbar=$('.model-toolbar'),presets=$('#viewport-camera-presets'),fit=$('#viewport-fit'),four=$('#viewport-four-views'),divider=$('.viewport-toolbar-divider');if(toolbar&&presets&&fit&&four&&divider){detail.dataset.cadTool='orbit';fit.innerHTML=`${I.fit}<span class="toolbar-label">Вписать</span>`;fit.classList.add('cad3-tool');four.classList.add('cad3-tool');const views=document.createElement('details');views.className='cad3-views';views.innerHTML='<summary class="cad3-tool">Ракурсы ▾</summary>';views.append(presets);toolbar.replaceChildren(fit,four,divider,views)}
-    async function refresh(){const id=new URLSearchParams(location.search).get('project_id');if(!id||detail.hidden)return;try{const [info,scene]=await Promise.all([fetch(`/api/v1/projects/${encodeURIComponent(id)}`,{cache:'no-store'}).then(r=>r.json()),fetch(`/api/v1/projects/${encodeURIComponent(id)}/viewport`,{cache:'no-store'}).then(r=>r.json())]);if(scene.revision!==info.document.revision)return;const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};state.bindings=info.document.parameter_bindings||[];state.byId=new Map(state.objects.map(o=>[o.id,o]));state.scene=scene;makeLabels();if(projectChanged||(state.selected&&!state.byId.has(state.selected))){clearSelection();return}renderTree();state.selected?select(state.selected):renderProps(null);syncOverlay()}catch(e){console.debug('CAD semantic refresh',e)}}
+    async function refresh(){const id=new URLSearchParams(location.search).get('project_id');if(!id||detail.hidden)return;try{const [info,scene]=await Promise.all([fetch(`/api/v1/projects/${encodeURIComponent(id)}`,{cache:'no-store'}).then(r=>r.json()),fetch(`/api/v1/projects/${encodeURIComponent(id)}/viewport`,{cache:'no-store'}).then(r=>r.json())]);if(scene.revision!==info.document.revision)return;const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};state.bindings=info.document.parameter_bindings||[];state.assembly=info.document.assembly||null;state.byId=new Map(state.objects.map(o=>[o.id,o]));state.scene=scene;makeLabels();if(projectChanged||(state.selected&&!state.byId.has(state.selected))){clearSelection();return}renderTree();state.selected?select(state.selected):renderProps(null);syncOverlay()}catch(e){console.debug('CAD semantic refresh',e)}}
     let timer;const schedule=()=>{clearTimeout(timer);timer=setTimeout(refresh,80)};['#document-revision','#document-title'].forEach(s=>{const e=$(s);if(e)new MutationObserver(schedule).observe(e,{childList:true,subtree:true,characterData:true})});new MutationObserver(schedule).observe(detail,{attributes:true,attributeFilter:['hidden']});schedule();setTimeout(refresh,600);
   }
   const boot=()=>setTimeout(enhance,0);if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
