@@ -354,6 +354,7 @@ $("#workspace-navigation").addEventListener("click", (event) => {
   } else if (view === "analysis") {
     $("#comparison-panel").focus({ preventScroll: true });
     refreshValidationRecords().catch(showValidationRecordsError);
+    if (selectedProjectId && !getSelectedFolder()) refreshDetail().catch(handleRefreshError);
   } else if (view === "manufacturing") {
     $("#manufacturing-panel").focus({ preventScroll: true });
   } else if (view === "activity") {
@@ -1497,7 +1498,13 @@ async function refreshDetail() {
   const projectId = selectedProjectId;
   if (!projectId) return;
   const request = ++detailRequest;
-  const activity = await refreshActivitySnapshot(projectId);
+  const refreshAuxiliary = !renderedSceneKey?.startsWith(`${projectId}:`)
+    || detailedProjectModifiedAt === null
+    || !activityRevisionsByProject.has(projectId)
+    || !dashboardsByProject.has(projectId);
+  const activity = refreshAuxiliary
+    ? await refreshActivitySnapshot(projectId)
+    : (activitiesByProject.get(projectId) || []).slice(-1)[0] || null;
   if (projectId !== selectedProjectId || request !== detailRequest) return;
   if (activity?.state === "running") {
     $("#folder-detail").hidden = true;
@@ -1510,56 +1517,60 @@ async function refreshDetail() {
   const [info, scene, dashboard] = await Promise.all([
     api(`/api/v1/projects/${encodedProjectId}`),
     api(`/api/v1/projects/${encodedProjectId}/viewport`),
-    api(`/api/v1/projects/${encodedProjectId}/dashboard`),
+    refreshAuxiliary
+      ? api(`/api/v1/projects/${encodedProjectId}/dashboard`)
+      : Promise.resolve(null),
   ]);
   if (projectId !== selectedProjectId || request !== detailRequest) return;
   if (scene.revision !== info.document.revision) { scheduleWorkspaceRefresh(); return; }
   agentLocksByProject.set(projectId, info.lock);
   renderAgentActivity(activitiesByProject.get(projectId) || [], info.lock);
-  const dashboardRevision = Number.isInteger(dashboard.revision) ? dashboard.revision : 0;
-  const knownDashboardRevision = dashboardRevisionsByProject.get(projectId);
-  if (knownDashboardRevision === undefined || dashboardRevision >= knownDashboardRevision) {
-    dashboardRevisionsByProject.set(projectId, dashboardRevision);
-    dashboardsByProject.set(projectId, dashboard);
-    renderAgentDashboard(dashboard);
-  } else {
-    renderAgentDashboard(dashboardsByProject.get(projectId));
+  if (dashboard) {
+    const dashboardRevision = Number.isInteger(dashboard.revision) ? dashboard.revision : 0;
+    const knownDashboardRevision = dashboardRevisionsByProject.get(projectId);
+    if (knownDashboardRevision === undefined || dashboardRevision >= knownDashboardRevision) {
+      dashboardRevisionsByProject.set(projectId, dashboardRevision);
+      dashboardsByProject.set(projectId, dashboard);
+      renderAgentDashboard(dashboard);
+    }
   }
-  const comparison = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/comparison`);
-  if (projectId !== selectedProjectId || request !== detailRequest) return;
-  if (comparison.revision !== scene.revision) { scheduleWorkspaceRefresh(); return; }
-  $("#comparison-description").hidden = !comparison.available;
-  $("#comparison-empty").hidden = comparison.available;
-  $("#comparison-empty").textContent = "Для этого проекта пока нет данных сравнения.";
-  $("#comparison-preview").hidden = !comparison.available;
-  $("#comparison-panel").dataset.available = String(comparison.available);
-  if (comparison.available) {
-    const original = comparison.original, modified = comparison.modified;
-    const positions = [...modified.positions, ...original.positions];
-    const offset = modified.positions.length / 3;
-    const lines = [];
-    const edges = new Set();
-    for (let i = 0; i < original.triangles.length; i += 3) {
-      const triangle = original.triangles.slice(i, i + 3);
-      for (let j = 0; j < 3; j++) {
-        const a = triangle[j], b = triangle[(j + 1) % 3];
-        const key = a < b ? `${a}:${b}` : `${b}:${a}`;
-        if (!edges.has(key)) { edges.add(key); lines.push(a + offset, b + offset); }
+  if (refreshAuxiliary || primaryGrid.dataset.view === "analysis") {
+    const comparison = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/comparison`);
+    if (projectId !== selectedProjectId || request !== detailRequest) return;
+    if (comparison.revision !== scene.revision) { scheduleWorkspaceRefresh(); return; }
+    $("#comparison-description").hidden = !comparison.available;
+    $("#comparison-empty").hidden = comparison.available;
+    $("#comparison-empty").textContent = "Для этого проекта пока нет данных сравнения.";
+    $("#comparison-preview").hidden = !comparison.available;
+    $("#comparison-panel").dataset.available = String(comparison.available);
+    if (comparison.available) {
+      const original = comparison.original, modified = comparison.modified;
+      const positions = [...modified.positions, ...original.positions];
+      const offset = modified.positions.length / 3;
+      const lines = [];
+      const edges = new Set();
+      for (let i = 0; i < original.triangles.length; i += 3) {
+        const triangle = original.triangles.slice(i, i + 3);
+        for (let j = 0; j < 3; j++) {
+          const a = triangle[j], b = triangle[(j + 1) % 3];
+          const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+          if (!edges.has(key)) { edges.add(key); lines.push(a + offset, b + offset); }
+        }
       }
-    }
-    const canvas = $("#comparison-preview");
-    canvas.comparisonViewer ||= window.CadyxViewport.createViewer(canvas);
-    const comparisonKey = `${projectId}:${comparison.revision}`;
-    if (canvas.comparisonKey !== comparisonKey) {
-      const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
-      for (let i = 0; i < positions.length; i++) {
-        bounds.min[i % 3] = Math.min(bounds.min[i % 3], positions[i]);
-        bounds.max[i % 3] = Math.max(bounds.max[i % 3], positions[i]);
+      const canvas = $("#comparison-preview");
+      canvas.comparisonViewer ||= window.CadyxViewport.createViewer(canvas);
+      const comparisonKey = `${projectId}:${comparison.revision}`;
+      if (canvas.comparisonKey !== comparisonKey) {
+        const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+        for (let i = 0; i < positions.length; i++) {
+          bounds.min[i % 3] = Math.min(bounds.min[i % 3], positions[i]);
+          bounds.max[i % 3] = Math.max(bounds.max[i % 3], positions[i]);
+        }
+        canvas.comparisonViewer.load({ positions, triangles: modified.triangles, lines, points: [], bounds }, { reset: true });
+        canvas.comparisonKey = comparisonKey;
       }
-      canvas.comparisonViewer.load({ positions, triangles: modified.triangles, lines, points: [], bounds }, { reset: true });
-      canvas.comparisonKey = comparisonKey;
+      $("#comparison-metrics").textContent = `Объём: ${formatNumber(comparison.original_volume)} → ${formatNumber(comparison.modified_volume)} мм³ · Δ ${formatNumber(comparison.volume_delta)} мм³`;
     }
-    $("#comparison-metrics").textContent = `Объём: ${formatNumber(comparison.original_volume)} → ${formatNumber(comparison.modified_volume)} мм³ · Δ ${formatNumber(comparison.volume_delta)} мм³`;
   }
   detailedProjectId = projectId;
   detailedProjectModifiedAt = info.project.modified_at;
