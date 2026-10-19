@@ -174,9 +174,10 @@ class AgentRuntime:
         guard = _RunGuard(self.run_timeout_seconds, cancel_event)
         guard.check()
         current = self.core.observe_agent_operation(
-            project_id, "Изучает модель", lambda: self.core.inspect_project(project_id),
+            project_id, "Изучает модель",
+            lambda: self._compact_project_summary(project_id),
         )
-        revision_state = [current["document"]["revision"]]
+        revision_state = [current["revision"]]
         guard.check()
         result = self._run_loop(project_id, revision_state, prompt, system_prompt, guard)
         guard.check()
@@ -188,6 +189,11 @@ class AgentRuntime:
             tool_calls=result[2],
             tool_names=tuple(result[3]),
         )
+
+    def _compact_project_summary(self, project_id: str) -> dict[str, Any]:
+        summary = self.core.inspect_compact(project_id, section="summary")
+        summary["lock"] = self.core.leases.snapshot_for_listing(project_id)
+        return summary
 
     def _complete_provider(
         self,
@@ -231,12 +237,33 @@ class AgentRuntime:
                 raise ValidationError("This tool does not accept arguments.")
 
         def inspect_project(arguments: Mapping[str, Any]) -> dict[str, Any]:
-            no_arguments(arguments)
-            detail = self.core.observe_agent_operation(
-                project_id, "Изучает модель", lambda: self.core.inspect_project(project_id),
+            allowed = {
+                "full", "section", "expected_revision", "kind", "body_id", "shape",
+                "since_revision", "offset", "limit", "include_metrics",
+            }
+            if set(arguments) - allowed:
+                raise ValidationError("inspect_project received an unsupported option.")
+            if "full" in arguments and type(arguments["full"]) is not bool:
+                raise ValidationError("full must be a boolean.")
+            if arguments.get("full"):
+                if set(arguments) != {"full"}:
+                    raise ValidationError("full inspection cannot be combined with compact inspection options.")
+                result = self.core.observe_agent_operation(
+                    project_id, "Изучает полную модель",
+                    lambda: self.core.inspect_project(project_id),
+                )
+                revision_state[0] = result["document"]["revision"]
+                return result
+            options = {key: value for key, value in arguments.items() if key != "full"}
+            result = self.core.observe_agent_operation(
+                project_id, "Изучает модель",
+                lambda: (self._compact_project_summary(project_id) if not options
+                         else self.core.inspect_compact(project_id, **options)),
             )
-            revision_state[0] = detail["document"]["revision"]
-            return detail
+            if result.get("section") == "summary" and "lock" not in result:
+                result["lock"] = self.core.leases.snapshot_for_listing(project_id)
+            revision_state[0] = result["revision"]
+            return result
 
         def get_viewport(arguments: Mapping[str, Any]) -> dict[str, Any]:
             no_arguments(arguments)
@@ -418,7 +445,22 @@ class AgentRuntime:
                 develop_capability,
             ),
             "inspect_project": _RegisteredTool(
-                AgentToolSpec("inspect_project", "Read the current project, document, history and lock.", empty_schema),
+                AgentToolSpec("inspect_project", "Read a compact project summary by default; request bounded revision-bound entities, parameters, topology or changes with section options. Set full=true only when full B-rep geometry and command history are required.", {
+                    "type": "object",
+                    "properties": {
+                        "full": {"type": "boolean"},
+                        "section": {"type": "string", "enum": ["summary", "entities", "parameters", "topology", "changes"]},
+                        "expected_revision": {"type": "integer", "minimum": 0},
+                        "kind": {"type": "string"},
+                        "body_id": {"type": "string"},
+                        "shape": {"type": "string"},
+                        "since_revision": {"type": "integer", "minimum": 0},
+                        "offset": {"type": "integer", "minimum": 0},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        "include_metrics": {"type": "boolean"},
+                    },
+                    "additionalProperties": False,
+                }),
                 inspect_project,
             ),
             "get_viewport": _RegisteredTool(

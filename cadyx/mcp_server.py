@@ -237,6 +237,9 @@ class MCPApplication:
     def _project(project_id: str, suffix: str = "") -> str:
         return "/api/v1/agent/projects/" + urllib.parse.quote(project_id, safe="") + suffix
 
+    def _project_summary(self, project_id: str) -> dict[str, Any]:
+        return self.api.get(self._project(project_id, "/inspection?section=summary"))
+
     def call_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         try:
             value = self._dispatch(name, args)
@@ -577,7 +580,7 @@ class MCPApplication:
                         self._project(project_id, f"/leases/{urllib.parse.quote(lease_id, safe='')}/release"), {},
                     )
                 except (APIError, RuntimeError):
-                    latest = self.api.get(self._project(project_id))
+                    latest = self._project_summary(project_id)
                     if latest["lock"].get("state") != "FREE":
                         raise
             with self._lease_guard:
@@ -597,17 +600,17 @@ class MCPApplication:
                                  {"lease_id": lease_id} if lease_id else {"owner_id": self.owner_id})
         except APIError as exc:
             if isinstance(exc.payload, dict) and exc.payload.get("error") == "PROJECT_LOCKED":
-                detail = self.api.get(self._project(project_id))
+                detail = self._project_summary(project_id)
                 activities = self.api.get(self._project(project_id, "/activity")).get("activities", [])
                 if detail["lock"].get("state") == "FREE" and not any(item.get("state") == "running" for item in activities):
-                    return {"stopped": False, "command_already_finished": True, "revision": detail["document"]["revision"], "lock": detail["lock"]}
+                    return {"stopped": False, "command_already_finished": True, "revision": detail["revision"], "lock": detail["lock"]}
             raise
         finally:
             with self._lease_guard:
                 self._stop_requests.discard(project_id)
 
     def _resume_agent_work(self, project_id: str, expected_revision: int) -> Any:
-        detail = self.api.get(self._project(project_id))
+        detail = self._project_summary(project_id)
         if detail["lock"].get("state") != "FREE" or detail["lock"].get("recovery_required"):
             raise APIError(409, {"error": "PROJECT_LOCKED", "message": "Resume requires a confirmed FREE project with no stale lease."})
         result = self.api.post(self._project(project_id, "/resume"), {
@@ -620,7 +623,7 @@ class MCPApplication:
         return {"resumed": result.get("resumed"), "revision": result["document"]["revision"], "lease": result["lease"], "next_command_must_use_expected_revision": expected_revision}
 
     def _recover_expired(self, project_id: str) -> Any:
-        detail = self.api.get(self._project(project_id))
+        detail = self._project_summary(project_id)
         if not detail["lock"].get("recovery_required"):
             raise APIError(409, {"error": "LEASE_NOT_EXPIRED", "message": "The API does not confirm an expired lease; recovery was not attempted."})
         return self.api.post(self._project(project_id, "/leases/recover"), {})
@@ -644,7 +647,7 @@ def handle_message(message: dict[str, Any], app: MCPApplication) -> dict[str, An
         if method == "initialize":
             requested = params.get("protocolVersion")
             protocol_version = requested if requested == _PROTOCOL_VERSION else _PROTOCOL_VERSION
-            result = {"protocolVersion": protocol_version, "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "cadyx-operator", "version": "1.0.0"}, "instructions": "Use CADYX tools for every project/model operation; never use shell, direct filesystem writes, or browser input to edit CAD. For every modeling task, inspect cadyx_capabilities and reuse a compatible registered capability. If a required operation is missing, first determine whether a tested declarative capability can express it. If not, read the relevant source, propose focused tests and a bounded source patch with cadyx_develop_source_extension; CADYX runs tests only in its no-network Windows AppContainer and applies source only after success. A successful source update requires CADYX host restart before it is loaded; the saved model remains in its project. Inspect the current project and exact revision before each command. Mutations require the returned revision and an Agent API lease. Never replay a command after a lost response; inspect history, lock, and geometry. Use cadyx_stop_agent_work to fence active work."}
+            result = {"protocolVersion": protocol_version, "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "cadyx-operator", "version": "1.0.0"}, "instructions": "Use CADYX tools for every project/model operation; never use shell, direct filesystem writes, or browser input to edit CAD. For every modeling task, inspect cadyx_capabilities and reuse a compatible registered capability. If a required operation is missing, first determine whether a tested declarative capability can express it. If not, read the relevant source, propose focused tests and a bounded source patch with cadyx_develop_source_extension; CADYX runs tests only in its no-network Windows AppContainer and applies source only after success. A successful source update requires CADYX host restart before it is loaded; the saved model remains in its project. Inspect the compact project summary and exact revision before each command; use bounded compact inspection for details and full inspection only when geometry or history is required. cadyx_execute_command checks the revision and acquires/releases its agent lease inside one API request. Never replay a command after a lost response; inspect history, lock, and geometry. Use cadyx_stop_agent_work to fence active work."}
         elif method == "notifications/initialized" or method.startswith("notifications/"):
             return None
         elif method == "ping":
