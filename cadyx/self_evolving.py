@@ -20,7 +20,8 @@ from .errors import CadyxError, ValidationError, public_text
 from .models import Document
 
 _BLOCKED_COMMANDS = {
-    "clear_model", "remove_body", "remove_objects", "import_scan", "set_scan_parameter",
+    "clear_model", "remove_body", "remove_objects", "import_scan", "import_project_scan",
+    "set_scan_parameter",
     "import_step", "export_brep", "export_stl", "export_mesh",
 }
 _MAX_DEFINITION_BYTES = 256 * 1024

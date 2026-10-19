@@ -255,16 +255,18 @@ class WorkspaceArtifactStore:
         }
 
     @staticmethod
-    def publish_project_step(directory: Path, filename: str, content: bytes) -> dict[str, Any]:
+    def _publish_project_source(
+        directory: Path, filename: str, content: bytes, *, suffixes: set[str], kind: str,
+    ) -> dict[str, Any]:
         if (
             not _is_single_path_segment(filename)
-            or Path(filename).suffix.casefold() not in {".step", ".stp"}
+            or Path(filename).suffix.casefold() not in suffixes
             or not isinstance(content, bytes)
             or not content
             or len(content) > 64 * 1024 * 1024
         ):
             raise ValidationError(
-                "STEP upload needs a direct .step/.stp filename and a non-empty payload "
+                f"{kind} upload needs a direct supported filename and a non-empty payload "
                 "no larger than 64 MiB."
             )
         target = directory / filename
@@ -273,7 +275,7 @@ class WorkspaceArtifactStore:
             with tempfile.NamedTemporaryFile(
                 mode="wb",
                 prefix=".cadyx-tmp-",
-                suffix=".step-upload",
+                suffix=".project-source-upload",
                 dir=directory,
                 delete=False,
             ) as stream:
@@ -291,7 +293,7 @@ class WorkspaceArtifactStore:
         except ConflictError:
             raise
         except OSError as exc:
-            raise ValidationError(f"STEP source file could not be saved: {exc}.") from exc
+            raise ValidationError(f"{kind} source file could not be saved: {exc}.") from exc
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
@@ -300,6 +302,18 @@ class WorkspaceArtifactStore:
             "size": len(content),
             "sha256": hashlib.sha256(content).hexdigest(),
         }
+
+    @staticmethod
+    def publish_project_step(directory: Path, filename: str, content: bytes) -> dict[str, Any]:
+        return WorkspaceArtifactStore._publish_project_source(
+            directory, filename, content, suffixes={".step", ".stp"}, kind="STEP",
+        )
+
+    @staticmethod
+    def publish_project_scan(directory: Path, filename: str, content: bytes) -> dict[str, Any]:
+        return WorkspaceArtifactStore._publish_project_source(
+            directory, filename, content, suffixes={".ply"}, kind="PLY scan",
+        )
 
     @staticmethod
     def remove_project_step(path: Path, filename: str) -> dict[str, Any]:
@@ -405,6 +419,15 @@ class WorkspaceArtifactStore:
             "size": len(content),
             "created": created,
         }
+
+    @staticmethod
+    def publish_project_scan_output(directory: Path, project_name: str, source_filename: str,
+                                    content: bytes) -> dict[str, Any]:
+        artifact = WorkspaceArtifactStore.publish_scan_output(
+            directory, project_name, source_filename, content,
+        )
+        artifact.pop("folder", None)
+        return {"project": project_name, **artifact}
 
     @staticmethod
     def publish_cad_delivery(directory: Path, files: dict[str, bytes]) -> list[dict[str, Any]]:

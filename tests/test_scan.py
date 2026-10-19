@@ -265,6 +265,58 @@ class ScanCommandTests(unittest.TestCase):
                 })
             self.assertEqual(core.inspect_project(project_id)["document"]["revision"], before_revision)
 
+    def test_project_ply_import_preserves_source_and_reprocesses_from_staged_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            processor = _FakeScanProcessor()
+            core = CadyxCore(str(root), kernel=OCCTKernelAdapter(), scan_processor=processor)
+            project_id = core.create_project("Project scan import")["project"]["id"]
+            source_path = root / "Back cover.ply"
+            original = (
+                b"ply\nformat binary_little_endian 1.0\nelement vertex 4\n"
+                b"property float x\nproperty float y\nproperty float z\nend_header\nscan bytes"
+            )
+            source_path.write_bytes(original)
+            uploaded = core.upload_project_scan(project_id, source_path.name, original)
+            staged_path = core.workspace.resolve_project_file(project_id, source_path.name)
+            self.assertEqual(uploaded["size"], len(original))
+            self.assertEqual(staged_path.read_bytes(), original)
+
+            lease = core.acquire_lease(project_id, "agent", "project-scan-test")
+            imported = core.execute_command(project_id, lease["lease_id"], {
+                "type": "import_project_scan", "file": source_path.name,
+                "name": "Kobra S1 Back Cover", "parameters": {"target_triangles": 5000},
+            })
+            feature_id = imported["history_entry"]["result"]["feature_id"]
+            aligned = core.execute_command(project_id, lease["lease_id"], {
+                "type": "align_scan", "body_id": imported["history_entry"]["result"]["body_id"],
+                "mode": "explicit", "basis": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                "origin": [0, 0, 0], "units": "unitless", "scale": 1.0, "ground_z": True,
+            })
+            changed = core.execute_command(project_id, lease["lease_id"], {
+                "type": "set_scan_parameter", "feature_id": feature_id,
+                "name": "voxel_size", "value": 1.25,
+            })
+
+            snapshot = core.inspect_project(project_id)
+            feature = next(item for item in snapshot["document"]["objects"] if item["id"] == feature_id)
+            body = next(item for item in snapshot["document"]["objects"] if item["id"] == feature["body_id"])
+            artifact = changed["history_entry"]["result"]["artifact"]
+            output_path = core.workspace.resolve_project_file(project_id, artifact["file"])
+            self.assertEqual(snapshot["document"]["revision"], 3)
+            self.assertEqual(feature["source"]["project_file"], source_path.name)
+            self.assertEqual(feature["parameters"]["voxel_size"], 1.25)
+            self.assertEqual(feature["alignment"]["units"], "unitless")
+            self.assertTrue(changed["history_entry"]["result"]["alignment_reapplied"])
+            self.assertEqual(aligned["history_entry"]["result"]["artifact"]["project"],
+                             core.workspace._project_dir(project_id).name)
+            self.assertEqual(body["geometry"]["kernel"], "cadyx-mesh-v1")
+            self.assertEqual(source_path.read_bytes(), original)
+            self.assertEqual(staged_path.read_bytes(), original)
+            self.assertTrue(output_path.is_file())
+            self.assertEqual(hashlib.sha256(output_path.read_bytes()).hexdigest(), artifact["sha256"])
+            self.assertEqual(len(processor.calls), 2)
+
 
 
 if __name__ == "__main__":

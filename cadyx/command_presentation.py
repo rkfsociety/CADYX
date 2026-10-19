@@ -61,6 +61,7 @@ _BUILTIN_ACTIVITY_ACTIONS = {
     "import_step": "Импортирует точную STEP-геометрию",
     "export_brep": "Проверяет и экспортирует модель САПР",
     "import_scan": "Обрабатывает скан",
+    "import_project_scan": "Обрабатывает проектный скан",
     "set_scan_parameter": "Пересобирает скан",
     "remove_sketch_object": "Удаляет объект эскиза",
 }

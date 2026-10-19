@@ -154,6 +154,29 @@ class CommandFamilyTests(unittest.TestCase):
         context._publish_scan_output.assert_called_once_with("scan", "source.ply", geometry, progress)
         document.validate()
 
+    def test_project_scan_handler_passes_project_context_and_keeps_provenance(self):
+        context = command_scan.ScanCommands()
+        source = Path("project-source.ply")
+        geometry = {"kernel": "cadyx-mesh-v1"}
+        stats = {"source_kind": "triangle_mesh", "processor_version": "test",
+                 "input_vertices": 4, "input_triangles": 4, "output_vertices": 4, "output_triangles": 4}
+        context.resolve_project_file = Mock(return_value=source)
+        context.scan_processor = Mock()
+        context.scan_processor.reconstruct.return_value = geometry, stats, "b" * 64
+        context._publish_scan_source_output = Mock(return_value={"file": "processed.ply"})
+        document = Document.create()
+        result = call(command_scan, context, document, {
+            "type": "import_project_scan", "file": "source.ply",
+        }, project_id="project-id")
+
+        self.assertEqual(document.objects[1]["source"], {"project_file": "source.ply", "sha256": "b" * 64})
+        self.assertEqual(result["artifact"], {"file": "processed.ply"})
+        context.resolve_project_file.assert_called_once_with("project-id", "source.ply")
+        context._publish_scan_source_output.assert_called_once_with(
+            {"project_file": "source.ply"}, "source.ply", geometry, None, "project-id",
+        )
+        document.validate()
+
     def test_step_handler_passes_project_context_and_preserves_source(self):
         context = command_delivery.DeliveryCommands()
         context.kernel = Mock()

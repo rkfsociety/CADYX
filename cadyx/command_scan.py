@@ -15,6 +15,32 @@ from .scan import DEFAULT_SCAN_PARAMETERS, normalize_scan_parameters
 
 
 class ScanCommands:
+    def _scan_source_path(self, source: dict[str, Any], project_id: str | None) -> Path:
+        if all(isinstance(source.get(key), str) for key in ("folder", "file")):
+            if self.resolve_scan is None:
+                raise ValidationError("Scan import requires a workspace file resolver.")
+            return self.resolve_scan(source["folder"], source["file"])
+        filename = source.get("project_file")
+        if isinstance(filename, str) and project_id is not None and self.resolve_project_file is not None:
+            return self.resolve_project_file(project_id, filename)
+        raise ValidationError("Scan source metadata is invalid or its project file is unavailable.")
+
+    def _publish_scan_source_output(
+        self,
+        source: dict[str, Any],
+        source_filename: str,
+        geometry: dict[str, Any],
+        progress: Callable[[dict[str, Any]], None] | None,
+        project_id: str | None,
+    ) -> dict[str, Any]:
+        if "project_file" in source:
+            if self.publish_project_scan_output is None or project_id is None:
+                raise ValidationError("Project scan output requires a project artifact writer.")
+            if progress is not None:
+                progress({"phase": "write_output"})
+            return self.publish_project_scan_output(project_id, source_filename, mesh_ply_bytes(geometry))
+        return self._publish_scan_output(source["folder"], source_filename, geometry, progress)
+
     def _publish_scan_output(
         self,
         folder: str,
@@ -35,16 +61,47 @@ class ScanCommands:
         *,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        if self.resolve_scan is None:
-            raise ValidationError("Scan import requires a project workspace file resolver.")
         folder, filename = command.get("folder"), command.get("file")
-        if not isinstance(folder, str) or not isinstance(filename, str):
+        if self.resolve_scan is None or not isinstance(folder, str) or not isinstance(filename, str):
             raise ValidationError("Scan import requires a workspace folder and PLY filename.")
+        return self._import_scan_source(
+            document, command, {"folder": folder, "file": filename},
+            self.resolve_scan(folder, filename), progress=progress, project_id=None,
+        )
+
+    def _import_project_scan(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        filename = command.get("file")
+        if (self.resolve_project_file is None or project_id is None or not isinstance(filename, str)
+                or Path(filename).suffix.casefold() != ".ply"):
+            raise ValidationError("Project scan import requires a staged PLY filename and project context.")
+        source = {"project_file": filename}
+        return self._import_scan_source(
+            document, command, source, self.resolve_project_file(project_id, filename),
+            progress=progress, project_id=project_id,
+        )
+
+    def _import_scan_source(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        source: dict[str, Any],
+        source_path: Path,
+        *,
+        progress: Callable[[dict[str, Any]], None] | None,
+        project_id: str | None,
+    ) -> dict[str, Any]:
+        filename = source.get("file", source.get("project_file"))
         name = command.get("name", Path(filename).stem)
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
             raise ValidationError("Scan name must be a non-empty string of at most 120 characters.")
         parameters = normalize_scan_parameters(command.get("parameters", {}))
-        source_path = self.resolve_scan(folder, filename)
         geometry, stats, source_hash = self.scan_processor.reconstruct(source_path, parameters, progress=progress)
         if stats["source_kind"] == "triangle_mesh" and any(
             parameters[key] != DEFAULT_SCAN_PARAMETERS[key]
@@ -54,8 +111,8 @@ class ScanCommands:
 
         body_id = f"body:{uuid4()}"
         feature_id = f"feature:{uuid4()}"
-        artifact = self._publish_scan_output(folder, filename, geometry, progress)
-        source = {"folder": folder, "file": filename, "sha256": source_hash}
+        artifact = self._publish_scan_source_output(source, filename, geometry, progress, project_id)
+        source = {**source, "sha256": source_hash}
         document.objects.extend([
             {
                 "id": body_id,
@@ -95,8 +152,9 @@ class ScanCommands:
         command: dict[str, Any],
         *,
         progress: Callable[[dict[str, Any]], None] | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
-        if self.resolve_scan is None:
+        if self.resolve_scan is None and self.resolve_project_file is None:
             raise ValidationError("Scan parameter editing requires a project workspace file resolver.")
         feature_id = command.get("feature_id")
         feature = next(
@@ -120,7 +178,7 @@ class ScanCommands:
             **feature_parameters, parameter_name: command.get("value"),
         })
         source = feature.get("source")
-        if not isinstance(source, dict) or not all(isinstance(source.get(key), str) for key in ("folder", "file", "sha256")):
+        if not isinstance(source, dict) or not isinstance(source.get("sha256"), str):
             raise ValidationError("Scan feature source metadata is invalid.")
         body = next(
             (item for item in document.objects
@@ -129,11 +187,13 @@ class ScanCommands:
         )
         if body is None:
             raise ValidationError("Scan feature refers to a missing body.")
-        source_path = self.resolve_scan(source["folder"], source["file"])
+        source_path = self._scan_source_path(source, project_id)
         geometry, stats, source_hash = self.scan_processor.reconstruct(
             source_path, parameters, expected_sha256=source["sha256"], progress=progress,
         )
-        artifact = self._publish_scan_output(source["folder"], source["file"], geometry, progress)
+        source_filename = source.get("file", source.get("project_file"))
+        artifact = self._publish_scan_source_output(source, source_filename, geometry, progress,
+                                                     project_id)
         body["geometry"] = geometry
         feature["parameters"] = parameters
         feature["stats"] = stats
@@ -157,14 +217,22 @@ def _handle_import_scan(
     return self._import_scan(document, command, progress=progress)
 
 
+def _handle_import_project_scan(
+    self: Any, document: Document, command: dict[str, Any], *,
+    progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
+) -> dict[str, Any]:
+    return self._import_project_scan(document, command, progress=progress, project_id=project_id)
+
+
 def _handle_set_scan_parameter(
     self: Any, document: Document, command: dict[str, Any], *,
     progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
 ) -> dict[str, Any]:
-    return self._set_scan_parameter(document, command, progress=progress)
+    return self._set_scan_parameter(document, command, progress=progress, project_id=project_id)
 
 
 COMMAND_HANDLERS = {
     "import_scan": _handle_import_scan,
+    "import_project_scan": _handle_import_project_scan,
     "set_scan_parameter": _handle_set_scan_parameter,
 }

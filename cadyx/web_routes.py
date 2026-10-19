@@ -96,7 +96,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/viewport/camera", "agent_viewport_camera", "viewport", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/files", "agent_project_files", "files"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/files/{filename}", "agent_project_file", "files"),
-    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/files/{filename}", "agent_project_file_upload", "files", "step"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/files/{filename}", "agent_project_file_upload", "files", "project_source"),
     RouteSpec("DELETE", "/api/v1/agent/projects/{project_id}/files/{filename}", "agent_project_file_delete", "files"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/rename", "agent_rename", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/copy-files", "agent_copy_files", "agent", "json"),
@@ -374,7 +374,11 @@ def _dispatch_files(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
     elif name in {"project_file", "agent_project_file"}:
         handler._binary_file(core.workspace.resolve_project_file(project_id, filename))
     elif name == "agent_project_file_upload":
-        result = core.upload_project_step(project_id, filename, handler._read_step_upload())
+        content = handler._read_project_source_upload()
+        if Path(filename).suffix.casefold() == ".ply":
+            result = core.upload_project_scan(project_id, filename, content)
+        else:
+            result = core.upload_project_step(project_id, filename, content)
         handler._json(201, {"project_id": project_id, "file": result})
     elif name == "agent_project_file_delete":
         handler._json(200, core.remove_staged_project_step(project_id, filename))

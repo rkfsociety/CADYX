@@ -54,6 +54,7 @@ class CadyxCore:
             resolve_project_file=self.workspace.resolve_project_file,
             scan_processor=scan_processor,
             publish_scan_output=self.workspace.publish_scan_output,
+            publish_project_scan_output=self.workspace.publish_project_scan_output,
             publish_cad_delivery=self.workspace.publish_cad_delivery,
         )
         if lease_clock is None:
@@ -126,6 +127,9 @@ class CadyxCore:
 
     def upload_project_step(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
         return self._lifecycle.upload_project_step(project_id, filename, content)
+
+    def upload_project_scan(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
+        return self._lifecycle.upload_project_scan(project_id, filename, content)
 
     def copy_project_files(self, target_project_id: str, source_project_id: str) -> dict[str, Any]:
         return self._lifecycle.copy_project_files(target_project_id, source_project_id)
@@ -548,7 +552,7 @@ class CadyxCore:
             for command in commands:
                 if not isinstance(command, dict):
                     raise ValidationError("Every preview command must be an object.")
-                if command.get("type") in {"import_scan", "set_scan_parameter", "export_brep"} or (
+                if command.get("type") in {"import_scan", "import_project_scan", "set_scan_parameter", "export_brep"} or (
                     command.get("type") == "remove_body" and command.get("remove_source_file") is True
                 ):
                     raise ValidationError("This command has external file effects and cannot be previewed.")

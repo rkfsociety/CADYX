@@ -39,7 +39,7 @@ class _Kernel:
             return self.target_mesh
         return tessellate_mesh_geometry(geometry)
 
-    def create_lofted_profiles(self, sections, *, section_offsets):
+    def create_lofted_profiles(self, sections, *, section_offsets, section_axis=None):
         return {
             "kernel": "fake-brep", "kind": "loft", "sections": sections,
             "section_offsets": section_offsets,
@@ -94,7 +94,7 @@ class ScanReverseTests(unittest.TestCase):
         raw_artifact = dict(feature["artifact"])
 
         class ReprocessSystem(CommandSystem):
-            def _set_scan_parameter(self, document, command, *, progress=None):
+            def _set_scan_parameter(self, document, command, *, progress=None, project_id=None):
                 # Isolate reconstruction from the middleware under test. A real
                 # reprocess replaces the aligned mesh with source-space geometry.
                 body["geometry"] = raw

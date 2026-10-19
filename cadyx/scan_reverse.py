@@ -77,7 +77,7 @@ def _scan_feature(document, body_id: str) -> dict[str, Any] | None:
                  if item.get("type") == "feature" and item.get("operation") in {"reconstruct_scan", "import_stl"}
                  and item.get("body_id") == body_id), None)
 
-def _alignment_feature_source(self, feature: dict[str, Any]) -> dict[str, Any]:
+def _alignment_feature_source(self, feature: dict[str, Any], project_id: str | None) -> dict[str, Any]:
     if feature.get("operation") == "import_stl":
         geometry = feature.get("source_geometry")
         from .mesh_geometry import validate_mesh_geometry
@@ -85,10 +85,10 @@ def _alignment_feature_source(self, feature: dict[str, Any]) -> dict[str, Any]:
         return geometry
     source = feature.get("source")
     parameters = feature.get("parameters")
-    if (not isinstance(source, dict) or not all(isinstance(source.get(key), str) for key in ("folder", "file", "sha256"))
-            or not isinstance(parameters, dict) or self.resolve_scan is None):
+    if (not isinstance(source, dict) or not isinstance(source.get("sha256"), str)
+            or not isinstance(parameters, dict)):
         raise ValidationError("Existing scan alignment cannot be recomputed because source metadata is unavailable.")
-    source_path = self.resolve_scan(source["folder"], source["file"])
+    source_path = self._scan_source_path(source, project_id)
     geometry, stats, source_hash = self.scan_processor.reconstruct(
         source_path, parameters, expected_sha256=source["sha256"], progress=None,
     )
@@ -96,14 +96,14 @@ def _alignment_feature_source(self, feature: dict[str, Any]) -> dict[str, Any]:
     feature["source"] = {**source, "sha256": source_hash}
     return geometry
 
-def _align_scan(self, document, command: dict[str, Any], *, progress=None) -> dict[str, Any]:
+def _align_scan(self, document, command: dict[str, Any], *, progress=None, project_id=None) -> dict[str, Any]:
     body = _mesh_body(document, command.get("body_id"))
     feature = _scan_feature(document, body["id"])
     if feature is None:
         raise ValidationError("align_scan requires an original imported PLY or STL reference body.")
     if progress:
         progress({"phase": "inspect_scan_alignment"})
-    raw_geometry = _alignment_feature_source(self, feature) if feature.get("alignment") else body["geometry"]
+    raw_geometry = _alignment_feature_source(self, feature, project_id) if feature.get("alignment") else body["geometry"]
     if feature.get("operation") == "import_stl" and "source_geometry" not in feature:
         feature["source_geometry"] = raw_geometry
     raw_mesh = tessellate_mesh_geometry(raw_geometry)
@@ -134,8 +134,12 @@ def _align_scan(self, document, command: dict[str, Any], *, progress=None) -> di
         feature["raw_artifact"] = feature["artifact"]
     source = feature.get("source")
     artifact = None
-    if isinstance(source, dict) and all(isinstance(source.get(key), str) for key in ("folder", "file")):
-        artifact = self._publish_scan_output(source["folder"], source["file"], geometry, progress)
+    if isinstance(source, dict) and (
+        "project_file" in source or all(isinstance(source.get(key), str) for key in ("folder", "file"))
+    ):
+        source_filename = source.get("file", source.get("project_file"))
+        if isinstance(source_filename, str):
+            artifact = self._publish_scan_source_output(source, source_filename, geometry, progress, project_id)
         feature["artifact"] = artifact
     feature["alignment"] = record
     return {
@@ -323,8 +327,13 @@ def _reapply_alignment_after_parameter_edit(self, document, command: dict[str, A
     if isinstance(raw_artifact, dict):
         feature["raw_artifact"] = raw_artifact
     source = feature.get("source")
-    if isinstance(source, dict) and all(isinstance(source.get(key), str) for key in ("folder", "file")):
-        artifact = self._publish_scan_output(source["folder"], source["file"], geometry, progress)
+    if isinstance(source, dict) and (
+        "project_file" in source or all(isinstance(source.get(key), str) for key in ("folder", "file"))
+    ):
+        source_filename = source.get("file", source.get("project_file"))
+        if not isinstance(source_filename, str):
+            return result
+        artifact = self._publish_scan_source_output(source, source_filename, geometry, progress, project_id)
         feature["artifact"] = artifact
         if isinstance(result, dict):
             result["artifact"] = artifact
@@ -334,7 +343,7 @@ def _reapply_alignment_after_parameter_edit(self, document, command: dict[str, A
 def _execute(self, document, command: dict[str, Any], *, progress=None, project_id=None):
     kind = command.get("type")
     if kind == "align_scan":
-        return _align_scan(self, document, command, progress=progress)
+        return _align_scan(self, document, command, progress=progress, project_id=project_id)
     if kind == "create_sketch_from_scan_section":
         return _create_sections(self, document, command, progress=progress, singular=True)
     if kind == "create_scan_sections":

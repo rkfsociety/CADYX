@@ -21,7 +21,7 @@ from .errors import CadyxError, NotFoundError, ValidationError
 from .web_routes import dispatch_route, match_route
 
 _MAX_BODY_BYTES = 1_000_000
-_MAX_STEP_UPLOAD_BYTES = 64 * 1024 * 1024
+_MAX_PROJECT_SOURCE_UPLOAD_BYTES = 64 * 1024 * 1024
 _MAX_VIEWPORT_SNAPSHOT_BYTES = 16 * 1024 * 1024
 _DEFAULT_MAX_HTTP_REQUESTS = 64
 _DEFAULT_MAX_SSE_STREAMS = 8
@@ -294,22 +294,22 @@ def make_request_handler(
                 raise ValidationError("Viewport snapshot body was incomplete.")
             return encoded
 
-        def _read_step_upload(self) -> bytes:
+        def _read_project_source_upload(self) -> bytes:
             content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
             if content_type != "application/octet-stream":
-                raise ValidationError("STEP uploads must use Content-Type application/octet-stream.")
+                raise ValidationError("Project source uploads must use Content-Type application/octet-stream.")
             raw_length = self.headers.get("Content-Length")
             try:
                 length = int(raw_length) if raw_length is not None else 0
             except ValueError as exc:
                 raise ValidationError("Content-Length is invalid.") from exc
-            if length < 1 or length > _MAX_STEP_UPLOAD_BYTES:
+            if length < 1 or length > _MAX_PROJECT_SOURCE_UPLOAD_BYTES:
                 self.close_connection = True
-                raise ValidationError("STEP upload must be between 1 byte and 64 MiB.")
+                raise ValidationError("Project source upload must be between 1 byte and 64 MiB.")
             content = self.rfile.read(length)
             if len(content) != length:
                 self.close_connection = True
-                raise ValidationError("STEP upload body was incomplete.")
+                raise ValidationError("Project source upload body was incomplete.")
             return content
 
         def _png(

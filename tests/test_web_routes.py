@@ -33,7 +33,7 @@ class WebRouteTableTests(unittest.TestCase):
             {spec.domain for spec in specs},
             {"system", "workspace", "scanner", "files", "project", "agent", "validation", "viewport", "static"},
         )
-        self.assertLessEqual({spec.body_kind for spec in specs}, {"none", "json", "png", "step"})
+        self.assertLessEqual({spec.body_kind for spec in specs}, {"none", "json", "png", "project_source"})
         self.assertTrue(all(spec.body_kind == "none" for spec in specs if spec.method == "GET"))
         self.assertTrue(all(spec.body_kind == "none" for spec in specs if spec.method == "DELETE"))
 
@@ -90,7 +90,7 @@ class WebRouteTableTests(unittest.TestCase):
         command = match_route("POST", "/api/v1/projects/p-1/commands")
         assert snapshot is not None and upload is not None and command is not None
         self.assertEqual(snapshot.spec.body_kind, "png")
-        self.assertEqual(upload.spec.body_kind, "step")
+        self.assertEqual(upload.spec.body_kind, "project_source")
         self.assertEqual(command.spec.body_kind, "json")
 
 

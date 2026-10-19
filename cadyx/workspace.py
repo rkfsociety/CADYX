@@ -300,6 +300,19 @@ class ProjectWorkspace:
             self._project_dir(project_id), filename, content
         )
 
+    def publish_project_scan(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
+        return self._artifacts.publish_project_scan(
+            self._project_dir(project_id), filename, content
+        )
+
+    def publish_project_scan_output(
+        self, project_id: str, source_filename: str, content: bytes
+    ) -> dict[str, Any]:
+        directory = self._project_dir(project_id)
+        return self._artifacts.publish_project_scan_output(
+            directory, directory.name, source_filename, content,
+        )
+
     def remove_project_step(self, project_id: str, filename: str) -> dict[str, Any]:
         path = self.resolve_project_file(project_id, filename)
         return self._artifacts.remove_project_step(path, filename)

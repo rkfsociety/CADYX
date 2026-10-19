@@ -182,6 +182,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_list_project_files", "description": "List direct user files in a saved project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_read_project_file", "description": "Read a direct project file through the read-only Agent API; small images are returned as image content.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING}, ["project_id", "name"])},
     {"name": "cadyx_upload_project_step", "description": "Copy a local STEP file into a project through the Agent API without overwriting existing files or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
+    {"name": "cadyx_upload_project_scan", "description": "Copy a local PLY scan into a project through the Agent API without overwriting the source or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
     {"name": "cadyx_remove_staged_step", "description": "Remove an unused direct STEP reference file from a FREE project; CADYX preserves the original local source.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING}, ["project_id", "name"])},
     {"name": "cadyx_list_folder_files", "description": "List direct user files in a workspace folder.", "inputSchema": _schema({"folder_name": _STRING}, ["folder_name"])},
     {"name": "cadyx_read_folder_file", "description": "Read a direct workspace file through the read-only API; small images are returned as image content.", "inputSchema": _schema({"folder_name": _STRING, "name": _STRING}, ["folder_name", "name"])},
@@ -368,6 +369,18 @@ class MCPApplication:
                 raise ValueError("The STEP source must be a regular, non-symlink local file.")
             if source.stat().st_size < 1 or source.stat().st_size > _MAX_FILE_BYTES:
                 raise ValueError("The STEP source must be between 1 byte and 64 MiB.")
+            content = source.read_bytes()
+            path = self._project(args["project_id"], "/files/" + urllib.parse.quote(source.name, safe=""))
+            raw, _ = self.api.request("POST", path, content)
+            return json.loads(raw.decode("utf-8"))
+        if name == "cadyx_upload_project_scan":
+            source = Path(args["source_path"]).expanduser()
+            if source.suffix.casefold() != ".ply":
+                raise ValueError("Only .ply files can be uploaded as project scan sources.")
+            if source.is_symlink() or not source.is_file():
+                raise ValueError("The PLY scan source must be a regular, non-symlink local file.")
+            if source.stat().st_size < 1 or source.stat().st_size > _MAX_FILE_BYTES:
+                raise ValueError("The PLY scan source must be between 1 byte and 64 MiB.")
             content = source.read_bytes()
             path = self._project(args["project_id"], "/files/" + urllib.parse.quote(source.name, safe=""))
             raw, _ = self.api.request("POST", path, content)

@@ -211,6 +211,15 @@ class ProjectLifecycleService(_CoreService):
             )
             return self.workspace.publish_project_step(project_id, filename, content)
 
+    def upload_project_scan(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            self._require_project_policy(
+                project_id,
+                "file_management",
+                "PLY scan files can only be staged in a free project with no running operation.",
+            )
+            return self.workspace.publish_project_scan(project_id, filename, content)
+
     def copy_project_files(self, target_project_id: str, source_project_id: str) -> dict[str, Any]:
         if target_project_id == source_project_id:
             raise ValidationError("Source and target projects must be different.")

@@ -575,14 +575,15 @@ a reference that must remain available for section analysis without appearing
 in the viewport or project thumbnail. Existing documents without an explicit
 body visibility flag remain visible.
 
-The Agent API can stage a local STEP source into a project with
+The Agent API can stage a local STEP or PLY scan source into a project with
 `POST /api/v1/agent/projects/{id}/files/{name}` using
 `Content-Type: application/octet-stream`. Uploads are limited to 64 MiB, must
-use a direct `.step` or `.stp` filename, require the target project to be free,
-follow the host's configured authentication policy, and never replace an
-existing project file. The local `cadyx_upload_project_step`
-MCP tool reads the supplied local regular file and transfers its bytes; the HTTP
-host does not accept or resolve arbitrary filesystem paths. A project can be
+use a direct `.step`, `.stp`, or `.ply` filename, require the target project to
+be free, follow the host's configured authentication policy, and never replace
+an existing project file. The local `cadyx_upload_project_step` and
+`cadyx_upload_project_scan` MCP tools read the supplied local regular file and
+transfer its bytes; the HTTP host does not accept or resolve arbitrary
+filesystem paths. A project can be
 created without changing the viewer selection using `select: false` on the Agent
 API project-creation route.
 
@@ -692,6 +693,13 @@ Agent command endpoint under that project's edit lease:
   }
 }
 ```
+
+`import_project_scan` reads a direct `.ply` file previously staged in the same
+project with `cadyx_upload_project_scan`. It accepts the same `name` and
+`parameters` fields and creates the same editable mesh feature; project-file
+sources are recorded by filename and SHA-256, then re-read and hash-checked when
+scan parameters or alignment are recomputed. Both import commands preserve the
+original PLY and publish the processed PLY beside it in the source's folder.
 
 `folder` and `file` must resolve to a direct regular `.ply` file in the project
 workspace; traversal and symlinks are rejected. The command stores the source

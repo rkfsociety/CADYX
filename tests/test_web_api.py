@@ -159,6 +159,29 @@ class WebApiTests(unittest.TestCase):
         status, error = self.upload(f"/api/v1/agent/projects/{project_id}/files", "source.stp", b"x")
         self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
 
+    def test_agent_scan_upload_stages_direct_ply_without_overwrite(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "PLY upload"})
+        project_id = created["project"]["id"]
+        source = b"ply\nformat binary_little_endian 1.0\nelement vertex 0\nend_header\n"
+        status, uploaded = self.upload(
+            f"/api/v1/agent/projects/{project_id}/files", "Back cover.ply", source,
+        )
+        self.assertEqual(status, 201)
+        staged = self.core.workspace.resolve_project_file(project_id, "Back cover.ply")
+        self.assertEqual(staged.read_bytes(), source)
+        self.assertEqual(uploaded["file"]["size"], len(source))
+
+        status, conflict = self.upload(
+            f"/api/v1/agent/projects/{project_id}/files", "Back cover.ply", b"replacement",
+        )
+        self.assertEqual((status, conflict["error"]), (409, "ARTIFACT_CONFLICT"))
+        self.assertEqual(staged.read_bytes(), source)
+
+        status, error = self.upload(
+            f"/api/v1/agent/projects/{project_id}/files", "unsupported.txt", b"x",
+        )
+        self.assertEqual((status, error["error"]), (400, "VALIDATION_ERROR"))
+
     def test_legacy_migration_uses_both_api_command_paths(self) -> None:
         for prefix, owner in (("/api/v1/projects", "human"), ("/api/v1/agent/projects", "agent")):
             with self.subTest(owner=owner):

@@ -34,6 +34,7 @@ class CommandSystem(
         resolve_project_file: Callable[[str, str], Path] | None = None,
         scan_processor: ScanProcessor | None = None,
         publish_scan_output: Callable[[str, str, bytes], dict[str, Any]] | None = None,
+        publish_project_scan_output: Callable[[str, str, bytes], dict[str, Any]] | None = None,
         publish_cad_delivery: Callable[[str, dict[str, bytes]], list[dict[str, Any]]] | None = None,
     ) -> None:
         self.kernel = kernel
@@ -41,6 +42,7 @@ class CommandSystem(
         self.resolve_project_file = resolve_project_file
         self.scan_processor = scan_processor if scan_processor is not None else ScanProcessor()
         self.publish_scan_output = publish_scan_output
+        self.publish_project_scan_output = publish_project_scan_output
         self.publish_cad_delivery = publish_cad_delivery
         self._extension_execute = COMMAND_REGISTRY.bind(self)
 

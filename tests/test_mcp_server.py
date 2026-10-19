@@ -381,6 +381,22 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual((self.core.workspace._project_dir(staged_id) / source.name).read_bytes(), source.read_bytes())
         self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": active_id})
 
+    def test_can_stage_scan_in_unselected_project_through_agent_api(self) -> None:
+        active = self.core.create_project("Active scan workflow")
+        active_id = active["project"]["id"]
+        staged = self._tool_value("cadyx_create_project", {"name": "Staged PLY", "select": False})
+        staged_id = staged["project"]["id"]
+        source = Path(self.temporary_directory.name) / "Back cover.ply"
+        source.write_bytes(b"ply\nformat binary_little_endian 1.0\nelement vertex 0\nend_header\n")
+
+        uploaded = self._tool_value("cadyx_upload_project_scan", {
+            "project_id": staged_id, "source_path": str(source),
+        })
+        self.assertEqual(uploaded["project_id"], staged_id)
+        self.assertEqual((self.core.workspace._project_dir(staged_id) / source.name).read_bytes(),
+                         source.read_bytes())
+        self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": active_id})
+
     def test_errors_keep_saved_document_and_free_the_lease(self) -> None:
         project_id = self._create_project()
         with patch.object(self.app.api, "post", wraps=self.app.api.post) as post:
