@@ -42,6 +42,8 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/events", "events", "system"),
     RouteSpec("GET", "/api/v1/updates", "updates", "system"),
     RouteSpec("GET", "/api/v1/agent/capabilities", "capabilities", "system"),
+    RouteSpec("GET", "/api/v1/agent/catalog", "standard_part_catalog", "system"),
+    RouteSpec("POST", "/api/v1/agent/catalog/resolve", "standard_part_resolve", "system", "json"),
     RouteSpec("GET", "/api/v1/agent/workspace/selection", "workspace_selection_get", "workspace"),
     RouteSpec("POST", "/api/v1/agent/workspace/selection", "workspace_selection_post", "workspace", "json"),
     RouteSpec("POST", "/api/v1/project-groups", "project_group_create", "workspace", "json"),
@@ -202,6 +204,10 @@ def _dispatch_system(handler: Any, core: CadyxCore, route: RouteMatch, parsed: S
         handler._stream_events(parse_qs(parsed.query).get("project_id", [None])[0])
     elif name == "capabilities":
         handler._json(200, core.agent_capabilities())
+    elif name == "standard_part_catalog":
+        handler._json(200, core.list_standard_parts())
+    elif name == "standard_part_resolve":
+        handler._json(200, core.resolve_standard_part(_require_json(handler)))
     elif name == "updates":
         query = parse_qs(parsed.query)
         project_id = query.get("project_id", [None])[0]

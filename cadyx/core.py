@@ -171,6 +171,16 @@ class CadyxCore:
 
         return agent_api_capabilities(self.self_evolving.available())
 
+    def list_standard_parts(self) -> dict[str, Any]:
+        from .standard_parts import list_standard_parts
+
+        return list_standard_parts()
+
+    def resolve_standard_part(self, request: dict[str, Any]) -> dict[str, Any]:
+        from .standard_parts import resolve_standard_part
+
+        return resolve_standard_part(request)
+
     def read_agent_source_file(self, relative_path: str) -> dict[str, Any]:
         return self.source_extensions.read_file(relative_path)
 

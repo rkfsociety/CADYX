@@ -193,3 +193,19 @@ occurrences. Units are explicitly mm; cross-project part links, joints/mates,
 other-unit conversion, and assembly STEP export are not yet implemented.
 Existing document v8 snapshots migrate read-only to v9. See
 [the assembly contract](.codex/docs/document-model-v9.md).
+
+
+## Standard-part catalog (initial built-in presets)
+
+Agent clients discover data-only, SHA-256-addressed preset manifests at
+`GET /api/v1/agent/catalog`, then validate exact version, hash and parameters
+through `POST /api/v1/agent/catalog/resolve`. The returned
+`create_catalog_part` command is executed via the same revision-checked,
+leased Agent API/MCP command route as other modeling operations. Supported
+presets include a metric threaded stud, an annular reference ring, a hexagonal
+bar, a solid rectangular extrusion and user-staged STEP references. Created
+features retain catalog provenance. Neither an annular ring nor an externally
+sourced STEP should be treated as a certified bearing or manufacturing fit.
+Third-party STEP files must already be staged, explicitly rights-attested
+and SHA-256-pinned; CADYX does not download packages or independently
+verify third-party licenses. See [catalog contract](docs/standard-part-catalog.md).
