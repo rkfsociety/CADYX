@@ -135,14 +135,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .project-group-heading { display: flex; align-items: center; gap: 8px; margin: 0; padding-bottom: 9px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font: 600 11px var(--ui-font); letter-spacing: .02em; }
 .project-group-heading span { color: var(--dim); font-size: 9px; }
 .project-group-cards { display: grid; min-width: 0; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); gap: 14px; }
-.workspace-project-card { display: grid; min-width: 0; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(145deg, #141d24, #10171d); }
+.workspace-project-card { display: grid; min-width: 0; min-height: 0; aspect-ratio: 1; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: linear-gradient(145deg, #141d24, #10171d); }
 .workspace-project-card[data-active="true"] { border-color: #8e5732; background: linear-gradient(145deg, #211811, #15171a); }
 .workspace-project-card-heading { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; align-items: start; }
 .workspace-project-card h3 { overflow: hidden; margin: 0; color: var(--text); font: 600 16px/1.4 var(--ui-font); text-overflow: ellipsis; overflow-wrap: anywhere; }
 .workspace-project-state { align-self: start; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font: 10px var(--mono); letter-spacing: .02em; white-space: nowrap; }
 .workspace-project-card[data-active="true"] .workspace-project-state { border-color: #8e5732; color: #ffad73; }
-.workspace-project-thumbnail { display: grid; min-height: 160px; place-items: center; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 6px; background-color: #0d1419; background-image: linear-gradient(#26323838 1px, transparent 1px), linear-gradient(90deg, #26323838 1px, transparent 1px); background-size: 20px 20px; }
-.workspace-project-thumbnail img { display: block; width: 100%; height: 160px; object-fit: contain; }
+.workspace-project-thumbnail { display: grid; min-height: 0; place-items: center; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 6px; background-color: #0d1419; background-image: linear-gradient(#26323838 1px, transparent 1px), linear-gradient(90deg, #26323838 1px, transparent 1px); background-size: 20px 20px; }
+.workspace-project-thumbnail img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .workspace-project-thumbnail.unavailable::after { color: var(--dim); content: "ПРЕДПРОСМОТР НЕДОСТУПЕН"; font: 9px var(--mono); letter-spacing: .06em; }
 .workspace-project-meta { display: flex; min-width: 0; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; padding-top: 12px; border-top: 1px solid var(--line-soft); color: var(--dim); font: 10px var(--mono); }
 .workspace-project-meta span { display: grid; min-width: 0; gap: 4px; }
