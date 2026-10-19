@@ -1502,7 +1502,8 @@ async function refreshDetail() {
     || detailedProjectModifiedAt === null
     || !activityRevisionsByProject.has(projectId)
     || !dashboardsByProject.has(projectId);
-  const activity = refreshAuxiliary
+  const detailRequests = window.CadyxViewport.detailRefreshPlan(refreshAuxiliary, primaryGrid.dataset.view);
+  const activity = detailRequests.activity
     ? await refreshActivitySnapshot(projectId)
     : (activitiesByProject.get(projectId) || []).slice(-1)[0] || null;
   if (projectId !== selectedProjectId || request !== detailRequest) return;
@@ -1517,7 +1518,7 @@ async function refreshDetail() {
   const [info, scene, dashboard] = await Promise.all([
     api(`/api/v1/projects/${encodedProjectId}`),
     api(`/api/v1/projects/${encodedProjectId}/viewport`),
-    refreshAuxiliary
+    detailRequests.dashboard
       ? api(`/api/v1/projects/${encodedProjectId}/dashboard`)
       : Promise.resolve(null),
   ]);
@@ -1534,7 +1535,7 @@ async function refreshDetail() {
       renderAgentDashboard(dashboard);
     }
   }
-  if (refreshAuxiliary || primaryGrid.dataset.view === "analysis") {
+  if (detailRequests.comparison) {
     const comparison = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/comparison`);
     if (projectId !== selectedProjectId || request !== detailRequest) return;
     if (comparison.revision !== scene.revision) { scheduleWorkspaceRefresh(); return; }

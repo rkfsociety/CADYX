@@ -67,6 +67,20 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "
 const viewer = sandbox.window.CadyxViewport.createViewer(canvas, { showCoordinateGizmo: false });
 const activityUpdate = sandbox.window.CadyxViewport.viewportUpdateForAgentActivity;
 const transitionForRevision = sandbox.window.CadyxViewport.transitionForRevision;
+const detailRefreshPlan = sandbox.window.CadyxViewport.detailRefreshPlan;
+const initialRefresh = detailRefreshPlan(true, "overview");
+assert.equal(Object.values(initialRefresh).filter(Boolean).length, 3,
+  "First load requests the activity, dashboard, and comparison snapshots");
+assert.equal(2 + Object.values(initialRefresh).filter(Boolean).length, 5);
+const ordinaryRefresh = detailRefreshPlan(false, "overview");
+assert.deepEqual({ ...ordinaryRefresh }, { activity: false, dashboard: false, comparison: false });
+assert.equal(Object.values(ordinaryRefresh).filter(Boolean).length, 0,
+  "Ordinary geometry updates reuse SSE-backed auxiliary snapshots");
+assert.equal(2 + Object.values(ordinaryRefresh).filter(Boolean).length, 2,
+  "Ordinary geometry updates use only project info and scene requests");
+const analysisRefresh = detailRefreshPlan(false, "analysis");
+assert.deepEqual({ ...analysisRefresh }, { activity: false, dashboard: false, comparison: true },
+  "The analysis view still refreshes its comparison snapshot");
 const expectedTransition = { expectedRevision: 8, type: "extrude" };
 assert.equal(transitionForRevision(expectedTransition, 8), expectedTransition,
   "A command transition is retained for its exact committed revision");

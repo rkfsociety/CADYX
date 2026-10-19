@@ -96,6 +96,14 @@
     return Number.isInteger(transition.expectedRevision) && transition.expectedRevision !== revision
       ? null : transition;
   }
+  function detailRefreshPlan(needsAuxiliary, view) {
+    const refreshAuxiliary = Boolean(needsAuxiliary);
+    return {
+      activity: refreshAuxiliary,
+      dashboard: refreshAuxiliary,
+      comparison: refreshAuxiliary || view === "analysis",
+    };
+  }
   const multiplyMatrices = (left, right) => [
     left[0] * right[0] + left[1] * right[3] + left[2] * right[6],
     left[0] * right[1] + left[1] * right[4] + left[2] * right[7],
@@ -1700,5 +1708,7 @@
     }
   }
 
-  window.CadyxViewport = { createViewer, viewportUpdateForAgentActivity, transitionForRevision };
+  window.CadyxViewport = {
+    createViewer, viewportUpdateForAgentActivity, transitionForRevision, detailRefreshPlan,
+  };
 })();
