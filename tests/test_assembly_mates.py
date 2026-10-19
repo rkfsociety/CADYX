@@ -39,6 +39,8 @@ class AssemblyMateTests(unittest.TestCase):
         return next(item for item in self.document.assembly["instances"] if item["id"] == instance_id)
 
     def test_fixed_chain_and_consistent_redundant_cycle(self):
+        self.assertEqual(inspect_assembly_mates(self.document.assembly)["status"],
+                         "underconstrained")
         self.run_command("add_assembly_mate", kind="fixed", a_instance_id=self.a,
                          b_instance_id=self.b)
         self.run_command("add_assembly_mate", kind="fixed", a_instance_id=self.b,

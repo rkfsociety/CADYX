@@ -184,7 +184,7 @@ def solve_assembly_mates(graph: dict[str, Any], *,
         instances[ident]["rotation"] = pose["rotation"]
     return {
         "status": "overconstrained" if redundant else (
-            "underconstrained" if internal_dof else "fully_mated"),
+            "underconstrained" if internal_dof or len(anchors) > 1 else "fully_mated"),
         "anchor_instance_ids": anchors,
         "component_count": len(anchors),
         "global_dof": 6 * len(anchors),

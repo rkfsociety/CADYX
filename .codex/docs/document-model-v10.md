@@ -75,8 +75,8 @@ The read-only standard project inspection includes
 translation/rotation tolerances. Each disconnected component has six **global**
 ungrounded freedoms. `internal_dof` is the sum of the spanning-tree joint
 freedoms; `fully_mated` therefore means zero relative freedoms, **not**
-global grounding. `underconstrained` means relative freedoms remain and
-`overconstrained` flags consistent redundant cycle edges. This DOF report is
+global grounding. `underconstrained` means relative freedoms remain or multiple disconnected
+components can move independently; `overconstrained` flags consistent redundant cycle edges. This DOF report is
 a tree count, not a Jacobian rank proof for arbitrary closed mechanisms.
 
 The solver traverses mate edges deterministically by ID, anchors the
