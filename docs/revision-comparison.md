@@ -71,6 +71,9 @@ The response contains:
   preservation measurements where supported: reference/candidate volume,
   **common (intersecting)** volume, lost volume, added volume, native estimated
   volume resolution, volume-balance discrepancy and topology summary changes.
+- For newly added or removed bodies, a bounded `unmatched_body_reports`
+  array with the exact OCCT standalone body volume and topology summary when
+  supported. Standalone volumes are **not** the net model-union volume.
 - `visual_highlights` ID lists for added, removed and changed bodies. These
   are **selection hints** for external viewers/agents; CADYX's passive browser
   does not automatically overlay a second model or display deleted geometry.
@@ -84,12 +87,15 @@ The default numeric tolerances are **absolute 1e-8 model volume units** and
 volumetric changes; they **do not** establish topological identity, feature
 equivalence, manufacturing fit, or cross-body union volume. Surface changes
 with zero volume difference may still change topology. Changed-geometry
-calculations are bounded to the first **32** sorted same-ID body pairs.
-Additional pairs are explicitly omitted; unlike model feature creation, this
-is an inspection resource budget. Each pair is computed independently.
-Triangle meshes and unsupported kernel operations remain `untested`. The
-comparison does not claim exact global added/removed union volume across bodies
-or infer body identity after deletion/recreation.
+calculations share a budget of **32**: first sorted matching-ID body
+pairs, then new/removed individual bodies with any remaining slots. Additional
+measurements are explicitly omitted; unlike model feature creation, this is
+an inspection resource budget. Each pair and unmatched body is computed
+independently. Triangle meshes and unsupported kernel operations remain
+`untested`. The overall result is `partial` whenever unmatched body volumes
+cannot establish the actual added/removed union across bodies. The comparison
+does not claim exact global added/removed union volume or infer body identity
+after deletion/recreation.
 
 The SQLite sidecar is derived metadata and is not an interface for writing
 model geometry. Model changes still require the usual Command System edit
