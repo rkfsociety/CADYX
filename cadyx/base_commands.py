@@ -10,6 +10,7 @@ from .command_bodies import COMMAND_HANDLERS as BODIES_HANDLERS
 from .command_parameters import COMMAND_HANDLERS as PARAMETERS_HANDLERS
 from .command_scan import COMMAND_HANDLERS as SCAN_HANDLERS
 from .command_delivery import COMMAND_HANDLERS as DELIVERY_HANDLERS
+from .command_assembly import COMMAND_HANDLERS as ASSEMBLY_HANDLERS
 
 
 COMMAND_FAMILIES = (
@@ -21,6 +22,7 @@ COMMAND_FAMILIES = (
     ("parameters", PARAMETERS_HANDLERS),
     ("scan", SCAN_HANDLERS),
     ("delivery", DELIVERY_HANDLERS),
+    ("assembly", ASSEMBLY_HANDLERS),
 )
 
 

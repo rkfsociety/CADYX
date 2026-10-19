@@ -179,3 +179,17 @@ The HTTP host binds to loopback by default. Non-loopback access requires authent
 See [CONTRIBUTING.md](CONTRIBUTING.md) for environment prerequisites, checks, and the AI-first editing contract. For responsible disclosure, see [SECURITY.md](SECURITY.md).
 
 **No open-source license has been selected or granted for this repository.** Public visibility, if enabled, does not by itself grant permission to redistribute, modify, or reuse CADYX source code. Licensing must be decided by the project owner before presenting the project as open source.
+
+
+## Versioned assemblies — Document Model v9
+
+The leased Agent API command route and `cadyx_execute_command` now accept
+`create_assembly_part`, `create_subassembly`, `add_assembly_instance`,
+`transform_assembly_instance`, `remove_assembly_instance`, and
+`remove_assembly_component`. Each part references an editable body in the same
+project. Nested instances apply independent rigid XYZ/quaternion placements
+without duplicating saved B-reps. The passive shared viewport shows placed
+occurrences. Units are explicitly mm; cross-project part links, joints/mates,
+other-unit conversion, and assembly STEP export are not yet implemented.
+Existing document v8 snapshots migrate read-only to v9. See
+[the assembly contract](.codex/docs/document-model-v9.md).

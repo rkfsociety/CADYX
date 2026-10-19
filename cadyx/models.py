@@ -10,6 +10,7 @@ import re
 from typing import Any
 
 from .errors import ValidationError
+from .assemblies import empty_assembly, validate_assembly
 from .persisted_schemas import OBJECT_SCHEMAS, validate_persisted_object
 from .migrations import DOCUMENT_VERSION, migrate_document
 from .model_parameters import evaluate_expression, property_location
@@ -37,6 +38,7 @@ class Document:
     objects: list[dict[str, Any]] = field(default_factory=list)
     model_parameters: dict[str, dict[str, Any]] = field(default_factory=dict)
     parameter_bindings: list[dict[str, str]] = field(default_factory=list)
+    assembly: dict[str, Any] = field(default_factory=empty_assembly)
 
     @classmethod
     def create(cls) -> Document:
@@ -57,6 +59,7 @@ class Document:
             objects=value.get("objects", []),
             model_parameters=value.get("model_parameters", {}),
             parameter_bindings=value.get("parameter_bindings", []),
+            assembly=value.get("assembly", empty_assembly()),
         )
         document.validate()
         return document
@@ -69,6 +72,7 @@ class Document:
             "objects": deepcopy(self.objects),
             "model_parameters": deepcopy(self.model_parameters),
             "parameter_bindings": deepcopy(self.parameter_bindings),
+            "assembly": deepcopy(self.assembly),
         }
 
     def validate(self) -> None:
@@ -162,6 +166,7 @@ class Document:
             if not math.isclose(float(current), expected, rel_tol=1e-12, abs_tol=1e-12):
                 raise ValidationError("Bound model parameter value is out of date with its expression.")
         validate_sketches(self.objects)
+        validate_assembly(self.assembly, self.objects)
 
 
 @dataclass(frozen=True, slots=True)

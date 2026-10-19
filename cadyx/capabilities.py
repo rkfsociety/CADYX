@@ -34,6 +34,12 @@ _SKETCH_SPLINE_PARAMETER_SCHEMAS = {
 # Parameter names and JSON Schema hints are an operator guide; CommandSystem and
 # Core validators remain authoritative for required fields, ranges, references and geometry.
 BASE_COMMAND_CAPABILITIES: tuple[dict[str, Any], ...] = (
+    {"type": "create_assembly_part", "description": "Reference an existing editable body as a part of a versioned assembly.", "required": ["body_id"], "optional": ["name"], "constraints": ["A body may define one part; reuse it by creating multiple instances. Assembly units are mm."]},
+    {"type": "create_subassembly", "description": "Define a named nested subassembly.", "required": ["name"], "optional": [], "constraints": ["Instances can target this component from the root or another subassembly."]},
+    {"type": "add_assembly_instance", "description": "Place a part or subassembly instance with a rigid local transform.", "required": ["target_id"], "optional": ["parent_id", "name", "translation", "rotation"], "constraints": ["parent_id is null/root or a subassembly; translation is xyz millimeters; unit rotation quaternion is wxyz; cycles are rejected."], "parameter_schemas": {"target_id": {"type": "string"}, "parent_id": {"type": ["string", "null"]}, "translation": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}}, "rotation": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}}}},
+    {"type": "transform_assembly_instance", "description": "Update placement of one instance without changing source part geometry.", "required": ["instance_id"], "optional": ["translation", "rotation"], "constraints": ["Specify at least one finite translation xyz in mm or unit quaternion wxyz."]},
+    {"type": "remove_assembly_instance", "description": "Remove one placed instance without removing its reusable component.", "required": ["instance_id"], "optional": [], "constraints": ["A component definition is preserved."]},
+    {"type": "remove_assembly_component", "description": "Remove an unreferenced assembly part or subassembly definition.", "required": ["component_id"], "optional": [], "constraints": ["No instances may reference the component or use the subassembly as a parent. Original body/geometry remains unchanged."]},
     {"type": "create_model_parameter", "description": "Create a named numeric model parameter.", "required": ["name", "value"], "optional": ["unit"], "constraints": ["Names are unique identifiers; unit is mm, deg, or unitless."]},
     {"type": "create_model_parameters", "description": "Create several named numeric model parameters atomically.", "required": ["parameters"], "optional": [], "constraints": ["parameters maps valid unique identifiers to {value, unit}; all records are validated before any are stored."]},
     {"type": "set_model_parameter", "description": "Change a named parameter and atomically rebuild all bound model inputs.", "required": ["name", "value"], "optional": [], "constraints": ["The parameter must exist; every dependent sketch and feature must rebuild successfully."]},
@@ -204,12 +210,13 @@ def agent_api_capabilities(reusable_capabilities: list[dict[str, Any]] | None = 
         "contracts": [
             ".codex/docs/architecture.md#edit-leases",
             ".codex/docs/architecture.md#safe-agent-stop-and-resume",
-            ".codex/docs/document-model-v8.md",
+            ".codex/docs/document-model-v9.md",
             ".codex/docs/viewport-api.md",
         ],
         "reusable_capabilities": deepcopy(reusable_capabilities or []),
         "limitations": [
             "Browser is a read-only observation surface; API selection and commands are authoritative.",
+            "Assembly parts reference bodies in the same project; no cross-project links, other-unit conversion or assembly STEP export.",
             "Imported PLY scan results are triangle meshes, not B-reps; no unmeasured scale or reconstruction accuracy is claimed.",
             "Parameter names are a guide. Core/Command System validators define accepted values and geometry constraints.",
             "Declarative capabilities cannot execute code. Source extensions run candidate tests only inside a bounded no-network Windows AppContainer, fail closed when unavailable, and are loaded by the CADYX host only after successful tests and explicit source integration.",

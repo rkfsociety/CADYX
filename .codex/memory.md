@@ -1,3 +1,5 @@
+- Implemented in source on 2026-10-19 (Windows CI pending): Document Model v9 adds an independent, millimeter-only assembly graph (editable body parts, nested subassemblies and rigid placement instances) with leased generic Command System / Agent API / MCP commands and shared viewport placement. Saved B-reps remain single-source; cyclic/dangling references and invalid transforms fail closed. Old v8 projects migrate read-only. No cross-project links, other-unit conversion, mating or assembly STEP export. See [assembly contract](docs/document-model-v9.md), `cadyx/assemblies.py` and `tests/test_assemblies.py`.
+
 # CADYX project memory
 
 - Confirmed: optional `deterministic_rebuild` on revision-bound `check_project` performs isolated saved/cold/warm feature reconstruction with canonical inputs/graph fingerprints, B-rep metrics and descriptor hashes. Unsupported feature families and equal-metric hash mismatches report `untested`, not proof of shape equality. Cold means a fresh document copy within one host, not a new process. Available through Core/API/MCP/CLI; see [project-check contract](docs/project-checks.md).

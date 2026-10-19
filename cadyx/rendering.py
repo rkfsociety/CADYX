@@ -8,12 +8,16 @@ from array import array
 from .kernel import GeometryKernel
 from .models import Document
 from .errors import ValidationError
+from .assemblies import flatten_assembly, transform_point
 from .sketches import spline_sample_points
 
 
 def render_scene(document: Document, kernel: GeometryKernel) -> dict:
     from .agent_authoring import filter_consumed_sources
 
+    source_bodies = {item['id']: item for item in document.objects if item.get('type') == 'body'}
+    placements = flatten_assembly(document.assembly)
+    placed_source_ids = {item['body_id'] for item in placements}
     document = filter_consumed_sources(document)
     objects = []
     by_id = {item["id"]: item for item in document.objects}
@@ -92,6 +96,8 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
 
     for item in document.objects:
         kind = item["type"]
+        if kind == "body" and item["id"] in placed_source_ids:
+            continue
         if kind == "body" and item.get("visible", True) is False:
             continue
         if kind == "body" and item["id"] in consumed_bodies:
@@ -201,6 +207,39 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         if kind == "line":
             scene_item["line_modes"] = [item.get("extent", "segment")]
         objects.append(scene_item)
+    # Tessellate each source B-rep once per scene; instance placements never
+    # become stored geometry or independently editable native solids.
+    instance_meshes: dict[str, dict] = {}
+    for placement in placements:
+        source = source_bodies[placement["body_id"]]
+        if source.get("visible", True) is False or source.get("geometry") is None:
+            continue
+        body_id = placement["body_id"]
+        if body_id not in instance_meshes:
+            instance_meshes[body_id] = kernel.tessellate(source["geometry"])
+        mesh = instance_meshes[body_id]
+        original_positions = list(mesh["positions"]) + list(mesh.get("edge_positions", []))
+        positions = []
+        for offset in range(0, len(original_positions), 3):
+            point = transform_point(original_positions[offset:offset + 3],
+                                    placement["translation"], placement["rotation"])
+            positions.extend(point)
+            has_coordinates = True
+            for axis, value in enumerate(point):
+                if not math.isfinite(value):
+                    raise ValidationError("Placed assembly geometry exceeds the viewport numeric range.")
+                bounds_min[axis] = min(bounds_min[axis], value)
+                bounds_max[axis] = max(bounds_max[axis], value)
+        edge_offset = len(mesh["positions"]) // 3
+        objects.append({
+            "object_id": placement["id"], "type": "body",
+            "name": placement["name"], "instance_id": placement["instance_id"],
+            "instance_path": placement["instance_path"], "part_id": placement["part_id"],
+            "source_body_id": body_id,
+            "positions": positions, "triangles": mesh["triangles"],
+            "lines": [edge_offset + index for index in mesh.get("edge_lines", [])],
+            "points": [],
+        })
     bounds = None
     if has_coordinates:
         bounds = {"min": bounds_min, "max": bounds_max}

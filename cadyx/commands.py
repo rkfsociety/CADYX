@@ -18,11 +18,13 @@ from .command_parameters import ParameterCommands
 from .command_rebuild import RebuildCommands
 from .command_scan import ScanCommands
 from .command_delivery import DeliveryCommands
+from .command_assembly import AssemblyCommands
 
 
 class CommandSystem(
     SketchCommands, SketchProfileCommands, SketchCurveCommands, HistoryCommands,
     BodyCommands, ParameterCommands, RebuildCommands, ScanCommands, DeliveryCommands,
+    AssemblyCommands,
 ):
     def __init__(
         self,

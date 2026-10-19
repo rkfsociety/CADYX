@@ -504,7 +504,7 @@ class SketchDocumentTests(unittest.TestCase):
         path.write_text(json.dumps(legacy))
         before = path.read_bytes()
         inspected = self.core.inspect_project(project)
-        self.assertEqual(inspected["document"]["version"], 8)
+        self.assertEqual(inspected["document"]["version"], 9)
         self.assertEqual(inspected["document"]["objects"], legacy["document"]["objects"])
         self.assertEqual(inspected["history"], legacy["history"])
         self.assertEqual(path.read_bytes(), before)

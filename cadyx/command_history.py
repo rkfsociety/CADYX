@@ -30,6 +30,9 @@ class HistoryCommands:
         if body is None:
             raise NotFoundError("Body to remove was not found.")
 
+        if any(part["body_id"] == body_id for part in document.assembly["parts"]):
+            raise ValidationError("Body is referenced by an assembly part; remove the component first.")
+
         # Do not leave dependent features or sections pointing at a missing body.
         # A feature's body_id identifies its own output and is safe to cascade.
         def contains_reference(value: Any) -> bool:
@@ -111,6 +114,8 @@ class HistoryCommands:
                     if item["id"] not in removed and references_removed(item)]
         if external:
             raise ValidationError(f"Objects are still referenced by retained objects: {', '.join(external)}")
+        if any(part["body_id"] in removed for part in document.assembly["parts"]):
+            raise ValidationError("Assembly parts reference bodies in the removal group.")
         document.objects[:] = [item for item in document.objects if item["id"] not in removed]
         return {"removed_object_ids": object_ids, "removed_count": len(object_ids)}
 
@@ -420,6 +425,8 @@ def _handle_clear_model(
     removed_body_count = sum(item.get("type") == "body" for item in document.objects)
     removed_sketch_count = sum(item.get("type") == "sketch" for item in document.objects)
     document.objects.clear()
+    from .assemblies import empty_assembly
+    document.assembly = empty_assembly()
     return {
         "removed_object_count": removed_object_count,
         "removed_body_count": removed_body_count,
