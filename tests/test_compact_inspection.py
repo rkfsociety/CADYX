@@ -160,6 +160,7 @@ class CompactInspectionTransportTests(unittest.TestCase):
         tool = next(item for item in TOOLS if item["name"] == "cadyx_inspect_compact")
         self.assertIn("limit", tool["inputSchema"]["properties"])
         api = CadyxAPI()
+        self.addCleanup(api.close)
         api.base_url = self.base
         mcp = MCPApplication(api)
         result = mcp.call_tool("cadyx_inspect_compact", {

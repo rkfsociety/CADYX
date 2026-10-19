@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import email.message
 import json
 import os
 import tempfile
 import threading
-import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -13,7 +13,7 @@ from unittest.mock import patch
 from cadyx.capabilities import COMMAND_CAPABILITIES
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
-from cadyx.mcp_server import APIError, CadyxAPI, MCPApplication, TOOLS, handle_message
+from cadyx.mcp_server import APIError, CadyxAPI, MCPApplication, TOOLS, TransportError, handle_message
 from cadyx.web import CadyxHTTPServer, make_request_handler
 
 
@@ -32,6 +32,7 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.app = MCPApplication(CadyxAPI())
 
     def _stop_server(self) -> None:
+        self.app.api.close()
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
@@ -45,6 +46,86 @@ class CadyxMCPServerTests(unittest.TestCase):
         result = self.app.call_tool(name, args or {})
         self.assertNotIn("isError", result, result)
         return result.get("structuredContent")
+
+    def test_api_reuses_keep_alive_connection(self) -> None:
+        class Response:
+            status = 200
+
+            def __init__(self):
+                self.headers = email.message.Message()
+                self.headers["Content-Type"] = "application/json"
+
+            def read(self, size: int) -> bytes:
+                return b"{}"
+
+        class Connection:
+            sock = object()
+
+            def __init__(self, *args, **kwargs):
+                self.requests = 0
+
+            def request(self, *args, **kwargs):
+                self.requests += 1
+
+            def getresponse(self):
+                return Response()
+
+            def close(self):
+                self.sock = None
+
+        connections = []
+
+        def create_connection(*args, **kwargs):
+            connection = Connection(*args, **kwargs)
+            connections.append(connection)
+            return connection
+
+        api = CadyxAPI()
+        with patch("cadyx.mcp_server.http.client.HTTPConnection", side_effect=create_connection):
+            self.assertEqual(api.get("/api/v1/health"), {})
+            self.assertEqual(api.get("/api/v1/health"), {})
+        self.assertEqual(len(connections), 1)
+        self.assertEqual(connections[0].requests, 2)
+
+    def test_api_bounds_response_reads(self) -> None:
+        class Response:
+            status = 200
+
+            def __init__(self):
+                self.headers = email.message.Message()
+                self.headers["Content-Type"] = "application/json"
+
+            def read(self, size: int) -> bytes:
+                self.read_size = size
+                return b"12345"
+
+        class Connection:
+            sock = object()
+
+            def __init__(self, *args, **kwargs):
+                self.response = Response()
+                self.closed = False
+
+            def request(self, *args, **kwargs):
+                pass
+
+            def getresponse(self):
+                return self.response
+
+            def close(self):
+                self.closed = True
+                self.sock = None
+
+        connection = Connection()
+        api = CadyxAPI()
+        with (
+            patch("cadyx.mcp_server.http.client.HTTPConnection", return_value=connection),
+            patch("cadyx.mcp_server._MAX_RESPONSE_BYTES", 4),
+        ):
+            with self.assertRaises(TransportError):
+                api.get("/api/v1/health")
+        self.assertEqual(connection.response.read_size, 5)
+        self.assertTrue(connection.closed)
 
     def test_protocol_discovery_and_image_content(self) -> None:
         initialize = handle_message({

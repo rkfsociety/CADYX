@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
+import ssl
 import sys
 import threading
-import urllib.error
 import urllib.parse
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -20,6 +20,9 @@ from .errors import public_data, public_text
 
 _PROTOCOL_VERSION = "2025-11-25"
 _MAX_FILE_BYTES = 64 * 1024 * 1024
+_MAX_RESPONSE_BYTES = _MAX_FILE_BYTES
+_API_TIMEOUT_SECONDS = 120
+_ERROR_RESPONSE_BYTES = 1024 * 1024
 _JSON = "application/json"
 # Only these command HTTP responses prove that the submitted mutation was rejected.
 _DEFINITIVE_COMMAND_REJECTION_STATUSES = frozenset({400, 401, 403, 404, 405, 409, 413, 415, 422})
@@ -60,6 +63,39 @@ class CadyxAPI:
             self.token = path.read_text(encoding="utf-8").strip()
             if not self.token:
                 raise ValueError("CADYX_API_TOKEN_FILE is empty.")
+        self._connections = threading.local()
+
+    def _connection(self, parsed: urllib.parse.SplitResult) -> http.client.HTTPConnection:
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("CADYX_API_URL must be an HTTP or HTTPS URL with a host.")
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        key = (parsed.scheme, parsed.hostname, port)
+        connections = getattr(self._connections, "by_origin", None)
+        if connections is None:
+            connections = self._connections.by_origin = {}
+        connection = connections.get(key)
+        if connection is None or connection.sock is None:
+            connection_type = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+            options = {"timeout": _API_TIMEOUT_SECONDS}
+            if parsed.scheme == "https":
+                options["context"] = ssl.create_default_context()
+            connection = connection_type(parsed.hostname, port, **options)
+            connections[key] = connection
+        return connection
+
+    def _drop_connection(self, parsed: urllib.parse.SplitResult) -> None:
+        connections = getattr(self._connections, "by_origin", {})
+        key = (parsed.scheme, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+        connection = connections.pop(key, None)
+        if connection is not None:
+            connection.close()
+
+    def close(self) -> None:
+        """Close the calling thread's idle keep-alive connections."""
+        connections = getattr(self._connections, "by_origin", {})
+        self._connections.by_origin = {}
+        for connection in connections.values():
+            connection.close()
 
     def request(self, method: str, path: str, body: dict[str, Any] | bytes | None = None) -> tuple[bytes, Any]:
         headers = {"Accept": "application/json, image/png, */*"}
@@ -72,25 +108,35 @@ class CadyxAPI:
         elif body is not None:
             data = json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
             headers["Content-Type"] = _JSON
-        request = urllib.request.Request(self.base_url + path, data=data, headers=headers, method=method)
+        parsed = urllib.parse.urlsplit(self.base_url)
+        target = urllib.parse.urlunsplit(("", "", parsed.path.rstrip("/") + path, "", ""))
+        if not target.startswith("/"):
+            target = "/" + target
         try:
-            with urllib.request.urlopen(request, timeout=600) as response:
-                raw = response.read()
-                content_type = response.headers.get_content_type()
-                metadata = {
-                    "content_type": content_type,
-                    "document_revision": response.headers.get("X-CADYX-Document-Revision"),
-                    "viewport_source": response.headers.get("X-CADYX-Viewport-Source"),
-                }
-        except urllib.error.HTTPError as exc:
-            with exc:
-                raw = exc.read()
-            try:
-                payload = json.loads(raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                payload = raw.decode("utf-8", errors="replace")
-            raise APIError(exc.code, payload) from exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            connection = self._connection(parsed)
+            connection.request(method, target, body=data, headers=headers)
+            response = connection.getresponse()
+            response_limit = _MAX_RESPONSE_BYTES if response.status < 400 else _ERROR_RESPONSE_BYTES
+            raw = response.read(response_limit + 1)
+            if len(raw) > response_limit:
+                self._drop_connection(parsed)
+                raise TransportError("CADYX API response exceeded the configured size limit.")
+            content_type = response.headers.get_content_type()
+            metadata = {
+                "content_type": content_type,
+                "document_revision": response.headers.get("X-CADYX-Document-Revision"),
+                "viewport_source": response.headers.get("X-CADYX-Viewport-Source"),
+            }
+            if response.status >= 400:
+                try:
+                    payload = json.loads(raw.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    payload = raw.decode("utf-8", errors="replace")
+                raise APIError(response.status, payload)
+        except APIError:
+            raise
+        except (OSError, http.client.HTTPException, ssl.SSLError) as exc:
+            self._drop_connection(parsed)
             raise TransportError("CADYX API transport failed; the operation outcome may be uncertain.") from exc
         if content_type == _JSON:
             try:
@@ -108,45 +154,6 @@ class CadyxAPI:
 
 def _schema(properties: dict[str, Any] | None = None, required: list[str] | None = None) -> dict[str, Any]:
     return {"type": "object", "properties": properties or {}, "required": required or [], "additionalProperties": False}
-
-
-def _compact_command_value(value: Any, *, key: str | None = None) -> Any:
-    """Keep command results useful to an MCP caller without echoing model payloads."""
-    if isinstance(value, dict):
-        if key == "geometry":
-            return {name: value[name] for name in ("kernel", "kind", "volume", "plane") if name in value}
-        return {
-            name: _compact_command_value(item, key=name)
-            for name, item in value.items()
-            if name not in {"point_ids", "line_ids", "circle_ids", "positions", "triangles", "data"}
-        }
-    if isinstance(value, list):
-        return [_compact_command_value(item, key=key) for item in value]
-    return value
-
-
-def _compact_command_response(result: dict[str, Any]) -> dict[str, Any]:
-    if isinstance(result.get("error"), str):
-        return result
-    document = result.get("document", {})
-    if isinstance(document, dict) and "object_count" in document and "objects" not in document:
-        return result
-    objects = document.get("objects", []) if isinstance(document, dict) else []
-    object_counts: dict[str, int] = {}
-    for item in objects if isinstance(objects, list) else []:
-        if isinstance(item, dict) and isinstance(item.get("type"), str):
-            object_counts[item["type"]] = object_counts.get(item["type"], 0) + 1
-    summary = {
-        "id": document.get("id"),
-        "version": document.get("version"),
-        "revision": document.get("revision"),
-        "object_count": len(objects) if isinstance(objects, list) else 0,
-        "object_counts": object_counts,
-    }
-    history_entry = result.get("history_entry")
-    if isinstance(history_entry, dict):
-        history_entry = _compact_command_value(history_entry)
-    return {"document": summary, "history_entry": history_entry}
 
 
 _STRING = {"type": "string", "minLength": 1}
@@ -486,7 +493,6 @@ class MCPApplication:
                     self._project(args["project_id"], "/capabilities/check"),
                     {"command_type": args["command"].get("type")},
                 )
-            result["command_result"] = _compact_command_response(result["command_result"])
             return result
         if name == "cadyx_preview_commands":
             return self.api.post(self._project(args["project_id"], "/commands/preview"),
