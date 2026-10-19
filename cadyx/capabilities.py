@@ -167,6 +167,8 @@ def agent_api_capabilities(reusable_capabilities: list[dict[str, Any]] | None = 
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/files/{name}", "description": "Upload a .step/.stp source as application/octet-stream; max 64 MiB; existing project files are never overwritten."},
         {"method": "DELETE", "path": "/api/v1/agent/projects/{id}/files/{name}", "description": "Remove an unused direct .step/.stp reference from a free project; fails while its imported body still uses it."},
             {"method": "GET", "path": "/api/v1/agent/capabilities", "description": "This read-only route discovery and command parameter guide."},
+            {"method": "GET", "path": "/api/v1/agent/catalog", "description": "Immutable versioned built-in part manifests, SHA-256 identities, unit and license assumptions."},
+            {"method": "POST", "path": "/api/v1/agent/catalog/resolve", "description": "Pure preset validation and exact-version command resolution; no document mutation."},
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/capabilities", "description": "Test and register a reusable declarative command composition."},
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/capabilities/check", "description": "Report a missing required command as a visual agent activity without acquiring a model edit lease."},
             {"method": "POST", "path": "/api/v1/agent/projects/{id}/capabilities/{capability_id}/execute", "description": "Execute a tested capability through individually revision-checked Command System operations."},

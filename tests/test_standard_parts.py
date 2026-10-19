@@ -7,6 +7,9 @@ from types import SimpleNamespace
 
 from cadyx.errors import ValidationError
 from cadyx.standard_parts import list_standard_parts, resolve_standard_part, _execute
+from cadyx.capabilities import agent_api_capabilities
+from cadyx.web_routes import match_route
+from cadyx.mcp_server import TOOLS
 
 
 class _StubCommands:
@@ -55,6 +58,16 @@ class StandardPartsTests(unittest.TestCase):
         snapshot["items"][0]["assumptions"].append("mutation")
         self.assertEqual(before, {i["id"]: i for i in list_standard_parts()["items"]}["cadyx.hex-bar"]["sha256"])
         self.assertTrue(all(len(item["sha256"]) == 64 for item in self.items.values()))
+
+    def test_catalog_routes_and_mcp_are_discoverable(self):
+        for method, path in (("GET", "/api/v1/agent/catalog"),
+                             ("POST", "/api/v1/agent/catalog/resolve")):
+            self.assertIsNotNone(match_route(method, path))
+            self.assertIn(path, [route["path"] for route in agent_api_capabilities()["routes"]])
+        tool_names = {entry["name"] for entry in TOOLS}
+        self.assertIn("cadyx_list_standard_parts", tool_names)
+        self.assertIn("cadyx_resolve_standard_part", tool_names)
+        self.assertIn("create_catalog_part", {item["type"] for item in agent_api_capabilities()["commands"]})
 
     def test_exact_revision_and_parameter_contract(self):
         request = self.request("cadyx.rectangular-extrusion",

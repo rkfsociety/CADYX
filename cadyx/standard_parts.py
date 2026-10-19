@@ -130,7 +130,7 @@ def resolve_standard_part(request: dict[str, Any]) -> dict[str, Any]:
         params["file_sha256"] = digest
         params["supplier"] = _required_text(parameters["supplier"], "supplier")
         params["part_number"] = _required_text(parameters["part_number"], "part_number")
-        if parameters["license_id"] not in _LICENSES:
+        if not isinstance(parameters["license_id"], str) or parameters["license_id"] not in _LICENSES:
             raise ValidationError("Unknown license_id; only the documented explicit license identifiers are supported.")
         if parameters["usage_rights_confirmed"] is not True:
             raise ValidationError("The caller must explicitly confirm rights to use this STEP reference.")
