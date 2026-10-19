@@ -18,6 +18,10 @@ For reference-driven reconstruction, keep imported source/reference bodies hidde
 4. Ask only for material product requirements that cannot be inferred safely (for example dimensions, intended attachment, scale, units, or tolerance). Never invent scan scale, physical units, accuracy, or manufacturing claims. Do not ask permission for implementation changes required to fulfil the requested model; follow the repository engineering rules.
 5. Before the first document mutation, publish a concrete 3–7 phase Russian plan with `cadyx_report_dashboard`, at 0% with phases pending and an honest ETA or `null`. Keep `tasks: []` unless work is actually queued. Update the same report at verified phase boundaries; do not show fabricated progress.
 
+## Naming the model
+
+Treat the project, final part body, and construction features as different things. For a single solid part, use the part's descriptive name for the project and final body; do not label the project as an assembly unless the document contains an actual assembly structure. Never let the final body inherit the last finishing operation's name (for example, `Chamfer ...` or `Fillet ...`). Check command semantics before supplying `name`: some commands store it as the result body's display name, and their feature record may not have a separate name field. In that case, name the result body after the part and preserve operation details in the feature's operation/parameters. Before finishing, inspect the saved document and confirm the project title and final body name describe the part, while the feature history still identifies the actual operations.
+
 ## Parametric modeling doctrine
 
 Build models the way an experienced engineer would build them in a conventional history-based parametric CAD system. The target is not merely the same final surface or silhouette: the saved CADYX document must express the design intent through a logical, editable and robust feature history.
