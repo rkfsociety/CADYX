@@ -74,6 +74,8 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects", "agent_project_create", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}", "agent_project_get", "agent"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/inspection", "agent_inspection", "agent"),
+    RouteSpec("GET", "/api/v1/agent/projects/{project_id}/revisions", "agent_revisions", "agent"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/revisions/compare", "agent_revision_compare", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/dashboard", "agent_dashboard_get", "agent"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/dashboard", "agent_dashboard_post", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/activity", "agent_activity", "agent"),
@@ -474,6 +476,29 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         if options.get("section", "summary") == "summary":
             result["lock"] = core.leases.snapshot_for_listing(project_id)
         handler._json(200, result)
+    elif name == "agent_revisions":
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if set(query) - {"offset", "limit"} or any(len(values) != 1 for values in query.values()):
+            raise ValidationError("Revisions accept only offset and limit query parameters.")
+        values = {}
+        for key in ("offset", "limit"):
+            if key in query:
+                raw = query[key][0]
+                if not raw.isascii() or not raw.isdecimal():
+                    raise ValidationError(f"{key} must be a nonnegative decimal integer.")
+                values[key] = int(raw)
+        handler._json(200, core.list_revision_checkpoints(project_id, **values))
+    elif name == "agent_revision_compare":
+        body = _require_json(handler)
+        required = {"expected_revision", "before", "after"}
+        if not required.issubset(body) or set(body) - (required | {"absolute_tolerance", "relative_tolerance"}):
+            raise ValidationError("Comparison requires expected_revision, before and after selectors; tolerances are optional.")
+        handler._json(200, core.compare_model_revisions(
+            project_id, body["before"], body["after"],
+            expected_revision=body["expected_revision"],
+            absolute_tolerance=body.get("absolute_tolerance", 1e-8),
+            relative_tolerance=body.get("relative_tolerance", 1e-9),
+        ))
     elif name == "agent_capability_develop":
         body = _require_json(handler)
         if set(body) != {"definition"} or not isinstance(body["definition"], dict):
