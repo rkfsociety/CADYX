@@ -8,13 +8,13 @@ from uuid import uuid4
 from .advanced_features import _raw_brep
 from .errors import NotFoundError, ValidationError
 from .native_kernel import NativeKernel
-from .profile_segments import sketch_segments
+from .profile_segments import sketch_segment_profiles, sketch_segments
 from .sketches import closed_profile, closed_profiles
 
 
 CAPABILITIES = (
     {"type": "create_sketch_from_body_section", "description": "Extract closed planar contours from any editable B-rep body into editable sketches.", "required": ["body_id", "normal_axis", "offset"], "optional": ["max_points", "name"], "constraints": ["normal_axis is X, Y or Z; max_points is at least 16 total samples (default 2048); open/branched sections are rejected by the native sectioner."]},
-    {"type": "pad_sketch_to_body", "description": "Extrude a sketch profile with optional inner contours and fuse it into an existing body.", "required": ["body_id", "sketch_id", "depth"], "optional": ["centered", "name"], "constraints": ["Additional closed contours inside the outer contour become holes; offset XY/XZ sketch planes are honored. Pad must intersect the source body and final result must remain one solid."]},
+    {"type": "pad_sketch_to_body", "description": "Extrude a sketch profile with optional inner contours and fuse it into an existing body.", "required": ["body_id", "sketch_id", "depth"], "optional": ["centered", "name"], "constraints": ["Additional closed contours inside the outer contour become holes with exact line and circular or elliptical arc edges; offset XY/XZ sketch planes are honored. Pad must intersect the source body and final result must remain one solid."]},
     {"type": "rib_from_sketch", "description": "Create an additive rib from a thin closed sketch profile and fuse it into a body.", "required": ["body_id", "sketch_id", "depth"], "optional": ["centered", "name"], "constraints": ["Use a thin closed rib profile; result must fuse into one solid."]},
     {"type": "pocket_sketch", "description": "Extrude a closed sketch as a cutting tool and subtract it from an existing body.", "required": ["body_id", "sketch_id", "depth"], "optional": ["centered", "name"], "constraints": ["Pocket must remove material and final result must remain one solid."]},
 )
@@ -100,10 +100,14 @@ def _execute(self, document, command, *, progress=None, project_id=None):
         raise ValidationError("centered must be a boolean.")
     if progress:
         progress({"phase": "build_tool_extrusion"})
+    segment_profiles = sketch_segment_profiles(document.objects, sketch_id) if len(profiles) > 1 else None
     tool = (self.kernel.create_extruded_profile(profiles[0], plane=plane, depth=depth, centered=centered,
-                                                   segments=sketch_segments(document.objects, sketch_id))
+                                                segments=sketch_segments(document.objects, sketch_id))
             if len(profiles) == 1 else
-            self.kernel.create_extruded_profile_with_holes(profiles, plane=plane, depth=depth, centered=centered))
+            self.kernel.create_extruded_profile_with_holes(
+                profiles, plane=plane, depth=depth, centered=centered,
+                segment_profiles=segment_profiles,
+            ))
     axis = sketch.get("section_normal_axis")
     offset = sketch.get("section_offset", 0.0)
     if offset:

@@ -30,7 +30,7 @@ from .scan import ScanProcessor
 from .self_evolving import SelfEvolvingCapabilityEngine
 from .source_extension import SourceExtensionEngine
 from .workspace import ProjectWorkspace
-from .profile_segments import sketch_segments
+from .profile_segments import sketch_segment_profiles, sketch_segments
 from .sketches import (closed_profile, closed_profiles, closed_spline_profile,
                        generated_gear_curve_profiles, open_path)
 
@@ -690,16 +690,27 @@ class CadyxCore:
                         or feature_geometry != body.get("geometry") or not isinstance(parameters, dict)):
                     raise ValidationError("Pad feature geometry or source references are invalid.")
                 plane, profiles = closed_profiles(document.objects, sketch_id)
-                segments = sketch_segments(document.objects, sketch_id) if len(profiles) == 1 else None
-                # Legacy saved pads remain readable; their next edit migrates the wire.
-                for candidate_segments in ([segments, None] if segments is not None else [None]):
-                    options = {"segments": candidate_segments} if candidate_segments is not None else {}
-                    tool = (self.kernel.create_extruded_profile(
-                        profiles[0], plane=plane, depth=parameters["depth"], centered=parameters["centered"],
-                        **options,
-                    ) if len(profiles) == 1 else self.kernel.create_extruded_profile_with_holes(
-                        profiles, plane=plane, depth=parameters["depth"], centered=parameters["centered"],
-                    ))
+                if len(profiles) == 1:
+                    segments = sketch_segments(document.objects, sketch_id)
+                    candidates = [segments, None] if segments is not None else [None]
+                else:
+                    segments = None
+                    segment_profiles = sketch_segment_profiles(document.objects, sketch_id)
+                    candidates = [segment_profiles, None] if segment_profiles is not None else [None]
+                # Older documents without per-contour arc descriptors remain readable.
+                for candidate in candidates:
+                    if len(profiles) == 1:
+                        options = {"segments": candidate} if candidate is not None else {}
+                        tool = self.kernel.create_extruded_profile(
+                            profiles[0], plane=plane, depth=parameters["depth"],
+                            centered=parameters["centered"], **options,
+                        )
+                    else:
+                        options = {"segment_profiles": candidate} if candidate is not None else {}
+                        tool = self.kernel.create_extruded_profile_with_holes(
+                            profiles, plane=plane, depth=parameters["depth"],
+                            centered=parameters["centered"], **options,
+                        )
                     offset = sketch.get("section_offset", 0.0)
                     if offset:
                         shift = [0.0, 0.0, 0.0]
@@ -958,11 +969,19 @@ class CadyxCore:
                 plane, profiles = closed_profiles(document.objects, source_id)
                 if len(profiles) > 1:
                     curve_profiles = generated_gear_curve_profiles(document.objects, source_id, profiles)
+                    segment_profiles = sketch_segment_profiles(document.objects, source_id)
                     expected = self.kernel.create_extruded_profile_with_holes(
                         profiles, plane=plane, depth=parameters["depth"],
                         centered=parameters.get("centered", False),
                         curve_profiles=curve_profiles,
+                        segment_profiles=segment_profiles,
                     )
+                    if expected != feature_geometry and segment_profiles is not None:
+                        expected = self.kernel.create_extruded_profile_with_holes(
+                            profiles, plane=plane, depth=parameters["depth"],
+                            centered=parameters.get("centered", False),
+                            curve_profiles=curve_profiles,
+                        )
                     if expected != feature_geometry:
                         if accepts_legacy_gear_geometry(plane):
                             continue

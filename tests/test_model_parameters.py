@@ -1,14 +1,64 @@
+import math
 import unittest
 
 from cadyx.model_parameters import evaluate_expression
 from cadyx.errors import NotFoundError, ValidationError
 from cadyx.commands import CommandSystem
 from cadyx.kernel import OCCTKernelAdapter
+from cadyx.native_kernel import NativeKernel
 from cadyx.models import Document
 from cadyx.semantic_selection import capture_edge_references, resolve_edge_references
+from cadyx.profile_segments import sketch_segment_profiles
+from cadyx.sketches import closed_profiles
 
 
 class ModelParameterExpressionTests(unittest.TestCase):
+    def test_multicontour_pad_keeps_exact_slot_arcs_on_rebuild(self):
+        system = CommandSystem(OCCTKernelAdapter())
+        document = Document.create()
+        base = system.execute(document, {"type": "create_box", "width": 50, "height": 30, "depth": 5})
+        sketch = system.execute(document, {"type": "create_sketch", "plane": "XZ"})["sketch_id"]
+        system.execute(document, {"type": "add_sketch_rectangle", "sketch_id": sketch,
+                                  "x": -20, "y": 4.9, "width": 40, "height": 30})
+        system.execute(document, {"type": "add_sketch_slot_centered", "sketch_id": sketch,
+                                  "center_point": {"x": 0, "y": 20}, "total_length": 20,
+                                  "slot_width": 8, "rotation_degrees": 90})
+        plane, contours = closed_profiles(document.objects, sketch)
+        self.assertEqual(plane, "XZ")
+        self.assertEqual(len(contours), 2)
+        segments = sketch_segment_profiles(document.objects, sketch)
+        self.assertIsNotNone(segments)
+        self.assertEqual(sum(segment[0] == 1 for contour in segments if contour
+                             for segment in contour), 2)
+
+        pad = system.execute(document, {"type": "pad_sketch_to_body", "body_id": base["body_id"],
+                                        "sketch_id": sketch, "depth": 10})
+        tool = pad["geometry"]["tool"]
+        self.assertEqual(tool["kind"], "profile_with_holes")
+        self.assertEqual(len(tool["segment_profiles"]), 2)
+        self.assertAlmostEqual(tool["volume"], (40 * 30 - 8 * 12 - 16 * math.pi) * 10, places=8)
+
+        def slot_arc_edges(geometry):
+            topology = NativeKernel().geometry_graph(geometry, topology=True)
+            return [edge for edge in topology["edges"]
+                    if edge.get("curve") == "circle"]
+
+        arcs = slot_arc_edges(tool)
+        self.assertEqual(len(arcs), 4)
+        self.assertAlmostEqual(sum(edge["length"] for edge in arcs), 4 * math.pi * 4, places=7)
+        self.assertEqual(system.kernel.metrics(pad["geometry"])["topology"]["solid_count"], 1)
+
+        system.execute(document, {"type": "set_parameter", "feature_id": pad["feature_id"],
+                                   "name": "depth", "value": 11})
+        rebuilt_body = next(item for item in document.objects if item["id"] == pad["body_id"])
+        rebuilt_tool = rebuilt_body["geometry"]["tool"]
+        self.assertEqual(rebuilt_tool["segment_profiles"], tool["segment_profiles"])
+        arcs = slot_arc_edges(rebuilt_tool)
+        self.assertEqual(len(arcs), 4)
+        self.assertAlmostEqual(sum(edge["length"] for edge in arcs), 4 * math.pi * 4, places=7)
+        self.assertEqual(system.kernel.metrics(rebuilt_body["geometry"])["topology"]["solid_count"], 1)
+        document.validate()
+
     def test_converging_bound_roots_rebuild_shared_fuse_once_with_final_inputs(self):
         system = CommandSystem(OCCTKernelAdapter())
         document = Document.create()

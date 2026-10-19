@@ -2,7 +2,7 @@
 from __future__ import annotations
 import math
 from .errors import ValidationError
-from .sketches import closed_profile, _profile_endpoint_aliases
+from .sketches import closed_profile, closed_profile_subsets, _profile_endpoint_aliases
 
 
 def _ellipse_point(cx, cy, major, minor, rotation, angle):
@@ -68,6 +68,14 @@ def sketch_segments(objects, sketch_id):
         current = end
     return segment_values(result)
 
+
+
+
+def sketch_segment_profiles(objects, sketch_id):
+    """Return analytic segment descriptors per closed sketch contour when present."""
+    _plane, subsets = closed_profile_subsets(objects, sketch_id)
+    profiles = [sketch_segments(subset, sketch_id) for subset in subsets]
+    return profiles if any(profile is not None for profile in profiles) else None
 
 def segment_values(segments):
     if not isinstance(segments, list) or len(segments) < 3:

@@ -10,6 +10,7 @@ from typing import Any, Callable
 from uuid import uuid4
 from .errors import NotFoundError, ValidationError
 from .models import Document
+from .profile_segments import sketch_segment_profiles
 from .sketches import closed_profile, closed_profiles, closed_spline_profile, generated_gear_curve_profiles, open_path
 from .command_values import _finite_number, _number
 
@@ -96,11 +97,13 @@ class BodyCommands:
         spline_profile = closed_spline_profile(document.objects, sketch_id)
         profiles = None
         curve_profiles = None
+        segment_profiles = None
         if spline_profile is None:
             if operation == "extrude_sketch":
                 plane, profiles = closed_profiles(document.objects, sketch_id)
                 profile = profiles[0]
                 curve_profiles = generated_gear_curve_profiles(document.objects, sketch_id, profiles)
+                segment_profiles = sketch_segment_profiles(document.objects, sketch_id) if len(profiles) > 1 else None
             else:
                 plane, profile = closed_profile(document.objects, sketch_id)
             curve_points = None
@@ -129,7 +132,7 @@ class BodyCommands:
         geometry = self._profile_geometry(document, {
             "operation": operation, "source_sketch_id": sketch_id,
         }, parameters, profile=profile, plane=plane, curve_points=curve_points,
-            profiles=profiles, curve_profiles=curve_profiles)
+            profiles=profiles, curve_profiles=curve_profiles, segment_profiles=segment_profiles)
         if progress is not None:
             progress({"phase": "validate_result"})
         body_id = f"body:{uuid4()}"

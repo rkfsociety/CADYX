@@ -358,7 +358,11 @@ ellipse can be used as an extrusion profile; each is sampled into a 128-edge
 polygon. Elliptical arcs can join line and circular-arc edges to make a closed
 profile. A profile made from lines, circular arcs and elliptical arcs is passed
 to OCCT with exact conic edges; sampled profile points remain available for
-sketch validation and compatible descriptor data. Full ellipses remain exact in
+sketch validation and compatible descriptor data. This applies independently
+to each contour in a multi-contour extrusion or fused pad: the saved
+segment_profiles descriptor preserves exact line and conic edges for the outer
+contour and every inner cut, and dependent rebuilds reconstruct those analytic
+edges rather than a polygonal substitute. Full ellipses remain exact in
 the sketch and are sampled for viewport and standalone full-profile operations.
 Interpolating splines remain defined by their
 ordered interpolated points and are sampled at 24 segments per span for display

@@ -667,10 +667,10 @@ def closed_profile(objects: list[dict[str, Any]], sketch_id: str) -> tuple[str, 
     return plane, profile
 
 
-def closed_profiles(
+def closed_profile_subsets(
         objects: list[dict[str, Any]], sketch_id: str,
-) -> tuple[str, list[list[dict[str, float]]]]:
-    """Return the independent closed contours in one sketch, preserving each exact loop."""
+) -> tuple[str, list[list[dict[str, Any]]]]:
+    """Return one validated source-object subset for each independent closed contour."""
     sketch = next((item for item in objects if item.get("id") == sketch_id and item.get("type") == "sketch"), None)
     if sketch is None:
         raise ValidationError("A profile operation needs an existing sketch.")
@@ -683,9 +683,8 @@ def closed_profiles(
     standalone = [item for item in owned if item.get("type") == "circle" and "sweep_radians" not in item]
     standalone.extend(item for item in owned if item.get("type") == "ellipse" and "sweep_radians" not in item)
     closed_splines = [item for item in owned if item.get("type") == "spline" and item.get("mode") == "closed"]
-    if closed_splines:
-        if edges:
-            raise ValidationError("A closed spline profile cannot be mixed into an open edge chain.")
+    if closed_splines and edges:
+        raise ValidationError("A closed spline profile cannot be mixed into an open edge chain.")
 
     edges = _profile_endpoint_aliases(objects, edges)
     components: list[list[dict[str, Any]]] = [[item] for item in standalone]
@@ -700,8 +699,6 @@ def closed_profiles(
         remaining = {edge["id"]: edge for edge in edges}
         while remaining:
             first = next(iter(remaining.values()))
-            start_id, end_id = ((first["point_ids"][0], first["point_ids"][-1]) if first["type"] == "spline"
-                                else (first["start_id"], first["end_id"]))
             component, pending = [], [first]
             seen_edges: set[str] = set()
             while pending:
@@ -720,7 +717,7 @@ def closed_profiles(
             components.append(component)
 
     by_id = {item["id"]: item for item in objects}
-    profiles = []
+    subsets = []
     for component in components:
         vertex_ids = set()
         for edge in component:
@@ -733,11 +730,20 @@ def closed_profiles(
             else:
                 vertex_ids.update((edge.get("start_id"), edge.get("end_id")))
         subset = [sketch, *component, *(by_id[value] for value in vertex_ids if value in by_id)]
-        _plane, profile = closed_profile(subset, sketch_id)
-        profiles.append(profile)
-    if not profiles:
+        closed_profile(subset, sketch_id)
+        subsets.append(subset)
+    if not subsets:
         raise ValidationError("A profile operation needs at least one closed contour.")
-    return sketch["plane"], profiles
+    return sketch["plane"], subsets
+
+
+def closed_profiles(
+        objects: list[dict[str, Any]], sketch_id: str,
+) -> tuple[str, list[list[dict[str, float]]]]:
+    """Return the sampled contour points while retaining each source contour separately."""
+    plane, subsets = closed_profile_subsets(objects, sketch_id)
+    profiles = [closed_profile(subset, sketch_id)[1] for subset in subsets]
+    return plane, profiles
 
 
 def closed_spline_profile(

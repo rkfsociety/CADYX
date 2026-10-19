@@ -9,7 +9,7 @@ import math
 from typing import Any, Callable
 from .errors import ConflictError, ValidationError
 from .models import Document
-from .profile_segments import sketch_segments
+from .profile_segments import sketch_segment_profiles, sketch_segments
 from .sketches import (closed_profile, closed_profiles, closed_spline_profile,
                        generated_gear_curve_profiles, open_path)
 
@@ -21,6 +21,7 @@ class RebuildCommands:
         curve_points: list[dict[str, float]] | None = None,
         profiles: list[list[dict[str, float]]] | None = None,
         curve_profiles: list[list[dict[str, float]] | None] | None = None,
+        segment_profiles: list[list[list[float]] | None] | None = None,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         source_sketch_id = (feature.get("source_sketch_id") or parameters.get("source_sketch_id")
@@ -34,11 +35,14 @@ class RebuildCommands:
             plane, profiles = closed_profiles(document.objects, source_sketch_id)
             depth = parameters["depth"]
             centered = parameters.get("centered", False)
+            segment_profiles = sketch_segment_profiles(document.objects, source_sketch_id) if len(profiles) > 1 else None
             tool = (self.kernel.create_extruded_profile(profiles[0], plane=plane, depth=depth, centered=centered,
                                                        segments=sketch_segments(document.objects, source_sketch_id))
                     if len(profiles) == 1 else
-                    self.kernel.create_extruded_profile_with_holes(profiles, plane=plane, depth=depth,
-                                                                   centered=centered))
+                    self.kernel.create_extruded_profile_with_holes(
+                        profiles, plane=plane, depth=depth, centered=centered,
+                        segment_profiles=segment_profiles,
+                    ))
             axis = sketch.get("section_normal_axis")
             offset = sketch.get("section_offset", 0.0)
             if offset:
@@ -59,6 +63,7 @@ class RebuildCommands:
                     plane, profiles = closed_profiles(document.objects, source_sketch_id)
                     profile = profiles[0]
                     curve_profiles = generated_gear_curve_profiles(document.objects, source_sketch_id, profiles)
+                    segment_profiles = sketch_segment_profiles(document.objects, source_sketch_id) if len(profiles) > 1 else None
                 else:
                     plane, profile = closed_profile(document.objects, source_sketch_id)
                 curve_points = None
@@ -75,6 +80,7 @@ class RebuildCommands:
                 return self.kernel.create_extruded_profile_with_holes(
                     profiles, plane=plane, depth=parameters["depth"],
                     centered=parameters.get("centered", False), curve_profiles=curve_profiles,
+                    segment_profiles=segment_profiles,
                 )
             if curve_points is None:
                 options["segments"] = sketch_segments(document.objects, source_sketch_id)

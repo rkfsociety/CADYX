@@ -63,6 +63,7 @@ class HoledProfileDescriptor(OCCTDescriptor):
     depth: float
     solid: SolidDescriptor
     curve_profiles: NotRequired[list[list[dict[str, float]] | None]]
+    segment_profiles: NotRequired[list[list[list[float]] | None]]
     centered: NotRequired[bool]
 
 
@@ -303,10 +304,10 @@ class GeometryDescriptorValidation:
             raise ValidationError("Saved geometry volume does not match the Open CASCADE solid.")
 
     def _validate_profile_with_holes_geometry(self, geometry: GeometryDescriptor) -> None:
-        if (set(geometry) not in ({"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume"},
-                                  {"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume", "centered"},
-                                  {"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume", "curve_profiles"},
-                                  {"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume", "centered", "curve_profiles"})
+        required_fields = {"kernel", "kind", "plane", "profile", "holes", "depth", "solid", "volume"}
+        optional_fields = {"centered", "curve_profiles", "segment_profiles"}
+        if (not required_fields.issubset(geometry)
+                or set(geometry) - required_fields - optional_fields
                 or geometry.get("kernel") != self.kernel_id or geometry.get("kind") != "profile_with_holes"
                 or not isinstance(geometry.get("holes"), list) or not geometry["holes"]
                 or not isinstance(geometry.get("solid"), dict)):
@@ -318,6 +319,7 @@ class GeometryDescriptorValidation:
             [geometry["profile"], *geometry["holes"]], plane=geometry["plane"],
             depth=geometry["depth"], centered=centered,
             curve_profiles=geometry.get("curve_profiles"),
+            segment_profiles=geometry.get("segment_profiles"),
         )
         comparable = dict(geometry)
         expected.pop("volume", None)
