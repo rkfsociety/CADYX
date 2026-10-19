@@ -761,7 +761,6 @@ window.addEventListener("DOMContentLoaded", () => {
   const workflowToggle = document.querySelector("#workflow-toggle");
   const copyProjectIdButton = document.querySelector("#copy-project-id");
   const documentKind = document.querySelector("#document-kind");
-  const sourceProjectName = document.querySelector("#sidebar-project-name");
   const geometryRows = document.querySelector("#geometry-rows");
 
   if (!detail || !grid || !sidebar || !navigation || !inspector || !workflow || !orthographic || !fourViewsButton || !workflowToggle) return;
@@ -799,22 +798,16 @@ window.addEventListener("DOMContentLoaded", () => {
     <div class="cad-tree-search"><input type="search" placeholder="Поиск по элементам…" aria-label="Поиск по дереву модели"></div>
     <div class="cad-tree-scroll">
       <div class="cad-tree-root">
-        <div class="cad-tree-root-row"><span class="cad-tree-chevron" aria-hidden="true"></span><span class="cad-tree-icon">◆</span><span id="cad-tree-project-name" class="cad-tree-label">—</span></div>
         <div id="cad-tree-features" class="cad-tree-features"></div>
         <p id="cad-tree-empty" class="cad-tree-empty">Модель ещё не содержит отображаемых объектов.</p>
       </div>
     </div>`;
   sidebar.prepend(tree);
 
-  const treeName = tree.querySelector("#cad-tree-project-name");
   const featureList = tree.querySelector("#cad-tree-features");
   const treeEmpty = tree.querySelector("#cad-tree-empty");
   const treeSearch = tree.querySelector("input[type='search']");
   const collapseTree = tree.querySelector(".cad-tree-collapse");
-
-  const syncProjectName = () => { treeName.textContent = sourceProjectName?.textContent?.trim() || "—"; };
-  syncProjectName();
-  if (sourceProjectName) new MutationObserver(syncProjectName).observe(sourceProjectName, { childList: true, characterData: true, subtree: true });
 
   const iconForLabel = (label) => {
     const value = label.toLowerCase();
