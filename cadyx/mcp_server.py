@@ -268,6 +268,20 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_inspect_project", "description": "Read a compact saved-state summary and lock state without loading B-rep payloads. Use cadyx_inspect_compact for bounded entities, parameters, topology or changes; use cadyx_inspect_project_full only when full geometry or history is required.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_inspect_project_full", "description": "Read the full saved model, B-rep geometry and command history. This response can be large; prefer cadyx_inspect_project for state and cadyx_inspect_compact for targeted inspection.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_inspect_compact", "description": "Read a revision-bound compact project summary, paginated entities/parameters/topology or history-referenced feature changes without B-rep or mesh payloads. Use expected_revision to stabilize pagination. Historical change lists are explicitly incomplete for indirect rebuilds.", "inputSchema": _schema({"project_id": _STRING, "section": {"enum": ["summary", "entities", "parameters", "topology", "changes"]}, "expected_revision": _INTEGER, "kind": _STRING, "body_id": _STRING, "shape": _STRING, "since_revision": _INTEGER, "offset": _INTEGER, "limit": {"type": "integer", "minimum": 1, "maximum": 100}, "include_metrics": {"type": "boolean"}}, ["project_id"])},
+    {"name": "cadyx_list_revision_checkpoints",
+     "description": "List persisted model revisions available for exact comparison; historical revisions without checkpoints are unavailable.",
+     "inputSchema": _schema({"project_id": _STRING, "offset": _INTEGER,
+                             "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, ["project_id"])},
+    {"name": "cadyx_compare_revisions",
+     "description": "Read-only geometry-aware diff between saved checkpoints and/or process-local preview proposals at one expected current revision. Reports parameter, feature, assembly and per-body OCCT volume changes; unsupported topology correspondence and mesh comparisons are explicitly untested.",
+     "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER,
+                             "before": {"type": "object", "properties": {"revision": _INTEGER, "proposal_id": _STRING},
+                                        "minProperties": 1, "maxProperties": 1, "additionalProperties": False},
+                             "after": {"type": "object", "properties": {"revision": _INTEGER, "proposal_id": _STRING},
+                                       "minProperties": 1, "maxProperties": 1, "additionalProperties": False},
+                             "absolute_tolerance": {"type": "number", "minimum": 0},
+                             "relative_tolerance": {"type": "number", "minimum": 0}},
+                            ["project_id", "expected_revision", "before", "after"])},
     {"name": "cadyx_capabilities", "description": "Discover supported Agent API routes, model commands, parameter names, documented constraints and error meanings.", "inputSchema": _schema()},
     {"name": "cadyx_propose_capability", "description": "Develop a persistent CADYX capability from a bounded composition of existing commands. CADYX tests it on isolated real geometry before it becomes available; arbitrary code is rejected.", "inputSchema": _schema({"project_id": _STRING, "definition": _OBJECT}, ["project_id", "definition"])},
     {"name": "cadyx_execute_capability", "description": "Run a geometry-tested persistent capability. Each contained Command System step receives its own revision-checked agent lease and visible operation event.", "inputSchema": _schema({"project_id": _STRING, "capability_id": _STRING, "expected_revision": _INTEGER, "arguments": _OBJECT}, ["project_id", "capability_id", "expected_revision", "arguments"])},
@@ -452,6 +466,15 @@ class MCPApplication:
                        for key, value in args.items() if key != "project_id"}
             suffix = "/inspection" + ("?" + urllib.parse.urlencode(options) if options else "")
             return self.api.get(self._project(args["project_id"], suffix))
+        if name == "cadyx_list_revision_checkpoints":
+            values = {key: args[key] for key in ("offset", "limit") if key in args}
+            suffix = "/revisions" + ("?" + urllib.parse.urlencode(values) if values else "")
+            return self.api.get(self._project(args["project_id"], suffix))
+        if name == "cadyx_compare_revisions":
+            body = {key: args[key] for key in
+                    ("expected_revision", "before", "after", "absolute_tolerance", "relative_tolerance")
+                    if key in args}
+            return self.api.post(self._project(args["project_id"], "/revisions/compare"), body)
         if name == "cadyx_capabilities":
             return self.api.get("/api/v1/agent/capabilities")
         if name == "cadyx_propose_capability":
