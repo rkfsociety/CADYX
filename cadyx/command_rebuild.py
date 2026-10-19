@@ -9,6 +9,7 @@ import math
 from typing import Any, Callable
 from .errors import ConflictError, ValidationError
 from .models import Document
+from .sketch_workplanes import kernel_plane, place_geometry, refresh_face
 from .profile_segments import sketch_segment_profiles, sketch_segments
 from .sketches import (closed_profile, closed_profiles, closed_spline_profile,
                        generated_gear_curve_profiles, open_path)
@@ -35,19 +36,15 @@ class RebuildCommands:
             depth = parameters["depth"]
             centered = parameters.get("centered", False)
             segment_profiles = sketch_segment_profiles(document.objects, source_sketch_id) if len(profiles) > 1 else None
-            tool = (self.kernel.create_extruded_profile(profiles[0], plane=plane, depth=depth, centered=centered,
+            native_plane = kernel_plane(sketch, plane)
+            tool = (self.kernel.create_extruded_profile(profiles[0], plane=native_plane, depth=depth, centered=centered,
                                                        segments=sketch_segments(document.objects, source_sketch_id))
                     if len(profiles) == 1 else
                     self.kernel.create_extruded_profile_with_holes(
-                        profiles, plane=plane, depth=depth, centered=centered,
+                        profiles, plane=native_plane, depth=depth, centered=centered,
                         segment_profiles=segment_profiles,
                     ))
-            axis = sketch.get("section_normal_axis")
-            offset = sketch.get("section_offset", 0.0)
-            if offset:
-                shift = [0.0, 0.0, 0.0]
-                shift[2 if plane == "XY" and axis == "Z" else 1] = offset
-                tool = self.kernel.translate_solid(tool, shift)
+            tool = place_geometry(sketch, tool, self.kernel)
             source_body = document.find_object(feature.get("source_body_id"), "body")
             if source_body is None:
                 raise ValidationError("Manufacturing feature source body is missing.")
@@ -68,21 +65,26 @@ class RebuildCommands:
             else:
                 plane, profile, curve_points = spline_profile
         if operation == "extrude_sketch":
+            sketch = document.find_object(source_sketch_id, "sketch")
+            if sketch is None:
+                raise ValidationError("Extrusion source sketch is missing.")
+            native_plane = kernel_plane(sketch, plane)
             if progress is not None:
                 progress({"phase": "kernel_extrusion"})
-            options = {"plane": plane, "depth": parameters["depth"],
+            options = {"plane": native_plane, "depth": parameters["depth"],
                        "centered": parameters.get("centered", False)}
             if curve_points is not None:
                 options["curve_points"] = curve_points
             elif profiles is not None and len(profiles) > 1:
-                return self.kernel.create_extruded_profile_with_holes(
-                    profiles, plane=plane, depth=parameters["depth"],
+                geom = self.kernel.create_extruded_profile_with_holes(
+                    profiles, plane=native_plane, depth=parameters["depth"],
                     centered=parameters.get("centered", False), curve_profiles=curve_profiles,
                     segment_profiles=segment_profiles,
                 )
+                return place_geometry(sketch, geom, self.kernel)
             if curve_points is None:
                 options["segments"] = sketch_segments(document.objects, source_sketch_id)
-            return self.kernel.create_extruded_profile(profile, **options)
+            return place_geometry(sketch, self.kernel.create_extruded_profile(profile, **options), self.kernel)
         if operation == "revolve_sketch":
             if progress is not None:
                 progress({"phase": "kernel_revolution"})
@@ -131,6 +133,7 @@ class RebuildCommands:
     def _rebuild_changed_features(
         self, document: Document, changed_sketches: set[str], *,
         progress: Callable[[dict[str, Any]], None] | None = None,
+        _visited: set[str] | None = None,
     ) -> None:
         by_id = {item["id"]: item for item in document.objects}
         changed_bodies: set[str] = set()
@@ -153,9 +156,12 @@ class RebuildCommands:
                 raise ValidationError("Profile feature refers to a missing body.")
             if feature.get("operation") == "sweep_sketch":
                 plane, path = open_path(document.objects, feature.get("source_sketch_id"))
-                geometry = self.kernel.create_swept_pipe(
-                    path, plane=plane, radius=feature["parameters"]["radius"],
-                )
+                sketch = document.find_object(feature.get("source_sketch_id"), "sketch")
+                if sketch is None:
+                    raise ValidationError("Sweep source sketch is missing.")
+                geometry = place_geometry(sketch, self.kernel.create_swept_pipe(
+                    path, plane=kernel_plane(sketch, plane), radius=feature["parameters"]["radius"],
+                ), self.kernel)
             elif feature.get("operation") == "loft_sketches":
                 geometry = self._profile_geometry(document, feature, feature["parameters"], progress=progress)
             else:
@@ -163,15 +169,30 @@ class RebuildCommands:
             body["geometry"] = geometry
             feature["geometry"] = geometry
             changed_bodies.add(body["id"])
-        self._rebuild_derived_features(document, changed_bodies, progress=progress)
+        self._rebuild_derived_features(document, changed_bodies, progress=progress, _visited=_visited)
 
     def _rebuild_derived_features(
         self, document: Document, changed_bodies: set[str], *,
         progress: Callable[[dict[str, Any]], None] | None = None,
+        _visited: set[str] | None = None,
     ) -> None:
         if not changed_bodies:
             return
+        visited = _visited if _visited is not None else set()
+        if visited.intersection(changed_bodies):
+            raise ValidationError("Face attachment creates a cyclic body dependency.")
+        visited.update(changed_bodies)
         by_id = {item["id"]: item for item in document.objects}
+        attached = [
+            obj for obj in document.objects if obj.get("type") == "sketch"
+            and obj.get("plane") == "FACE"
+            and obj.get("attachment", {}).get("body_id") in changed_bodies
+        ]
+        for sketch in attached:
+            refresh_face(document, sketch, self.kernel)
+        if attached:
+            self._rebuild_changed_features(document, {obj["id"] for obj in attached},
+                                           progress=progress, _visited=visited)
         rebuilt_bodies = set(changed_bodies)
         features = [item for item in document.objects if item.get("type") == "feature"]
         for feature in features:

@@ -14,6 +14,7 @@ from .models import Document
 from .errors import ValidationError
 from .assemblies import flatten_assembly, transform_point
 from .sketches import spline_sample_points
+from .sketch_workplanes import world_position
 
 
 _INSTANCE_TRANSFORM_CACHE_MAX_ENTRIES = 128
@@ -94,16 +95,7 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
     has_coordinates = False
 
     def sketch_position(sketch_id: str, x: float, y: float) -> list[float]:
-        sketch = by_id[sketch_id]
-        section_axis = sketch.get("section_normal_axis")
-        section_offset = sketch.get("section_offset")
-        if section_axis == "X" and isinstance(section_offset, (int, float)):
-            return [section_offset, x, y]
-        if section_axis == "Y" and isinstance(section_offset, (int, float)):
-            return [x, section_offset, y]
-        if section_axis == "Z" and isinstance(section_offset, (int, float)):
-            return [x, y, section_offset]
-        return [x, 0, y] if sketch["plane"] == "XZ" else [x, y, 0]
+        return world_position(by_id[sketch_id], x, y)
 
     for item in document.objects:
         kind = item["type"]

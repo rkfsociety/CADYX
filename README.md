@@ -96,6 +96,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - `POST /api/v1/projects/{id}/commands` with a human `lease_id` and a command
 - Agent equivalents under `/api/v1/agent/projects`
 - `extrude_sketch`, `revolve_sketch`, `sweep_sketch`, `fuse_bodies`, `cut_bodies`, and `fillet_edges` commands for editable OCCT solids; see the [feature contract](.codex/docs/document-model-v7.md#sketch-driven-solid-features)
+- Document Model v12 adds persisted YZ, arbitrary and face-attached sketch work planes through `create_sketch` and `set_sketch_workplane`; see [work-plane contract](docs/sketch-workplanes.md).
 - Document Model v8 adds `create_model_parameters`, `bind_model_parameters`, and atomic `set_model_parameter` rebuilds; Geometry displays the named values. See the [parameter contract](.codex/docs/document-model-v8.md).
 - `fillet_edges` can round multiple compatible edges in one feature; `merge_consecutive_fillet_features` can safely consolidate a same-radius linear fillet chain while rebuilding dependents. See [Document Model v8](.codex/docs/document-model-v8.md#rebuilding-topology-selected-edge-features).
 - `insert_fillet_before_feature` inserts a boss-root fillet before a downstream pocket and atomically reorders/rebuilds the editable feature chain; see [Document Model v8](.codex/docs/document-model-v8.md#rebuilding-topology-selected-edge-features).

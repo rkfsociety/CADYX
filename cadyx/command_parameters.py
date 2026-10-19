@@ -15,6 +15,7 @@ from .model_parameters import assign_property, evaluate_expression, property_loc
 from .models import Document
 from .sketches import closed_profile, closed_spline_profile, open_path
 from .command_values import _finite_number, _number
+from .sketch_workplanes import kernel_plane, place_geometry
 
 
 class ParameterCommands:
@@ -170,7 +171,11 @@ class ParameterCommands:
                 parameters = dict(feature["parameters"])
                 parameters["radius"] = value
                 plane, path = open_path(document.objects, feature.get("source_sketch_id"))
-                geometry = self.kernel.create_swept_pipe(path, plane=plane, radius=value)
+                sketch = document.find_object(feature.get("source_sketch_id"), "sketch")
+                if sketch is None:
+                    raise ValidationError("Sweep source sketch is missing.")
+                geometry = place_geometry(sketch, self.kernel.create_swept_pipe(
+                    path, plane=kernel_plane(sketch, plane), radius=value), self.kernel)
                 body = document.find_object(feature.get("body_id"), "body")
                 if body is None:
                     raise ValidationError("Sweep feature refers to a missing body.")
@@ -563,12 +568,16 @@ class ParameterCommands:
         if operation == "create_box":
             geometry = self.kernel.create_box(**parameters)
         elif operation in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "pad_sketch_to_body"}:
-            geometry = (self.kernel.create_swept_pipe(
-                open_path(document.objects, feature.get("source_sketch_id"))[1],
-                plane=open_path(document.objects, feature.get("source_sketch_id"))[0],
-                radius=parameters["radius"],
-            ) if operation == "sweep_sketch" else
-                self._profile_geometry(document, feature, parameters, progress=progress))
+            if operation == "sweep_sketch":
+                sketch = document.find_object(feature.get("source_sketch_id"), "sketch")
+                if sketch is None:
+                    raise ValidationError("Sweep source sketch is missing.")
+                plane, path = open_path(document.objects, sketch["id"])
+                geometry = place_geometry(sketch, self.kernel.create_swept_pipe(
+                    path, plane=kernel_plane(sketch, plane), radius=parameters["radius"],
+                ), self.kernel)
+            else:
+                geometry = self._profile_geometry(document, feature, parameters, progress=progress)
         elif operation == "extrude_profile_on_plane":
             from .agent_authoring import _agent_native, _vector, _workplane_rotation
             profile = parameters.get("profile")

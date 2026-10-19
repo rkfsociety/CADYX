@@ -10,6 +10,7 @@ DEFAULT_ACTIVITY_ACTION = "Выполняет операцию"
 _BUILTIN_ACTIVITY_ACTIONS = {
     "create_box": "Строит модель",
     "create_sketch": "Создаёт эскиз",
+    "set_sketch_workplane": "Изменяет рабочую плоскость эскиза",
     "add_sketch_element": "Рисует элемент эскиза",
     "add_sketch_polyline": "Рисует ломаную",
     "add_sketch_involute_gear": "Строит эвольвентный профиль",

@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from .errors import ValidationError
+from .sketch_workplanes import validate_placement
 from .sketch_curve_tools import (
     evaluate_bezier, evaluate_bspline, evaluate_nurbs,
 )
@@ -210,8 +211,7 @@ def validate_sketches(objects: list[dict[str, Any]]) -> None:
             continue
         typed_id(item["id"], kind)
         if kind == "sketch":
-            if item.get("plane") not in {"XY", "XZ"}:
-                raise ValidationError("Only XY and XZ sketches are supported.")
+            validate_placement(item, by_id)
             if not isinstance(item.get("name"), str) or not item["name"].strip() or len(item["name"]) > 120:
                 raise ValidationError("Sketch name must contain 1 to 120 characters.")
             generated = item.get("generated_gear_profile")

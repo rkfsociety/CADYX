@@ -12,6 +12,7 @@ from uuid import uuid4
 from .errors import NotFoundError, ValidationError
 from .models import Document
 from .command_values import _finite_number
+from .sketch_workplanes import placement_from_command
 
 
 class SketchCommands:
@@ -387,20 +388,10 @@ def _handle_create_sketch(
     progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
 ) -> dict[str, Any]:
     sketch_id = f"sketch:{uuid4()}"
-    plane = command.get("plane", "XY")
-    if plane not in {"XY", "XZ"}:
-        raise ValidationError("Sketch plane must be XY or XZ.")
     sketch = {
-        "id": sketch_id, "type": "sketch",
-        "name": command.get("name", "Sketch"), "plane": plane,
+        "id": sketch_id, "type": "sketch", "name": command.get("name", "Sketch"),
+        **placement_from_command(document, command, self.kernel),
     }
-    if "section_normal_axis" in command or "section_offset" in command:
-        axis = command.get("section_normal_axis")
-        expected_axis = "Z" if plane == "XY" else "Y"
-        if axis != expected_axis or "section_offset" not in command:
-            raise ValidationError(f"An offset {plane} sketch needs section_normal_axis={expected_axis} and section_offset.")
-        sketch["section_normal_axis"] = axis
-        sketch["section_offset"] = _finite_number(command.get("section_offset"), "Sketch plane offset")
     document.objects.append(sketch)
     return {"sketch_id": sketch_id}
 
@@ -598,7 +589,21 @@ def _handle_remove_sketch_object(
     return {"object_id": object_id}
 
 
+def _handle_set_sketch_workplane(
+    self: Any, document: Document, command: dict[str, Any], *,
+    progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
+) -> dict[str, Any]:
+    sketch = self._find_sketch(document, command.get("sketch_id"))
+    fields = placement_from_command(document, command, self.kernel)
+    for field in ("plane", "frame", "attachment", "section_normal_axis", "section_offset"):
+        sketch.pop(field, None)
+    sketch.update(fields)
+    self._rebuild_changed_features(document, {sketch["id"]}, progress=progress)
+    return {"sketch_id": sketch["id"], "plane": sketch["plane"], "frame": sketch.get("frame")}
+
+
 COMMAND_HANDLERS = {
+    "set_sketch_workplane": _handle_set_sketch_workplane,
     "create_sketch": _handle_create_sketch,
     "add_sketch_construction_point": _handle_sketch_point,
     "add_sketch_point": _handle_sketch_point,

@@ -13,6 +13,7 @@ from .models import Document
 from .profile_segments import sketch_segment_profiles
 from .sketches import closed_profile, closed_profiles, closed_spline_profile, generated_gear_curve_profiles, open_path
 from .command_values import _finite_number, _number
+from .sketch_workplanes import kernel_plane, place_geometry
 
 
 class BodyCommands:
@@ -473,7 +474,11 @@ class BodyCommands:
         radius = _number(command.get("radius"), "radius")
         if progress is not None:
             progress({"phase": "kernel_sweep"})
-        geometry = self.kernel.create_swept_pipe(path, plane=plane, radius=radius)
+        sketch = document.find_object(sketch_id, "sketch")
+        if sketch is None:
+            raise ValidationError("Sweep source sketch is missing.")
+        geometry = place_geometry(sketch, self.kernel.create_swept_pipe(
+            path, plane=kernel_plane(sketch, plane), radius=radius), self.kernel)
         body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
         document.objects.extend([
             {"id": body_id, "type": "body", "name": name.strip(),
