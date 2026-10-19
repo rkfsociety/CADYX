@@ -239,6 +239,29 @@ def compare_documents(
                 item.update(status="untested", reason=str(exc))
         reports.append(item)
     body_inputs = _changes(bodies_before, bodies_after)
+    # A new/deleted body has no matched counterpart for a Boolean intersection.
+    # Report its standalone measured volume, never a global net model delta.
+    unmatched = [(body_id, "removed", bodies_before[body_id]) for body_id in body_inputs["removed"]]
+    unmatched.extend((body_id, "added", bodies_after[body_id]) for body_id in body_inputs["added"])
+    unmatched_reports: list[dict[str, Any]] = []
+    unmatched_limit = max(0, max_geometry_pairs - len(reports))
+    for body_id, change, body in unmatched[:unmatched_limit]:
+        geometry = body["geometry"]
+        item = {"body_id": body_id, "change": change,
+                "geometry_sha256": _digest(geometry)}
+        if geometry.get("kernel") == "cadyx-mesh-v1":
+            item.update(status="untested", reason="Triangle meshes do not have exact OCCT solid volumes.")
+        else:
+            try:
+                metric = kernel.metrics(geometry)
+                volume = metric.get("volume")
+                if type(volume) not in (int, float) or not math.isfinite(volume) or volume < 0:
+                    raise ValidationError("Kernel returned an invalid standalone volume.")
+                item.update(status="measured", volume=volume, topology=metric.get("topology"))
+            except (ValidationError, NotImplementedError) as exc:
+                item.update(status="untested", reason=str(exc))
+        unmatched_reports.append(item)
+    omitted_unmatched = max(0, len(unmatched) - unmatched_limit)
     return {
         "schema_version": 1,
         "before": {"revision": first["revision"], "document_sha256": _digest(first)},
@@ -254,13 +277,18 @@ def compare_documents(
         "bodies": body_inputs,
         "geometry": {"reports": reports, "total_changed_body_pairs": len(changed_bodies),
                      "omitted_body_pairs": omitted,
+                     "unmatched_body_reports": unmatched_reports,
+                     "unmatched_body_count": len(unmatched),
+                     "omitted_unmatched_bodies": omitted_unmatched,
                      "coverage": "per_matching_body_id_not_global_union",
-                     "added_removed_bodies": "untested_for_global_volume",
+                     "added_removed_bodies": "standalone_volume_only_no_global_union",
                      "topology_identity_matching": "untested"},
         "visual_highlights": {"added_body_ids": body_inputs["added"],
                               "removed_body_ids": body_inputs["removed"],
                               "changed_body_ids": body_inputs["changed"]},
-        "status": "partial" if omitted or any(row["status"] == "untested" for row in reports)
-                  else "measured_with_declared_limits",
+        "status": "partial" if (
+            omitted or omitted_unmatched or unmatched
+            or any(row["status"] == "untested" for row in reports + unmatched_reports)
+        ) else "measured_with_declared_limits",
         "read_only": True,
     }
