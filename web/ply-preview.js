@@ -331,7 +331,8 @@ function updateWorkspaceControls() {
   document.querySelectorAll("#project-detail button").forEach((button) => {
     const filesUnavailable = button.dataset.workspaceView === "files" && !canOpenFilesView();
     const projectsNavigation = button.dataset.workspaceView === "projects";
-    button.disabled = (!projectsNavigation && !available) || filesUnavailable;
+    const projectNavigation = button.dataset.projectNavigation === "true";
+    button.disabled = (!projectsNavigation && !projectNavigation && !available) || filesUnavailable;
     if (button.dataset.workspaceView) {
       button.title = projectsNavigation ? ""
         : lockReason || (filesUnavailable
@@ -773,22 +774,7 @@ function canSelectProject(id) {
   return lock?.state === "FREE" && !lock.recovery_required && !agentIsActive;
 }
 
-async function selectWorkspaceProject(projectId, projectName) {
-  try {
-    await api("/api/v1/agent/workspace/selection", {
-      method: "POST",
-      body: JSON.stringify({ type: "project", project_id: projectId }),
-    });
-  } catch (error) {
-    notify(`Не удалось выбрать проект: ${error.message}`, true);
-    try {
-      await refreshWorkspace();
-    } catch (refreshError) {
-      notify(`Не удалось обновить список проектов: ${refreshError.message}`, true);
-    }
-    return;
-  }
-
+async function navigateToWorkspaceProject(projectId, projectName) {
   const address = new URL(window.location.href);
   address.searchParams.set("project_id", projectId);
   address.searchParams.delete("folder");
@@ -797,9 +783,9 @@ async function selectWorkspaceProject(projectId, projectName) {
   projectAddressPinned = true;
   try {
     await refreshWorkspace();
-    notify(`Выбран проект «${projectName}».`);
+    notify(`Открыт проект «${projectName}».`);
   } catch (error) {
-    notify(`Проект выбран, но не удалось обновить панель: ${error.message}`, true);
+    notify(`Не удалось открыть проект: ${error.message}`, true);
   }
 }
 
@@ -867,7 +853,6 @@ function renderProjectCard(entry) {
   const project = entry.project;
   const active = project.id === selectedProjectId;
   const projectAvailable = canSelectProject(project.id);
-  const selectionAvailable = projectAvailable && workspaceControlLockReason() === null;
   const card = document.createElement("article");
   card.className = "workspace-project-card";
   card.dataset.active = String(active);
@@ -875,7 +860,7 @@ function renderProjectCard(entry) {
 
   const state = document.createElement("span");
   state.className = "workspace-project-state";
-  state.textContent = active ? "Текущий проект" : projectAvailable ? "Готов к выбору" : "Панель занята";
+  state.textContent = active ? "Текущий проект" : projectAvailable ? "Готов к просмотру" : "Занят · просмотр доступен";
 
   const thumbnail = document.createElement("div");
   thumbnail.className = "workspace-project-thumbnail";
@@ -940,12 +925,13 @@ function renderProjectCard(entry) {
   const select = document.createElement("button");
   select.className = "button workspace-project-open";
   select.type = "button";
+  select.dataset.projectNavigation = "true";
   select.textContent = active ? "Текущий проект" : "Выбрать проект";
-  select.disabled = active || !selectionAvailable;
+  select.disabled = active;
   select.setAttribute("aria-label", active
     ? `Проект «${project.name}» уже выбран`
     : `Выбрать проект «${project.name}»`);
-  select.addEventListener("click", () => selectWorkspaceProject(project.id, project.name));
+  select.addEventListener("click", () => navigateToWorkspaceProject(project.id, project.name));
 
   const open = document.createElement("a");
   open.className = "button workspace-project-open workspace-project-open-new-tab";
