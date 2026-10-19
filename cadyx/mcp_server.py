@@ -21,8 +21,14 @@ from .errors import public_data, public_text
 _PROTOCOL_VERSION = "2025-11-25"
 _MAX_FILE_BYTES = 64 * 1024 * 1024
 _MAX_RESPONSE_BYTES = _MAX_FILE_BYTES
-_API_TIMEOUT_SECONDS = 120
-_ERROR_RESPONSE_BYTES = 1024 * 1024
+_JSON_RESPONSE_BYTES = 16 * 1024 * 1024
+_FULL_JSON_RESPONSE_BYTES = 64 * 1024 * 1024
+_COMPACT_RESPONSE_BYTES = 8 * 1024 * 1024
+_PNG_RESPONSE_BYTES = 24 * 1024 * 1024
+_THUMBNAIL_RESPONSE_BYTES = 8 * 1024 * 1024
+_ERROR_RESPONSE_BYTES = 64 * 1024
+_READ_CHUNK_BYTES = 64 * 1024
+_API_TIMEOUT_SECONDS = 600
 _JSON = "application/json"
 # Only these command HTTP responses prove that the submitted mutation was rejected.
 _DEFINITIVE_COMMAND_REJECTION_STATUSES = frozenset({400, 401, 403, 404, 405, 409, 413, 415, 422})
@@ -46,6 +52,76 @@ class TransportError(RuntimeError):
 
 class OutcomeUncertainError(RuntimeError):
     """A mutation response was ambiguous and requires inspection before retry."""
+
+
+class ResponseTooLargeError(RuntimeError):
+    """A response exceeded its route-specific MCP byte budget."""
+
+    def __init__(self, kind: str, limit: int, alternative: str) -> None:
+        self.kind = kind
+        self.limit = limit
+        self.alternative = alternative
+        super().__init__(
+            f"CADYX {kind} response exceeds the {limit} byte MCP read limit. {alternative}"
+        )
+
+
+def _response_budget(method: str, path: str) -> tuple[int, str, str]:
+    """Limit the wire body before JSON decoding, UTF-8 conversion or base64 encoding."""
+    route = urllib.parse.urlsplit(path).path
+    if method == "GET" and "/files/" in route:
+        return (
+            _MAX_FILE_BYTES, "file",
+            "Use the corresponding staged STEP/PLY import operation for large geometry; "
+            "read smaller source files separately.",
+        )
+    if route.endswith("/viewport.png"):
+        if urllib.parse.parse_qs(urllib.parse.urlsplit(path).query).get("thumbnail") == ["1"]:
+            return _THUMBNAIL_RESPONSE_BYTES, "thumbnail PNG", "Use compact model inspection instead."
+        return _PNG_RESPONSE_BYTES, "viewport PNG", "Use a project thumbnail or compact model inspection instead."
+    if route.endswith("/inspection"):
+        return (
+            _COMPACT_RESPONSE_BYTES, "compact inspection JSON",
+            "Request a smaller section/page with cadyx_inspect_compact (limit/offset).",
+        )
+    if (
+        route.endswith(("/viewport", "/topology", "/commands", "/commands/execute",
+                       "/commands/preview", "/commands/commit"))
+        or (route.startswith("/api/v1/agent/projects/") and route.count("/") == 5)
+    ):
+        return (
+            _FULL_JSON_RESPONSE_BYTES, "model JSON",
+            "Use cadyx_inspect_compact with section, limit and offset to inspect a smaller result.",
+        )
+    return (
+        _JSON_RESPONSE_BYTES, "JSON",
+        "Use a filtered or paginated Agent API/MCP inspection where available; "
+        "avoid requesting the entire model or activity history.",
+    )
+
+
+def _read_bounded(response: Any, limit: int, kind: str, alternative: str) -> bytes:
+    """Read at most limit + 1 bytes, regardless of Content-Length accuracy."""
+    declared = response.headers.get("Content-Length")
+    if declared is not None:
+        try:
+            length = int(declared)
+        except (TypeError, ValueError):
+            pass
+        else:
+            if length > limit:
+                raise ResponseTooLargeError(kind, limit, alternative)
+    chunks: list[bytes] = []
+    size = 0
+    while True:
+        chunk = response.read(min(_READ_CHUNK_BYTES, limit - size + 1))
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > limit:
+            raise ResponseTooLargeError(kind, limit, alternative)
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 class CadyxAPI:
@@ -116,11 +192,20 @@ class CadyxAPI:
             connection = self._connection(parsed)
             connection.request(method, target, body=data, headers=headers)
             response = connection.getresponse()
-            response_limit = _MAX_RESPONSE_BYTES if response.status < 400 else _ERROR_RESPONSE_BYTES
-            raw = response.read(response_limit + 1)
-            if len(raw) > response_limit:
+            limit, kind, alternative = _response_budget(method, path)
+            limit = min(limit, _MAX_RESPONSE_BYTES)
+            try:
+                raw = _read_bounded(response, limit if response.status < 400 else _ERROR_RESPONSE_BYTES,
+                                   kind if response.status < 400 else "HTTP error",
+                                   alternative if response.status < 400 else
+                                   "Inspect the HTTP status and request arguments; the error body was not retained.")
+            except ResponseTooLargeError as oversized:
                 self._drop_connection(parsed)
-                raise TransportError("CADYX API response exceeded the configured size limit.")
+                if response.status >= 400:
+                    raise APIError(response.status, {
+                        "error": "HTTP_ERROR_BODY_TOO_LARGE", "message": str(oversized),
+                    }) from oversized
+                raise
             content_type = response.headers.get_content_type()
             metadata = {
                 "content_type": content_type,
@@ -134,6 +219,8 @@ class CadyxAPI:
                     payload = raw.decode("utf-8", errors="replace")
                 raise APIError(response.status, payload)
         except APIError:
+            raise
+        except ResponseTooLargeError:
             raise
         except (OSError, http.client.HTTPException, ssl.SSLError) as exc:
             self._drop_connection(parsed)
@@ -264,6 +351,19 @@ class MCPApplication:
                      "http_status": exc.status}
             if isinstance(payload.get("diagnostics"), dict):
                 error["diagnostics"] = public_data(payload["diagnostics"])
+            return {"content": [{"type": "text", "text": json.dumps(error, ensure_ascii=False, separators=(",", ":"))}],
+                    "structuredContent": error, "isError": True}
+        except ResponseTooLargeError as exc:
+            error = {
+                "error": "RESPONSE_TOO_LARGE",
+                "message": public_text(str(exc)),
+                "diagnostics": {
+                    "category": "resource_limit",
+                    "failed_precondition": f"The {exc.kind} body exceeds the bounded MCP response budget.",
+                    "measurements": {"byte_limit": exc.limit},
+                    "correction_hint": exc.alternative,
+                },
+            }
             return {"content": [{"type": "text", "text": json.dumps(error, ensure_ascii=False, separators=(",", ":"))}],
                     "structuredContent": error, "isError": True}
         except TransportError as exc:

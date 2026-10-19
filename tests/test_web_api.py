@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from http.client import HTTPConnection
 import json
 import os
 import re
@@ -22,6 +23,34 @@ import cadyx.web as web_module
 
 
 class WebApiTests(unittest.TestCase):
+    def test_sse_last_event_id_replay_and_gap_wire_protocol(self) -> None:
+        first = self.core.events.publish("probe", None, {"n": 1})
+        second = self.core.events.publish("probe", None, {"n": 2})
+        for cursor, event_name, reason in (
+            (self.core.events.event_cursor(first.id), "probe", None),
+            ("other-process:0", "stream.gap", "stream_changed"),
+        ):
+            with self.subTest(event_name=event_name):
+                connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+                try:
+                    connection.request("GET", "/api/v1/events", headers={"Last-Event-ID": cursor})
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.readline(), b": CADYX event stream\n")
+                    self.assertEqual(response.readline(), b"\n")
+                    self.assertEqual(response.readline().decode().strip(),
+                                     f"id: {self.core.events.event_cursor(second.id)}")
+                    self.assertEqual(response.readline().decode().strip(), f"event: {event_name}")
+                    payload = json.loads(response.readline()[6:])
+                    if reason is None:
+                        self.assertEqual(payload["data"], {"n": 2})
+                    else:
+                        self.assertEqual(payload["data"]["reason"], reason)
+                    self.assertEqual(response.readline(), b"\n")
+                    response.close()
+                finally:
+                    connection.close()
+
     def test_project_check_http_strict_and_revision_binding(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "HTTP headless"})
         project_id = created["project"]["id"]

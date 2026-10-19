@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import email.message
+import io
 import json
 import os
 import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 
 from cadyx.capabilities import COMMAND_CAPABILITIES
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
-from cadyx.mcp_server import APIError, CadyxAPI, MCPApplication, TOOLS, TransportError, handle_message
+from cadyx.mcp_server import (APIError, CadyxAPI, MCPApplication, ResponseTooLargeError,
+                              TOOLS, handle_message)
 from cadyx.web import CadyxHTTPServer, make_request_handler
 
 
@@ -56,6 +59,9 @@ class CadyxMCPServerTests(unittest.TestCase):
                 self.headers["Content-Type"] = "application/json"
 
             def read(self, size: int) -> bytes:
+                if getattr(self, "read_done", False):
+                    return b""
+                self.read_done = True
                 return b"{}"
 
         class Connection:
@@ -122,7 +128,7 @@ class CadyxMCPServerTests(unittest.TestCase):
             patch("cadyx.mcp_server.http.client.HTTPConnection", return_value=connection),
             patch("cadyx.mcp_server._MAX_RESPONSE_BYTES", 4),
         ):
-            with self.assertRaises(TransportError):
+            with self.assertRaises(ResponseTooLargeError):
                 api.get("/api/v1/health")
         self.assertEqual(connection.response.read_size, 5)
         self.assertTrue(connection.closed)
@@ -521,7 +527,7 @@ class CadyxMCPServerTests(unittest.TestCase):
                 rejection = APIError(status, {"error": "REJECTED", "message": "definite rejection"})
 
                 def reject_command(path: str, body: dict):
-                    if path.endswith("/commands"):
+                    if path.endswith("/commands/execute"):
                         raise rejection
                     return original_post(path, body)
 
@@ -542,7 +548,7 @@ class CadyxMCPServerTests(unittest.TestCase):
         original_post = self.app.api.post
 
         def timeout_command(path: str, body: dict):
-            if path.endswith("/commands"):
+            if path.endswith("/commands/execute"):
                 raise APIError(408, {"error": "TIMEOUT", "message": "outcome uncertain"})
             return original_post(path, body)
 
@@ -564,7 +570,7 @@ class CadyxMCPServerTests(unittest.TestCase):
         original_post = self.app.api.post
 
         def corrupt_command_response(path: str, body: dict):
-            if path.endswith("/commands"):
+            if path.endswith("/commands/execute"):
                 original_post(path, body)  # Command commits; only its response is lost.
                 raise json.JSONDecodeError("invalid response JSON", "{", 1)
             return original_post(path, body)
@@ -588,7 +594,7 @@ class CadyxMCPServerTests(unittest.TestCase):
         original_post = self.app.api.post
 
         def fail_command(path: str, body: dict):
-            if path.endswith("/commands"):
+            if path.endswith("/commands/execute"):
                 raise APIError(500, {"error": "INTERNAL_ERROR", "message": "simulated server failure"})
             return original_post(path, body)
 
@@ -619,7 +625,7 @@ class CadyxMCPServerTests(unittest.TestCase):
         def drop_command_response(path: str, body: dict):
             nonlocal dropped
             result = original_post(path, body)
-            if path.endswith("/commands") and not dropped:
+            if path.endswith("/commands/execute") and not dropped:
                 dropped = True
                 raise RuntimeError("simulated lost command response")
             return result
@@ -732,6 +738,150 @@ class CadyxMCPServerTests(unittest.TestCase):
         (project_path / "opaque.bin").write_bytes(b"\x00\x01\xff")
         rejected = self.app.call_tool("cadyx_read_project_file", {"project_id": project_id, "name": "opaque.bin"})
         self.assertTrue(rejected["isError"])
+
+
+class _ResponseStream(io.BytesIO):
+    """Fixture that rejects unbounded API response reads."""
+
+    def __init__(self, raw: bytes, content_type: str = "application/json",
+                 content_length: str | None = None, status: int = 200) -> None:
+        super().__init__(raw)
+        self.status = status
+        self.headers = Message()
+        self.headers["Content-Type"] = content_type
+        if content_length is not None:
+            self.headers["Content-Length"] = content_length
+        self.read_sizes: list[int] = []
+
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            raise AssertionError("Unbounded response.read() is not allowed")
+        self.read_sizes.append(size)
+        return super().read(size)
+
+
+class _ResponseConnection:
+    sock = object()
+
+    def __init__(self, response: _ResponseStream, *args, **kwargs) -> None:
+        self.response = response
+
+    def request(self, *args, **kwargs) -> None:
+        pass
+
+    def getresponse(self) -> _ResponseStream:
+        return self.response
+
+    def close(self) -> None:
+        self.sock = None
+
+
+class CadyxMCPResponseLimitsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.api = CadyxAPI()
+
+    def test_json_at_budget_is_decoded_with_bounded_chunks(self) -> None:
+        body = b'{"ready":true}'
+        stream = _ResponseStream(body)
+        with patch("cadyx.mcp_server._JSON_RESPONSE_BYTES", len(body)):
+            with patch("cadyx.mcp_server.http.client.HTTPConnection", return_value=_ResponseConnection(stream)):
+                raw, parsed = self.api.request("GET", "/api/v1/health")
+        self.assertEqual(raw, body)
+        self.assertEqual(parsed, {"ready": True})
+        self.assertTrue(stream.read_sizes)
+        self.assertLessEqual(max(stream.read_sizes), len(body) + 1)
+
+    def test_declared_oversize_rejected_without_reading(self) -> None:
+        stream = _ResponseStream(b"small", content_length="9999")
+        with patch("cadyx.mcp_server._JSON_RESPONSE_BYTES", 8):
+            with patch("cadyx.mcp_server.http.client.HTTPConnection", return_value=_ResponseConnection(stream)):
+                with self.assertRaises(ResponseTooLargeError) as caught:
+                    self.api.get("/api/v1/health")
+        self.assertEqual(caught.exception.limit, 8)
+        self.assertEqual(stream.read_sizes, [])
+
+    def test_chunked_body_over_budget_never_reads_unbounded(self) -> None:
+        stream = _ResponseStream(b"0123456789")
+        with patch("cadyx.mcp_server._JSON_RESPONSE_BYTES", 9):
+            with patch("cadyx.mcp_server.http.client.HTTPConnection", return_value=_ResponseConnection(stream)):
+                with self.assertRaises(ResponseTooLargeError):
+                    self.api.get("/api/v1/health")
+        self.assertLessEqual(max(stream.read_sizes), 10)
+
+    def test_file_and_thumbnail_have_independent_budgets(self) -> None:
+        for route, budget_name in (
+            ("/api/v1/agent/projects/p/files/scan.ply", "_MAX_FILE_BYTES"),
+            ("/api/v1/agent/projects/p/viewport.png?thumbnail=1", "_THUMBNAIL_RESPONSE_BYTES"),
+        ):
+            with self.subTest(route=route):
+                stream = _ResponseStream(b"12345", content_type="application/octet-stream")
+                with patch("cadyx.mcp_server." + budget_name, 4):
+                    with patch("cadyx.mcp_server.http.client.HTTPConnection", return_value=_ResponseConnection(stream)):
+                        with self.assertRaises(ResponseTooLargeError):
+                            self.api.request("GET", route)
+                self.assertLessEqual(max(stream.read_sizes), 5)
+
+    def test_mcp_tool_exposes_oversized_result_and_recovery_hint(self) -> None:
+        app = MCPApplication(self.api)
+        with patch.object(self.api, "get", side_effect=ResponseTooLargeError(
+            "model JSON", 1024, "Use cadyx_inspect_compact with limit/offset.",
+        )):
+            result = app.call_tool("cadyx_inspect_project", {"project_id": "p"})
+        self.assertTrue(result["isError"])
+        self.assertEqual(result["structuredContent"]["error"], "RESPONSE_TOO_LARGE")
+        self.assertEqual(result["structuredContent"]["diagnostics"]["measurements"]["byte_limit"], 1024)
+        self.assertIn("cadyx_inspect_compact", result["content"][0]["text"])
+
+    def test_oversized_http_error_preserves_status_without_buffering(self) -> None:
+        for status in (409, 500):
+            with self.subTest(status=status):
+                stream = _ResponseStream(b'{"error":"bad"}', content_length="9999", status=status)
+                with patch("cadyx.mcp_server._ERROR_RESPONSE_BYTES", 8):
+                    with patch("cadyx.mcp_server.http.client.HTTPConnection",
+                               return_value=_ResponseConnection(stream)):
+                        with self.assertRaises(APIError) as caught:
+                            self.api.get("/api/v1/health")
+                self.assertEqual(caught.exception.status, status)
+                self.assertEqual(caught.exception.payload["error"], "HTTP_ERROR_BODY_TOO_LARGE")
+                self.assertEqual(stream.read_sizes, [])
+
+    def test_command_oversized_success_response_is_fenced_not_retried(self) -> None:
+        # The response limit is enforced after the server may have committed the command.
+        with tempfile.TemporaryDirectory() as temporary:
+            core = CadyxCore(str(Path(temporary) / "projects"))
+            project_id = core.create_project("Oversized command")["project"]["id"]
+            server = CadyxHTTPServer(("127.0.0.1", 0), make_request_handler(core))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with patch.dict(os.environ, {"CADYX_API_URL": f"http://127.0.0.1:{server.server_port}"}):
+                    api = CadyxAPI()
+                    app = MCPApplication(api)
+                    original_post = api.post
+                    command_calls = 0
+
+                    def oversize_after_commit(path: str, body: dict):
+                        nonlocal command_calls
+                        result = original_post(path, body)
+                        if path.endswith("/commands/execute"):
+                            command_calls += 1
+                            raise ResponseTooLargeError("model JSON", 8, "Inspect compact project state.")
+                        return result
+
+                    with patch.object(api, "post", side_effect=oversize_after_commit):
+                        result = app.call_tool("cadyx_execute_command", {
+                            "project_id": project_id, "expected_revision": 0,
+                            "command": {"type": "create_box", "width": 2, "height": 3, "depth": 4},
+                        })
+                    self.assertEqual(command_calls, 1)
+                    self.assertEqual(result["structuredContent"]["error"], "OPERATION_OUTCOME_UNCERTAIN")
+                    detail = app.call_tool("cadyx_inspect_project", {"project_id": project_id})
+                    self.assertEqual(detail["structuredContent"]["document"]["revision"], 1)
+                    self.assertEqual(detail["structuredContent"]["lock"]["state"], "FREE")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
 
 
 if __name__ == "__main__":

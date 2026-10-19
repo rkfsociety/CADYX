@@ -6,6 +6,8 @@ import copy
 import json
 import math
 import queue
+import uuid
+from collections import deque
 import sqlite3
 import threading
 from contextlib import closing
@@ -250,10 +252,24 @@ class EventBroker:
         self,
         *,
         subscriber_capacity: int = 128,
+        replay_capacity: int = 256,
+        replay_max_bytes: int = 1024 * 1024,
         dashboard_state_path: str | Path | None = None,
         dashboard_database_path: str | Path | None = None,
     ) -> None:
+        if type(subscriber_capacity) is not int or subscriber_capacity < 1:
+            raise ValueError("subscriber_capacity must be positive")
+        if type(replay_capacity) is not int or replay_capacity < 1:
+            raise ValueError("replay_capacity must be positive")
+        if type(replay_max_bytes) is not int or replay_max_bytes < 1:
+            raise ValueError("replay_max_bytes must be positive")
         self._capacity = subscriber_capacity
+        self._replay_capacity = replay_capacity
+        self._replay_max_bytes = replay_max_bytes
+        self._replay: deque[tuple[int, str | None, bytes]] = deque()
+        self._replay_bytes = 0
+        self._replay_floor = 0
+        self._stream_epoch = uuid.uuid4().hex
         self._lock = threading.Lock()
         self._dashboard_persist_lock = threading.Lock()
         self._next_id = 1
@@ -444,6 +460,27 @@ class EventBroker:
             occurred_at=occurred_at or datetime.now(timezone.utc).isoformat(),
         )
         self._next_id += 1
+        # Encoded snapshots are immutable even if publisher/subscriber data changes.
+        encoded = json.dumps(
+            item.as_dict(), ensure_ascii=False, allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        size = len(encoded)
+        if size > self._replay_max_bytes:
+            # This event cannot be replayed; older cursors must resynchronize.
+            self._replay.clear()
+            self._replay_bytes = 0
+            self._replay_floor = item.id
+        else:
+            while self._replay and (
+                len(self._replay) >= self._replay_capacity
+                or self._replay_bytes + size > self._replay_max_bytes
+            ):
+                removed_id, _, removed_payload = self._replay.popleft()
+                self._replay_bytes -= len(removed_payload)
+                self._replay_floor = removed_id
+            self._replay.append((item.id, project_id, encoded))
+            self._replay_bytes += size
         self._fan_out_locked(item)
         return item
 
@@ -635,12 +672,63 @@ class EventBroker:
             dashboard = self._agent_dashboards.get(project_id)
             return dashboard.revision if dashboard else 0
 
+    def event_cursor(self, event_id: int) -> str:
+        """Opaque SSE cursor; a restarted server has a different epoch."""
+        return f"{self._stream_epoch}:{event_id}"
+
     def subscribe(
         self,
         project_id: str | None = None,
+        *,
+        last_event_id: str | None = None,
     ) -> tuple[int, queue.Queue[ProjectEvent]]:
         subscriber_queue: queue.Queue[ProjectEvent] = queue.Queue(maxsize=self._capacity)
         with self._lock:
+            # Replay and subscriber enrollment are atomic with publication.
+            if last_event_id is not None:
+                reason: str | None = None
+                cursor_id = -1
+                if not isinstance(last_event_id, str) or len(last_event_id) > 80:
+                    reason = "invalid_cursor"
+                else:
+                    epoch, separator, number = last_event_id.partition(":")
+                    if not separator or not number.isascii() or not number.isdecimal():
+                        reason = "invalid_cursor"
+                    elif epoch != self._stream_epoch:
+                        reason = "stream_changed"
+                    else:
+                        cursor_id = int(number)
+                        if cursor_id > self._next_id - 1:
+                            reason = "invalid_cursor"
+                        elif cursor_id < self._replay_floor:
+                            reason = "history_expired"
+                if reason is None:
+                    replay = [
+                        json.loads(payload)
+                        for event_id, event_project_id, payload in self._replay
+                        if event_id > cursor_id
+                        and (project_id is None or event_project_id == project_id)
+                    ]
+                    if len(replay) > self._capacity:
+                        reason = "subscriber_capacity"
+                    else:
+                        for row in replay:
+                            subscriber_queue.put_nowait(ProjectEvent(
+                                id=row["id"],
+                                event=row["event"],
+                                project_id=row["project_id"],
+                                data=row["data"],
+                                occurred_at=row["occurred_at"],
+                            ))
+                if reason is not None:
+                    latest_id = self._next_id - 1
+                    subscriber_queue.put_nowait(ProjectEvent(
+                        id=latest_id,
+                        event="stream.gap",
+                        project_id=project_id,
+                        data={"reason": reason, "latest_event_id": latest_id},
+                        occurred_at=datetime.now(timezone.utc).isoformat(),
+                    ))
             subscriber_id = self._next_subscriber_id
             self._next_subscriber_id += 1
             self._subscribers[subscriber_id] = _Subscriber(

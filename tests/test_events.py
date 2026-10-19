@@ -187,6 +187,78 @@ class EventBrokerTests(unittest.TestCase):
             finally:
                 broker.unsubscribe(subscriber_id)
 
+    def test_replay_filters_project_and_keeps_order_without_duplicates(self):
+        broker = EventBroker()
+        first = broker.publish("probe", "a", {"n": 1})
+        broker.publish("probe", "b", {"n": 2})
+        last = broker.publish("probe", "a", {"n": 3})
+        subscriber_id, events = broker.subscribe("a", last_event_id=broker.event_cursor(first.id))
+        try:
+            self.assertEqual(events.get_nowait().id, last.id)
+            self.assertTrue(events.empty())
+            following = broker.publish("probe", "a", {"n": 4})
+            self.assertEqual(events.get_nowait().id, following.id)
+            self.assertTrue(events.empty())
+        finally:
+            broker.unsubscribe(subscriber_id)
+
+    def test_replay_rejects_expired_future_invalid_and_restarted_cursors(self):
+        broker = EventBroker(replay_capacity=2)
+        first = broker.publish("probe", "a", {"n": 1})
+        broker.publish("probe", "a", {"n": 2})
+        broker.publish("probe", "a", {"n": 3})
+        for cursor, reason in (
+            (broker.event_cursor(first.id), "history_expired"),
+            (broker.event_cursor(999), "invalid_cursor"),
+            ("not-a-cursor", "invalid_cursor"),
+            (EventBroker().event_cursor(first.id), "stream_changed"),
+        ):
+            with self.subTest(reason=reason):
+                subscription_id, events = broker.subscribe("a", last_event_id=cursor)
+                try:
+                    gap = events.get_nowait()
+                    self.assertEqual((gap.event, gap.data["reason"]), ("stream.gap", reason))
+                    self.assertEqual(gap.id, 3)
+                    self.assertTrue(events.empty())
+                finally:
+                    broker.unsubscribe(subscription_id)
+
+    def test_replay_byte_and_subscriber_budgets_fail_without_partial_replay(self):
+        broker = EventBroker(subscriber_capacity=2, replay_capacity=10, replay_max_bytes=2048)
+        first = broker.publish("probe", None, {"n": 1})
+        for n in (2, 3, 4):
+            broker.publish("probe", None, {"n": n})
+        subscription_id, events = broker.subscribe(last_event_id=broker.event_cursor(first.id))
+        try:
+            self.assertEqual(events.get_nowait().data["reason"], "subscriber_capacity")
+            self.assertTrue(events.empty())
+        finally:
+            broker.unsubscribe(subscription_id)
+        oversized = broker.publish("probe", None, {"payload": "x" * 4096})
+        next_event = broker.publish("probe", None, {"n": 5})
+        self.assertLessEqual(broker._replay_bytes, broker._replay_max_bytes)
+        subscription_id, events = broker.subscribe(last_event_id=broker.event_cursor(oversized.id - 1))
+        try:
+            self.assertEqual(events.get_nowait().data["reason"], "history_expired")
+        finally:
+            broker.unsubscribe(subscription_id)
+        subscription_id, events = broker.subscribe(last_event_id=broker.event_cursor(oversized.id))
+        try:
+            self.assertEqual(events.get_nowait().id, next_event.id)
+        finally:
+            broker.unsubscribe(subscription_id)
+
+    def test_replay_keeps_immutable_encoded_event_data(self):
+        broker = EventBroker()
+        source = {"child": {"n": 1}}
+        broker.publish("probe", "a", source)
+        source["child"]["n"] = 999
+        subscription_id, events = broker.subscribe("a", last_event_id=broker.event_cursor(0))
+        try:
+            self.assertEqual(events.get_nowait().data["child"]["n"], 1)
+        finally:
+            broker.unsubscribe(subscription_id)
+
     def test_dashboard_revisions_and_event_ids_are_monotonic(self):
         broker = EventBroker()
         subscriber_id, events = broker.subscribe()
