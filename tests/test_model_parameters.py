@@ -36,7 +36,9 @@ class ModelParameterExpressionTests(unittest.TestCase):
         system.execute(document, {"type": "set_model_parameter", "name": "LeftWidth", "value": 12})
         self.assertEqual(fuse_calls, 1)
         feature = next(item for item in document.objects if item.get("id") == fused["feature_id"])
-        self.assertEqual(feature["geometry"]["solid"]["base"]["dimensions"]["width"], 12)
+        metrics = system.kernel.metrics(feature["geometry"])
+        self.assertEqual(metrics["bounds"]["max"][0] - metrics["bounds"]["min"][0], 12)
+        self.assertEqual(metrics["topology"]["solid_count"], 1)
         document.validate()
 
     def test_legacy_polyline_gear_converts_to_editable_closed_spline_on_rebuild(self):
