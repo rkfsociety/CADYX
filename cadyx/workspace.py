@@ -204,6 +204,8 @@ class ProjectWorkspace:
         project = migrate_project(project)
         project_id = project.get("id") if isinstance(project, dict) else None
         project_dir = self._project_dir(project_id)
+        # Never admit invalid staged documents to the checkpoint archive.
+        self._projects.validate_current(project, expected_id=project_id)
         # Checkpoint both ends before project.json is replaced. Readers only
         # trust rows matching the committed command-history prefix.
         previous = self._projects.load(project_dir, project_id)
