@@ -75,6 +75,64 @@ TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count,
   return builder.Shape();
 }
 
+TopoDS_Shape MakeProfileWithInnerWiresShape(const double* coordinates, size_t coordinate_count,
+                                            const int* contour_sizes, size_t contour_count,
+                                            int plane, double amount, bool centered) {
+  if (!coordinates || !contour_sizes || contour_count < 2
+      || (plane != 0 && plane != 1) || !std::isfinite(amount) || amount <= 0)
+    throw std::runtime_error("An extrusion with inner wires needs valid contours, plane and depth.");
+  size_t total_points = 0;
+  for (size_t contour = 0; contour < contour_count; ++contour) {
+    if (contour_sizes[contour] < 3
+        || static_cast<size_t>(contour_sizes[contour]) > (coordinate_count / 2) - total_points)
+      throw std::runtime_error("An inner-wire contour has an invalid point count.");
+    total_points += static_cast<size_t>(contour_sizes[contour]);
+  }
+  if (total_points != coordinate_count / 2 || coordinate_count % 2 != 0)
+    throw std::runtime_error("Inner-wire coordinates do not match their contour sizes.");
+  const double axial_offset = centered ? -amount / 2.0 : 0.0;
+  const auto point = [&](size_t index) {
+    const double x = coordinates[2 * index], y = coordinates[2 * index + 1];
+    if (!std::isfinite(x) || !std::isfinite(y))
+      throw std::runtime_error("Inner-wire profile coordinates must be finite.");
+    return plane == 0 ? gp_Pnt(x, y, axial_offset) : gp_Pnt(x, axial_offset, y);
+  };
+  size_t coordinate_offset = 0;
+  BRepBuilderAPI_MakePolygon outer_builder;
+  for (int index = 0; index < contour_sizes[0]; ++index) {
+    const gp_Pnt current = point(coordinate_offset + static_cast<size_t>(index));
+    const gp_Pnt next = point(coordinate_offset + static_cast<size_t>((index + 1) % contour_sizes[0]));
+    if (current.Distance(next) <= 1e-7)
+      throw std::runtime_error("Inner-wire profile vertices must be distinct.");
+    outer_builder.Add(current);
+  }
+  outer_builder.Close();
+  if (!outer_builder.IsDone()) throw std::runtime_error("OCCT could not close the outer profile wire.");
+  BRepBuilderAPI_MakeFace face_builder(outer_builder.Wire());
+  coordinate_offset += static_cast<size_t>(contour_sizes[0]);
+  for (size_t contour = 1; contour < contour_count; ++contour) {
+    BRepBuilderAPI_MakePolygon inner_builder;
+    for (int index = 0; index < contour_sizes[contour]; ++index) {
+      const gp_Pnt current = point(coordinate_offset + static_cast<size_t>(index));
+      const gp_Pnt next = point(coordinate_offset + static_cast<size_t>((index + 1) % contour_sizes[contour]));
+      if (current.Distance(next) <= 1e-7)
+        throw std::runtime_error("Inner-wire profile vertices must be distinct.");
+      inner_builder.Add(current);
+    }
+    inner_builder.Close();
+    if (!inner_builder.IsDone()) throw std::runtime_error("OCCT could not close an inner profile wire.");
+    face_builder.Add(TopoDS::Wire(inner_builder.Wire().Reversed()));
+    coordinate_offset += static_cast<size_t>(contour_sizes[contour]);
+  }
+  if (!face_builder.IsDone() || !BRepCheck_Analyzer(face_builder.Face()).IsValid())
+    throw std::runtime_error("Outer and inner profile wires do not form a valid planar face.");
+  BRepPrimAPI_MakePrism prism(face_builder.Face(), plane == 0 ? gp_Vec(0, 0, amount)
+                                                               : gp_Vec(0, amount, 0), true, true);
+  prism.Build();
+  if (!prism.IsDone()) throw std::runtime_error("OCCT could not extrude the face with inner wires.");
+  return EnsureOneSolid(prism.Shape(), "Extrusion with inner wires");
+}
+
 Handle(NCollection_HArray1<double>) MakePeriodicSplineParameters(const double* coordinates,
                                                                   size_t point_count) {
   if (!coordinates || point_count < 3

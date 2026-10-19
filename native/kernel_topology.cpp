@@ -150,31 +150,6 @@ TopoDS_Shape MakeCut(const TopoDS_Shape& base, const TopoDS_Shape& tool) {
   return EnsureOneSolid(operation.Shape(), "Boolean cut");
 }
 
-TopoDS_Shape MakeCutBatch(const TopoDS_Shape& base, const std::vector<TopoDS_Shape>& shapes,
-                          const int* tool_indices, size_t tool_count) {
-  if (!tool_indices || tool_count == 0)
-    throw std::runtime_error("A batched Boolean cut needs at least one tool solid.");
-  NCollection_List<TopoDS_Shape> tools;
-  for (size_t i = 0; i < tool_count; ++i) {
-    if (tool_indices[i] < 0 || static_cast<size_t>(tool_indices[i]) >= shapes.size())
-      throw std::runtime_error("Batched Boolean cut references an unavailable tool solid.");
-    tools.Append(shapes[static_cast<size_t>(tool_indices[i])]);
-  }
-  BRepAlgoAPI_Cut operation;
-  NCollection_List<TopoDS_Shape> arguments;
-  arguments.Append(base);
-  operation.SetArguments(arguments);
-  operation.SetTools(tools);
-  operation.SetFuzzyValue(1e-7);
-  operation.Build();
-  if (!operation.IsDone()) {
-    std::ostringstream detail;
-    operation.DumpErrors(detail);
-    throw std::runtime_error("OCCT could not subtract the batched tool solids: " + detail.str());
-  }
-  return EnsureOneSolid(operation.Shape(), "Batched Boolean cut");
-}
-
 TopoDS_Shape MakeMetricThread(double major_diameter, double pitch, double length, int handedness) {
   if (!std::isfinite(major_diameter) || !std::isfinite(pitch) || !std::isfinite(length)
       || major_diameter <= 0 || pitch <= 0 || length < pitch
@@ -460,11 +435,12 @@ TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count,
           throw std::runtime_error("Boolean cut graph references must point to earlier operations.");
         shape = MakeCut(shapes[node.input_a], shapes[node.input_b]);
         break;
-      case 17:
-        if (node.input_a < 0 || static_cast<size_t>(node.input_a) >= i || node.edge_count == 0)
-          throw std::runtime_error("Batched Boolean cut needs an earlier base and at least one tool.");
-        shape = MakeCutBatch(shapes[static_cast<size_t>(node.input_a)], shapes,
-                             edges + node.edge_offset, node.edge_count);
+      case 18:
+        if (node.coordinate_count % 2 != 0 || node.edge_count < 2)
+          throw std::runtime_error("Inner-wire extrusion needs paired coordinates and at least two contours.");
+        shape = MakeProfileWithInnerWiresShape(points, node.coordinate_count, edges + node.edge_offset,
+                                               node.edge_count, node.plane, node.amount,
+                                               node.centered != 0);
         break;
       case 8:
         if (node.edge_offset > edge_count || node.edge_count < 2 || node.edge_count > edge_count - node.edge_offset

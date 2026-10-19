@@ -668,12 +668,18 @@ class NativeKernel:
                 node.update(type=2, input_a=append(value["base"]), input_b=append(value["tool"]))
             elif kind == "cut_solids":
                 node.update(type=7, input_a=append(value["base"]), input_b=append(value["tool"]))
-            elif kind == "cut_solids_batch":
-                tool_nodes = [append(tool) for tool in value["tools"]]
+            elif kind == "profile_inner_wires":
+                contours = [value["outer"], *value["holes"]]
                 edge_offset = len(edge_indices)
-                edge_indices.extend(tool_nodes)
-                node.update(type=17, input_a=append(value["base"]),
-                            edge_offset=edge_offset, edge_count=len(tool_nodes))
+                edge_indices.extend(len(contour) for contour in contours)
+                coordinate_offset = len(coordinates)
+                coordinates.extend(coordinate for contour in contours for point in contour
+                                   for coordinate in (point["x"], point["y"]))
+                node.update(type=18, plane=int(value["plane"] == "XZ"),
+                            centered=int(value.get("centered", False)), amount=value["depth"],
+                            coordinate_offset=coordinate_offset,
+                            coordinate_count=len(coordinates) - coordinate_offset,
+                            edge_offset=edge_offset, edge_count=len(contours))
             elif kind == "filleted_solid":
                 node.update(type=3, input_a=append(value["base"]), amount=value["radius"],
                             edge_offset=len(edge_indices), edge_count=len(value["edge_indices"]))

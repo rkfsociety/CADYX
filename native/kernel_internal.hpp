@@ -153,6 +153,9 @@ std::string SectionProfileJson(const unsigned char* data, size_t size, int norma
 std::string ExportStepBytes(const unsigned char* data, size_t size);
 StlExportResult ExportStl(const unsigned char* data, size_t size, double linear_deflection, double angular_deflection);
 TopoDS_Shape MakeProfileShape(const double* coordinates, size_t point_count, int operation, int plane, double amount, bool centered);
+TopoDS_Shape MakeProfileWithInnerWiresShape(const double* coordinates, size_t coordinate_count,
+                                            const int* contour_sizes, size_t contour_count,
+                                            int plane, double amount, bool centered);
 std::string BoxJson(double width, double height, double depth, int mesh);
 std::string FuseProfilesJson(
     const double* base_coordinates, size_t base_point_count, int base_operation,
@@ -175,8 +178,6 @@ TopoDS_Shape MakeFuse(const TopoDS_Shape& base, const TopoDS_Shape& tool);
 TopoDS_Shape MakeFuseParts(const TopoDS_Shape& base, const TopoDS_Shape& tool);
 TopoDS_Shape MakeFusePartsBatch(const std::vector<TopoDS_Shape>& shapes, const int* shape_indices, size_t shape_count);
 TopoDS_Shape MakeCut(const TopoDS_Shape& base, const TopoDS_Shape& tool);
-TopoDS_Shape MakeCutBatch(const TopoDS_Shape& base, const std::vector<TopoDS_Shape>& shapes,
-                          const int* tool_indices, size_t tool_count);
 TopoDS_Shape MakeMetricThread(double major_diameter, double pitch, double length, int handedness);
 TopoDS_Shape BuildGraphShape(const OperationNode* nodes, size_t node_count, const double* coordinates, size_t coordinate_count, const int* edge_indices, size_t edge_count, const unsigned char* brep_data, size_t brep_size, bool& allow_invalid_import, std::vector<int>* generated_face_indices);
 std::string BuildGraphJson(const OperationNode* nodes, size_t node_count, const double* coordinates, size_t coordinate_count, const int* edge_indices, size_t edge_count, const unsigned char* brep_data, size_t brep_size, int mesh, int topology);

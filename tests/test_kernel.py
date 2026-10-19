@@ -37,7 +37,7 @@ class OCPKernelAdapterConformanceTests(unittest.TestCase):
         self.assertEqual(native_mesh.call_count, 1)
         self.assertEqual(second["positions"], [0.0, 0.0, 0.0])
 
-    def test_profile_holes_use_one_batched_native_cut(self) -> None:
+    def test_profile_holes_use_inner_wires_in_one_native_extrusion(self) -> None:
         def rectangle(x0, y0, x1, y1):
             return [{"x": x0, "y": y0}, {"x": x1, "y": y0},
                     {"x": x1, "y": y1}, {"x": x0, "y": y1}]
@@ -46,8 +46,8 @@ class OCPKernelAdapterConformanceTests(unittest.TestCase):
             plane="XY", depth=3,
         )
 
-        self.assertEqual(geometry["solid"]["kind"], "cut_solids_batch")
-        self.assertEqual(len(geometry["solid"]["tools"]), 2)
+        self.assertEqual(geometry["solid"]["kind"], "profile_inner_wires")
+        self.assertEqual(len(geometry["solid"]["holes"]), 2)
         self.assertAlmostEqual(geometry["volume"], 20 * 10 * 3 - 2 * 2 * 3 * 2)
         self.assertIsNone(self.kernel.validate(geometry))
 

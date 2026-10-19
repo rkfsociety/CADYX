@@ -312,9 +312,9 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
             return self.create_extruded_profile(profile, plane=plane, depth=amount, centered=centered)
 
         if not any(normalized_curves) and not any(normalized_segments):
-            solid = {"kernel": self.kernel_id, "kind": "cut_solids_batch",
-                     "base": extrude(outer_index),
-                     "tools": [extrude(index) for index in hole_indices]}
+            solid = {"kernel": self.kernel_id, "kind": "profile_inner_wires", "plane": plane,
+                     "outer": normalized[outer_index], "holes": holes, "depth": amount,
+                     **({"centered": True} if centered else {})}
             solid["volume"] = NativeKernel().geometry_graph(solid)["volume"]
         else:
             solid = extrude(outer_index)
