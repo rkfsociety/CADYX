@@ -36,4 +36,4 @@ The Node browser tests and complete Windows verification steps are defined in [`
 
 Repository maintainers currently work directly on `main` per [project rules](.codex/rules.md). External contributors can propose a pull request from a fork. Provide the scope, reason, affected interfaces and test results. Avoid unrelated formatting or large generated-file changes. Security reports belong in a **private** channel as described in [SECURITY.md](SECURITY.md).
 
-**Licensing:** no open-source license has yet been selected. Obtain the project owner's permission before reusing, redistributing, or licensing CADYX code; do not assume a pull request changes these terms.
+**Licensing:** CADYX is licensed under the [MIT License](LICENSE). Before submitting a contribution, ensure you have the right to submit and license that work under the project's license.

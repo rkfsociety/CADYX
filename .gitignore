@@ -4,6 +4,10 @@ __pycache__/
 venv/
 projects/*
 !projects/.gitkeep
+# Local Revopoint export samples; do not publish device capture data.
+/framesmall.mkf
+/framesmall_points.csv
+/framesmall_points.ply
 *.tmp
 .runtime/
 tools/revopoint/build/

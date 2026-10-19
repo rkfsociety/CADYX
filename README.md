@@ -178,7 +178,7 @@ The HTTP host binds to loopback by default. Non-loopback access requires authent
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for environment prerequisites, checks, and the AI-first editing contract. For responsible disclosure, see [SECURITY.md](SECURITY.md).
 
-**No open-source license has been selected or granted for this repository.** Public visibility, if enabled, does not by itself grant permission to redistribute, modify, or reuse CADYX source code. Licensing must be decided by the project owner before presenting the project as open source.
+CADYX is licensed under the [MIT License](LICENSE). Third-party software downloaded by the setup scripts remains under its own license terms.
 
 
 ## Versioned assemblies — Document Model v9
