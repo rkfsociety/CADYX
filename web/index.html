@@ -427,8 +427,8 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   background: linear-gradient(180deg, #0d1419 0%, #0a1014 100%);
   box-shadow: 0 -8px 24px #0003;
 }
-#workflow-panel > .panel-heading,
-#workflow-panel > .workflow-history { display: none !important; }
+#workflow-panel:not([data-activity-view="true"]) > .panel-heading,
+#workflow-panel:not([data-activity-view="true"]) > .workflow-history { display: none !important; }
 #workflow-panel .workflow-current {
   order: 1;
   display: flex;
@@ -485,6 +485,40 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   white-space: nowrap;
 }
 .workflow-collapse-button { display: none; }
+
+/* The full activity workspace restores the dashboard and action history from the status rail. */
+.primary-grid[data-view="activity"] #workflow-panel[data-activity-view="true"] {
+  display: grid !important;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: 38px minmax(48px, auto) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: none;
+}
+.primary-grid[data-view="activity"] #workflow-panel[data-activity-view="true"] > .panel-heading { display: flex !important; }
+.primary-grid[data-view="activity"] #workflow-panel[data-activity-view="true"] .workflow-current {
+  display: grid;
+  min-width: 0;
+  max-width: none;
+  overflow: auto;
+  align-items: start;
+  gap: 10px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.primary-grid[data-view="activity"] #workflow-panel[data-activity-view="true"] .workflow-current-label { display: inline; }
+.primary-grid[data-view="activity"] #workflow-panel[data-activity-view="true"] .workflow-action { white-space: normal; }
+.primary-grid[data-view="activity"] #workflow-panel[data-activity-view="true"] .workflow-task { display: grid !important; }
+.primary-grid[data-view="activity"] #workflow-panel[data-activity-view="true"] .workflow-summary { min-height: 48px; flex: none; }
+.primary-grid[data-view="activity"] #workflow-panel[data-activity-view="true"] > .workflow-history { display: grid !important; }
 
 /* Four-view mode remains functional. */
 .primary-grid[data-four-views="true"] { position: relative; display: block; }
@@ -741,10 +775,18 @@ window.addEventListener("DOMContentLoaded", () => {
     if (title && strong) strong.textContent = title;
   });
 
-  /* Move the existing agent workflow to the persistent bottom status rail. */
+  /* Keep the compact workflow in the status rail and restore it to the activity workspace on demand. */
+  const workflowHome = workflow.parentElement;
   detail.appendChild(workflow);
   workflow.dataset.collapsed = "true";
   workflowToggle.setAttribute("aria-expanded", "false");
+  const syncWorkflowPlacement = () => {
+    const activityView = grid.dataset.view === "activity";
+    workflow.dataset.activityView = String(activityView);
+    const target = activityView ? workflowHome : detail;
+    if (target && workflow.parentElement !== target) target.appendChild(workflow);
+  };
+  syncWorkflowPlacement();
 
   /* Build the CAD model tree without duplicating CAD state: it mirrors the existing object rows. */
   const tree = document.createElement("div");
@@ -913,7 +955,10 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const stateObserver = new MutationObserver(syncShellState);
   stateObserver.observe(detail, { attributes: true, attributeFilter: ["hidden", "data-controls-locked"] });
-  const viewObserver = new MutationObserver(() => { if (grid.dataset.view !== "overview" && grid.dataset.fourViews === "true") setFourViews(false); });
+  const viewObserver = new MutationObserver(() => {
+    syncWorkflowPlacement();
+    if (grid.dataset.view !== "overview" && grid.dataset.fourViews === "true") setFourViews(false);
+  });
   viewObserver.observe(grid, { attributes: true, attributeFilter: ["data-view"] });
 
   renderWorkflowToggle();
