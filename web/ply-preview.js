@@ -773,6 +773,36 @@ function canSelectProject(id) {
   return lock?.state === "FREE" && !lock.recovery_required && !agentIsActive;
 }
 
+async function selectWorkspaceProject(projectId, projectName) {
+  try {
+    await api("/api/v1/agent/workspace/selection", {
+      method: "POST",
+      body: JSON.stringify({ type: "project", project_id: projectId }),
+    });
+  } catch (error) {
+    notify(`Не удалось выбрать проект: ${error.message}`, true);
+    try {
+      await refreshWorkspace();
+    } catch (refreshError) {
+      notify(`Не удалось обновить список проектов: ${refreshError.message}`, true);
+    }
+    return;
+  }
+
+  const address = new URL(window.location.href);
+  address.searchParams.set("project_id", projectId);
+  address.searchParams.delete("folder");
+  address.searchParams.delete("view");
+  window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
+  projectAddressPinned = true;
+  try {
+    await refreshWorkspace();
+    notify(`Выбран проект «${projectName}».`);
+  } catch (error) {
+    notify(`Проект выбран, но не удалось обновить панель: ${error.message}`, true);
+  }
+}
+
 $("#create-project-group").addEventListener("click", () => {
   const dialog = $("#project-group-dialog");
   $("#project-group-name").value = "";
@@ -837,6 +867,7 @@ function renderProjectCard(entry) {
   const project = entry.project;
   const active = project.id === selectedProjectId;
   const projectAvailable = canSelectProject(project.id);
+  const selectionAvailable = projectAvailable && workspaceControlLockReason() === null;
   const card = document.createElement("article");
   card.className = "workspace-project-card";
   card.dataset.active = String(active);
@@ -844,7 +875,7 @@ function renderProjectCard(entry) {
 
   const state = document.createElement("span");
   state.className = "workspace-project-state";
-  state.textContent = active ? "Текущий проект" : projectAvailable ? "Готов к открытию" : "Панель занята";
+  state.textContent = active ? "Текущий проект" : projectAvailable ? "Готов к выбору" : "Панель занята";
 
   const thumbnail = document.createElement("div");
   thumbnail.className = "workspace-project-thumbnail";
@@ -906,13 +937,23 @@ function renderProjectCard(entry) {
 
   const actions = document.createElement("div");
   actions.className = "workspace-project-actions";
+  const select = document.createElement("button");
+  select.className = "button workspace-project-open";
+  select.type = "button";
+  select.textContent = active ? "Текущий проект" : "Выбрать проект";
+  select.disabled = active || !selectionAvailable;
+  select.setAttribute("aria-label", active
+    ? `Проект «${project.name}» уже выбран`
+    : `Выбрать проект «${project.name}»`);
+  select.addEventListener("click", () => selectWorkspaceProject(project.id, project.name));
+
   const open = document.createElement("a");
-  open.className = "button workspace-project-open";
+  open.className = "button workspace-project-open workspace-project-open-new-tab";
   open.href = `/?project_id=${encodeURIComponent(project.id)}`;
   open.target = "_blank";
   open.rel = "noopener";
   open.setAttribute("aria-label", `Открыть проект «${project.name}» в новой вкладке`);
-  open.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7h6l2 2h9v10h-17V7Zm0 0V5h6l2 2"/></svg><span>Открыть проект</span>';
+  open.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7h6l2 2h9v10h-17V7Zm0 0V5h6l2 2"/></svg><span>Новая вкладка</span>';
 
   const folderMenu = document.createElement("details");
   folderMenu.className = "workspace-project-folder-menu";
@@ -942,7 +983,7 @@ function renderProjectCard(entry) {
   groupSelect.addEventListener("change", () => setProjectGroup(project.id, groupSelect.value));
   folderPopover.append(folderLabel, groupSelect);
   folderMenu.append(folderButton, folderPopover);
-  actions.append(open, folderMenu);
+  actions.append(select, open, folderMenu);
   card.append(thumbnail, heading, meta, actions);
   return card;
 }

@@ -115,7 +115,9 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
 .workspace-project-id strong{color:#c7d0d5;font:12px var(--ui-font);letter-spacing:.02em}
 .workspace-project-actions{display:flex;align-items:stretch;gap:8px}
 .workspace-project-open{display:flex;min-width:0;min-height:42px;flex:1;justify-content:center;gap:10px;padding:8px 12px;border-color:#ff7628;border-radius:9px;background:linear-gradient(180deg,#ff7a2e,#f45d12);box-shadow:0 4px 15px #ff681d20;color:#1b120e;font:700 12px var(--ui-font);white-space:nowrap}
-.workspace-project-open:hover{border-color:#ff9a5e;background:#ff8a43;color:#17100c}
+.workspace-project-open:hover:not(:disabled){border-color:#ff9a5e;background:#ff8a43;color:#17100c}
+.workspace-project-open-new-tab{border-color:#34434b;background:#111a20;box-shadow:none;color:#c4cdd2}
+.workspace-project-open-new-tab:hover:not(:disabled){border-color:#596b74;background:#18232a;color:#fff}
 .workspace-project-open svg{width:18px;height:18px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .workspace-project-open:focus-visible,.workspace-project-folder-menu summary:focus-visible,.workspace-project-menu summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .workspace-project-folder-menu{position:relative;z-index:2;flex:0 0 auto}
