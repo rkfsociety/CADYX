@@ -470,7 +470,10 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
             if value not in ("0", "1"):
                 raise ValidationError("include_metrics must be 0 or 1.")
             options["include_metrics"] = value == "1"
-        handler._json(200, core.inspect_compact(project_id, **options))
+        result = core.inspect_compact(project_id, **options)
+        if options.get("section", "summary") == "summary":
+            result["lock"] = core.leases.snapshot_for_listing(project_id)
+        handler._json(200, result)
     elif name == "agent_capability_develop":
         body = _require_json(handler)
         if set(body) != {"definition"} or not isinstance(body["definition"], dict):
@@ -581,7 +584,9 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
             result = (core.stop_agent(project_id, body["lease_id"]) if isinstance(body.get("lease_id"), str)
                       else core.stop_agent_owner(project_id, body.get("owner_id")))
         else:
-            result = core.resume_agent(project_id, body.get("owner_id"), body.get("expected_revision"))
+            result = core.resume_agent(
+                project_id, body.get("owner_id"), body.get("expected_revision"), compact_response=True,
+            )
         handler._json(200, result)
     elif name == "agent_command_execute":
         body = _require_json(handler)

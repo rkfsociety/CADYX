@@ -524,8 +524,12 @@ class CadyxCore:
                              "correction_hint": "Inspect the current project state and rebuild the request against its saved revision."},
             )
 
-    def resume_agent(self, project_id: str, owner_id: str, expected_revision: int) -> dict[str, Any]:
-        return self._command_activity.resume_agent(project_id, owner_id, expected_revision)
+    def resume_agent(
+        self, project_id: str, owner_id: str, expected_revision: int, *, compact_response: bool = False,
+    ) -> dict[str, Any]:
+        return self._command_activity.resume_agent(
+            project_id, owner_id, expected_revision, compact_response=compact_response,
+        )
 
     def execute_command(
         self,

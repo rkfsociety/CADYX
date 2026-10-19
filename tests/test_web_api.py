@@ -1228,6 +1228,9 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(self.request(base + "/resume", {"owner_id": "agent", "expected_revision": 2})[0], 409)
         status, resumed = self.request(base + "/resume", {"owner_id": "agent", "expected_revision": 0})
         self.assertEqual(status, 200)
+        self.assertNotIn("objects", resumed["document"])
+        self.assertNotIn("history", resumed)
+        self.assertEqual(resumed["document"]["revision"], 0)
         command = {"lease_id": resumed["lease"]["lease_id"], "command": {"type": "create_sketch"}}
         self.assertEqual(self.request(base + "/commands", command)[0], 400)
         command["expected_revision"] = 0

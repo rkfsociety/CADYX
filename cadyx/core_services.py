@@ -414,13 +414,22 @@ class CommandActivityService(_CoreService):
                 result = self.execute_command(
                     project_id, lease["lease_id"], command,
                     expected_owner_type=OwnerType.AGENT, expected_revision=expected_revision,
+                    compact_receipt=True,
                 )
                 document = result.get("document", {})
                 objects = document.get("objects", []) if isinstance(document, dict) else []
-                object_counts: dict[str, int] = {}
-                for item in objects if isinstance(objects, list) else []:
-                    if isinstance(item, dict) and isinstance(item.get("type"), str):
-                        object_counts[item["type"]] = object_counts.get(item["type"], 0) + 1
+                if isinstance(document, dict) and "object_count" in document:
+                    document_summary = document
+                else:
+                    object_counts: dict[str, int] = {}
+                    for item in objects if isinstance(objects, list) else []:
+                        if isinstance(item, dict) and isinstance(item.get("type"), str):
+                            object_counts[item["type"]] = object_counts.get(item["type"], 0) + 1
+                    document_summary = {
+                        "id": document.get("id"), "version": document.get("version"),
+                        "revision": document.get("revision"), "object_count": len(objects),
+                        "object_counts": object_counts,
+                    }
                 history_entry = result.get("history_entry")
                 if isinstance(history_entry, dict):
                     def compact_value(value: Any, key: str | None = None) -> Any:
@@ -441,11 +450,7 @@ class CommandActivityService(_CoreService):
                     }
                     history_entry = compact_value(history_entry)
                 return {
-                    "document": {
-                        "id": document.get("id"), "version": document.get("version"),
-                        "revision": document.get("revision"), "object_count": len(objects),
-                        "object_counts": object_counts,
-                    },
+                    "document": document_summary,
                     "history_entry": history_entry,
                     "lease_released": True,
                 }
@@ -711,13 +716,18 @@ class CommandActivityService(_CoreService):
             raise ConflictError("This MCP session does not own the current agent lease.", code="PROJECT_LOCKED")
         return self.stop_agent(project_id, lease.lease_id)
 
-    def resume_agent(self, project_id: str, owner_id: str, expected_revision: int) -> dict[str, Any]:
+    def resume_agent(
+        self, project_id: str, owner_id: str, expected_revision: int, *, compact_response: bool = False,
+    ) -> dict[str, Any]:
         with self._project_guard(project_id):
-            detail = self.inspect_project(project_id)
+            project = self.workspace.load(project_id)
+            document = Document.from_dict(project["document"])
             # Resuming grants a new editing lease, so recheck geometry at this
             # explicit state transition rather than relying on viewer caching.
-            self._validate_geometry(Document.from_dict(detail["document"]))
-            self._check_revision(Document.from_dict(detail["document"]), expected_revision)
+            # Keep the validated snapshot in Core; do not serialize its B-rep or
+            # history into the Agent API response.
+            self._validate_geometry(document)
+            self._check_revision(document, expected_revision)
             availability = self._project_availability(project_id)
             if (
                 not availability.permits("write")
@@ -727,8 +737,22 @@ class CommandActivityService(_CoreService):
                 raise ConflictError("Project has an operation in progress; retry later.", code="PROJECT_BUSY")
             lease = self.leases.acquire(project_id, "agent", owner_id)
             self.leases.mark_resumed(project_id, lease.lease_id)
-            detail["lock"] = self.leases.snapshot(project_id)
-            self.events.publish("project.lock.changed", project_id, detail["lock"])
+            lock = self.leases.snapshot(project_id)
+            self.events.publish("project.lock.changed", project_id, lock)
+            if compact_response:
+                return {
+                    "resumed": True,
+                    "lease": lease.as_dict(),
+                    "project": self._summary(project),
+                    "document": {
+                        "id": document.id,
+                        "version": document.version,
+                        "revision": document.revision,
+                    },
+                    "lock": lock,
+                }
+            detail = self.inspect_project(project_id)
+            detail["lock"] = lock
             return {"resumed": True, "lease": lease.as_dict(), **detail}
 
     def execute_command(
@@ -739,6 +763,7 @@ class CommandActivityService(_CoreService):
         *,
         expected_owner_type: OwnerType | None = None,
         expected_revision: int | None = None,
+        compact_receipt: bool = False,
     ) -> dict[str, Any]:
         with self._project_guard(project_id):
             command_name = command.get("type") if isinstance(command, dict) else None
@@ -886,6 +911,19 @@ class CommandActivityService(_CoreService):
             if isinstance(result.get("feature_id"), str):
                 receipt["feature_id"] = result["feature_id"]
             self.events.publish("command.completed", project_id, receipt)
+            if compact_receipt:
+                object_counts: dict[str, int] = {}
+                for item in document.objects:
+                    object_type = item.get("type")
+                    if isinstance(object_type, str):
+                        object_counts[object_type] = object_counts.get(object_type, 0) + 1
+                return {
+                    "document": {"id": document.id, "version": document.version,
+                                 "revision": document.revision,
+                                 "object_count": len(document.objects),
+                                 "object_counts": object_counts},
+                    "history_entry": history_entry,
+                }
             return {"document": document.to_dict(), "history_entry": history_entry}
 
 class RenderingCacheService(_CoreService):

@@ -322,7 +322,19 @@ class MCPApplication:
             raw, _ = self.api.request("DELETE", path)
             return json.loads(raw.decode("utf-8"))
         if name == "cadyx_inspect_project":
-            return self.api.get(self._project(args["project_id"], "/inspection?section=summary"))
+            summary = self.api.get(self._project(args["project_id"], "/inspection?section=summary"))
+            return {
+                "project_id": summary["project_id"],
+                "name": summary["name"],
+                "document": {
+                    "id": summary["project_id"],
+                    "revision": summary["revision"],
+                    "object_count": summary["object_count"],
+                    "object_counts": summary["object_counts"],
+                },
+                "lock": summary["lock"],
+                "history_count": summary["history_count"],
+            }
         if name == "cadyx_inspect_project_full":
             return self.api.get(self._project(args["project_id"]))
         if name == "cadyx_inspect_compact":
