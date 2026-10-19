@@ -385,6 +385,7 @@ class ProjectLifecycleService(_CoreService):
                 "lock": availability.lock,
                 "document": document.to_dict(),
                 "history": copy.deepcopy(project["history"]),
+                "assembly_kinematics": inspect_assembly_mates(document.assembly),
             }
 
 class CommandActivityService(_CoreService):

@@ -1,6 +1,6 @@
 """Pure assembly mating, graph migration, and Core inspection regressions.
 
-Not executed locally; included for remote CI.
+Run locally and in CI; these cases use only a primitive fixture.
 """
 from __future__ import annotations
 
@@ -30,8 +30,8 @@ class AssemblyMateTests(unittest.TestCase):
         self.c = self.run_command("add_assembly_instance", target_id=part, name="C",
                                   translation=[1, 4, 0])["instance_id"]
 
-    def run_command(self, kind, **fields):
-        result = self.commands.execute(self.document, {"type": kind, **fields})
+    def run_command(self, command_type, **fields):
+        result = self.commands.execute(self.document, {"type": command_type, **fields})
         self.document.validate()
         return result
 
