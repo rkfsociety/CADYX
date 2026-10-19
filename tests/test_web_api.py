@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import struct
 import threading
@@ -950,7 +951,13 @@ class WebApiTests(unittest.TestCase):
     def test_web_assets_are_served(self) -> None:
         with urlopen(self.base_url + "/", timeout=3) as response:
             self.assertEqual(response.status, 200)
-            self.assertIn(b"CADYX", response.read())
+            index = response.read()
+            self.assertIn(b"CADYX", index)
+            version_match = re.search(rb'<meta name="cadyx-ui-version" content="([a-f0-9]{64})">', index)
+            self.assertIsNotNone(version_match)
+        status, updates = self.request("/api/v1/updates")
+        self.assertEqual(status, 200)
+        self.assertEqual(version_match.group(1).decode("ascii"), updates["ui_version"])
         with urlopen(self.base_url + "/scanner", timeout=3) as response:
             scanner_page = response.read()
             self.assertEqual(response.status, 200)

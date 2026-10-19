@@ -49,6 +49,7 @@ const api = async (path, options = {}) => {
   }
   return value;
 };
+const loadedUiVersion = document.querySelector('meta[name="cadyx-ui-version"]')?.content || null;
 
 const $ = (selector) => document.querySelector(selector);
 const projectDetail = $("#project-detail");
@@ -1435,6 +1436,10 @@ async function checkAutomaticUpdates() {
       }
     }
     if (!previous) {
+      if (loadedUiVersion && current.ui_version !== loadedUiVersion) {
+        window.location.reload();
+        return;
+      }
       updateWorkspaceControls();
       return;
     }

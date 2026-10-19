@@ -333,6 +333,8 @@ def make_request_handler(
             data = (_WEB_ROOT / filename).read_bytes()
             if filename in {"index.html", "scanner.html"}:
                 version = _ui_asset_version()
+                version_meta = f'<meta name="cadyx-ui-version" content="{version}">'.encode("ascii")
+                data = data.replace(b"</head>", version_meta + b"</head>", 1)
                 assets = (
                     ("style.css", "viewport.js", "ply-parser.js", "ply-preview.js", "app.js")
                     if filename == "index.html" else ("style.css", "scanner-camera.js")
