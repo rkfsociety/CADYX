@@ -1599,7 +1599,27 @@ async function refreshDetail() {
     const feature = objectsById.get(transition.featureId);
     transition.bodyId = feature?.body_id;
     const sourceBody = feature?.source_body_id && objectsById.get(feature.source_body_id);
-    if (transition.type === "fuse" && sourceBody?.geometry?.plane === "XY"
+    if (transition.type === "pad") {
+      const sketchId = feature?.parameters?.sketch_id;
+      const sketch = sketchId ? objectsById.get(sketchId) : null;
+      if (sketch?.type === "sketch") {
+        const profileObjects = objects.filter((object) => object.sketch_id === sketchId
+          && object.construction !== true);
+        const minimums = profileObjects.flatMap((object) => {
+          if (object.type === "point" && Number.isFinite(object.y)) return [object.y];
+          if (object.type === "circle" && Number.isFinite(object.radius)) {
+            const center = objectsById.get(object.center_id);
+            return Number.isFinite(center?.y) ? [center.y - object.radius] : [];
+          }
+          if (object.type === "ellipse" && Number.isFinite(object.minor_radius)
+              && Number.isFinite(object.center_y)) return [object.center_y - object.minor_radius];
+          return [];
+        });
+        const profileMinimum = minimums.length ? Math.min(...minimums) : null;
+        Object.assign(transition, window.CadyxViewport.padGrowthFrame(
+          sketch.plane, sketch.section_normal_axis, sketch.section_offset, profileMinimum));
+      }
+    } else if (transition.type === "fuse" && sourceBody?.geometry?.plane === "XY"
         && Number.isFinite(sourceBody.geometry.depth)) {
       transition.growAxis = 2;
       transition.growOrigin = sourceBody.geometry.depth;

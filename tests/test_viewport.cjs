@@ -67,6 +67,8 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "
 const viewer = sandbox.window.CadyxViewport.createViewer(canvas, { showCoordinateGizmo: false });
 const activityUpdate = sandbox.window.CadyxViewport.viewportUpdateForAgentActivity;
 const transitionForRevision = sandbox.window.CadyxViewport.transitionForRevision;
+const padGrowthFrame = sandbox.window.CadyxViewport.padGrowthFrame;
+const padGrowthPosition = sandbox.window.CadyxViewport.padGrowthPosition;
 const detailRefreshPlan = sandbox.window.CadyxViewport.detailRefreshPlan;
 const initialRefresh = detailRefreshPlan(true, "overview");
 assert.equal(Object.values(initialRefresh).filter(Boolean).length, 3,
@@ -136,8 +138,24 @@ const padUpdate = activityUpdate("project-1", "project-1", {
   result: { body_id: "body-1", feature_id: "feature-1" },
 });
 assert.equal(padUpdate.activeSketchId, null);
-assert.equal(padUpdate.transition.type, "fuse");
+assert.equal(padUpdate.transition.type, "pad");
 assert.equal(padUpdate.transition.featureId, "feature-1");
+const wallPadFrame = padGrowthFrame("XZ", "Y", 50, 10);
+assert.deepEqual({ ...wallPadFrame }, {
+  growAxis: 1, growOrigin: 50, growClipAxis: 2, growClipOrigin: 10,
+}, "An XZ wall pad grows along its Y-normal from the sketch plane");
+assert.deepEqual(padGrowthPosition([0, 60, 100], wallPadFrame, 0.5), [0, 55, 100],
+  "The wall advances through its thickness instead of rising from the base");
+assert.deepEqual(padGrowthPosition([0, 60, 5], wallPadFrame, 0.5), [0, 60, 5],
+  "The base plate stays fixed while the wall pad is animated");
+assert.deepEqual(padGrowthPosition([0, 60, 10], wallPadFrame, 0.5), [0, 60, 10],
+  "The wall to base seam remains fixed on the sketch profile boundary");
+const fuseUpdate = activityUpdate("project-1", "project-1", {
+  state: "completed", command: "fuse_bodies",
+  result: { body_id: "body-2", feature_id: "feature-2" },
+});
+assert.equal(fuseUpdate.transition.type, "fuse",
+  "A standalone Boolean fuse keeps its distinct transition type");
 assert.equal(activityUpdate("project-1", "project-2", {
   state: "completed", command: "pad_sketch_to_body",
   result: { body_id: "body-1", feature_id: "feature-1" },

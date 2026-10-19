@@ -73,7 +73,13 @@
         plane: result.geometry?.plane || "XZ", durationMs: 1400,
       } : null };
     }
-    if (["pad_sketch_to_body", "rib_from_sketch", "fuse_bodies"].includes(command)) {
+    if (["pad_sketch_to_body", "rib_from_sketch"].includes(command)) {
+      return { activeSketchId: null, transition: result.body_id ? {
+        projectId, bodyId: result.body_id, featureId: result.feature_id || null,
+        type: "pad", durationMs: 1200,
+      } : null };
+    }
+    if (command === "fuse_bodies") {
       return { activeSketchId: null, transition: result.body_id ? {
         projectId, bodyId: result.body_id, featureId: result.feature_id || null,
         type: "fuse", durationMs: 1200,
@@ -95,6 +101,25 @@
     if (!transition) return null;
     return Number.isInteger(transition.expectedRevision) && transition.expectedRevision !== revision
       ? null : transition;
+  }
+  function padGrowthFrame(plane, sectionNormalAxis, sectionOffset, profileMinimum) {
+    const growAxis = sectionNormalAxis === "Y" || plane === "XZ" ? 1 : 2;
+    const frame = { growAxis, growOrigin: Number.isFinite(sectionOffset) ? sectionOffset : 0 };
+    if (growAxis === 1 && Number.isFinite(profileMinimum)) {
+      frame.growClipAxis = 2;
+      frame.growClipOrigin = profileMinimum;
+    }
+    return frame;
+  }
+  function padGrowthPosition(point, transition, progress) {
+    const result = point.slice();
+    const axis = transition.growAxis;
+    if (!Number.isInteger(axis) || axis < 0 || axis > 2) return result;
+    if (Number.isInteger(transition.growClipAxis)
+        && !(point[transition.growClipAxis] > transition.growClipOrigin + 1e-9)) return result;
+    const origin = transition.growOrigin || 0;
+    if (point[axis] > origin) result[axis] = origin + (point[axis] - origin) * progress;
+    return result;
   }
   function detailRefreshPlan(needsAuxiliary, view) {
     const refreshAuxiliary = Boolean(needsAuxiliary);
@@ -424,6 +449,9 @@
           } else if (transition.type === "fuse" && transition.growAxis === 2
               && worldZ > transition.growOrigin) {
             worldZ = transition.growOrigin + (worldZ - transition.growOrigin) * progress;
+          } else if (transition.type === "pad") {
+            [worldX, worldY, worldZ] = padGrowthPosition(
+              [worldX, worldY, worldZ], transition, progress);
           } else if (transition.type === "brep" && transition.center) {
             worldX = transition.center[0] + (worldX - transition.center[0]) * progress;
             worldY = transition.center[1] + (worldY - transition.center[1]) * progress;
@@ -1709,6 +1737,7 @@
   }
 
   window.CadyxViewport = {
-    createViewer, viewportUpdateForAgentActivity, transitionForRevision, detailRefreshPlan,
+    createViewer, viewportUpdateForAgentActivity, transitionForRevision, padGrowthFrame,
+    padGrowthPosition, detailRefreshPlan,
   };
 })();

@@ -130,7 +130,11 @@ being edited, then is hidden when that edit finishes. Agent operation events
 animate each new sketch stroke and apply eased visual transitions to profile
 extrusions/revolutions, metric-thread construction, path sweeps, Boolean fuses,
 and edge fillets; consuming a sketch removes its overlay as the solid feature
-appears. Sweep animation precomputes each mesh vertex's progress along its
+appears. Additive sketch pads and ribs use a separate transition along the
+source sketch plane normal and section offset; an XZ sketch grows along Y while
+the base below its profile remains fixed. This keeps a pad's preview consistent
+with its extrusion direction instead of treating every fused result as a Z-axis
+growth. Sweep animation precomputes each mesh vertex's progress along its
 nearest path segment using a segment AABB hierarchy, so it avoids scanning the
 entire path for every vertex. Boolean fuse hides its consumed source bodies and
 eases the newly connected B-rep into the scene. Sketch lines and points overlay
