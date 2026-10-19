@@ -508,6 +508,9 @@ class CadyxCore:
     def stop_agent(self, project_id: str, lease_id: str) -> dict[str, Any]:
         return self._command_activity.stop_agent(project_id, lease_id)
 
+    def stop_agent_owner(self, project_id: str, owner_id: str) -> dict[str, Any]:
+        return self._command_activity.stop_agent_owner(project_id, owner_id)
+
     @staticmethod
     def _check_revision(document: Document, expected_revision: Any) -> None:
         if type(expected_revision) is not int or expected_revision < 0:
@@ -534,6 +537,14 @@ class CadyxCore:
         expected_revision: int | None = None,
     ) -> dict[str, Any]:
         return self._command_activity.execute_command(project_id, lease_id, command, expected_owner_type=expected_owner_type, expected_revision=expected_revision)
+
+    def execute_agent_command(
+        self, project_id: str, owner_id: str, expected_revision: int, command: dict[str, Any],
+        lease_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._command_activity.execute_agent_command(
+            project_id, owner_id, expected_revision, command, lease_id,
+        )
 
     def preview_commands(self, project_id: str, expected_revision: int, commands: list[dict[str, Any]]) -> dict[str, Any]:
         """Validate an ordered command batch on an isolated copy without saving it."""

@@ -106,6 +106,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases", "agent_lease", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands", "agent_command", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands/preview", "agent_commands_preview", "agent", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands/execute", "agent_command_execute", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands/commit", "agent_commands_commit", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities", "agent_capability_develop", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities/check", "agent_capability_check", "agent", "json"),
@@ -576,8 +577,19 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         handler._json(200, core.prune_project_files(project_id, body["keep_files"]))
     elif name in {"agent_stop", "agent_resume"}:
         body = _require_json(handler)
-        result = (core.stop_agent(project_id, body.get("lease_id")) if name == "agent_stop" else core.resume_agent(project_id, body.get("owner_id"), body.get("expected_revision")))
+        if name == "agent_stop":
+            result = (core.stop_agent(project_id, body["lease_id"]) if isinstance(body.get("lease_id"), str)
+                      else core.stop_agent_owner(project_id, body.get("owner_id")))
+        else:
+            result = core.resume_agent(project_id, body.get("owner_id"), body.get("expected_revision"))
         handler._json(200, result)
+    elif name == "agent_command_execute":
+        body = _require_json(handler)
+        if not {"owner_id", "expected_revision", "command"}.issubset(body) or set(body) - {"owner_id", "expected_revision", "command", "lease_id"}:
+            raise ValidationError("Atomic agent command requires owner_id, expected_revision and command, with optional lease_id.")
+        handler._json(200, core.execute_agent_command(
+            project_id, body["owner_id"], body["expected_revision"], body["command"], body.get("lease_id"),
+        ))
     elif name in {"agent_lease", "agent_command", "agent_lease_recover", "agent_lease_heartbeat", "agent_lease_release"}:
         _dispatch_project_control(handler, core, route, agent_api=True)
     else:

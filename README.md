@@ -194,6 +194,12 @@ other-unit conversion, and assembly STEP export are not yet implemented.
 Existing document v8 snapshots migrate read-only to v9. See
 [the assembly contract](.codex/docs/document-model-v9.md).
 
+The local MCP adapter executes ordinary agent commands through one
+`POST /api/v1/agent/projects/{id}/commands/execute` request. Core acquires and
+releases the lease around the revision-checked command and returns a compact
+receipt; the normal MCP inspection tool reads the compact summary endpoint,
+while `cadyx_inspect_project_full` remains available for full geometry/history.
+
 
 ## Standard-part catalog (initial built-in presets)
 

@@ -400,6 +400,58 @@ class ProjectLifecycleService(_CoreService):
 class CommandActivityService(_CoreService):
     """Coordinate leases, commands, dashboards, and activity."""
 
+    def execute_agent_command(
+        self, project_id: str, owner_id: str, expected_revision: int, command: dict[str, Any],
+        lease_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one agent command under a server-managed, single-request lease."""
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            lease = (self.acquire_lease(project_id, "agent", owner_id) if lease_id is None
+                     else self.leases.require(project_id, lease_id).as_dict())
+            if lease.get("owner_id") != owner_id or lease.get("owner_type") != OwnerType.AGENT.value:
+                raise ConflictError("The agent lease does not belong to this MCP session.", code="PROJECT_LOCKED")
+            try:
+                result = self.execute_command(
+                    project_id, lease["lease_id"], command,
+                    expected_owner_type=OwnerType.AGENT, expected_revision=expected_revision,
+                )
+                document = result.get("document", {})
+                objects = document.get("objects", []) if isinstance(document, dict) else []
+                object_counts: dict[str, int] = {}
+                for item in objects if isinstance(objects, list) else []:
+                    if isinstance(item, dict) and isinstance(item.get("type"), str):
+                        object_counts[item["type"]] = object_counts.get(item["type"], 0) + 1
+                history_entry = result.get("history_entry")
+                if isinstance(history_entry, dict):
+                    def compact_value(value: Any, key: str | None = None) -> Any:
+                        if isinstance(value, dict):
+                            if key == "geometry":
+                                return {name: value[name] for name in ("kernel", "kind", "volume", "plane") if name in value}
+                            return {
+                                name: compact_value(item, name) for name, item in value.items()
+                                if name not in {"data", "triangles", "positions", "point_ids", "line_ids", "circle_ids"}
+                            }
+                        if isinstance(value, list):
+                            return [compact_value(item, key) for item in value]
+                        return value
+
+                    history_entry = {
+                        key: value for key, value in history_entry.items()
+                        if key != "command"
+                    }
+                    history_entry = compact_value(history_entry)
+                return {
+                    "document": {
+                        "id": document.get("id"), "version": document.get("version"),
+                        "revision": document.get("revision"), "object_count": len(objects),
+                        "object_counts": object_counts,
+                    },
+                    "history_entry": history_entry,
+                    "lease_released": True,
+                }
+            finally:
+                self.release_lease(project_id, lease["lease_id"])
+
     def agent_dashboard_snapshot(self, project_id: str) -> dict[str, Any]:
         self.workspace.load(project_id)
         return self.events.agent_dashboard_snapshot(project_id)
@@ -652,6 +704,12 @@ class CommandActivityService(_CoreService):
             detail["lock"] = self.leases.snapshot(project_id)
             self.events.publish("project.lock.changed", project_id, detail["lock"])
             return {"stopped": True, **detail}
+
+    def stop_agent_owner(self, project_id: str, owner_id: str) -> dict[str, Any]:
+        lease = self.leases.get(project_id)
+        if lease is None or lease.owner_type is not OwnerType.AGENT or lease.owner_id != owner_id:
+            raise ConflictError("This MCP session does not own the current agent lease.", code="PROJECT_LOCKED")
+        return self.stop_agent(project_id, lease.lease_id)
 
     def resume_agent(self, project_id: str, owner_id: str, expected_revision: int) -> dict[str, Any]:
         with self._project_guard(project_id):

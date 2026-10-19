@@ -440,6 +440,18 @@ parity and that atomic-failure invariant without loading native libraries.
 
 ### Agent API discovery and local Codex MCP adapter
 
+The MCP adapter's default `cadyx_execute_command` uses the single-request
+`POST /api/v1/agent/projects/{id}/commands/execute` route. The Core holds the
+project guard while it acquires the agent lease, checks the exact revision,
+executes one command, creates a bounded receipt, and releases the lease. A
+resumed lease may be passed to this route and is checked against the MCP owner.
+The receipt includes revision and object counts plus the compact command result;
+it does not serialize saved objects or full command history. The legacy
+lease-explicit `/commands` route remains available to other clients. MCP's
+`cadyx_inspect_project` reads `inspection?section=summary`; use
+`cadyx_inspect_compact` for bounded details and `cadyx_inspect_project_full`
+only when full geometry or history is needed.
+
 `GET /api/v1/agent/capabilities` is a read-only machine-readable inventory of Agent API routes, supported Command System names, required/optional parameter names, optional JSON Schema hints, known error codes and documented limitations. Parameter metadata is an operator guide; Core and command validators plus the linked model contracts remain authoritative. `CommandSystem.execute` rejects command types absent from the discovery registry, so a new operation is not exposed until its contract is registered.
 
 Typed Agent API errors preserve the top-level `error` and `message` fields and add a `diagnostics` object containing the error category and failed precondition, with command type, saved revision, feature/body/sketch/entity IDs, measured values, and a descriptive `correction_hint` when available. Measurements are `null` when the failing operation produced no measurement; CADYX does not invent them or choose a repair. Kernel, topology-selection, sketch-constraint, scan, export, resource-limit and unsupported-operation failures have stable codes listed by capability discovery. The MCP bridge reports read-side transport failures as `TRANSIENT_TRANSPORT` and ambiguous mutations as `OPERATION_OUTCOME_UNCERTAIN`; inspect revision/history before deciding whether to retry. Unexpected HTTP and MCP failures use a generic `INTERNAL_ERROR` response; public errors redact bearer credentials and absolute host paths.
