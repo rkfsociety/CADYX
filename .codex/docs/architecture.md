@@ -343,11 +343,10 @@ project without changing selection. MCP delegates these checks to Core through
 the Agent API. The browser's Projects (07) view lists saved projects and opens each
 project in a separate tab; this does not change the process-local Agent API
 selection. Workspace-folder selection remains Agent API-only.
-The browser loads a model when its address contains `project_id`. At an
-unqualified root address, the initial refresh reads the current host selection
-from the Agent API and pins an existing project or folder into the address;
-`?view=projects` explicitly opens the project chooser without restoring that
-selection. If the API has no valid current resource, the root opens Projects.
+The browser loads a model when its address contains `project_id`. An
+unqualified root address opens Projects without restoring the current host
+selection; `?view=projects` has the same behavior. A project or folder is shown
+only when its address explicitly contains `project_id` or `folder`.
 Explicit `project_id`, `folder`, and `view=projects` routes remain pinned across
 SSE workspace-selection events; only an explicit navigation action or a newly
 created project can change the address.

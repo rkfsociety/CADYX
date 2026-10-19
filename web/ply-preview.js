@@ -227,7 +227,7 @@ const initialAddress = new URLSearchParams(window.location.search);
 let projectAddressPinned = (initialAddress.has("project_id") || initialAddress.has("folder"))
   && initialAddress.get("view") !== "projects";
 const projectsChooserPinned = initialAddress.get("view") === "projects";
-let workspaceSelectionRestoreAttempted = projectAddressPinned || initialAddress.get("view") === "projects";
+let workspaceSelectionRestoreAttempted = !projectAddressPinned || initialAddress.get("view") === "projects";
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
 const folderInspector = $("#folder-inspector");
