@@ -19,6 +19,7 @@ from .migrations import migrate_project
 from .workspace_files import WorkspaceArtifactStore, _is_single_path_segment
 from .workspace_groups import ProjectGroupStore
 from .workspace_projects import ProjectRecordStore, _PROJECT_ID
+from .revision_diff import RevisionArchive
 from .workspace_validations import ValidationRecordStore
 
 _WINDOWS_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} | {
@@ -203,7 +204,15 @@ class ProjectWorkspace:
         project = migrate_project(project)
         project_id = project.get("id") if isinstance(project, dict) else None
         project_dir = self._project_dir(project_id)
+        # Checkpoint both ends before project.json is replaced. Readers only
+        # trust rows matching the committed command-history prefix.
+        previous = self._projects.load(project_dir, project_id)
+        RevisionArchive(project_dir).record(previous, project)
         self._projects.save(project_dir, project)
+
+    def revision_archive(self, project_id: str) -> RevisionArchive:
+        self.load(project_id)
+        return RevisionArchive(self._project_dir(project_id))
 
     def record_validation(
         self, project_id: str, kind: str, result: dict[str, Any]
