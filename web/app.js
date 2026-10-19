@@ -176,7 +176,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const active=groups.find(group=>group.body.id===state.activeModelBodyId);
       const visibleGroups=modelSelectorVisible?(active?[active]:[]):groups;
       for(const group of visibleGroups){
-        const modelTitle=document.createElement('div');modelTitle.className='cad3-model-title';modelTitle.textContent=group.body.name;list.append(modelTitle);
+        if(modelSelectorVisible||visibleGroups.length>1){const modelTitle=document.createElement('div');modelTitle.className='cad3-model-title';modelTitle.textContent=group.body.name;list.append(modelTitle)}
         const features=group.features;
         for(const feature of features){
           const sketchIds=[...new Set([feature.source_sketch_id,...(feature.source_sketch_ids||[])].filter(id=>state.byId.get(id)?.type==='sketch'))];
