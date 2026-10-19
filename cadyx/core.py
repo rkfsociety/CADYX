@@ -391,6 +391,19 @@ class CadyxCore:
     ) -> dict[str, Any]:
         return self._engineering_validation.validate_body_clearance(project_id, first_body_id, second_body_id, expected_revision, minimum_clearance, tolerance, progress=progress, persist=persist)
 
+    def validate_assembly_fit(
+        self, project_id: str, expected_revision: Any,
+        minimum_clearance: Any, tolerance: Any, *,
+        instance_pairs: Any = None, pose_samples: Any = None,
+        progress: Callable[[str, float], None] | None = None,
+        persist: bool = False,
+    ) -> dict[str, Any]:
+        return self._engineering_validation.validate_assembly_fit(
+            project_id, expected_revision, minimum_clearance, tolerance,
+            instance_pairs=instance_pairs, pose_samples=pose_samples,
+            progress=progress, persist=persist,
+        )
+
     def list_validation_records(self, project_id: str, *, limit: int = 50) -> dict[str, Any]:
         return self._engineering_validation.list_validation_records(project_id, limit=limit)
 

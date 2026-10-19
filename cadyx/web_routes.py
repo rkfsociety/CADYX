@@ -81,6 +81,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/dimensions", "agent_validate_dimensions", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/planetary-kinematics", "agent_validate_planetary_kinematics", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/clearance", "agent_validate_clearance", "validation", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/assembly-fit", "agent_validate_assembly_fit", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/preservation", "agent_validate_preservation", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/thickness", "agent_validate_thickness", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/specification", "agent_validate_specification", "validation", "json"),
@@ -599,6 +600,18 @@ def _dispatch_validation(handler: Any, core: CadyxCore, route: RouteMatch, parse
         result = core.observe_agent_operation(project_id, "Проверяет габариты тела", lambda: core.validate_body_dimensions(project_id, body["body_id"], body["expected_revision"], body["expected_dimensions"], body["tolerance"], persist=body.get("persist", False)))
     elif operation == "clearance":
         result = core.observe_agent_operation(project_id, "Измеряет зазор между телами", lambda progress: core.validate_body_clearance(project_id, body["first_body_id"], body["second_body_id"], body["expected_revision"], body["minimum_clearance"], body["tolerance"], progress=progress, persist=body.get("persist", False)), reports_progress=True)
+    elif operation == "assembly_fit":
+        result = core.observe_agent_operation(
+            project_id, "Проверяет пересечения и зазоры сборки",
+            lambda progress: core.validate_assembly_fit(
+                project_id, body["expected_revision"],
+                body["minimum_clearance"], body["tolerance"],
+                instance_pairs=body.get("instance_pairs"),
+                pose_samples=body.get("pose_samples"),
+                progress=progress, persist=body.get("persist", False),
+            ),
+            reports_progress=True,
+        )
     elif operation == "preservation":
         result = core.observe_agent_operation(project_id, "Проверяет сохранённый объём тела", lambda: core.validate_body_preservation(project_id, body["reference_body_id"], body["candidate_body_id"], body["expected_revision"], body["maximum_lost_volume"], body["tolerance"], persist=body.get("persist", False)))
     else:

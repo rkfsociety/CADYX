@@ -1422,6 +1422,39 @@ class EngineeringValidationService(_CoreService):
         }
         return self._maybe_persist_validation(project_id, "body_clearance", result, persist)
 
+    def validate_assembly_fit(
+        self, project_id: str, expected_revision: Any,
+        minimum_clearance: Any, tolerance: Any, *,
+        instance_pairs: Any = None, pose_samples: Any = None,
+        progress: Callable[[str, float], None] | None = None,
+        persist: bool = False,
+    ) -> dict[str, Any]:
+        from .assembly_fit import evaluate_assembly_fit
+
+        project = self.workspace.load(project_id)
+        document = Document.from_dict(project["document"])
+        self._check_revision(document, expected_revision)
+        if type(persist) is not bool:
+            raise ValidationError("persist must be a boolean.")
+        result = evaluate_assembly_fit(
+            document, self.kernel, instance_pairs, pose_samples,
+            minimum_clearance, tolerance, progress=progress,
+        )
+        from .assemblies import flatten_assembly
+
+        bodies = {item["id"]: item["geometry"] for item in document.objects
+                  if item.get("type") == "body"}
+        leaves = {item["id"]: item for item in flatten_assembly(document.assembly, limit=256)}
+        source = {
+            "assembly": document.assembly,
+            "bodies": {leaves[key]["body_id"]: bodies[leaves[key]["body_id"]]
+                       for pair in result["instance_pairs"] for key in pair},
+            "instance_pairs": result["instance_pairs"],
+            "pose_samples": pose_samples,
+        }
+        result["geometry_sha256"] = geometry_sha256(source)
+        return self._maybe_persist_validation(project_id, "assembly_fit", result, persist)
+
     def list_validation_records(self, project_id: str, *, limit: int = 50) -> dict[str, Any]:
         return {"records": self.workspace.list_validation_records(project_id, limit=limit)}
 

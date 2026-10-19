@@ -114,6 +114,13 @@ class GeometryKernel(Protocol):
         progress: Callable[[str, float], None] | None = None,
     ) -> dict[str, Any]: ...
 
+    def minimum_distance_placed(
+        self, first: GeometryDescriptor, second: GeometryDescriptor, *,
+        first_translation: list[float], first_rotation: list[float],
+        second_translation: list[float], second_rotation: list[float],
+        progress: Callable[[str, float], None] | None = None,
+    ) -> dict[str, Any]: ...
+
     def compare_preserved_volume(
         self, reference: GeometryDescriptor, candidate: GeometryDescriptor,
     ) -> dict[str, Any]: ...
@@ -711,6 +718,47 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
         first_brep, _ = native.export_geometry(first)
         second_brep, _ = native.export_geometry(second)
         return native.minimum_brep_distance(first_brep, second_brep, progress=progress)
+
+    def minimum_distance_placed(
+        self, first: GeometryDescriptor, second: GeometryDescriptor, *,
+        first_translation: list[float], first_rotation: list[float],
+        second_translation: list[float], second_rotation: list[float],
+        progress: Callable[[str, float], None] | None = None,
+    ) -> dict[str, Any]:
+        """Measure transient rigid placements using existing native B-rep transformations."""
+        from .assemblies import validate_transform
+
+        native = NativeKernel()
+
+        def placed(geometry: GeometryDescriptor, translation: list[float],
+                   quaternion: list[float]) -> GeometryDescriptor:
+            validate_transform(translation, quaternion)
+            normalized = self.normalize_geometry(geometry)
+            if translation == [0, 0, 0] and quaternion in (
+                    [1, 0, 0, 0], [-1, 0, 0, 0]):
+                return normalized
+            brep, metrics = native.export_geometry(normalized)
+            descriptor = {
+                "kernel": self.kernel_id, "kind": "imported_brep",
+                "data": base64.b64encode(zlib.compress(brep)).decode("ascii"),
+                "volume": metrics["volume"], "brep_valid": True,
+            }
+            w, x, y, z = (float(value) for value in quaternion)
+            if w < 0:
+                w, x, y, z = -w, -x, -y, -z
+            vector_length = math.sqrt(x * x + y * y + z * z)
+            axis = ([x / vector_length, y / vector_length, z / vector_length]
+                    if vector_length > 1e-12 else [0.0, 0.0, 1.0])
+            angle = 2.0 * math.atan2(vector_length, w)
+            return self.modify_imported_brep(
+                descriptor, operation="rigid_transform",
+                parameters=[*axis, angle, *translation],
+            )
+
+        return self.minimum_distance(
+            placed(first, first_translation, first_rotation),
+            placed(second, second_translation, second_rotation), progress=progress,
+        )
 
     def compare_preserved_volume(
         self, reference: GeometryDescriptor, candidate: GeometryDescriptor,

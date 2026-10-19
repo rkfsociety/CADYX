@@ -100,6 +100,55 @@ VALIDATION_OPERATIONS: dict[str, dict[str, Any]] = {
         "field_error": "Clearance validation requires both body ids, expected_revision, "
         "minimum_clearance, and tolerance.",
     },
+    "assembly_fit": {
+        "tool_name": "cadyx_validate_assembly_fit",
+        "description": "Read-only revision-bound OCCT interference, contact and clearance checks "
+        "for assembly leaf-instance pairs over the saved and up to 16 explicit joint poses. "
+        "Returns volume, witness points, per-sample results and discrete-only coverage.",
+        "method": "POST",
+        "path": "/api/v1/agent/projects/{id}/validations/assembly-fit",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "expected_revision": {"type": "integer", "minimum": 0},
+                "minimum_clearance": {"type": "number", "minimum": 0},
+                "tolerance": {"type": "number", "minimum": 0},
+                "instance_pairs": {
+                    "type": "array", "minItems": 1, "maxItems": 32,
+                    "items": {"type": "array", "minItems": 2, "maxItems": 2,
+                              "items": {"type": "string", "minLength": 1}},
+                },
+                "pose_samples": {
+                    "type": "array", "maxItems": 16,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "joint_values": {
+                                "type": "array", "minItems": 1, "maxItems": 16,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "mate_id": {"type": "string", "minLength": 1},
+                                        "angle_deg": {"type": "number"},
+                                        "offset_mm": {"type": "number"},
+                                    },
+                                    "required": ["mate_id"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": ["joint_values"], "additionalProperties": False,
+                    },
+                },
+                "persist": {"type": "boolean"},
+            },
+            "required": ["expected_revision", "minimum_clearance", "tolerance"],
+            "additionalProperties": False,
+        },
+        "defaults": {"persist": False},
+        "field_error": "Assembly fit requires expected_revision, minimum_clearance, and tolerance; "
+        "optional instance_pairs identifies leaf paths and pose_samples overrides joint coordinates.",
+    },
     "preservation": {
         "tool_name": "cadyx_validate_body_preservation",
         "description": "Compare a reference and candidate solid using OCCT common volume; "
