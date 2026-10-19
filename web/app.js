@@ -87,12 +87,12 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
 .project-group-heading span{color:var(--dim);font:11px var(--ui-font)}
 .project-group-cards{grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));gap:16px}
 .workspace-project-card{position:relative;grid-template-rows:208px auto auto auto;gap:13px;min-width:0;padding:13px;border:1px solid #26343e;border-radius:12px;background:linear-gradient(145deg,#121c23,#0f171d);box-shadow:0 8px 24px #0002;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}
-#projects-panel[data-layout="grid"] .workspace-project-card{aspect-ratio:auto;grid-template-rows:208px auto auto auto;min-height:0;max-width:none;justify-self:stretch}
+#projects-panel[data-layout="grid"] .workspace-project-card{aspect-ratio:1;grid-template-rows:minmax(0,1fr) auto auto auto;min-height:0;max-width:none;justify-self:stretch}
 #projects-panel[data-layout="grid"] .workspace-project-thumbnail{height:auto;min-height:0;overflow:hidden}
 .workspace-project-card:hover{border-color:#596b74;box-shadow:0 14px 32px #0004;transform:translateY(-1px)}
 .workspace-project-card[data-active="true"]{border-color:#a85e32;background:linear-gradient(145deg,#201912,#12171b);box-shadow:0 0 0 1px #ff742718,0 10px 28px #0004}
 .workspace-project-thumbnail{position:relative;min-height:0;height:208px;border:1px solid #26343d;border-radius:9px;background-color:#0a1217;background-image:linear-gradient(#26323838 1px,transparent 1px),linear-gradient(90deg,#26323838 1px,transparent 1px),radial-gradient(ellipse at 50% 78%,#1c39302b,transparent 58%);background-size:20px 20px,20px 20px,auto}
-.workspace-project-thumbnail img{width:100%;height:100%;object-fit:contain}
+.workspace-project-thumbnail img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
 .workspace-project-thumbnail.unavailable::after{color:#aab5bb;content:"Предпросмотр недоступен";font:12px var(--ui-font);letter-spacing:0}
 .workspace-project-state{position:absolute;top:10px;right:10px;align-self:auto;padding:6px 10px;border:1px solid #34444d;border-radius:8px;background:#101a20eF;color:#e2e9ec;font:600 11px var(--ui-font);letter-spacing:0;box-shadow:0 4px 12px #0004}
 .workspace-project-state::before{display:inline-block;width:8px;height:8px;margin-right:7px;border-radius:50%;background:#64df83;box-shadow:0 0 8px #64df8355;content:""}
