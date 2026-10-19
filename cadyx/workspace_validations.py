@@ -18,6 +18,7 @@ _SUPPORTED_VALIDATION_KINDS = {
     "body_preservation",
     "body_thickness",
     "planetary_kinematics",
+    "project_check",
 }
 
 

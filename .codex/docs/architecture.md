@@ -156,15 +156,21 @@ revision-bound by each file's SHA-256, limited to 12 files, 256 KiB per file,
 dependencies or modify runtime/native binaries, project data, or configuration.
 
 Candidate files and selected tests are copied into a disposable tree. Windows
-`Experimental_CreateProcessInSandbox` runs the isolated Python interpreter in an
-AppContainer with no network capabilities, read-only candidate/runtime mounts,
-one explicitly writable scratch mount, no inherited handles, a one-process
-Job Object, a 180-second wall timeout, and a 2 GiB process-memory limit. The
-environment is allow-listed to standard Windows runtime variables. If the
-AppContainer API or a policy cannot be applied, the operation fails closed and
-does not execute the candidate. The current Windows host smoke/regression test
-verified scratch writes work while a host sentinel cannot be read or changed and
-outbound networking fails.
+`CreateProcessW` with `PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES` runs the
+isolated Python interpreter in a uniquely named AppContainer with no network
+capabilities. CADYX grants that package SID read-only ACLs on candidate/runtime
+directories and uses its AppContainer profile `Temp` directory as the sole
+writeable location, then removes the temporary ACL grants and profile after the
+process exits. The process inherits only a write-only diagnostics file handle
+through an explicit handle list, has a one-process Job Object, a 180-second
+wall timeout, and a 2 GiB process-memory limit. The environment is allow-listed
+to standard Windows runtime variables. Python temporary directories use
+inherited AppContainer profile ACLs so nested test scratch remains writable
+without granting access to candidate files. If AppContainer creation,
+ACL setup, process limits, or cleanup fails, the operation fails closed and
+reports `SOURCE_SANDBOX_UNAVAILABLE`; it never runs the candidate normally.
+The Windows security regression verifies scratch writes work while a host
+sentinel cannot be read or changed and outbound networking fails.
 
 Only after at least one selected test runs successfully with no failures or
 errors does CADYX write a durable checkpoint in `.cadyx-source-extensions.sqlite3`

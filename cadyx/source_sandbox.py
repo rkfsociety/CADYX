@@ -1,8 +1,8 @@
 """Windows AppContainer runner for untrusted CADYX source-change tests.
 
-The sandbox runner is fail-closed: it never falls back to a normal subprocess.
-It requires the experimental Windows processmodel API, read-only source/runtime
-mounts, a single writable scratch directory, and a bounded Windows Job Object.
+The runner uses the documented CreateProcessW security-capabilities interface,
+with a unique AppContainer SID, explicit file ACLs, no capabilities, and a
+bounded Job Object. It never falls back to an ordinary process.
 """
 from __future__ import annotations
 
@@ -10,69 +10,19 @@ import ctypes
 import json
 import os
 import shutil
-import struct
 import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 from uuid import uuid4
 
-from .errors import ValidationError
+from .errors import CadyxError, ValidationError
 
 
-class SourceSandboxUnavailable(RuntimeError):
+class SourceSandboxUnavailable(CadyxError):
     """The current host cannot provide the required Windows sandbox."""
 
-
-def build_sandbox_spec(read_write: Sequence[str], read_only: Sequence[str]) -> bytes:
-    """Build the minimal version-0.1.0 SandboxSpec FlatBuffer used by processmodel."""
-    if not read_write or not read_only or any(not Path(path).is_absolute() for path in (*read_write, *read_only)):
-        raise ValidationError("AppContainer source tests need absolute read/write and read-only directory lists.")
-    buffer = bytearray(struct.pack("<I4s", 36, b"SBOX"))
-    field_offsets = (4, 8, 0, 9, 0, 10, 0, 12, 16, 0, 0, 0)
-    buffer.extend(struct.pack("<HH12H", 26, 20, *field_offsets))
-    if len(buffer) != 36:
-        raise RuntimeError("SandboxSpec vtable layout is invalid.")
-    table_start = len(buffer)
-    buffer.extend(struct.pack("<i", table_start - 8))
-    buffer.extend(b"\0" * 16)
-
-    def align4() -> None:
-        buffer.extend(b"\0" * ((-len(buffer)) % 4))
-
-    def add_string(value: str) -> int:
-        encoded = value.encode("utf-8")
-        align4()
-        start = len(buffer)
-        buffer.extend(struct.pack("<I", len(encoded)))
-        buffer.extend(encoded)
-        buffer.append(0)
-        return start
-
-    def add_string_vector(values: Sequence[str]) -> int:
-        align4()
-        start = len(buffer)
-        buffer.extend(struct.pack("<I", len(values)))
-        element_positions = []
-        for _ in values:
-            element_positions.append(len(buffer))
-            buffer.extend(b"\0" * 4)
-        for value, element_position in zip(values, element_positions, strict=True):
-            target = add_string(value)
-            struct.pack_into("<I", buffer, element_position, target - element_position)
-        return start
-
-    version = add_string("0.1.0")
-    rw = add_string_vector(read_write)
-    ro = add_string_vector(read_only)
-    struct.pack_into("<I", buffer, table_start + 4, version - (table_start + 4))
-    buffer[table_start + 8] = 1  # app_container
-    # ctypes loads Windows DLLs whose initialization requires Win32k compatibility.
-    # AppContainer capabilities, filesystem mounts and the Job Object remain enforced.
-    buffer[table_start + 9] = 0
-    buffer[table_start + 10] = 1  # least_privilege
-    struct.pack_into("<I", buffer, table_start + 12, rw - (table_start + 12))
-    struct.pack_into("<I", buffer, table_start + 16, ro - (table_start + 16))
-    return bytes(buffer)
+    code = "SOURCE_SANDBOX_UNAVAILABLE"
+    http_status = 503
 
 
 def run_appcontainer_process(
@@ -80,9 +30,9 @@ def run_appcontainer_process(
     arguments: Sequence[str],
     *,
     current_directory: Path,
-    read_write: Sequence[Path],
     read_only: Sequence[Path],
     environment: dict[str, str],
+    result_files: Sequence[str] = (),
     timeout_seconds: float = 120.0,
     memory_limit_bytes: int = 2_000_000_000,
 ) -> dict[str, Any]:
@@ -93,17 +43,9 @@ def run_appcontainer_process(
         raise SourceSandboxUnavailable("The isolated test interpreter or scratch directory is unavailable.")
     if timeout_seconds <= 0 or memory_limit_bytes < 64 * 1024 * 1024:
         raise ValidationError("Source-test process limits are invalid.")
-    paths_rw = [str(path.resolve()) for path in read_write]
     paths_ro = [str(path.resolve()) for path in read_only]
-    specification = build_sandbox_spec(paths_rw, paths_ro)
-    try:
-        processmodel = ctypes.WinDLL("processmodel.dll", use_last_error=True)
-        create_sandbox = processmodel.Experimental_CreateProcessInSandbox
-    except (OSError, AttributeError) as exc:
-        raise SourceSandboxUnavailable(
-            "Windows processmodel.dll does not expose Experimental_CreateProcessInSandbox; no fallback is permitted."
-        ) from exc
-
+    if any(Path(name).is_absolute() or ".." in Path(name).parts for name in result_files):
+        raise ValidationError("AppContainer result file names must stay inside its temporary directory.")
     class StartupInfo(ctypes.Structure):
         _fields_ = [
             ("cb", ctypes.c_uint32), ("lpReserved", ctypes.c_wchar_p),
@@ -120,6 +62,17 @@ def run_appcontainer_process(
     class ProcessInformation(ctypes.Structure):
         _fields_ = [("hProcess", ctypes.c_void_p), ("hThread", ctypes.c_void_p),
                     ("dwProcessId", ctypes.c_uint32), ("dwThreadId", ctypes.c_uint32)]
+
+    class StartupInfoEx(ctypes.Structure):
+        _fields_ = [("StartupInfo", StartupInfo), ("lpAttributeList", ctypes.c_void_p)]
+
+    class SecurityCapabilities(ctypes.Structure):
+        _fields_ = [("AppContainerSid", ctypes.c_void_p), ("Capabilities", ctypes.c_void_p),
+                    ("CapabilityCount", ctypes.c_uint32), ("Reserved", ctypes.c_uint32)]
+
+    class SecurityAttributes(ctypes.Structure):
+        _fields_ = [("nLength", ctypes.c_uint32), ("lpSecurityDescriptor", ctypes.c_void_p),
+                    ("bInheritHandle", ctypes.c_int)]
 
     class BasicLimitInformation(ctypes.Structure):
         _fields_ = [
@@ -161,6 +114,10 @@ def run_appcontainer_process(
     kernel32.TerminateJobObject.restype = ctypes.c_int
     kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
     kernel32.CloseHandle.restype = ctypes.c_int
+    kernel32.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
+                                     ctypes.POINTER(SecurityAttributes), ctypes.c_uint32,
+                                     ctypes.c_uint32, ctypes.c_void_p]
+    kernel32.CreateFileW.restype = ctypes.c_void_p
 
     safe_names = {
         "ALLUSERSPROFILE", "APPDATA", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)",
@@ -181,35 +138,148 @@ def run_appcontainer_process(
     command_line = ctypes.create_unicode_buffer(
         subprocess.list2cmdline([str(application), *arguments]),
     )
-    startup = StartupInfo()
-    startup.cb = ctypes.sizeof(StartupInfo)
+    startup = StartupInfoEx()
+    startup.StartupInfo.cb = ctypes.sizeof(StartupInfoEx)
     process = ProcessInformation()
-    spec_buffer = ctypes.create_string_buffer(specification)
-    create_sandbox.argtypes = [
-        ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.c_int, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_wchar_p,
-        ctypes.POINTER(StartupInfo), ctypes.c_wchar_p, ctypes.c_void_p,
-        ctypes.c_uint32, ctypes.POINTER(ProcessInformation),
-    ]
-    create_sandbox.restype = ctypes.c_int
-    flags = 0x08000000 | 0x00000004 | 0x00000400  # NO_WINDOW | SUSPENDED | UNICODE_ENVIRONMENT
-    identity = "CadyxSource_" + uuid4().hex
-    if not create_sandbox(
-        str(application), command_line, None, None, 0, flags,
-        ctypes.cast(environment_buffer, ctypes.c_void_p), str(current_directory),
-        ctypes.byref(startup), identity, ctypes.cast(spec_buffer, ctypes.c_void_p),
-        len(specification), ctypes.byref(process),
-    ):
-        error = ctypes.get_last_error()
-        raise SourceSandboxUnavailable(f"Windows refused to create the AppContainer test process (error {error}).")
+    userenv = ctypes.WinDLL("userenv", use_last_error=True)
+    profile_name = "CadyxSource_" + uuid4().hex
+    package_sid = ctypes.c_void_p()
+    create_profile = userenv.CreateAppContainerProfile
+    create_profile.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
+                               ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p)]
+    create_profile.restype = ctypes.c_long
+    result = create_profile(profile_name, "CADYX source tests", "Temporary isolated source tests",
+                            None, 0, ctypes.byref(package_sid))
+    if result < 0 or not package_sid:
+        raise SourceSandboxUnavailable(f"Windows could not create the source-test AppContainer profile (HRESULT 0x{result & 0xFFFFFFFF:08X}).")
 
-    job = kernel32.CreateJobObjectW(None, None)
-    if not job:
-        kernel32.TerminateProcess(process.hProcess, 1)
-        kernel32.CloseHandle(process.hThread)
-        kernel32.CloseHandle(process.hProcess)
-        raise SourceSandboxUnavailable("Could not create the bounded source-test Job Object.")
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    advapi32.ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
+    advapi32.ConvertSidToStringSidW.restype = ctypes.c_int
+    advapi32.FreeSid.argtypes = [ctypes.c_void_p]
+    advapi32.FreeSid.restype = ctypes.c_void_p
+    sid_text = ctypes.c_wchar_p()
+    if not advapi32.ConvertSidToStringSidW(package_sid, ctypes.byref(sid_text)):
+        userenv.DeleteAppContainerProfile.argtypes = [ctypes.c_wchar_p]
+        userenv.DeleteAppContainerProfile.restype = ctypes.c_long
+        userenv.DeleteAppContainerProfile(profile_name)
+        advapi32.FreeSid(package_sid)
+        raise SourceSandboxUnavailable(f"Windows could not format the source-test AppContainer SID (error {ctypes.get_last_error()}).")
+    sid = sid_text.value
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
+    kernel32.LocalFree(ctypes.cast(sid_text, ctypes.c_void_p))
+
+    get_profile_folder = userenv.GetAppContainerFolderPath
+    get_profile_folder.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_wchar_p)]
+    get_profile_folder.restype = ctypes.c_long
+    profile_folder = ctypes.c_wchar_p()
+    result = get_profile_folder(sid, ctypes.byref(profile_folder))
+    if result < 0 or not profile_folder:
+        userenv.DeleteAppContainerProfile.argtypes = [ctypes.c_wchar_p]
+        userenv.DeleteAppContainerProfile.restype = ctypes.c_long
+        userenv.DeleteAppContainerProfile(profile_name)
+        ctypes.WinDLL("advapi32", use_last_error=True).FreeSid(package_sid)
+        raise SourceSandboxUnavailable(f"Windows could not locate the AppContainer scratch profile (HRESULT 0x{result & 0xFFFFFFFF:08X}).")
+    container_data = Path(profile_folder.value)
+    ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    ole32.CoTaskMemFree.restype = None
+    ole32.CoTaskMemFree(ctypes.cast(profile_folder, ctypes.c_void_p))
     try:
+        container_temp = container_data / "Temp"
+        container_temp.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        userenv.DeleteAppContainerProfile.argtypes = [ctypes.c_wchar_p]
+        userenv.DeleteAppContainerProfile.restype = ctypes.c_long
+        userenv.DeleteAppContainerProfile(profile_name)
+        ctypes.WinDLL("advapi32", use_last_error=True).FreeSid(package_sid)
+        raise SourceSandboxUnavailable(f"Windows could not prepare the AppContainer scratch directory: {exc}") from exc
+    # Pass the caller's host TEMP/LOCALAPPDATA values. Windows redirects these
+    # to this profile when it creates the AppContainer token; passing the
+    # already redirected path here would apply that redirection twice.
+
+    icacls = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "icacls.exe"
+    acl_paths: list[Path] = []
+    attribute_list = None
+    job = None
+    diagnostic_handle = None
+    delete_profile = userenv.DeleteAppContainerProfile
+    delete_profile.argtypes = [ctypes.c_wchar_p]
+    delete_profile.restype = ctypes.c_long
+
+    def acl(*args: str) -> None:
+        completed = subprocess.run([str(icacls), *args], capture_output=True, text=True,
+                                   creationflags=0x08000000)
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip()[-500:]
+            raise SourceSandboxUnavailable(f"Windows could not apply source-test AppContainer ACLs (exit {completed.returncode}): {detail}")
+
+    try:
+        for path in dict.fromkeys(Path(item) for item in paths_ro):
+            acl_paths.append(path)
+            acl(str(path), "/grant", f"*{sid}:(OI)(CI)(RX)", "/T", "/C", "/Q")
+        acl_paths.append(container_data)
+        acl(str(container_data), "/grant", f"*{sid}:(OI)(CI)(RX)", "/T", "/C", "/Q")
+        acl_paths.append(container_temp)
+        acl(str(container_temp), "/grant", f"*{sid}:(OI)(CI)(F)", "/T", "/C", "/Q")
+        acl(str(container_temp), "/grant", "*S-1-3-0:(OI)(CI)(IO)(F)", "/T", "/C", "/Q")
+        acl(str(container_temp), "/setintegritylevel", "(OI)(CI)L", "/T", "/C", "/Q")
+
+        diagnostics_path = container_temp / "process-output.log"
+        security_attributes = SecurityAttributes(ctypes.sizeof(SecurityAttributes), None, 1)
+        diagnostic_handle = kernel32.CreateFileW(
+            str(diagnostics_path), 0x40000000, 0x00000001, ctypes.byref(security_attributes),
+            2, 0x00000100, None,
+        )
+        if diagnostic_handle in (None, ctypes.c_void_p(-1).value):
+            raise SourceSandboxUnavailable(f"Windows could not open the bounded AppContainer diagnostic channel (error {ctypes.get_last_error()}).")
+        kernel32.InitializeProcThreadAttributeList.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
+                                                               ctypes.c_uint32, ctypes.POINTER(ctypes.c_size_t)]
+        kernel32.InitializeProcThreadAttributeList.restype = ctypes.c_int
+        kernel32.UpdateProcThreadAttribute.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_size_t,
+                                                       ctypes.c_void_p, ctypes.c_size_t,
+                                                       ctypes.c_void_p, ctypes.c_void_p]
+        kernel32.UpdateProcThreadAttribute.restype = ctypes.c_int
+        kernel32.DeleteProcThreadAttributeList.argtypes = [ctypes.c_void_p]
+        attribute_size = ctypes.c_size_t()
+        kernel32.InitializeProcThreadAttributeList(None, 2, 0, ctypes.byref(attribute_size))
+        attribute_list = ctypes.create_string_buffer(attribute_size.value)
+        if not kernel32.InitializeProcThreadAttributeList(attribute_list, 2, 0, ctypes.byref(attribute_size)):
+            raise SourceSandboxUnavailable(f"Windows could not initialize AppContainer process attributes (error {ctypes.get_last_error()}).")
+        startup.lpAttributeList = ctypes.cast(attribute_list, ctypes.c_void_p)
+        capabilities = SecurityCapabilities(package_sid, None, 0, 0)
+        if not kernel32.UpdateProcThreadAttribute(
+            startup.lpAttributeList, 0, 0x00020009, ctypes.byref(capabilities),
+            ctypes.sizeof(capabilities), None, None,
+        ):
+            raise SourceSandboxUnavailable(f"Windows could not attach AppContainer security capabilities (error {ctypes.get_last_error()}).")
+        handle_list = (ctypes.c_void_p * 1)(diagnostic_handle)
+        if not kernel32.UpdateProcThreadAttribute(
+            startup.lpAttributeList, 0, 0x00020002, ctypes.cast(handle_list, ctypes.c_void_p),
+            ctypes.sizeof(handle_list), None, None,
+        ):
+            raise SourceSandboxUnavailable(f"Windows could not restrict inherited diagnostic handles (error {ctypes.get_last_error()}).")
+        startup.StartupInfo.dwFlags |= 0x00000100  # STARTF_USESTDHANDLES
+        startup.StartupInfo.hStdInput = None
+        startup.StartupInfo.hStdOutput = diagnostic_handle
+        startup.StartupInfo.hStdError = diagnostic_handle
+        kernel32.CreateProcessW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_void_p,
+                                            ctypes.c_void_p, ctypes.c_int, ctypes.c_uint32,
+                                            ctypes.c_void_p, ctypes.c_wchar_p,
+                                            ctypes.POINTER(StartupInfoEx), ctypes.POINTER(ProcessInformation)]
+        kernel32.CreateProcessW.restype = ctypes.c_int
+        flags = 0x08000000 | 0x00000004 | 0x00000400 | 0x00080000
+        if not kernel32.CreateProcessW(
+            str(application), command_line, None, None, 1, flags,
+            ctypes.cast(environment_buffer, ctypes.c_void_p), str(current_directory),
+            ctypes.byref(startup), ctypes.byref(process),
+        ):
+            raise SourceSandboxUnavailable(f"Windows refused to create the AppContainer test process (error {ctypes.get_last_error()}).")
+
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            raise SourceSandboxUnavailable("Could not create the bounded source-test Job Object.")
         limits = ExtendedLimitInformation()
         limits.BasicLimitInformation.PerProcessUserTimeLimit = int(timeout_seconds * 10_000_000)
         limits.BasicLimitInformation.LimitFlags = 0x00000002 | 0x00000008 | 0x00000100 | 0x00002000
@@ -233,16 +303,50 @@ def run_appcontainer_process(
         exit_code = ctypes.c_uint32()
         if not kernel32.GetExitCodeProcess(process.hProcess, ctypes.byref(exit_code)):
             raise SourceSandboxUnavailable("Could not read the AppContainer test process exit code.")
+        collected_files = {}
+        for name in result_files:
+            candidate = container_temp.joinpath(*Path(name).parts)
+            try:
+                resolved = candidate.resolve(strict=True)
+            except OSError:
+                continue
+            attributes = kernel32.GetFileAttributesW(str(candidate))
+            if (resolved.parent != container_temp.resolve() or attributes == 0xFFFFFFFF
+                    or attributes & 0x400):  # FILE_ATTRIBUTE_REPARSE_POINT
+                raise SourceSandboxUnavailable("An AppContainer test result was not a regular file inside its scratch directory.")
+            collected_files[name] = resolved.read_text(encoding="utf-8", errors="replace")
+        diagnostics = diagnostics_path.read_text(encoding="utf-8", errors="replace")[-12000:]
         return {"exit_code": int(exit_code.value), "timed_out": timed_out,
-                "process_id": int(process.dwProcessId), "identity": identity}
+                "process_id": int(process.dwProcessId), "identity": profile_name,
+                "files": collected_files, "diagnostics": diagnostics}
     finally:
-        kernel32.TerminateJobObject(job, 0)
-        kernel32.CloseHandle(job)
-        kernel32.CloseHandle(process.hThread)
-        kernel32.CloseHandle(process.hProcess)
+        if process.hProcess:
+            kernel32.TerminateProcess(process.hProcess, 1)
+        if job:
+            kernel32.TerminateJobObject(job, 0)
+            kernel32.CloseHandle(job)
+        if process.hThread:
+            kernel32.CloseHandle(process.hThread)
+        if process.hProcess:
+            kernel32.CloseHandle(process.hProcess)
+        if attribute_list is not None:
+            kernel32.DeleteProcThreadAttributeList(attribute_list)
+        if diagnostic_handle:
+            kernel32.CloseHandle(diagnostic_handle)
+        cleanup_errors = []
+        for path in reversed(acl_paths):
+            completed = subprocess.run([str(icacls), str(path), "/remove:g", f"*{sid}", "/T", "/C", "/Q"],
+                                       capture_output=True, text=True, creationflags=0x08000000)
+            if completed.returncode != 0:
+                cleanup_errors.append((completed.stderr or completed.stdout).strip()[-300:])
+        delete_result = delete_profile(profile_name)
+        advapi32.FreeSid(package_sid)
+        if cleanup_errors or delete_result < 0:
+            raise SourceSandboxUnavailable("Windows could not fully remove temporary AppContainer permissions/profile; scratch data must remain isolated. "
+                                           + "; ".join(cleanup_errors[-2:]))
 
 
-def build_scratch_runtime(source_root: Path, writable_root: Path, runtime_root: Path) -> tuple[Path, list[Path]]:
+def build_scratch_runtime(source_root: Path, runtime_root: Path) -> tuple[Path, list[Path]]:
     """Prepare a private Python runtime view and return read-only mount roots."""
     manifest_path = runtime_root / "manifest.json"
     if not manifest_path.is_file():
@@ -285,5 +389,4 @@ def build_scratch_runtime(source_root: Path, writable_root: Path, runtime_root: 
     for path in read_only:
         if not path.exists():
             raise SourceSandboxUnavailable(f"Required AppContainer read-only runtime path is missing: {path}.")
-    writable_root.mkdir(parents=True, exist_ok=True)
     return scratch_python / "python.exe", list(dict.fromkeys(read_only))

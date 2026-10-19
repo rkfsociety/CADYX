@@ -64,6 +64,7 @@ class CadyxCore:
             dashboard_state_path=self.workspace.root / ".cadyx-agent-dashboards.json",
             dashboard_database_path=self.workspace.root / ".cadyx-agent-dashboards.sqlite3",
         )
+        self.events.prune_agent_dashboards({project["id"] for project in self.workspace.list()})
         self._lifecycle = ProjectLifecycleService(self)
         self._command_activity = CommandActivityService(self)
         self._rendering = RenderingCacheService(self, cache_policy=cache_policy)

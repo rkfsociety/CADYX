@@ -586,6 +586,23 @@ class ParameterCommands:
                 radius=parameters["radius"],
             ) if operation == "sweep_sketch" else
                 self._profile_geometry(document, feature, parameters, progress=progress))
+        elif operation == "extrude_profile_on_plane":
+            from .agent_authoring import _agent_native, _vector, _workplane_rotation
+            profile = parameters.get("profile")
+            if not isinstance(profile, list):
+                raise ValidationError("Arbitrary-plane extrusion is missing its editable profile.")
+            depth = _number(parameters.get("depth"), "depth")
+            origin = _vector(parameters.get("origin"), "origin")
+            normal = _vector(parameters.get("normal"), "normal", nonzero=True)
+            x_axis = _vector(parameters.get("x_axis"), "x_axis", nonzero=True)
+            centered = parameters.get("centered", False)
+            if type(centered) is not bool:
+                raise ValidationError("centered must be a boolean.")
+            temporary = self.kernel.create_extruded_profile(
+                profile, plane="XY", depth=depth, centered=centered,
+            )
+            rotation_axis, angle, _, _ = _workplane_rotation(normal, x_axis)
+            geometry = _agent_native(temporary, 2, [*rotation_axis, angle, *origin])
         elif operation in {"boss", "hole", "linear_pattern_body", "circular_pattern_body"}:
             source = next((item for item in document.objects
                            if item.get("id") == feature.get("source_body_id") and item.get("type") == "body"), None)

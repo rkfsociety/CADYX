@@ -100,10 +100,15 @@ def resolve_edge_references(kernel, geometry: dict[str, Any], references: list[d
             score = distance / max(max_distance, 1e-9) + orientation_cost
             candidates.append((score, edge.get("index")))
         candidates.sort(key=lambda item: (item[0], item[1]))
-        match = next((index for _, index in candidates if index not in chosen), None)
-        if match is None:
+        available = [(score, index) for score, index in candidates if index not in chosen]
+        if not available:
             raise ValidationError("Stored edge intent no longer matches a unique edge; inspect topology again.")
-        chosen.append(match)
+        best_score = available[0][0]
+        equally_near = [index for score, index in available
+                        if math.isclose(score, best_score, rel_tol=0.0, abs_tol=1e-9)]
+        if len(equally_near) != 1:
+            raise ValidationError("Stored edge intent matches multiple equally near edges; inspect topology again.")
+        chosen.append(equally_near[0])
     return chosen
 
 

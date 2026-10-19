@@ -282,6 +282,7 @@ class ProjectLifecycleService(_CoreService):
                 self.workspace.mark_project_deleting(project_id)
             cleanup_pending = self.workspace.delete_project(project_id)
             self._invalidate_project_runtime_caches(project_id)
+            self.events.prune_agent_dashboards({project["id"] for project in self.workspace.list()})
         with self._workspace_selection_guard:
             if self._workspace_selection == {"type": "project", "project_id": project_id}:
                 self._workspace_selection = None
@@ -352,6 +353,7 @@ class ProjectLifecycleService(_CoreService):
             raise ValidationError("Workspace selection type must be project or folder.")
 
         target_project_id = selected.get("project_id") if resource_type == "project" else None
+        self.events.prune_agent_dashboards({project["id"] for project in self.workspace.list()})
         with self._workspace_selection_guard:
             current_selection = copy.deepcopy(self._workspace_selection)
             with self._selection_project_locks(current_selection, target_project_id):

@@ -8,16 +8,9 @@ from unittest.mock import patch
 
 from cadyx.errors import ValidationError
 from cadyx.source_extension import SourceExtensionEngine
-from cadyx.source_sandbox import build_sandbox_spec
 
 
 class SourceExtensionTests(unittest.TestCase):
-    def test_sandbox_spec_has_flatbuffer_identifier_and_root_offset(self) -> None:
-        spec = build_sandbox_spec([r"C:\scratch"], [r"C:\source"])
-        self.assertEqual(spec[4:8], b"SBOX")
-        self.assertEqual(int.from_bytes(spec[:4], "little"), 36)
-        self.assertEqual(int.from_bytes(spec[36:40], "little", signed=True), 28)
-
     def test_source_path_policy_rejects_escape_and_non_code(self) -> None:
         with self.assertRaises(ValidationError):
             SourceExtensionEngine._source_path("../secret.txt")
@@ -77,7 +70,7 @@ class SourceExtensionTests(unittest.TestCase):
                 self.assertFalse(failed["files_applied"])
                 self.assertEqual(module.read_text(encoding="utf-8"), "def answer():\n    return 41\n")
                 result = engine.develop(proposal)
-                self.assertEqual(result["status"], "ready")
+                self.assertEqual(result["status"], "ready", result)
                 self.assertTrue(result["tests"]["passed"])
                 self.assertEqual(module.read_text(encoding="utf-8"), "def answer():\n    return 42\n")
                 rollback = engine.rollback("test_probe_extension")

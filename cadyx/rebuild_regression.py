@@ -15,7 +15,7 @@ from .delivery import geometry_sha256
 from .errors import CadyxError
 from .models import Document
 
-_ROOTS = {"create_box", "metric_thread"}
+_ROOTS = {"create_box", "metric_thread", "extrude_profile_on_plane"}
 _SKETCH_ROOTS = {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches"}
 _DERIVED = {
     "fillet_edges", "chamfer_edges", "fuse_bodies", "cut_bodies",
@@ -55,10 +55,18 @@ def _rebuild_once(core: Any, document: Document, checkpoint: Callable[[], None])
         parameters = feature["parameters"]
         if feature["operation"] == "create_box":
             geometry = core.kernel.create_box(**parameters)
-        else:
+            body["geometry"] = geometry
+            feature["geometry"] = geometry
+        elif feature["operation"] == "metric_thread":
             geometry = core.kernel.create_metric_thread(**parameters)
-        body["geometry"] = geometry
-        feature["geometry"] = geometry
+            body["geometry"] = geometry
+            feature["geometry"] = geometry
+        else:
+            # Reuse the same authoritative Command System feature rebuild path used
+            # for parameter edits, rather than duplicating arbitrary-plane geometry.
+            core.commands._rebuild_bound_feature(
+                document, feature["id"], progress=None, rebuild_derived=False,
+            )
         roots.add(body["id"])
 
     sketch_ids = {

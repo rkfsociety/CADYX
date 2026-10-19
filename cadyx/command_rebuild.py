@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 from typing import Any, Callable
-from .errors import ValidationError
+from .errors import ConflictError, ValidationError
 from .models import Document
 from .profile_segments import sketch_segments
 from .sketches import (closed_profile, closed_profiles, closed_spline_profile,
@@ -296,7 +296,10 @@ class RebuildCommands:
             from .semantic_selection import _resolve
             try:
                 return _resolve(self.kernel, geometry, keys=feature["edge_keys"], collection="edges")
-            except ValidationError:
+            except (ConflictError, ValidationError):
+                # Semantic keys include geometric coordinates, so dimension changes
+                # can invalidate them even when the selected design edge still exists.
+                # Fall back to the stored geometric intent and require a unique match.
                 pass
         references = feature.get("edge_references")
         if references:

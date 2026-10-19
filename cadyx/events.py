@@ -392,6 +392,24 @@ class EventBroker:
         except (OSError, sqlite3.Error):
             raise
 
+    def _persist_agent_dashboard_prune(self, project_ids: list[str], revision: int) -> None:
+        path = self._dashboard_database_path
+        if path is None:
+            return
+        try:
+            with closing(self._connect_dashboard_database()) as connection, connection:
+                self._create_dashboard_schema(connection)
+                connection.executemany(
+                    "DELETE FROM dashboards WHERE project_id = ?",
+                    [(project_id,) for project_id in project_ids],
+                )
+                connection.execute(
+                    "UPDATE metadata SET value = ? WHERE key = 'agent_work_revision'",
+                    (revision,),
+                )
+        except (OSError, sqlite3.Error):
+            raise
+
     @staticmethod
     def _offer_drop_oldest(
         subscriber: queue.Queue[ProjectEvent],
@@ -557,6 +575,37 @@ class EventBroker:
                     occurred_at=dashboard.updated_at,
                 )
                 return dashboard.as_dict()
+
+    def prune_agent_dashboards(self, valid_project_ids: set[str]) -> list[str]:
+        """Remove persisted workflow reports for projects absent from the workspace."""
+        with self._dashboard_persist_lock:
+            with self._lock:
+                removed = sorted(set(self._agent_dashboards) - valid_project_ids)
+                if not removed:
+                    return []
+                dashboards = {
+                    project_id: dashboard
+                    for project_id, dashboard in self._agent_dashboards.items()
+                    if project_id in valid_project_ids
+                }
+                work_revision = self._agent_work_revision + 1
+
+            self._persist_agent_dashboard_prune(removed, work_revision)
+
+            with self._lock:
+                self._agent_dashboards = dashboards
+                self._agent_work_revision = work_revision
+                active_project_ids = self._agent_work_project_ids_locked()
+                self._emit_locked(
+                    "workspace.agent-work",
+                    None,
+                    {
+                        "active": bool(active_project_ids),
+                        "revision": work_revision,
+                        "project_ids": active_project_ids,
+                    },
+                )
+            return removed
 
     def agent_work_snapshot(self) -> dict[str, Any]:
         with self._lock:

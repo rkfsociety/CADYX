@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -121,7 +122,7 @@ class EventBrokerTests(unittest.TestCase):
                 "tasks": [{"id": "x", "title": "updated", "state": "completed"}],
             })
 
-            with sqlite3.connect(database_path) as connection:
+            with closing(sqlite3.connect(database_path)) as connection:
                 rows = dict(connection.execute(
                     "SELECT project_id, payload FROM dashboards"
                 ))
@@ -136,6 +137,37 @@ class EventBrokerTests(unittest.TestCase):
             self.assertEqual(revision, 3)
             self.assertEqual(EventBroker(dashboard_database_path=database_path)
                              .agent_work_snapshot()["revision"], 3)
+
+    def test_prune_missing_project_dashboards_persists_and_publishes_active_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database_path = Path(directory) / "dashboards.sqlite3"
+            broker = EventBroker(dashboard_database_path=database_path)
+            subscriber_id, events = broker.subscribe()
+            active = {
+                "workflow": {"title": "Работа", "progress_percent": 20,
+                             "eta_seconds": None, "phases": [
+                                 {"id": "build", "title": "Сборка", "state": "in_progress"}]},
+                "tasks": [],
+            }
+            broker.publish_agent_dashboard("missing-project", active)
+            broker.publish_agent_dashboard("live-project", active)
+            try:
+                self.assertEqual(broker.prune_agent_dashboards({"live-project"}), ["missing-project"])
+                self.assertEqual(broker.agent_work_snapshot(), {
+                    "active": True, "active_project_ids": ["live-project"], "revision": 3,
+                })
+                self.assertEqual(broker.agent_dashboard_snapshot("missing-project")["revision"], 0)
+                self.assertEqual(EventBroker(dashboard_database_path=database_path)
+                                 .agent_work_snapshot(), broker.agent_work_snapshot())
+                with closing(sqlite3.connect(database_path)) as connection:
+                    self.assertEqual(connection.execute(
+                        "SELECT project_id FROM dashboards ORDER BY project_id"
+                    ).fetchall(), [("live-project",)])
+                workspace_event = list(events.queue)[-1]
+                self.assertEqual(workspace_event.event, "workspace.agent-work")
+                self.assertEqual(workspace_event.data["project_ids"], ["live-project"])
+            finally:
+                broker.unsubscribe(subscriber_id)
 
     def test_dashboard_database_failure_does_not_publish_uncommitted_work(self):
         with tempfile.TemporaryDirectory() as directory:

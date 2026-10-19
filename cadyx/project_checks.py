@@ -1,6 +1,8 @@
 """Revision-bound, caller-invoked CAD project preflight composed from existing checks."""
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import time
 from collections.abc import Callable
@@ -180,8 +182,17 @@ def check_project(
         for status in ("pass", "fail", "untested")
     }
     status = "fail" if counts["fail"] else "untested" if counts["untested"] else "pass"
+    geometry_manifest = [
+        {"body_id": body["id"], "geometry_sha256": geometry_sha256(body["geometry"])}
+        for body in sorted(bodies, key=lambda item: item["id"])
+        if isinstance(body.get("geometry"), dict)
+    ]
+    project_geometry_sha256 = hashlib.sha256(json.dumps(
+        geometry_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8")).hexdigest()
     return {
         "schema_version": 1, "project_id": project_id, "revision": revision,
+        "geometry_sha256": project_geometry_sha256,
         "status": status, "strict": strict,
         "passed": not counts["fail"] and (not strict or not counts["untested"]),
         "counts": counts, "stages": stages,

@@ -42,7 +42,10 @@ stage has `id`, `status` (`pass`, `fail` or `untested`),
   A "cold" check means a freshly loaded, isolated document copy **within
   the current host process**, not a new OS process or a fresh OCCT DLL.
   It checks a saved revision only, not arbitrary changed inputs across revisions.
-  Native work is cooperatively budgeted at stage boundaries, not preemptible.
+  Arbitrary-plane profile extrusions are rebuilt through the same Command
+  System feature rebuild used by parameter edits, preserving their saved profile,
+  plane origin, normal, local X axis and depth. Native work is cooperatively
+  budgeted at stage boundaries, not preemptible.
 - `assembly`, `drawings`: unsupported and `untested`, required only if
   explicitly requested. No fabricated evidence for unavailable backends.
 
@@ -50,7 +53,9 @@ Only **required** stages determine overall `status`: fail takes precedence,
 then untested, otherwise pass. `strict` additionally makes `passed=false`
 for required untested stages while retaining their actual `untested` status.
 Saving an optional sidecar record with `persist=true` does not change the
-CAD document revision. A concurrent save triggers `REVISION_CONFLICT`.
+CAD document revision. A project-check record stores the aggregate SHA-256 of
+its saved body geometries in stable body-ID order. A concurrent save triggers
+`REVISION_CONFLICT`.
 
 ## CI invocation
 

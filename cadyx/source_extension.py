@@ -223,14 +223,21 @@ class SourceExtensionEngine:
                 target = source_root.joinpath(*PurePosixPath(change["path"]).parts)
                 target.write_text(change["after"], encoding="utf-8", newline="")
             runner = source_root / "_cadyx_source_test_runner.py"
-            output = work_root / "result.json"
-            log = work_root / "test-output.txt"
             runner.write_text(
                 "import json, sys, unittest, tempfile\n"
-                f"tempfile.tempdir = {str(work_root)!r}\n"
+                "from pathlib import Path\n"
+                "def _appcontainer_mkdtemp(suffix=None, prefix=None, dir=None):\n"
+                "    prefix, suffix, directory, output_type = tempfile._sanitize_params(prefix, suffix, dir)\n"
+                "    for _ in range(tempfile.TMP_MAX):\n"
+                "        path = tempfile._os.path.join(tempfile._get_default_tempdir() if directory is None else directory, prefix + next(tempfile._get_candidate_names()) + suffix)\n"
+                "        try: tempfile._os.mkdir(path)\n"
+                "        except FileExistsError: continue\n"
+                "        return output_type(path)\n"
+                "    raise FileExistsError('No unique AppContainer temporary directory could be created')\n"
+                "tempfile.mkdtemp = _appcontainer_mkdtemp\n"
                 f"NAMES = {tests!r}\n"
-                f"OUT = {str(output)!r}\n"
-                f"LOG = {str(log)!r}\n"
+                "OUT = str(Path(tempfile.gettempdir()) / 'result.json')\n"
+                "LOG = str(Path(tempfile.gettempdir()) / 'test-output.txt')\n"
                 "with open(LOG, 'w', encoding='utf-8') as stream:\n"
                 "    suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromName(name) for name in NAMES)\n"
                 "    result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)\n"
@@ -243,7 +250,8 @@ class SourceExtensionEngine:
             native_bridge = None
             if any(change["path"].startswith("native/") for change in files):
                 native_bridge = build_candidate(source_root, work_root, self.runtime_root)
-            python, read_only = build_scratch_runtime(source_root, work_root, self.runtime_root)
+            python, read_only = build_scratch_runtime(source_root, self.runtime_root)
+            read_only.append(work_root)
             if native_bridge is not None:
                 runtime_manifest = source_root / ".runtime" / "manifest.json"
                 candidate_manifest = json.loads(runtime_manifest.read_text(encoding="utf-8"))
@@ -252,24 +260,25 @@ class SourceExtensionEngine:
                 read_only.append(native_bridge.parent)
                 native_digest = self._digest(native_bridge.read_bytes())
             allowed_env = {key: value for key, value in os.environ.items() if key.upper() in _ALLOWED_ENV}
-            allowed_env.update({"PATH": str(python.parent), "TEMP": str(work_root), "TMP": str(work_root)})
+            allowed_env.update({"PATH": str(python.parent)})
             launch = run_appcontainer_process(
                 python, ["-I", "-B", str(runner)], current_directory=source_root,
-                read_write=[work_root], read_only=read_only, environment=allowed_env,
+                read_only=read_only, environment=allowed_env,
+                result_files=["result.json", "test-output.txt"],
                 timeout_seconds=180, memory_limit_bytes=2_000_000_000,
             )
             if launch["timed_out"]:
                 report = {"tests_run": 0, "failures": 0, "errors": 1, "skipped": 0,
                           "output": "AppContainer test execution timed out."}
-            elif output.is_file():
-                report = json.loads(output.read_text(encoding="utf-8"))
-                if log.is_file():
-                    report["output"] = log.read_text(encoding="utf-8", errors="replace")[-12000:]
+            elif "result.json" in launch["files"]:
+                report = json.loads(launch["files"]["result.json"])
+                if "test-output.txt" in launch["files"]:
+                    report["output"] = launch["files"]["test-output.txt"][-12000:]
                 report["exit_code"] = launch["exit_code"]
             else:
                 report = {"tests_run": 0, "failures": 0, "errors": 1, "skipped": 0,
                           "exit_code": launch["exit_code"],
-                          "output": "Sandbox test runner exited without a result file."}
+                          "output": launch.get("diagnostics") or "Sandbox test runner exited without a result file."}
             report["passed"] = launch["exit_code"] == 0 and report.get("tests_run", 0) > 0 and not report.get("failures") and not report.get("errors")
             if report["passed"] and native_bridge is not None:
                 if self._digest(native_bridge.read_bytes()) != native_digest:

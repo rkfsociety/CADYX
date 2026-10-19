@@ -667,6 +667,48 @@ class WebApiTests(unittest.TestCase):
         finally:
             self.core.events.unsubscribe(subscriber_id)
 
+    def test_agent_selection_prunes_active_dashboards_for_deleted_projects(self) -> None:
+        _, target = self.request(
+            "/api/v1/agent/projects",
+            {"name": "Выбор проекта", "select": False},
+        )
+        target_id = target["project"]["id"]
+        self.core.events.publish_agent_dashboard("deleted-project-id", {
+            "workflow": {
+                "title": "Осиротевшая работа",
+                "progress_percent": 20,
+                "eta_seconds": None,
+                "phases": [{"id": "build", "title": "Построение", "state": "in_progress"}],
+            },
+            "tasks": [],
+        })
+
+        status, selected = self.request(
+            "/api/v1/agent/workspace/selection",
+            {"type": "project", "project_id": target_id},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(selected["selection"], {"type": "project", "project_id": target_id})
+        self.assertEqual(self.core.events.agent_work_snapshot()["active_project_ids"], [])
+        self.assertEqual(self.core.events.agent_dashboard_snapshot("deleted-project-id")["revision"], 0)
+
+    def test_core_startup_prunes_persisted_dashboards_for_missing_projects(self) -> None:
+        self.core.events.publish_agent_dashboard("deleted-project-id", {
+            "workflow": {
+                "title": "Осиротевшая работа",
+                "progress_percent": 20,
+                "eta_seconds": None,
+                "phases": [{"id": "build", "title": "Построение", "state": "in_progress"}],
+            },
+            "tasks": [],
+        })
+
+        restarted = CadyxCore(str(self.core.workspace.root))
+
+        self.assertEqual(restarted.events.agent_work_snapshot()["active_project_ids"], [])
+        self.assertEqual(restarted.events.agent_dashboard_snapshot("deleted-project-id")["revision"], 0)
+
     def test_agent_selection_api_rejects_locked_projects_and_running_operations(self) -> None:
         _, current = self.request("/api/v1/agent/projects", {"name": "Current selection"})
         current_id = current["project"]["id"]
