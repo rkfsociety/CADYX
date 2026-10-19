@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import base64
+import copy
+import hashlib
 import math
+import threading
 import zlib
+from collections import OrderedDict
 from typing import Any, Callable, Protocol
 
 from .errors import ValidationError
@@ -13,6 +17,7 @@ from .native_kernel import NativeKernel
 from .kernel_descriptors import (
     GeometryDescriptor, GeometryDescriptorValidation,
     BRepDescriptor, BooleanDescriptor, BoxDescriptor, CircleDescriptor, FilletDescriptor, HoledProfileDescriptor, LoftDescriptor, MulticontourLoftDescriptor, PipeDescriptor, ProfileDescriptor, RuledShellDescriptor, ThreadDescriptor,
+    serialize_geometry,
 )
 from .kernel_primitive import PrimitiveKernelAdapter as PrimitiveKernelAdapter
 from .kernel_profiles import (
@@ -32,6 +37,26 @@ from .kernel_profiles import (
 
 
 _MAX_OCCT_THREAD_SECTIONS = (1 << 31) - 2
+
+# Meshes are immutable runtime products. Keep them independent of document
+# revisions so an edit to one body does not force unchanged bodies through OCCT.
+_TESSELLATION_CONTRACT = "occt-viewport-v1-linear-0.01-display-mesh-v1"
+_TESSELLATION_CACHE_MAX_ENTRIES = 128
+_TESSELLATION_CACHE_MAX_BYTES = 64 * 1024 * 1024
+_tessellation_cache: OrderedDict[tuple[str, str], tuple[dict[str, Any], int]] = OrderedDict()
+_tessellation_cache_bytes = 0
+_tessellation_cache_lock = threading.RLock()
+
+
+def _estimated_mesh_bytes(value: Any) -> int:
+    if isinstance(value, dict):
+        return 64 + sum(32 + len(str(key).encode("utf-8")) + _estimated_mesh_bytes(item)
+                        for key, item in value.items())
+    if isinstance(value, list):
+        return 64 + sum(_estimated_mesh_bytes(item) for item in value)
+    if isinstance(value, str):
+        return 49 + len(value.encode("utf-8"))
+    return 32
 
 
 class GeometryKernel(Protocol):
@@ -153,6 +178,14 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
         # Avoid serializing and validating a large scan mesh a second time here.
         if isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1":
             return tessellate_mesh_geometry(geometry)
+        global _tessellation_cache_bytes
+        descriptor_hash = hashlib.sha256(serialize_geometry(geometry).encode("utf-8")).hexdigest()
+        cache_key = (_TESSELLATION_CONTRACT, descriptor_hash)
+        with _tessellation_cache_lock:
+            cached = _tessellation_cache.get(cache_key)
+            if cached is not None:
+                _tessellation_cache.move_to_end(cache_key)
+                return copy.deepcopy(cached[0])
         checked = self.normalize_geometry(geometry)
         result = NativeKernel().geometry_graph(checked, mesh=True)
         mesh = {key: result[key] for key in (
@@ -160,6 +193,19 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
         )}
         selected_faces = geometry.get("selected_face_indices", result.get("generated_face_indices", []))
         mesh["selected_face_indices"] = selected_faces if isinstance(selected_faces, list) else []
+        size = _estimated_mesh_bytes(mesh)
+        if size <= _TESSELLATION_CACHE_MAX_BYTES:
+            with _tessellation_cache_lock:
+                previous = _tessellation_cache.pop(cache_key, None)
+                if previous is not None:
+                    _tessellation_cache_bytes -= previous[1]
+                while (_tessellation_cache and
+                       (_tessellation_cache_bytes + size > _TESSELLATION_CACHE_MAX_BYTES or
+                        len(_tessellation_cache) >= _TESSELLATION_CACHE_MAX_ENTRIES)):
+                    _, (_, evicted_size) = _tessellation_cache.popitem(last=False)
+                    _tessellation_cache_bytes -= evicted_size
+                _tessellation_cache[cache_key] = (copy.deepcopy(mesh), size)
+                _tessellation_cache_bytes += size
         return mesh
 
     def create_box(self, *, width: float, height: float, depth: float) -> BoxDescriptor:
@@ -265,9 +311,15 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
                                                    depth=amount, centered=centered)
             return self.create_extruded_profile(profile, plane=plane, depth=amount, centered=centered)
 
-        solid = extrude(outer_index)
-        for hole_index in hole_indices:
-            solid = self.cut_solids(solid, extrude(hole_index))
+        if not any(normalized_curves) and not any(normalized_segments):
+            solid = {"kernel": self.kernel_id, "kind": "cut_solids_batch",
+                     "base": extrude(outer_index),
+                     "tools": [extrude(index) for index in hole_indices]}
+            solid["volume"] = NativeKernel().geometry_graph(solid)["volume"]
+        else:
+            solid = extrude(outer_index)
+            for hole_index in hole_indices:
+                solid = self.cut_solids(solid, extrude(hole_index))
         ordered_curves = [normalized_curves[outer_index],
                           *(normalized_curves[index] for index in hole_indices)]
         ordered_segments = [normalized_segments[outer_index],

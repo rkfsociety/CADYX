@@ -16,8 +16,9 @@ def _keys(value: Any, name: str) -> list[str]:
     return value
 
 
-def _resolve(kernel, geometry: dict[str, Any], *, keys: list[str], collection: str) -> list[int]:
-    topology = kernel.topology(geometry)
+def _resolve(kernel, geometry: dict[str, Any], *, keys: list[str], collection: str,
+             topology: dict[str, Any] | None = None) -> list[int]:
+    topology = topology if topology is not None else kernel.topology(geometry)
     items = topology.get(collection)
     if not isinstance(items, list):
         raise ValidationError(f"Current topology does not expose {collection}.")
@@ -64,9 +65,10 @@ def capture_edge_references(kernel, geometry: dict[str, Any], indices: list[int]
     return references
 
 
-def resolve_edge_references(kernel, geometry: dict[str, Any], references: list[dict[str, Any]]) -> list[int]:
+def resolve_edge_references(kernel, geometry: dict[str, Any], references: list[dict[str, Any]], *,
+                            topology: dict[str, Any] | None = None) -> list[int]:
     """Resolve stored geometric edge intent after upstream topology IDs have changed."""
-    topology = kernel.topology(geometry)
+    topology = topology if topology is not None else kernel.topology(geometry)
     edges = topology.get("edges")
     if not isinstance(edges, list) or not references:
         raise ValidationError("Stored edge references or current topology are unavailable.")

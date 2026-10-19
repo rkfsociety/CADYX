@@ -1,15 +1,26 @@
 """Versioned, JSON-safe scene contract shared by browser and agent clients."""
 
 import math
+import hashlib
+import json
 import struct
+import threading
 import zlib
 from array import array
+from collections import OrderedDict
 
 from .kernel import GeometryKernel
 from .models import Document
 from .errors import ValidationError
 from .assemblies import flatten_assembly, transform_point
 from .sketches import spline_sample_points
+
+
+_INSTANCE_TRANSFORM_CACHE_MAX_ENTRIES = 128
+_INSTANCE_TRANSFORM_CACHE_MAX_BYTES = 64 * 1024 * 1024
+_instance_transform_cache: OrderedDict[tuple[str, str, tuple[float, ...], tuple[float, ...]], tuple[list[float], int]] = OrderedDict()
+_instance_transform_cache_bytes = 0
+_instance_transform_cache_lock = threading.RLock()
 
 
 def render_scene(document: Document, kernel: GeometryKernel) -> dict:
@@ -219,11 +230,39 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
             instance_meshes[body_id] = kernel.tessellate(source["geometry"])
         mesh = instance_meshes[body_id]
         original_positions = list(mesh["positions"]) + list(mesh.get("edge_positions", []))
-        positions = []
-        for offset in range(0, len(original_positions), 3):
-            point = transform_point(original_positions[offset:offset + 3],
-                                    placement["translation"], placement["rotation"])
-            positions.extend(point)
+        descriptor_hash = hashlib.sha256(json.dumps(
+            source["geometry"], sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        ).encode("ascii")).hexdigest()
+        transform_key = ("occt-viewport-v1-linear-0.01-display-mesh-v1", descriptor_hash,
+                         tuple(placement["translation"]), tuple(placement["rotation"]))
+        global _instance_transform_cache_bytes
+        with _instance_transform_cache_lock:
+            cached_positions = _instance_transform_cache.get(transform_key)
+            if cached_positions is not None:
+                _instance_transform_cache.move_to_end(transform_key)
+                positions = list(cached_positions[0])
+            else:
+                positions = []
+        if cached_positions is None:
+            for offset in range(0, len(original_positions), 3):
+                point = transform_point(original_positions[offset:offset + 3],
+                                        placement["translation"], placement["rotation"])
+                positions.extend(point)
+            size = len(positions) * 8
+            if size <= _INSTANCE_TRANSFORM_CACHE_MAX_BYTES:
+                with _instance_transform_cache_lock:
+                    previous = _instance_transform_cache.pop(transform_key, None)
+                    if previous is not None:
+                        _instance_transform_cache_bytes -= previous[1]
+                    while (_instance_transform_cache and
+                           (_instance_transform_cache_bytes + size > _INSTANCE_TRANSFORM_CACHE_MAX_BYTES or
+                            len(_instance_transform_cache) >= _INSTANCE_TRANSFORM_CACHE_MAX_ENTRIES)):
+                        _, (_, removed_size) = _instance_transform_cache.popitem(last=False)
+                        _instance_transform_cache_bytes -= removed_size
+                    _instance_transform_cache[transform_key] = (list(positions), size)
+                    _instance_transform_cache_bytes += size
+        for offset in range(0, len(positions), 3):
+            point = positions[offset:offset + 3]
             has_coordinates = True
             for axis, value in enumerate(point):
                 if not math.isfinite(value):

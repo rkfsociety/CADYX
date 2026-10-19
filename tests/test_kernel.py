@@ -25,6 +25,32 @@ class OCPKernelAdapterConformanceTests(unittest.TestCase):
         self.assertAlmostEqual(geometry["volume"], 30.0)
         self.assertIsNone(self.kernel.validate(geometry))
 
+    def test_tessellation_cache_uses_geometry_and_returns_independent_meshes(self) -> None:
+        geometry = self.kernel.create_box(width=913, height=917, depth=919)
+        mesh = {"positions": [0.0, 0.0, 0.0], "triangles": [0], "edge_positions": [],
+                "edge_lines": [], "face_triangle_ranges": [], "generated_face_indices": []}
+        with patch.object(NativeKernel, "geometry_graph", return_value=mesh) as native_mesh:
+            first = self.kernel.tessellate(geometry)
+            first["positions"][0] = 123.0
+            second = self.kernel.tessellate(dict(geometry))
+
+        self.assertEqual(native_mesh.call_count, 1)
+        self.assertEqual(second["positions"], [0.0, 0.0, 0.0])
+
+    def test_profile_holes_use_one_batched_native_cut(self) -> None:
+        def rectangle(x0, y0, x1, y1):
+            return [{"x": x0, "y": y0}, {"x": x1, "y": y0},
+                    {"x": x1, "y": y1}, {"x": x0, "y": y1}]
+        geometry = self.kernel.create_extruded_profile_with_holes(
+            [rectangle(0, 0, 20, 10), rectangle(2, 2, 4, 4), rectangle(10, 2, 12, 4)],
+            plane="XY", depth=3,
+        )
+
+        self.assertEqual(geometry["solid"]["kind"], "cut_solids_batch")
+        self.assertEqual(len(geometry["solid"]["tools"]), 2)
+        self.assertAlmostEqual(geometry["volume"], 20 * 10 * 3 - 2 * 2 * 3 * 2)
+        self.assertIsNone(self.kernel.validate(geometry))
+
     def test_create_box_rejects_non_positive_non_finite_and_non_numeric_dimensions(self) -> None:
         invalid_dimensions = (0, -1, float("inf"), float("nan"), True, "2")
         for width in invalid_dimensions:

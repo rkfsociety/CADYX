@@ -668,6 +668,12 @@ class NativeKernel:
                 node.update(type=2, input_a=append(value["base"]), input_b=append(value["tool"]))
             elif kind == "cut_solids":
                 node.update(type=7, input_a=append(value["base"]), input_b=append(value["tool"]))
+            elif kind == "cut_solids_batch":
+                tool_nodes = [append(tool) for tool in value["tools"]]
+                edge_offset = len(edge_indices)
+                edge_indices.extend(tool_nodes)
+                node.update(type=17, input_a=append(value["base"]),
+                            edge_offset=edge_offset, edge_count=len(tool_nodes))
             elif kind == "filleted_solid":
                 node.update(type=3, input_a=append(value["base"]), amount=value["radius"],
                             edge_offset=len(edge_indices), edge_count=len(value["edge_indices"]))

@@ -87,9 +87,10 @@ class RuledShellDescriptor(OCCTDescriptor):
 
 
 class BooleanDescriptor(OCCTDescriptor):
-    kind: Literal["fused_profiles", "fused_solids", "cut_solids"]
+    kind: Literal["fused_profiles", "fused_solids", "cut_solids", "cut_solids_batch"]
     base: SolidDescriptor
-    tool: SolidDescriptor
+    tool: NotRequired[SolidDescriptor]
+    tools: NotRequired[list[SolidDescriptor]]
 
 
 class PipeDescriptor(OCCTDescriptor):
@@ -201,6 +202,9 @@ class GeometryDescriptorValidation:
             self._validate_fused_geometry(geometry)
             return
         if kernel_id == self.kernel_id and geometry.get("kind") == "cut_solids":
+            self._validate_fused_geometry(geometry)
+            return
+        if kernel_id == self.kernel_id and geometry.get("kind") == "cut_solids_batch":
             self._validate_fused_geometry(geometry)
             return
         if kernel_id == self.kernel_id and geometry.get("kind") == "swept_pipe":
@@ -355,6 +359,23 @@ class GeometryDescriptorValidation:
             raise ValidationError("Saved analytic circular extrusion volume is invalid.")
 
     def _validate_fused_geometry(self, geometry: GeometryDescriptor) -> None:
+        if geometry.get("kind") == "cut_solids_batch":
+            if (set(geometry) != {"kernel", "kind", "base", "tools", "volume"}
+                    or geometry.get("kernel") != self.kernel_id
+                    or not isinstance(geometry.get("base"), dict)
+                    or not isinstance(geometry.get("tools"), list) or not geometry["tools"]
+                    or any(not isinstance(tool, dict) for tool in geometry["tools"])):
+                raise ValidationError("Batched Boolean cut descriptor is invalid.")
+            self.validate(geometry["base"])
+            for tool in geometry["tools"]:
+                self.validate(tool)
+            saved_volume = geometry.get("volume")
+            if isinstance(saved_volume, bool) or not isinstance(saved_volume, (int, float)) or not math.isfinite(saved_volume):
+                raise ValidationError("Saved batched cut volume is invalid.")
+            actual = NativeKernel().geometry_graph(geometry)["volume"]
+            if not math.isclose(saved_volume, actual, rel_tol=1e-12, abs_tol=1e-12):
+                raise ValidationError("Saved batched cut volume does not match the Open CASCADE solid.")
+            return
         if (set(geometry) != {"kernel", "kind", "base", "tool", "volume"}
                 or geometry.get("kernel") != self.kernel_id
                 or geometry.get("kind") not in {"fused_profiles", "fused_solids", "cut_solids"}):

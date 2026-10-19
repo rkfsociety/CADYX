@@ -241,6 +241,10 @@ generated from `cadyx/api_contracts.py`.
 
 ## Commands and geometry
 
+Polygonal multi-contour extrusions submit all hole tools through one OCCT batch
+cut. Curved or analytic-segment contours retain the existing validated sequential
+Boolean path. Both paths persist the editable source contours and rebuild from them.
+
 The shared Command System supports box and parameter edits, workspace and project-file PLY scan import and parameter edits, direct single-solid STEP import, XY/XZ sketches and constraints, profile/path replacement, and linked solid features. Profile extrusion/revolution, circular-section path sweeps, connected Boolean fuses, and topology-selected edge fillets all create editable OCCT B-reps. STEP import stores the transferred OCCT B-rep with the source hash and geometry metrics; invalid source shapes remain marked invalid if OCCT cannot repair them within the documented tolerance. Feature descriptors retain their source sketches or bodies and parameters; supported upstream edits rebuild dependent features in document order inside the same atomic command. Fusion accepts intersecting B-rep solids, including swept pipes and prior fuse/fillet results, and must produce one connected solid. Fillet selection uses current unique B-rep edge indices exposed by the Agent topology endpoint; indices are traversal results, not persistent names. Scan commands resolve direct workspace or project PLY files through `ProjectWorkspace`, run inside the same Core lease and atomic-save path, and never write to the source. Each processed mesh is published as an atomic, content-addressed binary PLY beside its source; matching files are reused, and conflicts are never overwritten. The `reconstruct_scan` feature stores its source location and hash, output-file metadata, and processing parameters; its body's `cadyx-mesh-v1` geometry stores bounded compressed float32 vertices and uint32 faces in `project.json`. The Core retains the latest 128 in-memory activity snapshots per project and publishes updates as `agent.activity` SSE. Snapshots include Agent Runtime/API inspections, render requests, commands, solid features, camera orbits, and native scan phases; the browser shows the current action/task and a newest-first timestamped list of completed/failed action snapshots, without exposing the full journal. The `GeometryKernel` protocol isolates CADYX Core from a specific kernel. `OCCTKernelAdapter` creates and validates boxes, profile extrusions/revolutions, swept pipes, fused solids, filleted solids, and imported STEP solids, and validates legacy `primitive-v1` descriptors. It also validates and tessellates portable triangle meshes without turning them into B-reps. `PrimitiveKernelAdapter` remains available for demos and does not create B-rep geometry. See the [Document Model v7 contract](document-model-v7.md#sketch-driven-solid-features) for exact commands and limits.
 
 ### Geometry descriptor ownership
@@ -264,6 +268,15 @@ types. Native shape checks remain authoritative; these annotations do not imply
 that the whole adapter implementation is covered by the incremental mypy gate.
 Persisted JSON, legacy `primitive-v1`/spline descriptors, validation errors and
 native reconstruction algorithms remain unchanged; no migration is required.
+
+Viewport tessellation uses a process-wide bounded LRU keyed by canonical geometry
+descriptor SHA-256 and the explicit `occt-viewport-v1-linear-0.01-display-mesh-v1`
+contract. The cache is capped at 128 meshes and 64 MiB, returns independent copies,
+and excludes portable triangle meshes, which are decoded and validated from their
+own content-addressed descriptors. A second 128-entry/64 MiB LRU caches transformed
+assembly-instance vertex positions by source geometry hash and placement transform.
+Scene snapshots remain revision-bound for the browser protocol; unchanged body and
+assembly-instance meshes survive scene rebuilds.
 
 ### OCCT C ABI ownership
 

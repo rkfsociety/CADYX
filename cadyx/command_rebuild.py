@@ -204,10 +204,11 @@ class RebuildCommands:
                 if source is None or source.get("type") != "body":
                     raise ValidationError("Fillet feature refers to a missing source body.")
                 edges = feature.get("edge_indices", [])
-                edges = self._resolve_feature_edges(feature, source["geometry"], edges)
+                source_topology = self.kernel.topology(source["geometry"])
+                edges = self._resolve_feature_edges(feature, source["geometry"], edges, source_topology)
                 feature["edge_indices"] = list(edges)
                 if progress is not None:
-                    topology_edges = self.kernel.topology(source["geometry"]).get("edges", [])
+                    topology_edges = source_topology.get("edges", [])
                     selected_edges = [edge for edge in topology_edges
                                       if isinstance(edge, dict) and edge.get("index") in set(edges)]
                     progress({"phase": "kernel_fillet", "feature_id": feature["id"],
@@ -223,7 +224,8 @@ class RebuildCommands:
                     raise ValidationError("Chamfer feature refers to a missing source body.")
                 from .advanced_features import _advanced_native
                 edges = feature["parameters"].get("edge_indices", [])
-                edges = self._resolve_feature_edges(feature, source["geometry"], edges)
+                source_topology = self.kernel.topology(source["geometry"])
+                edges = self._resolve_feature_edges(feature, source["geometry"], edges, source_topology)
                 feature["parameters"]["edge_indices"] = list(edges)
                 geometry = _advanced_native(source["geometry"], 2,
                     [feature["parameters"]["distance"]], edges)
@@ -297,11 +299,13 @@ class RebuildCommands:
 
     def _resolve_feature_edges(
         self, feature: dict[str, Any], geometry: dict[str, Any], fallback_indices: list[int],
+        topology: dict[str, Any] | None = None,
     ) -> list[int]:
         if feature.get("edge_keys"):
             from .semantic_selection import _resolve
             try:
-                return _resolve(self.kernel, geometry, keys=feature["edge_keys"], collection="edges")
+                return _resolve(self.kernel, geometry, keys=feature["edge_keys"], collection="edges",
+                                topology=topology)
             except (ConflictError, ValidationError):
                 # Semantic keys include geometric coordinates, so dimension changes
                 # can invalidate them even when the selected design edge still exists.
@@ -310,5 +314,5 @@ class RebuildCommands:
         references = feature.get("edge_references")
         if references:
             from .semantic_selection import resolve_edge_references
-            return resolve_edge_references(self.kernel, geometry, references)
+            return resolve_edge_references(self.kernel, geometry, references, topology=topology)
         return fallback_indices
