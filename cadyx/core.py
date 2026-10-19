@@ -171,6 +171,16 @@ class CadyxCore:
 
         return agent_api_capabilities(self.self_evolving.available())
 
+    def list_standard_parts(self) -> dict[str, Any]:
+        from .standard_parts import list_standard_parts
+
+        return list_standard_parts()
+
+    def resolve_standard_part(self, request: dict[str, Any]) -> dict[str, Any]:
+        from .standard_parts import resolve_standard_part
+
+        return resolve_standard_part(request)
+
     def read_agent_source_file(self, relative_path: str) -> dict[str, Any]:
         return self.source_extensions.read_file(relative_path)
 
@@ -390,6 +400,26 @@ class CadyxCore:
         *, progress: Callable[[str, float], None] | None = None, persist: bool = False,
     ) -> dict[str, Any]:
         return self._engineering_validation.validate_body_clearance(project_id, first_body_id, second_body_id, expected_revision, minimum_clearance, tolerance, progress=progress, persist=persist)
+
+    def validate_assembly_fit(
+        self, project_id: str, expected_revision: Any,
+        minimum_clearance: Any, tolerance: Any, *,
+        instance_pairs: Any = None, pose_samples: Any = None,
+        progress: Callable[[str, float], None] | None = None,
+        persist: bool = False,
+    ) -> dict[str, Any]:
+        return self._engineering_validation.validate_assembly_fit(
+            project_id, expected_revision, minimum_clearance, tolerance,
+            instance_pairs=instance_pairs, pose_samples=pose_samples,
+            progress=progress, persist=persist,
+        )
+
+    def validate_assembly_mass_properties(
+        self, project_id: str, expected_revision: Any, *, persist: bool = False,
+    ) -> dict[str, Any]:
+        return self._engineering_validation.validate_assembly_mass_properties(
+            project_id, expected_revision, persist=persist,
+        )
 
     def list_validation_records(self, project_id: str, *, limit: int = 50) -> dict[str, Any]:
         return self._engineering_validation.list_validation_records(project_id, limit=limit)

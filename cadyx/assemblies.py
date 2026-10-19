@@ -6,7 +6,7 @@ from typing import Any
 
 from .errors import ValidationError
 
-ASSEMBLY_VERSION = 2
+ASSEMBLY_VERSION = 3
 IDENTITY_ROTATION = [1.0, 0.0, 0.0, 0.0]
 IDENTITY_TRANSLATION = [0.0, 0.0, 0.0]
 
@@ -20,6 +20,24 @@ def _name(record: dict[str, Any], label: str) -> None:
     value = record.get("name")
     if not isinstance(value, str) or not value.strip() or len(value.strip()) > 120:
         raise ValidationError(f"{label} name must contain 1–120 nonblank characters.")
+
+
+def validate_material(material: Any) -> None:
+    """A part may be unassigned, but measured mass requires stated provenance."""
+    if material is None:
+        return
+    if not isinstance(material, dict) or set(material) != {
+        "name", "density_kg_m3", "source"
+    }:
+        raise ValidationError("Part material needs name, density_kg_m3 and source.")
+    for key in ("name", "source"):
+        value = material[key]
+        if not isinstance(value, str) or not value.strip() or len(value.strip()) > 256:
+            raise ValidationError(f"Material {key} requires 1–256 nonblank characters.")
+    density = material["density_kg_m3"]
+    if (type(density) not in (int, float) or not math.isfinite(density)
+            or density <= 0 or density > 1e9):
+        raise ValidationError("Material density_kg_m3 must be finite and positive (at most 1e9).")
 
 
 def _vector(value: Any, size: int, label: str) -> None:
@@ -53,9 +71,10 @@ def validate_assembly(graph: Any, objects: list[dict[str, Any]]) -> None:
     components: set[str] = set()
     bound_bodies: set[str] = set()
     for part in graph["parts"]:
-        if not isinstance(part, dict) or set(part) != {"id", "name", "body_id"}:
+        if not isinstance(part, dict) or set(part) != {"id", "name", "body_id", "material"}:
             raise ValidationError("Assembly part record has invalid fields.")
         _name(part, "Part")
+        validate_material(part["material"])
         ident = part["id"]
         body_id = part["body_id"]
         if not isinstance(ident, str) or not ident.startswith("part:") or not ident[5:] or ident in components:

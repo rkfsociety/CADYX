@@ -33,6 +33,7 @@
 #include <gp_Lin.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Mat.hxx>
 #include <gp_Sphere.hxx>
 #include <gp_Torus.hxx>
 #include <gp_Trsf.hxx>
@@ -204,14 +205,39 @@ char* BrepMetricsImpl(const unsigned char* data, size_t size,
                              char* error, size_t capacity) noexcept {
   try {
     const TopoDS_Shape shape = OneSolid(ReadBrep(data, size), "B-rep metrics");
+    if (!BRepCheck_Analyzer(shape).IsValid())
+      throw std::runtime_error("Mass properties require a valid closed B-rep solid.");
     GProp_GProps properties;
     BRepGProp::VolumeProperties(shape, properties);
-    const double volume = std::abs(properties.Mass());
+    const double signed_volume = properties.Mass();
+    const double volume = std::abs(signed_volume);
     if (!std::isfinite(volume) || volume <= 0.0)
       throw std::runtime_error("OCCT returned an invalid B-rep volume.");
+    const gp_Pnt center = properties.CentreOfMass();
+    const gp_Mat tensor = properties.MatrixOfInertia();
+    const double orientation = signed_volume < 0 ? -1.0 : 1.0;
+    for (double coordinate : {center.X(), center.Y(), center.Z()})
+      if (!std::isfinite(coordinate))
+        throw std::runtime_error("OCCT returned an invalid solid centroid.");
+    for (int i = 1; i <= 3; ++i)
+      for (int j = 1; j <= 3; ++j)
+        if (!std::isfinite(tensor.Value(i, j)))
+          throw std::runtime_error("OCCT returned an invalid inertia tensor.");
     std::ostringstream json;
     json.imbue(std::locale::classic());
-    json << std::setprecision(17) << "{\"volume\":" << volume << '}';
+    json << std::setprecision(17) << "{\"volume\":" << volume
+         << ",\"center_of_mass\":[" << center.X() << ',' << center.Y() << ',' << center.Z()
+         << "],\"inertia_unit_density\":[";
+    for (int i = 1; i <= 3; ++i) {
+      if (i != 1) json << ',';
+      json << '[';
+      for (int j = 1; j <= 3; ++j) {
+        if (j != 1) json << ',';
+        json << orientation * tensor.Value(i, j);
+      }
+      json << ']';
+    }
+    json << "]}";
     return CopyResult(json.str());
   } catch (const Standard_Failure& exception) {
     CopyError(error, capacity, exception.GetMessageString()

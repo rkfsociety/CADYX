@@ -167,11 +167,12 @@ class WebApiTests(unittest.TestCase):
                 path = self.core.workspace._project_dir(project_id) / "project.json"
                 legacy = json.loads(path.read_text())
                 legacy["document"]["version"] = 1
+                legacy["document"].pop("assembly", None)
                 path.write_text(json.dumps(legacy))
                 before = path.read_bytes()
                 status, detail = self.request(f"{prefix}/{project_id}")
                 self.assertEqual(status, 200)
-                self.assertEqual(detail["document"]["version"], 8)
+                self.assertEqual(detail["document"]["version"], 11)
                 _, acquired = self.request(f"{prefix}/{project_id}/leases",
                                           {"owner_type": owner, "owner_id": "migration-test"})
                 lease = acquired["lease"]["lease_id"]
@@ -184,7 +185,7 @@ class WebApiTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 saved = json.loads(path.read_text())
                 self.assertEqual(saved["version"], 1)
-                self.assertEqual(saved["document"]["version"], 8)
+                self.assertEqual(saved["document"]["version"], 11)
                 self.assertEqual(saved["history"][0]["actor_type"], owner)
                 self.core.release_lease(project_id, lease)
 

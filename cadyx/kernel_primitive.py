@@ -30,6 +30,23 @@ class PrimitiveKernelAdapter:
             "volume": width * height * depth,
         }
 
+    def mass_properties(self, geometry: GeometryDescriptor) -> dict[str, Any]:
+        """Analytic cuboid fixture only; not a replacement for production OCCT."""
+        self.validate(geometry)
+        dims = geometry["dimensions"]
+        width, height, depth = (float(dims[k]) for k in ("width", "height", "depth"))
+        volume = width * height * depth
+        tensor = [
+            [volume * (height**2 + depth**2) / 12, 0.0, 0.0],
+            [0.0, volume * (width**2 + depth**2) / 12, 0.0],
+            [0.0, 0.0, volume * (width**2 + height**2) / 12],
+        ]
+        return {
+            "volume": volume,
+            "center_of_mass": [width / 2, height / 2, depth / 2],
+            "inertia_unit_density": tensor,
+        }
+
     def validate(self, geometry: GeometryDescriptor) -> None:
         if not isinstance(geometry, dict) or geometry.get("kernel") != "primitive-v1":
             raise ValidationError("Geometry does not match the primitive kernel format.")

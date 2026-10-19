@@ -31,8 +31,8 @@ class AssemblyTests(unittest.TestCase):
         before = copy.deepcopy(old)
         new = migrate_document(old)
         self.assertEqual(old, before)
-        self.assertEqual(new["version"], 10)
-        self.assertEqual(new["assembly"], {"version": 2, "units": "mm",
+        self.assertEqual(new["version"], 11)
+        self.assertEqual(new["assembly"], {"version": 3, "units": "mm",
                                          "parts": [], "subassemblies": [], "instances": [], "mates": []})
         self.assertEqual(Document.from_dict(new).to_dict(), new)
 

@@ -160,6 +160,8 @@ _COMMAND = {
 TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_health", "description": "Check whether the local CADYX host is ready.", "inputSchema": _schema()},
     {"name": "cadyx_list_workspace", "description": "List saved CADYX projects and direct workspace folders with lock snapshots.", "inputSchema": _schema()},
+    {"name": "cadyx_list_standard_parts", "description": "List immutable-versioned CADYX standard-part manifests with license provenance, parameter names, limitations and manifest SHA-256.", "inputSchema": _schema()},
+    {"name": "cadyx_resolve_standard_part", "description": "Validate catalog version, pinned SHA-256, exact dimensions or locally staged STEP identity, and return a create_catalog_part command for the existing leased Command System.", "inputSchema": _schema({"catalog_id": _STRING, "catalog_version": _STRING, "catalog_sha256": _STRING, "parameters": _OBJECT, "name": _STRING}, ["catalog_id", "catalog_version", "catalog_sha256", "parameters"])},
     {"name": "cadyx_get_selection", "description": "Read the local host's currently selected project or folder.", "inputSchema": _schema()},
     {"name": "cadyx_select_resource", "description": "Select an existing project or workspace folder through the Agent API.", "inputSchema": _schema({"type": {"enum": ["project", "folder"]}, "project_id": _STRING, "folder_name": _STRING}, ["type"])},
     {"name": "cadyx_create_project", "description": "Create a project; set select=false to leave the current viewer selection unchanged.", "inputSchema": _schema({"name": {"type": "string", "minLength": 1, "maxLength": 120}, "select": {"type": "boolean"}}, ["name"])},
@@ -284,6 +286,10 @@ class MCPApplication:
             return self.api.get("/api/v1/health")
         if name == "cadyx_list_workspace":
             return self.api.get("/api/v1/agent/projects")
+        if name == "cadyx_list_standard_parts":
+            return self.api.get("/api/v1/agent/catalog")
+        if name == "cadyx_resolve_standard_part":
+            return self.api.post("/api/v1/agent/catalog/resolve", args)
         if name == "cadyx_get_selection":
             return self.api.get("/api/v1/agent/workspace/selection")
         if name == "cadyx_select_resource":
