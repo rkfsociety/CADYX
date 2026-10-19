@@ -980,6 +980,7 @@ $("#projects-list-view").addEventListener("click", () => setProjectsLayout("list
 
 function renderProjects() {
   const list = $("#projects-list");
+  const scrollTop = list.scrollTop;
   list.replaceChildren();
   $("#projects-count").textContent = integerFormat.format(projects.length);
   const query = $("#projects-search").value.trim().toLocaleLowerCase("ru-RU");
@@ -1001,6 +1002,7 @@ function renderProjects() {
   const sortedGroups = [...grouped.values()].sort((left, right) =>
     left.group.name.localeCompare(right.group.name, "ru", { sensitivity: "base" }));
   for (const { group, entries } of sortedGroups) renderProjectGroup(group.name, group.id, entries);
+  list.scrollTop = scrollTop;
 }
 
 function showProjectLoading(name) {
