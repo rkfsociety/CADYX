@@ -33,9 +33,22 @@ class AssemblyCommands:
         if any(part["body_id"] == body["id"] for part in document.assembly["parts"]):
             raise ValidationError("Body already belongs to a part; reuse it through another instance.")
         part = {"id": f"part:{uuid4()}", "name": _text(command.get("name", body.get("name")), "Part name"),
-                "body_id": body["id"]}
+                "body_id": body["id"], "material": None}
         document.assembly["parts"].append(part)
         return {"part_id": part["id"], "body_id": part["body_id"]}
+
+    @staticmethod
+    def _set_assembly_part_material(document: Document, command: dict[str, Any]) -> dict[str, Any]:
+        _fields(command, {"part_id", "material"})
+        part = next((entry for entry in document.assembly["parts"]
+                     if entry["id"] == command["part_id"]), None)
+        if part is None:
+            raise NotFoundError("Assembly part does not exist.")
+        from .assemblies import validate_material
+
+        validate_material(command["material"])
+        part["material"] = deepcopy(command["material"])
+        return {"part_id": part["id"], "material": deepcopy(part["material"])}
 
     @staticmethod
     def _create_subassembly(document: Document, command: dict[str, Any]) -> dict[str, Any]:
@@ -183,6 +196,7 @@ def _call(method: str) -> Callable[..., dict[str, Any]]:
 
 COMMAND_HANDLERS = {
     "create_assembly_part": _call("_create_assembly_part"),
+    "set_assembly_part_material": _call("_set_assembly_part_material"),
     "create_subassembly": _call("_create_subassembly"),
     "add_assembly_instance": _call("_add_assembly_instance"),
     "transform_assembly_instance": _call("_transform_assembly_instance"),

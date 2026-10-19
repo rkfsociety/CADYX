@@ -698,6 +698,21 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
         self._same_saved_volume(geometry, result["volume"])
         return enrich_topology(geometry, result)
 
+    def mass_properties(self, geometry: GeometryDescriptor) -> dict[str, Any]:
+        """Exact OCCT unit-density volume properties of one valid saved solid."""
+        if isinstance(geometry, dict) and geometry.get("kernel") == "cadyx-mesh-v1":
+            raise ValidationError("Mass properties require an exact B-rep, not triangle mesh geometry.")
+        checked = self.normalize_geometry(geometry)
+        native = NativeKernel()
+        brep, summary = native.export_geometry(checked)
+        self._same_saved_volume(checked, summary["volume"])
+        properties = native.brep_metrics(brep)
+        if properties is None or not {"volume", "center_of_mass", "inertia_unit_density"} <= properties.keys():
+            raise ValidationError("Native OCCT runtime lacks mass properties; rebuild the native bridge.")
+        if not math.isclose(properties["volume"], summary["volume"], rel_tol=1e-9, abs_tol=1e-8):
+            raise ValidationError("B-rep mass properties do not match the source volume.")
+        return properties
+
     def metrics(self, geometry: GeometryDescriptor) -> dict[str, Any]:
         result = NativeKernel().geometry_graph(geometry)
         self._same_saved_volume(geometry, result["volume"])

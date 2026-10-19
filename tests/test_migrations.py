@@ -26,6 +26,7 @@ class MigrationTests(unittest.TestCase):
         self.path = self.core.workspace._project_dir(self.id) / "project.json"
         self.legacy = json.loads(self.path.read_text())
         self.legacy["document"]["version"] = 1
+        self.legacy["document"].pop("assembly", None)  # Actual v1 had no assembly graph.
         self.legacy["extension"] = {"source": "preserve"}
         self.write(self.legacy)
 
@@ -35,8 +36,8 @@ class MigrationTests(unittest.TestCase):
     def test_migration_preserves_snapshot_and_is_idempotent(self):
         original = copy.deepcopy(self.legacy)
         expected = copy.deepcopy(original)
-        expected["document"]["version"] = 10
-        expected["document"]["assembly"] = {"version": 2, "units": "mm", "parts": [], "subassemblies": [], "instances": [], "mates": []}
+        expected["document"]["version"] = 11
+        expected["document"]["assembly"] = {"version": 3, "units": "mm", "parts": [], "subassemblies": [], "instances": [], "mates": []}
         expected["document"]["model_parameters"] = {}
         expected["document"]["parameter_bindings"] = []
         migrated = migrate_project(self.legacy)
@@ -51,8 +52,8 @@ class MigrationTests(unittest.TestCase):
         document = {"id": "document:legacy", "version": 7, "revision": 3, "objects": []}
         migrated = migrate_document(document)
 
-        self.assertEqual(migrated["version"], 10)
-        self.assertEqual(migrated["assembly"]["version"], 2)
+        self.assertEqual(migrated["version"], 11)
+        self.assertEqual(migrated["assembly"]["version"], 3)
         self.assertEqual(migrated["model_parameters"], {})
         self.assertEqual(migrated["parameter_bindings"], [])
         self.assertEqual(document["version"], 7)
@@ -68,7 +69,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_reads_failed_commands_and_failed_save_preserve_bytes(self):
         before = self.path.read_bytes()
-        self.assertEqual(self.core.workspace.load(self.id)["document"]["version"], 10)
+        self.assertEqual(self.core.workspace.load(self.id)["document"]["version"], 11)
         self.core.list_projects()
         self.core.inspect_project(self.id)
         self.core.heartbeat(self.id, self.lease)
@@ -89,7 +90,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(saved["document"]["objects"][:-1], self.legacy["document"]["objects"])
         self.assertEqual(saved["document"]["id"], self.legacy["document"]["id"])
         self.assertEqual(saved["document"]["revision"], 2)
-        self.assertEqual(saved["document"]["version"], 10)
+        self.assertEqual(saved["document"]["version"], 11)
         reloaded = CadyxCore(self.temp.name, kernel=PrimitiveKernelAdapter()).inspect_project(self.id)
         self.assertEqual(reloaded["document"], saved["document"])
         self.assertEqual(reloaded["history"], saved["history"])

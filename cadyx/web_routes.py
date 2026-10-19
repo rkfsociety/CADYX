@@ -82,6 +82,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/planetary-kinematics", "agent_validate_planetary_kinematics", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/clearance", "agent_validate_clearance", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/assembly-fit", "agent_validate_assembly_fit", "validation", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/mass-properties", "agent_validate_mass_properties", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/preservation", "agent_validate_preservation", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/thickness", "agent_validate_thickness", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/specification", "agent_validate_specification", "validation", "json"),
@@ -611,6 +612,14 @@ def _dispatch_validation(handler: Any, core: CadyxCore, route: RouteMatch, parse
                 progress=progress, persist=body.get("persist", False),
             ),
             reports_progress=True,
+        )
+    elif operation == "mass_properties":
+        result = core.observe_agent_operation(
+            project_id, "Рассчитывает массу и инерцию сборки",
+            lambda: core.validate_assembly_mass_properties(
+                project_id, body["expected_revision"],
+                persist=body.get("persist", False),
+            ),
         )
     elif operation == "preservation":
         result = core.observe_agent_operation(project_id, "Проверяет сохранённый объём тела", lambda: core.validate_body_preservation(project_id, body["reference_body_id"], body["candidate_body_id"], body["expected_revision"], body["maximum_lost_volume"], body["tolerance"], persist=body.get("persist", False)))

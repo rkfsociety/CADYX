@@ -127,12 +127,14 @@ class AssemblyMateTests(unittest.TestCase):
         old = self.document.to_dict()
         old["version"] = 9
         old["assembly"].pop("mates")
+        for part in old["assembly"]["parts"]:
+            part.pop("material")
         old["assembly"]["version"] = 1
         before = copy.deepcopy(old)
         upgraded = migrate_document(old)
         self.assertEqual(old, before)
-        self.assertEqual(upgraded["version"], 10)
-        self.assertEqual(upgraded["assembly"]["version"], 2)
+        self.assertEqual(upgraded["version"], 11)
+        self.assertEqual(upgraded["assembly"]["version"], 3)
         self.assertEqual(upgraded["assembly"]["mates"], [])
         self.assertEqual(Document.from_dict(upgraded).to_dict(), upgraded)
 

@@ -404,6 +404,13 @@ class CadyxCore:
             progress=progress, persist=persist,
         )
 
+    def validate_assembly_mass_properties(
+        self, project_id: str, expected_revision: Any, *, persist: bool = False,
+    ) -> dict[str, Any]:
+        return self._engineering_validation.validate_assembly_mass_properties(
+            project_id, expected_revision, persist=persist,
+        )
+
     def list_validation_records(self, project_id: str, *, limit: int = 50) -> dict[str, Any]:
         return self._engineering_validation.list_validation_records(project_id, limit=limit)
 

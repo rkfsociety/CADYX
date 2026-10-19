@@ -149,6 +149,23 @@ VALIDATION_OPERATIONS: dict[str, dict[str, Any]] = {
         "field_error": "Assembly fit requires expected_revision, minimum_clearance, and tolerance; "
         "optional instance_pairs identifies leaf paths and pose_samples overrides joint coordinates.",
     },
+    "mass_properties": {
+        "tool_name": "cadyx_measure_assembly_mass_properties",
+        "description": "Read-only revision-bound OCCT physical properties of assigned assembly parts and placed instances. Exact solid volume, center of mass, mass, full 3x3 inertia tensor and aggregate; requires explicit material density with provenance and mm geometry.",
+        "method": "POST",
+        "path": "/api/v1/agent/projects/{id}/validations/mass-properties",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "expected_revision": {"type": "integer", "minimum": 0},
+                "persist": {"type": "boolean"},
+            },
+            "required": ["expected_revision"],
+            "additionalProperties": False,
+        },
+        "defaults": {"persist": False},
+        "field_error": "Mass properties require expected_revision; persist is optional.",
+    },
     "preservation": {
         "tool_name": "cadyx_validate_body_preservation",
         "description": "Compare a reference and candidate solid using OCCT common volume; "
