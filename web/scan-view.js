@@ -108,7 +108,7 @@
       if (!window.CadyxPlyPreview?.parseStream) throw new Error('Не найден потоковый PLY-парсер.');
       let lastProgress = -1;
       const geometry = await window.CadyxPlyPreview.parseStream(response.body, {
-        maxPreviewPoints: 500_000,
+        maxPreviewPoints: 250_000,
         totalBytes: source.size,
         onProgress: (bytesRead, totalBytes) => {
           const total = Number(totalBytes);
