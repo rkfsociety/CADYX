@@ -134,6 +134,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/assets/scanner-camera.js", "asset_scanner_camera", "static"),
     RouteSpec("GET", "/assets/ply-parser.js", "asset_ply_parser", "static"),
     RouteSpec("GET", "/assets/ply-preview.js", "asset_ply_preview", "static"),
+    RouteSpec("GET", "/assets/scan-view.js", "asset_scan_view", "static"),
     RouteSpec("GET", "/assets/style.css", "asset_style", "static"),
 )
 
@@ -822,6 +823,7 @@ def _dispatch_static(handler: Any, core: CadyxCore, route: RouteMatch, parsed: S
         "asset_scanner_camera": ("scanner-camera.js", "text/javascript; charset=utf-8"),
         "asset_ply_parser": ("ply-parser.js", "text/javascript; charset=utf-8"),
         "asset_ply_preview": ("ply-preview.js", "text/javascript; charset=utf-8"),
+        "asset_scan_view": ("scan-view.js", "text/javascript; charset=utf-8"),
         "asset_style": ("style.css", "text/css; charset=utf-8"),
     }
     filename, content_type = assets[route.spec.name]

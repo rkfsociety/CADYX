@@ -31,7 +31,7 @@ _SOCKET_REQUEST = socket | tuple[bytes, socket]
 _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 _UI_ASSETS = (
     "index.html", "scanner.html", "app.js", "style.css", "viewport.js",
-    "ply-parser.js", "ply-preview.js", "scanner-camera.js", "favicon.svg",
+    "ply-parser.js", "ply-preview.js", "scanner-camera.js", "scan-view.js", "favicon.svg",
 )
 _CLIENT_API_CONTRACT_VERSION = "viewport-snapshot-v1"
 _UI_ASSET_VERSION_LOCK = threading.Lock()
@@ -336,7 +336,7 @@ def make_request_handler(
                 version_meta = f'<meta name="cadyx-ui-version" content="{version}">'.encode("ascii")
                 data = data.replace(b"</head>", version_meta + b"</head>", 1)
                 assets = (
-                    ("style.css", "viewport.js", "ply-parser.js", "ply-preview.js", "app.js")
+                    ("style.css", "viewport.js", "ply-parser.js", "ply-preview.js", "scan-view.js", "app.js")
                     if filename == "index.html" else ("style.css", "scanner-camera.js")
                 )
                 for asset in assets:

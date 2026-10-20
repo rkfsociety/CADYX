@@ -371,11 +371,15 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   pointer-events: auto;
 }
 .viewport-camera-presets { gap: 3px; }
+.viewport-live-scan-button.cad3-tool { min-width: 58px; height: 34px; justify-content: center; padding: 0 12px; font: 600 12px var(--ui-font); }
 .viewport-live-scan-button[aria-pressed="true"] { border-color: #9b6038; color: var(--accent); background: #26190f; }
 #viewport-scan-360-status { color: var(--muted); font-size: 11px; max-width: 220px; }
-.live-scan-layer { position: absolute; z-index: 7; inset: 56px 12px 12px; overflow: hidden; border: 1px solid #313a42; border-radius: 8px; background: #0c1116; box-shadow: 0 10px 30px #0008; }
+.live-scan-layer { position: absolute; z-index: 7; inset: 56px 12px 12px; overflow: hidden; pointer-events: none; }
 .live-scan-layer[hidden] { display: none !important; }
-.live-scan-layer iframe { display: block; width: 100%; height: 100%; border: 0; background: #0c1116; }
+.live-scan-tabs { position: absolute; z-index: 1; top: 0; left: 0; display: flex; gap: 4px; padding: 4px; border: 1px solid #313a42; border-radius: 7px; background: #0d1419e9; box-shadow: 0 8px 24px #0006; backdrop-filter: blur(8px); pointer-events: auto; }
+.live-scan-tabs button { min-height: 32px; padding: 5px 11px; border: 1px solid transparent; border-radius: 5px; color: var(--muted); background: transparent; font: 600 12px var(--ui-font); cursor: pointer; }
+.live-scan-tabs button[aria-pressed="true"] { border-color: #9b6038; color: var(--accent); background: #26190f; }
+.live-scan-layer iframe { display: block; position: absolute; inset: 40px 0 0; width: 100%; height: calc(100% - 40px); box-sizing: border-box; border: 1px solid #313a42; border-radius: 8px; background: #0c1116; box-shadow: 0 10px 30px #0008; pointer-events: auto; }
 .viewport-icon-button,
 .viewport-fit-button,
 .viewport-four-views-button {
@@ -683,13 +687,19 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                     <span class="viewport-toolbar-divider" aria-hidden="true"></span>
                     <button id="viewport-four-views" class="button viewport-four-views-button" type="button" aria-label="Показать четыре вида" title="Показать четыре вида" aria-pressed="false"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></span><span class="toolbar-label">4 ВИДА</span></button>
                     <button id="viewport-fit" class="button viewport-fit-button" type="button" aria-label="Вписать модель в область просмотра" title="Вписать модель в область просмотра"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 4H4v4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 9 4 4M15 9l5-5M15 15l5 5M9 15l-5 5"/></svg></span><span class="toolbar-label">ВПИСАТЬ МОДЕЛЬ</span></button>
-                    <button id="viewport-live-scan" class="button viewport-icon-button viewport-live-scan-button" type="button" aria-label="Показать живой скан в окне проекта" title="Показать живой скан в окне проекта" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h16v12H4zM8 7.5l1.5-3h5l1.5 3M12 11a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/></svg></button>
+                    <button id="viewport-live-scan" class="button viewport-live-scan-button" type="button" aria-label="Показать скан" title="Показать скан" aria-pressed="false">Скан</button>
                     <button id="viewport-scan-360" class="button" type="button" title="Снять 12 кадров за полный оборот стола">Сканировать 360°</button><span id="viewport-scan-360-status" role="status" aria-live="polite"></span>
                   </div>
                 </div>
                 <div class="viewport" id="viewport">
                   <canvas id="model-preview" class="model-preview ply-preview-canvas" aria-label="Координатная сетка, оси и 3D-модель"></canvas>
-                  <div id="live-scan-layer" class="live-scan-layer" hidden><iframe id="live-scan-frame" title="Живой поток Revopoint в проекте CADYX" loading="lazy"></iframe></div>
+                  <div id="live-scan-layer" class="live-scan-layer" data-mode="cloud" hidden>
+                    <div class="live-scan-tabs" role="tablist" aria-label="Представление скана">
+                      <button id="live-scan-cloud-tab" type="button" role="tab" aria-controls="live-scan-frame" aria-selected="true" tabindex="0">Облако точек</button>
+                      <button id="live-scan-mesh-tab" type="button" role="tab" aria-controls="live-scan-frame" aria-selected="false" tabindex="-1">Сетка</button>
+                    </div>
+                    <iframe id="live-scan-frame" title="Облако точек скана: перетаскивание вращает, колесо меняет масштаб" loading="lazy"></iframe>
+                  </div>
                 </div>
                 <footer class="viewport-footer" aria-label="Сводка модели">
                   <span>МОДЕЛЬ <strong id="viewport-model-name">—</strong></span><span>ОБЪЕКТЫ <strong id="viewport-object-count">0</strong></span><span>ВЕРШИНЫ <strong id="viewport-vertex-count">0</strong></span><span>ГРАНИ <strong id="viewport-face-count">0</strong></span><span>РЕВ. <strong id="viewport-revision">—</strong></span>
@@ -754,6 +764,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
     <script src="/assets/viewport.js" defer></script>
     <script src="/assets/ply-parser.js" defer></script>
     <script src="/assets/ply-preview.js" defer></script>
+    <script src="/assets/scan-view.js" defer></script>
     <script src="/assets/app.js" defer></script>
     <script id="cadyx-cad-reference-script">
 window.addEventListener("DOMContentLoaded", () => {

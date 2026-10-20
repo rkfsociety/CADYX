@@ -146,7 +146,7 @@
         </div>
       </div>
       <div class="scanner-stage"><div class="screen"><canvas id="depth" width="640" height="400" aria-label="Кадр глубины Revopoint" hidden></canvas><canvas id="cloud" width="640" height="400" aria-label="Облако точек Revopoint: перетаскивание вращает, колесо меняет масштаб" title="Перетаскивание — вращение · колёсико — масштаб"></canvas></div></div>
-      <div class="scanner-view-footer"><span>Y16 · 640×400</span><span id="age">ОЖИДАНИЕ</span><span id="cloud-info">ТЕКУЩИЙ КАДР · Q.BIN · ГЛУБИНА × 0,005 мм</span></div>
+      <div class="scanner-view-footer"><span id="scan-format">Y16 · 640×400</span><span id="age">ОЖИДАНИЕ</span><span id="cloud-info">ТЕКУЩИЙ КАДР · Q.BIN · ГЛУБИНА × 0,005 мм</span></div>
     </section>
     <aside class="scanner-inspector" aria-label="Состояние захвата">
       <section class="panel scanner-card">
@@ -176,12 +176,16 @@
       const state = document.querySelector("#state");
       const rate = document.querySelector("#rate");
       const age = document.querySelector("#age");
+      const scanFormat = document.querySelector("#scan-format");
       const cloudInfo = document.querySelector("#cloud-info");
       const depthMode = document.querySelector("#depth-mode");
       const cloudMode = document.querySelector("#cloud-mode");
       const image = context.createImageData(640, 400);
       let lastMtime = "", lastArrival = 0, intervals = [], qMatrix = null, depthScale = null;
       let yaw = .55, pitch = .55, drag = null, cloudSupportMax = 0;
+      let scanViewMode = "cloud", projectMesh = null, projectMeshPromise = null;
+      let cloudTitle = "ОБЛАКО ТОЧЕК", cloudAge = "", cloudInfoText = "", cloudState = "СОХРАНЁННОЕ ОБЛАКО";
+      let cloudFormat = "Y16 · 640×400";
       let zoom = 1;
       const scannerQuery = new URLSearchParams(location.search);
       const singleFrame = scannerQuery.get("cloud_kind") === "single";
@@ -213,15 +217,22 @@
         yaw += orbit.yaw;
         pitch += orbit.pitch;
         drag = { x: event.clientX, y: event.clientY };
-        if (window.latestCloud) drawCloud(window.latestCloud);
+        renderScanView();
       });
       cloudCanvas.addEventListener("pointerup", () => { drag = null; });
       cloudCanvas.addEventListener("pointercancel", () => { drag = null; });
       cloudCanvas.addEventListener("wheel", event => {
         event.preventDefault();
         zoom = Math.max(.25, Math.min(20, zoom * Math.exp(-event.deltaY * .001)));
-        if (window.latestCloud) drawCloud(window.latestCloud);
+        renderScanView();
       }, { passive: false });
+      window.addEventListener("message", event => {
+        if (event.origin !== location.origin || event.data?.type !== "cadyx-scan-view") return;
+        setScanViewMode(event.data.mode).catch(error => {
+          state.textContent = error.message;
+          state.dataset.live = "false";
+        });
+      });
 
       async function loadCalibration() {
         const response = await fetch(`/api/v1/scanner/calibration?ts=${Date.now()}`, { cache: "no-store" });
@@ -236,19 +247,15 @@
           ? "КАНДИДАТ · UVC НЕ ПРОВЕРЕН" : calibration.depth_scale_status;
       }
 
-      function drawCloud(points) {
-        const c = cloudContext;
-        c.clearRect(0, 0, 640, 400);
-        if (!points.length) return;
+      function projectForView(points, referencePoints = points) {
+        if (!points.length || !referencePoints.length) return null;
         let cx = 0, cy = 0, cz = 0;
-        for (const p of points) { cx += p[0]; cy += p[1]; cz += p[2]; }
-        cx /= points.length; cy /= points.length; cz /= points.length;
-        const projected = new Array(points.length);
+        for (const p of referencePoints) { cx += p[0]; cy += p[1]; cz += p[2]; }
+        cx /= referencePoints.length; cy /= referencePoints.length; cz /= referencePoints.length;
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-        for (let i = 0; i < points.length; i++) {
-          const dx = points[i][0] - cx, dy = points[i][1] - cy, dz = points[i][2] - cz;
-          const point = window.scannerPreviewPoint(dx, dy, dz, yaw, pitch);
-          projected[i] = point;
+        for (let i = 0; i < referencePoints.length; i++) {
+          const point = window.scannerPreviewPoint(referencePoints[i][0] - cx, referencePoints[i][1] - cy,
+            referencePoints[i][2] - cz, yaw, pitch);
           const [x, y, z] = point;
           minX = Math.min(minX, x); maxX = Math.max(maxX, x);
           minY = Math.min(minY, y); maxY = Math.max(maxY, y);
@@ -257,14 +264,132 @@
         const spanX = Math.max(1e-6, maxX - minX), spanY = Math.max(1e-6, maxY - minY);
         const scale = Math.min(500 / spanX, 290 / spanY) * zoom;
         const offsetX = 320 - (minX + maxX) * scale / 2, offsetY = 200 - (minY + maxY) * scale / 2;
-        const spanZ = Math.max(1e-6, maxZ - minZ);
-        const pointOrder = window.scannerDepthOrder(projected);
+        const projected = points.map(point => window.scannerPreviewPoint(
+          point[0] - cx, point[1] - cy, point[2] - cz, yaw, pitch));
+        return { projected, minZ, maxZ, offsetX, offsetY, scale };
+      }
+
+      function drawCloud(points) {
+        if (scanViewMode !== "cloud") return;
+        const c = cloudContext;
+        c.clearRect(0, 0, 640, 400);
+        const view = projectForView(points);
+        if (!view) return;
+        const spanZ = Math.max(1e-6, view.maxZ - view.minZ);
+        const pointOrder = window.scannerDepthOrder(view.projected);
         for (const i of pointOrder) {
-          const p = projected[i];
-          const x = offsetX + p[0] * scale, y = offsetY + p[1] * scale;
-          const t = (p[2] - minZ) / spanZ;
+          const p = view.projected[i];
+          const x = view.offsetX + p[0] * view.scale, y = view.offsetY + p[1] * view.scale;
+          const t = (p[2] - view.minZ) / spanZ;
           c.fillStyle = window.scannerDepthColor(t);
           c.fillRect(x, y, 1.15, 1.15);
+        }
+      }
+
+      function drawMesh(mesh) {
+        const c = cloudContext;
+        c.clearRect(0, 0, 640, 400);
+        const view = projectForView(mesh.vertices, window.latestCloud?.length ? window.latestCloud : mesh.vertices);
+        if (!view) return;
+        const spanZ = Math.max(1e-6, view.maxZ - view.minZ);
+        const faces = Array.from({ length: mesh.triangles.length / 3 }, (_, index) => index);
+        const depth = index => {
+          const offset = index * 3;
+          return (view.projected[mesh.triangles[offset]][2]
+            + view.projected[mesh.triangles[offset + 1]][2]
+            + view.projected[mesh.triangles[offset + 2]][2]) / 3;
+        };
+        faces.sort((a, b) => depth(a) - depth(b));
+        c.lineWidth = 0.35;
+        for (const face of faces) {
+          const offset = face * 3;
+          const a = view.projected[mesh.triangles[offset]], b = view.projected[mesh.triangles[offset + 1]];
+          const d = view.projected[mesh.triangles[offset + 2]];
+          const averageDepth = (a[2] + b[2] + d[2]) / 3;
+          c.beginPath();
+          c.moveTo(view.offsetX + a[0] * view.scale, view.offsetY + a[1] * view.scale);
+          c.lineTo(view.offsetX + b[0] * view.scale, view.offsetY + b[1] * view.scale);
+          c.lineTo(view.offsetX + d[0] * view.scale, view.offsetY + d[1] * view.scale);
+          c.closePath();
+          c.fillStyle = window.scannerDepthColor((averageDepth - view.minZ) / spanZ);
+          c.fill();
+          c.strokeStyle = "rgba(255, 231, 211, .10)";
+          c.stroke();
+        }
+      }
+
+      function renderScanView() {
+        if (scanViewMode === "mesh") {
+          if (projectMesh) drawMesh(projectMesh);
+          return;
+        }
+        if (window.latestCloud) drawCloud(window.latestCloud);
+      }
+
+      async function loadProjectMesh() {
+        if (projectMesh) return projectMesh;
+        if (projectMeshPromise) return projectMeshPromise;
+        const projectId = scannerQuery.get("project_id");
+        if (!projectId) throw Error("Для сетки не задан проект CADYX.");
+        projectMeshPromise = (async () => {
+          const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/viewport?ts=${Date.now()}`, { cache: "no-store" });
+          if (!response.ok) throw Error(`Не удалось загрузить сетку проекта (HTTP ${response.status}).`);
+          const scene = await response.json();
+          const body = (scene.objects || []).find(object => object.type === "body"
+            && Array.isArray(object.positions) && Array.isArray(object.triangles) && object.triangles.length >= 3);
+          if (!body || body.positions.length % 3 !== 0 || body.positions.length / 3 > 250000
+              || body.triangles.length % 3 !== 0 || body.triangles.length > 750000) {
+            throw Error("В проекте нет пригодной треугольной сетки.");
+          }
+          const vertices = new Array(body.positions.length / 3);
+          for (let index = 0; index < vertices.length; index++) {
+            const offset = index * 3;
+            const point = [body.positions[offset], body.positions[offset + 1], body.positions[offset + 2]];
+            if (!point.every(Number.isFinite)) throw Error("Сетка содержит некорректные координаты.");
+            vertices[index] = point;
+          }
+          const triangles = body.triangles;
+          if (triangles.some(index => !Number.isInteger(index) || index < 0 || index >= vertices.length)) {
+            throw Error("Сетка содержит некорректные индексы вершин.");
+          }
+          projectMesh = { vertices, triangles };
+          return projectMesh;
+        })();
+        try { return await projectMeshPromise; }
+        catch (error) { projectMeshPromise = null; throw error; }
+      }
+
+      async function setScanViewMode(mode) {
+        if (mode !== "cloud" && mode !== "mesh") return;
+        scanViewMode = mode;
+        if (mode === "cloud") {
+          document.querySelector("#scanner-title").textContent = cloudTitle;
+          cloudCanvas.setAttribute("aria-label", "Облако точек Revopoint: перетаскивание вращает, колесо меняет масштаб");
+          cloudCanvas.title = "Перетаскивание — вращение · колёсико — масштаб";
+          scanFormat.textContent = cloudFormat;
+          state.textContent = cloudState;
+          age.textContent = cloudAge;
+          cloudInfo.textContent = cloudInfoText;
+          renderScanView();
+          return;
+        }
+        document.querySelector("#scanner-title").textContent = "СЕТКА · ТРЕУГОЛЬНАЯ МОДЕЛЬ";
+        cloudCanvas.setAttribute("aria-label", "Треугольная сетка скана: перетаскивание вращает, колесо меняет масштаб");
+        cloudCanvas.title = "Перетаскивание — вращение · колёсико — масштаб";
+        scanFormat.textContent = "СЕТКА · ТРЕУГОЛЬНАЯ";
+        state.textContent = "ЗАГРУЗКА СЕТКИ";
+        try {
+          const mesh = await loadProjectMesh();
+          if (scanViewMode !== "mesh") return;
+          drawMesh(mesh);
+          state.textContent = "СЕТКА ПРОЕКТА";
+          age.textContent = `${mesh.vertices.length.toLocaleString("ru-RU")} ВЕРШИН`;
+          cloudInfo.textContent = `${(mesh.triangles.length / 3).toLocaleString("ru-RU")} ТРЕУГОЛЬНИКОВ · МАСШТАБ НЕ ПРОВЕРЕН`;
+        } catch (error) {
+          if (scanViewMode !== "mesh") return;
+          state.textContent = error.message;
+          state.dataset.live = "false";
+          cloudContext.clearRect(0, 0, 640, 400);
         }
       }
 
@@ -307,25 +432,27 @@
         }
         if (points.length < 3) throw Error("В PLY недостаточно корректных точек.");
         window.latestCloud = points;
+        cloudFormat = "PLY · ОБЛАКО ТОЧЕК";
         const hasSupport = supportColumn >= 0 && supportValues.length === points.length
           && supportValues.every(value => Number.isInteger(value) && value >= 1 && value <= 255);
         cloudSupportMax = hasSupport ? supportValues.reduce((maximum, value) => Math.max(maximum, value), 1) : 0;
         yaw = 0;
         pitch = 0;
         setMode("cloud");
-        document.querySelector("#scanner-title").textContent = singleFrame
+        cloudTitle = singleFrame
           ? "ОБЛАКО ТОЧЕК · ОДИН КАДР"
           : provisionalFusion ? "ОБЛАКО ТОЧЕК · ПРЕДВАРИТЕЛЬНАЯ СШИВКА" : "СОХРАНЁННОЕ ОБЛАКО ТОЧЕК";
         depthMode.hidden = true;
         cloudMode.hidden = true;
-        drawCloud(points);
-        state.textContent = "СОХРАНЁННОЕ ОБЛАКО";
+        cloudState = "СОХРАНЁННОЕ ОБЛАКО";
         state.dataset.live = "false";
         rate.textContent = "—";
-        age.textContent = singleFrame
+        cloudAge = singleFrame
           ? Number.isFinite(frameAngle) ? `ОДИН КАДР · СТОЛ ${frameAngle >= 0 ? "+" : ""}${frameAngle}° · НЕ СШИТ` : "ОДИН КАДР · НЕ СШИТ"
           : provisionalFusion ? `${fusionFrameCount} РАКУРСОВ · РЕГИСТРАЦИЯ ПРЕДВАРИТЕЛЬНАЯ` : "СОХРАНЁННОЕ ОБЛАКО · СТАТУС СШИВКИ НЕ УКАЗАН";
-        cloudInfo.textContent = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · ${hasSupport ? `ПОДДЕРЖКА 1–${cloudSupportMax} КАДРАМИ · ` : ""}${provisionalFusion && fusionCleanup === "none" ? "ШУМ НЕ ФИЛЬТРОВАЛСЯ · " : ""}КАЛИБРОВКА МАСШТАБА НЕ ПРОВЕРЕНА`;
+        cloudInfoText = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · ${hasSupport ? `ПОДДЕРЖКА 1–${cloudSupportMax} КАДРАМИ · ` : ""}${provisionalFusion && fusionCleanup === "none" ? "ШУМ НЕ ФИЛЬТРОВАЛСЯ · " : ""}КАЛИБРОВКА МАСШТАБА НЕ ПРОВЕРЕНА`;
+        if (scanViewMode === "cloud") setScanViewMode("cloud");
+        else setScanViewMode("mesh");
       }
 
       async function poll() {
@@ -390,8 +517,13 @@
             context.restore();
             window.latestCloud = points;
             cloudSupportMax = 0;
-            drawCloud(points);
-            cloudInfo.textContent = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · Z=${depthScale.toLocaleString("ru-RU")} ММ/ОТСЧЁТ · ОДИН КАДР`;
+            cloudInfoText = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · Z=${depthScale.toLocaleString("ru-RU")} ММ/ОТСЧЁТ · ОДИН КАДР`;
+            if (scanViewMode === "cloud") {
+              cloudAge = "ОЖИДАНИЕ";
+              cloudState = "ПОТОК АКТИВЕН";
+              drawCloud(points);
+              cloudInfo.textContent = cloudInfoText;
+            }
             const now = performance.now();
             if (lastArrival) intervals.push(now - lastArrival);
             if (intervals.length > 30) intervals.shift();

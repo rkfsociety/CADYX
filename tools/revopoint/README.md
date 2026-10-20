@@ -226,6 +226,8 @@ Secure the object to the turntable, keep the scanner fixed, close Revo Scan, and
 
 The script operates inside the supplied existing CADYX project; it does not create another project. The project viewport's **Сканировать 360°** button starts a capture at the table's current angle, captures twelve stationary poses at 30° intervals, and verifies that the full turn returns to that starting angle. It requires the table to already be level and never sends a tilt or home command. `CaptureY16` captures one frame and exits; the controller then waits 3 seconds before the next table move so frame processing can finish. The preview displays the most recent saved frame rather than fusing moving video. Raw frames, per-frame provisional PLY, calibration copies, pose log, and manifest are saved in the project. Direct UVC scale remains provisional.
 
+The project's **Скан** preview keeps the registered point cloud and imported triangle mesh inside one scanner window. Its **Облако точек** and **Сетка** tabs switch the content of the same canvas, preserving the orbit and zoom; the mesh tab reads the saved project viewport. The mesh is a triangle mesh, not a B-rep, and the captured scale remains provisional.
+
 If all twelve frames exist but manifest creation failed, rebuild only that metadata from the saved pose log with `-ManifestOnly -RunId revopoint_<UTC run id>`. This mode verifies all capture files, level tilt and return-to-start telemetry, then writes the manifest without starting the scanner or table.
 
 ## Register a turntable scan by geometry in the first-frame coordinate system
