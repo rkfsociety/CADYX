@@ -15,6 +15,7 @@ const apiErrorLabels = {
   PROJECT_FOLDER_CONFLICT: "Не удалось подобрать имя папки для проекта.",
   ARTIFACT_CONFLICT: "Файл результата с таким именем уже существует.",
   PROJECT_GROUP_EXISTS: "Папка с таким именем уже существует.",
+  SCAN_OPERATION_FAILED: "Не удалось импортировать PLY как облако точек. Нужен point-only PLY минимум с тремя точками.",
 };
 
 function apiErrorMessage(value, status) {
@@ -57,6 +58,7 @@ const noSelection = $("#no-selection");
 const folderFileList = $("#folder-file-list");
 const folderPreviewCanvas = $("#ply-preview-canvas");
 const folderPreviewPlaceholder = $("#folder-preview-placeholder");
+const folderImportModelFileButton = $("#folder-import-model-file");
 const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
 const modelViewer = window.CadyxViewport.createViewer($("#model-preview"), {
   showViewCube: true, wireframe: true, onRender: queueViewportSnapshot,
@@ -148,6 +150,8 @@ let folderFiles = [];
 let folderFilesSignature = null;
 let fileListContextKey = null;
 let selectedFolderFileName = null;
+let selectedFolderFileGeometry = null;
+let projectModelFileImportInFlight = false;
 let folderListRequest = 0;
 let previewRequest = 0;
 
@@ -1222,6 +1226,7 @@ function resetFileList(contextKey) {
   folderFiles = [];
   folderFilesSignature = null;
   selectedFolderFileName = null;
+  selectedFolderFileGeometry = null;
   folderListRequest++;
   previewRequest++;
   updateFolderInspector();
@@ -1232,6 +1237,7 @@ function resetFileList(contextKey) {
   folderPreviewPlaceholder.textContent = "Загружаю список файлов…";
   $("#folder-preview-title").textContent = "Предпросмотр";
   $("#folder-preview-info").textContent = "";
+  updateProjectModelFileImportButton();
 }
 
 function fileContextPath(context) {
@@ -1329,12 +1335,115 @@ function renderFolderFiles() {
 function updateFolderInspector(file = folderFiles.find((item) => item.name === selectedFolderFileName) || null) {
   $("#folder-inspector-count").textContent = `ФАЙЛОВ: ${folderFiles.length}`;
   $("#folder-model-file-count").textContent = String(
-    folderFiles.filter((item) => item.name.toLowerCase().endsWith(".ply")).length,
+    folderFiles.filter((item) => /\.(ply|stl|step|stp)$/i.test(item.name)).length,
   );
   $("#folder-inspector-file-name").textContent = file?.name || "Не выбран";
   $("#folder-inspector-file-size").textContent = file ? formatFileSize(file.size) : "—";
   const extension = file?.name.match(/\.([^.]+)$/)?.[1];
   $("#folder-inspector-file-type").textContent = extension ? extension.toUpperCase() : "—";
+}
+
+function updateProjectModelFileImportButton() {
+  const button = folderImportModelFileButton;
+  const file = folderFiles.find((item) => item.name === selectedFolderFileName) || null;
+  const extension = file?.name.match(/\.([^.]+)$/)?.[1]?.toLowerCase();
+  const supported = ["ply", "stl", "step", "stp"].includes(extension);
+  const isProjectImport = Boolean(selectedProjectId && !getSelectedFolder()
+    && primaryGrid.dataset.view === "files" && supported);
+  button.hidden = !isProjectImport;
+  if (!isProjectImport) return;
+
+  const alreadyImported = currentObjects.some((item) => item.type === "feature"
+    && ["import_point_cloud", "reconstruct_scan", "import_stl", "import_step"].includes(item.operation)
+    && (item.source?.project_file === file.name || item.source?.file === file.name));
+  const geometry = selectedFolderFileGeometry;
+  const needsPlyGeometry = extension === "ply";
+  const eligible = !needsPlyGeometry || (geometry && geometry.vertexCount >= 3);
+  button.disabled = projectModelFileImportInFlight || alreadyImported || !eligible
+    || !canOpenFilesView(selectedProjectId) || renderedSceneProjectId !== selectedProjectId
+    || !Number.isInteger(renderedSceneRevision);
+
+  if (projectModelFileImportInFlight) {
+    button.textContent = "Импортирую…";
+    button.title = "Добавляю 3D-файл в дерево модели и историю проекта.";
+  } else if (alreadyImported) {
+    button.textContent = "Уже в дереве";
+    button.title = "Этот файл уже импортирован в дерево модели.";
+  } else {
+    button.textContent = "Добавить в дерево";
+    button.title = !eligible ? "Дождитесь загрузки PLY для определения типа геометрии."
+      : geometry && geometry.vertexCount < 3 ? "В PLY должно быть не менее 3 вершин."
+      : !canOpenFilesView(selectedProjectId) ? "Дождитесь освобождения проекта."
+      : "Исходный файл сохранится; импорт появится в дереве модели и истории.";
+  }
+}
+
+async function importSelectedProjectModelFile() {
+  const projectId = selectedProjectId;
+  const file = folderFiles.find((item) => item.name === selectedFolderFileName) || null;
+  updateProjectModelFileImportButton();
+  if (!file || folderImportModelFileButton.disabled || !projectId) return;
+
+  projectModelFileImportInFlight = true;
+  updateProjectModelFileImportButton();
+  let leaseId = null;
+  let imported = false;
+  try {
+    const encoded = encodeURIComponent(projectId);
+    const info = await api(`/api/v1/projects/${encoded}`);
+    if (info.lock?.state !== "FREE" || info.lock?.recovery_required
+        || projectId !== selectedProjectId || !canOpenFilesView(projectId)) {
+      throw new Error("Проект занят; дождитесь завершения текущей операции.");
+    }
+    const lease = await api(`/api/v1/projects/${encoded}/leases`, {
+      method: "POST",
+      body: JSON.stringify({ owner_id: `files-ui:${crypto.randomUUID()}` }),
+    });
+    leaseId = lease.lease?.lease_id;
+    if (!leaseId) throw new Error("Сервер не выдал блокировку редактирования.");
+
+    const extension = file.name.match(/\.([^.]+)$/)?.[1]?.toLowerCase();
+    const commandType = extension === "step" || extension === "stp" ? "import_step"
+      : extension === "stl" ? "import_stl"
+        : selectedFolderFileGeometry?.faceCount > 0 ? "import_project_scan" : "import_project_point_cloud";
+    const response = await api(`/api/v1/projects/${encoded}/commands`, {
+      method: "POST",
+      body: JSON.stringify({
+        lease_id: leaseId,
+        expected_revision: info.document.revision,
+        command: {
+          type: commandType,
+          file: file.name,
+          name: file.name.replace(/\.[^.]+$/, ""),
+          ...(commandType === "import_step" ? { show_in_preview: true } : {}),
+        },
+      }),
+    });
+    const result = response.history_entry?.result;
+    if (!result?.body_id) throw new Error("Сервер вернул неполный результат импорта.");
+    selectedObjectId = result.body_id;
+    imported = true;
+  } catch (error) {
+    notify(`Не удалось добавить файл в дерево: ${error.message}`, true);
+  } finally {
+    if (leaseId) {
+      try {
+        await api(`/api/v1/projects/${encodeURIComponent(projectId)}/leases/${encodeURIComponent(leaseId)}/release`, {
+          method: "POST", body: "{}",
+        });
+      } catch (error) {
+        scheduleWorkspaceRefresh();
+        if (imported) notify(`Файл импортирован, но блокировка не освобождена: ${error.message}`, true);
+      }
+    }
+    projectModelFileImportInFlight = false;
+    if (projectId === selectedProjectId) {
+      await refreshDetail().catch(() => scheduleWorkspaceRefresh());
+      if (imported && workspaceControlLockReason() === null) setWorkspaceNavigation("geometry");
+    }
+    updateProjectModelFileImportButton();
+  }
+  if (imported) notify("Файл добавлен в дерево модели и историю проекта.");
 }
 
 async function previewFolderFile(folderName, file) {
@@ -1348,8 +1457,10 @@ async function previewProjectFile(projectId, file) {
 async function previewResourceFile(context, file) {
   if (!isCurrentFileContext(context)) return;
   selectedFolderFileName = file.name;
+  selectedFolderFileGeometry = null;
   updateFolderInspector(file);
   renderFolderFiles();
+  updateProjectModelFileImportButton();
   const request = ++previewRequest;
   $("#folder-preview-title").textContent = file.name;
   $("#folder-preview-info").textContent = formatFileSize(file.size);
@@ -1375,19 +1486,33 @@ async function previewResourceFile(context, file) {
       const error = await response.json().catch(() => ({}));
       throw new Error(apiErrorMessage(error, response.status));
     }
-    const geometry = window.CadyxPlyPreview.parse(await response.arrayBuffer());
+    let geometry;
+    try {
+      geometry = await window.CadyxPlyPreview.parseStream(response.body, {
+        maxPreviewPoints: 125_000,
+        totalBytes: file.size,
+      });
+    } catch (streamError) {
+      if (!streamError.message.includes("без граней")) throw streamError;
+      const meshResponse = await fetch(url);
+      if (!meshResponse.ok) throw streamError;
+      geometry = window.CadyxPlyPreview.parse(await meshResponse.arrayBuffer());
+    }
     if (request !== previewRequest || !isCurrentFileContext(context)) return;
+    selectedFolderFileGeometry = geometry;
     plyViewer.load(geometry, { smoothShading: Boolean(geometry.vertexNormals) });
     folderPreviewCanvas.hidden = false;
     folderPreviewPlaceholder.hidden = true;
     $("#folder-preview-info").textContent = geometry.faceCount
       ? `${formatNumber(geometry.vertexCount)} вершин · ${formatNumber(geometry.faceCount)} граней · в сцене ${formatNumber(geometry.previewFaceCount)}`
-      : `${formatNumber(geometry.vertexCount)} точек · отображается ${formatNumber(geometry.previewVertexCount)}`;
+    : `${formatNumber(geometry.vertexCount)} точек · отображается ${formatNumber(geometry.previewVertexCount)}`;
+    updateProjectModelFileImportButton();
   } catch (error) {
     if (request !== previewRequest || !isCurrentFileContext(context)) return;
     folderPreviewPlaceholder.hidden = false;
     folderPreviewPlaceholder.textContent = error.message;
     $("#folder-preview-info").textContent = "";
+    updateProjectModelFileImportButton();
   }
 }
 
@@ -1845,6 +1970,7 @@ async function refreshDetail() {
   }
   currentObjects = visibleObjects;
   renderObjectTree(visibleObjects);
+  updateProjectModelFileImportButton();
   refreshValidationRecords(projectId).catch(showValidationRecordsError);
 }
 
@@ -2234,6 +2360,10 @@ folderFileList.addEventListener("click", (event) => {
   const folderName = getSelectedFolder();
   if (folderName) previewFolderFile(folderName, file);
   else if (primaryGrid.dataset.view === "files" && canOpenFilesView()) previewProjectFile(selectedProjectId, file);
+});
+
+folderImportModelFileButton.addEventListener("click", () => {
+  importSelectedProjectModelFile();
 });
 
 const stream = new EventSource("/api/v1/events");

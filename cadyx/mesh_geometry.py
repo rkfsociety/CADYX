@@ -77,7 +77,7 @@ def point_cloud_geometry(points: Iterable[tuple[float, float, float]]) -> dict[s
         positions.extend(values)
         count += 1
         if count > _MAX_VERTICES:
-            raise ValidationError("Point cloud exceeds the supported 300000 point limit.")
+            raise ValidationError("Viewport point sample exceeds its supported size.")
     if count < 3:
         raise ValidationError("Point cloud must contain at least three points.")
     if sys.byteorder != "little":

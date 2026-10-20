@@ -13,10 +13,10 @@ from .mesh_geometry import geometry_from_native_buffer, mesh_bounds
 MAX_BYTES = 64 * 1024 * 1024
 CAPABILITIES = ({
     "type": "import_stl",
-    "description": "Read a local STL reference without changing it; preserves source coordinates and units remain unspecified.",
-    "required": ["source_path", "expected_sha256"],
-    "optional": ["name"],
-    "constraints": ["Regular non-symlink local .stl, <=64 MiB, exact source SHA-256 required. Output is a reference mesh, not an editable B-rep."],
+    "description": "Import a staged project STL or a hash-verified local STL reference without changing its source.",
+    "required": [],
+    "optional": ["file", "source_path", "expected_sha256", "name"],
+    "constraints": ["Provide file for an STL in the current project, or both source_path and expected_sha256 for an external local STL; source must be <=64 MiB. Output is a reference mesh, not an editable B-rep."],
 }, {
     "type": "set_body_visibility",
     "description": "Change body visibility without removing geometry or its references.",
@@ -115,26 +115,39 @@ def _execute(self, document, command, *, progress=None, project_id=None):
             raise ValidationError("Body was not found.")
         body["visible"] = command["visible"]
         return {"body_id": body["id"], "visible": body["visible"]}
-    value, expected = command.get("source_path"), command.get("expected_sha256")
-    if not isinstance(value, str) or not isinstance(expected, str) or len(expected) != 64:
-        raise ValidationError("STL import requires a local path and source SHA-256.")
-    source = Path(value)
-    if not source.is_absolute() or source.suffix.casefold() != ".stl" or source.is_symlink() or not source.is_file():
-        raise ValidationError("STL source must be an absolute regular non-symlink .stl file.")
-    name = command.get("name", source.stem)
+    filename = command.get("file")
+    if isinstance(filename, str):
+        if project_id is None or self.resolve_project_file is None or Path(filename).suffix.casefold() != ".stl":
+            raise ValidationError("Project STL import requires an .stl file in the current project.")
+        source = self.resolve_project_file(project_id, filename)
+        expected = None
+        source_name = filename
+        source_reference = {"project_file": filename}
+    else:
+        value, expected = command.get("source_path"), command.get("expected_sha256")
+        if not isinstance(value, str) or not isinstance(expected, str) or len(expected) != 64:
+            raise ValidationError("STL import requires a project file or a local path and source SHA-256.")
+        source = Path(value)
+        if not source.is_absolute() or source.suffix.casefold() != ".stl" or source.is_symlink() or not source.is_file():
+            raise ValidationError("STL source must be an absolute regular non-symlink .stl file.")
+        source_name = source.name
+        source_reference = {"file": source.name}
+    name = command.get("name", Path(source_name).stem)
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
         raise ValidationError("STL name must contain 1 to 120 characters.")
     if progress:
         progress({"phase": "read_source"})
     with source.open("rb") as stream:
         data = stream.read(MAX_BYTES + 1)
-    if hashlib.sha256(data).hexdigest() != expected:
+    source_hash = hashlib.sha256(data).hexdigest()
+    if expected is not None and source_hash != expected:
         raise ValidationError("STL source changed since inspection.")
     geometry, stats = parse_stl(data)
     body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+    source_reference["sha256"] = source_hash
     document.objects.extend([
         {"id": body_id, "type": "body", "name": name.strip(), "feature_ids": [feature_id], "geometry": geometry},
         {"id": feature_id, "type": "feature", "operation": "import_stl", "body_id": body_id,
-         "source": {"file": source.name, "sha256": expected}, "parameters": {}, "stats": stats},
+         "source": source_reference, "parameters": {}, "stats": stats},
     ])
     return {"body_id": body_id, "feature_id": feature_id, **stats}

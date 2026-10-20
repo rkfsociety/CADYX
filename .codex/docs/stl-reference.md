@@ -1,6 +1,8 @@
 # STL reference import
 
-`import_stl` reads a regular non-symlink local `.stl` file identified by absolute `source_path` and exact lowercase `expected_sha256`. Optional `name` controls the reference body name. This local-host command requires the normal project lease and exact revision. The file remains unchanged; saved mesh geometry is self-contained.
+`import_stl` accepts either a staged `.stl` filename in the current project or a regular non-symlink local `.stl` file identified by absolute `source_path` and exact lowercase `expected_sha256`. Optional `name` controls the reference body name. Both forms require the normal project lease and exact revision. Project imports compute and record the source hash; the file remains unchanged and saved mesh geometry is self-contained.
+
+Project-file imports resolve `file` through the current project's workspace, store the relative source filename and computed SHA-256 in feature provenance, and are available to the Files tab alongside STEP and PLY import actions.
 
 Binary STL (including headers starting with `solid`) and strict ASCII STL are supported. Inputs are limited to 64 MiB; triangle count has no separate ceiling and is bounded by source size. Non-finite coordinates, invalid structure and degenerate triangles are rejected before document mutation. Vertices are welded by exact coordinate equality; source coordinates and scale are preserved. STL does not specify physical units: results are unitless until confirmed separately.
 

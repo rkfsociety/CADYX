@@ -30,7 +30,7 @@ _MAX_PLY_BYTES = 512 * 1024 * 1024
 _MAX_PLY_HEADER_BYTES = 64 * 1024
 _MAX_PLY_VERTICES = 2_000_000
 _MAX_PLY_FACES = 5_000_000
-_MAX_POINT_CLOUD_VERTICES = 300_000
+_POINT_CLOUD_DISPLAY_SAMPLE = 125_000
 
 
 @contextmanager
@@ -154,12 +154,10 @@ def _ply_counts(path: Path) -> tuple[int, int]:
 
 
 def read_point_cloud_ply(path: str | Path) -> tuple[list[tuple[float, float, float]], str, dict[str, Any]]:
-    """Read a direct point-only PLY for persistence in the server viewport."""
+    """Read a bounded viewport sample while preserving full source provenance."""
     source = Path(path).resolve(strict=True)
     if source.suffix.casefold() != ".ply" or not source.is_file():
         raise ValidationError("Point-cloud source must be a regular PLY file.")
-    if source.stat().st_size > _MAX_PLY_BYTES:
-        raise ValidationError("PLY source exceeds the 512 MiB processing limit.", code="RESOURCE_LIMIT")
     source_hash = _sha256_file(source)
     property_types = {
         "char": "b", "int8": "b", "uchar": "B", "uint8": "B",
@@ -179,6 +177,8 @@ def read_point_cloud_ply(path: str | Path) -> tuple[list[tuple[float, float, flo
                     break
             if len(header) > _MAX_PLY_HEADER_BYTES or not header.rstrip().endswith(b"end_header"):
                 raise ValidationError("PLY header is missing, incomplete, or exceeds 64 KiB.")
+            read_digest = hashlib.sha256()
+            read_digest.update(header)
             try:
                 lines = header.decode("ascii").splitlines()
             except UnicodeDecodeError as exc:
@@ -214,24 +214,46 @@ def read_point_cloud_ply(path: str | Path) -> tuple[list[tuple[float, float, flo
             if len(elements) != 1 or elements[0][0] != "vertex":
                 raise ValidationError("Point-cloud import requires a point-only PLY with no faces or other elements.")
             _, vertex_count, properties = elements[0]
-            if not 3 <= vertex_count <= _MAX_POINT_CLOUD_VERTICES:
-                raise ValidationError("Point cloud must contain 3–300000 vertices.", code="RESOURCE_LIMIT")
+            if vertex_count < 3:
+                raise ValidationError("Point cloud must contain at least 3 vertices.")
             names = [name for name, _ in properties]
             if len(names) != len(set(names)) or not all(name in names for name in ("x", "y", "z")):
                 raise ValidationError("Point-cloud PLY must contain unique x, y and z properties.")
             xyz_indices = tuple(names.index(axis) for axis in ("x", "y", "z"))
             points: list[tuple[float, float, float]] = []
+            bounds_min = [math.inf, math.inf, math.inf]
+            bounds_max = [-math.inf, -math.inf, -math.inf]
+            bound_points: list[tuple[float, float, float] | None] = [None] * 6
+            previous_sample = -1
+
+            def record_point(index: int, point: tuple[float, float, float]) -> None:
+                nonlocal previous_sample
+                if not all(math.isfinite(value) for value in point):
+                    raise ValidationError(f"PLY vertex {index} contains a non-finite coordinate.")
+                for axis, value in enumerate(point):
+                    if value < bounds_min[axis]:
+                        bounds_min[axis] = value
+                        bound_points[axis * 2] = point
+                    if value > bounds_max[axis]:
+                        bounds_max[axis] = value
+                        bound_points[axis * 2 + 1] = point
+                sample_index = index * min(vertex_count, _POINT_CLOUD_DISPLAY_SAMPLE) // vertex_count
+                if sample_index != previous_sample:
+                    points.append(point)
+                    previous_sample = sample_index
+
             if ply_format == "ascii":
                 for index in range(vertex_count):
                     row = stream.readline()
                     if not row:
                         raise ValidationError(f"PLY ended after {index} of {vertex_count} vertices.")
+                    read_digest.update(row)
                     try:
                         fields = row.decode("ascii").split()
                         if len(fields) != len(properties):
                             raise ValueError("property count mismatch")
                         point = tuple(float(fields[column]) for column in xyz_indices)
-                        points.append(point)
+                        record_point(index, point)
                     except (UnicodeDecodeError, ValueError, IndexError) as exc:
                         raise ValidationError(f"PLY vertex {index} is malformed.") from exc
             else:
@@ -239,25 +261,34 @@ def read_point_cloud_ply(path: str | Path) -> tuple[list[tuple[float, float, flo
                 record = struct.Struct(endian + "".join(property_types[prop_type] for _, prop_type in properties))
                 if record.size * vertex_count > source.stat().st_size - len(header):
                     raise ValidationError("Binary PLY ended before all vertex records were read.")
-                for index in range(vertex_count):
-                    row = stream.read(record.size)
-                    if len(row) != record.size:
+                index = 0
+                chunk_records = max(1, 65_536 // record.size)
+                while index < vertex_count:
+                    record_count = min(chunk_records, vertex_count - index)
+                    chunk = stream.read(record.size * record_count)
+                    if len(chunk) != record.size * record_count:
                         raise ValidationError(f"PLY ended after {index} of {vertex_count} vertices.")
-                    values = record.unpack(row)
-                    point = tuple(float(values[column]) for column in xyz_indices)
-                    points.append(point)
-            for index, point in enumerate(points):
-                if not all(math.isfinite(value) for value in point):
-                    raise ValidationError(f"PLY vertex {index} contains a non-finite coordinate.")
+                    read_digest.update(chunk)
+                    for values in record.iter_unpack(chunk):
+                        point = tuple(float(values[column]) for column in xyz_indices)
+                        record_point(index, point)
+                        index += 1
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                read_digest.update(block)
     except OSError as exc:
         raise ValidationError(f"PLY source could not be read: {exc}.") from exc
-    if _sha256_file(source) != source_hash:
+    if read_digest.hexdigest() != source_hash:
         raise ValidationError("Source PLY changed while it was being read; no model change was saved.")
-    bounds = {
-        "min": [min(point[axis] for point in points) for axis in range(3)],
-        "max": [max(point[axis] for point in points) for axis in range(3)],
+    if len(points) >= 6:
+        for index, point in enumerate(bound_points):
+            if point is not None:
+                points[index] = point
+    bounds = {"min": bounds_min, "max": bounds_max}
+    return points, source_hash, {
+        "point_count": vertex_count,
+        "display_sample_count": len(points),
+        "bounds": bounds,
     }
-    return points, source_hash, {"point_count": vertex_count, "bounds": bounds}
 
 
 def _sha256_file(path: Path) -> str:
