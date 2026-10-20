@@ -1920,6 +1920,7 @@ async function refreshDetail() {
   }
   currentObjects = visibleObjects;
   renderObjectTree(visibleObjects);
+  window.dispatchEvent(new CustomEvent("cadyx:model-tree-updated", { detail: { objects: visibleObjects } }));
   updateProjectModelFileImportButton();
   refreshValidationRecords(projectId).catch(showValidationRecordsError);
 }

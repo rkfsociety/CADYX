@@ -831,15 +831,23 @@ window.addEventListener("DOMContentLoaded", () => {
   };
 
   let selectedTreeIndex = -1;
-  const renderTreeFeatures = () => {
+  const renderTreeFeatures = (event) => {
     if (!geometryRows) return;
     const query = treeSearch.value.trim().toLowerCase();
-    const rows = [...geometryRows.querySelectorAll("tr")];
+    const objects = event?.detail?.objects;
+    const rows = Array.isArray(objects)
+      ? objects.filter((item) => item.type === "body").map((body) => ({
+        body,
+        label: body.name || "Тело модели",
+        row: [...geometryRows.querySelectorAll("tr")].find((item) => item.title === body.id),
+      }))
+      : [...geometryRows.querySelectorAll("tr")].map((row) => ({
+        row,
+        label: (row.querySelector("th[scope='row']")?.textContent || row.textContent || "").replace(/\s+/g, " ").trim(),
+      }));
     featureList.replaceChildren();
     let shown = 0;
-    rows.forEach((row, index) => {
-      const nameCell = row.querySelector("th[scope='row']");
-      const label = (nameCell?.textContent || row.textContent || "").replace(/\s+/g, " ").trim();
+    rows.forEach(({ row, label }, index) => {
       if (!label || (query && !label.toLowerCase().includes(query))) return;
       const button = document.createElement("button");
       button.type = "button";
@@ -851,8 +859,8 @@ window.addEventListener("DOMContentLoaded", () => {
         selectedTreeIndex = index;
         featureList.querySelectorAll(".cad-tree-feature").forEach((item) => { item.dataset.selected = "false"; });
         button.dataset.selected = "true";
-        const target = row.querySelector("button, input, [role='button']") || row;
-        target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        const target = row?.querySelector("button, input, [role='button']") || row;
+        target?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
       featureList.appendChild(button);
       shown += 1;
@@ -860,6 +868,7 @@ window.addEventListener("DOMContentLoaded", () => {
     treeEmpty.hidden = shown > 0;
   };
   treeSearch.addEventListener("input", renderTreeFeatures);
+  window.addEventListener("cadyx:model-tree-updated", renderTreeFeatures);
   if (geometryRows) new MutationObserver(renderTreeFeatures).observe(geometryRows, { childList: true, subtree: true, characterData: true });
   renderTreeFeatures();
 
