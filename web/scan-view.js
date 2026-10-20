@@ -96,6 +96,7 @@
       }
       return {
         file: candidates[0].name,
+        size: candidates[0].size,
         url: `/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(candidates[0].name)}`,
       };
     };
@@ -104,8 +105,21 @@
       const source = await projectPointCloudUrl();
       const response = await fetcher(source.url, { cache: 'no-store' });
       if (!response.ok) throw new Error(`Не удалось открыть ${source.file} (HTTP ${response.status}).`);
-      if (!window.CadyxPlyPreview?.parse) throw new Error('Не найден PLY-парсер.');
-      const geometry = window.CadyxPlyPreview.parse(await response.arrayBuffer(), { maxPreviewPoints: 48_000 });
+      if (!window.CadyxPlyPreview?.parseStream) throw new Error('Не найден потоковый PLY-парсер.');
+      let lastProgress = -1;
+      const geometry = await window.CadyxPlyPreview.parseStream(response.body, {
+        maxPreviewPoints: 1_000_000,
+        totalBytes: source.size,
+        onProgress: (bytesRead, totalBytes) => {
+          const total = Number(totalBytes);
+          if (!Number.isFinite(total) || total <= 0) return;
+          const percent = Math.min(99, Math.floor(bytesRead / total * 100));
+          if (percent > lastProgress) {
+            lastProgress = percent;
+            cloudButton.title = `Чтение облака точек: ${percent}%`;
+          }
+        },
+      });
       if (geometry.faceCount > 0) throw new Error(`${source.file} содержит сетку, а не облако точек.`);
       const count = geometry.previewVertexCount ?? geometry.positions.length / 3;
       return {
@@ -324,7 +338,10 @@
       cloudPreviewOpen = open;
       if (!open) { restoreModel(); updateButton(); return; }
       updateButton();
-      try { await loadCloud({ reset: renderedCloudSource !== cloudSource }); }
+      try {
+        await loadCloud({ reset: renderedCloudSource !== cloudSource });
+        updateButton();
+      }
       catch (error) { cloudPreviewOpen = false; restoreModel(); updateButton(); cloudButton.title = error.message; }
     };
     const showMesh = (open = true) => {

@@ -1,7 +1,7 @@
 (() => {
   const MAX_PREVIEW_FACES = 36_000;
   const MAX_PREVIEW_POINTS = 24_000;
-  const MAX_CUSTOM_PREVIEW_POINTS = 100_000;
+  const MAX_CUSTOM_PREVIEW_POINTS = 1_000_000;
   const asciiDecoder = new TextDecoder("ascii");
   const scalarTypes = {
     char: { size: 1, read: (view, offset) => view.getInt8(offset) },
@@ -608,5 +608,175 @@
     };
   }
 
-  window.CadyxPlyPreview = { parse: parsePly };
+  function findPlyDataOffset(bytes) {
+    const text = asciiDecoder.decode(bytes);
+    let lineStart = 0;
+    while (lineStart < text.length) {
+      const lineEnd = text.indexOf("\n", lineStart);
+      if (lineEnd < 0) return -1;
+      const line = text.slice(lineStart, lineEnd).replace(/\r$/, "").trim();
+      if (line === "end_header") return lineEnd + 1;
+      lineStart = lineEnd + 1;
+    }
+    return -1;
+  }
+
+  async function parsePlyStream(stream, options = {}) {
+    if (!stream?.getReader) throw new Error("Потоковое чтение PLY недоступно.");
+    const maxPreviewPoints = options?.maxPreviewPoints ?? MAX_PREVIEW_POINTS;
+    if (!Number.isSafeInteger(maxPreviewPoints) || maxPreviewPoints < 1
+        || maxPreviewPoints > MAX_CUSTOM_PREVIEW_POINTS) {
+      throw new Error(`Число точек предпросмотра должно быть от 1 до ${MAX_CUSTOM_PREVIEW_POINTS}.`);
+    }
+    const reader = stream.getReader();
+    let headerBytes = new Uint8Array(0);
+    let initialData = new Uint8Array(0);
+    let bytesRead = 0;
+    try {
+      let header = null;
+      while (!header) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error("Данные PLY обрезаны до конца заголовка.");
+        const joined = new Uint8Array(headerBytes.length + value.length);
+        joined.set(headerBytes);
+        joined.set(value, headerBytes.length);
+        const dataOffset = findPlyDataOffset(joined);
+        if (dataOffset >= 0) {
+          if (dataOffset > 65_536) throw new Error("Заголовок PLY слишком длинный.");
+          headerBytes = joined.subarray(0, dataOffset);
+          initialData = joined.subarray(dataOffset);
+          header = parseHeader(headerBytes);
+          bytesRead = joined.length;
+        } else {
+          if (joined.length >= 65_536) throw new Error("Заголовок PLY слишком длинный.");
+          headerBytes = joined;
+        }
+      }
+
+      const { vertex, face, format, littleEndian } = header;
+      if (vertex.count === 0) throw new Error("В PLY нет вершин для предпросмотра.");
+      if (face && face.count > 0) throw new Error("Для облака точек нужен PLY без граней.");
+      if (vertex.properties.some(property => property.list || !scalarTypes[property.type])) {
+        throw new Error("Списки свойств вершин PLY не поддерживаются.");
+      }
+
+      const offsets = {};
+      let stride = 0;
+      for (const property of vertex.properties) {
+        offsets[property.name] = { offset: stride, type: property.type };
+        stride += scalarTypes[property.type].size;
+      }
+      const coordinates = ["x", "y", "z"].map(name => offsets[name]);
+      if (coordinates.some(value => !value)) throw new Error("У вершин PLY должны быть координаты x, y, z.");
+
+      const previewVertexCount = Math.min(vertex.count, maxPreviewPoints);
+      const sampleStride = vertex.count / previewVertexCount;
+      const positions = new Float32Array(previewVertexCount * 3);
+      const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+      let vertexIndex = 0;
+      let nextSample = 0;
+      const saveVertex = (x, y, z) => {
+        const point = [x, y, z];
+        if (!point.every(Number.isFinite)) throw new Error("В PLY найдены некорректные координаты.");
+        const previewOffset = nextSample * 3;
+        if (nextSample < previewVertexCount && vertexIndex >= Math.floor(nextSample * sampleStride)) {
+          for (let axis = 0; axis < 3; axis += 1) {
+            const value = Math.fround(point[axis]);
+            if (!Number.isFinite(value)) throw new Error("Координаты PLY слишком велики для предпросмотра.");
+            positions[previewOffset + axis] = value;
+          }
+          nextSample += 1;
+        }
+        for (let axis = 0; axis < 3; axis += 1) {
+          bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
+          bounds.max[axis] = Math.max(bounds.max[axis], point[axis]);
+        }
+        vertexIndex += 1;
+      };
+      const reportProgress = () => options?.onProgress?.(bytesRead, options.totalBytes);
+
+      if (format === "ascii") {
+        const decoder = new TextDecoder("ascii");
+        let pending = decoder.decode(initialData, { stream: true });
+        const coordinateColumns = ["x", "y", "z"].map(name => vertex.properties.findIndex(property => property.name === name));
+        const consumeLines = (flush = false) => {
+          let lineStart = 0;
+          while (vertexIndex < vertex.count) {
+            const lineEnd = pending.indexOf("\n", lineStart);
+            if (lineEnd < 0) break;
+            const line = pending.slice(lineStart, lineEnd).replace(/\r$/, "").trim();
+            lineStart = lineEnd + 1;
+            if (!line) continue;
+            const fields = line.split(/\s+/);
+            if (fields.length !== vertex.properties.length) throw new Error("Некорректная строка вершин PLY.");
+            saveVertex(...coordinateColumns.map(column => Number(fields[column])));
+          }
+          if (flush && vertexIndex < vertex.count && pending.trim()) {
+            const fields = pending.trim().split(/\s+/);
+            if (fields.length !== vertex.properties.length) throw new Error("Некорректная строка вершин PLY.");
+            saveVertex(...coordinateColumns.map(column => Number(fields[column])));
+            pending = "";
+          } else {
+            pending = pending.slice(lineStart);
+          }
+        };
+        consumeLines();
+        reportProgress();
+        while (vertexIndex < vertex.count) {
+          const { value, done } = await reader.read();
+          if (done) {
+            pending += decoder.decode();
+            consumeLines(true);
+            break;
+          }
+          bytesRead += value.length;
+          pending += decoder.decode(value, { stream: true });
+          consumeLines();
+          reportProgress();
+        }
+      } else {
+        let pending = initialData;
+        const dataViewFor = buffer => new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        while (vertexIndex < vertex.count) {
+          if (pending.length < stride) {
+            const { value, done } = await reader.read();
+            if (done) throw new Error("Данные вершин PLY обрезаны.");
+            const joined = new Uint8Array(pending.length + value.length);
+            joined.set(pending);
+            joined.set(value, pending.length);
+            pending = joined;
+            bytesRead += value.length;
+          }
+          const available = Math.min(Math.floor(pending.length / stride), vertex.count - vertexIndex);
+          if (!available) continue;
+          const view = dataViewFor(pending);
+          for (let record = 0; record < available; record += 1) {
+            const base = record * stride;
+            saveVertex(...coordinates.map(property => scalarTypes[property.type].read(view, base + property.offset, littleEndian)));
+          }
+          pending = pending.subarray(available * stride);
+          reportProgress();
+        }
+      }
+
+      if (vertexIndex !== vertex.count || nextSample !== previewVertexCount) throw new Error("Данные вершин PLY обрезаны.");
+      await reader.cancel().catch(() => {});
+      return {
+        positions,
+        colors: null,
+        vertexNormals: null,
+        triangleColors: null,
+        triangles: new Uint32Array(0),
+        bounds,
+        vertexCount: vertex.count,
+        previewVertexCount,
+        faceCount: 0,
+        previewFaceCount: 0,
+      };
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  window.CadyxPlyPreview = { parse: parsePly, parseStream: parsePlyStream };
 })();
