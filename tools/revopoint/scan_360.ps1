@@ -6,7 +6,9 @@ param(
 
     [string]$CalibrationFile = '',
 
-    [string]$RunId = ''
+    [string]$RunId = '',
+
+    [switch]$ManifestOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,10 +55,18 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
 }
 $projectCalibration = Join-Path $ProjectPath "${runPrefix}_Q.bin"
 $projectDepthScale = Join-Path $ProjectPath "${runPrefix}_depth_scale.json"
-if (Test-Path -LiteralPath $projectCalibration) { throw "Calibration copy already exists: $projectCalibration" }
-if (Test-Path -LiteralPath $projectDepthScale) { throw "Depth-scale copy already exists: $projectDepthScale" }
-Copy-Item -LiteralPath $CalibrationFile -Destination $projectCalibration
-Copy-Item -LiteralPath $depthScaleConfig -Destination $projectDepthScale
+if ($ManifestOnly) {
+    foreach ($path in @($projectCalibration, $projectDepthScale)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Manifest-only repair requires the existing scan input copy: $path"
+        }
+    }
+} else {
+    if (Test-Path -LiteralPath $projectCalibration) { throw "Calibration copy already exists: $projectCalibration" }
+    if (Test-Path -LiteralPath $projectDepthScale) { throw "Depth-scale copy already exists: $projectDepthScale" }
+    Copy-Item -LiteralPath $CalibrationFile -Destination $projectCalibration
+    Copy-Item -LiteralPath $depthScaleConfig -Destination $projectDepthScale
+}
 
 function Invoke-Turntable {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
@@ -81,6 +91,78 @@ function Read-ReportedAngle {
 $poseLog = Join-Path $ProjectPath "${runPrefix}_poses.csv"
 $prefix = Join-Path $ProjectPath $runPrefix
 $liveRaw = Join-Path $workspaceRoot '.revopoint-live.raw'
+if ($ManifestOnly) {
+    if (-not (Test-Path -LiteralPath $poseLog -PathType Leaf)) {
+        throw "Manifest-only repair requires the existing pose log: $poseLog"
+    }
+    $manifestPath = Join-Path $ProjectPath "${runPrefix}_scan_360.json"
+    if (Test-Path -LiteralPath $manifestPath) {
+        throw "Manifest already exists; refusing to overwrite: $manifestPath"
+    }
+    $rows = @(Import-Csv -LiteralPath $poseLog)
+    $captures = @($rows | Where-Object { $_.event -eq 'capture_completed' } | Sort-Object { [int]$_.step_index })
+    if ($captures.Count -ne 12) {
+        throw "Manifest-only repair requires 12 completed stationary captures; found $($captures.Count)."
+    }
+    $baseline = $rows | Where-Object { $_.event -eq 'baseline' } | Select-Object -First 1
+    $finalPose = $rows | Where-Object { $_.event -eq 'target_reached' -and [int]$_.step_index -eq 12 } | Select-Object -Last 1
+    if (-not $baseline -or -not $finalPose) {
+        throw 'Pose log has no starting angle or final full-turn pose; no manifest was written.'
+    }
+    $startAngle = [double]::Parse([string]$baseline.angle_degrees, [Globalization.CultureInfo]::InvariantCulture)
+    $finalAngle = [double]::Parse([string]$finalPose.angle_degrees, [Globalization.CultureInfo]::InvariantCulture)
+    $closureDelta = [math]::IEEERemainder($finalAngle - $startAngle, 360.0)
+    if ([math]::Abs($closureDelta) -gt 1.0) {
+        throw "Pose log does not return to the starting angle (closure error $closureDelta degrees)."
+    }
+    foreach ($row in $rows) {
+        if ([string]::IsNullOrWhiteSpace([string]$row.tilt_degrees)) { continue }
+        $tilt = [double]::Parse([string]$row.tilt_degrees, [Globalization.CultureInfo]::InvariantCulture)
+        if ([math]::Abs($tilt) -gt 0.5) {
+            throw "Pose log contains nonzero tilt ($tilt degrees); no manifest was written."
+        }
+    }
+    $frames = @()
+    foreach ($capture in $captures) {
+        $prefixName = [IO.Path]::GetFileName([string]$capture.command)
+        foreach ($extension in @('.raw', '.ply', '.json')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $ProjectPath ($prefixName + $extension)) -PathType Leaf)) {
+                throw "Capture $($capture.step_index) is missing $($prefixName + $extension); no manifest was written."
+            }
+        }
+        $frames += [pscustomobject]@{
+            index = [int]$capture.step_index
+            commanded_angle_degrees = [int]$capture.step_index * 30
+            reported_angle_degrees = [double]::Parse([string]$capture.angle_degrees, [Globalization.CultureInfo]::InvariantCulture)
+            tilt_degrees = [double]::Parse([string]$capture.tilt_degrees, [Globalization.CultureInfo]::InvariantCulture)
+            raw_file = "$prefixName.raw"
+            ply_file = "$prefixName.ply"
+            metadata_file = "$prefixName.json"
+        }
+    }
+    $manifest = [ordered]@{
+        format = 'revopoint-y16-turntable-capture-v2'
+        frame_count = $frames.Count
+        step_degrees = 30
+        table_tilt_degrees = 0
+        starting_position_preserved = $true
+        starting_table_angle_degrees = $startAngle
+        final_table_angle_degrees = $finalAngle
+        full_turn_closure_error_degrees = $closureDelta
+        projection_method = 'Q_ray_scaled_to_depth'
+        depth_scale_mm_per_raw_unit = $DepthScale
+        depth_scale_status = 'provisional_for_direct_UVC'
+        calibration_file = [IO.Path]::GetFileName($projectCalibration)
+        depth_scale_config = [IO.Path]::GetFileName($projectDepthScale)
+        poses_file = [IO.Path]::GetFileName($poseLog)
+        frame_registration = 'not_performed'
+        frames = $frames
+    }
+    $manifestJson = $manifest | ConvertTo-Json -Depth 6
+    [IO.File]::WriteAllText($manifestPath, $manifestJson, [Text.UTF8Encoding]::new($false))
+    Write-Host "Rebuilt 360 scan manifest from the verified pose log; the table and scanner were not started."
+    return
+}
 $complete = $false
 try {
     Invoke-Turntable -Arguments @(

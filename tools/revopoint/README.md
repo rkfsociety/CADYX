@@ -224,7 +224,27 @@ Secure the object to the turntable, keep the scanner fixed, close Revo Scan, and
 .\tools\revopoint\scan_360.ps1 -ProjectPath 'projects\<existing CADYX project folder>' -DepthScale 0.005
 ```
 
-The script operates inside the supplied existing CADYX project; it does not create another project. The project viewport's **Сканировать 360°** button starts a capture at the table's current angle, captures twelve stationary poses at 30° intervals, and verifies that the full turn returns to that starting angle. It requires the table to already be level and never sends a tilt or home command. Each capture updates the CADYX live preview with the latest single frame; registration and fusion happen after capture. Raw frames, per-frame provisional PLY, calibration copies, pose log, and manifest are saved in the project. The table center/axis, direct UVC depth mapping, and absolute scale still need validation before the views can form a trustworthy complete cloud.
+The script operates inside the supplied existing CADYX project; it does not create another project. The project viewport's **Сканировать 360°** button starts a capture at the table's current angle, captures twelve stationary poses at 30° intervals, and verifies that the full turn returns to that starting angle. It requires the table to already be level and never sends a tilt or home command. `CaptureY16` captures one frame and exits before the next table move; the preview displays the most recent saved frame rather than fusing moving video. Raw frames, per-frame provisional PLY, calibration copies, pose log, and manifest are saved in the project. Direct UVC scale remains provisional.
+
+If all twelve frames exist but manifest creation failed, rebuild only that metadata from the saved pose log with `-ManifestOnly -RunId revopoint_<UTC run id>`. This mode verifies all capture files, level tilt and return-to-start telemetry, then writes the manifest without starting the scanner or table.
+
+## Register a turntable scan by geometry in the first-frame coordinate system
+
+This optional offline tool does not use the turntable encoder, a table axis, or a guessed pivot to align point clouds. It computes FPFH descriptors, initializes each geometric pair with RANSAC, refines with robust point-to-plane ICP, then optimizes adjacent and first-frame loop-closure constraints in an Open3D pose graph. It downsamples and keeps the largest connected point-cloud component. The output remains a point-only PLY; no mesh is built. Open3D documents global feature registration and multiway pose-graph registration in its [global registration guide](https://www.open3d.org/docs/latest/tutorial/pipelines/global_registration.html) and [multiway registration guide](https://open3d.org/docs/latest/tutorial/pipelines/multiway_registration.html).
+
+Use an optional virtual environment so the app runtime stays separate from scan processing:
+
+```powershell
+python -m venv .runtime\scan-reconstruction\venv
+& .\.runtime\scan-reconstruction\venv\Scripts\python.exe -m pip install -r tools\revopoint\requirements-point-registration.txt
+$runId = 'revopoint_<YYYYMMDDTHHMMSSZ>'
+$project = 'projects\<existing CADYX project folder>'
+$output = ".runtime\scan-reconstruction\${runId}_first_frame_geometric_candidate.ply"
+& .\.runtime\scan-reconstruction\venv\Scripts\python.exe `
+    tools\revopoint\register_point_clouds_first_frame.py $project $runId $output
+```
+
+Review the JSON sidecar before publishing the candidate. Check each adjacent direct-overlap fraction, last-to-first overlap, dominant-component fraction, bounds, and the residual local correction. Keep the status provisional if these disagree or are weak. Physical scale remains unverified until checked against a known length. The staging script writes outside the CADYX project and refuses to overwrite outputs; after review, publish the PLY into the same project with `cadyx_upload_project_scan` through the Agent API. Preserve all captured source frames.
 
 ## Multi-tilt capture and registration status
 
