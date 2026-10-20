@@ -127,7 +127,7 @@ const projectDateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium"
 let projects = [];
 let projectRouteSlugSource = null;
 let projectRouteSlugCache = new Map();
-let projectSort = "name";
+let projectSort = "modified-desc";
 let projectsRenderSignature = null;
 let projectGroups = [];
 let folders = [];
@@ -1056,7 +1056,7 @@ function renderProjects() {
     projectSort,
     $("#projects-search").value.trim().toLocaleLowerCase("ru-RU"),
     projectGroups.map(({ id, name }) => [id, name]),
-    projects.map((entry) => [entry.project.id, entry.project.name, entry.group_id,
+    projects.map((entry) => [entry.project.id, entry.project.name, entry.project.modified_at, entry.group_id,
       entry.project.id === selectedProjectId, canSelectProject(entry.project.id)]),
   ]);
   if (signature === projectsRenderSignature) {
