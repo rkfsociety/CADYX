@@ -96,4 +96,10 @@ feature-face-based mate references, cross-parent mates, motion sweeps,
 dynamic simulation, globally fixed world anchor, unit conversion,
 collision/clearance proof or human browser editing. Source-only regression
 coverage is present; local execution was deliberately skipped and platform
-CI/native compatibility remains unverified.
+CI/native compatibility remains unverified for the original introduction.
+
+**Subsequent additions:** Document [v11](document-model-v11.md) adds source-part
+material assignment; separate [mass/inertia](../../docs/assembly-mass.md) and
+[discrete-pose interference checking](../../docs/assembly-fit.md) are available
+through revision-bound read-only validation. The mate solver itself still does
+not perform a continuous contact/collision sweep.

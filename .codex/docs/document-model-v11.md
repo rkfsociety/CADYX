@@ -32,7 +32,7 @@ valid.
 `density_kg_m3`, and provenance `source`. CADYX does not infer material or
 density. Assembly mass properties require assigned material data and report
 mass in kilograms from mm-based geometry. See [assembly mass properties and
-materials](model-specifications.md).
+materials](../../docs/assembly-mass.md).
 
 The v10 mate and rigid-kinematics contract is in
 [Document Model v10](document-model-v10.md). Base features and scan import

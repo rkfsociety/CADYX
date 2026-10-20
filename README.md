@@ -75,9 +75,13 @@ $node = ".\.runtime\node-v$nodeVersion-win-x64\node.exe"
 & $node tests/test_ply_preview.cjs
 ```
 
+## Documentation
+
+Start with the [documentation map](docs/README.md) for current contracts, versioned schema history, operator workflows, and verification boundaries. The project envelope is v1 and the **current document schema is v12** (`cadyx/migrations.py`); older `document-model-v*.md` contracts describe the features introduced in each version, not necessarily the current limitations. API command/route discovery is available from `GET /api/v1/agent/capabilities`.
+
 ## Architecture
 
-See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/project-format-v1.md](.codex/docs/project-format-v1.md), [.codex/docs/document-model-v7.md](.codex/docs/document-model-v7.md), and [.codex/roadmap.md](.codex/roadmap.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, durable per-project SQLite edit leases, a shared command system, and an Open CASCADE geometry-kernel adapter. Editable OCCT B-reps include boxes, sketch extrusions and revolutions, path sweeps, Boolean fuses, edge fillets, imported single-solid STEP models, localized thread resizing, and rigid imported-body transforms. Reconstructed scans are validated triangle meshes rather than B-reps; direct point-cloud imports remain point-only CAD scene objects. Native kernel objects are never stored in project files. The JSON APIs support XY/XZ sketches with stable point/line/circle/spline references, exact analytic ellipses and elliptical arcs, checked constraints, and linked solid features. Agents use the Agent API to create and edit models. The read-only browser displays supported bodies and sketch elements through the shared [viewport contract](.codex/docs/viewport-api.md), and previews PLY files using the same renderer.
+See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/project-format-v1.md](.codex/docs/project-format-v1.md), [.codex/docs/document-model-v7.md](.codex/docs/document-model-v7.md), and [.codex/roadmap.md](.codex/roadmap.md). The foundation uses a Python Core and stdlib HTTP API, a browser-native interface, atomic `project.json` saves, durable per-project SQLite edit leases, a shared command system, and an Open CASCADE geometry-kernel adapter. Editable OCCT B-reps include boxes, sketch extrusions and revolutions, path sweeps, Boolean fuses, edge fillets, imported single-solid STEP models, localized thread resizing, and rigid imported-body transforms. Reconstructed scans are validated triangle meshes rather than B-reps; direct point-cloud imports remain point-only CAD scene objects. Native kernel objects are never stored in project files. The JSON APIs support XY/XZ/YZ sketches, plus explicit custom and face-attached work planes with stable point/line/circle/spline references, exact analytic ellipses and elliptical arcs, checked constraints, and linked solid features. Agents use the Agent API to create and edit models. The read-only browser displays supported bodies and sketch elements through the shared [viewport contract](.codex/docs/viewport-api.md), and previews PLY files using the same renderer.
 
 ## API starting points
 
@@ -97,6 +101,7 @@ See [.codex/docs/architecture.md](.codex/docs/architecture.md), [.codex/docs/pro
 - Agent equivalents under `/api/v1/agent/projects`
 - `extrude_sketch`, `revolve_sketch`, `sweep_sketch`, `fuse_bodies`, `cut_bodies`, and `fillet_edges` commands for editable OCCT solids; see the [feature contract](.codex/docs/document-model-v7.md#sketch-driven-solid-features)
 - Document Model v12 adds persisted YZ, arbitrary and face-attached sketch work planes through `create_sketch` and `set_sketch_workplane`; see [work-plane contract](docs/sketch-workplanes.md).
+- A staged point-only project PLY can be imported with `import_project_point_cloud` as a persistent, point-only scene body, without Open3D surface reconstruction or an implied physical scale. Mesh-only scan section and alignment commands still need a triangle-mesh reference; see the [scan reverse-engineering contract](.codex/docs/scan-reverse-engineering.md).
 - Document Model v8 adds `create_model_parameters`, `bind_model_parameters`, and atomic `set_model_parameter` rebuilds; Geometry displays the named values. See the [parameter contract](.codex/docs/document-model-v8.md).
 - `fillet_edges` can round multiple compatible edges in one feature; `merge_consecutive_fillet_features` can safely consolidate a same-radius linear fillet chain while rebuilding dependents. See [Document Model v8](.codex/docs/document-model-v8.md#rebuilding-topology-selected-edge-features).
 - `insert_fillet_before_feature` inserts a boss-root fillet before a downstream pocket and atomically reorders/rebuilds the editable feature chain; see [Document Model v8](.codex/docs/document-model-v8.md#rebuilding-topology-selected-edge-features).
@@ -183,25 +188,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for environment prerequisites, checks, an
 CADYX is licensed under the [MIT License](LICENSE). Third-party software downloaded by the setup scripts remains under its own license terms.
 
 
-## Versioned assemblies — Document Model v9
+## Versioned assemblies — Document Models v9–v11
 
-The leased Agent API command route and `cadyx_execute_command` now accept
-`create_assembly_part`, `create_subassembly`, `add_assembly_instance`,
-`transform_assembly_instance`, `remove_assembly_instance`, and
-`remove_assembly_component`. Each part references an editable body in the same
-project. Nested instances apply independent rigid XYZ/quaternion placements
-without duplicating saved B-reps. The passive shared viewport shows placed
-occurrences. Units are explicitly mm; cross-project part links, joints/mates,
-other-unit conversion, and assembly STEP export are not yet implemented.
-Existing document v8 snapshots migrate read-only to v9. See
-[the assembly contract](.codex/docs/document-model-v9.md).
+Document v9 introduced editable in-project part definitions, nested subassemblies and rigid XYZ/quaternion placement instances, rendered as placed occurrences without duplicating saved B-reps. Document v10 added explicit sibling-instance mates (`add_assembly_mate`, `set_assembly_mate`, `remove_assembly_mate`, `solve_assembly_mates`) with caller-invoked rigid kinematic solving. Document v11 added explicit material assignment (`set_assembly_part_material`) and revision-bound read-only mass/center-of-mass/inertia measurements. Legacy documents migrate in memory to the current v12 model and are persisted on a successful leased command.
 
-The local MCP adapter executes ordinary agent commands through one
-`POST /api/v1/agent/projects/{id}/commands/execute` request. Core acquires and
-releases the lease around the revision-checked command and returns a compact
-receipt; the normal MCP inspection tool reads the compact summary endpoint,
-while `cadyx_inspect_project_full` remains available for full geometry/history.
+Assembly geometry is millimeter-based. The [assembly graph](.codex/docs/document-model-v9.md), [mate constraints](.codex/docs/document-model-v10.md), [material schema](.codex/docs/document-model-v11.md), [mass properties](docs/assembly-mass.md), and [sampled interference/fit checks](docs/assembly-fit.md) document the separate contracts. Assembly fit checks evaluate **explicit discrete poses**, not continuous collision-free motion. Cross-project assembly links, general unit conversion, continuous dynamics and assembly STEP export remain outside the implemented scope.
 
+The local MCP adapter executes ordinary commands through one `POST /api/v1/agent/projects/{id}/commands/execute` request, acquiring and releasing a server-managed lease around the exact-revision command. Its default project inspection is compact; `cadyx_inspect_project_full` retrieves complete geometry and history when necessary. Use `GET /api/v1/agent/projects/{id}/inspection` for bounded, paged reads.
 
 ## Standard-part catalog (initial built-in presets)
 

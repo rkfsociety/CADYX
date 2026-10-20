@@ -4,7 +4,7 @@ This contract extends the Document Model v7 scan workflow from reconstructed tri
 
 ## Scope and evidence
 
-`import_scan` remains the ingestion step. A PLY point cloud is cleaned and reconstructed by the Open3D CPU bridge; a PLY triangle mesh is cleaned/simplified. The result remains `cadyx-mesh-v1`, not a B-rep. Reverse-engineering commands use that validated mesh as reference data and create ordinary editable sketches that can feed existing OCCT features.
+For mesh-based reverse engineering, `import_scan` (workspace PLY) or `import_project_scan` (staged project PLY) produces a validated `cadyx-mesh-v1` **triangle mesh** using the Open3D CPU bridge (point-cloud reconstruction or triangle-mesh cleanup). A separate `import_project_point_cloud` command stores a staged **point-only PLY** as a persistent point-cloud body without reconstruction, preserving points and source coordinate scale. The point-only result is inspectable/renderable but **does not supply triangles** to `align_scan`, scan-section extraction or body-to-scan comparison. For those workflows, reconstruct a triangle mesh first. Neither import yields an editable OCCT B-rep; mesh-based reverse-engineering commands create editable sketches that can feed ordinary solid features.
 
 CADYX never infers physical units from PLY coordinates. `align_scan` records explicit units and a numeric scale supplied by the agent/user. A model built from those scan-derived sketches inherits the resulting coordinate scale by construction; the document schema itself remains unitless.
 

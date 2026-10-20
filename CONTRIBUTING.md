@@ -1,6 +1,6 @@
 # Contributing to CADYX
 
-CADYX is an AI-first CAD development prototype, currently verified on **Windows x64**. Before making changes, read [AGENTS.md](AGENTS.md), [`.codex/rules.md`](.codex/rules.md), the relevant architecture documents, and the existing tests.
+CADYX is an AI-first CAD development prototype, currently verified on **Windows x64**. Before making changes, read [AGENTS.md](AGENTS.md), [`.codex/rules.md`](.codex/rules.md), the [documentation map](docs/README.md), the relevant architecture documents, and the existing tests.
 
 ## Set up and verify
 
@@ -30,6 +30,7 @@ The Node browser tests and complete Windows verification steps are defined in [`
 - Keep geometry, saved document state, and command history revision-consistent and validate edits atomically.
 - Use the repository's reviewed runtime locks and verify official stable releases before changing dependency versions.
 - Add targeted regression coverage and update authoritative contracts when behavior changes; never suppress failures by weakening a baseline.
+- Document current behavior in topic-specific guides and the current-schema map, without rewriting historical version contracts as if older schemas were current. Verify API/command names against `cadyx/web_routes.py`, `cadyx/capabilities.py`, and `cadyx/migrations.py`.
 - Keep actual project models, scans, credentials and generated runtime files out of Git.
 
 ## Proposing changes
