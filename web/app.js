@@ -168,7 +168,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     function modelGroups(){
       const features=state.objects.filter(o=>o.type==='feature'),byBody=new Map(features.map(feature=>[feature.body_id,feature])),consumed=new Set();
       for(const feature of features)for(const id of [feature.source_body_id,feature.base_body_id,feature.tool_body_id])if(id)consumed.add(id);
-      const roots=state.objects.filter(body=>body.type==='body'&&!consumed.has(body.id)&&byBody.has(body.id)&&byBody.get(body.id).operation!=='import_stl');
+      const roots=state.objects.filter(body=>body.type==='body'&&!consumed.has(body.id)&&byBody.has(body.id));
       return roots.map(body=>{const included=new Set();const visit=id=>{if(!id||included.has(id))return;included.add(id);const feature=byBody.get(id);if(!feature)return;visit(feature.source_body_id);visit(feature.base_body_id);visit(feature.tool_body_id)};visit(body.id);return{body,features:features.filter(feature=>included.has(feature.body_id))}});
     }
     function renderTree(){
@@ -435,9 +435,11 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const projectId=()=>window.cadyxSelectedProjectId?.();
       const showCapturePreview=(scan,options)=>scanView?.showCapture(scan,options);
       const pollScan=async id=>{
+        if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
         try{
           const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{cache:'no-store'});
           const payload=await response.json();
+          if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
           if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось получить статус съёмки');
           const scan=payload.scan;
           const captureStarted=scan.state==='running'&&!scanWasRunning;
@@ -471,6 +473,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         try{
           const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
           const payload=await response.json();
+          if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
           if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось запустить сканирование');
           showCapturePreview(payload.scan,{open:true});
           scanWasRunning=payload.scan.state==='running';
@@ -483,7 +486,14 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       });
       waitForProjectId();
     }
-    async function refresh(){const id=window.cadyxSelectedProjectId?.()||new URLSearchParams(location.search).get('project_id');if(!id||detail.hidden)return;try{const [info,scene]=await Promise.all([fetch(`/api/v1/projects/${encodeURIComponent(id)}`,{cache:'no-store'}).then(r=>r.json()),fetch(`/api/v1/projects/${encodeURIComponent(id)}/viewport`,{cache:'no-store'}).then(r=>r.json())]);if(scene.revision!==info.document.revision)return;const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};state.bindings=info.document.parameter_bindings||[];state.assembly=info.document.assembly||null;state.byId=new Map(state.objects.map(o=>[o.id,o]));state.scene=scene;makeLabels();if(projectChanged||(state.selected&&!state.byId.has(state.selected))){clearSelection();return}renderTree();state.selected?select(state.selected):renderProps(null);syncOverlay()}catch(e){console.debug('CAD semantic refresh',e)}}
+    let semanticRequest = 0;
+    const semanticProjectId = () => window.cadyxSelectedProjectId?.() || new URLSearchParams(location.search).get('project_id');
+    async function semanticJson(url) {
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
+      return response.json();
+    }
+    async function refresh(){const request=++semanticRequest;const id=semanticProjectId();if(!id||detail.hidden)return;try{const [info,scene]=await Promise.all([semanticJson(`/api/v1/projects/${encodeURIComponent(id)}`),semanticJson(`/api/v1/projects/${encodeURIComponent(id)}/viewport`)]);if(request!==semanticRequest||id!==semanticProjectId()||detail.hidden)return;if(scene.revision!==info.document.revision){schedule();return}const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};state.bindings=info.document.parameter_bindings||[];state.assembly=info.document.assembly||null;state.byId=new Map(state.objects.map(o=>[o.id,o]));state.scene=scene;makeLabels();if(projectChanged||(state.selected&&!state.byId.has(state.selected))){clearSelection();return}renderTree();state.selected?select(state.selected):renderProps(null);syncOverlay()}catch(e){console.debug('CAD semantic refresh',e)}}
     let timer;const schedule=()=>{clearTimeout(timer);timer=setTimeout(refresh,80)};['#document-revision','#document-title'].forEach(s=>{const e=$(s);if(e)new MutationObserver(schedule).observe(e,{childList:true,subtree:true,characterData:true})});new MutationObserver(schedule).observe(detail,{attributes:true,attributeFilter:['hidden']});schedule();setTimeout(refresh,600);
   }
   const boot=()=>setTimeout(enhance,0);if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();

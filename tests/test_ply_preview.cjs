@@ -55,7 +55,7 @@ browserSandbox.window.setTimeout = (callback) => {
   return timers.length;
 };
 browserSandbox.window.fetch = async () => { throw new Error("unexpected fetch"); };
-for (const filename of ["browser-api.js", "viewport-helpers.js", "browser-state.js", "browser-viewers.js"]) {
+for (const filename of ["trace-draft.js", "browser-api.js", "viewport-helpers.js", "browser-state.js", "browser-viewers.js"]) {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, `../web/${filename}`), "utf8"), browserSandbox);
 }
 
