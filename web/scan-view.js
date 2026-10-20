@@ -164,10 +164,7 @@
         }
       }
       if (sample.length < 12) throw new Error('Недостаточно точек для определения плоскости стола.');
-      const depths = sample.map(point => point[2]).sort((a, b) => a - b);
-      const tableDepthCutoff = depths[Math.min(depths.length - 1, Math.floor(depths.length * 0.3))];
-      const tableSample = sample.filter(point => point[2] <= tableDepthCutoff);
-      const planeSample = tableSample.length >= 12 ? tableSample : sample;
+      const planeSample = sample;
       let best = null, bestCount = 0;
       let seed = 0x6d2b79f5;
       const randomIndex = () => {
@@ -185,8 +182,14 @@
         normal = normal.map(value => value / length);
         const d = -(normal[0] * a[0] + normal[1] * a[1] + normal[2] * a[2]);
         let count = 0;
-        for (const point of planeSample) if (Math.abs(normal[0] * point[0] + normal[1] * point[1] + normal[2] * point[2] + d) <= 2.5) count += 1;
-        if (count > bestCount) { bestCount = count; best = { normal, d }; }
+        const occupied = new Set();
+        for (const point of planeSample) if (Math.abs(normal[0] * point[0] + normal[1] * point[1] + normal[2] * point[2] + d) <= 2.5) {
+          count += 1;
+          occupied.add(point.map(value => Math.floor(value / 10)).join(','));
+        }
+        // Distributed table markers must outweigh a dense patch on the object.
+        const score = occupied.size;
+        if (count >= 12 && (!best || score > best.score)) { bestCount = count; best = { normal, d, score }; }
       }
       if (!best || bestCount < Math.max(6, planeSample.length * 0.1)) throw new Error('Не удалось надёжно определить плоскость стола в лайв-кадре.');
       let inliers = [];
