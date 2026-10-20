@@ -145,7 +145,7 @@
           <button id="cloud-mode" type="button" aria-pressed="true">3D-ТОЧКИ</button>
         </div>
       </div>
-      <div class="scanner-stage"><div class="screen"><canvas id="depth" width="640" height="400" aria-label="Кадр глубины Revopoint" hidden></canvas><canvas id="cloud" width="640" height="400" aria-label="Облако точек текущего кадра Revopoint"></canvas></div></div>
+      <div class="scanner-stage"><div class="screen"><canvas id="depth" width="640" height="400" aria-label="Кадр глубины Revopoint" hidden></canvas><canvas id="cloud" width="640" height="400" aria-label="Облако точек Revopoint: перетаскивание вращает, колесо меняет масштаб" title="Перетаскивание — вращение · колёсико — масштаб"></canvas></div></div>
       <div class="scanner-view-footer"><span>Y16 · 640×400</span><span id="age">ОЖИДАНИЕ</span><span id="cloud-info">ТЕКУЩИЙ КАДР · Q.BIN · МАСШТАБ НЕ ПРОВЕРЕН</span></div>
     </section>
     <aside class="scanner-inspector" aria-label="Состояние захвата">
@@ -182,6 +182,7 @@
       const image = context.createImageData(640, 400);
       let lastMtime = "", lastArrival = 0, intervals = [], qMatrix = null;
       let yaw = .55, pitch = .55, drag = null;
+      let zoom = 1;
       const scannerQuery = new URLSearchParams(location.search);
       const singleFrame = scannerQuery.get("cloud_kind") === "single";
       const provisionalFusion = scannerQuery.get("cloud_kind") === "provisional_fusion";
@@ -211,6 +212,11 @@
       });
       cloudCanvas.addEventListener("pointerup", () => { drag = null; });
       cloudCanvas.addEventListener("pointercancel", () => { drag = null; });
+      cloudCanvas.addEventListener("wheel", event => {
+        event.preventDefault();
+        zoom = Math.max(.25, Math.min(20, zoom * Math.exp(-event.deltaY * .001)));
+        if (window.latestCloud) drawCloud(window.latestCloud);
+      }, { passive: false });
 
       async function loadCalibration() {
         const response = await fetch(`/api/v1/scanner/calibration?ts=${Date.now()}`, { cache: "no-store" });
@@ -239,7 +245,7 @@
           minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
         }
         const spanX = Math.max(1e-6, maxX - minX), spanY = Math.max(1e-6, maxY - minY);
-        const scale = Math.min(500 / spanX, 290 / spanY);
+        const scale = Math.min(500 / spanX, 290 / spanY) * zoom;
         const offsetX = 320 - (minX + maxX) * scale / 2, offsetY = 200 - (minY + maxY) * scale / 2;
         const spanZ = Math.max(1e-6, maxZ - minZ);
         const pointOrder = window.scannerDepthOrder(projected);
