@@ -21,24 +21,36 @@
   };
 
   const initialize = ({ cloudButton, meshButton, viewport, layer, frame, meshReady = false }, location = window.location) => {
+    const setAttribute = (element, name, value) => {
+      const current = element.getAttribute(name);
+      if (current !== value) element.setAttribute(name, value);
+    };
     const updateButton = () => {
       const visible = !layer.hidden;
       const cloudSelected = visible && layer.dataset.mode === 'cloud';
       const meshSelected = visible && layer.dataset.mode === 'mesh';
-      viewport.dataset.scanPreview = String(visible);
-      cloudButton.setAttribute('aria-label', 'Облако точек');
-      cloudButton.setAttribute('aria-pressed', String(cloudSelected));
-      cloudButton.title = cloudSelected ? 'Скрыть предпросмотр скана'
+      const previewVisible = String(visible);
+      if (viewport.dataset.scanPreview !== previewVisible) viewport.dataset.scanPreview = previewVisible;
+      setAttribute(cloudButton, 'aria-label', 'Облако точек');
+      setAttribute(cloudButton, 'aria-pressed', String(cloudSelected));
+      const cloudTitle = cloudSelected ? 'Скрыть предпросмотр скана'
         : meshSelected ? 'Переключить на облако точек' : 'Показать облако точек';
-      meshButton.disabled = !meshReady;
-      meshButton.setAttribute('aria-pressed', String(meshSelected));
-      meshButton.title = meshReady
+      if (cloudButton.title !== cloudTitle) cloudButton.title = cloudTitle;
+      const meshDisabled = !meshReady;
+      if (meshButton.disabled !== meshDisabled) meshButton.disabled = meshDisabled;
+      setAttribute(meshButton, 'aria-pressed', String(meshSelected));
+      const meshTitle = meshReady
         ? meshSelected ? 'Скрыть предпросмотр скана' : cloudSelected ? 'Переключить на сетку' : 'Показать сетку скана'
         : 'Сетка станет доступна после обработки облака точек';
+      if (meshButton.title !== meshTitle) meshButton.title = meshTitle;
     };
     const setMode = mode => {
       if (mode !== 'cloud' && mode !== 'mesh') throw new TypeError(`Unknown scan view: ${mode}`);
       if (mode === 'mesh' && !meshReady) return;
+      if (!layer.hidden && layer.dataset.mode === mode && frame.getAttribute('src')) {
+        updateButton();
+        return;
+      }
       if (layer.hidden) layer.hidden = false;
       layer.dataset.mode = mode;
       frame.title = mode === 'cloud'
@@ -49,7 +61,8 @@
       updateButton();
     };
     const setOpen = visible => {
-      layer.hidden = !visible;
+      const nextHidden = !visible;
+      if (layer.hidden !== nextHidden) layer.hidden = nextHidden;
       if (visible) setMode(layer.dataset.mode || 'cloud');
       else updateButton();
     };

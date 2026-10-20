@@ -60,6 +60,9 @@ assert.equal(new URL(frame.src).searchParams.get("cloud_kind"), "provisional_fus
 meshButton.click();
 view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
 assert.equal(layer.dataset.mode, "mesh", "status polls for the same scan preserve the selected view");
+const messageCount = frame.messages.length;
+view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
+assert.equal(frame.messages.length, messageCount, "polling an unchanged capture does not resend the same preview mode");
 
 const blockedCloudButton = element();
 const blockedMeshButton = element();
