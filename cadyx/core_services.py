@@ -178,8 +178,7 @@ class ProjectLifecycleService(_CoreService):
             return self._scan_capture.start(project_id, self.workspace._project_dir(project_id))
 
     def scan_360_status(self, project_id: str) -> dict[str, Any]:
-        self.workspace._project_dir(project_id)
-        return self._scan_capture.status(project_id)
+        return self._scan_capture.status(project_id, self.workspace._project_dir(project_id))
 
     def copy_project_files(self, target_project_id: str, source_project_id: str) -> dict[str, Any]:
         if target_project_id == source_project_id:

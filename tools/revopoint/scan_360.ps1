@@ -4,7 +4,9 @@ param(
 
     [double]$DepthScale = 0,
 
-    [string]$CalibrationFile = ''
+    [string]$CalibrationFile = '',
+
+    [string]$RunId = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,8 +42,15 @@ foreach ($path in @($captureExe, $turntableExe, $CalibrationFile, $depthScaleCon
         throw "Required input was not found: $path"
     }
 }
-$runId = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
-$runPrefix = "revopoint_$runId"
+if ([string]::IsNullOrWhiteSpace($RunId)) {
+    $runId = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
+    $runPrefix = "revopoint_$runId"
+} elseif ($RunId -match '^revopoint_\d{8}T\d{6}Z$') {
+    $runPrefix = $RunId
+    $runId = $RunId.Substring('revopoint_'.Length)
+} else {
+    throw 'RunId must use the CADYX revopoint_YYYYMMDDTHHMMSSZ identifier format.'
+}
 $projectCalibration = Join-Path $ProjectPath "${runPrefix}_Q.bin"
 $projectDepthScale = Join-Path $ProjectPath "${runPrefix}_depth_scale.json"
 if (Test-Path -LiteralPath $projectCalibration) { throw "Calibration copy already exists: $projectCalibration" }
@@ -70,7 +79,7 @@ function Read-ReportedAngle {
 }
 
 $poseLog = Join-Path $ProjectPath "${runPrefix}_poses.csv"
-$prefix = Join-Path $ProjectPath "${runPrefix}_pose"
+$prefix = Join-Path $ProjectPath $runPrefix
 $liveRaw = Join-Path $workspaceRoot '.revopoint-live.raw'
 $complete = $false
 try {
@@ -105,7 +114,8 @@ try {
         frames = $frames
     }
     $manifestPath = Join-Path $ProjectPath "${runPrefix}_scan_360.json"
-    $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
+    $manifestJson = $manifest | ConvertTo-Json -Depth 6
+    [IO.File]::WriteAllText($manifestPath, $manifestJson, [Text.UTF8Encoding]::new($false))
     $complete = $true
     Write-Host "Captured 12 Y16 frames in CADYX project $ProjectPath; original table position preserved."
     Write-Host 'Live preview follows the latest captured frame. Registration and fusion are not performed during capture.'
