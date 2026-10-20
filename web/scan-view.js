@@ -323,6 +323,34 @@
               if (raw.length !== 640 * 400 * 2) throw new Error('Размер кадра Y16 не совпадает.');
               const { matrix, depth_scale_mm_per_raw_unit: scale } = liveCalibration;
               const positions = new Float32Array(640 * 400 * 3 / 2);
+              const markerPixels = new Set();
+              if (!liveTableFrame) {
+                const seen = new Uint8Array(640 * 400);
+                const valid = i => (raw[i * 2] | raw[i * 2 + 1] << 8) !== 0;
+                let regions = 0;
+                for (let seed = 0; seed < seen.length; seed += 1) {
+                  if (seen[seed] || !valid(seed)) continue;
+                  const pixels = [seed]; seen[seed] = 1;
+                  let minX = 640, maxX = 0, minY = 400, maxY = 0;
+                  for (let cursor = 0; cursor < pixels.length; cursor += 1) {
+                    const i = pixels[cursor], x = i % 640, y = Math.floor(i / 640);
+                    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+                    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+                    for (const n of [x > 0 ? i - 1 : -1, x < 639 ? i + 1 : -1,
+                      y > 0 ? i - 640 : -1, y < 399 ? i + 640 : -1]) {
+                      if (n >= 0 && !seen[n] && valid(n)) { seen[n] = 1; pixels.push(n); }
+                    }
+                  }
+                  const width = maxX - minX + 1, height = maxY - minY + 1;
+                  if (pixels.length >= 20 && pixels.length <= 1000 && width / height > 0.3
+                      && width / height < 3 && pixels.length / (width * height) > 0.45) {
+                    regions += 1;
+                    for (const i of pixels) markerPixels.add(i);
+                  }
+                }
+                if (regions < 3) throw new Error('Для плоскости XY нужны минимум три видимых маркера стола.');
+              }
+              const markerPositions = [];
               let count = 0;
               for (let pixel = 0; pixel < 640 * 400; pixel += 2) {
                 const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
@@ -335,13 +363,14 @@
                 if (!Number.isFinite(pz) || Math.abs(pz) < 1e-12) continue;
                 const point = [px * depth / pz, -py * depth / pz, -depth];
                 if (!point.every(Number.isFinite)) continue;
+                if (markerPixels.has(pixel)) markerPositions.push(...point);
                 positions[count * 3] = point[0];
                 positions[count * 3 + 1] = point[1];
                 positions[count * 3 + 2] = point[2];
                 count += 1;
               }
               if (count >= 3 && request === liveRequest && livePreviewOwned) {
-                liveTableFrame ||= fitTableFrame(positions.subarray(0, count * 3), centerRay(liveCalibration));
+                liveTableFrame ||= fitTableFrame(markerPositions, centerRay(liveCalibration));
                 const tableFrame = liveTableFrame;
                 let frameRadius = 0;
                 const transformedBounds = transformToTableFrame(positions.subarray(0, count * 3), tableFrame);
