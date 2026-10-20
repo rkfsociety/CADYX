@@ -164,15 +164,19 @@
         }
       }
       if (sample.length < 12) throw new Error('Недостаточно точек для определения плоскости стола.');
+      const depths = sample.map(point => point[2]).sort((a, b) => a - b);
+      const tableDepthCutoff = depths[Math.min(depths.length - 1, Math.floor(depths.length * 0.3))];
+      const tableSample = sample.filter(point => point[2] <= tableDepthCutoff);
+      const planeSample = tableSample.length >= 12 ? tableSample : sample;
       let best = null, bestCount = 0;
       let seed = 0x6d2b79f5;
       const randomIndex = () => {
         seed = (Math.imul(seed ^ seed >>> 15, 1 | seed) + 0x6d2b79f5) | 0;
         let value = Math.imul(seed ^ seed >>> 7, 61 | seed) ^ seed;
-        return ((value ^ value >>> 14) >>> 0) % sample.length;
+        return ((value ^ value >>> 14) >>> 0) % planeSample.length;
       };
       for (let attempt = 0; attempt < 96; attempt += 1) {
-        const a = sample[randomIndex()], b = sample[randomIndex()], c = sample[randomIndex()];
+        const a = planeSample[randomIndex()], b = planeSample[randomIndex()], c = planeSample[randomIndex()];
         const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
         let normal = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
@@ -181,10 +185,10 @@
         normal = normal.map(value => value / length);
         const d = -(normal[0] * a[0] + normal[1] * a[1] + normal[2] * a[2]);
         let count = 0;
-        for (const point of sample) if (Math.abs(normal[0] * point[0] + normal[1] * point[1] + normal[2] * point[2] + d) <= 2.5) count += 1;
+        for (const point of planeSample) if (Math.abs(normal[0] * point[0] + normal[1] * point[1] + normal[2] * point[2] + d) <= 2.5) count += 1;
         if (count > bestCount) { bestCount = count; best = { normal, d }; }
       }
-      if (!best || bestCount < Math.max(6, sample.length * 0.1)) throw new Error('Не удалось надёжно определить плоскость стола в лайв-кадре.');
+      if (!best || bestCount < Math.max(6, planeSample.length * 0.1)) throw new Error('Не удалось надёжно определить плоскость стола в лайв-кадре.');
       let inliers = [];
       for (let index = 0; index < positions.length; index += 3) {
         const distance = best.normal[0] * positions[index] + best.normal[1] * positions[index + 1]
