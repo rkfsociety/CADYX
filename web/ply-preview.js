@@ -2111,7 +2111,6 @@ function handleStreamEvent(type, event) {
       selectObjectFromResult(projectId, data.result);
     }
     if (projectId === selectedProjectId) renderAgentActivity(activities, agentLocksByProject.get(projectId));
-    else if (primaryGrid.dataset.view === "projects") renderProjects();
     if (projectId === selectedProjectId && data.state === "running") {
       $("#folder-detail").hidden = true;
       projectDetail.hidden = false;
