@@ -66,7 +66,7 @@
       if (visible) setMode(layer.dataset.mode || 'cloud');
       else updateButton();
     };
-    const showCapture = scan => {
+    const showCapture = (scan, { open = false } = {}) => {
       const previewUrl = new URL('/scanner', location.origin);
       previewUrl.searchParams.set('embed', '1');
       if (scan?.preview_file && scan?.preview_folder) {
@@ -81,8 +81,10 @@
       if (previewChanged) {
         frame.src = previewUrl.href;
         layer.dataset.mode = 'cloud';
+        if (layer.hidden) updateButton();
+        else setMode('cloud');
       }
-      setOpen(true);
+      if (open) setOpen(true);
     };
     cloudButton.addEventListener('click', () => {
       if (layer.hidden) setMode('cloud');

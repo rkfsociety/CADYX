@@ -84,6 +84,23 @@ blocked.setMode("mesh");
 assert.equal(blockedLayer.hidden, false);
 assert.equal(blockedLayer.dataset.mode, "cloud");
 
+const polledLayer = element();
+polledLayer.hidden = true;
+const polledFrame = element();
+const polled = sandbox.window.CadyxScanView.initialize({
+  cloudButton: element(), meshButton: element(), viewport: element(),
+  layer: polledLayer, frame: polledFrame, meshReady: false,
+});
+const capture = { preview_folder: "scan folder", preview_file: "frame-1.ply", preview_kind: "single" };
+polled.showCapture(capture);
+assert.equal(polledLayer.hidden, true, "background scan polling does not open a closed preview");
+polled.showCapture(capture, { open: true });
+assert.equal(polledLayer.hidden, false, "the explicit scan start can open the preview");
+polled.setOpen(false);
+polled.showCapture({ ...capture, preview_file: "frame-2.ply" });
+assert.equal(polledLayer.hidden, true, "new frames update without reopening a preview the user closed");
+assert.equal(new URL(polledFrame.src).searchParams.get("cloud_file"), "frame-2.ply");
+
 const html = fs.readFileSync(path.join(__dirname, "../web/index.html"), "utf8");
 const scannerHtml = fs.readFileSync(path.join(__dirname, "../web/scanner.html"), "utf8");
 assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/button>/);
