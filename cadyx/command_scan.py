@@ -105,7 +105,8 @@ class ScanCommands:
         geometry, stats, source_hash = self.scan_processor.reconstruct(source_path, parameters, progress=progress)
         if stats["source_kind"] == "triangle_mesh" and any(
             parameters[key] != DEFAULT_SCAN_PARAMETERS[key]
-            for key in ("outlier_neighbors", "outlier_std_ratio", "poisson_depth")
+            for key in ("reconstruction_method", "outlier_neighbors", "outlier_std_ratio",
+                        "poisson_depth", "poisson_density_quantile")
         ):
             raise ValidationError("Outlier and Poisson parameters apply only to PLY point clouds.")
 
@@ -169,11 +170,15 @@ class ScanCommands:
         if not isinstance(parameter_name, str) or parameter_name not in DEFAULT_SCAN_PARAMETERS:
             raise ValidationError(f"Unsupported scan parameter: {parameter_name!r}.")
         if (feature.get("source_kind") == "triangle_mesh" and
-                parameter_name in {"outlier_neighbors", "outlier_std_ratio", "poisson_depth"}):
+                parameter_name in {"reconstruction_method", "outlier_neighbors", "outlier_std_ratio",
+                                   "poisson_depth", "poisson_density_quantile"}):
             raise ValidationError("Outlier and Poisson parameters apply only to PLY point clouds.")
         feature_parameters = feature.get("parameters")
         if not isinstance(feature_parameters, dict):
             raise ValidationError("Scan feature parameters are invalid.")
+        if (feature_parameters.get("reconstruction_method", "poisson") == "ball_pivoting" and
+                parameter_name in {"poisson_depth", "poisson_density_quantile"}):
+            raise ValidationError("Poisson parameters apply only to the Poisson reconstruction method.")
         parameters = normalize_scan_parameters({
             **feature_parameters, parameter_name: command.get("value"),
         })

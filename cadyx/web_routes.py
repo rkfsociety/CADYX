@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import json
 import struct
 import subprocess
 from dataclasses import dataclass
@@ -359,9 +360,15 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
     matrix = struct.unpack("<16f", calibration)
     if not all(math.isfinite(value) for value in matrix):
         raise RuntimeError("Revopoint Q calibration contains a non-finite value.")
+    depth_scale_path = calibration_path.with_name("depth_scale.json")
+    depth_scale_config = json.loads(depth_scale_path.read_text(encoding="utf-8"))
+    depth_scale = float(depth_scale_config["depth_scale_mm_per_raw_unit"])
+    if not math.isfinite(depth_scale) or depth_scale <= 0:
+        raise RuntimeError("Revopoint depth scale must be positive and finite.")
     handler._json(200, {"width": 640, "height": 400, "matrix": matrix,
-                        "disparity_scale": 256,
-                        "disparity_scale_status": "provisional_unverified"})
+                        "depth_scale_mm_per_raw_unit": depth_scale,
+                        "depth_scale_status": depth_scale_config.get("status", "unverified"),
+                        "depth_scale_source": depth_scale_config.get("source", "unspecified")})
 
 
 def _dispatch_files(handler: Any, core: CadyxCore, route: RouteMatch, parsed: SplitResult) -> None:
@@ -400,16 +407,16 @@ def _project_activity(handler: Any, core: CadyxCore, project_id: str) -> None:
 def _create_project(handler: Any, core: CadyxCore, *, agent_api: bool) -> None:
     body = _require_json(handler)
     if agent_api:
-        if not body.keys() <= {"name", "select"} or "name" not in body:
-            raise ValidationError("Agent project creation requires name and accepts optional select.")
+        if not body.keys() <= {"name", "url_slug", "select"} or "name" not in body:
+            raise ValidationError("Agent project creation requires name and accepts optional url_slug and select.")
         select = body.get("select", True)
         if not isinstance(select, bool):
             raise ValidationError("select must be a boolean.")
     else:
-        if set(body) != {"name"}:
-            raise ValidationError("Project creation requires only a name field.")
+        if not body.keys() <= {"name", "url_slug"} or "name" not in body:
+            raise ValidationError("Project creation requires name and accepts optional url_slug.")
         select = True
-    handler._json(201, core.create_project(body["name"], select=select))
+    handler._json(201, core.create_project(body["name"], select=select, url_slug=body.get("url_slug")))
 
 
 def _dispatch_project(handler: Any, core: CadyxCore, route: RouteMatch, parsed: SplitResult) -> None:
@@ -591,9 +598,9 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         ))
     elif name == "agent_rename":
         body = _require_json(handler)
-        if set(body) != {"name"}:
-            raise ValidationError("Project rename requires only a name field.")
-        handler._json(200, core.rename_project(project_id, body["name"]))
+        if not body.keys() <= {"name", "url_slug"} or "name" not in body:
+            raise ValidationError("Project rename requires name and accepts optional url_slug.")
+        handler._json(200, core.rename_project(project_id, body["name"], url_slug=body.get("url_slug")))
     elif name == "agent_copy_files":
         body = _require_json(handler)
         if set(body) != {"source_project_id"}:

@@ -3,20 +3,21 @@ param(
     [string]$ProjectPath,
 
     [ValidatePattern('^[A-Za-z0-9_-]+$')]
-    [string]$OutputFolderName = ('revopoint_marker_sweep_' + (Get-Date -Format 'yyyyMMdd_HHmmss')),
+    [string]$OutputFolderName = ('revopoint_marker_poses_' + (Get-Date -Format 'yyyyMMdd_HHmmss')),
 
-    [ValidateRange(12, 1000)]
-    [int]$Frames = 1000,
+    [ValidateRange(1, 10)]
+    [int]$FramesPerPose = 1,
 
     [ValidateSet(10, 15)]
-    [int]$Fps = 10
+    [int]$Fps = 15,
+
+    [double]$DepthScale = 0
 )
 
 $ErrorActionPreference = 'Stop'
 $toolRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = (Resolve-Path (Join-Path $toolRoot '..\..')).Path
-$workspaceRoot = Join-Path $repoRoot 'projects'
-$workspaceRoot = [IO.Path]::GetFullPath($workspaceRoot).TrimEnd([char[]]@('\', '/'))
+$workspaceRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'projects')).TrimEnd([char[]]@('\', '/'))
 $ProjectPath = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $ProjectPath).Path).TrimEnd([char[]]@('\', '/'))
 $projectParent = [IO.Path]::GetDirectoryName($ProjectPath)
 if (-not [string]::Equals($projectParent.TrimEnd([char[]]@('\', '/')), $workspaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
@@ -24,235 +25,179 @@ if (-not [string]::Equals($projectParent.TrimEnd([char[]]@('\', '/')), $workspac
 }
 $projectRecord = Get-Content -LiteralPath (Join-Path $ProjectPath 'project.json') -Raw | ConvertFrom-Json
 $projectId = [guid]::Empty
-if ($projectRecord.format -ne 'cadyx-project' -or
-    -not [guid]::TryParse([string]$projectRecord.id, [ref]$projectId)) {
+if ($projectRecord.format -ne 'cadyx-project' -or -not [guid]::TryParse([string]$projectRecord.id, [ref]$projectId)) {
     throw "Scan target is not a valid CADYX project folder: $ProjectPath"
 }
-$outputDirectory = Join-Path $ProjectPath $OutputFolderName
+
 $captureY16 = Join-Path $toolRoot 'build\CaptureY16.exe'
 $captureRgb = Join-Path $toolRoot 'build\CaptureRgb.exe'
 $turntable = Join-Path $toolRoot 'build\TurntableController.exe'
 $calibration = Join-Path $toolRoot 'calibration\Q.bin'
-$liveFrame = Join-Path $workspaceRoot '.revopoint-live.raw'
-$stopSignal = Join-Path $outputDirectory 'capture.stop'
-
-foreach ($path in @($captureY16, $captureRgb, $turntable, $calibration)) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        throw "Required input was not found: $path. Run tools/revopoint/build.ps1 first."
-    }
+$depthScaleConfig = Join-Path $toolRoot 'calibration\depth_scale.json'
+if (-not $PSBoundParameters.ContainsKey('DepthScale')) {
+    $DepthScale = [double](Get-Content -LiteralPath $depthScaleConfig -Raw | ConvertFrom-Json).depth_scale_mm_per_raw_unit
 }
-if (Test-Path -LiteralPath $outputDirectory) {
-    throw "Output directory already exists; choose a new name: $outputDirectory"
+if ([double]::IsNaN($DepthScale) -or [double]::IsInfinity($DepthScale) -or $DepthScale -le 0) {
+    throw 'DepthScale must be a positive finite value in millimeters per uint16 unit.'
 }
-$busy = Get-Process -ErrorAction SilentlyContinue | Where-Object {
-    $_.ProcessName -match '^(CaptureY16|CaptureRgb|TurntableController|RevoScan|RevoAssistant)$'
+foreach ($path in @($captureY16, $captureRgb, $turntable, $calibration, $depthScaleConfig)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required scanner input was not found: $path" }
 }
-if ($busy) {
-    throw "Scanner or turntable process is already running: $($busy.ProcessName -join ', ')"
-}
+$outputDirectory = Join-Path $ProjectPath $OutputFolderName
+if (Test-Path -LiteralPath $outputDirectory) { throw "Output folder already exists; choose a new run name: $outputDirectory" }
+$activeScannerPattern = '^(CaptureY16|CaptureRgb|RevoScan|RevoScan5|RevoAssistant)$'
+$busy = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match $activeScannerPattern }
+if ($busy) { throw "A scanner application is already open: $($busy.ProcessName -join ', ')" }
 
 New-Item -ItemType Directory -Path $outputDirectory | Out-Null
 Copy-Item -LiteralPath $calibration -Destination (Join-Path $outputDirectory 'Q.bin')
+Copy-Item -LiteralPath $depthScaleConfig -Destination (Join-Path $outputDirectory 'depth_scale.json')
+$liveFrame = Join-Path $workspaceRoot '.revopoint-live.raw'
+$manifestPath = Join-Path $outputDirectory 'capture_manifest.json'
+$posesPath = Join-Path $outputDirectory 'poses.csv'
+$manifest = [ordered]@{
+    format = 'revopoint-stationary-marker-poses-v2'
+    status = 'capturing'
+    started_utc = [DateTime]::UtcNow.ToString('o')
+    camera = 'DepthCam Y16 and RGBCam MJPG'
+    rotation_steps = 12
+    step_degrees = 30
+    frames_per_pose = $FramesPerPose
+    requested_fps = $Fps
+    projection_method = 'Q_ray_scaled_to_depth'
+    depth_scale_mm_per_raw_unit = $DepthScale
+    depth_scale_status = 'provisional_for_direct_UVC'
+    motion_while_cameras_connected = $false
+    captures = @()
+    final_angle_degrees = $null
+    final_tilt_degrees = $null
+    error = $null
+}
+$manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+
+function Save-Manifest {
+    $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+    $manifest.captures | Export-Csv -LiteralPath $posesPath -NoTypeInformation -Encoding utf8
+}
+
+function Assert-CamerasDisconnected {
+    $active = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match $activeScannerPattern }
+    if ($active) { throw "Turntable motion blocked while scanner process is active: $($active.ProcessName -join ', ')" }
+}
 
 function Invoke-Turntable {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
-    $lines = & $turntable @Arguments 2>&1
+    Assert-CamerasDisconnected
+    $output = & $turntable @Arguments 2>&1 | Out-String
     $exitCode = $LASTEXITCODE
-    $text = ($lines | Out-String).TrimEnd()
-    $text | Write-Host
-    if ($exitCode -ne 0) {
-        throw "Turntable command failed ($exitCode): $($Arguments -join ' ')"
-    }
-    return $text
+    $output.TrimEnd() | Write-Host
+    if ($exitCode -ne 0) { throw "Turntable command failed ($exitCode): $($Arguments -join ' ')" }
+    return $output
 }
 
-function Read-TurntableState {
-    $text = Invoke-Turntable -Arguments @('query')
-    $angleMatch = [regex]::Match($text, '\+QT,CHANGEANGLE; => \+DATA=(-?\d+(?:\.\d+)?);')
-    $tiltMatch = [regex]::Match($text, '\+QR,TILTVALUE; => \+DATA=(-?\d+(?:\.\d+)?);')
-    if (-not $angleMatch.Success -or -not $tiltMatch.Success) {
-        throw 'Turntable query did not return both rotation and tilt angles.'
-    }
+function Read-TableState {
+    $output = Invoke-Turntable -Arguments @('query')
+    $angleMatch = [regex]::Match($output, '\+QT,CHANGEANGLE; => \+DATA=(-?\d+(?:\.\d+)?);')
+    $tiltMatch = [regex]::Match($output, '\+QR,TILTVALUE; => \+DATA=(-?\d+(?:\.\d+)?);')
+    if (-not $angleMatch.Success -or -not $tiltMatch.Success) { throw 'Turntable query did not return both axes.' }
     return [pscustomobject]@{
         angle = [double]::Parse($angleMatch.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
         tilt = [double]::Parse($tiltMatch.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
-        text = $text
     }
 }
 
 function Get-NeutralAngle([double]$Angle) {
-    $normalized = $Angle % 360.0
-    if ($normalized -gt 180.0) { $normalized -= 360.0 }
-    if ($normalized -lt -180.0) { $normalized += 360.0 }
-    return $normalized
+    $value = $Angle % 360.0
+    if ($value -gt 180.0) { $value -= 360.0 }
+    if ($value -lt -180.0) { $value += 360.0 }
+    return $value
 }
 
-function Start-Capture {
-    param(
-        [string]$FilePath,
-        [string[]]$Arguments,
-        [string]$Name
-    )
-    $argumentLine = (@($Arguments | ForEach-Object { '"' + $_ + '"' }) -join ' ')
-    return Start-Process -PassThru -NoNewWindow -FilePath $FilePath -ArgumentList $argumentLine `
-        -WorkingDirectory $repoRoot `
-        -RedirectStandardOutput (Join-Path $outputDirectory "$Name.stdout.txt") `
-        -RedirectStandardError (Join-Path $outputDirectory "$Name.stderr.txt")
+function Invoke-DepthCapture([string]$Prefix) {
+    Assert-CamerasDisconnected
+    & $captureY16 --out-prefix $Prefix --q-file (Join-Path $outputDirectory 'Q.bin') `
+        --depth-scale $DepthScale --frames $FramesPerPose --fps $Fps --live-raw $liveFrame
+    if ($LASTEXITCODE -ne 0) { throw "Depth capture failed at $Prefix ($LASTEXITCODE)." }
+    Assert-CamerasDisconnected
 }
 
-function Wait-Ready {
-    param([System.Diagnostics.Process]$Process, [string]$SignalPath, [string]$Name)
-    $deadline = [DateTime]::UtcNow.AddSeconds(30)
-    while ([DateTime]::UtcNow -lt $deadline) {
-        $Process.Refresh()
-        if (Test-Path -LiteralPath $SignalPath -PathType Leaf) { return }
-        if ($Process.HasExited) {
-            throw "$Name exited before producing a frame (exit $($Process.ExitCode)); inspect its stdout/stderr logs."
-        }
-        Start-Sleep -Milliseconds 100
-    }
-    throw "$Name did not produce its first frame within 30 seconds."
+function Invoke-RgbCapture([string]$Prefix) {
+    Assert-CamerasDisconnected
+    & $captureRgb --out-prefix $Prefix --frames $FramesPerPose --fps $Fps --format mjpg
+    if ($LASTEXITCODE -ne 0) { throw "RGB capture failed at $Prefix ($LASTEXITCODE)." }
+    Assert-CamerasDisconnected
 }
 
-function Wait-ProcessExit {
-    param([System.Diagnostics.Process]$Process, [string]$Name, [int]$TimeoutSeconds = 240)
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    while ([DateTime]::UtcNow -lt $deadline) {
-        $Process.Refresh()
-        if ($Process.HasExited) {
-            $Process.WaitForExit()
-            if ($Process.ExitCode -ne 0) { throw "$Name failed with exit code $($Process.ExitCode)." }
-            return
-        }
-        Start-Sleep -Milliseconds 250
-    }
-    throw "$Name exceeded the $TimeoutSeconds second capture limit."
-}
-
-$depth = $null
-$rgb = $null
-$sweep = $null
-$sweepStarted = $false
-$captureSucceeded = $false
-$failureMessage = $null
-$baseline = $null
-$finalState = $null
-$depthExitCode = $null
-$rgbExitCode = $null
-$sweepExitCode = $null
-$startedUtc = [DateTime]::UtcNow
-
+$completed = $false
 try {
-    $baseline = Read-TurntableState
+    $baseline = Read-TableState
     if ([math]::Abs((Get-NeutralAngle $baseline.angle)) -gt 1.0 -or [math]::Abs($baseline.tilt) -gt 0.5) {
-        throw "Empty-table sweep requires a home rotation position and zero tilt; found angle $($baseline.angle), tilt $($baseline.tilt)."
+        throw "Stationary marker scan requires rotation 0 and tilt 0; found $($baseline.angle), $($baseline.tilt). No axes were moved."
     }
 
-    $depthPrefix = Join-Path $outputDirectory 'depth'
-    $depthReady = Join-Path $outputDirectory 'depth.ready'
-    $depth = Start-Capture -FilePath $captureY16 -Name 'depth' -Arguments @(
-        '--out-prefix', $depthPrefix, '--q-file', (Join-Path $outputDirectory 'Q.bin'),
-        '--disparity-scale', '256', '--frames', "$Frames", '--fps', "$Fps",
-        '--live-raw', $liveFrame, '--ready-file', $depthReady, '--stop-file', $stopSignal
-    )
-    Wait-Ready -Process $depth -SignalPath $depthReady -Name 'DepthCam'
-    Write-Host 'DepthCam delivered its first valid Y16 frame.'
+    for ($index = 0; $index -lt 12; $index++) {
+        if ($index -gt 0) {
+            Invoke-Turntable -Arguments @('rotate', '30') | Out-Null
+        }
+        $state = Read-TableState
+        $expected = $index * 30.0
+        $errorAngle = Get-NeutralAngle ($state.angle - $expected)
+        if ([math]::Abs($errorAngle) -gt 1.0 -or [math]::Abs($state.tilt) -gt 0.5) {
+            throw "Pose $index is outside its rotation target or tilt is nonzero (angle=$($state.angle), tilt=$($state.tilt))."
+        }
 
-    $rgbPrefix = Join-Path $outputDirectory 'rgb'
-    $rgbReady = Join-Path $outputDirectory 'rgb.ready'
-    $rgb = Start-Capture -FilePath $captureRgb -Name 'rgb' -Arguments @(
-        '--out-prefix', $rgbPrefix, '--frames', "$Frames", '--fps', "$Fps",
-        '--format', 'mjpg', '--ready-file', $rgbReady, '--stop-file', $stopSignal
-    )
-    Wait-Ready -Process $rgb -SignalPath $rgbReady -Name 'RGBCam'
-    Write-Host 'RGBCam delivered its first valid frame; starting the turntable sweep.'
+        $depthPrefixName = 'depth_pose_{0:D2}' -f $index
+        $rgbPrefixName = 'rgb_pose_{0:D2}' -f $index
+        $depthPrefix = Join-Path $outputDirectory $depthPrefixName
+        $rgbPrefix = Join-Path $outputDirectory $rgbPrefixName
+        $captureStarted = [DateTime]::UtcNow
+        Invoke-DepthCapture $depthPrefix
+        Invoke-RgbCapture $rgbPrefix
+        $captureFinished = [DateTime]::UtcNow
+        Assert-CamerasDisconnected
 
-    $sweep = Start-Capture -FilePath $turntable -Name 'turntable' -Arguments @(
-        'sweep', '12', '30', (Join-Path $outputDirectory 'turntable_sweep.csv')
-    )
-    $sweepStarted = $true
-    Wait-ProcessExit -Process $sweep -Name 'Turntable sweep'
-    $sweepExitCode = $sweep.ExitCode
+        $manifest.captures += [ordered]@{
+            pose_index = $index
+            expected_angle_degrees = $expected
+            reported_angle_degrees = $state.angle
+            tilt_degrees = $state.tilt
+            capture_started_utc = $captureStarted.ToString('o')
+            capture_finished_utc = $captureFinished.ToString('o')
+            depth_prefix = $depthPrefixName
+            rgb_prefix = $rgbPrefixName
+            camera_processes_closed_before_next_move = $true
+        }
+        Save-Manifest
+        Write-Host "Completed stationary pose $($index + 1)/12 at $($state.angle)°; both cameras are closed."
+    }
 
-    $stopHandle = [System.IO.File]::Open($stopSignal, [System.IO.FileMode]::CreateNew,
-        [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-    $stopHandle.Dispose()
-    Write-Host 'Full rotation verified; both camera streams are closing their timestamped bursts.'
-
-    Wait-ProcessExit -Process $depth -Name 'DepthCam capture' -TimeoutSeconds 30
-    $depthExitCode = $depth.ExitCode
-    Wait-ProcessExit -Process $rgb -Name 'RGBCam capture' -TimeoutSeconds 30
-    $rgbExitCode = $rgb.ExitCode
-
-    $captureSucceeded = $true
+    # Final 30-degree move returns the table to zero; both camera processes have exited.
+    Invoke-Turntable -Arguments @('rotate', '30') | Out-Null
+    $final = Read-TableState
+    if ([math]::Abs((Get-NeutralAngle $final.angle)) -gt 1.0 -or [math]::Abs($final.tilt) -gt 0.5) {
+        throw "Final rotation-only home check failed (angle=$($final.angle), tilt=$($final.tilt))."
+    }
+    $manifest.final_angle_degrees = $final.angle
+    $manifest.final_tilt_degrees = $final.tilt
+    $manifest.status = 'captured_unregistered'
+    $completed = $true
 }
 catch {
-    $failureMessage = $_.Exception.Message
+    $manifest.error = $_.Exception.Message
+    throw
 }
 finally {
-    foreach ($process in @($sweep, $depth, $rgb)) {
-        if ($null -ne $process) {
-            $process.Refresh()
-            if (-not $process.HasExited -and $process.Id -ne $PID) {
-                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-                $process.WaitForExit()
-            }
-        }
+    Assert-CamerasDisconnected
+    if (-not $completed) {
+        $manifest.status = 'failed_partial_captures_preserved'
+        try {
+            $state = Read-TableState
+            $manifest.final_angle_degrees = $state.angle
+            $manifest.final_tilt_degrees = $state.tilt
+        } catch { $manifest.error += "; final table state unavailable: $($_.Exception.Message)" }
     }
-
-    if ($sweepStarted -and -not $captureSucceeded) {
-        try { Invoke-Turntable -Arguments @('stop') | Out-Null } catch { $failureMessage += " Stop failed: $($_.Exception.Message)" }
-    }
-
-    try {
-        $finalState = Read-TurntableState
-        if ([math]::Abs((Get-NeutralAngle $finalState.angle)) -gt 1.0 -or [math]::Abs($finalState.tilt) -gt 0.5) {
-            $homeText = Invoke-Turntable -Arguments @('zero')
-            if ($homeText -notmatch 'angle after zero:\s*(-?\d+(?:\.\d+)?)\s*deg') {
-                throw 'Turntable did not report a verified home angle.'
-            }
-            $finalState = Read-TurntableState
-            if ([math]::Abs((Get-NeutralAngle $finalState.angle)) -gt 1.0 -or [math]::Abs($finalState.tilt) -gt 0.5) {
-                throw "Turntable did not return to home; angle $($finalState.angle), tilt $($finalState.tilt)."
-            }
-        }
-    }
-    catch {
-        if ($failureMessage) { $failureMessage += " Final table state could not be verified: $($_.Exception.Message)" }
-        else { $failureMessage = "Final table state could not be verified: $($_.Exception.Message)" }
-        $captureSucceeded = $false
-    }
-
-    $depthTimestamps = Join-Path $outputDirectory 'depth_timestamps.csv'
-    $rgbTimestamps = Join-Path $outputDirectory 'rgb_timestamps.csv'
-    $manifest = [ordered]@{
-        format = 'revopoint-synchronized-marker-sweep-v1'
-        status = if ($captureSucceeded -and -not $failureMessage) { 'completed' } else { 'failed' }
-        started_utc = $startedUtc.ToString('o')
-        finished_utc = [DateTime]::UtcNow.ToString('o')
-        requested_frames_per_camera = $Frames
-        requested_fps = $Fps
-        disparity_scale = 256
-        disparity_scale_status = 'provisional_unverified'
-        rotation_steps = 12
-        step_degrees = 30
-        baseline_angle_degrees = if ($baseline) { $baseline.angle } else { $null }
-        baseline_tilt_degrees = if ($baseline) { $baseline.tilt } else { $null }
-        final_angle_degrees = if ($finalState) { $finalState.angle } else { $null }
-        final_tilt_degrees = if ($finalState) { $finalState.tilt } else { $null }
-        depth_frame_rows = if (Test-Path -LiteralPath $depthTimestamps) { [Math]::Max(0, (Get-Content $depthTimestamps).Count - 1) } else { 0 }
-        rgb_frame_rows = if (Test-Path -LiteralPath $rgbTimestamps) { [Math]::Max(0, (Get-Content $rgbTimestamps).Count - 1) } else { 0 }
-        depth_exit_code = $depthExitCode
-        rgb_exit_code = $rgbExitCode
-        sweep_exit_code = $sweepExitCode
-        error = $failureMessage
-        table_baseline_query = if ($baseline) { $baseline.text } else { $null }
-        table_final_query = if ($finalState) { $finalState.text } else { $null }
-    }
-    $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $outputDirectory 'capture_manifest.json') -Encoding utf8NoBOM
+    $manifest.finished_utc = [DateTime]::UtcNow.ToString('o')
+    Save-Manifest
 }
 
-if (-not $captureSucceeded -or $failureMessage) {
-    throw "Marker sweep failed; partial data were preserved in $outputDirectory. $failureMessage"
-}
-Write-Host "Completed: $outputDirectory"
+Write-Host "Saved 12 stationary pose captures in $outputDirectory. No camera was connected during table rotation."

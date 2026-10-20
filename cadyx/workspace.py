@@ -143,19 +143,19 @@ class ProjectWorkspace:
                 return entry
         raise NotFoundError("Project was not found.")
 
-    def create(self, name: str) -> dict[str, Any]:
+    def create(self, name: str, *, url_slug: str | None = None) -> dict[str, Any]:
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
             raise ValidationError(
                 "Project name must be a non-empty string of at most 120 characters."
             )
         project_id = str(uuid4())
-        project = self._new_project_record(project_id, name.strip())
+        project = self._new_project_record(project_id, name.strip(), url_slug=url_slug)
         project_dir = self._create_project_directory(project["name"], project_id)
         self._projects.write_atomic(project_dir / "project.json", project)
         self._remember_project_path(project_id, project_dir)
         return project
 
-    def rename(self, project_id: str, name: str) -> dict[str, Any]:
+    def rename(self, project_id: str, name: str, *, url_slug: str | None = None) -> dict[str, Any]:
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
             raise ValidationError(
                 "Project name must be a non-empty string of at most 120 characters."
@@ -165,6 +165,10 @@ class ProjectWorkspace:
         base_name = self._safe_project_directory_name(name.strip())
         target = self._unique_project_directory_path(base_name, exclude=source)
         project["name"] = name.strip()
+        if url_slug is not None:
+            project["url_slug"] = self._projects.normalize_url_slug(url_slug)
+        elif not project.get("url_slug"):
+            project["url_slug"] = self._projects.default_url_slug(name.strip())
         project["modified_at"] = utc_now()
         try:
             source.rename(target)
@@ -189,8 +193,8 @@ class ProjectWorkspace:
         return project
 
     @staticmethod
-    def _new_project_record(project_id: str, name: str) -> dict[str, Any]:
-        return ProjectRecordStore.new_record(project_id, name, timestamp=utc_now())
+    def _new_project_record(project_id: str, name: str, *, url_slug: str | None = None) -> dict[str, Any]:
+        return ProjectRecordStore.new_record(project_id, name, timestamp=utc_now(), url_slug=url_slug)
 
     def load(self, project_id: str, *, include_history: bool = True) -> dict[str, Any]:
         return self._load_project_from_directory(

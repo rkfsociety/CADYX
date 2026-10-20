@@ -37,11 +37,13 @@ class _FakeNative:
         self.source_has_faces = None
         self.source_path = None
         self.source_bytes = None
+        self.parameters = None
 
     def process(self, path, parameters, *, source_has_faces, progress=None):
         self.source_has_faces = source_has_faces
         self.source_path = Path(path)
         self.source_bytes = self.source_path.read_bytes()
+        self.parameters = dict(parameters)
         if progress is not None:
             progress({"phase": "read_source"})
             progress({"phase": "serialize_mesh"})
@@ -97,6 +99,11 @@ class ScanGeometryTests(unittest.TestCase):
 
     def test_scan_parameters_are_bounded_and_integer_parameters_are_integral(self):
         self.assertEqual(normalize_scan_parameters({}), DEFAULT_SCAN_PARAMETERS)
+        self.assertEqual(normalize_scan_parameters({"reconstruction_method": "ball_pivoting"})[
+            "reconstruction_method"], "ball_pivoting")
+        for method in (True, None, {}, "unknown"):
+            with self.subTest(reconstruction_method=method), self.assertRaises(ValidationError):
+                normalize_scan_parameters({"reconstruction_method": method})
         for value in (True, 1.5, 99, 100001):
             with self.subTest(value=value), self.assertRaises(ValidationError):
                 normalize_scan_parameters({"target_triangles": value})
@@ -129,9 +136,26 @@ class ScanGeometryTests(unittest.TestCase):
             geometry, stats, source_hash = ScanProcessor(native).reconstruct(path, {})
 
         self.assertFalse(native.source_has_faces)
+        self.assertEqual(native.parameters["reconstruction_method"], "poisson")
         self.assertEqual(source_hash, original_hash)
         self.assertEqual(stats["source_kind"], "point_cloud")
+        self.assertEqual(stats["reconstruction_method"], "poisson")
         validate_mesh_geometry(geometry)
+
+    def test_ball_pivoting_method_passes_through_native_scan_boundary(self):
+        header = (
+            b"ply\nformat ascii 1.0\nelement vertex 4\n"
+            b"property float x\nproperty float y\nproperty float z\nend_header\n"
+        )
+        native = _FakeNative()
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "cloud.ply"
+            path.write_bytes(header + b"0 0 0\n1 0 0\n0 1 0\n0 0 1\n")
+            _, stats, _ = ScanProcessor(native).reconstruct(
+                path, {"reconstruction_method": "ball_pivoting"},
+            )
+        self.assertEqual(native.parameters["reconstruction_method"], "ball_pivoting")
+        self.assertEqual(stats["reconstruction_method"], "ball_pivoting")
 
     @unittest.skipUnless(os.name == "nt", "Windows native scan paths use the ASCII staging copy")
     def test_unicode_workspace_path_uses_verified_ascii_native_copy(self):

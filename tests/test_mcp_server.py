@@ -50,6 +50,20 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertNotIn("isError", result, result)
         return result.get("structuredContent")
 
+    def test_project_tools_keep_russian_title_and_english_url_slug_separate(self) -> None:
+        created = self._tool_value("cadyx_create_project", {
+            "name": "Гипсовая фигурка — 5 ракурсов", "url_slug": "gypsum-figurine-5-views",
+        })
+        project_id = created["project"]["id"]
+        self.assertEqual(created["project"]["name"], "Гипсовая фигурка — 5 ракурсов")
+        self.assertEqual(created["project"]["url_slug"], "gypsum-figurine-5-views")
+
+        renamed = self._tool_value("cadyx_rename_project", {
+            "project_id": project_id, "name": "Фигурка из гипса", "url_slug": "plaster-figurine",
+        })
+        self.assertEqual(renamed["project"]["name"], "Фигурка из гипса")
+        self.assertEqual(renamed["project"]["url_slug"], "plaster-figurine")
+
     def test_api_reuses_keep_alive_connection(self) -> None:
         class Response:
             status = 200

@@ -167,6 +167,7 @@ std::shared_ptr<TriangleMesh> ReadAndSimplifyMesh(const std::string& filename,
 }
 
 std::shared_ptr<TriangleMesh> ReconstructPointCloud(const std::string& filename,
+                                                    const std::string& reconstruction_method,
                                                     double requested_voxel_size,
                                                     int target_triangles,
                                                     int outlier_neighbors,
@@ -222,15 +223,23 @@ std::shared_ptr<TriangleMesh> ReconstructPointCloud(const std::string& filename,
 
     auto legacy_cloud = cloud.ToLegacy();
     ReportProgress(progress, 6);
-    auto reconstruction = TriangleMesh::CreateFromPointCloudPoisson(
-            legacy_cloud, static_cast<size_t>(poisson_depth), 0.0f, 1.1f,
-            false, static_cast<int>(ProcessingThreads()));
-    auto mesh = std::move(std::get<0>(reconstruction));
-    auto densities = std::move(std::get<1>(reconstruction));
-    if (!mesh || mesh->triangles_.empty()) {
-        throw std::runtime_error("Open3D could not reconstruct a surface from this point cloud.");
+    std::shared_ptr<TriangleMesh> mesh;
+    std::vector<double> densities;
+    if (reconstruction_method == "poisson") {
+        auto reconstruction = TriangleMesh::CreateFromPointCloudPoisson(
+                legacy_cloud, static_cast<size_t>(poisson_depth), 0.0f, 1.1f,
+                false, static_cast<int>(ProcessingThreads()));
+        mesh = std::move(std::get<0>(reconstruction));
+        densities = std::move(std::get<1>(reconstruction));
+    } else {
+        const std::vector<double> radii = {
+                voxel_size * 1.5, voxel_size * 2.0, voxel_size * 3.0};
+        mesh = TriangleMesh::CreateFromPointCloudBallPivoting(legacy_cloud, radii);
     }
-    if (poisson_density_quantile > 0.0 && !densities.empty()) {
+    if (!mesh || mesh->triangles_.empty()) {
+        throw std::runtime_error("Open3D could not reconstruct a surface with the selected method.");
+    }
+    if (reconstruction_method == "poisson" && poisson_density_quantile > 0.0 && !densities.empty()) {
         const size_t quantile_index = static_cast<size_t>(poisson_density_quantile * (densities.size() - 1));
         auto quantile = densities;
         std::nth_element(quantile.begin(), quantile.begin() + quantile_index, quantile.end());
@@ -262,6 +271,7 @@ API void cadyx_scan_free(void* value) noexcept {
 
 API void* cadyx_scan_process(const char* filename,
                              int source_has_faces,
+                             const char* reconstruction_method,
                              double voxel_size,
                              int target_triangles,
                              int outlier_neighbors,
@@ -273,8 +283,17 @@ API void* cadyx_scan_process(const char* filename,
                              char* error,
                              size_t error_capacity) noexcept {
     if (output_size) *output_size = 0;
-    if (!filename || !*filename || !output_size) {
-        SetError(error, error_capacity, "A scan path and output buffer are required.");
+    if (!filename || !*filename || !reconstruction_method || !output_size) {
+        SetError(error, error_capacity, "A scan path, reconstruction method and output buffer are required.");
+        return nullptr;
+    }
+    const std::string method(reconstruction_method);
+    if (method != "poisson" && method != "ball_pivoting") {
+        SetError(error, error_capacity, "The scan reconstruction method is not supported.");
+        return nullptr;
+    }
+    if (source_has_faces && method != "poisson") {
+        SetError(error, error_capacity, "Point-cloud reconstruction methods do not apply to triangle meshes.");
         return nullptr;
     }
     if (!std::isfinite(voxel_size) || voxel_size <= 0 ||
@@ -303,7 +322,7 @@ API void* cadyx_scan_process(const char* filename,
             source_kind = 1;
         } else {
             source_kind = 2;
-            mesh = ReconstructPointCloud(filename, voxel_size, target_triangles,
+            mesh = ReconstructPointCloud(filename, method, voxel_size, target_triangles,
                                          outlier_neighbors, outlier_std_ratio,
                                          poisson_depth, poisson_density_quantile, input_vertices,
                                          effective_voxel_size, progress);

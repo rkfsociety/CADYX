@@ -22,17 +22,44 @@ $outPrefix = Join-Path $PWD 'projects\revopoint_probe\frame'
 & .\tools\revopoint\build\CaptureY16.exe `
     --out-prefix $outPrefix `
     --q-file $qFile `
-    --disparity-scale 256
+    --depth-scale 0.005
 ```
 
-The command writes `frame.raw`, `frame.ply`, and `frame.json` side by side. It refuses to overwrite any of them. The raw file contains one 640×400 little-endian Y16 frame. The PLY is a single-frame point cloud reprojected through `Q.bin`.
+The command writes `frame.raw`, `frame.ply`, and `frame.json` side by side. It refuses to overwrite any of them. The raw file contains one 640×400 little-endian Y16 frame. Reprojection treats each uint16 sample as depth (`raw × depth_scale` mm), uses the first three rows of `Q.bin` to obtain the camera ray, then scales that ray so its Z equals the measured depth. The point-cloud PLY uses candidate millimeter units; direct UVC byte-for-byte equivalence with the SDK frame is still marked provisional. The shared per-scanner scale and its status are in `tools/revopoint/calibration/depth_scale.json`.
+
+To reproject a saved raw frame after a processing change without reconnecting to the camera, use `reproject_y16.py`. Its output prefix must be in an existing folder (normally the same CADYX project) and existing outputs are never overwritten:
+
+```powershell
+$calibration = Join-Path $PWD 'tools\revopoint\calibration'
+$projectPath = Join-Path $PWD 'projects\<existing CADYX project folder>'
+$scale = (Get-Content (Join-Path $calibration 'depth_scale.json') -Raw | ConvertFrom-Json).depth_scale_mm_per_raw_unit
+python .\tools\revopoint\reproject_y16.py `
+    --raw-file (Join-Path $projectPath 'frame.raw') `
+    --q-file (Join-Path $calibration 'Q.bin') `
+    --output-prefix (Join-Path $projectPath 'frame_reprojected') `
+    --depth-scale $scale
+```
 
 For a continuous capture-rate measurement, add `--frames 120`. The camera stays open for the sequence; the utility saves the packed frames to `frame_burst.raw`, records Media Foundation timestamps, elapsed stream time and UTC arrival time in `frame_timestamps.csv`, and reports both timestamp-derived and wall-clock rates. The PLY remains a preview of the first frame. An earlier 120-frame run produced about 4.53 fps by media timestamps; the newer paired full-turn run below measured both streams for over 40 seconds and supersedes it for that tested configuration.
 
-To preview a live scan in the current CADYX project, open the project and use the scan button in the 3D viewport toolbar. The embedded preview polls the read-only frame endpoint every 80 ms and offers depth grayscale or 3D points reprojected through Q.bin; drag the point view to orbit it. It shows one current frame and does not accumulate or fuse frames. A saved ASCII point-only PLY can also be shown in the same project panel by adding `scan_folder` and `scan_file` to the CADYX URL together with `live_scan=1`; this displays the stored points directly without Poisson reconstruction. A frame older than one second is marked as stopped. The disparity scale (256) and physical units remain unverified, so this is a geometry preview rather than a calibrated scan. The /scanner route remains available for diagnostics. Start capture with --live-raw pointing at the CADYX workspace root's .revopoint-live.raw; the capture updates this fixed-size file atomically after each received frame. Example when the workspace root is the repository's projects folder:
+To preview a live scan in the current CADYX project, open the project and use the scan button in the 3D viewport toolbar. The embedded preview polls the read-only frame endpoint every 80 ms and offers depth grayscale or 3D points reprojected through Q.bin; drag the point view to orbit it. It shows one current frame and does not accumulate or fuse frames. A saved ASCII point-only PLY can also be shown in the same project panel by adding `scan_folder` and `scan_file` to the CADYX URL together with `live_scan=1`; this displays the stored points directly without Poisson reconstruction. If the PLY includes a `support_count` vertex property, the preview offers color by frame support as well as by depth. A frame older than one second is marked as stopped. The depth scale is sourced from the installed Revo Scan SDK log, but direct UVC correspondence and known-dimension accuracy remain unverified. The /scanner route remains available for diagnostics. Start capture with --live-raw pointing at the CADYX workspace root's .revopoint-live.raw; the capture updates this fixed-size file atomically after each received frame. Example when the workspace root is the repository's projects folder:
 
 ```powershell
-& .\tools\revopoint\build\CaptureY16.exe --out-prefix (Join-Path $PWD 'projects\live_preview\capture') --q-file (Join-Path $PWD 'tools\revopoint\calibration\Q.bin') --disparity-scale 256 --frames 1000 --fps 15 --live-raw (Join-Path $PWD 'projects\.revopoint-live.raw')
+& .\tools\revopoint\build\CaptureY16.exe --out-prefix (Join-Path $projectPath 'capture') --q-file (Join-Path $calibration 'Q.bin') --depth-scale $scale --frames 1000 --fps 15 --live-raw (Join-Path $PWD 'projects\.revopoint-live.raw')
+```
+
+For a live-only positioning preview that does not save per-scan RAW/PLY/metadata or a burst, run:
+
+```powershell
+$livePath = Join-Path $PWD 'projects\.revopoint-live.raw'
+$stopPath = Join-Path $PWD 'projects\.revopoint-live-preview.stop'
+& .\tools\revopoint\build\CaptureY16.exe --live-only --live-raw $livePath --stop-file $stopPath --fps 15
+```
+
+The scanner page reads the latest frame from the fixed-size `$livePath` cache. To stop the preview from another PowerShell window, create the stop signal; the capture closes on the next frame:
+
+```powershell
+New-Item -ItemType File -Path (Join-Path $PWD 'projects\.revopoint-live-preview.stop')
 ```
 
 ## Live capture with turntable movement
@@ -47,20 +74,22 @@ For a timestamped angle trace with an in-session turn command, use:
 
 The arguments are monitor duration, CSV path, delay before the relative turn, and turn angle. The command keeps a single BLE connection, records UTC rotation and tilt samples, and sends the turn itself on that connection. In a 120-frame live capture the controller recorded 88 angle samples and observed 0°→30°. The table was homed to 0° after capture. Tilt control was tested across the supported range: target +30° reported +29.2°, −30° reported −30.0°, and the zero command restored both axes to 0°. `+QR,TILTVALUE;` reads the current tilt; `+QR,TILTANGLE;` reports the supported range instead.
 
-The frame UTC timestamps and angle samples can be joined by linear interpolation. Verified synchronized run: 120 captured frames all received an interpolated table pose spanning 0°–30°; derived per-frame rows are saved as `capture_frame_poses.csv`. The monitor CSV also records tilt from `+QR,TILTVALUE;`. This is suitable for per-frame rigid pose estimates when the turntable axes/pivot are calibrated. The Q-matrix disparity scale and mechanical axes remain unvalidated, so the pose table alone does not establish an accurate fused full model.
+The frame UTC timestamps and angle samples can be joined by linear interpolation. Verified synchronized run: 120 captured frames all received an interpolated table pose spanning 0°–30°; derived per-frame rows are saved as `capture_frame_poses.csv`. The monitor CSV also records tilt from `+QR,TILTVALUE;`. This is suitable for per-frame rigid pose estimates when the turntable axes/pivot are calibrated. The direct UVC depth mapping and mechanical axes remain unvalidated, so the pose table alone does not establish an accurate fused full model.
 
-## Continuous synchronized sweep
+## Stationary marker poses
 
-To record both camera streams while the table completes one revolution, run:
+For marker/camera studies, this script captures each angle while the table is stationary. DepthCam and RGBCam processes exit before the table moves to the next 30° pose:
 
 ```powershell
 $projectPath = Join-Path $PWD 'projects\Исходные кадры сканирования'
-.\tools\revopoint\capture_marker_sweep.ps1 -ProjectPath $projectPath -OutputFolderName revopoint_marker_sweep_20261019 -Frames 1000 -Fps 15
+.\tools\revopoint\capture_marker_sweep.ps1 -ProjectPath $projectPath -OutputFolderName marker_poses -FramesPerPose 1 -Fps 15
 ```
 
-The script creates a run folder inside the selected CADYX project, checks that the table is at home with zero tilt, starts DepthCam, waits for its first valid Y16 sample, starts RGBCam and waits for its first valid MJPG sample, then starts TurntableController.exe sweep 12 30. That controller holds one BLE connection, verifies each 30° step before issuing the next, records angle and tilt telemetry, and aborts on a missed target. A shared stop-file closes the two finite bursts after the final step so their raw frames and timestamps are saved. The Y16 capture also updates projects/.revopoint-live.raw for the in-project scan preview. The script preserves partial data and attempts to stop and home the table if an operation fails.
+The script captures one or more stationary frames from each camera at 0°, 30°, …, 330°, then makes a rotation-only 30° return to zero after the final camera process has exited. It never commands table tilt. Each pose and capture time is stored in `poses.csv` and `capture_manifest.json`; raw frames, point-cloud previews, and RGB images stay in one run subfolder inside the existing CADYX project. The TurntableController also rejects `rotate`, `sweep`, `capture-sweep`, `tilt`, and `zero` commands while known scanner processes are active. Partial captures are preserved, and an error does not trigger an automatic table move.
 
-To join camera frames to interpolated turntable angles and inspect bright-component trajectories, run:
+The `analyze_marker_sweep.py` tool below is for historical moving-camera sweeps that already contain continuous timestamp streams and a `turntable_sweep.csv`. It does not process the stationary pose format; those captures should be associated by their recorded pose angles.
+
+For a historical continuous sweep, the old analysis command was:
 
 ```powershell
 py .\tools\revopoint\analyze_marker_sweep.py .\projects\revopoint_marker_sweep_YYYYMMDD_HHMMSS
@@ -100,7 +129,7 @@ It reads each frame's measured table angle, estimates an XY pivot under a camera
 
 On the 2026-10-16 current-setup capture, the denser defaults estimated pivot `[32.1, -22.7, 0]` and achieved 82.2% training and 86.9% held-out point overlap within 5 Q units. The prior sparse settings scored 71.1% held-out. The earlier manually fitted candidate scored about 90% with a different sampling procedure. These candidates remain diagnostic; the multi-tilt experiment added points but only slightly increased coverage against the user's earlier scan, so the transform, scale and completeness still need validation.
 
-The initial CADYX reconstruction had 24,641 vertices and 49,979 triangles. Subsequent trials at higher triangle count and with density/outlier filtering still produce a thin plate-like result with isolated fragments; this is a diagnostic model, not a verified complete scan. The raw disparity scale, mechanical axis/pivot and coverage of occluded surfaces need validation before the fusion can be accepted.
+The initial CADYX reconstruction had 24,641 vertices and 49,979 triangles. Subsequent trials at higher triangle count and with density/outlier filtering still produce a thin plate-like result with isolated fragments; this is a diagnostic model, not a verified complete scan. The previous `raw/256` disparity interpretation, mechanical axis/pivot and coverage of occluded surfaces need validation before that fusion can be accepted.
 
 The mesh and source cloud have similar PCA eigenvalues for their thinnest dimension (14.1 vs. 15.6 coordinate-units²). This indicates the thin, plate-like shape is already present in the fused input, rather than being created only by Poisson reconstruction. It still does not prove the object itself is fully covered: the underside and occluded surfaces are not validated.
 
@@ -119,7 +148,7 @@ python .\tools\revopoint\fuse_known_pose_pair.py `
     --pivot 34.941 -19.133 117.392
 ```
 
-The tool rotates the second frame by the negative measured table angle, reports sampled bidirectional overlap at 1/2/5 Q units, voxel-averages the merged points, and writes a JSON provenance file beside the PLY. It refuses to replace either source or an existing output. Supply an independently measured angle and a justified axis/pivot; this run reuses the prior marker-registered axis/pivot and is therefore a provisional registration. Its Q scale remains unverified and the result covers only the surfaces visible in these two views.
+The tool rotates the second frame by the negative measured table angle, reports sampled bidirectional overlap at 1/2/5 Q units, voxel-averages the merged points, and writes a JSON provenance file beside the PLY. It refuses to replace either source or an existing output. Supply an independently measured angle and a justified axis/pivot; this run reuses the prior marker-registered axis/pivot and is therefore a provisional registration. Its physical scale remains unverified and the result covers only the surfaces visible in these two views.
 
 List the camera's advertised native modes with:
 
@@ -149,7 +178,7 @@ The installed Revo Scan 5.5.5 package was inspected without launching the applic
 
 `3DCamera.dll` exports the camera/frame API: enumerate/connect/disconnect, create/start/stop streams, get single or paired frames, read frame data/format/dimensions/timestamp/extra-info, query intrinsics/extrinsics/distortion, and request marker information. The public SDK headers document callback and pull-based frame acquisition, and require releasing frames after use. Its generic `ExtraInfo` structure contains an optional `gyroPosAndPos` extension with quaternion fields `q0..q3`, gyroscope fields `gx/gy/gz`, acceleration, magnetic-field values, and a motion score. This proves the SDK frame format can carry such metadata; it does not prove that the original MINI supplies it. The public 3DViewer sample converts each incoming depth frame to a point cloud using camera calibration and publishes that frame as a live 3D update; it does not implement multi-frame registration/fusion in that path.
 
-The public SDK defines Z16 depth as `uint16` and documents `Z_mm = raw_value × depthScale`. Installed Revo Scan logs repeatedly report `depthScale=0.005`. The SDK `Intrinsics` structure is exactly 40 bytes (two 16-bit dimensions and nine floats), matching the local `Pl.bin` and `Prgb.bin` sizes and decoded layouts. `Pl.bin` gives 640×400, `fx=fy=891.2453`, `cx=52.7665`, `cy=199.49365`; `Prgb.bin` gives 640×400, `fx=fy=899.3882`, `cx=331.0519`, `cy=202.1866`. This provides a strong depth-scale candidate and verified camera intrinsics without assuming Q-matrix disparity. Whether the raw values from the independent UVC reader are byte-for-byte the SDK's Z16 values remains unconfirmed; validate against a known dimension or a supported SDK connection before claiming metric accuracy.
+Installed Revo Scan logs for this scanner report a 640×400, 15 fps depth stream (`format:3`) and `depthScale=0.005`. The local `Q.bin` hash matches the active `%LOCALAPPDATA%\RevoScan5\cameraparam\Q.bin`; `Pl.bin` also matches byte-for-byte. The 40-byte `Pl.bin` is 640×400 with `fx=fy=891.2453`, `cx=52.7665`, `cy=199.49365`; `Prgb.bin` is 640×400 with `fx=fy=899.3882`, `cx=331.0519`, `cy=202.1866`. Reprojection now scales the uint16 sample by the logged depth scale, uses Q to obtain a ray, then scales the ray to the measured Z depth. A 0°/14.4° table pair gave a 13.1° fitted cloud rotation and 100%/97.9% directional overlap within 5 mm using this projection; the old `raw/256` disparity path gave only 2.7–3.1 Q units of robust depth spread and a 0.7° fitted rotation. This is strong internal evidence for the corrected method, not independent proof of UVC/SDK buffer identity or absolute scale; verify against a known dimension before treating the scale as certified.
 
 The marker pipeline is split across `markerDetectionByGradient.dll` and `markerDetectionByJH.dll` (OpenCV-backed `IMarkerExtraction` factories), `markerMatchByEpipolar.dll` (camera-parameter setup and point undistortion), `markerAlignByTriangle.dll` (`IMarkerAlign` factory), and `markerFusionByTriangle.dll` (`IMarkerFusion` factory importing the aligner). The fusion DLL contains strings for `createBaFusion`, keyframe selection/optimization, frame-marker alignment, global optimization, point filtering, and intermediate PLY dumps. These are architecture clues, not a recovered algorithm or a guarantee that its marker mode applies to the turntable reflectors.
 
@@ -183,7 +212,7 @@ Keep each capture prefix unique. The original Y16 frame is preserved beside the 
 & .\tools\revopoint\build\TurntableController.exe stop
 ```
 
-`query` reads rotation angle and tilt value. `speed` sets the requested period in seconds per revolution from 18 to 90; smaller values rotate faster. `rotate` sends one relative move and is limited to 30° per command; use a negative angle to reverse it. `tilt` sets the second axis to a target from −30° to +30° and verifies the current value. `zero` returns both axes to their boot-time homes. `stop` sends stop commands to both axes. The tool scans for the BLE FFE1 service, connects without pairing, confirms the GATT name `REVO_DUAL_AXIS_TABLE`, and uses the FFE0/FFE1 service. The observed ASCII commands match the independently documented Revopoint Dual-axis Turntable protocol: [protocol research](https://github.com/opensourcemanufacturing/Revopoint-Dual-Turntable).
+`query` reads rotation angle and tilt value. `speed` sets the requested period in seconds per revolution from 18 to 90; smaller values rotate faster. `rotate` sends one relative move and is limited to 30° per command; use a negative angle to reverse it. `tilt` sets the second axis only within the user-defined safe operating range of −10° to +10° and verifies the current value. Although the table protocol accepts wider angles, do not exceed this limit on this setup: the scanned part fell off the table near 29°. The CLI enforces the ±10° limit; `zero` remains available to return both axes to their boot-time homes. Only tilt a part that is present and secured. `stop` sends stop commands to both axes. The tool scans for the BLE FFE1 service, connects without pairing, confirms the GATT name `REVO_DUAL_AXIS_TABLE`, and uses the FFE0/FFE1 service. The observed ASCII commands match the independently documented Revopoint Dual-axis Turntable protocol: [protocol research](https://github.com/opensourcemanufacturing/Revopoint-Dual-Turntable).
 
 Revo Scan, Revo Assistant, or another Bluetooth client can hold the table connection. The controller does not retry a movement command after a lost response.
 
@@ -192,10 +221,10 @@ Revo Scan, Revo Assistant, or another Bluetooth client can hold the table connec
 Secure the object to the turntable, keep the scanner fixed, close Revo Scan, and run:
 
 ```powershell
-.\tools\revopoint\scan_360.ps1 -OutputFolderName revopoint_scan_20261016 -DisparityScale 256
+.\tools\revopoint\scan_360.ps1 -ProjectPath 'projects\<existing CADYX project folder>' -DepthScale 0.005
 ```
 
-The script returns the table to its home zero, captures at 0°, 30°, …, 330°, and homes the table again. It saves every raw frame, per-frame provisional PLY, calibration copy, and angle manifest in a new direct workspace folder. It does **not** register the twelve views or merge them into one mesh. The table center/axis and disparity scale still need validation before the views can form a trustworthy complete model.
+The script operates inside the supplied existing CADYX project; it does not create another project. It returns the table to its home zero, captures at 0°, 30°, …, 330°, and homes the table again. It saves every raw frame, per-frame provisional PLY, calibration copy, and angle manifest in that project. It does **not** register the twelve views or merge them into one mesh. The table center/axis, direct UVC depth mapping, and absolute scale still need validation before the views can form a trustworthy complete model.
 
 ## Multi-tilt capture and registration status
 

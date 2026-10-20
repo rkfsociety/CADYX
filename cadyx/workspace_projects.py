@@ -16,6 +16,14 @@ from .migrations import DOCUMENT_VERSION, PROJECT_VERSION, migrate_project
 from .models import Document, OwnerType
 
 _PROJECT_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_URL_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_CYRILLIC_TO_LATIN = str.maketrans({
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "yo",
+    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch",
+    "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+})
 _GEOMETRY_REF = "$cadyx_geometry_ref"
 _STORAGE_KEY = "$cadyx_storage"
 _HISTORY_FILE = ".cadyx-history.jsonl"
@@ -159,12 +167,14 @@ class ProjectRecordStore:
         self._history_state.pop(str(project_file), None)
 
     @staticmethod
-    def new_record(project_id: str, name: str, *, timestamp: str) -> dict[str, Any]:
+    def new_record(project_id: str, name: str, *, timestamp: str, url_slug: str | None = None) -> dict[str, Any]:
         return {
             "format": "cadyx-project",
             "version": PROJECT_VERSION,
             "id": project_id,
             "name": name,
+            "url_slug": ProjectRecordStore.normalize_url_slug(url_slug) if url_slug is not None else
+            ProjectRecordStore.default_url_slug(name),
             "created_at": timestamp,
             "modified_at": timestamp,
             "document": Document.create().to_dict(),
@@ -214,6 +224,8 @@ class ProjectRecordStore:
                 or not isinstance(project.get("document"), dict)
                 or project["document"].get("version") != DOCUMENT_VERSION):
             project = migrate_project(project)
+        if "url_slug" not in project and isinstance(project.get("name"), str):
+            project["url_slug"] = self.default_url_slug(project["name"])
         self.validate_current(
             project, expected_id=project_id, history_start=project.get("_history_count", 0),
         )
@@ -299,7 +311,10 @@ class ProjectRecordStore:
 
     @staticmethod
     def validate(project: Any, *, expected_id: str | None = None) -> None:
-        ProjectRecordStore.validate_current(migrate_project(project), expected_id=expected_id)
+        migrated = migrate_project(project)
+        if isinstance(migrated, dict) and "url_slug" not in migrated and isinstance(migrated.get("name"), str):
+            migrated["url_slug"] = ProjectRecordStore.default_url_slug(migrated["name"])
+        ProjectRecordStore.validate_current(migrated, expected_id=expected_id)
 
     @staticmethod
     def validate_current(
@@ -321,6 +336,8 @@ class ProjectRecordStore:
             raise ValidationError("Project file id does not match its workspace directory.")
         if not isinstance(project.get("name"), str) or not project["name"].strip():
             raise ValidationError("Project name is invalid.")
+        if not isinstance(project.get("url_slug"), str) or not _URL_SLUG.fullmatch(project["url_slug"]):
+            raise ValidationError("Project URL slug must contain lowercase English letters, digits and single hyphens.")
         if not isinstance(project.get("created_at"), str) or not isinstance(project.get("modified_at"), str):
             raise ValidationError("Project timestamps are invalid.")
         document = (Document.from_validated_dict(project.get("document")) if document_validated else
@@ -352,6 +369,18 @@ class ProjectRecordStore:
                 raise ValidationError("History entry command and result must be objects.")
             if not isinstance(entry.get("timestamp"), str) or entry.get("revision") != history_base_count + index + 1:
                 raise ValidationError("History entry timestamp or revision is invalid.")
+
+    @staticmethod
+    def normalize_url_slug(value: str) -> str:
+        if not isinstance(value, str) or not _URL_SLUG.fullmatch(value):
+            raise ValidationError("Project URL slug must contain lowercase English letters, digits and single hyphens.")
+        return value
+
+    @staticmethod
+    def default_url_slug(name: str) -> str:
+        transliterated = name.lower().translate(_CYRILLIC_TO_LATIN)
+        slug = re.sub(r"[^a-z0-9]+", "-", transliterated).strip("-")
+        return slug[:120].strip("-") or "project"
 
     @staticmethod
     def write_atomic(path: Path, value: dict[str, Any]) -> None:

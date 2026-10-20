@@ -684,6 +684,7 @@ Agent command endpoint under that project's edit lease:
   "file": "Merge_02_pc.ply",
   "name": "Scanned cover",
   "parameters": {
+    "reconstruction_method": "poisson",
     "voxel_size": 0.75,
     "target_triangles": 30000,
     "outlier_neighbors": 20,
@@ -715,17 +716,24 @@ fails the command. Temporary files are hidden from workspace listings.
 
 Both PLY triangle meshes and point clouds are supported. Meshes are cleaned and
 simplified; point clouds are voxel-downsampled, filtered for statistical
-outliers, given consistently oriented normals, and reconstructed with screened
-Poisson. Output is an editable triangle mesh, not an OCCT B-rep. The packed
+outliers, given consistently oriented normals, and reconstructed using the
+selected method. `poisson` (default) builds a globally closed screened-Poisson
+surface and can crop weakly supported vertices. `ball_pivoting` rolls local
+spheres of 1.5, 2.0, and 3.0 times the effective voxel size over the measured
+points. It preserves open boundaries and gaps instead of filling unseen space;
+it may therefore produce multiple components or boundary edges and does not
+claim a watertight result. Both methods return an editable triangle mesh, not an
+OCCT B-rep. The packed
 float32 vertices and uint32 triangle indices are compressed, bounded, and
 checksum-validated by `GeometryKernel`; command history stores only ids,
 parameters, and counts, not a second mesh copy.
 
-The defaults are `voxel_size=0.75` in the source's coordinate units,
+The defaults are `reconstruction_method=poisson`, `voxel_size=0.75` in the source's coordinate units,
 `target_triangles=30000`, `outlier_neighbors=20`, `outlier_std_ratio=2.0`, and
 `poisson_depth=8`, and `poisson_density_quantile=0.01`. `voxel_size` and
-`target_triangles` apply to both input kinds; the outlier and Poisson settings
-apply to point clouds. After Poisson reconstruction, vertices below the chosen
+`target_triangles` apply to both input kinds; the outlier and reconstruction
+method settings apply to point clouds. `poisson_depth` and
+`poisson_density_quantile` only affect the `poisson` method. After Poisson reconstruction, vertices below the chosen
 density quantile are removed with their incident triangles; this trims weakly
 supported extrapolated surfaces. Set the quantile to `0` to preserve the full
 Poisson result. `set_scan_parameter`

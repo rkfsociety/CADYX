@@ -50,6 +50,7 @@ class NativeScan:
                     library.cadyx_scan_process.argtypes = [
                         ctypes.c_char_p,
                         ctypes.c_int,
+                        ctypes.c_char_p,
                         ctypes.c_double,
                         ctypes.c_int,
                         ctypes.c_int,
@@ -100,6 +101,7 @@ class NativeScan:
         result = self.library.cadyx_scan_process(
             filename,
             int(source_has_faces),
+            parameters["reconstruction_method"].encode("ascii"),
             parameters["voxel_size"],
             parameters["target_triangles"],
             parameters["outlier_neighbors"],

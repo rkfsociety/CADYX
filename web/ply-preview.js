@@ -789,7 +789,7 @@ function projectSlugBase(name) {
 
 function projectRouteSlugs() {
   if (projectRouteSlugSource === projects) return projectRouteSlugCache;
-  const entries = projects.map(({ project }) => ({ project, base: projectSlugBase(project.name) }));
+  const entries = projects.map(({ project }) => ({ project, base: project.url_slug || projectSlugBase(project.name) }));
   const baseCounts = new Map();
   entries.forEach(({ base }) => baseCounts.set(base, (baseCounts.get(base) || 0) + 1));
   const used = new Set();

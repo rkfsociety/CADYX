@@ -20,6 +20,7 @@ internal static class Program
     private static readonly Guid CharacteristicUuid = Guid.Parse("0000FFE1-0000-1000-8000-00805F9B34FB");
     private const string DeviceName = "REVO_DUAL_AXIS_TABLE";
     private const double MaxDegreesPerCommand = 30.0;
+    private const double MaxSafeTiltDegrees = 10.0;
     private const double MinRotationPeriodSeconds = 18.0;
     private const double MaxRotationPeriodSeconds = 90.0;
     private const double TiltSetpointToleranceDegrees = 1.0;
@@ -88,8 +89,8 @@ internal static class Program
             else if (operation == "tilt")
             {
                 if (args.Length != 2 || !double.TryParse(args[1], NumberStyles.Float,
-                        CultureInfo.InvariantCulture, out degrees) || !IsFinite(degrees) || Math.Abs(degrees) > 30.0)
-                    throw new ArgumentException("tilt requires a target angle from -30 to 30 degrees.");
+                    CultureInfo.InvariantCulture, out degrees) || !IsFinite(degrees) || Math.Abs(degrees) > MaxSafeTiltDegrees)
+                    throw new ArgumentException("tilt requires a target angle within the safe range of -10 to 10 degrees.");
             }
             else if (operation == "monitor")
             {
@@ -113,21 +114,23 @@ internal static class Program
             }
             else if (operation == "capture-sweep")
             {
-                double expectedTilt, disparityScale;
-                if (args.Length != 10 || !Int32.TryParse(args[1], out sweepSteps) || sweepSteps != 12 ||
-                    !double.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out degrees) || degrees != 30.0 ||
+                double expectedTilt, depthScale;
+                if (args.Length != 10 || !Int32.TryParse(args[1], out sweepSteps) || sweepSteps < 1 || sweepSteps > 360 ||
+                    !double.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out degrees) ||
+                    !IsFinite(degrees) || Math.Abs(degrees) < 0.1 || Math.Abs(degrees) > MaxDegreesPerCommand ||
+                    Math.Abs(Math.Abs(degrees * sweepSteps) - 360.0) > 0.01 ||
                     !double.TryParse(args[3], NumberStyles.Float, CultureInfo.InvariantCulture, out expectedTilt) ||
-                    !IsFinite(expectedTilt) || Math.Abs(expectedTilt) > 10.0 ||
-                    !double.TryParse(args[8], NumberStyles.Float, CultureInfo.InvariantCulture, out disparityScale) ||
-                    !IsFinite(disparityScale) || disparityScale <= 0.0)
-                    throw new ArgumentException("capture-sweep requires 12 poses at 30 degrees, an expected tilt within ±10 degrees, CSV, capture executable, output prefix, Q matrix, positive disparity scale, and live-frame path.");
+                    !IsFinite(expectedTilt) || Math.Abs(expectedTilt) > MaxSafeTiltDegrees ||
+                    !double.TryParse(args[8], NumberStyles.Float, CultureInfo.InvariantCulture, out depthScale) ||
+                    !IsFinite(depthScale) || depthScale <= 0.0)
+                    throw new ArgumentException("capture-sweep requires one full 360-degree turn using 1–360 steps of at most 30 degrees, an expected tilt within ±10 degrees, CSV, capture executable, output prefix, Q matrix, positive depth scale, and live-frame path.");
                 monitorPath = args[4];
                 scanCapture = new ScanCaptureOptions {
                     ExpectedTilt = expectedTilt,
                     CaptureExecutable = args[5],
                     OutputPrefix = args[6],
                     CalibrationFile = args[7],
-                    DisparityScale = disparityScale,
+                    DepthScale = depthScale,
                     LiveRawFile = args[9],
                 };
                 if (!File.Exists(scanCapture.CaptureExecutable) || !File.Exists(scanCapture.CalibrationFile))
@@ -156,21 +159,42 @@ internal static class Program
         Console.WriteLine("TurntableController.exe query");
         Console.WriteLine("TurntableController.exe zero");
         Console.WriteLine("TurntableController.exe speed <seconds-per-rotation>   (18–90 seconds)");
-        Console.WriteLine("TurntableController.exe tilt <degrees>   (-30–30 degrees)");
+        Console.WriteLine("TurntableController.exe tilt <degrees>   (safe operating limit: -10–10 degrees)");
         Console.WriteLine("TurntableController.exe rotate <degrees>   (one bounded relative move, max 30 degrees)");
         Console.WriteLine("TurntableController.exe stop");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv>");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv> <rotate-delay-seconds> <degrees>");
         Console.WriteLine("TurntableController.exe sweep <steps> <degrees-per-step> <output.csv>   (one BLE connection; each step is verified before the next)");
-        Console.WriteLine("TurntableController.exe capture-sweep 12 30 <tilt> <poses.csv> <CaptureY16.exe> <output-prefix> <Q.bin> <scale> <live.raw>");
+        Console.WriteLine("TurntableController.exe capture-sweep <steps> <degrees-per-step> <tilt> <poses.csv> <CaptureY16.exe> <output-prefix> <Q.bin> <depth-scale> <live.raw>   (one full turn; for example 24 steps of 15 degrees)");
         Console.WriteLine("The app does not pair the turntable. It discovers the BLE device by its advertised FFE1 service,\n" +
                           "then confirms the GATT device name before sending any command.");
+    }
+
+    private static void EnsureScannerDisconnected()
+    {
+        string[] scannerProcesses = { "CaptureY16", "CaptureRgb", "RevoScan", "RevoScan5", "RevoAssistant" };
+        Process[] running = Process.GetProcesses();
+        string[] active;
+        try
+        {
+            active = running.Where(process => scannerProcesses.Contains(process.ProcessName, StringComparer.OrdinalIgnoreCase))
+                .Select(process => process.ProcessName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+        finally
+        {
+            foreach (Process process in running) process.Dispose();
+        }
+        if (active.Length > 0)
+            throw new InvalidOperationException("Turntable motion is blocked while scanner processes are active: " + String.Join(", ", active) + ". Stop and disconnect the scanner before moving the table.");
     }
 
     private static async Task<int> RunAsync(string operation, double degrees, double rotationPeriod,
                                             int monitorSeconds, string monitorPath, int rotateAfterSeconds,
                                             int sweepSteps, ScanCaptureOptions scanCapture)
     {
+        bool motionRequested = operation == "rotate" || operation == "sweep" || operation == "capture-sweep" ||
+            operation == "tilt" || operation == "zero" || (operation == "monitor" && rotateAfterSeconds >= 0);
+        if (motionRequested) EnsureScannerDisconnected();
         using (Connection connection = await ConnectAsync())
         {
             await EnableNotificationsAsync(connection);
@@ -197,6 +221,7 @@ internal static class Program
                     {
                         if (!moveSent && rotateAfterSeconds >= 0 && monitorTimer.Elapsed.TotalSeconds >= rotateAfterSeconds)
                         {
+                            EnsureScannerDisconnected();
                             string monitorMove = "+CT,TURNANGLE=" + degrees.ToString("F1", CultureInfo.InvariantCulture) + ";";
                             Console.WriteLine("issuing " + monitorMove);
                             string reply = await SendAndReadAsync(connection, monitorMove);
@@ -260,6 +285,7 @@ internal static class Program
 
                     for (int step = 1; step <= sweepSteps; ++step)
                     {
+                        EnsureScannerDisconnected();
                         double sweepBefore = currentAngle;
                         string command = "+CT,TURNANGLE=" + degrees.ToString("F1", CultureInfo.InvariantCulture) + ";";
                         string commandReply = await SendAndReadAsync(connection, command);
@@ -343,11 +369,13 @@ internal static class Program
 
             if (operation == "tilt")
             {
+                EnsureScannerDisconnected();
                 string tiltBeforeText = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
                 double tiltBefore;
                 if (!TryAngle(tiltBeforeText, out tiltBefore))
                     throw new InvalidOperationException("Could not read current tilt angle; no tilt command was sent.");
                 Console.WriteLine("tilt before: " + tiltBefore.ToString("F1", CultureInfo.InvariantCulture) + " deg");
+                EnsureScannerDisconnected();
                 string command = "+CR,TILTVALUE=" + degrees.ToString("F1", CultureInfo.InvariantCulture) + ";";
                 Console.WriteLine(command + " => " + await SendAndReadAsync(connection, command));
                 DateTime tiltDeadline = DateTime.UtcNow.AddSeconds(30);
@@ -368,6 +396,7 @@ internal static class Program
 
             if (operation == "zero")
             {
+                EnsureScannerDisconnected();
                 string zeroBaselineText = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
                 double zeroBaseline;
                 if (!TryAngle(zeroBaselineText, out zeroBaseline))
@@ -382,8 +411,10 @@ internal static class Program
                 }
                 Console.WriteLine("angle before zero: " + zeroBaseline.ToString("F1", CultureInfo.InvariantCulture) + " deg");
                 Console.WriteLine("tilt before zero: " + tiltBaseline.ToString("F1", CultureInfo.InvariantCulture) + " deg");
+                EnsureScannerDisconnected();
                 string reply = await SendAndReadAsync(connection, "+CT,TOZERO;");
                 Console.WriteLine("+CT,TOZERO; => " + reply);
+                EnsureScannerDisconnected();
                 string tiltReply = await SendAndReadAsync(connection, "+CR,TOZERO;");
                 Console.WriteLine("+CR,TOZERO; => " + tiltReply);
                 for (int attempt = 0; attempt < 30; ++attempt)
@@ -415,6 +446,7 @@ internal static class Program
             }
             Console.WriteLine("angle before: " + before.ToString("F1", CultureInfo.InvariantCulture) + " deg");
 
+            EnsureScannerDisconnected();
             string move = "+CT,TURNANGLE=" + degrees.ToString("F1", CultureInfo.InvariantCulture) + ";";
             var timer = Stopwatch.StartNew();
             string moveReply = await SendAndReadAsync(connection, move);
@@ -605,7 +637,7 @@ internal static class Program
         public string CaptureExecutable;
         public string OutputPrefix;
         public string CalibrationFile;
-        public double DisparityScale;
+        public double DepthScale;
         public string LiveRawFile;
     }
 
@@ -616,7 +648,7 @@ internal static class Program
             Arguments = String.Join(" ", new[] {
                 "--out-prefix", prefix,
                 "--q-file", options.CalibrationFile,
-                "--disparity-scale", options.DisparityScale.ToString("R", CultureInfo.InvariantCulture),
+                "--depth-scale", options.DepthScale.ToString("R", CultureInfo.InvariantCulture),
                 "--frames", "1",
                 "--live-raw", options.LiveRawFile,
             }.Select(QuoteWindowsArgument)),

@@ -17,6 +17,7 @@ from .native_scan import NativeScan
 
 
 DEFAULT_SCAN_PARAMETERS = {
+    "reconstruction_method": "poisson",
     "voxel_size": 0.75,
     "target_triangles": 30000,
     "outlier_neighbors": 20,
@@ -64,7 +65,7 @@ def _native_scan_source(source: Path, source_hash: str) -> Iterator[Path]:
         yield native_source
 
 
-def normalize_scan_parameters(value: Any) -> dict[str, float | int]:
+def normalize_scan_parameters(value: Any) -> dict[str, float | int | str]:
     if not isinstance(value, dict):
         raise ValidationError("Scan parameters must be an object.")
     unknown = set(value) - set(DEFAULT_SCAN_PARAMETERS)
@@ -72,6 +73,10 @@ def normalize_scan_parameters(value: Any) -> dict[str, float | int]:
         raise ValidationError(f"Unsupported scan parameter: {sorted(unknown)[0]!r}.")
     result = dict(DEFAULT_SCAN_PARAMETERS)
     result.update(value)
+
+    reconstruction_method = result["reconstruction_method"]
+    if not isinstance(reconstruction_method, str) or reconstruction_method not in {"poisson", "ball_pivoting"}:
+        raise ValidationError("reconstruction_method must be 'poisson' or 'ball_pivoting'.")
 
     voxel_size = result["voxel_size"]
     if (isinstance(voxel_size, bool) or not isinstance(voxel_size, (int, float)) or
@@ -208,4 +213,5 @@ class ScanProcessor:
         if header_faces and metadata["input_triangles"] != header_faces:
             raise ValidationError("Open3D read a different face count than the PLY header declares.")
         metadata["processor_version"] = native.version
+        metadata["reconstruction_method"] = normalized["reconstruction_method"]
         return geometry, metadata, source_hash

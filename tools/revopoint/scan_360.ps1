@@ -1,34 +1,50 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^[A-Za-z0-9_-]+$')]
-    [string]$OutputFolderName,
+    [string]$ProjectPath,
 
-    [Parameter(Mandatory = $true)]
-    [ValidateScript({ $_ -gt 0 })]
-    [double]$DisparityScale,
+    [double]$DepthScale = 0,
 
     [string]$CalibrationFile = (Join-Path $PSScriptRoot 'calibration\Q.bin')
 )
 
 $ErrorActionPreference = 'Stop'
 $toolRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot = Resolve-Path (Join-Path $toolRoot '..\..')
-$workspaceRoot = Join-Path $repoRoot 'projects'
-$outputDirectory = Join-Path $workspaceRoot $OutputFolderName
+$repoRoot = (Resolve-Path (Join-Path $toolRoot '..\..')).Path
+$workspaceRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'projects')).TrimEnd([char[]]@('\', '/'))
+$ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
+$ProjectPath = [IO.Path]::GetFullPath($ProjectPath).TrimEnd([char[]]@('\', '/'))
+$projectParent = [IO.Path]::GetDirectoryName($ProjectPath)
+if (-not [string]::Equals($projectParent.TrimEnd([char[]]@('\', '/')), $workspaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Scan target must be one existing direct CADYX project folder under $workspaceRoot."
+}
+$projectRecord = Get-Content -LiteralPath (Join-Path $ProjectPath 'project.json') -Raw | ConvertFrom-Json
+$projectId = [guid]::Empty
+if ($projectRecord.format -ne 'cadyx-project' -or -not [guid]::TryParse([string]$projectRecord.id, [ref]$projectId)) {
+    throw "Scan target is not a valid CADYX project folder: $ProjectPath"
+}
 $captureExe = Join-Path $toolRoot 'build\CaptureY16.exe'
 $turntableExe = Join-Path $toolRoot 'build\TurntableController.exe'
+$depthScaleConfig = Join-Path $toolRoot 'calibration\depth_scale.json'
+if (-not $PSBoundParameters.ContainsKey('DepthScale')) {
+    $DepthScale = [double](Get-Content -LiteralPath $depthScaleConfig -Raw | ConvertFrom-Json).depth_scale_mm_per_raw_unit
+}
+if ([double]::IsNaN($DepthScale) -or [double]::IsInfinity($DepthScale) -or $DepthScale -le 0) {
+    throw 'DepthScale must be a positive finite value in millimeters per uint16 unit.'
+}
 
-foreach ($path in @($captureExe, $turntableExe, $CalibrationFile)) {
+foreach ($path in @($captureExe, $turntableExe, $CalibrationFile, $depthScaleConfig)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required input was not found: $path"
     }
 }
-if (Test-Path -LiteralPath $outputDirectory) {
-    throw "Output directory already exists; choose a new name: $outputDirectory"
-}
-
-New-Item -ItemType Directory -Path $outputDirectory | Out-Null
-Copy-Item -LiteralPath $CalibrationFile -Destination (Join-Path $outputDirectory 'Q.bin')
+$runId = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
+$runPrefix = "revopoint_$runId"
+$projectCalibration = Join-Path $ProjectPath "${runPrefix}_Q.bin"
+$projectDepthScale = Join-Path $ProjectPath "${runPrefix}_depth_scale.json"
+if (Test-Path -LiteralPath $projectCalibration) { throw "Calibration copy already exists: $projectCalibration" }
+if (Test-Path -LiteralPath $projectDepthScale) { throw "Depth-scale copy already exists: $projectDepthScale" }
+Copy-Item -LiteralPath $CalibrationFile -Destination $projectCalibration
+Copy-Item -LiteralPath $depthScaleConfig -Destination $projectDepthScale
 
 function Invoke-Turntable {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
@@ -52,8 +68,8 @@ function Read-ReportedAngle {
 
 function Invoke-Capture {
     param([Parameter(Mandatory = $true)][string]$Prefix)
-    & $captureExe --out-prefix $Prefix --q-file (Join-Path $outputDirectory 'Q.bin') `
-        --disparity-scale $DisparityScale
+    & $captureExe --out-prefix $Prefix --q-file $projectCalibration `
+        --depth-scale $DepthScale
     if ($LASTEXITCODE -ne 0) {
         throw "Depth frame capture failed ($LASTEXITCODE) at prefix $Prefix"
     }
@@ -76,8 +92,8 @@ try {
         } else {
             $actualAngle = $zeroAngle
         }
-        $prefixName = 'frame_{0:D3}' -f $expectedAngle
-        $prefix = Join-Path $outputDirectory $prefixName
+        $prefixName = '{0}_frame_{1:D3}' -f $runPrefix, $expectedAngle
+        $prefix = Join-Path $ProjectPath $prefixName
         Write-Host "Capturing frame $($index + 1)/12 at table angle $actualAngle degrees."
         Invoke-Capture -Prefix $prefix
         $frames += [pscustomobject]@{
@@ -100,23 +116,25 @@ try {
         format = 'revopoint-y16-turntable-capture-v1'
         frame_count = $frames.Count
         step_degrees = 30
-        disparity_scale = $DisparityScale
-        disparity_scale_status = 'provisional_unverified'
-        calibration_file = 'Q.bin'
+        projection_method = 'Q_ray_scaled_to_depth'
+        depth_scale_mm_per_raw_unit = $DepthScale
+        depth_scale_status = 'provisional_for_direct_UVC'
+        calibration_file = [IO.Path]::GetFileName($projectCalibration)
+        depth_scale_config = [IO.Path]::GetFileName($projectDepthScale)
         frame_registration = 'not_performed'
         final_table_angle_degrees = $finalAngle
         frames = $frames
     }
-    $manifestPath = Join-Path $outputDirectory 'scan_360.json'
+    $manifestPath = Join-Path $ProjectPath "${runPrefix}_scan_360.json"
     $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
     $complete = $true
-    Write-Host "Captured 12 Y16 frames under $outputDirectory"
+    Write-Host "Captured 12 Y16 frames in CADYX project $ProjectPath"
     Write-Host 'The frames are not merged or registered; the scan manifest records the table angles.'
 }
 finally {
     if (-not $complete) {
         try { Invoke-Turntable -Arguments @('stop') | Out-Null } catch { Write-Warning $_.Exception.Message }
         try { Invoke-Turntable -Arguments @('zero') | Out-Null } catch { Write-Warning $_.Exception.Message }
-        Write-Warning "Partial scan files, if any, were preserved in $outputDirectory"
+        Write-Warning "Partial scan files, if any, were preserved in CADYX project $ProjectPath"
     }
 }

@@ -117,8 +117,8 @@ class CadyxCore:
         with self._lifecycle._project_lifecycle_lock(project_id):
             yield
 
-    def create_project(self, name: str, *, select: bool = True) -> dict[str, Any]:
-        return self._lifecycle.create_project(name, select=select)
+    def create_project(self, name: str, *, select: bool = True, url_slug: str | None = None) -> dict[str, Any]:
+        return self._lifecycle.create_project(name, select=select, url_slug=url_slug)
 
     def upload_project_step(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
         return self._lifecycle.upload_project_step(project_id, filename, content)
@@ -135,8 +135,8 @@ class CadyxCore:
     def prune_project_files(self, project_id: str, keep_files: list[str]) -> dict[str, Any]:
         return self._lifecycle.prune_project_files(project_id, keep_files)
 
-    def rename_project(self, project_id: str, name: str) -> dict[str, Any]:
-        return self._lifecycle.rename_project(project_id, name)
+    def rename_project(self, project_id: str, name: str, *, url_slug: str | None = None) -> dict[str, Any]:
+        return self._lifecycle.rename_project(project_id, name, url_slug=url_slug)
 
     def delete_project(self, project_id: str) -> dict[str, Any]:
         return self._lifecycle.delete_project(project_id)
@@ -1140,5 +1140,5 @@ class CadyxCore:
     def _summary(project: dict[str, Any]) -> dict[str, Any]:
         return {
             key: project[key]
-            for key in ("id", "format", "version", "name", "created_at", "modified_at")
+            for key in ("id", "format", "version", "name", "url_slug", "created_at", "modified_at")
         }

@@ -28,7 +28,7 @@ namespace {
 struct Options {
     std::filesystem::path output_prefix;
     std::filesystem::path q_file;
-    double disparity_scale = 0.0;
+    double depth_scale = 0.0;
     int frame_count = 1;
     int requested_fps = 15;
     UINT32 width = 640;
@@ -38,6 +38,7 @@ struct Options {
     std::filesystem::path stop_file;
     bool list_modes = false;
     bool measure_only = false;
+    bool live_only = false;
 };
 
 std::string Hresult(HRESULT hr);
@@ -82,14 +83,15 @@ void CheckHr(HRESULT hr, const char* action) {
 }
 
 void PrintUsage() {
-    std::cout << "Capture Y16 frames and reproject the first frame through a supplied Q.bin.\n"
-              << "Usage: CaptureY16.exe --out-prefix PATH --q-file PATH --disparity-scale NUMBER [--frames N]\n"
+    std::cout << "Capture Y16 depth frames and reproject the first frame through a supplied Q.bin.\n"
+              << "Usage: CaptureY16.exe --out-prefix PATH --q-file PATH --depth-scale NUMBER [--frames N]\n"
               << "       [--fps 5|10|15] [--width 640|1280] [--height 400|800]\n"
               << "       CaptureY16.exe --out-prefix PATH --frames N --fps 5|10|15 --width W --height H --measure-only\n"
+              << "       CaptureY16.exe --live-only --live-raw PATH --stop-file PATH [--ready-file PATH] [--fps 5|10|15]\n"
               << "       Optional --ready-file PATH is created after the first valid frame is received.\n"
               << "       Optional --stop-file PATH ends a burst after the next valid frame.\n"
               << "       CaptureY16.exe --list-modes\n"
-              << "The scale is explicit because the raw-to-disparity mapping is not calibrated yet.\n";
+              << "Depth scale converts each uint16 sample to millimeters; read it from calibration/depth_scale.json.\n";
 }
 
 Options ParseOptions(int argc, wchar_t** argv) {
@@ -102,6 +104,7 @@ Options ParseOptions(int argc, wchar_t** argv) {
         }
         if (argument == L"--list-modes") { options.list_modes = true; continue; }
         if (argument == L"--measure-only") { options.measure_only = true; continue; }
+        if (argument == L"--live-only") { options.live_only = true; continue; }
         if (i + 1 >= argc) {
             throw std::runtime_error("Missing value after a command-line option.");
         }
@@ -110,11 +113,11 @@ Options ParseOptions(int argc, wchar_t** argv) {
             options.output_prefix = value;
         } else if (argument == L"--q-file") {
             options.q_file = value;
-        } else if (argument == L"--disparity-scale") {
+        } else if (argument == L"--depth-scale") {
             try {
-                options.disparity_scale = std::stod(value);
+                options.depth_scale = std::stod(value);
             } catch (...) {
-                throw std::runtime_error("--disparity-scale must be a positive number.");
+                throw std::runtime_error("--depth-scale must be a positive number in millimeters per raw unit.");
             }
         } else if (argument == L"--frames") {
             try { options.frame_count = std::stoi(value); }
@@ -139,8 +142,16 @@ Options ParseOptions(int argc, wchar_t** argv) {
         }
     }
     if (options.list_modes) return options;
-    if (options.output_prefix.empty() || (!options.measure_only && (options.q_file.empty() || options.disparity_scale <= 0.0 ||
-        !std::isfinite(options.disparity_scale))) || options.frame_count < 1 || options.frame_count > 1000 ||
+    if (options.live_only) {
+        if (options.live_raw_path.empty() || options.stop_file.empty() || options.measure_only ||
+            options.width != 640 || options.height != 400 ||
+            (options.requested_fps != 5 && options.requested_fps != 10 && options.requested_fps != 15)) {
+            throw std::runtime_error("Live-only preview requires --live-raw, --stop-file, 640x400 Y16, and fps 5, 10, or 15.");
+        }
+        return options;
+    }
+    if (options.output_prefix.empty() || (!options.measure_only && (options.q_file.empty() || options.depth_scale <= 0.0 ||
+        !std::isfinite(options.depth_scale))) || options.frame_count < 1 || options.frame_count > 1000 ||
         !((options.width == 640 && (options.height == 400 || options.height == 800)) ||
           (options.width == 1280 && options.height == 800)) ||
         (options.measure_only && options.frame_count < 2) ||
@@ -275,7 +286,9 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
                                                         std::size_t& null_sample_count,
                                                         const std::filesystem::path& live_raw_path,
                                                         const std::filesystem::path& ready_file,
-                                                        const std::filesystem::path& stop_file) {
+                                                        const std::filesystem::path& stop_file,
+                                                        bool live_only,
+                                                        std::size_t& captured_frame_count) {
     ComPtr<IMFActivate> activation = FindDepthCamera();
     ComPtr<IMFMediaSource> source;
     CheckHr(activation->ActivateObject(IID_PPV_ARGS(&source)), "Activate depth camera");
@@ -316,8 +329,9 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
 
     const std::size_t raw_bytes = static_cast<std::size_t>(requested_width) * requested_height * sizeof(std::uint16_t);
     std::vector<std::vector<std::uint8_t>> frames;
-    while (static_cast<int>(frames.size()) < frame_count &&
-           (frames.empty() || stop_file.empty() || !std::filesystem::exists(stop_file))) {
+    captured_frame_count = 0;
+    while ((live_only || static_cast<int>(captured_frame_count) < frame_count) &&
+           (stop_file.empty() || !std::filesystem::exists(stop_file))) {
         DWORD stream_index = 0;
         DWORD flags = 0;
         LONGLONG timestamp = 0;
@@ -327,7 +341,7 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
                 "Read Y16 frame");
         if (!sample) {
             ++null_sample_count;
-            empty_sample_flags.push_back(flags);
+            if (!live_only) empty_sample_flags.push_back(flags);
             continue;
         }
 
@@ -345,16 +359,20 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
         if (result.empty()) {
             throw std::runtime_error("Y16 buffer size did not match the selected dimensions; refusing to guess row stride.");
         }
-        timestamps.push_back(timestamp);
-        sample_flags.push_back(flags);
-        utc_epoch_us.push_back(std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
-        frames.push_back(std::move(result));
+        if (!live_only) {
+            timestamps.push_back(timestamp);
+            sample_flags.push_back(flags);
+            utc_epoch_us.push_back(std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+            frames.push_back(std::move(result));
+        }
+        ++captured_frame_count;
+        const std::vector<std::uint8_t>& current_frame = live_only ? result : frames.back();
         if (!live_raw_path.empty()) {
             if (!live_raw_path.parent_path().empty()) std::filesystem::create_directories(live_raw_path.parent_path());
             auto temporary = live_raw_path; temporary += L".tmp";
             { std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-              out.write(reinterpret_cast<const char*>(frames.back().data()), static_cast<std::streamsize>(frames.back().size()));
+              out.write(reinterpret_cast<const char*>(current_frame.data()), static_cast<std::streamsize>(current_frame.size()));
               if (!out) throw std::runtime_error("Could not update live frame file."); }
             bool published = false;
             DWORD publish_error = ERROR_SUCCESS;
@@ -371,7 +389,7 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
             if (!published) throw std::runtime_error("Could not atomically publish live frame file (Win32 "
                 + std::to_string(publish_error) + ").");
         }
-        if (frames.size() == 1 && !ready_file.empty()) {
+        if (captured_frame_count == 1 && !ready_file.empty()) {
             if (!ready_file.parent_path().empty()) std::filesystem::create_directories(ready_file.parent_path());
             HANDLE file = CreateFileW(ready_file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
                                       FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -417,7 +435,7 @@ std::array<double, 16> ReadQMatrix(const std::filesystem::path& path) {
 std::vector<std::array<double, 3>> Reproject(const std::vector<std::uint8_t>& raw,
                                             UINT32 width, UINT32 height,
                                             const std::array<double, 16>& q,
-                                            double disparity_scale) {
+                                            double depth_scale) {
     std::vector<std::array<double, 3>> points;
     points.reserve(static_cast<std::size_t>(width) * height);
     for (UINT32 y = 0; y < height; ++y) {
@@ -427,14 +445,22 @@ std::vector<std::array<double, 3>> Reproject(const std::vector<std::uint8_t>& ra
             if (pixel == 0) {
                 continue;
             }
-            const double disparity = static_cast<double>(pixel) / disparity_scale;
-            const double denominator = q[12] * x + q[13] * y + q[14] * disparity + q[15];
-            if (!std::isfinite(denominator) || std::abs(denominator) < 1e-12) {
+            const double depth = static_cast<double>(pixel) * depth_scale;
+            if (!std::isfinite(depth) || depth < 1.0) {
                 continue;
             }
-            const double px = (q[0] * x + q[1] * y + q[2] * disparity + q[3]) / denominator;
-            const double py = (q[4] * x + q[5] * y + q[6] * disparity + q[7]) / denominator;
-            const double pz = (q[8] * x + q[9] * y + q[10] * disparity + q[11]) / denominator;
+            // Q maps pixel plus depth to a ray. Scale that ray so its Z equals
+            // the measured depth; feeding Y16 as fixed-point disparity flattens
+            // this camera's point cloud.
+            const double ray_x = q[0] * x + q[1] * y + q[2] * depth + q[3];
+            const double ray_y = q[4] * x + q[5] * y + q[6] * depth + q[7];
+            const double ray_z = q[8] * x + q[9] * y + q[10] * depth + q[11];
+            if (!std::isfinite(ray_z) || std::abs(ray_z) < 1e-12) {
+                continue;
+            }
+            const double px = ray_x * depth / ray_z;
+            const double py = -ray_y * depth / ray_z;
+            const double pz = -depth;
             if (std::isfinite(px) && std::isfinite(py) && std::isfinite(pz)) {
                 points.push_back({px, py, pz});
             }
@@ -482,9 +508,9 @@ void SaveOutputs(const Options& options, const std::vector<std::uint8_t>& raw,
     });
     WriteNewFile(ply_path, [&](std::ofstream& output) {
         output << "ply\nformat ascii 1.0\n"
-               << "comment Q reprojection from the supplied Revo Scan calibration file\n"
-               << "comment disparity_scale=" << std::setprecision(12) << options.disparity_scale
-               << " (provisional; validate with a known dimension)\n"
+               << "comment Q-ray reprojection with uint16 depth scaled to millimeters\n"
+               << "comment depth_scale_mm_per_raw_unit=" << std::setprecision(12) << options.depth_scale
+               << " (reported by Revo Scan; direct UVC mapping remains provisional)\n"
                << "element vertex " << points.size() << "\n"
                << "property float x\nproperty float y\nproperty float z\nend_header\n";
         output << std::fixed << std::setprecision(6);
@@ -502,10 +528,11 @@ void SaveOutputs(const Options& options, const std::vector<std::uint8_t>& raw,
                << "  \"raw_file\": \"" << raw_path.filename().string() << "\",\n"
                << "  \"ply_file\": \"" << ply_path.filename().string() << "\",\n"
                << "  \"calibration_file\": \"" << options.q_file.filename().string() << "\",\n"
-               << "  \"disparity_scale\": " << options.disparity_scale << ",\n"
-               << "  \"disparity_scale_status\": \"provisional_unverified\",\n"
+               << "  \"projection_method\": \"Q_ray_scaled_to_depth\",\n"
+               << "  \"depth_scale_mm_per_raw_unit\": " << options.depth_scale << ",\n"
+               << "  \"depth_scale_status\": \"configured_candidate; direct_UVC_mapping_provisional\",\n"
                << "  \"point_count\": " << points.size() << ",\n"
-               << "  \"coordinates_unit\": \"inherited_from_Q.bin; not validated against a known dimension\"\n"
+               << "  \"coordinates_unit\": \"millimeters_candidate_from_Revo_Scan_depth_scale\"\n"
                << "}\n";
     });
     std::wcout << L"Raw frame: " << raw_path.wstring() << L"\n"
@@ -557,21 +584,27 @@ int wmain(int argc, wchar_t** argv) {
         MediaFoundationRuntime runtime;
         if (options.list_modes) { ListNativeModes(); return 0; }
         std::array<double, 16> q{};
-        if (!options.measure_only) q = ReadQMatrix(options.q_file);
+        if (!options.measure_only && !options.live_only) q = ReadQMatrix(options.q_file);
         std::vector<LONGLONG> timestamps;
         std::vector<std::int64_t> utc_epoch_us;
         std::vector<DWORD> sample_flags;
         std::vector<DWORD> empty_sample_flags;
         std::size_t null_sample_count = 0;
+        std::size_t captured_frame_count = 0;
         const auto started = std::chrono::steady_clock::now();
         const auto frames = CaptureY16Frames(options.frame_count, options.requested_fps,
                                              options.width, options.height, timestamps, utc_epoch_us,
                                              sample_flags, empty_sample_flags, null_sample_count,
-                                             options.live_raw_path, options.ready_file, options.stop_file);
+                                             options.live_raw_path, options.ready_file, options.stop_file,
+                                             options.live_only, captured_frame_count);
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        if (options.live_only) {
+            std::cout << "Live-only preview ended after " << captured_frame_count << " frames. No scan files were saved.\n";
+            return 0;
+        }
         if (!options.measure_only) {
             const auto& raw = frames.front();
-            const auto points = Reproject(raw, options.width, options.height, q, options.disparity_scale);
+            const auto points = Reproject(raw, options.width, options.height, q, options.depth_scale);
             if (points.size() < 100) {
                 throw std::runtime_error("Fewer than 100 valid points were reconstructed; no output was published.");
             }

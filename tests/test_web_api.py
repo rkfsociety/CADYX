@@ -160,6 +160,13 @@ class WebApiTests(unittest.TestCase):
         status, _, error = self.get_binary("/api/v1/scanner/point-cloud?folder=scan-samples&file=..%2Freference.ply")
         self.assertIn(status, {400, 404})
 
+    def test_scanner_calibration_exposes_configured_depth_scale(self) -> None:
+        status, calibration = self.request("/api/v1/scanner/calibration")
+        self.assertEqual(status, 200)
+        self.assertEqual(calibration["depth_scale_mm_per_raw_unit"], 0.005)
+        self.assertEqual(calibration["depth_scale_status"], "provisional_for_direct_UVC")
+        self.assertEqual(len(calibration["matrix"]), 16)
+
     def test_agent_project_can_be_created_without_changing_selection_and_receive_step(self) -> None:
         _, current = self.request("/api/v1/agent/projects", {"name": "Current project"})
         current_id = current["project"]["id"]
@@ -382,6 +389,28 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status, 409)
         self.assertEqual(error["error"], "PROJECT_LOCKED")
         self.assertEqual(self.core.workspace._project_dir(project_id).name, "Приёмка Operator временный проект")
+
+    def test_project_api_keeps_english_url_slug_separate_from_russian_title(self) -> None:
+        status, created = self.request("/api/v1/agent/projects", {
+            "name": "Гипсовая фигурка — 5 ракурсов", "url_slug": "gypsum-figurine-5-views",
+        })
+        self.assertEqual(status, 201)
+        project_id = created["project"]["id"]
+        self.assertEqual(created["project"]["name"], "Гипсовая фигурка — 5 ракурсов")
+        self.assertEqual(created["project"]["url_slug"], "gypsum-figurine-5-views")
+
+        status, renamed = self.request(f"/api/v1/agent/projects/{project_id}/rename", {
+            "name": "Фигурка из гипса", "url_slug": "plaster-figurine",
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(renamed["project"]["name"], "Фигурка из гипса")
+        self.assertEqual(renamed["project"]["url_slug"], "plaster-figurine")
+
+        status, error = self.request(f"/api/v1/agent/projects/{project_id}/rename", {
+            "name": "Некорректный slug", "url_slug": "Гипсовая фигурка",
+        })
+        self.assertEqual(status, 400)
+        self.assertEqual(error["error"], "VALIDATION_ERROR")
 
     def test_agent_capabilities_are_read_only_and_command_names_are_current(self) -> None:
         before = self.core.workspace.workspace_revision_token()

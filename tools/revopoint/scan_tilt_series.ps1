@@ -1,8 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$ProjectPath,
-    [ValidateScript({ $_ -gt 0 })]
-    [double]$DisparityScale = 256,
+    [double]$DepthScale = 0,
     [string]$RunId = ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))
 )
 
@@ -12,6 +11,13 @@ $repoRoot = (Resolve-Path (Join-Path $toolRoot '..\..')).Path
 $captureExe = Join-Path $toolRoot 'build\CaptureY16.exe'
 $turntableExe = Join-Path $toolRoot 'build\TurntableController.exe'
 $calibration = Join-Path $toolRoot 'calibration\Q.bin'
+$depthScaleConfig = Join-Path $toolRoot 'calibration\depth_scale.json'
+if (-not $PSBoundParameters.ContainsKey('DepthScale')) {
+    $DepthScale = [double](Get-Content -LiteralPath $depthScaleConfig -Raw | ConvertFrom-Json).depth_scale_mm_per_raw_unit
+}
+if ([double]::IsNaN($DepthScale) -or [double]::IsInfinity($DepthScale) -or $DepthScale -le 0) {
+    throw 'DepthScale must be a positive finite value in millimeters per uint16 unit.'
+}
 $liveRaw = Join-Path $repoRoot 'projects\.revopoint-live.raw'
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'projects')).TrimEnd([char[]]@('\', '/'))
 $ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
@@ -26,7 +32,7 @@ if ($projectRecord.format -ne 'cadyx-project' -or
     -not [guid]::TryParse([string]$projectRecord.id, [ref]$projectId)) {
     throw "Scan target is not a valid CADYX project folder: $ProjectPath"
 }
-foreach ($path in @($captureExe, $turntableExe, $calibration)) {
+foreach ($path in @($captureExe, $turntableExe, $calibration, $depthScaleConfig)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required scanner input is missing: $path" }
 }
 $busy = Get-Process -ErrorAction SilentlyContinue | Where-Object {
@@ -47,7 +53,7 @@ $tiltPasses = @(
 if (Test-Path -LiteralPath $manifestPath) {
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     if ($manifest.format -ne 'revopoint-mini-multi-tilt-capture-v1' -or
-        [double]$manifest.disparity_scale -ne $DisparityScale) {
+        [double]$manifest.depth_scale_mm_per_raw_unit -ne $DepthScale) {
         throw "Existing manifest is incompatible with this scan run: $manifestPath"
     }
     $manifest.status = 'running'
@@ -59,8 +65,9 @@ if (Test-Path -LiteralPath $manifestPath) {
         started_utc = [DateTime]::UtcNow.ToString('o')
         camera = 'DepthCam Y16 640x400'
         calibration_file = (Resolve-Path $calibration).Path
-        disparity_scale = $DisparityScale
-        disparity_scale_status = 'provisional_unverified'
+        projection_method = 'Q_ray_scaled_to_depth'
+        depth_scale_mm_per_raw_unit = $DepthScale
+        depth_scale_status = 'reported_by_Revo_Scan; direct_UVC_mapping_provisional'
         commanded_rotation_step_degrees = 30
         passes = @()
         final_rotation_degrees = $null
@@ -175,7 +182,7 @@ try {
             'capture-sweep', '12', '30',
             $tilt.ToString('0', [Globalization.CultureInfo]::InvariantCulture),
             $poseCsv, $captureExe, $prefix, $calibration,
-            $DisparityScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw
+            $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw
         ) | Out-Null
         Confirm-Home "Tilt $tilt capture pass" $tilt 1.0
         $captureRows = @(Get-ValidatedCaptureRows -PoseCsv $poseCsv -ExpectedTilt $tilt)

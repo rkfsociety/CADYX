@@ -130,16 +130,16 @@ class ProjectLifecycleService(_CoreService):
         with lock:
             yield
 
-    def create_project(self, name: str, *, select: bool = True) -> dict[str, Any]:
+    def create_project(self, name: str, *, select: bool = True, url_slug: str | None = None) -> dict[str, Any]:
         if not select:
-            project = self.workspace.create(name)
+            project = self.workspace.create(name, url_slug=url_slug)
             summary = self._summary(project)
             lock = self.leases.snapshot(project["id"])
             self.events.publish("project.lock.changed", project["id"], lock)
             return {"project": summary, "lock": lock}
 
         with self._workspace_selection_guard:
-            project = self.workspace.create(name)
+            project = self.workspace.create(name, url_slug=url_slug)
             summary = self._summary(project)
             lock = self.leases.snapshot(project["id"])
             self._workspace_selection = {"type": "project", "project_id": project["id"]}
@@ -212,7 +212,7 @@ class ProjectLifecycleService(_CoreService):
                 raise ConflictError("Clear model geometry through the Command System before pruning project files.", code="FILE_IN_USE")
             return self.workspace.prune_project_files(project_id, keep_files)
 
-    def rename_project(self, project_id: str, name: str) -> dict[str, Any]:
+    def rename_project(self, project_id: str, name: str, *, url_slug: str | None = None) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id):
             self._require_project_policy(
                 project_id,
@@ -220,7 +220,7 @@ class ProjectLifecycleService(_CoreService):
                 "Project must be unlocked before it can be renamed.",
                 code="PROJECT_LOCKED",
             )
-            project = self.workspace.rename(project_id, name)
+            project = self.workspace.rename(project_id, name, url_slug=url_slug)
             summary = self._summary(project)
             self.events.publish("project.renamed", project_id, summary)
             return {"project": summary, "lock": self.leases.snapshot(project_id)}

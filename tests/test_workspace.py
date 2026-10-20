@@ -30,6 +30,19 @@ class ProjectWorkspaceTests(unittest.TestCase):
         self.assertEqual(self.workspace.load(project["id"])["id"], project["id"])
         self.assertEqual([item["id"] for item in self.workspace.list()], [project["id"]])
 
+    def test_url_slug_is_separate_from_project_title_and_survives_rename(self) -> None:
+        project = self.workspace.create("Гипсовая фигурка — 5 ракурсов", url_slug="gypsum-figurine-5-views")
+
+        renamed = self.workspace.rename(project["id"], "Гипсовая фигурка — 5 ракурсов v2")
+        self.assertEqual(renamed["name"], "Гипсовая фигурка — 5 ракурсов v2")
+        self.assertEqual(renamed["url_slug"], "gypsum-figurine-5-views")
+        self.assertEqual(self.workspace.load(project["id"])["url_slug"], "gypsum-figurine-5-views")
+
+    def test_legacy_project_gets_ascii_url_slug(self) -> None:
+        project = self.workspace.create("Гипсовая фигурка — 5 ракурсов")
+        self.assertEqual(project["url_slug"], "gipsovaya-figurka-5-rakursov")
+        self.assertRegex(project["url_slug"], r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
     def test_duplicate_display_names_get_unique_folders_without_overwriting_workspace_data(self) -> None:
         existing_folder = self.root / "Кружка"
         existing_folder.mkdir()

@@ -2,6 +2,9 @@ const assert = require("node:assert/strict");
 const {
   rotateScannerPoint,
   scannerDepthOrder,
+  scannerPreviewPoint,
+  scannerReprojectDepthPixel,
+  scannerSupportColor,
   normalizeTraceSweepDegrees,
   traceArcFromPoints,
   traceSegmentGeometry,
@@ -24,8 +27,33 @@ closeTo(yawed[2], 0, "yaw leaves a vertical-axis point on the vertical axis");
 
 const horizontal = rotateScannerPoint(0, 0, 1, Math.PI / 2, 0);
 closeTo(horizontal[0], -1, "yaw rotates depth into horizontal view");
-assert.deepEqual(scannerDepthOrder([[0, 0, -150], [0, 0, -200], [0, 0, -175]]), [1, 2, 0], "cloud points are drawn far-to-near so foreground points occlude the rear during orbit");
 closeTo(horizontal[1], 0, "yaw does not roll depth into vertical view");
+
+assert.deepEqual(scannerPreviewPoint(2, -3, 4, 0, 0), [-2, 3, 4], "preview flips the image plane by 180 degrees without changing depth");
+assert.deepEqual(scannerDepthOrder([[0, 0, -150], [0, 0, -200], [0, 0, -175]]), [1, 2, 0], "cloud points are drawn far-to-near so foreground points occlude the rear during orbit");
+const rotatedPreview = scannerPreviewPoint(2, -3, 4, 0.4, -0.2);
+const rotatedPoint = rotateScannerPoint(2, -3, 4, 0.4, -0.2);
+assert.deepEqual(rotatedPreview, [-rotatedPoint[0], -rotatedPoint[1], rotatedPoint[2]], "preview-only rotation leaves camera depth unchanged");
+
+const qMatrix = [
+  1, 0, 0, -52.766502,
+  0, 1, 0, -199.493652,
+  0, 0, 0, 891.2453,
+  0, 0, 0.011310811, 5.890967,
+];
+const depthPoint = scannerReprojectDepthPixel(153, 299, 25000, qMatrix, 0.005);
+assert.ok(depthPoint, "positive Revo depth maps to a point");
+closeTo(depthPoint[2], -125, "Q ray is scaled to the measured raw depth in millimeters");
+assert.ok(depthPoint[0] > 10, "horizontal pixel offset is projected along the camera ray");
+assert.ok(depthPoint[1] < 0, "scanner camera Y is inverted into viewport-up coordinates");
+assert.equal(scannerReprojectDepthPixel(153, 299, 0, qMatrix, 0.005), null, "zero depth remains invalid");
+assert.equal(scannerReprojectDepthPixel(153, 299, 1, qMatrix, 0.005), null, "near-zero invalid readings are filtered");
+
+assert.equal(scannerSupportColor(1, 4), "hsl(25 88% 58%)", "one-frame points use the low-support color");
+assert.equal(scannerSupportColor(2, 4), "hsl(174 88% 58%)", "two-frame points use the medium-support color");
+assert.equal(scannerSupportColor(4, 4), "hsl(275 88% 58%)", "maximum-support points use the high-support color");
+assert.equal(scannerSupportColor(12, 4), "hsl(275 88% 58%)", "support colors clamp to the file's maximum");
+assert.equal(scannerSupportColor(0, 4), "hsl(0 0% 55%)", "invalid support is visibly neutral");
 
 const pitched = rotateScannerPoint(0, 0, 1, 0, Math.PI / 2);
 closeTo(pitched[0], 0, "pitch leaves the horizontal coordinate unchanged");

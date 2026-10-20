@@ -76,6 +76,7 @@
     .scanner-modes { display: flex; gap: 5px; }
     .scanner-modes button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: #151e25; font: 600 11px var(--ui-font); cursor: pointer; }
     .scanner-modes button[aria-pressed="true"] { border-color: #9b6038; color: #ffad73; background: #26190f; }
+    .scanner-modes select { min-height: 34px; max-width: 185px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: #151e25; font: 600 10px var(--ui-font); }
     .panel-note { color: var(--dim); font: 10px var(--mono); letter-spacing: .03em; }
     .scanner-stage { display: grid; min-width: 0; min-height: 0; place-items: center; padding: 16px; background-color: #0b1116; background-image: linear-gradient(#18212838 1px,transparent 1px),linear-gradient(90deg,#18212838 1px,transparent 1px); background-size: 24px 24px; }
     .screen { display: grid; width: min(100%, 1120px); max-height: 100%; aspect-ratio: 8/5; place-items: center; overflow: hidden; background: transparent; }
@@ -143,10 +144,14 @@
         <div class="scanner-modes" role="group" aria-label="Режим предпросмотра">
           <button id="depth-mode" type="button" aria-pressed="false">ГЛУБИНА</button>
           <button id="cloud-mode" type="button" aria-pressed="true">3D-ТОЧКИ</button>
+          <select id="cloud-color-mode" aria-label="Окраска облака точек" hidden>
+            <option value="depth">ЦВЕТ: ГЛУБИНА</option>
+            <option value="support">ЦВЕТ: ПОДДЕРЖКА КАДРАМИ</option>
+          </select>
         </div>
       </div>
       <div class="scanner-stage"><div class="screen"><canvas id="depth" width="640" height="400" aria-label="Кадр глубины Revopoint" hidden></canvas><canvas id="cloud" width="640" height="400" aria-label="Облако точек Revopoint: перетаскивание вращает, колесо меняет масштаб" title="Перетаскивание — вращение · колёсико — масштаб"></canvas></div></div>
-      <div class="scanner-view-footer"><span>Y16 · 640×400</span><span id="age">ОЖИДАНИЕ</span><span id="cloud-info">ТЕКУЩИЙ КАДР · Q.BIN · МАСШТАБ НЕ ПРОВЕРЕН</span></div>
+      <div class="scanner-view-footer"><span>Y16 · 640×400</span><span id="age">ОЖИДАНИЕ</span><span id="cloud-info">ТЕКУЩИЙ КАДР · Q.BIN · ГЛУБИНА × 0,005 мм</span></div>
     </section>
     <aside class="scanner-inspector" aria-label="Состояние захвата">
       <section class="panel scanner-card">
@@ -157,7 +162,7 @@
       <section class="panel scanner-card">
         <h2>ИСТОЧНИК</h2>
         <div class="panel-note">REVOPOINT DEPTHCAM</div>
-        <dl class="scanner-details"><dt>Калибровка</dt><dd>Q.bin</dd><dt>Коэффициент диспаратности</dt><dd>256 · гипотеза</dd><dt>Геометрия</dt><dd>текущий кадр, без слияния</dd></dl>
+        <dl class="scanner-details"><dt>Калибровка</dt><dd>Q.bin</dd><dt>Масштаб глубины</dt><dd id="depth-scale-label">ЗАГРУЗКА</dd><dt>Статус масштаба</dt><dd id="depth-scale-status">UVC КАНДИДАТ</dd><dt>Геометрия</dt><dd>текущий кадр, без слияния</dd></dl>
       </section>
       <div class="scanner-hint"><strong>ЗАПУСК ЗАХВАТА</strong>Программа CaptureY16 должна обновлять файл прямого потока в рабочей папке. Кадры доступны только через локальный API CADYX.<br><br><code>--live-raw .revopoint-live.raw</code></div>
     </aside>
@@ -179,13 +184,18 @@
       const cloudInfo = document.querySelector("#cloud-info");
       const depthMode = document.querySelector("#depth-mode");
       const cloudMode = document.querySelector("#cloud-mode");
+      const cloudColorMode = document.querySelector("#cloud-color-mode");
       const image = context.createImageData(640, 400);
-      let lastMtime = "", lastArrival = 0, intervals = [], qMatrix = null;
-      let yaw = .55, pitch = .55, drag = null;
+      let lastMtime = "", lastArrival = 0, intervals = [], qMatrix = null, depthScale = null;
+      let yaw = .55, pitch = .55, drag = null, cloudSupportMax = 0;
       let zoom = 1;
       const scannerQuery = new URLSearchParams(location.search);
       const singleFrame = scannerQuery.get("cloud_kind") === "single";
       const provisionalFusion = scannerQuery.get("cloud_kind") === "provisional_fusion";
+      const requestedFusionFrameCount = Number(scannerQuery.get("cloud_frame_count"));
+      const fusionFrameCount = Number.isInteger(requestedFusionFrameCount) && requestedFusionFrameCount >= 2 && requestedFusionFrameCount <= 64
+        ? requestedFusionFrameCount : 2;
+      const fusionCleanup = scannerQuery.get("cloud_cleanup");
       const frameAngleValue = scannerQuery.get("cloud_angle_deg");
       const frameAngle = frameAngleValue === null ? null : Number(frameAngleValue);
 
@@ -199,6 +209,9 @@
       }
       depthMode.addEventListener("click", () => setMode("depth"));
       cloudMode.addEventListener("click", () => setMode("cloud"));
+      cloudColorMode.addEventListener("change", () => {
+        if (window.latestCloud) drawCloud(window.latestCloud);
+      });
       cloudCanvas.addEventListener("pointerdown", event => {
         drag = { x: event.clientX, y: event.clientY };
         cloudCanvas.setPointerCapture(event.pointerId);
@@ -223,7 +236,12 @@
         if (!response.ok) throw Error(`Калибровка Q.bin недоступна (HTTP ${response.status}).`);
         const calibration = await response.json();
         if (!Array.isArray(calibration.matrix) || calibration.matrix.length !== 16) throw Error("Формат Q.bin не распознан.");
+        if (!Number.isFinite(calibration.depth_scale_mm_per_raw_unit) || calibration.depth_scale_mm_per_raw_unit <= 0) throw Error("Масштаб глубины не задан.");
         qMatrix = calibration.matrix;
+        depthScale = calibration.depth_scale_mm_per_raw_unit;
+        document.querySelector("#depth-scale-label").textContent = `${depthScale.toLocaleString("ru-RU")} мм / отсчёт`;
+        document.querySelector("#depth-scale-status").textContent = calibration.depth_scale_status === "provisional_for_direct_UVC"
+          ? "КАНДИДАТ · UVC НЕ ПРОВЕРЕН" : calibration.depth_scale_status;
       }
 
       function drawCloud(points) {
@@ -237,7 +255,7 @@
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
         for (let i = 0; i < points.length; i++) {
           const dx = points[i][0] - cx, dy = points[i][1] - cy, dz = points[i][2] - cz;
-          const point = window.rotateScannerPoint(dx, dy, dz, yaw, pitch);
+          const point = window.scannerPreviewPoint(dx, dy, dz, yaw, pitch);
           projected[i] = point;
           const [x, y, z] = point;
           minX = Math.min(minX, x); maxX = Math.max(maxX, x);
@@ -248,12 +266,16 @@
         const scale = Math.min(500 / spanX, 290 / spanY) * zoom;
         const offsetX = 320 - (minX + maxX) * scale / 2, offsetY = 200 - (minY + maxY) * scale / 2;
         const spanZ = Math.max(1e-6, maxZ - minZ);
+        const supportValues = window.latestCloudSupport;
+        const useSupportColor = cloudColorMode.value === "support" && Array.isArray(supportValues) && supportValues.length === projected.length;
         const pointOrder = window.scannerDepthOrder(projected);
         for (const i of pointOrder) {
           const p = projected[i];
           const x = offsetX + p[0] * scale, y = offsetY + p[1] * scale;
           const t = (p[2] - minZ) / spanZ;
-          c.fillStyle = `hsl(${Math.round(95 + 175 * t)} 88% 58%)`;
+          c.fillStyle = useSupportColor
+            ? window.scannerSupportColor(supportValues[i], cloudSupportMax)
+            : `hsl(${Math.round(95 + 175 * t)} 88% 58%)`;
           c.fillRect(x, y, 1.15, 1.15);
         }
       }
@@ -284,21 +306,31 @@
           throw Error("PLY должен содержать от 3 до 250 000 точек с координатами xyz.");
         }
         const columns = ["x", "y", "z"].map(name => properties.indexOf(name));
+        const supportColumn = properties.indexOf("support_count");
         const rows = content.slice(marker + "end_header".length).trim().split(/\r?\n/);
-        const points = [];
+        const points = [], supportValues = [];
         for (let i = 0; i < vertexCount; i++) {
           const fields = rows[i]?.trim().split(/\s+/) || [];
           const point = columns.map(index => Number(fields[index]));
-          if (point.length === 3 && point.every(Number.isFinite)) points.push(point);
+          if (point.length === 3 && point.every(Number.isFinite)) {
+            points.push(point);
+            if (supportColumn >= 0) supportValues.push(Number(fields[supportColumn]));
+          }
         }
         if (points.length < 3) throw Error("В PLY недостаточно корректных точек.");
         window.latestCloud = points;
+        const hasSupport = supportColumn >= 0 && supportValues.length === points.length
+          && supportValues.every(value => Number.isInteger(value) && value >= 1 && value <= 255);
+        window.latestCloudSupport = hasSupport ? supportValues : null;
+        cloudSupportMax = hasSupport ? supportValues.reduce((maximum, value) => Math.max(maximum, value), 1) : 0;
+        cloudColorMode.hidden = !hasSupport;
+        cloudColorMode.value = hasSupport ? "support" : "depth";
         yaw = 0;
         pitch = 0;
         setMode("cloud");
         document.querySelector("#scanner-title").textContent = singleFrame
           ? "ОБЛАКО ТОЧЕК · ОДИН КАДР"
-          : provisionalFusion ? "ОБЛАКО ТОЧЕК · ПРЕДВАРИТЕЛЬНО СШИТОЕ" : "СОХРАНЁННОЕ ОБЛАКО ТОЧЕК";
+          : provisionalFusion ? "ОБЛАКО ТОЧЕК · ПРЕДВАРИТЕЛЬНАЯ СШИВКА" : "СОХРАНЁННОЕ ОБЛАКО ТОЧЕК";
         depthMode.hidden = true;
         cloudMode.hidden = true;
         drawCloud(points);
@@ -307,8 +339,8 @@
         rate.textContent = "—";
         age.textContent = singleFrame
           ? Number.isFinite(frameAngle) ? `ОДИН КАДР · СТОЛ ${frameAngle >= 0 ? "+" : ""}${frameAngle}° · НЕ СШИТ` : "ОДИН КАДР · НЕ СШИТ"
-          : provisionalFusion ? "ДВА КАДРА · РЕГИСТРАЦИЯ ПРЕДВАРИТЕЛЬНАЯ" : "СОХРАНЁННОЕ ОБЛАКО · СТАТУС СШИВКИ НЕ УКАЗАН";
-        cloudInfo.textContent = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · КАЛИБРОВКА МАСШТАБА НЕ ПРОВЕРЕНА`;
+          : provisionalFusion ? `${fusionFrameCount} РАКУРСОВ · РЕГИСТРАЦИЯ ПРЕДВАРИТЕЛЬНАЯ` : "СОХРАНЁННОЕ ОБЛАКО · СТАТУС СШИВКИ НЕ УКАЗАН";
+        cloudInfo.textContent = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · ${hasSupport ? `ПОДДЕРЖКА 1–${cloudSupportMax} КАДРАМИ · ` : ""}${provisionalFusion && fusionCleanup === "none" ? "ШУМ НЕ ФИЛЬТРОВАЛСЯ · " : ""}КАЛИБРОВКА МАСШТАБА НЕ ПРОВЕРЕНА`;
       }
 
       async function poll() {
@@ -349,14 +381,9 @@
             for (let pixel = 0; pixel < 640 * 400; pixel++) {
               const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
               if (value && (pixel % 2 === 0)) {
-                const x = pixel % 640, y = Math.floor(pixel / 640), d = value / 256;
-                const den = qMatrix[12] * x + qMatrix[13] * y + qMatrix[14] * d + qMatrix[15];
-                if (Number.isFinite(den) && Math.abs(den) > 1e-12) {
-                  const px = (qMatrix[0] * x + qMatrix[1] * y + qMatrix[2] * d + qMatrix[3]) / den;
-                  const py = (qMatrix[4] * x + qMatrix[5] * y + qMatrix[6] * d + qMatrix[7]) / den;
-                  const pz = (qMatrix[8] * x + qMatrix[9] * y + qMatrix[10] * d + qMatrix[11]) / den;
-                  if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) points.push([px, py, pz]);
-                }
+                const x = pixel % 640, y = Math.floor(pixel / 640);
+                const point = window.scannerReprojectDepthPixel(x, y, value, qMatrix, depthScale);
+                if (point) points.push(point);
               }
               const gray = value ? Math.max(0, Math.min(255, Math.round((value - min) * 255 / span))) : 0;
               const offset = pixel * 4;
@@ -370,11 +397,19 @@
             const scale = Math.min(canvas.width * .9 / sourceWidth, canvas.height * .9 / sourceHeight);
             const drawWidth = sourceWidth * scale, drawHeight = sourceHeight * scale;
             context.clearRect(0, 0, canvas.width, canvas.height);
+            context.save();
+            context.translate(canvas.width, canvas.height);
+            context.rotate(Math.PI);
             context.drawImage(frameCanvas, left, top, sourceWidth, sourceHeight,
               (canvas.width - drawWidth) / 2, (canvas.height - drawHeight) / 2, drawWidth, drawHeight);
+            context.restore();
             window.latestCloud = points;
+            window.latestCloudSupport = null;
+            cloudSupportMax = 0;
+            cloudColorMode.hidden = true;
+            cloudColorMode.value = "depth";
             drawCloud(points);
-            cloudInfo.textContent = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · ТЕКУЩИЙ КАДР · МАСШТАБ НЕ ПРОВЕРЕН`;
+            cloudInfo.textContent = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · Z=${depthScale.toLocaleString("ru-RU")} ММ/ОТСЧЁТ · ОДИН КАДР`;
             const now = performance.now();
             if (lastArrival) intervals.push(now - lastArrival);
             if (intervals.length > 30) intervals.shift();
