@@ -15,7 +15,7 @@
   --warning: #e9bd6e;
   --danger: #ef827b;
   --ui-font: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
-  --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  --mono: var(--ui-font);
 }
 
 * { box-sizing: border-box; }

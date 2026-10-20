@@ -590,7 +590,7 @@
         context.stroke();
       }
 
-      context.font = `500 ${9 * dpr}px Segoe UI, Arial, sans-serif`;
+      context.font = `500 ${11 * dpr}px "Segoe UI Variable", "Segoe UI", Arial, sans-serif`;
       context.textBaseline = "middle";
       context.textAlign = "center";
       context.fillStyle = "rgba(190, 206, 211, 0.72)";
@@ -657,7 +657,7 @@
         context.lineTo(...end);
         context.stroke();
         context.setLineDash([]);
-        context.font = `600 ${10 * dpr}px Segoe UI, Arial, sans-serif`;
+        context.font = `600 ${11 * dpr}px "Segoe UI Variable", "Segoe UI", Arial, sans-serif`;
         context.textBaseline = "middle";
         context.fillText("Z · ось вращения", end[0] + 6 * dpr, end[1] - 2 * dpr);
         context.restore();
@@ -686,7 +686,7 @@
         context.lineTo(...end);
         context.stroke();
         context.setLineDash([]);
-        context.font = `600 ${11 * dpr}px Segoe UI, Arial, sans-serif`;
+        context.font = `600 ${11 * dpr}px "Segoe UI Variable", "Segoe UI", Arial, sans-serif`;
         context.textBaseline = "middle";
         context.fillText(axis.name, end[0] + 5 * dpr, end[1] - 2 * dpr);
         context.setLineDash([7 * dpr, 5 * dpr]);
@@ -697,7 +697,7 @@
       context.beginPath();
       context.arc(origin[0], origin[1], 3 * dpr, 0, Math.PI * 2);
       context.fill();
-      context.font = `600 ${10 * dpr}px Segoe UI, Arial, sans-serif`;
+      context.font = `600 ${11 * dpr}px "Segoe UI Variable", "Segoe UI", Arial, sans-serif`;
       context.textBaseline = "middle";
       const label = "0, 0, 0";
       const labelX = origin[0] + 7 * dpr;
@@ -722,7 +722,7 @@
       context.strokeStyle = "#30383e";
       context.lineWidth = dpr;
       context.strokeRect(left + 0.5 * dpr, top + 0.5 * dpr, 61 * dpr, 57 * dpr);
-      context.font = `600 ${10 * dpr}px Segoe UI, Arial, sans-serif`;
+      context.font = `600 ${11 * dpr}px "Segoe UI Variable", "Segoe UI", Arial, sans-serif`;
       context.textBaseline = "middle";
       const axes = [
         { name: "X", color: "#ef827b", world: [1, 0, 0] },
@@ -782,7 +782,7 @@
       });
       context.save();
       context.lineWidth = dpr;
-      context.font = `600 ${9 * dpr}px monospace`;
+      context.font = `600 ${11 * dpr}px "Segoe UI Variable", "Segoe UI", Arial, sans-serif`;
       context.textAlign = "center";
       context.textBaseline = "middle";
       for (const face of visibleFaces) {

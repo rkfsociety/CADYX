@@ -140,7 +140,12 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
 @media(max-width:1380px){.projects-page-heading{align-items:flex-start;flex-direction:column}.projects-toolbar{width:100%;justify-content:flex-start}.projects-toolbar input{flex:1}}
 @media(max-width:1040px){body:has(#primary-grid[data-view="projects"]) #workspace-navigation{left:192px}body:has(#primary-grid[data-view="projects"]) #workspace-navigation .nav-item{padding:0 11px}.projects-toolbar{flex-wrap:wrap}}
 @media(max-width:760px){.projects-page-heading{padding:18px 14px 10px}.projects-list{padding:6px 14px 16px}.projects-toolbar select{width:145px}.projects-create-group{margin-left:auto}#projects-panel[data-layout="list"] .workspace-project-card{grid-template-columns:minmax(110px,34%) minmax(0,1fr);grid-template-rows:auto auto auto}.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-thumbnail{grid-column:1;grid-row:1/4;height:140px}.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-card-heading,.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-meta{grid-column:2}.primary-grid[data-view="projects"] #projects-panel[data-layout="list"] .workspace-project-actions{grid-column:2;grid-row:3;min-width:0;flex-direction:row}}
-@media(max-width:680px){:root{--cadyx-rail-width:48px;--cadyx-tree-width:52px}.project-detail{grid-template-columns:48px 52px minmax(0,1fr)!important}.project-detail[data-tree-collapsed=true]{grid-template-columns:48px 48px minmax(0,1fr)!important}.cad3-rail{gap:4px;padding:8px 4px}.cad3-rail button{width:36px;height:36px}}
+ .projects-toolbar input{font:12px var(--ui-font)}.project-group-heading span{font-size:12px}
+ .cad-tree-root-row .cad-tree-label{font-size:12px}.cad3-tree-type{font-size:10px}
+ .cad3-model-tab{font:600 12px/1.2 var(--ui-font)}.cad3-props{font:11px/1.45 var(--ui-font)}.cad3-head small,.cad3-sec h3,.cad3-dep small{font-size:11px}
+ .cad3-grid input,.cad3-apply{font:600 11px/1.2 var(--ui-font)}
+ .model-toolbar>.cad3-tool,.model-toolbar>.button{font:600 12px/1.2 var(--ui-font)}
+ @media(max-width:680px){:root{--cadyx-rail-width:48px;--cadyx-tree-width:52px}.project-detail{grid-template-columns:48px 52px minmax(0,1fr)!important}.project-detail[data-tree-collapsed=true]{grid-template-columns:48px 48px minmax(0,1fr)!important}.cad3-rail{gap:4px;padding:8px 4px}.cad3-rail button{width:36px;height:36px}}
 `;
     style.textContent += '.cad3-model-tabs[hidden]{display:none!important}';
     document.head.appendChild(style);
@@ -294,7 +299,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const ctx=overlay.getContext('2d');ctx.clearRect(0,0,overlay.width,overlay.height);
       const o=state.byId.get(state.selected),P=projectSetup();
       if(P){
-        ctx.save();ctx.font=`600 ${11*dpr}px var(--ui-font),sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.save();ctx.font=`600 ${11*dpr}px "Segoe UI Variable", "Segoe UI", Arial, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
         for(const {body} of modelGroups()){
           const mesh=sceneBody(body.id);if(!mesh?.positions?.length)continue;
           const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];
@@ -316,7 +321,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       for(let i=0;i<pts.length;i+=3)for(let a=0;a<3;a++){min[a]=Math.min(min[a],pts[i+a]);max[a]=Math.max(max[a],pts[i+a])}
       const corners=[];for(const x of [min[0],max[0]])for(const y of [min[1],max[1]])for(const z of [min[2],max[2]])corners.push(P.p(x,y,z));
       const axisNames=['X','Y','Z'],center=min.map((value,axis)=>(value+max[axis])/2),center2d=P.p(...center);
-      ctx.font=`700 ${10*dpr}px ui-monospace,monospace`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.font=`700 ${11*dpr}px "Segoe UI Variable", "Segoe UI", Arial, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
       ctx.lineWidth=1*dpr;ctx.strokeStyle='#ffb27e';ctx.fillStyle='#ffb27e';ctx.globalAlpha=.96;
       const drawArrow=(tip,dx,dy)=>{
         const length=5*dpr,halfWidth=2.2*dpr,baseX=tip[0]+dx*length,baseY=tip[1]+dy*length;
