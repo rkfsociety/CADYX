@@ -1,5 +1,6 @@
 (() => {
   const initialize = ({ cloudButton, meshButton, viewport, viewer, getModelGeometry = () => null,
+    getProjectId = () => null,
     hasPersistentPointCloud = () => false, meshReady = false }, location = window.location, fetcher = fetch) => {
     let livePreviewOwned = false;
     let serverPointCloudVisible = false;
@@ -74,6 +75,43 @@
       url.searchParams.set('folder', folder);
       url.searchParams.set('file', file);
       return url.href;
+    };
+    const projectPointCloudUrl = async () => {
+      const projectId = getProjectId();
+      if (!projectId) throw new Error('Сначала выберите проект с файлом облака точек.');
+      const filesResponse = await fetcher(`/api/v1/projects/${encodeURIComponent(projectId)}/files`, { cache: 'no-store' });
+      if (!filesResponse.ok) throw new Error(`Не удалось получить файлы проекта (HTTP ${filesResponse.status}).`);
+      const filesPayload = await filesResponse.json();
+      const plyFiles = (filesPayload.files || []).filter(file => typeof file.name === 'string' && /\.ply$/i.test(file.name));
+      const pointCloudFiles = plyFiles.filter(file => {
+        const stem = file.name.replace(/\.ply$/i, '');
+        return !/(?:^|[_-])(?:mesh|surface|fused)(?:[_-]|$)/i.test(stem)
+          && /(?:^|[_-])(?:pc|points?|cloud|pointcloud|point_cloud)(?:[_-]|$)/i.test(stem);
+      });
+      const candidates = pointCloudFiles.length ? pointCloudFiles : plyFiles.length === 1 ? plyFiles : [];
+      if (candidates.length !== 1) {
+        throw new Error(candidates.length
+          ? 'В проекте несколько PLY-файлов облака точек.'
+          : 'В проекте не найден однозначный PLY-файл облака точек.');
+      }
+      return {
+        file: candidates[0].name,
+        url: `/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(candidates[0].name)}`,
+      };
+    };
+    const loadProjectPointCloud = async () => {
+      if (!viewer) throw new Error('Не найден основной 3D-предпросмотр.');
+      const source = await projectPointCloudUrl();
+      const response = await fetcher(source.url, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Не удалось открыть ${source.file} (HTTP ${response.status}).`);
+      if (!window.CadyxPlyPreview?.parse) throw new Error('Не найден PLY-парсер.');
+      const geometry = window.CadyxPlyPreview.parse(await response.arrayBuffer());
+      if (geometry.faceCount > 0) throw new Error(`${source.file} содержит сетку, а не облако точек.`);
+      const count = geometry.previewVertexCount ?? geometry.positions.length / 3;
+      return {
+        source: source.url,
+        geometry: { ...geometry, triangles: new Uint32Array(0), points: Array.from({ length: count }, (_, index) => index) },
+      };
     };
     const readPointCloud = async url => {
       const response = await fetcher(url, { cache: 'no-store' });
@@ -243,7 +281,14 @@
     cloudOriginSource = originUrl(null);
     const loadCloud = async ({ reset = true } = {}) => {
       if (!viewer) throw new Error('Не найден основной 3D-предпросмотр.');
-      if (!cloudSource) { cloudButton.title = 'Ожидание первого кадра сканирования'; return; }
+      if (!cloudSource) {
+        const request = ++cloudRequest;
+        const loaded = await loadProjectPointCloud();
+        if (request !== cloudRequest || !cloudPreviewOpen) return;
+        viewer.load(loaded.geometry, { reset: renderedCloudSource !== loaded.source });
+        renderedCloudSource = loaded.source;
+        return;
+      }
       const request = ++cloudRequest;
       if (!cloudPreviewOpen) modelGeometry = getModelGeometry();
       const cloud = await readPointCloud(cloudSource);
