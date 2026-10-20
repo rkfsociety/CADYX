@@ -15,12 +15,15 @@ tolerances, or certified supplier models. The browser remains passive.
   `parameters` and optional `name`; it checks both version/hash and every
   required parameter, rejects extras and returns a ready-to-execute
   `create_catalog_part` command plus a content-addressed instance digest.
-- Submit this command with `POST /api/v1/agent/projects/{id}/commands` or
-  `cadyx_execute_command` while holding the existing agent lease with the
-  exact current `expected_revision`. Core stages the entire creation and
-  persists the result, source sketch (if any), history and feature provenance
-  in the normal atomic document save. No alternate mutation or embedded
-  autonomous operator exists.
+- Submit the returned command with **exact `expected_revision`** through the
+  leased `POST /api/v1/agent/projects/{id}/commands` route when you already
+  own a valid agent lease. Alternatively use
+  `POST /api/v1/agent/projects/{id}/commands/execute` or MCP
+  `cadyx_execute_command`: the server acquires/releases the short-lived lease
+  around that one command and returns a compact receipt. Do **not** hold a
+  separate lease merely to invoke that MCP tool. Core stages and atomically
+  persists the result, source sketch (if any), history and provenance.
+  There is no autonomous catalog operator or second mutation path.
 
 ## Available preset geometries
 

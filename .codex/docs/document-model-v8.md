@@ -1,5 +1,8 @@
 # Document Model v8
 
+> **Versioned contract (8), not the current schema.** This document records the behavior introduced with Document v8. Current saved documents use **v12**; the project envelope remains v1. Read the [current documentation map](../../docs/README.md) and subsequent version contracts before interpreting introduction-era limits as current restrictions. The historical command/schema examples below are retained for migration and compatibility work.
+
+
 Document v8 extends the v7 object graph with top-level named parameters and
 expression bindings. The project envelope remains version 1. Migration from
 document v7 initializes `model_parameters` and `parameter_bindings` to empty

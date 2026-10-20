@@ -72,9 +72,11 @@ extruded through the profile-feature command. Reconstructed imported scans
 remain validated `cadyx-mesh-v1` triangle meshes rather than B-reps. Direct
 project point-cloud imports use the same validated descriptor with zero
 triangles and explicit vertex indices; the shared scene and server PNG render
-them as points. Point clouds are not B-reps or triangle meshes. XY sketch
-points/lines lie at Z=0; XZ
-sketches map their points/lines onto Y=0 with stored y becoming global Z.
+them as points. Point clouds are not B-reps or triangle meshes. Sketch elements are located
+through their saved work-plane frame: default XY points lie at Z=0, legacy XZ
+sketches map local y to global Z with Y=0, and v12 YZ/custom/face-attached
+sketches use their persisted three-dimensional frames. See
+[work-plane contract](../../docs/sketch-workplanes.md).
 Circles use 64 closed segments, a display approximation rather than replacement
 CAD geometry. Coordinates retain document units without inventing a physical
 unit convention.

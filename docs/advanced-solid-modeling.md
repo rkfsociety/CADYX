@@ -1,6 +1,6 @@
 # Advanced solid modeling
 
-CADYX extends the v8 document/command contract with OCCT-backed operations intended for complex molded housings, machined parts, and similar single-part models. The browser remains observation-only; agents author these features through `cadyx_execute_command` / the Agent API.
+These OCCT-backed operations extend the earlier Document v8 feature model; they run in the **current v12 document** and support complex molded housings, machined parts, and similar single-part models. The [work-plane contract](sketch-workplanes.md) identifies which operations accept YZ/custom/face-attached sketches and which still require legacy planes. The browser remains observation-only; agents author these features through `cadyx_execute_command` / the Agent API.
 
 ## Direct section loft workflow
 

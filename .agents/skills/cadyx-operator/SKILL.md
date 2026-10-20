@@ -114,16 +114,16 @@ A robust modeling cycle should therefore be:
 
 ## Scan reverse engineering
 
-1. Start with `import_scan`. Keep the PLY source unchanged and tune reconstruction parameters before committing to reconstruction geometry.
+1. For **mesh-based reverse engineering**, start with `import_scan` (workspace PLY) or `import_project_scan` (staged project PLY), preserving the source and choosing reconstruction parameters before committing geometry. For a **persistent visual-only point-cloud reference**, `import_project_point_cloud` stores staged point-only PLY vertices with no triangle reconstruction; it cannot be passed directly to scan alignment, sectioning or mesh deviation tools. Do not confuse a point-cloud scene body with a CAD solid.
 2. Do not infer physical units from PLY coordinates. Use `align_scan` to establish the datum/orientation, and set `scale` plus `units` only from a known dimension or explicit user requirement. For elongated parts, PCA with `long_axis=Y` and `ground_z=true` is the default reverse-engineering datum unless the reference requires another orientation.
 3. Use `create_scan_sections` for a station series. Y-normal stations create XZ sketches whose returned `section_groups` can be passed directly to `loft_sketches`; increase station density around curvature changes, ribs, clips, bosses and contour topology changes. Use `create_sketch_from_scan_section` for one diagnostic or local station.
-4. Build a clean editable design model from the scan-derived sketches using existing loft, extrusion, cut, fuse, shell, fillet and other B-rep commands. Do not reproduce scanner noise as CAD topology. X-normal/YZ sections are not faked through another plane: explicitly re-align the scan when that datum is required until native YZ sketches exist.
+4. Build a clean editable design model from the scan-derived sketches using existing loft, extrusion, cut, fuse, shell, fillet and other B-rep commands. Do not reproduce scanner noise as CAD topology. X-normal scan sections are **still unsupported by `create_scan_sections`** (only Y/Z normals), even though generic YZ sketches now exist in Document v12. Re-align the triangle mesh when X-normal station geometry is required, or author a separate YZ sketch through the general sketch commands with an explicit frame; do not mislabel an X-normal section as Y/Z.
 5. Run `compare_body_to_scan` after the principal B-rep and again after local features. Use RMS/P95/max and worst sampled points to decide where to refine the model. State that this is sampled point-to-tessellated-triangle deviation, not exhaustive exact B-rep metrology.
 6. If `set_scan_parameter` is used after alignment, CADYX reapplies the stored scan alignment automatically; still inspect the resulting bounds and current revision before continuing.
 
 ## Report
 
-Summarize what was created or changed, the actual final revision and geometry checks, and whether the result is an editable B-rep or triangle mesh. State unresolved requirements, unverified measurements and any parametric robustness checks that could not be performed. Never claim browser observation, command success, cancellation, lease release, rebuild robustness or requirement verification unless the API/inspection actually confirmed it.
+Summarize what was created or changed, the actual final revision and geometry checks, and whether the result is an editable B-rep, triangle mesh, or point-only reference. State unresolved requirements, unverified measurements and any parametric robustness checks that could not be performed. Never claim browser observation, command success, cancellation, lease release, rebuild robustness or requirement verification unless the API/inspection actually confirmed it.
 
 ## Canonical contracts
 
