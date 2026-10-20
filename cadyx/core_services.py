@@ -85,7 +85,10 @@ class ProjectLifecycleService(_CoreService):
         activities, _ = self.events.activity_state_snapshot(project_id)
         return _ProjectAvailability(
             lock=lock,
-            running_operation=any(item.get("state") == "running" for item in activities),
+            running_operation=(
+                any(item.get("state") == "running" for item in activities)
+                or self._scan_capture.is_running(project_id)
+            ),
         )
 
     def _require_project_policy(
@@ -164,6 +167,19 @@ class ProjectLifecycleService(_CoreService):
                 "PLY scan files can only be staged in a free project with no running operation.",
             )
             return self.workspace.publish_project_scan(project_id, filename, content)
+
+    def start_scan_360(self, project_id: str) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            self._require_project_policy(
+                project_id,
+                "file_management",
+                "A 360 scan can start only in a free project with no running operation.",
+            )
+            return self._scan_capture.start(project_id, self.workspace._project_dir(project_id))
+
+    def scan_360_status(self, project_id: str) -> dict[str, Any]:
+        self.workspace._project_dir(project_id)
+        return self._scan_capture.status(project_id)
 
     def copy_project_files(self, target_project_id: str, source_project_id: str) -> dict[str, Any]:
         if target_project_id == source_project_id:

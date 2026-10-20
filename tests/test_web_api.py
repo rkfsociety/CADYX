@@ -218,6 +218,26 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual((status, error["error"]), (400, "VALIDATION_ERROR"))
 
+    def test_agent_scan_360_routes_require_free_project_and_report_capture_state(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "360 capture"})
+        project_id = created["project"]["id"]
+        route = f"/api/v1/agent/projects/{project_id}/scans/360"
+        status, response = self.request(route)
+        self.assertEqual(status, 200)
+        self.assertEqual(response["scan"]["state"], "idle")
+        with patch.object(self.core._scan_capture, "is_running", return_value=True):
+            status, error = self.request(route, {})
+        self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
+        lease = self.core.acquire_lease(project_id, "agent", "scan-test")
+        status, error = self.request(route, {})
+        self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
+        self.core.release_lease(project_id, lease["lease_id"])
+        expected = {"state": "running", "completed_frames": 0, "frame_count": 12}
+        with patch.object(self.core._scan_capture, "start", return_value=expected) as start:
+            status, response = self.request(route, {})
+        self.assertEqual((status, response["scan"]), (202, expected))
+        start.assert_called_once()
+
     def test_legacy_migration_uses_both_api_command_paths(self) -> None:
         for prefix, owner in (("/api/v1/projects", "human"), ("/api/v1/agent/projects", "agent")):
             with self.subTest(owner=owner):

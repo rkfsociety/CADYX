@@ -132,6 +132,7 @@ let projectsRenderSignature = null;
 let projectGroups = [];
 let folders = [];
 let selectedProjectId = readSelectedProject();
+window.cadyxSelectedProjectId = () => selectedProjectId;
 let selectedObjectId = null;
 let currentObjects = [];
 let activeSketchId = null;

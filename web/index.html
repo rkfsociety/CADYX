@@ -372,6 +372,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 }
 .viewport-camera-presets { gap: 3px; }
 .viewport-live-scan-button[aria-pressed="true"] { border-color: #9b6038; color: var(--accent); background: #26190f; }
+#viewport-scan-360-status { color: var(--muted); font-size: 11px; max-width: 220px; }
 .live-scan-layer { position: absolute; z-index: 7; inset: 56px 12px 12px; overflow: hidden; border: 1px solid #313a42; border-radius: 8px; background: #0c1116; box-shadow: 0 10px 30px #0008; }
 .live-scan-layer[hidden] { display: none !important; }
 .live-scan-layer iframe { display: block; width: 100%; height: 100%; border: 0; background: #0c1116; }
@@ -683,6 +684,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                     <button id="viewport-four-views" class="button viewport-four-views-button" type="button" aria-label="Показать четыре вида" title="Показать четыре вида" aria-pressed="false"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></span><span class="toolbar-label">4 ВИДА</span></button>
                     <button id="viewport-fit" class="button viewport-fit-button" type="button" aria-label="Вписать модель в область просмотра" title="Вписать модель в область просмотра"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 4H4v4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 9 4 4M15 9l5-5M15 15l5 5M9 15l-5 5"/></svg></span><span class="toolbar-label">ВПИСАТЬ МОДЕЛЬ</span></button>
                     <button id="viewport-live-scan" class="button viewport-icon-button viewport-live-scan-button" type="button" aria-label="Показать живой скан в окне проекта" title="Показать живой скан в окне проекта" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h16v12H4zM8 7.5l1.5-3h5l1.5 3M12 11a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/></svg></button>
+                    <button id="viewport-scan-360" class="button" type="button" title="Снять 12 кадров за полный оборот стола">Сканировать 360°</button><span id="viewport-scan-360-status" role="status" aria-live="polite"></span>
                   </div>
                 </div>
                 <div class="viewport" id="viewport">

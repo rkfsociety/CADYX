@@ -6,6 +6,7 @@ import copy
 import math
 import threading
 import time
+from pathlib import Path
 from uuid import uuid4
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -27,6 +28,7 @@ from .lease import EditLeaseManager
 from .models import Document, OwnerType
 from .runtime_cache import RuntimeCachePolicy
 from .scan import ScanProcessor
+from .scan_capture import Scan360CaptureController
 from .self_evolving import SelfEvolvingCapabilityEngine
 from .source_extension import SourceExtensionEngine
 from .workspace import ProjectWorkspace
@@ -47,6 +49,7 @@ class CadyxCore:
         cache_policy: RuntimeCachePolicy | None = None,
     ) -> None:
         self.workspace = ProjectWorkspace(projects_dir)
+        self._scan_capture = Scan360CaptureController(Path(__file__).resolve().parent.parent, self.workspace.root)
         self.kernel = kernel if kernel is not None else OCCTKernelAdapter()
         self.commands = CommandSystem(
             self.kernel,
@@ -125,6 +128,12 @@ class CadyxCore:
 
     def upload_project_scan(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
         return self._lifecycle.upload_project_scan(project_id, filename, content)
+
+    def start_scan_360(self, project_id: str) -> dict[str, Any]:
+        return self._lifecycle.start_scan_360(project_id)
+
+    def scan_360_status(self, project_id: str) -> dict[str, Any]:
+        return self._lifecycle.scan_360_status(project_id)
 
     def copy_project_files(self, target_project_id: str, source_project_id: str) -> dict[str, Any]:
         return self._lifecycle.copy_project_files(target_project_id, source_project_id)

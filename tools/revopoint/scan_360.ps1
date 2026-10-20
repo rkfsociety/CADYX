@@ -66,75 +66,50 @@ function Read-ReportedAngle {
     return [double]::Parse($match.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
 }
 
-function Invoke-Capture {
-    param([Parameter(Mandatory = $true)][string]$Prefix)
-    & $captureExe --out-prefix $Prefix --q-file $projectCalibration `
-        --depth-scale $DepthScale
-    if ($LASTEXITCODE -ne 0) {
-        throw "Depth frame capture failed ($LASTEXITCODE) at prefix $Prefix"
-    }
-}
-
-$frames = @()
+$poseLog = Join-Path $ProjectPath "${runPrefix}_poses.csv"
+$prefix = Join-Path $ProjectPath "${runPrefix}_pose"
+$liveRaw = Join-Path $workspaceRoot '.revopoint-live.raw'
 $complete = $false
 try {
-    $zeroOutput = Invoke-Turntable -Arguments @('zero')
-    $zeroAngle = Read-ReportedAngle -Output $zeroOutput -Label 'angle after zero:'
-    if ([math]::Abs($zeroAngle) -gt 0.5) {
-        throw "Turntable did not reach zero (reported $zeroAngle degrees)."
-    }
+    Invoke-Turntable -Arguments @(
+        'capture-sweep', '12', '30', '0', $poseLog, $captureExe, $prefix,
+        $projectCalibration, $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw
+    ) | Out-Null
 
+    $frames = @()
     for ($index = 0; $index -lt 12; $index++) {
-        $expectedAngle = $index * 30
-        if ($index -gt 0) {
-            $rotationOutput = Invoke-Turntable -Arguments @('rotate', '30')
-            $actualAngle = Read-ReportedAngle -Output $rotationOutput -Label 'angle after:'
-        } else {
-            $actualAngle = $zeroAngle
-        }
-        $prefixName = '{0}_frame_{1:D3}' -f $runPrefix, $expectedAngle
-        $prefix = Join-Path $ProjectPath $prefixName
-        Write-Host "Capturing frame $($index + 1)/12 at table angle $actualAngle degrees."
-        Invoke-Capture -Prefix $prefix
+        $prefixName = '{0}_pose_{1:D3}' -f $runPrefix, $index
         $frames += [pscustomobject]@{
             index = $index
-            commanded_angle_degrees = $expectedAngle
-            reported_angle_degrees = $actualAngle
             raw_file = "$prefixName.raw"
             ply_file = "$prefixName.ply"
             metadata_file = "$prefixName.json"
         }
     }
-
-    $homeOutput = Invoke-Turntable -Arguments @('zero')
-    $finalAngle = Read-ReportedAngle -Output $homeOutput -Label 'angle after zero:'
-    if ([math]::Abs($finalAngle) -gt 0.5) {
-        throw "Scan frames were captured, but the table did not return to zero (reported $finalAngle degrees)."
-    }
-
     $manifest = [ordered]@{
-        format = 'revopoint-y16-turntable-capture-v1'
+        format = 'revopoint-y16-turntable-capture-v2'
         frame_count = $frames.Count
         step_degrees = 30
+        table_tilt_degrees = 0
+        starting_position_preserved = $true
         projection_method = 'Q_ray_scaled_to_depth'
         depth_scale_mm_per_raw_unit = $DepthScale
         depth_scale_status = 'provisional_for_direct_UVC'
         calibration_file = [IO.Path]::GetFileName($projectCalibration)
         depth_scale_config = [IO.Path]::GetFileName($projectDepthScale)
+        poses_file = [IO.Path]::GetFileName($poseLog)
         frame_registration = 'not_performed'
-        final_table_angle_degrees = $finalAngle
         frames = $frames
     }
     $manifestPath = Join-Path $ProjectPath "${runPrefix}_scan_360.json"
     $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
     $complete = $true
-    Write-Host "Captured 12 Y16 frames in CADYX project $ProjectPath"
-    Write-Host 'The frames are not merged or registered; the scan manifest records the table angles.'
+    Write-Host "Captured 12 Y16 frames in CADYX project $ProjectPath; original table position preserved."
+    Write-Host 'Live preview follows the latest captured frame. Registration and fusion are not performed during capture.'
 }
 finally {
     if (-not $complete) {
         try { Invoke-Turntable -Arguments @('stop') | Out-Null } catch { Write-Warning $_.Exception.Message }
-        try { Invoke-Turntable -Arguments @('zero') | Out-Null } catch { Write-Warning $_.Exception.Message }
-        Write-Warning "Partial scan files, if any, were preserved in CADYX project $ProjectPath"
+        Write-Warning "Partial scan files, if any, were preserved in CADYX project $ProjectPath; table home was not changed."
     }
 }

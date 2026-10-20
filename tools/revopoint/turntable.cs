@@ -269,8 +269,6 @@ internal static class Program
                         throw new InvalidOperationException("Rotation-only sweep requires zero tilt.");
                     if (operation == "capture-sweep" && Math.Abs(baselineTilt - scanCapture.ExpectedTilt) > TiltSetpointToleranceDegrees)
                         throw new InvalidOperationException("Turntable tilt does not match the requested scan-pass tilt; no rotation command was sent.");
-                    if (operation == "capture-sweep" && Math.Abs(SignedAngleDelta(0, currentAngle)) > 1.0)
-                        throw new InvalidOperationException("Each capture-sweep must start at the rotation home position.");
                     WriteSweepRow(writer, 0, "baseline", 0, currentAngle, currentTilt, "", initialRotation, initialTilt);
                     Console.WriteLine("sweep baseline: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) +
                                       " deg, tilt=" + currentTilt.ToString("F1", CultureInfo.InvariantCulture) + " deg");

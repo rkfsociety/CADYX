@@ -224,7 +224,7 @@ Secure the object to the turntable, keep the scanner fixed, close Revo Scan, and
 .\tools\revopoint\scan_360.ps1 -ProjectPath 'projects\<existing CADYX project folder>' -DepthScale 0.005
 ```
 
-The script operates inside the supplied existing CADYX project; it does not create another project. It returns the table to its home zero, captures at 0°, 30°, …, 330°, and homes the table again. It saves every raw frame, per-frame provisional PLY, calibration copy, and angle manifest in that project. It does **not** register the twelve views or merge them into one mesh. The table center/axis, direct UVC depth mapping, and absolute scale still need validation before the views can form a trustworthy complete model.
+The script operates inside the supplied existing CADYX project; it does not create another project. The project viewport's **Сканировать 360°** button starts a capture at the table's current angle, captures twelve stationary poses at 30° intervals, and verifies that the full turn returns to that starting angle. It requires the table to already be level and never sends a tilt or home command. Each capture updates the CADYX live preview with the latest single frame; registration and fusion happen after capture. Raw frames, per-frame provisional PLY, calibration copies, pose log, and manifest are saved in the project. The table center/axis, direct UVC depth mapping, and absolute scale still need validation before the views can form a trustworthy complete cloud.
 
 ## Multi-tilt capture and registration status
 
