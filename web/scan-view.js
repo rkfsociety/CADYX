@@ -110,7 +110,13 @@
       const count = geometry.previewVertexCount ?? geometry.positions.length / 3;
       return {
         source: source.url,
-        geometry: { ...geometry, triangles: new Uint32Array(0), points: Array.from({ length: count }, (_, index) => index) },
+        geometry: {
+          ...geometry,
+          triangles: new Uint32Array(0),
+          lines: [],
+          points: Array.from({ length: count }, (_, index) => index),
+          pointStyle: { size: 1.5, opacity: 0.78, color: '#a5d3e4' },
+        },
       };
     };
     const readPointCloud = async url => {

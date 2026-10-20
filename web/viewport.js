@@ -529,11 +529,14 @@
       }
       context.globalAlpha = 1;
       context.setLineDash([]);
-      context.fillStyle = "#c3ecff";
+      const pointStyle = geometry.pointStyle || {};
+      const pointSize = Number.isFinite(pointStyle.size) ? Math.max(0.75, Math.min(4, pointStyle.size)) : 4;
+      const pointOpacity = Number.isFinite(pointStyle.opacity) ? Math.max(0.1, Math.min(1, pointStyle.opacity)) : 1;
+      context.fillStyle = pointStyle.color || "#c3ecff";
       for (const point of geometry.points || []) {
         const forming = transition?.pointIndex === point;
-        const size = forming ? 4 * Math.max(0.05, progress) : 4;
-        context.globalAlpha = forming ? 0.2 + 0.8 * progress : 1;
+        const size = forming ? pointSize * Math.max(0.05, progress) : pointSize;
+        context.globalAlpha = forming ? 0.2 + (pointOpacity - 0.2) * progress : pointOpacity;
         if (geometry.construction) {
           context.strokeStyle = "#c3ecff";
           context.lineWidth = 1.5;
