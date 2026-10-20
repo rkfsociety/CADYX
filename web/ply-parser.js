@@ -1,7 +1,7 @@
 (() => {
   const MAX_PREVIEW_FACES = 36_000;
   const MAX_PREVIEW_POINTS = 24_000;
-  const MAX_CUSTOM_PREVIEW_POINTS = 250_000;
+  const MAX_CUSTOM_PREVIEW_POINTS = 125_000;
   const asciiDecoder = new TextDecoder("ascii");
   const scalarTypes = {
     char: { size: 1, read: (view, offset) => view.getInt8(offset) },
