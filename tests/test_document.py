@@ -251,6 +251,11 @@ class SketchDocumentTests(unittest.TestCase):
 
     def test_remove_body_removes_owned_features_and_preserves_sketches(self):
         body = self.command(type="create_box", width=2, height=3, depth=4)["body_id"]
+        self.command(type="create_model_parameter", name="Depth", value=4)
+        feature = next(item for item in self.core.inspect_project(self.project)["document"]["objects"]
+                       if item.get("type") == "feature" and item.get("body_id") == body)
+        self.command(type="bind_model_parameter", object_id=feature["id"],
+                     path="parameters.depth", expression="Depth")
         result = self.command(type="remove_body", body_id=body)
         document = self.core.inspect_project(self.project)["document"]
         self.assertEqual(result["body_id"], body)
@@ -259,6 +264,7 @@ class SketchDocumentTests(unittest.TestCase):
         self.assertNotIn(body, saved_ids)
         self.assertTrue(set(result["removed_feature_ids"]).isdisjoint(saved_ids))
         self.assertIn(self.sketch, [item["id"] for item in document["objects"]])
+        self.assertEqual(document["parameter_bindings"], [])
 
     def test_remove_body_rejects_other_object_references(self):
         source_id = self.command(type="create_box", width=2, height=3, depth=4)["body_id"]

@@ -78,6 +78,10 @@ class HistoryCommands:
             item for item in document.objects
             if item is not body and item.get("id") not in feature_ids
         ]
+        document.parameter_bindings[:] = [
+            binding for binding in document.parameter_bindings
+            if binding.get("object_id") not in feature_ids
+        ]
         return {
             "body_id": body_id,
             "removed_feature_ids": sorted(feature_ids),
