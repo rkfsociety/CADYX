@@ -122,13 +122,17 @@ class Scan360CaptureController:
                    "12 кадров сохранены. Запись манифеста завершилась ошибкой; журнал поз сохранён." if metadata_warning else
                    "Съёмка 360° завершена; кадры сохранены в проекте." if state == "completed" else
                    f"Съёмка завершилась с ошибкой (код {return_code}); исходные кадры, если они успели сохраниться, оставлены в проекте.")
-        return {
+        snapshot = {
             "state": state,
             "completed_frames": completed,
             "frame_count": _FRAME_COUNT,
             "started_at": self._job.started_at,
             "message": message,
         }
+        snapshot.update(self._preview_payload(
+            self._job.project_directory, self._job.run_id, completed,
+        ))
+        return snapshot
 
     @staticmethod
     def _count_run_frames(project_directory: Path, run_id: str) -> int:
@@ -163,5 +167,28 @@ class Scan360CaptureController:
                     "completed_frames": completed,
                     "frame_count": _FRAME_COUNT,
                     "message": message,
+                    **cls._preview_payload(project_directory, run_id, completed),
                 }
         return {"state": "idle", "completed_frames": 0, "frame_count": _FRAME_COUNT}
+
+    @classmethod
+    def _preview_payload(cls, project_directory: Path, run_id: str, completed: int) -> dict[str, str | int]:
+        fused_name = f"{run_id}_first_frame_geometric_candidate.ply"
+        if (project_directory / fused_name).is_file():
+            return {
+                "preview_folder": project_directory.name,
+                "preview_file": fused_name,
+                "preview_kind": "provisional_fusion",
+                "preview_frame_count": _FRAME_COUNT,
+            }
+        if completed > 0:
+            index = min(completed, _FRAME_COUNT) - 1
+            for name in (f"{run_id}_pose_{index:03d}.ply", f"{run_id}_pose_pose_{index:03d}.ply"):
+                if (project_directory / name).is_file():
+                    return {
+                        "preview_folder": project_directory.name,
+                        "preview_file": name,
+                        "preview_kind": "single",
+                        "preview_frame_count": _FRAME_COUNT,
+                    }
+        return {}
