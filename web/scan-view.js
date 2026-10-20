@@ -332,7 +332,14 @@
                 count += 1;
               }
               if (count >= 3 && request === liveRequest && livePreviewOwned) {
-                liveTableFrame ||= fitTableFrame(positions.subarray(0, count * 3), centerRay(liveCalibration));
+                if (!liveTableFrame) {
+                  const ray = centerRay(liveCalibration);
+                  liveTableFrame = fitTableFrame(positions.subarray(0, count * 3), ray);
+                  if (typeof viewer.setCamera === 'function' && typeof viewer.getCamera === 'function') {
+                    viewer.setCamera({ yaw: 0, pitch: 0,
+                      zoom: viewer.getCamera().zoom, panX: 0, panY: 0, projection: 'orthographic' });
+                  }
+                }
                 const tableFrame = liveTableFrame;
                 let frameRadius = 0;
                 const transformedBounds = transformToTableFrame(positions.subarray(0, count * 3), tableFrame);
