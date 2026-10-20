@@ -1,0 +1,15 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const source = fs.readFileSync(require('node:path').join(__dirname, '../web/app.js'), 'utf8');
+const context = vm.createContext({});
+vm.runInContext(source.slice(0, source.indexOf('(() => {')), context);
+const stage = feature => vm.runInContext(`cadyxCloudStage(${JSON.stringify(feature)})`, context);
+assert.equal(stage({operation:'import_point_cloud',stats:{point_count:221656}}).output, 221656);
+const filtered = stage({operation:'process_point_cloud',method:'radius_filter',stats:{input_points:221656,output_points:221502}});
+assert.equal(filtered.title, 'Фильтр изолированных точек');
+assert.equal(filtered.input - filtered.output, 154);
+assert.equal(stage({operation:'extrude_sketch'}), null);
+assert.ok(!source.includes('dataset.cloudTool'), 'Unused agent tools must not be rendered in the browser tree');
+assert.deepEqual(Array.from(vm.runInContext('Object.keys(cadyxCloudTools)', context)), ['deduplicate','radius_filter','crop','voxel_downsample']);
+console.log('Point-cloud tree presentation checks passed.');

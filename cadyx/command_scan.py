@@ -15,6 +15,63 @@ from .scan import DEFAULT_SCAN_PARAMETERS, normalize_scan_parameters, read_point
 
 
 class ScanCommands:
+    def _process_point_cloud(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        from .point_cloud import normalize_cloud_parameters, process_points
+        from .scan import _sha256_file
+        body = next((o for o in document.objects if o["id"] == command.get("body_id") and o["type"] == "body"), None)
+        if body is None or body.get("geometry", {}).get("kind") != "point_cloud":
+            raise ValidationError("Processing requires a saved point-cloud body.")
+        previous = next((o for o in reversed(document.objects) if o["id"] in body["feature_ids"]
+                         and o.get("operation") in {"import_point_cloud", "process_point_cloud"}), None)
+        if previous is None or project_id is None or self.publish_project_scan_output is None:
+            raise ValidationError("Processing requires a source-linked project cloud and artifact writer.")
+        method = command.get("method")
+        parameters = normalize_cloud_parameters(method, command.get("parameters", {}))
+        source = previous.get("artifact") or previous["source"]
+        filename = source.get("project_file", source.get("file"))
+        path = self._scan_source_path({"project_file": filename}, project_id)
+        if progress:
+            progress({"phase": "read_point_cloud"})
+        points, digest, _ = read_point_cloud_ply(path, full_resolution=True)
+        if digest != source.get("sha256"):
+            raise ValidationError("Point-cloud source changed; no processing was saved.")
+        if progress:
+            progress({"phase": "filter_point_cloud"})
+        result = process_points(points, method, parameters)
+        # The artifact contains every output point; only the document/view uses a sample.
+        full_geometry = self.kernel.create_point_cloud(result)
+        sample = result[::max(1, (len(result) + 124999) // 125000)]
+        if len(sample) < len(result) and len(sample) >= 6:
+            for axis in range(3):
+                sample[axis * 2] = min(result, key=lambda point: point[axis])
+                sample[axis * 2 + 1] = max(result, key=lambda point: point[axis])
+        geometry = self.kernel.create_point_cloud(sample)
+        stats = {"input_points": len(points), "output_points": len(result),
+                 "removed_points": len(points) - len(result), "display_sample_count": len(sample),
+                 "bounds": {"min": [min(v[a] for v in result) for a in range(3)],
+                            "max": [max(v[a] for v in result) for a in range(3)]},
+                 "coordinate_units": "source_unverified", "scale_status": "unverified"}
+        original = next(o for o in document.objects if o["id"] in body["feature_ids"]
+                        and o.get("operation") == "import_point_cloud")
+        output_name = original["source"]["project_file"]
+        artifact = self._publish_scan_source_output({"project_file": filename}, output_name, full_geometry, progress, project_id)
+        artifact_path = self._scan_source_path({"project_file": artifact["file"]}, project_id)
+        artifact = {**artifact, "sha256": _sha256_file(artifact_path)}
+        feature_id = f"feature:{uuid4()}"
+        feature = {"id": feature_id, "type": "feature", "operation": "process_point_cloud",
+                   "body_id": body["id"], "previous_feature_id": previous["id"],
+                   "method": method, "parameters": parameters,
+                   "source": {"project_file": filename, "sha256": digest}, "artifact": artifact,
+                   "stats": stats, "processor": {"name": "CADYX point-cloud tools", "version": 1}}
+        body["geometry"] = geometry
+        body["feature_ids"].append(feature_id)
+        document.objects.append(feature)
+        return {"body_id": body["id"], "feature_id": feature_id, "method": method, "stats": stats, "artifact": artifact}
+
     def _scan_source_path(self, source: dict[str, Any], project_id: str | None) -> Path:
         if all(isinstance(source.get(key), str) for key in ("folder", "file")):
             if self.resolve_scan is None:
@@ -296,7 +353,16 @@ def _handle_set_scan_parameter(
     return self._set_scan_parameter(document, command, progress=progress, project_id=project_id)
 
 
+def _handle_process_point_cloud(
+    self: Any, document: Document, command: dict[str, Any], *,
+    progress: Callable[[dict[str, Any]], None] | None = None,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    return self._process_point_cloud(document, command, progress=progress, project_id=project_id)
+
+
 COMMAND_HANDLERS = {
+    "process_point_cloud": _handle_process_point_cloud,
     "import_scan": _handle_import_scan,
     "import_project_scan": _handle_import_project_scan,
     "import_project_point_cloud": _handle_import_project_point_cloud,

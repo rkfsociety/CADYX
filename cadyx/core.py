@@ -633,7 +633,7 @@ class CadyxCore:
                 if not isinstance(command, dict):
                     raise ValidationError("Every preview command must be an object.")
                 if command.get("type") in {"import_scan", "import_project_scan", "import_project_point_cloud",
-                                             "set_scan_parameter", "export_brep"} or (
+                                             "set_scan_parameter", "process_point_cloud", "export_brep"} or (
                     command.get("type") == "remove_body" and command.get("remove_source_file") is True
                 ):
                     raise ValidationError("This command has external file effects and cannot be previewed.")

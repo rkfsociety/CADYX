@@ -65,6 +65,7 @@ _BUILTIN_ACTIVITY_ACTIONS = {
     "import_scan": "Обрабатывает скан",
     "import_project_scan": "Обрабатывает проектный скан",
     "import_project_point_cloud": "Показывает облако точек",
+    "process_point_cloud": "Обрабатывает облако точек",
     "set_scan_parameter": "Пересобирает скан",
     "remove_sketch_object": "Удаляет объект эскиза",
 }

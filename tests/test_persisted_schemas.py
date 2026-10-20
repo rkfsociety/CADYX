@@ -44,6 +44,14 @@ def feature_document(operation):
     document.objects = [{"id": body, "type": "body", "feature_ids": [feature["id"]]},
                         {"id": source, "type": "body"}, {"id": tool, "type": "body"},
                         *sketches, feature]
+    if operation == "process_point_cloud":
+        previous = {"id": identifier("feature"), "type": "feature",
+                    "body_id": body, "operation": "import_point_cloud"}
+        document.objects[0]["feature_ids"].insert(0, previous["id"])
+        document.objects.insert(-1, previous)
+        feature.update(previous_feature_id=previous["id"], method="deduplicate",
+                       artifact={"file": "result.ply", "sha256": "b" * 64},
+                       stats={"input_points": 4, "output_points": 3})
     return document, feature
 
 

@@ -153,7 +153,7 @@ def _ply_counts(path: Path) -> tuple[int, int]:
     return vertices, faces
 
 
-def read_point_cloud_ply(path: str | Path) -> tuple[list[tuple[float, float, float]], str, dict[str, Any]]:
+def read_point_cloud_ply(path: str | Path, *, full_resolution: bool = False) -> tuple[list[tuple[float, float, float]], str, dict[str, Any]]:
     """Read a bounded viewport sample while preserving full source provenance."""
     source = Path(path).resolve(strict=True)
     if source.suffix.casefold() != ".ply" or not source.is_file():
@@ -216,6 +216,8 @@ def read_point_cloud_ply(path: str | Path) -> tuple[list[tuple[float, float, flo
             _, vertex_count, properties = elements[0]
             if vertex_count < 3:
                 raise ValidationError("Point cloud must contain at least 3 vertices.")
+            if full_resolution and vertex_count > _MAX_PLY_VERTICES:
+                raise ValidationError("Point-cloud processing exceeds the 2M point resource limit.", code="RESOURCE_LIMIT")
             names = [name for name, _ in properties]
             if len(names) != len(set(names)) or not all(name in names for name in ("x", "y", "z")):
                 raise ValidationError("Point-cloud PLY must contain unique x, y and z properties.")
@@ -237,7 +239,7 @@ def read_point_cloud_ply(path: str | Path) -> tuple[list[tuple[float, float, flo
                     if value > bounds_max[axis]:
                         bounds_max[axis] = value
                         bound_points[axis * 2 + 1] = point
-                sample_index = index * min(vertex_count, _POINT_CLOUD_DISPLAY_SAMPLE) // vertex_count
+                sample_index = index * (vertex_count if full_resolution else min(vertex_count, _POINT_CLOUD_DISPLAY_SAMPLE)) // vertex_count
                 if sample_index != previous_sample:
                     points.append(point)
                     previous_sample = sample_index
@@ -279,7 +281,7 @@ def read_point_cloud_ply(path: str | Path) -> tuple[list[tuple[float, float, flo
         raise ValidationError(f"PLY source could not be read: {exc}.") from exc
     if read_digest.hexdigest() != source_hash:
         raise ValidationError("Source PLY changed while it was being read; no model change was saved.")
-    if len(points) >= 6:
+    if 6 <= len(points) < vertex_count:
         for index, point in enumerate(bound_points):
             if point is not None:
                 points[index] = point

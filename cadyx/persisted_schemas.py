@@ -173,7 +173,29 @@ def _validate_step_import(item: dict[str, Any], by_id: dict[str, dict[str, Any]]
             or topology["solid_count"] != 1 or topology["face_count"] == 0):
         raise ValidationError("STEP source B-rep topology metrics are invalid.")
 
+def _validate_cloud_processing(item: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> None:
+    from .point_cloud import normalize_cloud_parameters
+    normalize_cloud_parameters(item.get("method"), item.get("parameters"))
+    previous = by_id.get(item.get("previous_feature_id"), {})
+    if (previous.get("type") != "feature" or previous.get("body_id") != item["body_id"]
+            or previous.get("operation") not in {"import_point_cloud", "process_point_cloud"}
+            or previous["id"] == item["id"]):
+        raise ValidationError("Point-cloud processing must reference its preceding cloud feature.")
+    ownership = by_id.get(item["body_id"], {}).get("feature_ids", [])
+    index = ownership.index(item["id"])
+    if index == 0 or ownership[index - 1] != previous["id"]:
+        raise ValidationError("Point-cloud processing history must follow body feature order.")
+    for key in ("source", "artifact"):
+        record = item.get(key)
+        if not isinstance(record, dict) or not isinstance(record.get("sha256"), str) or not re.fullmatch(r"[a-f0-9]{64}", record["sha256"]):
+            raise ValidationError("Point-cloud stage requires hashed source and result artifacts.")
+    stats = item.get("stats", {})
+    if not isinstance(stats, dict) or any(type(stats.get(key)) is not int or stats[key] < 3 for key in ("input_points", "output_points")):
+        raise ValidationError("Point-cloud stage counts are invalid.")
+
+
 FEATURE_SCHEMAS: MappingProxyType[str, PersistedValidator] = MappingProxyType({
+    'process_point_cloud': _validate_cloud_processing,
     'extrude_sketch': _validate_profile,
     'pad_sketch_to_body': _validate_pad,
     'revolve_sketch': _validate_profile,

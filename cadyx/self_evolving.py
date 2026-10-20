@@ -22,7 +22,7 @@ from .models import Document
 _BLOCKED_COMMANDS = {
     "clear_model", "remove_body", "remove_objects", "import_scan", "import_project_scan",
     "import_project_point_cloud",
-    "set_scan_parameter",
+    "set_scan_parameter", "process_point_cloud",
     "import_step", "export_brep", "export_stl", "export_mesh",
 }
 _MAX_DEFINITION_BYTES = 256 * 1024
