@@ -4,11 +4,14 @@ param(
 
     [double]$DepthScale = 0,
 
-    [string]$CalibrationFile = (Join-Path $PSScriptRoot 'calibration\Q.bin')
+    [string]$CalibrationFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $toolRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+if ([string]::IsNullOrWhiteSpace($CalibrationFile)) {
+    $CalibrationFile = Join-Path $toolRoot 'calibration\Q.bin'
+}
 $repoRoot = (Resolve-Path (Join-Path $toolRoot '..\..')).Path
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'projects')).TrimEnd([char[]]@('\', '/'))
 $ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
