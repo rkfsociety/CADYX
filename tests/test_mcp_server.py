@@ -64,6 +64,25 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(renamed["project"]["name"], "Фигурка из гипса")
         self.assertEqual(renamed["project"]["url_slug"], "plaster-figurine")
 
+    def test_native_360_scan_tools_start_and_report_the_current_capture(self) -> None:
+        project_id = self._create_project("Live scan MCP")
+        scan = {
+            "state": "running", "completed_frames": 3, "frame_count": 12,
+            "preview_folder": "Live scan MCP", "preview_file": "revopoint_run_pose_002.ply",
+            "preview_kind": "single", "preview_frame_count": 12,
+        }
+        with (
+            patch.object(self.core, "start_scan_360", return_value=scan) as start,
+            patch.object(self.core, "scan_360_status", return_value=scan) as status,
+        ):
+            started = self._tool_value("cadyx_start_scan_360", {"project_id": project_id})
+            current = self._tool_value("cadyx_get_scan_360_status", {"project_id": project_id})
+
+        self.assertEqual(started["scan"], scan)
+        self.assertEqual(current["scan"], scan)
+        start.assert_called_once_with(project_id)
+        status.assert_called_once_with(project_id)
+
     def test_api_reuses_keep_alive_connection(self) -> None:
         class Response:
             status = 200
@@ -762,6 +781,13 @@ class CadyxMCPServerTests(unittest.TestCase):
         (project_path / "reference.md").write_text("Reference notes", encoding="utf-8")
         result = self._tool_value("cadyx_read_project_file", {"project_id": project_id, "name": "reference.md"})
         self.assertEqual(result["text"], "Reference notes")
+        json_text = '{"frame_count": 12,\n'
+        (project_path / "scan_manifest.json").write_text(json_text, encoding="utf-8")
+        json_result = self._tool_value("cadyx_read_project_file", {
+            "project_id": project_id, "name": "scan_manifest.json",
+        })
+        self.assertEqual(json_result["text"].replace("\r\n", "\n"), json_text)
+        self.assertEqual(json_result["content_type"], "application/json")
         (project_path / "opaque.bin").write_bytes(b"\x00\x01\xff")
         rejected = self.app.call_tool("cadyx_read_project_file", {"project_id": project_id, "name": "opaque.bin"})
         self.assertTrue(rejected["isError"])

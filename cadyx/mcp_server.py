@@ -225,7 +225,10 @@ class CadyxAPI:
         except (OSError, http.client.HTTPException, ssl.SSLError) as exc:
             self._drop_connection(parsed)
             raise TransportError("CADYX API transport failed; the operation outcome may be uncertain.") from exc
-        if content_type == _JSON:
+        # Project and workspace files are user payloads. Return JSON-named files
+        # as raw text to their caller instead of parsing them as Agent API replies.
+        is_file_read = method == "GET" and "/files/" in urllib.parse.urlsplit(path).path
+        if content_type == _JSON and not is_file_read:
             try:
                 return raw, json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -292,6 +295,8 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_rollback_source_extension", "description": "Restore a checked source-extension checkpoint without overwriting files changed since integration.", "inputSchema": _schema({"project_id": _STRING, "extension_id": _STRING}, ["project_id", "extension_id"])},
     {"name": "cadyx_list_project_files", "description": "List direct user files in a saved project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_read_project_file", "description": "Read a direct project file through the read-only Agent API; small images are returned as image content.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING}, ["project_id", "name"])},
+    {"name": "cadyx_start_scan_360", "description": "Start the native direct-UVC 360-degree point capture in a free project. The physical turntable must be level; the project viewer displays each captured frame while the scan runs.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
+    {"name": "cadyx_get_scan_360_status", "description": "Read native 360-degree scan progress and the latest captured point-cloud preview for a project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_upload_project_step", "description": "Copy a local STEP file into a project through the Agent API without overwriting existing files or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
     {"name": "cadyx_upload_project_scan", "description": "Copy a local PLY scan into a project through the Agent API without overwriting the source or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
     {"name": "cadyx_remove_staged_step", "description": "Remove an unused direct STEP reference file from a FREE project; CADYX preserves the original local source.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING}, ["project_id", "name"])},
@@ -517,6 +522,10 @@ class MCPApplication:
             return self.api.get(self._project(args["project_id"], "/files"))
         if name == "cadyx_read_project_file":
             return self._read_file(self._project(args["project_id"], "/files/" + urllib.parse.quote(args["name"], safe="")), args["name"])
+        if name == "cadyx_start_scan_360":
+            return self.api.post(self._project(args["project_id"], "/scans/360"), {})
+        if name == "cadyx_get_scan_360_status":
+            return self.api.get(self._project(args["project_id"], "/scans/360"))
         if name == "cadyx_upload_project_step":
             source = Path(args["source_path"]).expanduser()
             if source.suffix.casefold() not in {".step", ".stp"}:

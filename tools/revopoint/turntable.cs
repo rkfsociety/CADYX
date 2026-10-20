@@ -278,6 +278,7 @@ internal static class Program
                         WriteSweepRow(writer, 0, "capture_started", 0, currentAngle, currentTilt, prefix, initialRotation, initialTilt);
                         CaptureY16Pose(scanCapture, prefix);
                         WriteSweepRow(writer, 0, "capture_completed", 0, currentAngle, currentTilt, prefix, initialRotation, initialTilt);
+                        await PauseAfterCaptureAsync();
                         Console.WriteLine("captured pose 0/11: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) + " deg, tilt=" + currentTilt.ToString("F1", CultureInfo.InvariantCulture));
                     }
 
@@ -335,6 +336,7 @@ internal static class Program
                             WriteSweepRow(writer, step, "capture_started", degrees, currentAngle, currentTilt, prefix, "", "");
                             CaptureY16Pose(scanCapture, prefix);
                             WriteSweepRow(writer, step, "capture_completed", degrees, currentAngle, currentTilt, prefix, "", "");
+                            await PauseAfterCaptureAsync();
                             Console.WriteLine("captured pose " + step + "/11: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) + " deg, tilt=" + currentTilt.ToString("F1", CultureInfo.InvariantCulture));
                         }
                     }
@@ -637,6 +639,12 @@ internal static class Program
         public string CalibrationFile;
         public double DepthScale;
         public string LiveRawFile;
+    }
+
+    private static async Task PauseAfterCaptureAsync()
+    {
+        Console.WriteLine("scanner processing pause after frame: 3 seconds");
+        await Task.Delay(TimeSpan.FromSeconds(3));
     }
 
     private static void CaptureY16Pose(ScanCaptureOptions options, string prefix)
