@@ -85,10 +85,12 @@ assert.equal(blockedLayer.hidden, false);
 assert.equal(blockedLayer.dataset.mode, "cloud");
 
 const html = fs.readFileSync(path.join(__dirname, "../web/index.html"), "utf8");
+const scannerHtml = fs.readFileSync(path.join(__dirname, "../web/scanner.html"), "utf8");
 assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/button>/);
 assert.match(html, /id="viewport-scan-mesh"[^>]*>Сетка<\/button>/);
 assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/button>/);
 assert.ok(html.indexOf('id="viewport-live-scan"') < html.indexOf('id="viewport-scan-360"'));
 assert.doesNotMatch(html, /live-scan-tabs|live-scan-cloud-tab|live-scan-mesh-tab/);
 assert.match(html, /viewport\[data-scan-preview="true"\]\s*>\s*#model-preview/);
+assert.match(scannerHtml, /<a class="brand" href="\/" aria-label="CADYX — проекты"><svg class="brand-mark"/);
 console.log("scan view controls passed");

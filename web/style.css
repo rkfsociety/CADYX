@@ -31,6 +31,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .topbar-sync { display: flex; align-items: center; min-width: 0; gap: 10px; padding-left: 16px; border-left: 1px solid var(--line); }
 .topbar-start { gap: 0; }
 .brand { display: inline-flex; align-items: center; width: fit-content; color: #f3f7f8; text-decoration: none; font-size: 31px; font-weight: 750; letter-spacing: .075em; line-height: 1; }
+.brand-mark { display: block; width: 22px; height: 22px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .topbar-label { color: var(--dim); font: 10px/1.3 var(--mono); letter-spacing: .08em; }
 .topbar-project { min-width: 0; gap: 12px; padding-left: 18px; border-left: 1px solid var(--line); }
 .project-light { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--dim); }
