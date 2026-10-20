@@ -204,13 +204,14 @@ revision, so an unfinished workflow remains active after a host restart. A
 legacy JSON state is imported when the SQLite store is first created.
 `/api/v1/updates` exposes `agent_work_active` and
 `agent_work_revision` plus the active project IDs, and the host publishes
-`workspace.agent-work` over SSE. The browser uses that list to lock only the
-matching project while its workflow, phase or task is unfinished. Other projects
-remain available to separate chat sessions. It persists the per-project browser
-lock across reloads and clears it only after a newer API revision confirms that
-project's workflow and queue are complete. Unknown global status remains
-fail-closed until the API snapshot arrives. Hardware telemetry is not currently
-reported, so the UI does not display invented CPU/GPU/memory values.
+`workspace.agent-work` over SSE for informational status. Browser edit controls
+are gated by the selected project's authoritative lease/recovery snapshot and
+running-operation activity snapshot, not by the dashboard report. A persisted or
+stale unfinished workflow therefore cannot keep an otherwise-free project locked;
+server-side commands still enforce leases and revision checks. Unknown project
+availability remains fail-closed until both snapshots arrive. Hardware telemetry
+is not currently reported, so the UI does not display invented CPU/GPU/memory
+values.
 
 Core adds `started_at` and `elapsed_seconds` to persisted dashboard snapshots;
 agents must not send these fields. `started_at` is set at the first phase

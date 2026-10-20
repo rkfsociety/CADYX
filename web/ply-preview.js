@@ -227,12 +227,6 @@ const activityRevisionsByProject = new Map();
 const agentLocksByProject = new Map();
 const dashboardsByProject = new Map();
 const dashboardRevisionsByProject = new Map();
-const AGENT_WORK_LOCK_KEY = "cadyx.agent-work-lock";
-const savedAgentWorkLock = readSavedAgentWorkLock();
-let agentWorkActive = savedAgentWorkLock.active;
-let agentWorkRevision = savedAgentWorkLock.revision;
-let agentWorkProjectIds = savedAgentWorkLock.projectIds;
-let agentWorkStatusConnected = false;
 const FOLDER_SELECTION_PREFIX = "folder:";
 const initialAddress = new URLSearchParams(window.location.search);
 const initialProjectPath = /^\/p\/[^/]+\/?$/.test(window.location.pathname);
@@ -253,61 +247,12 @@ function canOpenFilesView(projectId = selectedProjectId) {
     && !lock.recovery_required && !agentIsActive;
 }
 
-function readSavedAgentWorkLock() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(AGENT_WORK_LOCK_KEY) || "null");
-    if (saved && typeof saved.active === "boolean" && Number.isInteger(saved.revision) && saved.revision >= 0) {
-      return {
-        ...saved,
-        projectIds: Array.isArray(saved.projectIds) ? saved.projectIds.filter((id) => typeof id === "string") : [],
-      };
-    }
-  } catch { /* A fresh lock state is safe before the API snapshot arrives. */ }
-  return { active: false, revision: 0, projectIds: [] };
-}
-
-function applyAgentWorkLock(active, revision, projectIds = null) {
-  if (typeof active !== "boolean" || !Number.isInteger(revision) || revision < agentWorkRevision) return;
-  if (active) {
-    agentWorkActive = true;
-    agentWorkRevision = revision;
-    if (Array.isArray(projectIds)) {
-      agentWorkProjectIds = projectIds.filter((id) => typeof id === "string");
-    } else if (!agentWorkProjectIds.length) {
-      agentWorkProjectIds = [];
-    }
-  } else if (!agentWorkActive || revision > agentWorkRevision) {
-    agentWorkActive = false;
-    agentWorkRevision = revision;
-    agentWorkProjectIds = [];
-  }
-  try {
-    localStorage.setItem(AGENT_WORK_LOCK_KEY, JSON.stringify({
-      active: agentWorkActive,
-      revision: agentWorkRevision,
-      projectIds: agentWorkProjectIds,
-    }));
-  } catch { /* The server snapshot remains authoritative when browser storage is unavailable. */ }
-}
-
-function dashboardHasUnfinishedWork(dashboard) {
-  const workflow = dashboard?.workflow;
-  return Boolean(workflow && (
-    Number(workflow.progress_percent) < 100
-    || workflow.phases.some((phase) => phase.state !== "completed")
-  )) || (dashboard?.tasks || []).some((task) => task.state !== "completed");
-}
-
 function lockAvailabilityKey(lock) {
   return JSON.stringify([lock?.state || null, Boolean(lock?.recovery_required)]);
 }
 
 function workspaceControlLockReason() {
   if (!projectAddressPinned) return null;
-  if (!agentWorkStatusConnected) return "ГЛОБАЛЬНОЕ СОСТОЯНИЕ РАБОТЫ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
-  if (agentWorkActive && (!selectedProjectId || !agentWorkProjectIds.length || agentWorkProjectIds.includes(selectedProjectId))) {
-    return "ИИ-АГЕНТ РАБОТАЕТ С ЭТОЙ МОДЕЛЬЮ · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
-  }
   if (!workspaceAvailabilityConnected) return "СОСТОЯНИЕ ПАНЕЛИ НЕ ПОДТВЕРЖДЕНО · УПРАВЛЕНИЕ ЗАБЛОКИРОВАНО";
   if (!selectedProjectId || getSelectedFolder()) return null;
   const lock = agentLocksByProject.get(selectedProjectId);
@@ -559,9 +504,10 @@ function setApiConnectionStatus(online) {
   }
 }
 
-function formatElapsed(dashboard) {
+function formatElapsed(dashboard, confirmedActive = false) {
   let seconds = dashboard?.elapsed_seconds;
   if (!Number.isInteger(seconds) || seconds < 0) {
+    if (!confirmedActive) return "ПРОШЛО —";
     const startedAt = Date.parse(dashboard?.started_at || "");
     if (!Number.isFinite(startedAt)) return "ПРОШЛО —";
     seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
@@ -574,7 +520,16 @@ function formatElapsed(dashboard) {
 
 function updateWorkflowElapsed() {
   const output = $("#workflow-eta");
-  if (output) output.textContent = formatElapsed(dashboardsByProject.get(selectedProjectId));
+  if (output) output.textContent = formatElapsed(
+    dashboardsByProject.get(selectedProjectId), hasConfirmedAgentWork(selectedProjectId),
+  );
+}
+
+function hasConfirmedAgentWork(projectId) {
+  const lock = agentLocksByProject.get(projectId);
+  const runningActivity = (activitiesByProject.get(projectId) || []).some((item) => item.state === "running");
+  return runningActivity || (lock?.state === "AI_LOCKED" && lock.lease?.owner_type === "agent"
+    && !lock.recovery_required);
 }
 
 const phaseStateLabel = (state) => ({
@@ -610,7 +565,7 @@ function renderAgentDashboard(dashboard) {
     $("#workflow-progress").setAttribute("aria-valuenow", "0");
     $("#workflow-progress-bar").style.width = "0%";
   }
-  $("#workflow-eta").textContent = formatElapsed(dashboard);
+  $("#workflow-eta").textContent = formatElapsed(dashboard, hasConfirmedAgentWork(selectedProjectId));
 
   renderCurrentProgress(
     dashboard,
@@ -618,10 +573,6 @@ function renderAgentDashboard(dashboard) {
     agentLocksByProject.get(selectedProjectId),
   );
   renderWorkflowHistory(activitiesByProject.get(selectedProjectId) || []);
-  if (dashboardHasUnfinishedWork(dashboard)) {
-    applyAgentWorkLock(true, agentWorkRevision);
-    updateWorkspaceControls();
-  }
 }
 
 function renderCurrentProgress(dashboard, value, lock = null) {
@@ -651,7 +602,7 @@ function renderCurrentProgress(dashboard, value, lock = null) {
   const progressTask = Number.isFinite(progressPercent) && progressPhaseLabels[runningActivity?.phase]
     ? { title: progressPhaseLabels[runningActivity.phase], state: "in_progress" }
     : null;
-  const isWorking = Boolean(runningActivity || agentLeaseActive || runningTask || activePhase);
+  const isWorking = Boolean(runningActivity || agentLeaseActive);
   const state = isWorking ? "running"
     : activity?.state === "failed" ? "failed"
       : activity?.state === "completed" || completedWorkflowWithoutJournal ? "completed" : "idle";
@@ -660,7 +611,7 @@ function renderCurrentProgress(dashboard, value, lock = null) {
   const actionText = !runningActivity && !agentLeaseActive && activity?.state === "completed" && action
     ? `${action} · завершено`
     : action;
-  const shownTask = runningTask || activePhase || progressTask;
+  const shownTask = isWorking ? runningTask || activePhase || progressTask : null;
 
   $("#workflow-current").dataset.state = state;
   const agentState = $("#agent-state");
@@ -1649,10 +1600,6 @@ async function checkAutomaticUpdates() {
     const current = await api(`/api/v1/updates?${query.toString()}`, { cache: "no-store" });
     setApiConnectionStatus(true);
     if (selectionAtRequest !== selectedProjectId) return;
-    if (typeof current.agent_work_active === "boolean" && Number.isInteger(current.agent_work_revision)) {
-      applyAgentWorkLock(current.agent_work_active, current.agent_work_revision, current.agent_work_active_project_ids);
-      agentWorkStatusConnected = true;
-    }
     workspaceAvailabilityConnected = true;
     const previous = automaticUpdateSnapshot;
     automaticUpdateSnapshot = current;
@@ -2277,13 +2224,6 @@ function handleStreamEvent(type, event) {
     window.location.assign(`${address.pathname}${address.search}${address.hash}`);
     return;
   }
-  if (type === "workspace.agent-work") {
-    const data = event.data || {};
-    applyAgentWorkLock(data.active, data.revision, data.project_ids);
-    agentWorkStatusConnected = true;
-    updateWorkspaceControls();
-    return;
-  }
   if (type === "viewport.body-motion") {
     if (projectId === selectedProjectId) {
       modelViewer.animateBodyMotion(event.data?.tracks, event.data?.duration_ms);
@@ -2378,7 +2318,7 @@ stream.addEventListener("stream.gap", () => {
   scheduleWorkspaceRefresh(0);
   checkAutomaticUpdates();
 });
-const eventTypes = ["project.created", "project.deleted", "workspace.selection.changed", "workspace.agent-work", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera", "viewport.body-motion"];
+const eventTypes = ["project.created", "project.deleted", "workspace.selection.changed", "project.lock.changed", "agent.activity", "agent.dashboard", "command.completed", "document.changed", "viewport.camera", "viewport.body-motion"];
 for (const type of eventTypes) {
   stream.addEventListener(type, (message) => {
     try { handleStreamEvent(type, JSON.parse(message.data)); }
