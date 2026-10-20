@@ -213,7 +213,22 @@ def _validate_mesh_processing(item: dict[str, Any], by_id: dict[str, dict[str, A
         raise ValidationError("Mesh processing requires before/after topology statistics.")
 
 
+def _validate_mesh_recognition(item: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> None:
+    from .mesh_recognition import normalize_recognition_parameters
+    normalize_recognition_parameters(item.get("parameters"))
+    body = by_id.get(item["body_id"], {})
+    if body.get("geometry", {}).get("sha256") != item.get("source_geometry_sha256") or body.get("geometry", {}).get("kind") != "triangle_mesh":
+        raise ValidationError("Recognition references require their unchanged source mesh.")
+    report = item.get("report")
+    if not isinstance(report, dict) or any(not isinstance(report.get(k),list) for k in ("planes","sections","circles","cylinder_candidates","unresolved")):
+        raise ValidationError("Recognition needs a persisted measured-reference report.")
+    sketches = item.get("source_sketch_ids")
+    if not isinstance(sketches,list) or len(set(sketches)) != len(sketches) or any(by_id.get(i,{}).get("type") != "sketch" for i in sketches):
+        raise ValidationError("Recognition references must own existing source sketches.")
+
+
 FEATURE_SCHEMAS: MappingProxyType[str, PersistedValidator] = MappingProxyType({
+    'recognize_mesh': _validate_mesh_recognition,
     'process_mesh': _validate_mesh_processing,
     'process_point_cloud': _validate_cloud_processing,
     'extrude_sketch': _validate_profile,

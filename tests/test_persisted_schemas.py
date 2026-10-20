@@ -61,6 +61,10 @@ def feature_document(operation):
         feature.update(previous_feature_id=previous["id"], source_geometry_sha256="a"*64,
                        method="clean", artifact={"file": "mesh.ply", "sha256": "b"*64},
                        stats={"before": {}, "after": {}})
+    if operation == "recognize_mesh":
+        document.objects[0]["geometry"] = {"kind":"triangle_mesh","sha256":"a"*64}
+        feature.update(parameters={},source_geometry_sha256="a"*64,source_sketch_ids=[],
+                       report={key:[] for key in ("planes","sections","circles","cylinder_candidates","unresolved")})
     return document, feature
 
 

@@ -60,6 +60,8 @@ def _estimated_mesh_bytes(value: Any) -> int:
 
 
 class GeometryKernel(Protocol):
+    def recognize_triangle_mesh(self, geometry: MeshDescriptor, parameters: dict[str, Any]) -> dict[str, Any]: ...
+
     def process_triangle_mesh(self, geometry: MeshDescriptor, method: str, parameters: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]: ...
 
     def create_point_cloud(self, points: list[tuple[float, float, float]]) -> MeshDescriptor: ...
@@ -211,6 +213,10 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
                 _tessellation_cache[cache_key] = (copy.deepcopy(mesh), size)
                 _tessellation_cache_bytes += size
         return mesh
+
+    def recognize_triangle_mesh(self, geometry: MeshDescriptor, parameters: dict[str, Any]) -> dict[str, Any]:
+        from .mesh_recognition import recognize_mesh_geometry
+        return recognize_mesh_geometry(geometry, parameters)
 
     def process_triangle_mesh(
         self, geometry: MeshDescriptor, method: str, parameters: dict[str, Any],

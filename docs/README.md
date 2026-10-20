@@ -24,6 +24,7 @@
 | PLY/scan reverse engineering | [Mesh-based scan-to-CAD](../.codex/docs/scan-reverse-engineering.md), [STL references](../.codex/docs/stl-reference.md) |
 | Point-only cloud cleanup and history | [Processing tools and persisted stages](point-cloud-processing.md) |
 | Triangle-mesh cleanup and smoothing | [Agent mesh processing](mesh-processing.md) |
+| Reconstruction datums, sections and support curves | [Mesh recognition](mesh-recognition.md) |
 | Catalog and standard parts | [Standard-part presets](standard-part-catalog.md) |
 | Backlog, not implemented feature list | [Sketch tool backlog](sketch-tools-backlog.md) |
 | Revopoint scanner tooling | [Scanner README](../tools/revopoint/README.md), [calibration notes](../tools/revopoint/calibration/README.md) |

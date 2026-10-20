@@ -15,6 +15,98 @@ from .scan import DEFAULT_SCAN_PARAMETERS, normalize_scan_parameters, read_point
 
 
 class ScanCommands:
+    def _recognize_mesh(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        from .sketch_workplanes import normalized_frame
+        from .mesh_recognition import normalize_recognition_parameters
+        body = document.find_object(command.get("body_id"), "body")
+        if body is None or body.get("geometry", {}).get("kind") != "triangle_mesh":
+            raise ValidationError("Recognition requires a saved triangle-mesh body.")
+        parameters = normalize_recognition_parameters(command.get("parameters", {}))
+        validate_profiles = command.get("validate_profiles",False)
+        if type(validate_profiles) is not bool:
+            raise ValidationError("validate_profiles must be boolean.")
+        if progress:
+            progress({"phase": "recognize_mesh"})
+        report = self.kernel.recognize_triangle_mesh(body["geometry"], parameters)
+        existing = next((o for o in document.objects if o.get("operation")=="recognize_mesh" and o.get("body_id")==body["id"]),None)
+        if existing:
+            old_sketches = set(existing["source_sketch_ids"])
+            removed = [o["id"] for o in document.objects if o["id"] in old_sketches or o.get("sketch_id") in old_sketches]
+            if any(binding.get("object_id") in removed for binding in document.parameter_bindings):
+                raise ValidationError("Existing recognition sketches have parameter bindings; preserve them before refreshing.")
+            existing["source_sketch_ids"],existing["report"] = [],{}
+            if removed:
+                self._remove_objects(document,{"type":"remove_objects","object_ids":removed})
+        sketch_ids = []
+        def sketch_for(name, frame, role):
+            sketch = {"id": f"sketch:{uuid4()}", "type": "sketch", "name": name, "plane": "CUSTOM",
+                      "frame": normalized_frame(frame), "recognition_role": role}
+            document.objects.append(sketch)
+            sketch_ids.append(sketch["id"])
+            return sketch
+        def polyline(sketch, points, closed, construction):
+            return self._append_sketch_polyline(document, sketch, [tuple(p) for p in points],
+                                                closed=closed, operation="recognition_reference", construction=construction)
+        for plane in report["planes"]:
+            sketch = sketch_for("Опорная плоскость", plane["frame"], "plane")
+            lo, hi = plane["bounds"]["min"], plane["bounds"]["max"]
+            polyline(sketch, [lo, [hi[0],lo[1]],hi,[lo[0],hi[1]]], True, True)
+            plane["sketch_id"] = sketch["id"]
+        for section in report["sections"]:
+            sketch = sketch_for("Замкнутое сечение" if section["closed"] else "Открытое сечение",
+                                section["frame"], "section")
+            polyline(sketch, section["points"], section["closed"], False)
+            section["point_count"] = len(section.pop("points"))
+            section["sketch_id"] = sketch["id"]
+        for projection in report.get("projections",[]):
+            sketch = sketch_for("Проекция внешнего контура",projection["frame"],"projection")
+            polyline(sketch,projection["points"],True,False)
+            from .sketches import closed_profile
+            closed_profile(document.objects,sketch["id"])
+            projection["profile_validation"] = {"closed_loop":True,"solid_probe":"not_run"}
+            if validate_profiles:
+                if progress:
+                    progress({"phase":"validate_reference_profiles"})
+                probe = self._profile_geometry(document,{"operation":"extrude_sketch","source_sketch_id":sketch["id"]},
+                                               {"depth":1.,"centered":False})
+                self.kernel.validate(probe)
+                projection["profile_validation"] = {"closed_loop":True,"solid_probe":"pass","diagnostic_depth":1.}
+            projection["point_count"] = len(projection.pop("points"))
+            projection["sketch_id"] = sketch["id"]
+        for circle in report["circles"]:
+            sketch = sketch_for(f"Опорная окружность R≈{circle['radius']:.3g}", circle["frame"], "circle")
+            self._add_sketch_circle(document, {"sketch_id": sketch["id"], "x": circle["center"][0],
+                                              "y": circle["center"][1], "radius": circle["radius"]})
+            for obj in document.objects:
+                if obj.get("sketch_id") == sketch["id"]:
+                    obj["construction"] = True
+            circle["sketch_id"] = sketch["id"]
+        for cylinder in report["cylinder_candidates"]:
+            from .scan_reverse_common import _cross, _unit
+            axis = cylinder["axis"]
+            other = min(([1.,0.,0.],[0.,1.,0.],[0.,0.,1.]),key=lambda v:abs(sum(a*b for a,b in zip(v,axis))))
+            normal = _unit(_cross(axis,other),"axis work plane")
+            sketch = sketch_for("Ось круговых сечений", {"origin":cylinder["origin"],"normal":normal,"x_axis":axis}, "axis")
+            polyline(sketch, [[0.,0.],[cylinder["supported_length"],0.]], False, True)
+            cylinder["sketch_id"] = sketch["id"]
+        feature_id = existing["id"] if existing else f"feature:{uuid4()}"
+        feature = {"id":feature_id,"type":"feature","operation":"recognize_mesh","body_id":body["id"],
+                   "name":"Подготовка к твердотельному моделированию",
+                   "source_geometry_sha256":body["geometry"]["sha256"],"parameters":parameters,
+                   "source_sketch_ids":sketch_ids,"report":report}
+        if existing:
+            existing.update(feature)
+        else:
+            body["feature_ids"].append(feature_id)
+            document.objects.append(feature)
+        return {"body_id":body["id"],"feature_id":feature_id,"reference_sketches":len(sketch_ids),
+                "planes":len(report["planes"]),"sections":len(report["sections"]),"circles":len(report["circles"]),"projections":len(report.get("projections",[])),
+                "cylinder_candidates":len(report["cylinder_candidates"]),"readiness":report["readiness"]}
+
     def _process_mesh(
         self, document: Document, command: dict[str, Any], *,
         progress: Callable[[dict[str, Any]], None] | None = None,
@@ -399,7 +491,15 @@ def _handle_process_mesh(
     return self._process_mesh(document, command, progress=progress, project_id=project_id)
 
 
+def _handle_recognize_mesh(
+    self: Any, document: Document, command: dict[str, Any], *,
+    progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
+) -> dict[str, Any]:
+    return self._recognize_mesh(document, command, progress=progress, project_id=project_id)
+
+
 COMMAND_HANDLERS = {
+    "recognize_mesh": _handle_recognize_mesh,
     "process_mesh": _handle_process_mesh,
     "process_point_cloud": _handle_process_point_cloud,
     "import_scan": _handle_import_scan,

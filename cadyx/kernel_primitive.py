@@ -16,6 +16,10 @@ class PrimitiveKernelAdapter:
 
         return OCCTKernelAdapter().tessellate(geometry)
 
+    def recognize_triangle_mesh(self, geometry: MeshDescriptor, parameters: dict[str, Any]) -> dict[str, Any]:
+        from .mesh_recognition import recognize_mesh_geometry
+        return recognize_mesh_geometry(geometry, parameters)
+
     def process_triangle_mesh(
         self, geometry: MeshDescriptor, method: str, parameters: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:

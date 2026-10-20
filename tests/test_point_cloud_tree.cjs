@@ -16,4 +16,15 @@ assert.equal(meshStage({operation:'process_mesh',method:'remove_small_components
 assert.equal(meshStage({operation:'import_point_cloud'}), null);
 assert.ok(!source.includes('dataset.cloudTool'), 'Unused agent tools must not be rendered in the browser tree');
 assert.deepEqual(Array.from(vm.runInContext('Object.keys(cadyxCloudTools)', context)), ['deduplicate','radius_filter','crop','voxel_downsample']);
-console.log('Point-cloud tree presentation checks passed.');
+const groupStart = source.indexOf('function modelGroups(){');
+const groupEnd = source.indexOf('function renderTree(){', groupStart);
+context.state = {objects:[
+  {id:'body:original',type:'body'}, {id:'body:result',type:'body'},
+  {id:'feature:import',type:'feature',body_id:'body:original',operation:'reconstruct_scan'},
+  {id:'feature:smooth',type:'feature',body_id:'body:result',source_body_id:'body:original',operation:'process_mesh'},
+  {id:'feature:recognition',type:'feature',body_id:'body:result',operation:'recognize_mesh'},
+]};
+vm.runInContext(source.slice(groupStart,groupEnd),context);
+assert.deepEqual(Array.from(vm.runInContext('modelGroups()[0].features.map(f=>f.id)',context)),
+  ['feature:import','feature:smooth','feature:recognition'], 'Recognition preserves the full preceding mesh-processing tree');
+console.log('Point-cloud, recognition and processing-tree presentation checks passed.');

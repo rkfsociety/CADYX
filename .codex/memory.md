@@ -105,3 +105,5 @@
 - Confirmed: main-preview triangle meshes use surface-only shading; do not re-enable inferred scan boundary/crease overlays when adjusting CAD edge display. Orthographic wireframes remain separate. Contract: [viewport rendering](docs/viewport-api.md).
 
 - Confirmed: `process_mesh` uses full saved geometry through GeometryKernel and retains source bodies/hash-bound history. Components are edge-connected, not vertex-connected. Smoothing pins open boundaries; strict orientation rejects non-orientable surfaces and explicit repair cuts conflicting faces. Agent tools and limits: [mesh processing](../docs/mesh-processing.md).
+
+- Confirmed: `recognize_mesh` persists measured plane datums, PCA section traces, an explicitly labeled outer projection and conservative circular/cylinder candidates as nested CUSTOM sketches plus a hash-bound report. `validate_profiles=true` records a temporary solid-extrusion check without saving a solid. Keep projection distinct from section and candidate curves distinct from nominal design geometry. Refresh refuses references in downstream work. Contract: [mesh recognition](../docs/mesh-recognition.md).
