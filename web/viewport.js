@@ -533,7 +533,10 @@
       const pointSize = Number.isFinite(pointStyle.size) ? Math.max(0.75, Math.min(4, pointStyle.size)) : 4;
       const pointOpacity = Number.isFinite(pointStyle.opacity) ? Math.max(0.1, Math.min(1, pointStyle.opacity)) : 1;
       context.fillStyle = pointStyle.color || "#c3ecff";
-      for (const point of geometry.points || []) {
+      const points = geometry.points || [];
+      const pointStep = Math.max(1, Math.ceil(points.length / MAX_PREVIEW_POINTS));
+      for (let pointIndex = 0; pointIndex < points.length; pointIndex += pointStep) {
+        const point = points[pointIndex];
         const forming = transition?.pointIndex === point;
         const size = forming ? pointSize * Math.max(0.05, progress) : pointSize;
         context.globalAlpha = forming ? 0.2 + (pointOpacity - 0.2) * progress : pointOpacity;
