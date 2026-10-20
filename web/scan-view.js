@@ -225,7 +225,7 @@
         const relative = [positions[index] - frame.origin[0], positions[index + 1] - frame.origin[1], positions[index + 2] - frame.origin[2]];
         const point = [frame.xAxis, frame.yAxis, frame.zAxis].map(axis => axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]);
         // Approximate in-plane table-center offset observed in the top view.
-        point[0] += 8;
+        point[0] += 10;
         point[1] += 48;
         for (let axis = 0; axis < 3; axis += 1) {
           positions[index + axis] = point[axis];
