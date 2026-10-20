@@ -123,6 +123,128 @@ class HistoryCommands:
         document.objects[:] = [item for item in document.objects if item["id"] not in removed]
         return {"removed_object_ids": object_ids, "removed_count": len(object_ids)}
 
+    def _repair_profile_chain(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
+    ) -> dict[str, Any]:
+        required = {"type", "feature_id", "parameter_name", "temporary_value", "restore_value",
+                    "finish_feature_ids", "finish_edge_indices"}
+        if command.keys() != required:
+            raise ValidationError("repair_profile_chain requires a source feature, refresh parameter and finish selectors.")
+        feature_id = command["feature_id"]
+        source_feature = document.find_object(feature_id, "feature")
+        if source_feature is None or source_feature.get("operation") != "extrude_sketch":
+            raise ValidationError("Recovery needs an existing sketch-driven extrusion feature.")
+        parameter_name = command["parameter_name"]
+        if not isinstance(parameter_name, str) or parameter_name not in document.model_parameters:
+            raise ValidationError("Recovery refresh parameter was not found.")
+        temporary_value = _number(command["temporary_value"], "temporary_value")
+        restore_value = _number(command["restore_value"], "restore_value")
+        current_value = float(document.model_parameters[parameter_name]["value"])
+        if (not math.isclose(restore_value, current_value, rel_tol=0.0, abs_tol=1e-12)
+                or math.isclose(temporary_value, restore_value, rel_tol=0.0, abs_tol=1e-12)):
+            raise ValidationError("Recovery must refresh geometry temporarily and restore the current parameter value.")
+
+        finish_feature_ids = command["finish_feature_ids"]
+        selectors = command["finish_edge_indices"]
+        if (not isinstance(finish_feature_ids, list) or not finish_feature_ids
+                or any(not isinstance(value, str) or not value for value in finish_feature_ids)
+                or len(set(finish_feature_ids)) != len(finish_feature_ids)
+                or not isinstance(selectors, dict) or set(selectors) != set(finish_feature_ids)):
+            raise ValidationError("Recovery needs matching unique finish feature IDs and fresh edge selectors.")
+
+        by_id = {item["id"]: item for item in document.objects}
+        feature_order = {item["id"]: index for index, item in enumerate(document.objects)
+                         if item.get("type") == "feature"}
+        if any(value not in feature_order for value in finish_feature_ids):
+            raise NotFoundError("A recovery finish feature was not found.")
+        ordered_ids = sorted(finish_feature_ids, key=feature_order.__getitem__)
+
+        descendants = {source_feature.get("body_id")}
+        changed = True
+        while changed:
+            changed = False
+            for item in document.objects:
+                if item.get("type") != "feature" or item.get("body_id") in descendants:
+                    continue
+                operation = item.get("operation")
+                sources = ({item.get("base_body_id"), item.get("tool_body_id")}
+                           if operation in {"fuse_bodies", "cut_bodies"}
+                           else {item.get("source_body_id")})
+                if sources & descendants:
+                    descendants.add(item.get("body_id"))
+                    changed = True
+        recovered: list[dict[str, Any]] = []
+        previous_source = None
+        for old_id in ordered_ids:
+            feature = by_id[old_id]
+            operation = feature.get("operation")
+            if operation not in {"fillet_edges", "chamfer_edges"}:
+                raise ValidationError("Only fillet and chamfer descendants can be restored by this recovery command.")
+            source_body_id = feature.get("source_body_id")
+            if source_body_id not in descendants or (previous_source is not None and source_body_id != previous_source):
+                raise ValidationError("Finish features must form one downstream chain from the repaired extrusion.")
+            output_body = by_id.get(feature.get("body_id"))
+            if output_body is None or output_body.get("type") != "body":
+                raise ValidationError("A recovery finish feature has no result body.")
+            edge_indices = selectors[old_id]
+            if (not isinstance(edge_indices, list) or not edge_indices
+                    or any(type(index) is not int or index < 0 for index in edge_indices)
+                    or len(set(edge_indices)) != len(edge_indices)):
+                raise ValidationError("Each recovery finish operation needs unique fresh edge indices.")
+            path = "parameters.radius" if operation == "fillet_edges" else "parameters.distance"
+            size_key = "radius" if operation == "fillet_edges" else "distance"
+            size = _number((feature.get("parameters") or {}).get(size_key), size_key)
+            if size <= 0:
+                raise ValidationError(f"Recovery finish parameter {size_key} must be positive.")
+            bindings = [deepcopy(binding) for binding in document.parameter_bindings
+                        if binding.get("object_id") == old_id]
+            if any(binding.get("path") != path for binding in bindings):
+                raise ValidationError("Recovery found an unsupported finish-feature parameter binding.")
+            recovered.append({"old_feature_id": old_id, "operation": operation,
+                              "source_body_id": source_body_id, "body_name": output_body.get("name"),
+                              "size": size, "size_key": size_key, "path": path,
+                              "bindings": bindings, "edge_indices": edge_indices})
+            previous_source = feature.get("body_id")
+
+        staged = deepcopy(document)
+        staged._command_object_index = None
+        for item in reversed(recovered):
+            old_body_id = by_id[item["old_feature_id"]]["body_id"]
+            self._remove_body(staged, {"type": "remove_body", "body_id": old_body_id})
+        self._set_model_parameter(staged, {"type": "set_model_parameter", "name": parameter_name,
+                                           "value": temporary_value}, progress=progress)
+        self._set_model_parameter(staged, {"type": "set_model_parameter", "name": parameter_name,
+                                           "value": restore_value}, progress=progress)
+
+        output_body_by_old_id: dict[str, str] = {}
+        restored_features = []
+        for item in recovered:
+            source_body_id = output_body_by_old_id.get(item["source_body_id"], item["source_body_id"])
+            operation = item["operation"]
+            nested = {"type": operation, "body_id": source_body_id,
+                      "edge_indices": item["edge_indices"], item["size_key"]: item["size"]}
+            if item["body_name"]:
+                nested["name"] = item["body_name"]
+            result = self.execute(staged, nested, progress=progress, project_id=project_id)
+            new_feature_id, new_body_id = result.get("feature_id"), result.get("body_id")
+            if not isinstance(new_feature_id, str) or not isinstance(new_body_id, str):
+                raise ValidationError("A recovery finish operation did not produce a feature and body.")
+            output_body_by_old_id[by_id[item["old_feature_id"]]["body_id"]] = new_body_id
+            for binding in item["bindings"]:
+                self._bind_model_parameter(staged, {"object_id": new_feature_id,
+                    "path": binding["path"], "expression": binding["expression"]}, progress=progress)
+            restored_features.append({"operation": operation, "feature_id": new_feature_id,
+                                      "body_id": new_body_id, "edge_indices": item["edge_indices"]})
+
+        staged.validate()
+        document.objects[:] = staged.objects
+        document.model_parameters = staged.model_parameters
+        document.parameter_bindings = staged.parameter_bindings
+        document.assembly = staged.assembly
+        return {"feature_id": feature_id, "parameter_name": parameter_name,
+                "parameter_value": restore_value, "restored_features": restored_features}
+
     @staticmethod
     def _consumed_body_ids(document: Document) -> set[str]:
         consumed: set[str] = set()
@@ -419,6 +541,13 @@ def _handle_remove_objects(
     return self._remove_objects(document, command)
 
 
+def _handle_repair_profile_chain(
+    self: Any, document: Document, command: dict[str, Any], *,
+    progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
+) -> dict[str, Any]:
+    return self._repair_profile_chain(document, command, progress=progress, project_id=project_id)
+
+
 def _handle_clear_model(
     self: Any, document: Document, command: dict[str, Any], *,
     progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
@@ -444,5 +573,6 @@ COMMAND_HANDLERS = {
     "merge_consecutive_fillet_features": _handle_merge_consecutive_fillet_features,
     "remove_body": _handle_remove_body,
     "remove_objects": _handle_remove_objects,
+    "repair_profile_chain": _handle_repair_profile_chain,
     "clear_model": _handle_clear_model,
 }

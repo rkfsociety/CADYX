@@ -23,6 +23,27 @@ def sketch_segments(objects, sketch_id):
     owned = [item for item in objects if item.get("sketch_id") == sketch_id
              and not item.get("construction", False) and item.get("type") != "point"]
     arc_types = {"circle", "ellipse"}
+    full_circles = [item for item in owned if item.get("type") == "circle"
+                    and "sweep_radians" not in item]
+    if len(full_circles) == 1 and len(owned) == 1:
+        circle = full_circles[0]
+        points = [
+            (math.cos(index * math.pi / 2), math.sin(index * math.pi / 2))
+            for index in range(4)
+        ]
+        points.append(points[0])
+        center = next((item for item in objects if item.get("id") == circle.get("center_id")), None)
+        if center is None:
+            raise ValidationError("A circular profile needs its source center point.")
+        cx, cy, radius = float(center["x"]), float(center["y"]), float(circle["radius"])
+        return segment_values([
+            [1,
+             cx + radius * points[index][0], cy + radius * points[index][1],
+             cx + radius * math.cos((index + 0.5) * math.pi / 2),
+             cy + radius * math.sin((index + 0.5) * math.pi / 2),
+             cx + radius * points[index + 1][0], cy + radius * points[index + 1][1]]
+            for index in range(4)
+        ])
     if not any(item.get("type") in arc_types and "sweep_radians" in item for item in owned):
         return None
     if any(not (item.get("type") == "line" and item.get("extent", "segment") == "segment"

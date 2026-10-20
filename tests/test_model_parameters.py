@@ -13,6 +13,121 @@ from cadyx.sketches import closed_profiles
 
 
 class ModelParameterExpressionTests(unittest.TestCase):
+    def test_full_circle_holes_remain_analytic_across_parameter_rebuild(self):
+        system = CommandSystem(OCCTKernelAdapter())
+        document = Document.create()
+        system.execute(document, {"type": "create_model_parameters", "parameters": {
+            "HoleRadius": {"value": 2, "unit": "mm"},
+            "Depth": {"value": 5, "unit": "mm"},
+        }})
+        sketch = system.execute(document, {"type": "create_sketch", "plane": "XY"})["sketch_id"]
+        system.execute(document, {"type": "add_sketch_rectangle", "sketch_id": sketch,
+                                  "x": -10, "y": -10, "width": 20, "height": 20})
+        circle = system.execute(document, {"type": "add_sketch_circle", "sketch_id": sketch,
+                                           "x": 0, "y": 0, "radius": 2})
+        system.execute(document, {"type": "bind_model_parameter", "object_id": circle["circle_id"],
+                                  "path": "radius", "expression": "HoleRadius"})
+        plane, profiles = closed_profiles(document.objects, sketch)
+        segments = sketch_segment_profiles(document.objects, sketch)
+        self.assertEqual(plane, "XY")
+        self.assertEqual(len(profiles), 2)
+        self.assertIsNotNone(segments)
+        self.assertEqual([segment[0] for segment in segments[0]], [1, 1, 1, 1])
+        self.assertIsNone(segments[1])
+
+        body = system.execute(document, {"type": "extrude_sketch", "sketch_id": sketch,
+                                         "depth": 5})
+        system.execute(document, {"type": "bind_model_parameter", "object_id": body["feature_id"],
+                                  "path": "parameters.depth", "expression": "Depth"})
+        geometry = body["geometry"]
+        self.assertEqual(sum(segments is None for segments in geometry["segment_profiles"]), 1)
+        analytic_hole = next(segments for segments in geometry["segment_profiles"] if segments is not None)
+        self.assertEqual(len(analytic_hole), 4)
+        self.assertAlmostEqual(geometry["volume"], (400 - 4 * math.pi) * 5, places=8)
+        topology = NativeKernel().geometry_graph(geometry, topology=True)
+        self.assertEqual(sum(edge["curve"] == "circle" for edge in topology["edges"]), 8)
+        system.execute(document, {"type": "set_model_parameter", "name": "HoleRadius", "value": 3})
+        rebuilt = next(item for item in document.objects if item["id"] == body["body_id"])
+        self.assertAlmostEqual(rebuilt["geometry"]["volume"], (400 - 9 * math.pi) * 5, places=8)
+        analytic_hole = next(segments for segments in rebuilt["geometry"]["segment_profiles"]
+                             if segments is not None)
+        self.assertEqual(len(analytic_hole), 4)
+
+    def test_repair_profile_chain_rebuilds_source_and_finishers_atomically(self):
+        from types import SimpleNamespace
+        from cadyx.core import CadyxCore
+
+        kernel = OCCTKernelAdapter()
+        system = CommandSystem(kernel)
+        document = Document.create()
+        system.execute(document, {"type": "create_model_parameters", "parameters": {
+            "Width": {"value": 20, "unit": "mm"},
+            "Depth": {"value": 10, "unit": "mm"},
+            "FilletRadius": {"value": 1, "unit": "mm"},
+            "ChamferDistance": {"value": 0.5, "unit": "mm"},
+        }})
+        sketch = system.execute(document, {"type": "create_sketch", "plane": "XY"})["sketch_id"]
+        rectangle = system.execute(document, {"type": "add_sketch_rectangle", "sketch_id": sketch,
+                                              "x": -10, "y": -10, "width": 20, "height": 20})
+        point_ids = rectangle["point_ids"]
+        bindings = []
+        for point_id, x_expr, y_expr in zip(
+            point_ids, ["-Width/2", "Width/2", "Width/2", "-Width/2"],
+            ["-Width/2", "-Width/2", "Width/2", "Width/2"], strict=True,
+        ):
+            bindings.extend([
+                {"object_id": point_id, "path": "x", "expression": x_expr},
+                {"object_id": point_id, "path": "y", "expression": y_expr},
+            ])
+        system.execute(document, {"type": "bind_model_parameters", "bindings": bindings})
+        extrusion = system.execute(document, {"type": "extrude_sketch", "sketch_id": sketch,
+                                               "depth": 10, "name": "Основание"})
+        system.execute(document, {"type": "bind_model_parameter", "object_id": extrusion["feature_id"],
+                                  "path": "parameters.depth", "expression": "Depth"})
+        topology = kernel.topology(next(item for item in document.objects
+                                        if item["id"] == extrusion["body_id"])["geometry"])
+        vertical = [edge["index"] for edge in topology["edges"]
+                    if edge.get("curve") == "line" and abs(abs(edge["end"][2]-edge["start"][2])-10) < 1e-7
+                    and abs(edge["start"][0]-edge["end"][0]) < 1e-7
+                    and abs(edge["start"][1]-edge["end"][1]) < 1e-7]
+        self.assertTrue(vertical)
+        fillet = system.execute(document, {"type": "fillet_edges", "body_id": extrusion["body_id"],
+                                           "edge_indices": [vertical[0]], "radius": 1,
+                                           "name": "Скругление 1 мм"})
+        system.execute(document, {"type": "bind_model_parameter", "object_id": fillet["feature_id"],
+                                  "path": "parameters.radius", "expression": "FilletRadius"})
+        fillet_body = next(item for item in document.objects if item["id"] == fillet["body_id"])
+        chamfer_topology = kernel.topology(fillet_body["geometry"])
+        chamfer_edges = [edge["index"] for edge in chamfer_topology["edges"]
+                         if edge.get("curve") == "line" and abs(edge.get("length", 0)-20) < 1e-7
+                         and abs(edge.get("center", [0, 0, 1])[2]) < 1e-7]
+        self.assertTrue(chamfer_edges)
+        chamfer = system.execute(document, {"type": "chamfer_edges", "body_id": fillet["body_id"],
+                                            "edge_indices": [chamfer_edges[0]], "distance": 0.5,
+                                            "name": "Фаска 0,5 мм"})
+        system.execute(document, {"type": "bind_model_parameter", "object_id": chamfer["feature_id"],
+                                  "path": "parameters.distance", "expression": "ChamferDistance"})
+
+        stale = kernel.create_extruded_profile(
+            [{"x": -9, "y": -10}, {"x": 9, "y": -10}, {"x": 9, "y": 10}, {"x": -9, "y": 10}],
+            plane="XY", depth=10,
+        )
+        for object_id in (extrusion["body_id"], extrusion["feature_id"]):
+            item = next(value for value in document.objects if value["id"] == object_id)
+            item["geometry"] = stale
+
+        result = system.execute(document, {
+            "type": "repair_profile_chain", "feature_id": extrusion["feature_id"],
+            "parameter_name": "Width", "temporary_value": 20.1, "restore_value": 20,
+            "finish_feature_ids": [fillet["feature_id"], chamfer["feature_id"]],
+            "finish_edge_indices": {fillet["feature_id"]: [vertical[0]],
+                                    chamfer["feature_id"]: [chamfer_edges[0]]},
+        })
+        document.validate()
+        CadyxCore._validate_geometry(SimpleNamespace(kernel=kernel), document)
+        self.assertEqual(result["parameter_value"], 20)
+        self.assertEqual([item["operation"] for item in result["restored_features"]],
+                         ["fillet_edges", "chamfer_edges"])
     def test_multicontour_pad_keeps_exact_slot_arcs_on_rebuild(self):
         system = CommandSystem(OCCTKernelAdapter())
         document = Document.create()

@@ -48,6 +48,7 @@ _BUILTIN_ACTIVITY_ACTIONS = {
     "fuse_bodies": "Объединяет тела",
     "cut_bodies": "Вырезает материал",
     "remove_body": "Удаляет тело из модели",
+    "repair_profile_chain": "Восстанавливает эскизную геометрию и отделку",
     "set_assembly_part_material": "Назначает материал детали",
     "add_assembly_mate": "Создаёт сопряжение сборки",
     "set_assembly_mate": "Меняет параметры сопряжения",
