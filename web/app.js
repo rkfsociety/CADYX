@@ -144,7 +144,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
  .cad-tree-root-row .cad-tree-label{font-size:12px}.cad3-tree-type{font-size:10px}
  .cad3-model-tab{font:600 12px/1.2 var(--ui-font)}.cad3-props{font:11px/1.45 var(--ui-font)}.cad3-head small,.cad3-sec h3,.cad3-dep small{font-size:11px}
  .cad3-grid input,.cad3-apply{font:600 11px/1.2 var(--ui-font)}
- .model-toolbar>.cad3-tool,.model-toolbar>.button{font:600 12px/1.2 var(--ui-font)}
+ .model-toolbar .cad3-tool,.model-toolbar>.button{font:600 12px/1.2 var(--ui-font)}
  @media(max-width:680px){:root{--cadyx-rail-width:48px;--cadyx-tree-width:52px}.project-detail{grid-template-columns:48px 52px minmax(0,1fr)!important}.project-detail[data-tree-collapsed=true]{grid-template-columns:48px 48px minmax(0,1fr)!important}.cad3-rail{gap:4px;padding:8px 4px}.cad3-rail button{width:36px;height:36px}}
 `;
     style.textContent += '.cad3-model-tabs[hidden]{display:none!important}';
