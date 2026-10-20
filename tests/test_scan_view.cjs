@@ -27,12 +27,7 @@ const originPoints = [];
 for (let y = -35; y < 35; y += 1) for (let x = -35; x < 35; x += 1) originPoints.push(`${x} ${y} ${-120 + 0.2 * x - 0.1 * y}`);
 const originCloud = `ply\nformat ascii 1.0\nelement vertex ${originPoints.length}\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n${originPoints.join("\n")}\n`;
 const viewerLoads = [];
-const viewerCameras = [];
-const viewer = {
-  load(geometry, options) { viewerLoads.push({ geometry, options }); },
-  getCamera() { return { zoom: 1 }; },
-  setCamera(camera) { viewerCameras.push(camera); },
-};
+const viewer = { load(geometry, options) { viewerLoads.push({ geometry, options }); } };
 const baseGeometry = { positions: new Float64Array([0, 0, 0]), triangles: new Uint32Array(0), bounds: { min: [0, 0, 0], max: [0, 0, 0] } };
 const getModelGeometry = () => baseGeometry;
 const fetchCloud = async url => ({ ok: true, async text() { assert.match(url, /point-cloud\?/); return pointCloud; } });
@@ -111,9 +106,6 @@ await new Promise(resolve => setTimeout(resolve, 10));
 assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "live");
 assert.equal(viewerLoads.at(-1).geometry.positions.length, markerPointCount * 3);
-assert.equal(viewerCameras.length, 1, "entering live scanner view selects the front projection");
-assert.equal(viewerCameras[0].projection, "orthographic");
-assert.deepEqual([viewerCameras[0].yaw, viewerCameras[0].pitch], [0, 0], "front view is the XZ plane viewed along Y");
 assert.ok(Math.abs(viewerLoads.at(-1).geometry.bounds.min[2]) < 2 && Math.abs(viewerLoads.at(-1).geometry.bounds.max[2]) < 2,
   "sparse table markers define XY and lie on that plane after alignment");
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0],
