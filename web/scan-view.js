@@ -115,7 +115,7 @@
           triangles: new Uint32Array(0),
           lines: [],
           points: Array.from({ length: count }, (_, index) => index),
-          pointStyle: { size: 1.5, opacity: 0.78, color: '#a5d3e4' },
+          pointStyle: { size: 1.5, opacity: 0.78, color: '#ff8740' },
         },
       };
     };
