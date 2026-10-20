@@ -65,6 +65,7 @@ const emptyViewportGeometry = {
   positions: new Float64Array(0), triangles: new Uint32Array(0), lines: [], points: [],
   bounds: { min: [0, 0, 0], max: [0, 0, 0] },
 };
+let currentModelViewportGeometry = emptyViewportGeometry;
 const orthographicViewers = [
   { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: 0 } },
   { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: Math.PI / 2, pitch: 0 } },
@@ -153,6 +154,7 @@ let previewRequest = 0;
 function queueViewportSnapshot() {
   window.dispatchEvent(new Event("cadyx:viewport-rendered"));
   if (!selectedProjectId || selectedProjectId.startsWith(FOLDER_SELECTION_PREFIX)
+      || $("#viewport")?.dataset.scanPreviewMode
       || renderedSceneProjectId !== selectedProjectId
       || !Number.isInteger(renderedSceneRevision)) return;
   viewportSnapshotDirty = true;
@@ -166,6 +168,7 @@ function queueViewportSnapshot() {
 
 async function publishViewportSnapshot() {
   if (viewportSnapshotInFlight || !viewportSnapshotDirty) return;
+  if ($("#viewport")?.dataset.scanPreviewMode) { viewportSnapshotDirty = false; return; }
   const projectId = selectedProjectId;
   const revision = renderedSceneRevision;
   viewportSnapshotDirty = false;
@@ -173,7 +176,7 @@ async function publishViewportSnapshot() {
   try {
     const image = await modelViewer.createSnapshotBlob();
     if (projectId !== selectedProjectId || projectId !== renderedSceneProjectId
-        || revision !== renderedSceneRevision) {
+        || revision !== renderedSceneRevision || $("#viewport")?.dataset.scanPreviewMode) {
       viewportSnapshotDirty = true;
       return;
     }
@@ -1130,6 +1133,7 @@ function showProjectLoading(name) {
   if (!renderedSceneKey?.startsWith(`${selectedProjectId}:`)) {
     renderedSceneProjectId = null;
     renderedSceneRevision = null;
+    currentModelViewportGeometry = emptyViewportGeometry;
     modelViewer.load(emptyViewportGeometry, { reset: true });
   }
 }
@@ -1813,6 +1817,7 @@ async function refreshDetail() {
     if (!targetFound) transition = null;
     const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes,
       bodyLineRanges, bodyTriangleRanges, featureTriangleRanges, overlayTriangleRanges };
+    currentModelViewportGeometry = viewportGeometry;
     modelViewer.load(viewportGeometry, {
       reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition, smoothShading: true,
     });

@@ -1,45 +1,28 @@
 (() => {
-  const scannerUrlFromPage = location => {
-    const pageParams = new URLSearchParams(location.search);
-    const scannerUrl = new URL('/scanner', location.origin);
-    scannerUrl.searchParams.set('embed', '1');
-    const projectId = pageParams.get('project_id');
-    if (projectId) scannerUrl.searchParams.set('project_id', projectId);
-    const folder = pageParams.get('scan_folder'), file = pageParams.get('scan_file');
-    if (folder && file) {
-      scannerUrl.searchParams.set('cloud_folder', folder);
-      scannerUrl.searchParams.set('cloud_file', file);
-    }
-    for (const [sources, target] of [[['scan_kind', 'cloud_kind'], 'cloud_kind'],
-      [['scan_angle_deg', 'cloud_angle_deg'], 'cloud_angle_deg'],
-      [['scan_frame_count', 'cloud_frame_count'], 'cloud_frame_count'],
-      [['scan_cleanup', 'cloud_cleanup'], 'cloud_cleanup']]) {
-      const value = sources.map(source => pageParams.get(source)).find(candidate => candidate !== null);
-      if (value !== undefined) scannerUrl.searchParams.set(target, value);
-    }
-    return scannerUrl;
-  };
-
-  const liveScannerUrlFromPage = location => {
-    const scannerUrl = new URL('/scanner', location.origin);
-    scannerUrl.searchParams.set('embed', '1');
-    scannerUrl.searchParams.set('live_only', '1');
-    const projectId = new URLSearchParams(location.search).get('project_id');
-    if (projectId) scannerUrl.searchParams.set('project_id', projectId);
-    return scannerUrl;
-  };
-
-  const initialize = ({ cloudButton, meshButton, viewport, layer, frame, meshReady = false }, location = window.location) => {
+  const initialize = ({ cloudButton, meshButton, viewport, viewer, getModelGeometry = () => null, meshReady = false }, location = window.location, fetcher = fetch) => {
     let livePreviewOwned = false;
+    let cloudPreviewOpen = false;
+    let meshPreviewOpen = false;
+    let cloudSource = null;
+    let cloudOriginSource = null;
+    let cloudOriginOffset = null;
+    let renderedCloudSource = null;
+    let cloudRequest = 0;
+    let liveRequest = 0;
+    let liveTimer = null;
+    let liveMtime = null;
+    let liveCalibration = null;
+    let liveOriginOffset = null;
+    let modelGeometry = null;
     const setAttribute = (element, name, value) => {
       const current = element.getAttribute(name);
       if (current !== value) element.setAttribute(name, value);
     };
     const updateButton = () => {
-      const visible = !layer.hidden;
-      const cloudSelected = visible && layer.dataset.mode === 'cloud';
-      const meshSelected = visible && layer.dataset.mode === 'mesh';
-      const previewVisible = String(visible);
+      const cloudSelected = cloudPreviewOpen;
+      const meshSelected = meshPreviewOpen;
+      const previewVisible = String(livePreviewOwned);
+      viewport.dataset.scanPreviewMode = livePreviewOwned ? 'live' : cloudSelected ? 'cloud' : meshSelected ? 'mesh' : '';
       if (viewport.dataset.scanPreview !== previewVisible) viewport.dataset.scanPreview = previewVisible;
       setAttribute(cloudButton, 'aria-label', 'Облако точек');
       setAttribute(cloudButton, 'aria-pressed', String(cloudSelected));
@@ -54,83 +37,260 @@
         : 'Сетка станет доступна после обработки облака точек';
       if (meshButton.title !== meshTitle) meshButton.title = meshTitle;
     };
+    const restoreModel = () => {
+      cloudRequest += 1;
+      liveRequest += 1;
+      clearTimeout(liveTimer);
+      liveTimer = null;
+      livePreviewOwned = false;
+      cloudPreviewOpen = false;
+      meshPreviewOpen = false;
+      updateButton();
+      const geometry = getModelGeometry() || modelGeometry;
+      if (geometry && viewer) viewer.load(geometry, { reset: false });
+      modelGeometry = null;
+    };
+    const pointCloudUrl = scan => {
+      const url = new URL('/api/v1/scanner/point-cloud', location.origin);
+      const pageParams = new URLSearchParams(location.search);
+      const folder = scan ? scan.preview_folder : pageParams.get('scan_folder');
+      const file = scan ? scan.preview_file : pageParams.get('scan_file');
+      if (!folder || !file) return null;
+      url.searchParams.set('folder', folder);
+      url.searchParams.set('file', file);
+      return url.href;
+    };
+    const originUrl = scan => {
+      const pageParams = new URLSearchParams(location.search);
+      const folder = scan ? scan.preview_folder : pageParams.get('scan_folder');
+      const file = scan ? scan.origin_file : pageParams.get('scan_origin_file');
+      if (!folder || !file) return null;
+      const url = new URL('/api/v1/scanner/point-cloud', location.origin);
+      url.searchParams.set('folder', folder);
+      url.searchParams.set('file', file);
+      return url.href;
+    };
+    const readPointCloud = async url => {
+      const response = await fetcher(url, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Не удалось открыть облако точек (HTTP ${response.status}).`);
+      const content = await response.text();
+      const marker = content.indexOf('end_header');
+      if (marker < 0) throw new Error('PLY не содержит end_header.');
+      const header = content.slice(0, marker).split(/\r?\n/);
+      let vertexCount = 0, inVertices = false;
+      const properties = [];
+      for (const line of header) {
+        const fields = line.trim().split(/\s+/);
+        if (fields[0] === 'format' && fields[1] !== 'ascii') throw new Error('Поддерживается только ASCII PLY.');
+        if (fields[0] === 'element') {
+          inVertices = fields[1] === 'vertex';
+          if (fields[1] === 'face' && Number(fields[2]) !== 0) throw new Error('Для облака точек нужен PLY без граней.');
+          if (inVertices) vertexCount = Number(fields[2]);
+        } else if (fields[0] === 'property' && inVertices) properties.push(fields.at(-1));
+      }
+      if (!Number.isInteger(vertexCount) || vertexCount < 3 || vertexCount > 250000
+          || !['x', 'y', 'z'].every(name => properties.includes(name))) {
+        throw new Error('PLY должен содержать от 3 до 250 000 точек с координатами xyz.');
+      }
+      const columns = ['x', 'y', 'z'].map(name => properties.indexOf(name));
+      const rows = content.slice(marker + 'end_header'.length).trim().split(/\r?\n/);
+      const positions = new Float64Array(vertexCount * 3);
+      const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+      let validCount = 0;
+      for (let index = 0; index < vertexCount; index += 1) {
+        const fields = rows[index]?.trim().split(/\s+/) || [];
+        const point = columns.map(column => Number(fields[column]));
+        if (!point.every(Number.isFinite)) continue;
+        for (let axis = 0; axis < 3; axis += 1) {
+          positions[validCount * 3 + axis] = point[axis];
+          bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
+          bounds.max[axis] = Math.max(bounds.max[axis], point[axis]);
+        }
+        validCount += 1;
+      }
+      if (validCount < 3) throw new Error('В PLY недостаточно корректных точек.');
+      return { positions: validCount === vertexCount ? positions : positions.slice(0, validCount * 3), bounds, count: validCount };
+    };
+    cloudSource = pointCloudUrl(null);
+    cloudOriginSource = originUrl(null);
+    const loadCloud = async ({ reset = true } = {}) => {
+      if (!viewer) throw new Error('Не найден основной 3D-предпросмотр.');
+      if (!cloudSource) { cloudButton.title = 'Ожидание первого кадра сканирования'; return; }
+      const request = ++cloudRequest;
+      if (!cloudPreviewOpen) modelGeometry = getModelGeometry();
+      const cloud = await readPointCloud(cloudSource);
+      let offset = cloudOriginOffset;
+      if (!offset) {
+        const origin = cloudOriginSource && cloudOriginSource !== cloudSource
+          ? await readPointCloud(cloudOriginSource) : cloud;
+        offset = origin.bounds.min.map((minimum, axis) => (minimum + origin.bounds.max[axis]) / 2);
+      }
+      if (request !== cloudRequest || !cloudPreviewOpen) return;
+      const bounds = { min: cloud.bounds.min.map((value, axis) => value - offset[axis]),
+        max: cloud.bounds.max.map((value, axis) => value - offset[axis]) };
+      for (let index = 0; index < cloud.positions.length; index += 3) {
+        for (let axis = 0; axis < 3; axis += 1) cloud.positions[index + axis] -= offset[axis];
+      }
+      cloudOriginOffset ||= offset;
+      viewer.load({ positions: cloud.positions, triangles: new Uint32Array(0), lines: null, bounds }, { reset });
+      renderedCloudSource = cloudSource;
+    };
+    const showCloud = async (open = true) => {
+      livePreviewOwned = false;
+      clearTimeout(liveTimer);
+      liveTimer = null;
+      if (open && !cloudPreviewOpen) modelGeometry = getModelGeometry();
+      meshPreviewOpen = false;
+      cloudPreviewOpen = open;
+      if (!open) { restoreModel(); updateButton(); return; }
+      updateButton();
+      try { await loadCloud({ reset: renderedCloudSource !== cloudSource }); }
+      catch (error) { cloudPreviewOpen = false; restoreModel(); updateButton(); cloudButton.title = error.message; }
+    };
+    const showMesh = (open = true) => {
+      livePreviewOwned = false;
+      clearTimeout(liveTimer);
+      liveTimer = null;
+      if (open && !meshPreviewOpen) modelGeometry = getModelGeometry();
+      cloudRequest += 1;
+      cloudPreviewOpen = false;
+      meshPreviewOpen = open;
+      updateButton();
+      if (open && modelGeometry && viewer) viewer.load(modelGeometry, { reset: false });
+      else if (!open) restoreModel();
+    };
     const setMode = mode => {
       if (mode !== 'cloud' && mode !== 'mesh' && mode !== 'live') throw new TypeError(`Unknown scan view: ${mode}`);
       if (mode === 'mesh' && !meshReady) return;
-      if (!layer.hidden && layer.dataset.mode === mode && frame.getAttribute('src')) {
-        updateButton();
-        return;
-      }
-      if (layer.hidden) layer.hidden = false;
-      layer.dataset.mode = mode;
-      frame.title = mode === 'live'
-        ? 'Предпросмотр сканера в реальном времени'
-        : mode === 'cloud' ? 'Облако точек скана: перетаскивание вращает, колесо меняет масштаб'
-          : 'Треугольная сетка скана: перетаскивание вращает, колесо меняет масштаб';
-      if (mode === 'live') frame.src = liveScannerUrlFromPage(location).href;
-      else if (mode === 'cloud' && (!frame.getAttribute('src') || frame.src === 'about:blank'
-        || new URL(frame.src).searchParams.has('live_only'))) {
-        frame.src = scannerUrlFromPage(location).href;
-      }
-      frame.contentWindow?.postMessage({ type: 'cadyx-scan-view', mode: mode === 'mesh' ? 'mesh' : 'cloud' }, location.origin);
-      updateButton();
+      if (mode === 'cloud') { void showCloud(true); return; }
+      if (mode === 'mesh') { showMesh(true); return; }
+      if (cloudPreviewOpen || meshPreviewOpen) restoreModel();
+      showLivePreview({ open: true });
     };
     const showLivePreview = ({ open = false } = {}) => {
+      if (!open) return;
+      if (!livePreviewOwned) modelGeometry = getModelGeometry();
+      liveMtime = null;
+      liveOriginOffset = null;
+      cloudRequest += 1;
+      cloudPreviewOpen = false;
+      meshPreviewOpen = false;
       livePreviewOwned = true;
-      if (frame.src !== liveScannerUrlFromPage(location).href) frame.src = liveScannerUrlFromPage(location).href;
-      layer.dataset.mode = 'live';
-      frame.title = 'Предпросмотр сканера в реальном времени';
-      if (open && layer.hidden) layer.hidden = false;
+      const request = ++liveRequest;
       updateButton();
+      const pollFrame = async () => {
+        if (request !== liveRequest || !livePreviewOwned) return;
+        try {
+          if (!liveCalibration) {
+            const response = await fetcher('/api/v1/scanner/calibration', { cache: 'no-store' });
+            if (!response.ok) throw new Error(`Калибровка сканера недоступна (HTTP ${response.status}).`);
+            const calibration = await response.json();
+            if (!Array.isArray(calibration.matrix) || calibration.matrix.length !== 16
+                || !Number.isFinite(calibration.depth_scale_mm_per_raw_unit)
+                || calibration.depth_scale_mm_per_raw_unit <= 0) throw new Error('Калибровка глубины сканера некорректна.');
+            liveCalibration = calibration;
+          }
+          const response = await fetcher(`/api/v1/scanner/live-frame?ts=${Date.now()}`, { cache: 'no-store' });
+          if (response.ok) {
+            const mtime = response.headers.get('X-CADYX-Frame-Mtime');
+            if (mtime && mtime !== liveMtime) {
+              const raw = new Uint8Array(await response.arrayBuffer());
+              if (raw.length !== 640 * 400 * 2) throw new Error('Размер кадра Y16 не совпадает.');
+              const { matrix, depth_scale_mm_per_raw_unit: scale } = liveCalibration;
+              const positions = new Float32Array(640 * 400 * 3 / 2);
+              const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+              let count = 0;
+              for (let pixel = 0; pixel < 640 * 400; pixel += 2) {
+                const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
+                const depth = value * scale;
+                if (!value || !Number.isFinite(depth) || depth < 1) continue;
+                const x = pixel % 640, y = Math.floor(pixel / 640);
+                const px = matrix[0] * x + matrix[1] * y + matrix[2] * depth + matrix[3];
+                const py = matrix[4] * x + matrix[5] * y + matrix[6] * depth + matrix[7];
+                const pz = matrix[8] * x + matrix[9] * y + matrix[10] * depth + matrix[11];
+                if (!Number.isFinite(pz) || Math.abs(pz) < 1e-12) continue;
+                const point = [px * depth / pz, -py * depth / pz, -depth];
+                if (!point.every(Number.isFinite)) continue;
+                for (let axis = 0; axis < 3; axis += 1) {
+                  positions[count * 3 + axis] = point[axis];
+                  bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
+                  bounds.max[axis] = Math.max(bounds.max[axis], point[axis]);
+                }
+                count += 1;
+              }
+              if (count >= 3 && request === liveRequest && livePreviewOwned) {
+                liveOriginOffset ||= bounds.min.map((minimum, axis) => (minimum + bounds.max[axis]) / 2);
+                for (let index = 0; index < count * 3; index += 3) {
+                  for (let axis = 0; axis < 3; axis += 1) positions[index + axis] -= liveOriginOffset[axis];
+                }
+                for (let axis = 0; axis < 3; axis += 1) {
+                  bounds.min[axis] -= liveOriginOffset[axis];
+                  bounds.max[axis] -= liveOriginOffset[axis];
+                }
+                viewer.load({ positions: positions.slice(0, count * 3), triangles: new Uint32Array(0), lines: null, bounds },
+                  { reset: liveMtime === null });
+                liveMtime = mtime;
+              }
+            }
+          } else if (response.status !== 404) throw new Error(`Кадр сканера недоступен (HTTP ${response.status}).`);
+        } catch (error) {
+          cloudButton.title = error.message;
+        } finally {
+          if (request === liveRequest && livePreviewOwned) liveTimer = setTimeout(pollFrame, 350);
+        }
+      };
+      void pollFrame();
     };
     const closeLivePreview = () => {
       if (livePreviewOwned) {
-        frame.src = 'about:blank';
-        setOpen(false);
+        livePreviewOwned = false;
+        restoreModel();
+        liveMtime = null;
+        liveOriginOffset = null;
+        updateButton();
       }
-      livePreviewOwned = false;
     };
     const setOpen = visible => {
-      const nextHidden = !visible;
-      if (layer.hidden !== nextHidden) layer.hidden = nextHidden;
-      if (visible) setMode(layer.dataset.mode || 'cloud');
+      if (!visible && (cloudPreviewOpen || meshPreviewOpen)) { restoreModel(); updateButton(); return; }
+      if (!visible && livePreviewOwned) { closeLivePreview(); return; }
+      if (visible) setMode('cloud');
       else updateButton();
     };
     const showCapture = (scan, { open = false } = {}) => {
       if (livePreviewOwned) return;
-      const previewUrl = new URL('/scanner', location.origin);
-      previewUrl.searchParams.set('embed', '1');
-      if (scan?.preview_file && scan?.preview_folder) {
-        previewUrl.searchParams.set('cloud_folder', scan.preview_folder);
-        previewUrl.searchParams.set('cloud_file', scan.preview_file);
-        if (scan.preview_kind) previewUrl.searchParams.set('cloud_kind', scan.preview_kind);
-        if (scan.preview_frame_count) previewUrl.searchParams.set('cloud_frame_count', String(scan.preview_frame_count));
+      const source = pointCloudUrl(scan);
+      const nextOriginSource = originUrl(scan);
+      const originChanged = nextOriginSource !== cloudOriginSource;
+      const sourceChanged = source !== cloudSource;
+      cloudOriginSource = nextOriginSource;
+      if (sourceChanged) {
+        cloudSource = source;
       }
-      const projectId = new URLSearchParams(location.search).get('project_id');
-      if (projectId) previewUrl.searchParams.set('project_id', projectId);
-      const previewChanged = frame.src !== previewUrl.href;
-      if (previewChanged) {
-        livePreviewOwned = false;
-        frame.src = previewUrl.href;
-        layer.dataset.mode = 'cloud';
-        if (layer.hidden) updateButton();
-        else setMode('cloud');
+      if (open) { cloudOriginOffset = null; renderedCloudSource = null; }
+      if ((sourceChanged || originChanged) && cloudPreviewOpen && source && !open) {
+        if (originChanged) cloudOriginOffset = null;
+        const reset = renderedCloudSource === null;
+        void loadCloud({ reset }).catch(error => { cloudButton.title = error.message; });
       }
-      if (open) setOpen(true);
+      if (sourceChanged && cloudPreviewOpen && !source && !open) {
+        cloudRequest += 1;
+        const geometry = getModelGeometry() || modelGeometry;
+        if (geometry && viewer) viewer.load(geometry, { reset: false });
+        cloudOriginOffset = null;
+        renderedCloudSource = null;
+        cloudButton.title = 'Ожидание первого кадра сканирования';
+      }
+      if (open) { void showCloud(true); return; }
     };
     cloudButton.addEventListener('click', () => {
-      if (layer.hidden) setMode('cloud');
-      else if (layer.dataset.mode === 'cloud') setOpen(false);
-      else setMode('cloud');
+      if (cloudPreviewOpen) void showCloud(false);
+      else void showCloud(true);
     });
     meshButton.addEventListener('click', () => {
       if (!meshReady) return;
-      if (layer.hidden) setMode('mesh');
-      else if (layer.dataset.mode === 'mesh') setOpen(false);
+      if (meshPreviewOpen) showMesh(false);
       else setMode('mesh');
     });
-    frame.addEventListener('load', () => frame.contentWindow?.postMessage(
-      { type: 'cadyx-scan-view', mode: layer.dataset.mode === 'mesh' ? 'mesh' : 'cloud' }, location.origin));
     updateButton();
     if (new URLSearchParams(location.search).get('live_scan') === '1') setOpen(true);
     return { setOpen, setMode, showCapture, showLivePreview, closeLivePreview };

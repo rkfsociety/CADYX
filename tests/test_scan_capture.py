@@ -98,10 +98,12 @@ class Scan360CaptureTests(unittest.TestCase):
             )
             for index in range(12):
                 (project / f"{run_id}_pose_{index:03d}.raw").touch()
+            (project / f"{run_id}_pose_000.ply").touch()
             (project / f"{run_id}_first_frame_geometric_candidate.ply").touch()
             status = Scan360CaptureController._latest_completed_snapshot(project)
         self.assertEqual(status["preview_kind"], "provisional_fusion")
         self.assertEqual(status["preview_frame_count"], 12)
+        self.assertEqual(status["origin_file"], f"{run_id}_pose_000.ply")
 
     def test_partial_capture_is_not_reported_as_complete(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

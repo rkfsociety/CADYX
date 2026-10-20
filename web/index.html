@@ -376,10 +376,6 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .viewport-scan-mesh-button.cad3-tool { min-width: 112px; height: 34px; justify-content: center; padding: 0 12px; font: 600 12px var(--ui-font); }
 .viewport-scan-mode-button[aria-pressed="true"] { border-color: #9b6038; color: var(--accent); background: #26190f; }
 #viewport-scan-360-status { color: var(--muted); font-size: 11px; max-width: 220px; }
-.live-scan-layer { position: absolute; z-index: 7; inset: 56px 12px 12px; overflow: hidden; pointer-events: none; }
-.live-scan-layer[hidden] { display: none !important; }
-.live-scan-layer iframe { display: block; position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; border: 1px solid #313a42; border-radius: 8px; background: #0c1116; box-shadow: 0 10px 30px #0008; pointer-events: auto; }
-.viewport[data-scan-preview="true"] > #model-preview { visibility: hidden; }
 .viewport-icon-button,
 .viewport-fit-button,
 .viewport-four-views-button {
@@ -695,9 +691,6 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                 </div>
                 <div class="viewport" id="viewport">
                   <canvas id="model-preview" class="model-preview ply-preview-canvas" aria-label="Координатная сетка, оси и 3D-модель"></canvas>
-                  <div id="live-scan-layer" class="live-scan-layer" data-mode="cloud" hidden>
-                    <iframe id="live-scan-frame" title="Облако точек скана: перетаскивание вращает, колесо меняет масштаб" loading="lazy"></iframe>
-                  </div>
                 </div>
                 <footer class="viewport-footer" aria-label="Сводка модели">
                   <span>МОДЕЛЬ <strong id="viewport-model-name">—</strong></span><span>ОБЪЕКТЫ <strong id="viewport-object-count">0</strong></span><span>ВЕРШИНЫ <strong id="viewport-vertex-count">0</strong></span><span>ГРАНИ <strong id="viewport-face-count">0</strong></span><span>РЕВ. <strong id="viewport-revision">—</strong></span>

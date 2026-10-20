@@ -19,96 +19,109 @@ const element = () => {
     click() { if (!this.disabled) listeners.click?.(); },
   };
 };
-const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply") }, URL, URLSearchParams, setTimeout, clearTimeout };
+const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply") }, URL, URLSearchParams, setTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"), sandbox);
 
+const pointCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n0 0 0\n1 0 0\n0 1 0\n";
+const originCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n10 20 30\n12 20 30\n10 22 30\n";
+const viewerLoads = [];
+const viewer = { load(geometry, options) { viewerLoads.push({ geometry, options }); } };
+const baseGeometry = { positions: new Float64Array([0, 0, 0]), triangles: new Uint32Array(0), bounds: { min: [0, 0, 0], max: [0, 0, 0] } };
+const getModelGeometry = () => baseGeometry;
+const fetchCloud = async url => ({ ok: true, async text() { assert.match(url, /point-cloud\?/); return pointCloud; } });
+const liveRaw = new Uint8Array(640 * 400 * 2);
+for (const pixel of [0, 2, 4]) { liveRaw[pixel * 2] = 100; liveRaw[pixel * 2 + 1] = 0; }
+const fetchPreview = async url => {
+  if (url.includes("point-cloud?")) return { ok: true, async text() { return url.includes("origin.ply") ? originCloud : pointCloud; } };
+  if (url.includes("/calibration")) return { ok: true, async json() { return { matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], depth_scale_mm_per_raw_unit: 1 }; } };
+  if (url.includes("/live-frame")) return { ok: true, headers: { get() { return "1000"; } }, async arrayBuffer() { return liveRaw.buffer; } };
+  throw new Error(`Unexpected preview request: ${url}`);
+};
+
+async function verifyScanView() {
 const cloudButton = element();
 const meshButton = element();
 const viewport = element();
-const layer = element();
-layer.hidden = true;
-const frame = element();
-const view = sandbox.window.CadyxScanView.initialize({ cloudButton, meshButton, viewport, layer, frame, meshReady: true });
-assert.equal(layer.hidden, true);
+const view = sandbox.window.CadyxScanView.initialize({ cloudButton, meshButton, viewport, viewer, getModelGeometry, meshReady: true }, undefined, fetchPreview);
 cloudButton.click();
-assert.equal(layer.hidden, false);
+await new Promise(resolve => setImmediate(resolve));
 assert.equal(cloudButton.attributes["aria-pressed"], "true");
-assert.equal(viewport.dataset.scanPreview, "true");
-assert.equal(new URL(frame.src).searchParams.get("cloud_file"), "frame.ply");
-assert.equal(new URL(frame.src).searchParams.get("project_id"), "project-1");
+assert.equal(viewport.dataset.scanPreview, "false");
+assert.equal(viewport.dataset.scanPreviewMode, "cloud");
+assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
+assert.equal(viewerLoads.at(-1).geometry.triangles.length, 0);
+assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [-0.5, -0.5, 0], "first saved cloud frame is centered at the global origin");
 meshButton.click();
-assert.equal(layer.dataset.mode, "mesh");
-assert.equal(frame.hidden, false, "both modes keep the same embedded scan window visible");
-assert.equal(viewport.dataset.scanPreview, "true");
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(viewport.dataset.scanPreview, "false");
+assert.equal(viewport.dataset.scanPreviewMode, "mesh");
 assert.equal(cloudButton.attributes["aria-pressed"], "false");
 assert.equal(meshButton.attributes["aria-pressed"], "true");
-assert.equal(frame.messages.at(-1).message.mode, "mesh");
-assert.match(frame.title, /Треугольная сетка/);
+assert.equal(viewerLoads.at(-1).geometry, baseGeometry);
 cloudButton.click();
-assert.equal(layer.dataset.mode, "cloud");
-assert.equal(frame.hidden, false);
-assert.equal(frame.messages.at(-1).message.mode, "cloud");
-assert.match(frame.title, /Облако точек/);
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
+assert.match(cloudButton.title, /Скрыть/);
 view.setOpen(false);
 assert.equal(viewport.dataset.scanPreview, "false");
+assert.equal(viewerLoads.at(-1).geometry, baseGeometry, "closing the cloud restores the CAD model in the same canvas");
 view.setOpen(true);
-assert.equal(layer.dataset.mode, "cloud", "reopening preserves the selected scan view");
-view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
-assert.equal(layer.hidden, false);
-assert.equal(new URL(frame.src).searchParams.get("cloud_file"), "fused.ply");
-assert.equal(new URL(frame.src).searchParams.get("cloud_kind"), "provisional_fusion");
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(viewerLoads.at(-1).options.reset, false, "reopening the same cloud preserves the shared viewer orbit");
+view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", origin_file: "origin.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
+await new Promise(resolve => setImmediate(resolve));
+assert.match(viewerLoads.at(-1).geometry.positions.length.toString(), /^9$/);
+assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [-11, -21, -30], "registered fusion is aligned to the first capture frame origin");
 meshButton.click();
-view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
-assert.equal(layer.dataset.mode, "mesh", "status polls for the same scan preserve the selected view");
-const messageCount = frame.messages.length;
-view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
-assert.equal(frame.messages.length, messageCount, "polling an unchanged capture does not resend the same preview mode");
+await new Promise(resolve => setImmediate(resolve));
+view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", origin_file: "origin.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
+assert.equal(viewerLoads.at(-1).geometry, baseGeometry, "the grid view uses the CAD mesh in the same viewer");
+const loadCount = viewerLoads.length;
+view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", origin_file: "origin.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
+assert.equal(viewerLoads.length, loadCount, "repeated status polls do not reload the mesh or reset the camera");
 view.showLivePreview({ open: true });
-assert.equal(layer.hidden, false);
-assert.equal(layer.dataset.mode, "live");
-assert.equal(frame.title, "Предпросмотр сканера в реальном времени");
-assert.equal(new URL(frame.src).searchParams.get("live_only"), "1");
+await new Promise(resolve => setTimeout(resolve, 10));
+assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
+assert.equal(viewport.dataset.scanPreviewMode, "live");
+assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
+assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [-2, 0, 0], "live first frame is centered at the global origin");
 view.showCapture({ preview_folder: "scan folder", preview_file: "new-saved-capture.ply", preview_kind: "single" });
-assert.equal(new URL(frame.src).searchParams.get("live_only"), "1", "360 status polling does not replace active live preview");
+assert.equal(viewport.dataset.scanPreview, "true", "360 status polling does not replace the live canvas preview");
 view.closeLivePreview();
-assert.equal(layer.hidden, true, "stopping the live preview closes the shared viewport");
+assert.equal(viewport.dataset.scanPreview, "false", "stopping the live preview restores the CAD geometry");
+assert.equal(viewport.dataset.scanPreviewMode, "");
 
 const blockedCloudButton = element();
 const blockedMeshButton = element();
-const blockedLayer = element();
-blockedLayer.hidden = true;
-blockedLayer.dataset.mode = "cloud";
 const blocked = sandbox.window.CadyxScanView.initialize({
-  cloudButton: blockedCloudButton, meshButton: blockedMeshButton, viewport: element(),
-  layer: blockedLayer, frame: element(), meshReady: false,
-});
+  cloudButton: blockedCloudButton, meshButton: blockedMeshButton, viewport: element(), viewer, getModelGeometry, meshReady: false,
+}, undefined, fetchPreview);
 assert.equal(blockedMeshButton.disabled, true, "mesh stays disabled until point cloud processing is confirmed");
 blockedCloudButton.click();
-assert.equal(blockedLayer.hidden, false, "the cloud control opens one preview while mesh is unavailable");
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(blockedCloudButton.attributes["aria-pressed"], "true", "the cloud control renders in the existing canvas while mesh is unavailable");
+assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
 blockedCloudButton.click();
-assert.equal(blockedLayer.hidden, true, "closing the cloud preview does not generate a mesh");
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(blockedCloudButton.attributes["aria-pressed"], "false", "closing the cloud preview does not generate a mesh");
 blockedMeshButton.click();
 blocked.setOpen(true);
 blocked.setMode("mesh");
-assert.equal(blockedLayer.hidden, false);
-assert.equal(blockedLayer.dataset.mode, "cloud");
+assert.equal(blockedMeshButton.attributes["aria-pressed"], "false");
 
-const polledLayer = element();
-polledLayer.hidden = true;
-const polledFrame = element();
+const polledCloudButton = element();
 const polled = sandbox.window.CadyxScanView.initialize({
-  cloudButton: element(), meshButton: element(), viewport: element(),
-  layer: polledLayer, frame: polledFrame, meshReady: false,
-});
+  cloudButton: polledCloudButton, meshButton: element(), viewport: element(), viewer, getModelGeometry, meshReady: false,
+}, undefined, fetchPreview);
 const capture = { preview_folder: "scan folder", preview_file: "frame-1.ply", preview_kind: "single" };
 polled.showCapture(capture);
-assert.equal(polledLayer.hidden, true, "background scan polling does not open a closed preview");
+assert.equal(polledCloudButton.attributes["aria-pressed"], "false", "background scan polling does not open a closed preview");
 polled.showCapture(capture, { open: true });
-assert.equal(polledLayer.hidden, false, "the explicit scan start can open the preview");
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(polledCloudButton.attributes["aria-pressed"], "true", "the explicit scan start opens the point cloud inside the main canvas");
 polled.setOpen(false);
 polled.showCapture({ ...capture, preview_file: "frame-2.ply" });
-assert.equal(polledLayer.hidden, true, "new frames update without reopening a preview the user closed");
-assert.equal(new URL(polledFrame.src).searchParams.get("cloud_file"), "frame-2.ply");
+assert.equal(polledCloudButton.attributes["aria-pressed"], "false", "new frames update without reopening a preview the user closed");
 
 const html = fs.readFileSync(path.join(__dirname, "../web/index.html"), "utf8");
 const scannerHtml = fs.readFileSync(path.join(__dirname, "../web/scanner.html"), "utf8");
@@ -119,10 +132,16 @@ assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/b
 assert.match(html, /id="viewport-live-camera"[^>]*>Сканер<\/button>/);
 assert.ok(html.indexOf('id="viewport-live-scan"') < html.indexOf('id="viewport-scan-360"'));
 assert.doesNotMatch(html, /live-scan-tabs|live-scan-cloud-tab|live-scan-mesh-tab/);
-assert.match(html, /viewport\[data-scan-preview="true"\]\s*>\s*#model-preview/);
+assert.doesNotMatch(html, /live-scan-layer|live-scan-frame|<iframe/);
+assert.match(appJs, /viewer:modelViewer/);
 assert.match(scannerHtml, /<a class="brand" href="\/" aria-label="CADYX — проекты"><svg class="brand-mark"/);
 assert.match(appJs, /\.model-toolbar \.cad3-tool/);
 console.log("scan view controls passed");
+}
+verifyScanView().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
 
 (async () => {
   let apiState = { state: "idle" };

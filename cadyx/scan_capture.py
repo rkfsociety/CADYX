@@ -289,20 +289,26 @@ class Scan360CaptureController:
     def _preview_payload(cls, project_directory: Path, run_id: str, completed: int) -> dict[str, str | int]:
         fused_name = f"{run_id}_first_frame_geometric_candidate.ply"
         if (project_directory / fused_name).is_file():
+            origin_name = next((name for name in (f"{run_id}_pose_000.ply", f"{run_id}_pose_pose_000.ply")
+                                if (project_directory / name).is_file()), None)
             return {
                 "preview_folder": project_directory.name,
                 "preview_file": fused_name,
                 "preview_kind": "provisional_fusion",
                 "preview_frame_count": _FRAME_COUNT,
+                **({"origin_file": origin_name} if origin_name else {}),
             }
         if completed > 0:
             index = min(completed, _FRAME_COUNT) - 1
             for name in (f"{run_id}_pose_{index:03d}.ply", f"{run_id}_pose_pose_{index:03d}.ply"):
                 if (project_directory / name).is_file():
+                    origin_name = next((candidate for candidate in (f"{run_id}_pose_000.ply", f"{run_id}_pose_pose_000.ply")
+                                        if (project_directory / candidate).is_file()), None)
                     return {
                         "preview_folder": project_directory.name,
                         "preview_file": name,
                         "preview_kind": "single",
                         "preview_frame_count": _FRAME_COUNT,
+                        **({"origin_file": origin_name} if origin_name else {}),
                     }
         return {}
