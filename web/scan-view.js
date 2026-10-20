@@ -20,25 +20,38 @@
     return scannerUrl;
   };
 
-  const initialize = ({ button, layer, frame, cloudTab, meshTab }, location = window.location) => {
+  const initialize = ({ cloudButton, meshButton, viewport, layer, frame, meshReady = false }, location = window.location) => {
+    const updateButton = () => {
+      const visible = !layer.hidden;
+      const cloudSelected = visible && layer.dataset.mode === 'cloud';
+      const meshSelected = visible && layer.dataset.mode === 'mesh';
+      viewport.dataset.scanPreview = String(visible);
+      cloudButton.setAttribute('aria-label', 'Облако точек');
+      cloudButton.setAttribute('aria-pressed', String(cloudSelected));
+      cloudButton.title = cloudSelected ? 'Скрыть предпросмотр скана'
+        : meshSelected ? 'Переключить на облако точек' : 'Показать облако точек';
+      meshButton.disabled = !meshReady;
+      meshButton.setAttribute('aria-pressed', String(meshSelected));
+      meshButton.title = meshReady
+        ? meshSelected ? 'Скрыть предпросмотр скана' : cloudSelected ? 'Переключить на сетку' : 'Показать сетку скана'
+        : 'Сетка станет доступна после обработки облака точек';
+    };
     const setMode = mode => {
       if (mode !== 'cloud' && mode !== 'mesh') throw new TypeError(`Unknown scan view: ${mode}`);
+      if (mode === 'mesh' && !meshReady) return;
+      if (layer.hidden) layer.hidden = false;
       layer.dataset.mode = mode;
-      cloudTab?.setAttribute('aria-selected', String(mode === 'cloud'));
-      meshTab?.setAttribute('aria-selected', String(mode === 'mesh'));
-      if (cloudTab) cloudTab.tabIndex = mode === 'cloud' ? 0 : -1;
-      if (meshTab) meshTab.tabIndex = mode === 'mesh' ? 0 : -1;
       frame.title = mode === 'cloud'
         ? 'Облако точек скана: перетаскивание вращает, колесо меняет масштаб'
         : 'Треугольная сетка скана: перетаскивание вращает, колесо меняет масштаб';
       if (mode === 'cloud' && !frame.getAttribute('src')) frame.src = scannerUrlFromPage(location).href;
       frame.contentWindow?.postMessage({ type: 'cadyx-scan-view', mode }, location.origin);
+      updateButton();
     };
     const setOpen = visible => {
       layer.hidden = !visible;
-      button.setAttribute('aria-pressed', String(visible));
-      button.title = visible ? 'Скрыть скан' : 'Показать облако точек или сетку';
       if (visible) setMode(layer.dataset.mode || 'cloud');
+      else updateButton();
     };
     const showCapture = scan => {
       const previewUrl = new URL('/scanner', location.origin);
@@ -58,11 +71,20 @@
       }
       setOpen(true);
     };
-    button.addEventListener('click', () => setOpen(layer.hidden));
+    cloudButton.addEventListener('click', () => {
+      if (layer.hidden) setMode('cloud');
+      else if (layer.dataset.mode === 'cloud') setOpen(false);
+      else setMode('cloud');
+    });
+    meshButton.addEventListener('click', () => {
+      if (!meshReady) return;
+      if (layer.hidden) setMode('mesh');
+      else if (layer.dataset.mode === 'mesh') setOpen(false);
+      else setMode('mesh');
+    });
     frame.addEventListener('load', () => frame.contentWindow?.postMessage(
       { type: 'cadyx-scan-view', mode: layer.dataset.mode || 'cloud' }, location.origin));
-    cloudTab?.addEventListener('click', () => setMode('cloud'));
-    meshTab?.addEventListener('click', () => setMode('mesh'));
+    updateButton();
     if (new URLSearchParams(location.search).get('live_scan') === '1') setOpen(true);
     return { setOpen, setMode, showCapture };
   };
