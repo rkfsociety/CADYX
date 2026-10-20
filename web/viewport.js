@@ -151,48 +151,6 @@
   function cameraMatrixFromYawPitch(yaw, pitch) {
     return multiplyMatrices(rotationX(-pitch), rotationZ(yaw));
   }
-  function rotationBetween(from, to) {
-    let axis = [
-      from[1] * to[2] - from[2] * to[1],
-      from[2] * to[0] - from[0] * to[2],
-      from[0] * to[1] - from[1] * to[0],
-    ];
-    const cosine = Math.max(-1, Math.min(1,
-      from[0] * to[0] + from[1] * to[1] + from[2] * to[2]));
-    let sine = Math.hypot(...axis);
-    if (sine < 1e-10) {
-      if (cosine > 0) return [1, 0, 0, 0, 1, 0, 0, 0, 1];
-      axis = Math.abs(from[0]) < 0.8
-        ? [0, from[2], -from[1]] : [-from[2], 0, from[0]];
-      sine = Math.hypot(...axis);
-    }
-    axis = axis.map((value) => value / sine);
-    const angleSine = cosine < -0.999999 ? 0 : sine;
-    const angleCosine = cosine < -0.999999 ? -1 : cosine;
-    const [x, y, z] = axis;
-    const complement = 1 - angleCosine;
-    return [
-      angleCosine + complement * x * x,
-      complement * x * y - angleSine * z,
-      complement * x * z + angleSine * y,
-      complement * y * x + angleSine * z,
-      angleCosine + complement * y * y,
-      complement * y * z - angleSine * x,
-      complement * z * x - angleSine * y,
-      complement * z * y + angleSine * x,
-      angleCosine + complement * z * z,
-    ];
-  }
-  function trackballPoint(clientX, clientY, rect) {
-    const radius = Math.max(1, Math.min(rect.width, rect.height) / 2);
-    const x = (clientX - rect.left - rect.width / 2) / radius;
-    const up = (rect.top + rect.height / 2 - clientY) / radius;
-    const distance = Math.hypot(x, up);
-    if (distance < 1e-10) return [0, 1, 0];
-    const angle = Math.PI * distance;
-    const radial = Math.sin(angle) / distance;
-    return [x * radial, Math.cos(angle), up * radial];
-  }
   function isRotationMatrix(matrix) {
     if (!matrix || matrix.length !== 9 || !Array.from(matrix).every(Number.isFinite)) return false;
     for (let row = 0; row < 3; row += 1) {
@@ -666,7 +624,7 @@
 
     function drawWorldAxes(project, radius, dpr) {
       const origin = project(0, 0, 0);
-      const length = Math.max(radius * 1.25, 0.001);
+      const length = Math.max(radius * (1.25 / 3), 0.001);
       const axes = [
         { name: "X", color: "#ef827b", end: [length, 0, 0] },
         { name: "Y", color: "#71d7bb", end: [0, length, 0] },
@@ -1302,7 +1260,7 @@
         event.preventDefault();
         drag = { type: "pan", clientX: event.clientX, clientY: event.clientY };
       } else if (event.button === 0) {
-        drag = { type: "orbit", point: trackballPoint(event.clientX, event.clientY, canvas.getBoundingClientRect()) };
+        drag = { type: "orbit", clientX: event.clientX, clientY: event.clientY };
       } else {
         return;
       }
@@ -1321,9 +1279,12 @@
         scheduleCameraRender();
         return;
       }
-      const nextPoint = trackballPoint(event.clientX, event.clientY, canvas.getBoundingClientRect());
-      cameraOrientation = multiplyMatrices(rotationBetween(drag.point, nextPoint), cameraOrientation);
-      drag = { type: "orbit", point: nextPoint };
+      const rect = canvas.getBoundingClientRect();
+      const yawDelta = (event.clientX - drag.clientX) / Math.max(rect.width, 1) * Math.PI * 2;
+      const pitchDelta = (event.clientY - drag.clientY) / Math.max(rect.height, 1) * Math.PI * 2;
+      cameraOrientation = multiplyMatrices(rotationX(-pitchDelta),
+        multiplyMatrices(cameraOrientation, rotationZ(yawDelta)));
+      drag = { type: "orbit", clientX: event.clientX, clientY: event.clientY };
       scheduleCameraRender();
     });
     const stopDrag = () => {

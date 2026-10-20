@@ -5,14 +5,14 @@
     let meshPreviewOpen = false;
     let cloudSource = null;
     let cloudOriginSource = null;
-    let cloudOriginOffset = null;
+    let cloudTableFrame = null;
     let renderedCloudSource = null;
     let cloudRequest = 0;
     let liveRequest = 0;
     let liveTimer = null;
     let liveMtime = null;
     let liveCalibration = null;
-    let liveOriginOffset = null;
+    let liveTableFrame = null;
     let liveFitRadius = null;
     let modelGeometry = null;
     const setAttribute = (element, name, value) => {
@@ -123,19 +123,106 @@
       const length = Math.hypot(...ray);
       return ray.map(value => value / length);
     };
-    const pointNearestCenterRay = (positions, ray) => {
-      let nearest = null, minimumDistance = Infinity;
-      for (let index = 0; index < positions.length; index += 3) {
-        const x = positions[index], y = positions[index + 1], z = positions[index + 2];
-        const along = x * ray[0] + y * ray[1] + z * ray[2];
-        if (along <= 0) continue;
-        const distance = Math.max(0, x * x + y * y + z * z - along * along);
-        if (distance < minimumDistance) {
-          minimumDistance = distance;
-          nearest = [x, y, z];
+    const smallestEigenvector = covariance => {
+      const matrix = covariance.map(row => [...row]);
+      const vectors = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+      for (let iteration = 0; iteration < 24; iteration += 1) {
+        let p = 0, q = 1;
+        if (Math.abs(matrix[0][2]) > Math.abs(matrix[p][q])) { p = 0; q = 2; }
+        if (Math.abs(matrix[1][2]) > Math.abs(matrix[p][q])) { p = 1; q = 2; }
+        if (Math.abs(matrix[p][q]) < 1e-12) break;
+        const angle = 0.5 * Math.atan2(2 * matrix[p][q], matrix[q][q] - matrix[p][p]);
+        const cosine = Math.cos(angle), sine = Math.sin(angle);
+        for (let k = 0; k < 3; k += 1) {
+          const mkp = matrix[k][p], mkq = matrix[k][q];
+          matrix[k][p] = cosine * mkp - sine * mkq;
+          matrix[k][q] = sine * mkp + cosine * mkq;
+        }
+        for (let k = 0; k < 3; k += 1) {
+          const mpk = matrix[p][k], mqk = matrix[q][k];
+          matrix[p][k] = cosine * mpk - sine * mqk;
+          matrix[q][k] = sine * mpk + cosine * mqk;
+        }
+        for (let k = 0; k < 3; k += 1) {
+          const vkp = vectors[k][p], vkq = vectors[k][q];
+          vectors[k][p] = cosine * vkp - sine * vkq;
+          vectors[k][q] = sine * vkp + cosine * vkq;
         }
       }
-      return nearest;
+      const axis = matrix[1][1] < matrix[0][0] ? (matrix[2][2] < matrix[1][1] ? 2 : 1)
+        : (matrix[2][2] < matrix[0][0] ? 2 : 0);
+      const normal = [vectors[0][axis], vectors[1][axis], vectors[2][axis]];
+      const length = Math.hypot(...normal);
+      return normal.map(value => value / length);
+    };
+    const fitTableFrame = (positions, centerDirection) => {
+      const sample = [];
+      for (let index = 0; index < positions.length; index += 48) {
+        if (Number.isFinite(positions[index]) && Number.isFinite(positions[index + 1]) && Number.isFinite(positions[index + 2])) {
+          sample.push([positions[index], positions[index + 1], positions[index + 2]]);
+        }
+      }
+      if (sample.length < 100) throw new Error('Недостаточно точек для определения плоскости стола.');
+      let best = null, bestCount = 0;
+      let seed = 0x6d2b79f5;
+      const randomIndex = () => {
+        seed = (Math.imul(seed ^ seed >>> 15, 1 | seed) + 0x6d2b79f5) | 0;
+        let value = Math.imul(seed ^ seed >>> 7, 61 | seed) ^ seed;
+        return ((value ^ value >>> 14) >>> 0) % sample.length;
+      };
+      for (let attempt = 0; attempt < 96; attempt += 1) {
+        const a = sample[randomIndex()], b = sample[randomIndex()], c = sample[randomIndex()];
+        const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        const ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let normal = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
+        const length = Math.hypot(...normal);
+        if (length < 1e-6) continue;
+        normal = normal.map(value => value / length);
+        const d = -(normal[0] * a[0] + normal[1] * a[1] + normal[2] * a[2]);
+        let count = 0;
+        for (const point of sample) if (Math.abs(normal[0] * point[0] + normal[1] * point[1] + normal[2] * point[2] + d) <= 2.5) count += 1;
+        if (count > bestCount) { bestCount = count; best = { normal, d }; }
+      }
+      if (!best || bestCount < sample.length * 0.1) throw new Error('Не удалось надёжно определить плоскость стола в лайв-кадре.');
+      let inliers = [];
+      for (let index = 0; index < positions.length; index += 3) {
+        const distance = best.normal[0] * positions[index] + best.normal[1] * positions[index + 1]
+          + best.normal[2] * positions[index + 2] + best.d;
+        if (Math.abs(distance) <= 2.5) inliers.push([positions[index], positions[index + 1], positions[index + 2]]);
+      }
+      if (inliers.length < 100) throw new Error('В лайв-кадре мало точек плоскости стола.');
+      const origin = [0, 0, 0];
+      for (const point of inliers) for (let axis = 0; axis < 3; axis += 1) origin[axis] += point[axis] / inliers.length;
+      const covariance = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+      for (const point of inliers) for (let row = 0; row < 3; row += 1) for (let column = 0; column < 3; column += 1) {
+        covariance[row][column] += (point[row] - origin[row]) * (point[column] - origin[column]) / inliers.length;
+      }
+      let zAxis = smallestEigenvector(covariance);
+      if (zAxis[0] * -centerDirection[0] + zAxis[1] * -centerDirection[1] + zAxis[2] * -centerDirection[2] < 0) zAxis = zAxis.map(value => -value);
+      let xAxis = [1, 0, 0].map((value, axis) => value - zAxis[axis] * zAxis[0]);
+      let xLength = Math.hypot(...xAxis);
+      if (xLength < 1e-6) { xAxis = [0, 1, 0].map((value, axis) => value - zAxis[axis] * zAxis[1]); xLength = Math.hypot(...xAxis); }
+      xAxis = xAxis.map(value => value / xLength);
+      const yAxis = [zAxis[1] * xAxis[2] - zAxis[2] * xAxis[1], zAxis[2] * xAxis[0] - zAxis[0] * xAxis[2], zAxis[0] * xAxis[1] - zAxis[1] * xAxis[0]];
+      const planeD = -(zAxis[0] * origin[0] + zAxis[1] * origin[1] + zAxis[2] * origin[2]);
+      const denominator = zAxis[0] * centerDirection[0] + zAxis[1] * centerDirection[1] + zAxis[2] * centerDirection[2];
+      if (Math.abs(denominator) < 1e-6) throw new Error('Центральный луч сканера почти параллелен плоскости стола.');
+      const distance = -planeD / denominator;
+      const tableCenter = centerDirection.map(value => value * distance);
+      return { origin: tableCenter, xAxis, yAxis, zAxis, inlierCount: inliers.length };
+    };
+    const transformToTableFrame = (positions, frame) => {
+      const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+      for (let index = 0; index < positions.length; index += 3) {
+        const relative = [positions[index] - frame.origin[0], positions[index + 1] - frame.origin[1], positions[index + 2] - frame.origin[2]];
+        const point = [frame.xAxis, frame.yAxis, frame.zAxis].map(axis => axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]);
+        for (let axis = 0; axis < 3; axis += 1) {
+          positions[index + axis] = point[axis];
+          bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
+          bounds.max[axis] = Math.max(bounds.max[axis], point[axis]);
+        }
+      }
+      return bounds;
     };
     cloudSource = pointCloudUrl(null);
     cloudOriginSource = originUrl(null);
@@ -145,8 +232,8 @@
       const request = ++cloudRequest;
       if (!cloudPreviewOpen) modelGeometry = getModelGeometry();
       const cloud = await readPointCloud(cloudSource);
-      let offset = cloudOriginOffset;
-      if (!offset) {
+      let frame = cloudTableFrame;
+      if (!frame) {
         const origin = cloudOriginSource && cloudOriginSource !== cloudSource
           ? await readPointCloud(cloudOriginSource) : cloud;
         if (!liveCalibration) {
@@ -154,16 +241,11 @@
           if (!response.ok) throw new Error(`Калибровка сканера недоступна (HTTP ${response.status}).`);
           liveCalibration = await response.json();
         }
-        offset = pointNearestCenterRay(origin.positions, centerRay(liveCalibration))
-          || origin.bounds.min.map((minimum, axis) => (minimum + origin.bounds.max[axis]) / 2);
+        frame = fitTableFrame(origin.positions, centerRay(liveCalibration));
       }
       if (request !== cloudRequest || !cloudPreviewOpen) return;
-      const bounds = { min: cloud.bounds.min.map((value, axis) => value - offset[axis]),
-        max: cloud.bounds.max.map((value, axis) => value - offset[axis]) };
-      for (let index = 0; index < cloud.positions.length; index += 3) {
-        for (let axis = 0; axis < 3; axis += 1) cloud.positions[index + axis] -= offset[axis];
-      }
-      cloudOriginOffset ||= offset;
+      const bounds = transformToTableFrame(cloud.positions, frame);
+      cloudTableFrame ||= frame;
       viewer.load({ positions: cloud.positions, triangles: new Uint32Array(0), lines: null, bounds }, { reset });
       renderedCloudSource = cloudSource;
     };
@@ -203,7 +285,7 @@
       if (!open) return;
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
       liveMtime = null;
-      liveOriginOffset = null;
+      liveTableFrame = null;
       liveFitRadius = null;
       cloudRequest += 1;
       cloudPreviewOpen = false;
@@ -231,9 +313,6 @@
               if (raw.length !== 640 * 400 * 2) throw new Error('Размер кадра Y16 не совпадает.');
               const { matrix, depth_scale_mm_per_raw_unit: scale } = liveCalibration;
               const positions = new Float32Array(640 * 400 * 3 / 2);
-              const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
-              const centerX = 320, centerY = 200;
-              let centerAnchor = null, nearestCenterPixel = Infinity;
               let count = 0;
               for (let pixel = 0; pixel < 640 * 400; pixel += 2) {
                 const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
@@ -246,32 +325,20 @@
                 if (!Number.isFinite(pz) || Math.abs(pz) < 1e-12) continue;
                 const point = [px * depth / pz, -py * depth / pz, -depth];
                 if (!point.every(Number.isFinite)) continue;
-                const centerDistance = (x - centerX) ** 2 + (y - centerY) ** 2;
-                if (centerDistance < nearestCenterPixel) {
-                  nearestCenterPixel = centerDistance;
-                  centerAnchor = point;
-                }
-                for (let axis = 0; axis < 3; axis += 1) {
-                  positions[count * 3 + axis] = point[axis];
-                  bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
-                  bounds.max[axis] = Math.max(bounds.max[axis], point[axis]);
-                }
+                positions[count * 3] = point[0];
+                positions[count * 3 + 1] = point[1];
+                positions[count * 3 + 2] = point[2];
                 count += 1;
               }
               if (count >= 3 && request === liveRequest && livePreviewOwned) {
-                liveOriginOffset ||= centerAnchor || bounds.min.map((minimum, axis) => (minimum + bounds.max[axis]) / 2);
+                liveTableFrame ||= fitTableFrame(positions.subarray(0, count * 3), centerRay(liveCalibration));
+                const tableFrame = liveTableFrame;
                 let frameRadius = 0;
-                for (let index = 0; index < count * 3; index += 3) {
-                  for (let axis = 0; axis < 3; axis += 1) positions[index + axis] -= liveOriginOffset[axis];
-                  frameRadius = Math.max(frameRadius, Math.hypot(positions[index], positions[index + 1], positions[index + 2]));
-                }
+                const transformedBounds = transformToTableFrame(positions.subarray(0, count * 3), tableFrame);
+                for (let index = 0; index < count * 3; index += 3) frameRadius = Math.max(frameRadius, Math.hypot(positions[index], positions[index + 1], positions[index + 2]));
                 liveFitRadius ||= Math.max(frameRadius, 0.001);
-                for (let axis = 0; axis < 3; axis += 1) {
-                  bounds.min[axis] -= liveOriginOffset[axis];
-                  bounds.max[axis] -= liveOriginOffset[axis];
-                }
                 viewer.load({ positions: positions.slice(0, count * 3), triangles: new Uint32Array(0), lines: null,
-                  bounds, orbitCenter: [0, 0, 0], fitRadius: liveFitRadius },
+                  bounds: transformedBounds, orbitCenter: [0, 0, 0], fitRadius: liveFitRadius },
                   { reset: liveMtime === null });
                 liveMtime = mtime;
               }
@@ -290,7 +357,7 @@
         livePreviewOwned = false;
         restoreModel();
         liveMtime = null;
-        liveOriginOffset = null;
+        liveTableFrame = null;
         liveFitRadius = null;
         updateButton();
       }
@@ -311,9 +378,9 @@
       if (sourceChanged) {
         cloudSource = source;
       }
-      if (open) { cloudOriginOffset = null; renderedCloudSource = null; }
+      if (open) { cloudTableFrame = null; renderedCloudSource = null; }
       if ((sourceChanged || originChanged) && cloudPreviewOpen && source && !open) {
-        if (originChanged) cloudOriginOffset = null;
+        if (originChanged) cloudTableFrame = null;
         const reset = renderedCloudSource === null;
         void loadCloud({ reset }).catch(error => { cloudButton.title = error.message; });
       }
@@ -321,7 +388,7 @@
         cloudRequest += 1;
         const geometry = getModelGeometry() || modelGeometry;
         if (geometry && viewer) viewer.load(geometry, { reset: false });
-        cloudOriginOffset = null;
+        cloudTableFrame = null;
         renderedCloudSource = null;
         cloudButton.title = 'Ожидание первого кадра сканирования';
       }

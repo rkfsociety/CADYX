@@ -19,11 +19,13 @@ const element = () => {
     click() { if (!this.disabled) listeners.click?.(); },
   };
 };
-const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply") }, URL, URLSearchParams, setTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
+const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply&scan_origin_file=origin.ply") }, URL, URLSearchParams, setTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"), sandbox);
 
-const pointCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n0 0 -100\n1 0 -100\n0 1 -100\n";
-const originCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n0 0 -120\n2 0 -120\n0 2 -120\n";
+const pointCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n0 0 -120\n1 0 -119.8\n0 1 -120.1\n";
+const originPoints = [];
+for (let y = -35; y < 35; y += 1) for (let x = -35; x < 35; x += 1) originPoints.push(`${x} ${y} ${-120 + 0.2 * x - 0.1 * y}`);
+const originCloud = `ply\nformat ascii 1.0\nelement vertex ${originPoints.length}\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n${originPoints.join("\n")}\n`;
 const viewerLoads = [];
 const viewer = { load(geometry, options) { viewerLoads.push({ geometry, options }); } };
 const baseGeometry = { positions: new Float64Array([0, 0, 0]), triangles: new Uint32Array(0), bounds: { min: [0, 0, 0], max: [0, 0, 0] } };
@@ -31,17 +33,18 @@ const getModelGeometry = () => baseGeometry;
 const fetchCloud = async url => ({ ok: true, async text() { assert.match(url, /point-cloud\?/); return pointCloud; } });
 const centerPixel = 200 * 640 + 320;
 const liveRawFrames = [new Uint8Array(640 * 400 * 2), new Uint8Array(640 * 400 * 2)];
-for (const [frameIndex, offsets] of liveRawFrames.entries()) {
-  const frame = liveRawFrames[frameIndex];
-  for (const offset of (frameIndex ? [-4, 0, 4] : [-2, 0, 2])) {
-    const pixel = centerPixel + offset;
-    frame[pixel * 2] = 100;
+for (const frame of liveRawFrames) {
+  for (let pixel = 0; pixel < 640 * 400; pixel += 2) {
+    const x = pixel % 640, y = Math.floor(pixel / 640);
+    const depth = Math.round(100 + 0.12 * (x - 320) - 0.08 * (y - 200));
+    frame[pixel * 2] = depth & 0xff;
+    frame[pixel * 2 + 1] = depth >> 8;
   }
 }
 let liveFrameSequence = 0;
 const fetchPreview = async url => {
   if (url.includes("point-cloud?")) return { ok: true, async text() { return url.includes("origin.ply") ? originCloud : pointCloud; } };
-  if (url.includes("/calibration")) return { ok: true, async json() { return { width: 640, height: 400, matrix: [1, 0, 0, -320, 0, 1, 0, -200, 0, 0, 0, 1, 0, 0, 0, 0], depth_scale_mm_per_raw_unit: 1 }; } };
+  if (url.includes("/calibration")) return { ok: true, async json() { return { width: 640, height: 400, matrix: [1, 0, 0, -320, 0, 1, 0, -200, 0, 0, 1, 0, 0, 0, 0, 0], depth_scale_mm_per_raw_unit: 1 }; } };
   if (url.includes("/live-frame")) {
     const index = liveFrameSequence++;
     return { ok: true, headers: { get() { return String(1000 + index); } }, async arrayBuffer() { return liveRawFrames[Math.min(index, 1)].buffer; } };
@@ -61,7 +64,8 @@ assert.equal(viewport.dataset.scanPreview, "false");
 assert.equal(viewport.dataset.scanPreviewMode, "cloud");
 assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
 assert.equal(viewerLoads.at(-1).geometry.triangles.length, 0);
-assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [0, 0, 0], "the saved frame point nearest the camera resolution center is the origin");
+assert.ok(Math.abs(viewerLoads.at(-1).geometry.bounds.min[2]) < 0.01 && Math.abs(viewerLoads.at(-1).geometry.bounds.max[2]) < 0.01,
+  "the saved table plane is mapped to XY using the first-frame source cloud");
 meshButton.click();
 await new Promise(resolve => setImmediate(resolve));
 assert.equal(viewport.dataset.scanPreview, "false");
@@ -82,7 +86,8 @@ assert.equal(viewerLoads.at(-1).options.reset, false, "reopening the same cloud 
 view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", origin_file: "origin.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
 await new Promise(resolve => setImmediate(resolve));
 assert.match(viewerLoads.at(-1).geometry.positions.length.toString(), /^9$/);
-assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [0, 0, 20], "registered fusion uses the first frame camera-center origin");
+assert.ok(Math.abs(viewerLoads.at(-1).geometry.bounds.min[2]) < 0.01 && Math.abs(viewerLoads.at(-1).geometry.bounds.max[2]) < 0.01,
+  "registered fusion uses the first-frame table coordinate system");
 meshButton.click();
 await new Promise(resolve => setImmediate(resolve));
 view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", origin_file: "origin.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
@@ -94,8 +99,12 @@ view.showLivePreview({ open: true });
 await new Promise(resolve => setTimeout(resolve, 10));
 assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "live");
-assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
-assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [-200, 0, 0], "live first frame is centered on the resolution center");
+assert.equal(viewerLoads.at(-1).geometry.positions.length, 640 * 400 * 3 / 2);
+assert.ok(Math.abs(viewerLoads.at(-1).geometry.bounds.min[2]) < 2 && Math.abs(viewerLoads.at(-1).geometry.bounds.max[2]) < 2,
+  "live table points lie on XY after the first frame establishes the table plane");
+const centerLivePoint = (centerPixel / 2) * 3;
+assert.ok(Math.hypot(...viewerLoads.at(-1).geometry.positions.slice(centerLivePoint, centerLivePoint + 3)) < 2,
+  "the scanner resolution center intersects the table at the coordinate origin");
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0]);
 const firstLiveFitRadius = viewerLoads.at(-1).geometry.fitRadius;
 await new Promise(resolve => setTimeout(resolve, 380));
@@ -131,7 +140,7 @@ const polledCloudButton = element();
 const polled = sandbox.window.CadyxScanView.initialize({
   cloudButton: polledCloudButton, meshButton: element(), viewport: element(), viewer, getModelGeometry, meshReady: false,
 }, undefined, fetchPreview);
-const capture = { preview_folder: "scan folder", preview_file: "frame-1.ply", preview_kind: "single" };
+const capture = { preview_folder: "scan folder", preview_file: "frame-1.ply", origin_file: "origin.ply", preview_kind: "single" };
 polled.showCapture(capture);
 assert.equal(polledCloudButton.attributes["aria-pressed"], "false", "background scan polling does not open a closed preview");
 polled.showCapture(capture, { open: true });
