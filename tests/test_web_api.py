@@ -799,7 +799,7 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(restarted.events.agent_work_snapshot()["active_project_ids"], [])
         self.assertEqual(restarted.events.agent_dashboard_snapshot("deleted-project-id")["revision"], 0)
 
-    def test_agent_selection_api_rejects_locked_projects_and_running_operations(self) -> None:
+    def test_agent_selection_api_checks_target_project_not_other_busy_projects(self) -> None:
         _, current = self.request("/api/v1/agent/projects", {"name": "Current selection"})
         current_id = current["project"]["id"]
         _, target = self.request(
@@ -815,12 +815,16 @@ class WebApiTests(unittest.TestCase):
             "/api/v1/agent/workspace/selection",
             {"type": "folder", "folder_name": current_folder},
         )
-        self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
+        self.assertEqual(status, 200)
         self.assertEqual(
             self.core.workspace_selection_snapshot(),
-            {"type": "project", "project_id": current_id},
+            {"type": "folder", "folder_name": current_folder},
         )
         self.core.release_lease(current_id, current_lease["lease_id"])
+        self.request(
+            "/api/v1/agent/workspace/selection",
+            {"type": "project", "project_id": current_id},
+        )
 
         target_lease = self.core.acquire_lease(target_id, "human", "selection-target")
         status, error = self.request(
@@ -844,17 +848,17 @@ class WebApiTests(unittest.TestCase):
             "/api/v1/agent/workspace/selection",
             {"type": "folder", "folder_name": folder_name},
         )
-        self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
+        self.assertEqual(status, 200)
         self.assertEqual(
             self.core.workspace_selection_snapshot(),
-            {"type": "project", "project_id": current_id},
+            {"type": "folder", "folder_name": folder_name},
         )
         self.core.events.publish("agent.activity", current_id, {
             "operation_id": "selection-operation",
             "state": "completed",
         })
 
-    def test_selected_project_creation_respects_active_workflow_policy(self) -> None:
+    def test_selected_project_creation_is_independent_of_other_active_workflows(self) -> None:
         _, current = self.request("/api/v1/agent/projects", {"name": "Active current project"})
         current_id = current["project"]["id"]
         self.core.report_agent_dashboard(current_id, {
@@ -866,13 +870,12 @@ class WebApiTests(unittest.TestCase):
             },
             "tasks": [],
         })
-        project_ids_before = {item["project"]["id"] for item in self.core.list_projects()}
-
-        status, error = self.request("/api/v1/agent/projects", {"name": "Must not be selected"})
-        self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
+        status, created = self.request("/api/v1/agent/projects", {"name": "Selected alongside active work"})
+        self.assertEqual(status, 201)
+        created_id = created["project"]["id"]
         self.assertEqual(
-            {item["project"]["id"] for item in self.core.list_projects()},
-            project_ids_before,
+            self.core.workspace_selection_snapshot(),
+            {"type": "project", "project_id": created_id},
         )
 
         status, staged = self.request(
@@ -883,7 +886,7 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(staged["project"]["name"], "Unselected project")
         self.assertEqual(
             self.core.workspace_selection_snapshot(),
-            {"type": "project", "project_id": current_id},
+            {"type": "project", "project_id": created_id},
         )
 
     def test_project_listing_adopts_existing_directories_and_exposes_their_files(self) -> None:

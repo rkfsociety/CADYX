@@ -191,13 +191,14 @@ SQLite transaction that updates only the reported project row and the global
 revision, so an unfinished workflow remains active after a host restart. A
 legacy JSON state is imported when the SQLite store is first created.
 `/api/v1/updates` exposes `agent_work_active` and
-`agent_work_revision`, and the host publishes `workspace.agent-work` over
-SSE. The browser disables every project control while any workflow is below
-100%, any phase or task is not completed, or the global work state has not yet
-been confirmed. It persists an active browser lock across reloads and clears it
-only after a newer API revision confirms that all workflows and queues have
-completed. Hardware telemetry is not currently reported, so the UI does not
-display invented CPU/GPU/memory values.
+`agent_work_revision` plus the active project IDs, and the host publishes
+`workspace.agent-work` over SSE. The browser uses that list to lock only the
+matching project while its workflow, phase or task is unfinished. Other projects
+remain available to separate chat sessions. It persists the per-project browser
+lock across reloads and clears it only after a newer API revision confirms that
+project's workflow and queue are complete. Unknown global status remains
+fail-closed until the API snapshot arrives. Hardware telemetry is not currently
+reported, so the UI does not display invented CPU/GPU/memory values.
 
 Core adds `started_at` and `elapsed_seconds` to persisted dashboard snapshots;
 agents must not send these fields. `started_at` is set at the first phase

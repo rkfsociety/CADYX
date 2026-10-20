@@ -126,7 +126,6 @@ class ProjectAvailabilityPolicyTests(unittest.TestCase):
                 "free",
                 {"state": "FREE", "recovery_required": False},
                 False,
-                False,
                 True,
                 False,
                 True,
@@ -137,7 +136,6 @@ class ProjectAvailabilityPolicyTests(unittest.TestCase):
                 {"state": "AI_LOCKED", "recovery_required": False},
                 False,
                 False,
-                False,
                 True,
                 False,
                 False,
@@ -145,7 +143,6 @@ class ProjectAvailabilityPolicyTests(unittest.TestCase):
             (
                 "recovery required",
                 {"state": "AI_LOCKED", "recovery_required": True},
-                False,
                 False,
                 False,
                 True,
@@ -160,12 +157,10 @@ class ProjectAvailabilityPolicyTests(unittest.TestCase):
                 False,
                 False,
                 False,
-                False,
             ),
             (
                 "unknown lock state",
                 {"state": "BUSY", "recovery_required": False},
-                False,
                 False,
                 False,
                 False,
@@ -177,14 +172,13 @@ class ProjectAvailabilityPolicyTests(unittest.TestCase):
             label,
             lock,
             running_operation,
-            active_workflow,
             can_acquire_write,
             can_write_with_lease,
             can_manage_files,
             can_select,
         ) in cases:
             with self.subTest(state=label):
-                availability = _ProjectAvailability(lock, running_operation, active_workflow)
+                availability = _ProjectAvailability(lock, running_operation)
                 self.assertTrue(availability.permits("read"))
                 self.assertEqual(availability.permits("write"), can_acquire_write)
                 self.assertEqual(
@@ -194,16 +188,6 @@ class ProjectAvailabilityPolicyTests(unittest.TestCase):
                 self.assertEqual(availability.permits("file_management"), can_manage_files)
                 self.assertEqual(availability.permits("destructive"), can_manage_files)
                 self.assertEqual(availability.permits("selection"), can_select)
-
-    def test_only_active_workflow_project_can_be_selected_to_restore_viewer(self) -> None:
-        availability = _ProjectAvailability(
-            {"state": "FREE", "recovery_required": False},
-            running_operation=False,
-            active_workflow=True,
-        )
-        self.assertFalse(availability.permits("selection"))
-        self.assertTrue(availability.permits("selection", sole_active_workflow_target=True))
-
 
 if __name__ == "__main__":
     unittest.main()

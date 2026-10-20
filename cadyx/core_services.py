@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 class _ProjectAvailability:
     lock: dict[str, Any]
     running_operation: bool
-    active_workflow: bool
 
     @property
     def lock_state(self) -> str | None:
@@ -38,14 +37,14 @@ class _ProjectAvailability:
     def is_free(self) -> bool:
         return self.lock_state == "FREE" and self.lock.get("recovery_required") is False and not self.running_operation
 
-    def permits(self, policy: Literal["read","write","file_management","selection","destructive"], *, valid_lease: bool=False, sole_active_workflow_target: bool=False) -> bool:
+    def permits(self, policy: Literal["read","write","file_management","selection","destructive"], *, valid_lease: bool=False) -> bool:
         if policy == "read": return True
         if policy == "write":
             if valid_lease:
                 return self.lock_state in {"AI_LOCKED","HUMAN_LOCKED","SYSTEM_LOCKED"} and not self.running_operation
             return self.is_free
         if policy in {"file_management","destructive"}: return self.is_free
-        if policy == "selection": return self.is_free and (not self.active_workflow or sole_active_workflow_target)
+        if policy == "selection": return self.is_free
         raise ValueError(f"Unknown project availability policy: {policy}")
 
 
@@ -87,7 +86,6 @@ class ProjectLifecycleService(_CoreService):
         return _ProjectAvailability(
             lock=lock,
             running_operation=any(item.get("state") == "running" for item in activities),
-            active_workflow=self.events.agent_dashboard_is_active(project_id),
         )
 
     def _require_project_policy(
@@ -105,71 +103,21 @@ class ProjectLifecycleService(_CoreService):
         return availability
 
     @contextmanager
-    def _selection_project_locks(
-        self,
-        current_selection: dict[str, str] | None,
-        target_project_id: str | None,
-    ) -> Iterator[None]:
-        project_ids = {
-            selection["project_id"]
-            for selection in (current_selection,)
-            if selection is not None and selection.get("type") == "project"
-        }
-        if target_project_id is not None:
-            project_ids.add(target_project_id)
-        with ExitStack() as stack:
-            for project_id in sorted(project_ids):
-                stack.enter_context(self._project_lifecycle_lock(project_id))
+    def _selection_project_lock(self, target_project_id: str | None) -> Iterator[None]:
+        if target_project_id is None:
+            yield
+            return
+        with self._project_lifecycle_lock(target_project_id):
             yield
 
     def _assert_workspace_selection_policy(
         self,
-        current_selection: dict[str, str] | None,
         target_type: str,
         target_project_id: str | None,
     ) -> None:
-        active_project_ids = self.events.agent_work_snapshot()["active_project_ids"]
-        sole_active_target = (
-            target_type == "project"
-            and target_project_id is not None
-            and len(active_project_ids) == 1
-            and active_project_ids[0] == target_project_id
-        )
-
-        current_project_id = (
-            current_selection.get("project_id")
-            if current_selection is not None and current_selection.get("type") == "project"
-            else None
-        )
-        current_availability = None
-        if current_project_id is not None:
-            current_availability = self._project_availability(current_project_id, nonblocking=True)
-            allow_current_workflow = sole_active_target and current_project_id == target_project_id
-            if not current_availability.permits(
-                "selection",
-                sole_active_workflow_target=allow_current_workflow,
-            ):
-                raise ConflictError(
-                    "The currently selected project is locked, has a running operation, or belongs to active agent work; selection is unchanged.",
-                    code="PROJECT_BUSY",
-                )
-
-        if active_project_ids and not sole_active_target:
-            raise ConflictError(
-                "CADYX reports active agent work; selection is unchanged.",
-                code="PROJECT_BUSY",
-            )
-
         if target_type == "project" and target_project_id is not None:
-            target_availability = (
-                current_availability
-                if target_project_id == current_project_id and current_availability is not None
-                else self._project_availability(target_project_id, nonblocking=True)
-            )
-            if not target_availability.permits(
-                "selection",
-                sole_active_workflow_target=sole_active_target,
-            ):
+            target_availability = self._project_availability(target_project_id, nonblocking=True)
+            if not target_availability.permits("selection"):
                 raise ConflictError(
                     "The target project is locked, requires lease recovery, or has a running operation; selection is unchanged.",
                     code="PROJECT_BUSY",
@@ -191,14 +139,11 @@ class ProjectLifecycleService(_CoreService):
             return {"project": summary, "lock": lock}
 
         with self._workspace_selection_guard:
-            current_selection = copy.deepcopy(self._workspace_selection)
-            with self._selection_project_locks(current_selection, None):
-                self._assert_workspace_selection_policy(current_selection, "new-project", None)
-                project = self.workspace.create(name)
-                summary = self._summary(project)
-                lock = self.leases.snapshot(project["id"])
-                self._workspace_selection = {"type": "project", "project_id": project["id"]}
-                self.events.publish("project.created", project["id"], summary)
+            project = self.workspace.create(name)
+            summary = self._summary(project)
+            lock = self.leases.snapshot(project["id"])
+            self._workspace_selection = {"type": "project", "project_id": project["id"]}
+            self.events.publish("project.created", project["id"], summary)
             self.events.publish("project.lock.changed", project["id"], lock)
         return {"project": summary, "lock": lock}
 
@@ -364,12 +309,10 @@ class ProjectLifecycleService(_CoreService):
         target_project_id = selected.get("project_id") if resource_type == "project" else None
         self.events.prune_agent_dashboards({project["id"] for project in self.workspace.list()})
         with self._workspace_selection_guard:
-            current_selection = copy.deepcopy(self._workspace_selection)
-            with self._selection_project_locks(current_selection, target_project_id):
+            with self._selection_project_lock(target_project_id):
                 if target_project_id is not None:
                     self.workspace.load(target_project_id)
                 self._assert_workspace_selection_policy(
-                    current_selection,
                     resource_type,
                     target_project_id,
                 )

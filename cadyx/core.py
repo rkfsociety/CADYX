@@ -101,21 +101,16 @@ class CadyxCore:
         return self._lifecycle._require_project_policy(project_id, policy, message, code=code, valid_lease=valid_lease)
 
     @contextmanager
-    def _selection_project_locks(
-        self,
-        current_selection: dict[str, str] | None,
-        target_project_id: str | None,
-    ) -> Iterator[None]:
-        with self._lifecycle._selection_project_locks(current_selection, target_project_id):
+    def _selection_project_lock(self, target_project_id: str | None) -> Iterator[None]:
+        with self._lifecycle._selection_project_lock(target_project_id):
             yield
 
     def _assert_workspace_selection_policy(
         self,
-        current_selection: dict[str, str] | None,
         target_type: str,
         target_project_id: str | None,
     ) -> None:
-        return self._lifecycle._assert_workspace_selection_policy(current_selection, target_type, target_project_id)
+        return self._lifecycle._assert_workspace_selection_policy(target_type, target_project_id)
 
     @contextmanager
     def _project_lifecycle_lock(self, project_id: str) -> Iterator[None]:

@@ -417,7 +417,7 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(detail["document"]["revision"], 1)
         self.assertEqual(detail["lock"]["state"], "FREE")
 
-    def test_selection_can_return_to_the_only_active_workflow_project(self) -> None:
+    def test_sessions_can_select_distinct_projects_during_active_workflows(self) -> None:
         project = self.core.workspace.create("Resumable workflow")
         project_id = project["id"]
         self.core.report_agent_dashboard(project_id, {
@@ -436,11 +436,23 @@ class CadyxMCPServerTests(unittest.TestCase):
         selected = self._tool_value("cadyx_select_resource", {"type": "project", "project_id": project_id})
         self.assertEqual(selected["selection"], {"type": "project", "project_id": project_id})
 
-        other = self.core.workspace.create("Other project")
-        blocked = self.app.call_tool("cadyx_select_resource", {"type": "project", "project_id": other["id"]})
-        self.assertTrue(blocked["isError"])
-        self.assertIn("PROJECT_BUSY", blocked["content"][0]["text"])
-        self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": project_id})
+        other = self.core.create_project("Other project", select=False)
+        other_id = other["project"]["id"]
+        self.core.report_agent_dashboard(other_id, {
+            "workflow": {
+                "title": "Работа второго чата",
+                "progress_percent": 20,
+                "eta_seconds": None,
+                "phases": [{"id": "build", "title": "Построение модели", "state": "in_progress"}],
+            },
+            "tasks": [],
+        })
+        selected_other = self._tool_value("cadyx_select_resource", {"type": "project", "project_id": other_id})
+        self.assertEqual(selected_other["selection"], {"type": "project", "project_id": other_id})
+        self.assertEqual(
+            self.core.events.agent_work_snapshot()["active_project_ids"],
+            sorted([project_id, other_id]),
+        )
 
     def test_can_stage_step_in_unselected_project_while_other_workflow_is_active(self) -> None:
         active = self.core.create_project("Active workflow")
@@ -658,7 +670,7 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(detail["history"], [])
         self.assertEqual(detail["lock"]["state"], "FREE")
 
-    def test_selection_refuses_busy_current_or_target_project(self) -> None:
+    def test_selection_refuses_busy_target_but_can_leave_busy_current_project(self) -> None:
         source_id = self._create_project("Source")
         target_id = self._create_project("Target")
         self._tool_value("cadyx_select_resource", {"type": "project", "project_id": source_id})
@@ -672,8 +684,9 @@ class CadyxMCPServerTests(unittest.TestCase):
         held = self.core.acquire_lease(source_id, "agent", "another-agent")
         try:
             result = self.app.call_tool("cadyx_select_resource", {"type": "project", "project_id": target_id})
-            self.assertTrue(result["isError"])
-            self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": source_id})
+            self.assertFalse(result["isError"])
+            self.assertEqual(result["structuredContent"]["selection"], {"type": "project", "project_id": target_id})
+            self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": target_id})
         finally:
             self.core.release_lease(source_id, held["lease_id"])
 
