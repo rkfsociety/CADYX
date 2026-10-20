@@ -15,7 +15,17 @@ Every project lives at `projects/<project-name>/project.json`. Newly created pro
     "id": "document:<uuid>",
     "version": 12,
     "revision": 0,
-    "objects": []
+    "objects": [],
+    "model_parameters": {},
+    "parameter_bindings": [],
+    "assembly": {
+      "version": 3,
+      "units": "mm",
+      "parts": [],
+      "subassemblies": [],
+      "instances": [],
+      "mates": []
+    }
   },
   "history": []
 }
