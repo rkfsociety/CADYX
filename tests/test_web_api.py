@@ -256,13 +256,6 @@ class WebApiTests(unittest.TestCase):
                 self.assertEqual(json.loads(response.read())["preview"]["state"], "idle")
         stop.assert_called_once_with()
 
-    def test_scanner_turntable_angle_route_reports_read_only_live_telemetry(self) -> None:
-        expected = {"state": "running", "angle_degrees": 42.5, "observed_at": "2026-10-20T12:00:00Z"}
-        with patch.object(self.core, "scanner_turntable_angle_status", return_value=expected) as status_reader:
-            status, response = self.request("/api/v1/scanner/turntable-angle")
-        self.assertEqual((status, response["turntable"]), (200, expected))
-        status_reader.assert_called_once_with()
-
     def test_legacy_migration_uses_both_api_command_paths(self) -> None:
         for prefix, owner in (("/api/v1/projects", "human"), ("/api/v1/agent/projects", "agent")):
             with self.subTest(owner=owner):

@@ -13,8 +13,6 @@
     let liveMtime = null;
     let liveCalibration = null;
     let liveTableFrame = null;
-    let liveTableAngle = null;
-    let liveTableRotation = 0;
     let liveFitRadius = null;
     let modelGeometry = null;
     const setAttribute = (element, name, value) => {
@@ -214,16 +212,11 @@
       const tableCenter = centerDirection.map(value => value * distance);
       return { origin: tableCenter, xAxis, yAxis, zAxis, inlierCount: inliers.length };
     };
-    const transformToTableFrame = (positions, frame, rotationDegrees = 0) => {
+    const transformToTableFrame = (positions, frame) => {
       const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
-      const angle = rotationDegrees * Math.PI / 180;
-      const cosine = Math.cos(angle), sine = Math.sin(angle);
       for (let index = 0; index < positions.length; index += 3) {
         const relative = [positions[index] - frame.origin[0], positions[index + 1] - frame.origin[1], positions[index + 2] - frame.origin[2]];
         const point = [frame.xAxis, frame.yAxis, frame.zAxis].map(axis => axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]);
-        const rotatedX = point[0] * cosine - point[1] * sine;
-        point[1] = point[0] * sine + point[1] * cosine;
-        point[0] = rotatedX;
         for (let axis = 0; axis < 3; axis += 1) {
           positions[index + axis] = point[axis];
           bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
@@ -294,8 +287,6 @@
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
       liveMtime = null;
       liveTableFrame = null;
-      liveTableAngle = null;
-      liveTableRotation = 0;
       liveFitRadius = null;
       cloudRequest += 1;
       cloudPreviewOpen = false;
@@ -319,18 +310,6 @@
           if (response.ok) {
             const mtime = response.headers.get('X-CADYX-Frame-Mtime');
             if (mtime && mtime !== liveMtime) {
-              const tableAngleResponse = await fetcher(`/api/v1/scanner/turntable-angle?ts=${Date.now()}`, { cache: 'no-store' });
-              if (tableAngleResponse.ok) {
-                const { turntable } = await tableAngleResponse.json();
-                const angle = turntable?.angle_degrees;
-                if (Number.isFinite(angle)) {
-                  if (liveTableAngle !== null) {
-                    const rawDelta = angle - liveTableAngle;
-                    liveTableRotation += ((rawDelta + 180) % 360 + 360) % 360 - 180;
-                  }
-                  liveTableAngle = angle;
-                }
-              }
               const raw = new Uint8Array(await response.arrayBuffer());
               if (raw.length !== 640 * 400 * 2) throw new Error('Размер кадра Y16 не совпадает.');
               const { matrix, depth_scale_mm_per_raw_unit: scale } = liveCalibration;
@@ -356,7 +335,7 @@
                 liveTableFrame ||= fitTableFrame(positions.subarray(0, count * 3), centerRay(liveCalibration));
                 const tableFrame = liveTableFrame;
                 let frameRadius = 0;
-                const transformedBounds = transformToTableFrame(positions.subarray(0, count * 3), tableFrame, liveTableRotation);
+                const transformedBounds = transformToTableFrame(positions.subarray(0, count * 3), tableFrame);
                 for (let index = 0; index < count * 3; index += 3) frameRadius = Math.max(frameRadius, Math.hypot(positions[index], positions[index + 1], positions[index + 2]));
                 liveFitRadius ||= Math.max(frameRadius, 0.001);
                 viewer.load({ positions: positions.slice(0, count * 3), triangles: new Uint32Array(0), lines: null,
@@ -380,8 +359,6 @@
         restoreModel();
         liveMtime = null;
         liveTableFrame = null;
-        liveTableAngle = null;
-        liveTableRotation = 0;
         liveFitRadius = null;
         updateButton();
       }

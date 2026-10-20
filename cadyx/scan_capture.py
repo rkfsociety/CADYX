@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import csv
-import io
-import math
 import os
 import re
 import shutil
 import subprocess
-import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -40,13 +36,6 @@ class _LivePreviewJob:
     log_path: Path
 
 
-@dataclass
-class _TurntableMonitorJob:
-    process: subprocess.Popen[bytes]
-    csv_path: Path
-    log_path: Path
-
-
 class Scan360CaptureController:
     """Own one active physical 360 capture and expose compact progress."""
 
@@ -56,7 +45,6 @@ class Scan360CaptureController:
         self._guard = threading.RLock()
         self._job: _Scan360Job | None = None
         self._live_preview: _LivePreviewJob | None = None
-        self._turntable_monitor: _TurntableMonitorJob | None = None
 
     def start(self, project_id: str, project_directory: Path) -> dict[str, Any]:
         if os.name != "nt":
@@ -155,94 +143,8 @@ class Scan360CaptureController:
                 return {"state": "idle"}
             return self._live_preview_snapshot_locked()
 
-    def turntable_angle_status(self) -> dict[str, Any]:
-        with self._guard:
-            if self._live_preview is None or self._live_preview.process.poll() is not None:
-                self._stop_turntable_monitor_locked()
-                return {"state": "idle"}
-            monitor = self._turntable_monitor
-            if monitor is None:
-                return self._start_turntable_monitor_locked()
-            sample = self._read_turntable_sample(monitor.csv_path)
-            return_code = monitor.process.poll()
-            if sample is not None:
-                return {"state": "running" if return_code is None else "stale", **sample}
-            if return_code is not None:
-                try:
-                    message = monitor.log_path.read_bytes()[-2048:].decode("utf-8", errors="replace").strip()
-                except OSError:
-                    message = ""
-                self._stop_turntable_monitor_locked()
-                return {"state": "unavailable", "return_code": return_code, "message": message}
-            return {"state": "starting"}
-
-    def _start_turntable_monitor_locked(self) -> dict[str, Any]:
-        executable = self._repository_root / "tools" / "revopoint" / "build" / "TurntableController.exe"
-        if not executable.is_file():
-            return {"state": "unavailable", "message": "TurntableController.exe is unavailable."}
-        descriptor, csv_name = tempfile.mkstemp(prefix=".revopoint-turntable-live-", suffix=".csv", dir=self._workspace_root)
-        os.close(descriptor)
-        csv_path = Path(csv_name)
-        log_path = csv_path.with_suffix(".log")
-        startup_info = subprocess.STARTUPINFO()
-        startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startup_info.wShowWindow = subprocess.SW_HIDE
-        try:
-            with log_path.open("xb") as log_stream:
-                process = subprocess.Popen(
-                    [str(executable), "monitor", "300", str(csv_path)],
-                    cwd=str(self._repository_root), stdin=subprocess.DEVNULL,
-                    stdout=log_stream, stderr=subprocess.STDOUT,
-                    creationflags=subprocess.CREATE_NO_WINDOW, startupinfo=startup_info,
-                )
-        except OSError as exc:
-            csv_path.unlink(missing_ok=True)
-            log_path.unlink(missing_ok=True)
-            return {"state": "unavailable", "message": f"Turntable telemetry could not be started: {exc}."}
-        self._turntable_monitor = _TurntableMonitorJob(process, csv_path, log_path)
-        return {"state": "starting"}
-
-    @staticmethod
-    def _read_turntable_sample(csv_path: Path) -> dict[str, Any] | None:
-        try:
-            content = csv_path.read_text(encoding="utf-8-sig")
-        except OSError:
-            return None
-        try:
-            rows = csv.DictReader(io.StringIO(content))
-            for row in reversed(list(rows)):
-                try:
-                    angle = float(row.get("angle_degrees", ""))
-                except (ValueError, TypeError):
-                    continue
-                observed_at = row.get("utc", "")
-                if math.isfinite(angle) and observed_at:
-                    return {"angle_degrees": angle, "observed_at": observed_at}
-        except csv.Error:
-            return None
-        return None
-
-    def _stop_turntable_monitor_locked(self) -> None:
-        monitor = self._turntable_monitor
-        if monitor is None:
-            return
-        if monitor.process.poll() is None:
-            monitor.process.terminate()
-            try:
-                monitor.process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                monitor.process.kill()
-                monitor.process.wait(timeout=2)
-        for path in (monitor.csv_path, monitor.log_path):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-        self._turntable_monitor = None
-
     def stop_live_preview(self) -> dict[str, Any]:
         with self._guard:
-            self._stop_turntable_monitor_locked()
             job = self._live_preview
             if job is None:
                 return {"state": "idle"}

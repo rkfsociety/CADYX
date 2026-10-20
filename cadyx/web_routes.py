@@ -53,7 +53,6 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/workspace/folders/{folder}/files/{filename}", "folder_file", "files"),
     RouteSpec("GET", "/api/v1/scanner/live-frame", "scanner_live_frame", "scanner"),
     RouteSpec("GET", "/api/v1/scanner/live-preview", "scanner_live_preview_status", "scanner"),
-    RouteSpec("GET", "/api/v1/scanner/turntable-angle", "scanner_turntable_angle", "scanner"),
     RouteSpec("POST", "/api/v1/scanner/live-preview", "scanner_live_preview_start", "scanner", "json"),
     RouteSpec("DELETE", "/api/v1/scanner/live-preview", "scanner_live_preview_stop", "scanner"),
     RouteSpec("GET", "/api/v1/scanner/point-cloud", "scanner_point_cloud", "scanner"),
@@ -335,9 +334,6 @@ def _resolve_scanner_point_cloud(core: CadyxCore, query_string: str) -> tuple[Pa
 def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: SplitResult) -> None:
     if route.spec.name == "scanner_live_preview_status":
         handler._json(200, {"preview": core.scanner_live_preview_status()})
-        return
-    if route.spec.name == "scanner_turntable_angle":
-        handler._json(200, {"turntable": core.scanner_turntable_angle_status()})
         return
     if route.spec.name == "scanner_live_preview_start":
         body = _require_json(handler)

@@ -48,11 +48,9 @@ for (const frame of liveRawFrames) {
   }
 }
 let liveFrameSequence = 0;
-let liveAngleSequence = 0;
 const fetchPreview = async url => {
   if (url.includes("point-cloud?")) return { ok: true, async text() { return url.includes("origin.ply") ? originCloud : pointCloud; } };
   if (url.includes("/calibration")) return { ok: true, async json() { return { width: 640, height: 400, matrix: [1, 0, 0, -320, 0, 1, 0, -200, 0, 0, 1, 0, 0, 0, 0, 0], depth_scale_mm_per_raw_unit: 1 }; } };
-  if (url.includes("/turntable-angle")) return { ok: true, async json() { return { turntable: { state: "running", angle_degrees: liveAngleSequence++ ? 90 : 0 } }; } };
   if (url.includes("/live-frame")) {
     const index = liveFrameSequence++;
     return { ok: true, headers: { get() { return String(1000 + index); } }, async arrayBuffer() { return liveRawFrames[Math.min(index, 1)].buffer; } };
@@ -121,9 +119,8 @@ assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0], "live 
 assert.equal(viewerLoads.at(-1).geometry.fitRadius, firstLiveFitRadius, "live frames keep a fixed view scale");
 assert.equal(viewerLoads.at(-1).options.reset, false, "new live frames never reset the camera");
 const secondTurntableCloud = viewerLoads.at(-1).geometry.positions.slice(0, 3);
-assert.ok(Math.abs(secondTurntableCloud[0] + firstTurntableCloud[1]) < 1e-3
-  && Math.abs(secondTurntableCloud[1] - firstTurntableCloud[0]) < 1e-3,
-"the point cloud follows a 90-degree turntable move around the fixed global Z axis");
+assert.deepEqual([...secondTurntableCloud], [...firstTurntableCloud],
+"identical scanner frames are not rotated a second time using the table angle");
 view.showCapture({ preview_folder: "scan folder", preview_file: "new-saved-capture.ply", preview_kind: "single" });
 assert.equal(viewport.dataset.scanPreview, "true", "360 status polling does not replace the live canvas preview");
 view.closeLivePreview();

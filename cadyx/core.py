@@ -141,9 +141,6 @@ class CadyxCore:
     def scanner_live_preview_status(self) -> dict[str, Any]:
         return self._scan_capture.live_preview_status()
 
-    def scanner_turntable_angle_status(self) -> dict[str, Any]:
-        return self._scan_capture.turntable_angle_status()
-
     def stop_scanner_live_preview(self) -> dict[str, Any]:
         return self._scan_capture.stop_live_preview()
 
