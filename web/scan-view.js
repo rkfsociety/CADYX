@@ -13,6 +13,8 @@
     let liveMtime = null;
     let liveCalibration = null;
     let liveTableFrame = null;
+    let liveTableAngle = null;
+    let liveTableRotation = 0;
     let liveFitRadius = null;
     let modelGeometry = null;
     const setAttribute = (element, name, value) => {
@@ -157,12 +159,13 @@
     };
     const fitTableFrame = (positions, centerDirection) => {
       const sample = [];
-      for (let index = 0; index < positions.length; index += 48) {
+      const sampleStride = Math.max(3, Math.ceil(positions.length / 15000) * 3);
+      for (let index = 0; index < positions.length; index += sampleStride) {
         if (Number.isFinite(positions[index]) && Number.isFinite(positions[index + 1]) && Number.isFinite(positions[index + 2])) {
           sample.push([positions[index], positions[index + 1], positions[index + 2]]);
         }
       }
-      if (sample.length < 100) throw new Error('Недостаточно точек для определения плоскости стола.');
+      if (sample.length < 12) throw new Error('Недостаточно точек для определения плоскости стола.');
       let best = null, bestCount = 0;
       let seed = 0x6d2b79f5;
       const randomIndex = () => {
@@ -183,14 +186,14 @@
         for (const point of sample) if (Math.abs(normal[0] * point[0] + normal[1] * point[1] + normal[2] * point[2] + d) <= 2.5) count += 1;
         if (count > bestCount) { bestCount = count; best = { normal, d }; }
       }
-      if (!best || bestCount < sample.length * 0.1) throw new Error('Не удалось надёжно определить плоскость стола в лайв-кадре.');
+      if (!best || bestCount < Math.max(6, sample.length * 0.1)) throw new Error('Не удалось надёжно определить плоскость стола в лайв-кадре.');
       let inliers = [];
       for (let index = 0; index < positions.length; index += 3) {
         const distance = best.normal[0] * positions[index] + best.normal[1] * positions[index + 1]
           + best.normal[2] * positions[index + 2] + best.d;
         if (Math.abs(distance) <= 2.5) inliers.push([positions[index], positions[index + 1], positions[index + 2]]);
       }
-      if (inliers.length < 100) throw new Error('В лайв-кадре мало точек плоскости стола.');
+      if (inliers.length < 12) throw new Error('В лайв-кадре мало точек плоскости стола.');
       const origin = [0, 0, 0];
       for (const point of inliers) for (let axis = 0; axis < 3; axis += 1) origin[axis] += point[axis] / inliers.length;
       const covariance = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
@@ -211,11 +214,16 @@
       const tableCenter = centerDirection.map(value => value * distance);
       return { origin: tableCenter, xAxis, yAxis, zAxis, inlierCount: inliers.length };
     };
-    const transformToTableFrame = (positions, frame) => {
+    const transformToTableFrame = (positions, frame, rotationDegrees = 0) => {
       const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+      const angle = rotationDegrees * Math.PI / 180;
+      const cosine = Math.cos(angle), sine = Math.sin(angle);
       for (let index = 0; index < positions.length; index += 3) {
         const relative = [positions[index] - frame.origin[0], positions[index + 1] - frame.origin[1], positions[index + 2] - frame.origin[2]];
         const point = [frame.xAxis, frame.yAxis, frame.zAxis].map(axis => axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]);
+        const rotatedX = point[0] * cosine - point[1] * sine;
+        point[1] = point[0] * sine + point[1] * cosine;
+        point[0] = rotatedX;
         for (let axis = 0; axis < 3; axis += 1) {
           positions[index + axis] = point[axis];
           bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
@@ -286,6 +294,8 @@
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
       liveMtime = null;
       liveTableFrame = null;
+      liveTableAngle = null;
+      liveTableRotation = 0;
       liveFitRadius = null;
       cloudRequest += 1;
       cloudPreviewOpen = false;
@@ -309,6 +319,18 @@
           if (response.ok) {
             const mtime = response.headers.get('X-CADYX-Frame-Mtime');
             if (mtime && mtime !== liveMtime) {
+              const tableAngleResponse = await fetcher(`/api/v1/scanner/turntable-angle?ts=${Date.now()}`, { cache: 'no-store' });
+              if (tableAngleResponse.ok) {
+                const { turntable } = await tableAngleResponse.json();
+                const angle = turntable?.angle_degrees;
+                if (Number.isFinite(angle)) {
+                  if (liveTableAngle !== null) {
+                    const rawDelta = angle - liveTableAngle;
+                    liveTableRotation += ((rawDelta + 180) % 360 + 360) % 360 - 180;
+                  }
+                  liveTableAngle = angle;
+                }
+              }
               const raw = new Uint8Array(await response.arrayBuffer());
               if (raw.length !== 640 * 400 * 2) throw new Error('Размер кадра Y16 не совпадает.');
               const { matrix, depth_scale_mm_per_raw_unit: scale } = liveCalibration;
@@ -334,7 +356,7 @@
                 liveTableFrame ||= fitTableFrame(positions.subarray(0, count * 3), centerRay(liveCalibration));
                 const tableFrame = liveTableFrame;
                 let frameRadius = 0;
-                const transformedBounds = transformToTableFrame(positions.subarray(0, count * 3), tableFrame);
+                const transformedBounds = transformToTableFrame(positions.subarray(0, count * 3), tableFrame, liveTableRotation);
                 for (let index = 0; index < count * 3; index += 3) frameRadius = Math.max(frameRadius, Math.hypot(positions[index], positions[index + 1], positions[index + 2]));
                 liveFitRadius ||= Math.max(frameRadius, 0.001);
                 viewer.load({ positions: positions.slice(0, count * 3), triangles: new Uint32Array(0), lines: null,
@@ -358,6 +380,8 @@
         restoreModel();
         liveMtime = null;
         liveTableFrame = null;
+        liveTableAngle = null;
+        liveTableRotation = 0;
         liveFitRadius = null;
         updateButton();
       }

@@ -41,6 +41,7 @@ class WebRouteTableTests(unittest.TestCase):
         cases = (
             ("GET", "/api/v1/health", "health", {}),
             ("GET", "/api/v1/scanner/live-preview", "scanner_live_preview_status", {}),
+            ("GET", "/api/v1/scanner/turntable-angle", "scanner_turntable_angle", {}),
             ("POST", "/api/v1/scanner/live-preview", "scanner_live_preview_start", {}),
             ("DELETE", "/api/v1/scanner/live-preview", "scanner_live_preview_stop", {}),
             ("GET", "/api/v1/workspace/folders/source%20files/files/a.step", "folder_file",

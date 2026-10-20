@@ -31,20 +31,28 @@ const viewer = { load(geometry, options) { viewerLoads.push({ geometry, options 
 const baseGeometry = { positions: new Float64Array([0, 0, 0]), triangles: new Uint32Array(0), bounds: { min: [0, 0, 0], max: [0, 0, 0] } };
 const getModelGeometry = () => baseGeometry;
 const fetchCloud = async url => ({ ok: true, async text() { assert.match(url, /point-cloud\?/); return pointCloud; } });
-const centerPixel = 200 * 640 + 320;
 const liveRawFrames = [new Uint8Array(640 * 400 * 2), new Uint8Array(640 * 400 * 2)];
+let markerPointCount = 0;
 for (const frame of liveRawFrames) {
-  for (let pixel = 0; pixel < 640 * 400; pixel += 2) {
-    const x = pixel % 640, y = Math.floor(pixel / 640);
-    const depth = Math.round(100 + 0.12 * (x - 320) - 0.08 * (y - 200));
-    frame[pixel * 2] = depth & 0xff;
-    frame[pixel * 2 + 1] = depth >> 8;
+  markerPointCount = 0;
+  for (const [centerX, centerY] of [[200, 200], [440, 180], [320, 320]]) {
+    for (let y = centerY - 16; y <= centerY + 16; y += 1) for (let x = centerX - 16; x <= centerX + 16; x += 1) {
+      if ((x - centerX) ** 2 + (y - centerY) ** 2 > 16 ** 2) continue;
+      const pixel = y * 640 + x;
+      if (pixel % 2) continue;
+      const depth = Math.round(100 + 0.12 * (x - 320) - 0.08 * (y - 200));
+      frame[pixel * 2] = depth & 0xff;
+      frame[pixel * 2 + 1] = depth >> 8;
+      markerPointCount += 1;
+    }
   }
 }
 let liveFrameSequence = 0;
+let liveAngleSequence = 0;
 const fetchPreview = async url => {
   if (url.includes("point-cloud?")) return { ok: true, async text() { return url.includes("origin.ply") ? originCloud : pointCloud; } };
   if (url.includes("/calibration")) return { ok: true, async json() { return { width: 640, height: 400, matrix: [1, 0, 0, -320, 0, 1, 0, -200, 0, 0, 1, 0, 0, 0, 0, 0], depth_scale_mm_per_raw_unit: 1 }; } };
+  if (url.includes("/turntable-angle")) return { ok: true, async json() { return { turntable: { state: "running", angle_degrees: liveAngleSequence++ ? 90 : 0 } }; } };
   if (url.includes("/live-frame")) {
     const index = liveFrameSequence++;
     return { ok: true, headers: { get() { return String(1000 + index); } }, async arrayBuffer() { return liveRawFrames[Math.min(index, 1)].buffer; } };
@@ -99,19 +107,23 @@ view.showLivePreview({ open: true });
 await new Promise(resolve => setTimeout(resolve, 10));
 assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "live");
-assert.equal(viewerLoads.at(-1).geometry.positions.length, 640 * 400 * 3 / 2);
+assert.equal(viewerLoads.at(-1).geometry.positions.length, markerPointCount * 3);
 assert.ok(Math.abs(viewerLoads.at(-1).geometry.bounds.min[2]) < 2 && Math.abs(viewerLoads.at(-1).geometry.bounds.max[2]) < 2,
-  "live table points lie on XY after the first frame establishes the table plane");
-const centerLivePoint = (centerPixel / 2) * 3;
-assert.ok(Math.hypot(...viewerLoads.at(-1).geometry.positions.slice(centerLivePoint, centerLivePoint + 3)) < 2,
-  "the scanner resolution center intersects the table at the coordinate origin");
+  "sparse table markers define XY and lie on that plane after alignment");
+assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0],
+  "the calibrated center-pixel ray intersection is the table origin even without a marker at the center");
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0]);
+const firstTurntableCloud = viewerLoads.at(-1).geometry.positions.slice(0, 3);
 const firstLiveFitRadius = viewerLoads.at(-1).geometry.fitRadius;
 await new Promise(resolve => setTimeout(resolve, 380));
 assert.ok(liveFrameSequence >= 2, "the live point cloud accepted a newer camera frame");
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0], "live frames keep the first-frame camera pivot");
 assert.equal(viewerLoads.at(-1).geometry.fitRadius, firstLiveFitRadius, "live frames keep a fixed view scale");
 assert.equal(viewerLoads.at(-1).options.reset, false, "new live frames never reset the camera");
+const secondTurntableCloud = viewerLoads.at(-1).geometry.positions.slice(0, 3);
+assert.ok(Math.abs(secondTurntableCloud[0] + firstTurntableCloud[1]) < 1e-3
+  && Math.abs(secondTurntableCloud[1] - firstTurntableCloud[0]) < 1e-3,
+"the point cloud follows a 90-degree turntable move around the fixed global Z axis");
 view.showCapture({ preview_folder: "scan folder", preview_file: "new-saved-capture.ply", preview_kind: "single" });
 assert.equal(viewport.dataset.scanPreview, "true", "360 status polling does not replace the live canvas preview");
 view.closeLivePreview();

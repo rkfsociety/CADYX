@@ -221,23 +221,12 @@ animationFrames.shift()(animationTime);
 assert.ok(viewer.getCamera().orientation.every((value, index) => Math.abs(value - initial.orientation[index]) < 1e-12),
   "Reverse drag restores the full camera orientation");
 viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
-events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 2 });
-events.pointermove({ clientX: 400, clientY: 200 });
-events.pointerup();
-animationFrames.shift()(animationTime);
-const horizontalOrbit = viewer.getCamera().orientation;
-assert.ok(Math.abs(horizontalOrbit[6]) < 1e-12 && Math.abs(horizontalOrbit[7]) < 1e-12
-  && Math.abs(horizontalOrbit[8] - 1) < 1e-12,
-"horizontal drag orbits around world Z while keeping the Z axis vertical");
-assert.ok(Math.abs(horizontalOrbit[1] + Math.sqrt(3) / 2) < 1e-12,
-  "horizontal drag changes azimuth around Z");
-viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
 events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 1 });
 for (let y = 210; y <= 400; y += 10) events.pointermove({ clientX: 300, clientY: y });
 events.pointerup();
 animationFrames.shift()(animationTime);
 assert.ok(viewer.getCamera().orientation[8] < -0.999,
-  "vertical drag tilts the camera while keeping its orbit axis constrained");
+  "Trackball drag passes through the former pitch limit and turns the camera upside down");
 events.pointerdown({ button: 0, clientX: 300, clientY: 400, pointerId: 1 });
 for (let y = 410; y <= 600; y += 10) events.pointermove({ clientX: 300, clientY: y });
 events.pointerup();

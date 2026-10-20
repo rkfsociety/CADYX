@@ -10,6 +10,53 @@ from cadyx.scan_capture import Scan360CaptureController
 
 
 class Scan360CaptureTests(unittest.TestCase):
+    def test_live_preview_reports_encoder_angle_and_stops_read_only_monitor(self) -> None:
+        class FakeProcess:
+            returncode = None
+            terminated = False
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                self.returncode = 0
+                return self.returncode
+
+            def terminate(self):
+                self.terminated = True
+                self.returncode = -1
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build = root / "tools" / "revopoint" / "build"
+            build.mkdir(parents=True)
+            (build / "CaptureY16.exe").touch()
+            (build / "TurntableController.exe").touch()
+            workspace = root / "projects"
+            workspace.mkdir()
+            controller = Scan360CaptureController(root, workspace)
+            camera_process, table_process = FakeProcess(), FakeProcess()
+            with patch("cadyx.scan_capture.subprocess.Popen", side_effect=[camera_process, table_process]) as popen:
+                controller.start_live_preview()
+                self.assertEqual(controller.turntable_angle_status(), {"state": "starting"})
+                monitor = controller._turntable_monitor
+                monitor.csv_path.write_text(
+                    "utc,angle_degrees,tilt_degrees,rotation_response,tilt_response\n"
+                    "2026-10-20T12:00:00Z,41.25,0,angle,tilt\n",
+                    encoding="utf-8",
+                )
+                self.assertEqual(controller.turntable_angle_status(), {
+                    "state": "running", "angle_degrees": 41.25, "observed_at": "2026-10-20T12:00:00Z",
+                })
+                table_command = popen.call_args_list[1].args[0]
+                self.assertEqual(table_command[1:3], ["monitor", "300"])
+                self.assertNotIn("rotate", table_command)
+                self.assertNotIn("stop", table_command)
+                controller.stop_live_preview()
+                self.assertTrue(table_process.terminated)
+                self.assertFalse(monitor.csv_path.exists())
+                self.assertFalse(monitor.log_path.exists())
+
     def test_live_preview_uses_only_the_ephemeral_frame_buffer_and_stops_cleanly(self) -> None:
         class FakeProcess:
             returncode = None
