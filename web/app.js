@@ -10,6 +10,11 @@ function cadyxCloudStage(feature) {
   if (feature.operation !== 'process_point_cloud') return null;
   return {title:cadyxCloudTools[feature.method] || 'Обработка облака точек', input:feature.stats?.input_points, output:feature.stats?.output_points};
 }
+function cadyxMeshStage(feature) {
+  if(feature?.operation !== 'process_mesh') return null;
+  const titles={clean:'Очистка сетки',orient:'Исправление ориентации сетки',repair_orientation:'Удаление конфликтующих треугольников',remove_small_components:'Удаление мелких фрагментов',smooth:'Сглаживание сетки'};
+  return {title:titles[feature.method]||'Обработка сетки',input:feature.stats?.before?.triangles,output:feature.stats?.after?.triangles};
+}
 (() => {
   /* Keep folder PLY preview working even though this served slot now hosts the legacy app. */
   if (!window.CadyxPlyPreview) {
@@ -25,7 +30,7 @@ function cadyxCloudStage(feature) {
   const meta={create_box:['Блок','model'],metric_thread:['Резьба','thread'],reconstruct_scan:['Реконструкция скана','model'],import_point_cloud:['Облако точек','cloud'],import_step:['Импорт STEP','model'],extrude_sketch:['Выдавливание','model'],revolve_sketch:['Вращение','model'],loft_sketches:['Переход по сечениям','model'],loft_profiles:['Переход по сечениям','model'],create_ruled_shell:['Линейчатая оболочка','model'],fuse_bodies:['Объединение тел','model'],cut_bodies:['Вырезание','cut'],sweep_sketch:['Протяжка','model'],fillet_edges:['Скругление','fillet'],variable_fillet_edges:['Переменное скругление','fillet'],chamfer_edges:['Фаска','model'],shell_body:['Оболочка','model'],offset_body:['Смещение поверхности','model'],draft_faces:['Уклон граней','model'],mirror_body:['Зеркальное отражение','model'],linear_pattern_body:['Линейный массив','model'],circular_pattern_body:['Круговой массив','model'],boss:['Выступ','model'],hole:['Отверстие','cut'],through_hole:['Сквозное отверстие','cut'],counterbore_hole:['Отверстие с цековкой','cut'],countersink_hole:['Отверстие с зенковкой','cut'],threaded_hole:['Резьбовое отверстие','cut'],pad_sketch_to_body:['Выдавливание','model'],rib_from_sketch:['Ребро жёсткости','model'],pocket_sketch:['Карман','cut'],extrude_profile_on_plane:['Выдавливание профиля','model'],resize_imported_thread:['Изменение резьбы','thread'],transform_imported_brep:['Преобразование тела','model']};
   const editable={create_box:['width','height','depth'],metric_thread:['major_diameter','pitch','length'],extrude_sketch:['depth'],revolve_sketch:['angle_degrees','outer_diameter','height'],sweep_sketch:['radius'],fillet_edges:['radius']};
   const pLabel={width:'Ширина',height:'Высота',depth:'Глубина',outer_diameter:'Наружный диаметр',major_diameter:'Номинальный диаметр',pitch:'Шаг',length:'Длина',angle_degrees:'Угол',radius:'Радиус',centered:'По центру',handedness:'Направление резьбы',diameter_delta:'Изменение диаметра',rotation_axis:'Ось вращения',translation:'Перемещение',section_offsets:'Смещения сечений',sewing_tolerance:'Допуск сшивания'};
-  Object.assign(pLabel,{min_neighbors:'Минимум соседей',voxel_size:'Размер вокселя',min:'Минимальные XYZ',max:'Максимальные XYZ'});
+  Object.assign(pLabel,{min_neighbors:'Минимум соседей',voxel_size:'Размер вокселя',min:'Минимальные XYZ',max:'Максимальные XYZ',min_triangles:'Минимум треугольников во фрагменте',iterations:'Итерации',strength:'Сила сглаживания'});
   const fmt=v=>Number.isFinite(Number(v))?new Intl.NumberFormat('ru-RU',{maximumFractionDigits:3}).format(Number(v)):'—';
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -169,7 +174,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     let props=$('.cad3-props');if(!props){props=document.createElement('section');props.className='cad3-props cad-inspector-pane';inspector.append(props)}
     const overlay=document.createElement('canvas');overlay.className='cad3-overlay';panel.append(overlay);
     const state={objects:[],byId:new Map(),scene:null,labels:new Map(),selected:null,selectionCleared:false,rev:null,project:null,parameters:{},bindings:[],assembly:null,activeModelBodyId:null};
-    const opType=o=>cadyxCloudStage(o||{})?.title||meta[o?.operation]?.[0]||(o?.operation?`Операция: ${String(o.operation).replace(/_/g,' ')}`:'Элемент'), opIcon=o=>cadyxCloudStage(o||{})?I.cloud:I[meta[o?.operation]?.[1]||'model'];
+    const opType=o=>cadyxMeshStage(o)?.title||cadyxCloudStage(o||{})?.title||meta[o?.operation]?.[0]||(o?.operation?`Операция: ${String(o.operation).replace(/_/g,' ')}`:'Элемент'), opIcon=o=>cadyxCloudStage(o||{})?I.cloud:I[meta[o?.operation]?.[1]||'model'];
     function featureDetails(o){const p=o.parameters||{},fmt=v=>Number.isFinite(Number(v))?new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(Number(v)):null,mm=v=>{const n=fmt(v);return n===null?null:`${n} мм`},pos=Array.isArray(p.origin)?p.origin.slice(0,2).map((v,i)=>`${i?'Y':'X'}${fmt(v)}`).filter(x=>!x.endsWith('null')).join(', '):'';let d=[];switch(o.operation){case'create_box':d=[mm(p.width),mm(p.height),mm(p.depth)].filter(Boolean);return d.length?d.join(' × '):'';case'extrude_sketch':case'pad_sketch_to_body':case'rib_from_sketch':case'pocket_sketch':case'extrude_profile_on_plane':d=[mm(p.depth)];break;case'revolve_sketch':d=[p.angle_degrees==null?null:`${fmt(p.angle_degrees)}°`];break;case'boss':d=[p.diameter==null?null:`Ø${mm(p.diameter)}`,mm(p.depth)];break;case'hole':case'through_hole':case'counterbore_hole':case'countersink_hole':case'threaded_hole':d=[p.diameter==null?null:`Ø${mm(p.diameter)}`,p.hole_depth==null?null:mm(p.hole_depth),p.thread_size||null];break;case'fillet_edges':d=[p.radius==null?null:`R${mm(p.radius)}`];break;case'variable_fillet_edges':d=[p.start_radius==null?null:`R${mm(p.start_radius)}`,p.end_radius==null?null:`R${mm(p.end_radius)}`];break;case'chamfer_edges':d=[mm(p.distance)];break;case'shell_body':case'offset_body':d=[mm(p.thickness??p.offset)];break;case'draft_faces':d=[p.angle_degrees==null?null:`${fmt(p.angle_degrees)}°`];break;case'linear_pattern_body':case'circular_pattern_body':d=[p.count==null?null:`${fmt(p.count)} шт.`];break;default:return''}if(pos)d.push(pos);return d.filter(Boolean).join(' · ')}
     function makeLabels(){state.labels.clear();const count={sketch:0};const ops={};for(const o of state.objects){if(o.type==='sketch')state.labels.set(o.id,o.name&&o.name!=='Sketch'?o.name:`Эскиз ${String(++count.sketch).padStart(3,'0')}`);if(o.type==='feature'){const base=opType(o);ops[base]=(ops[base]||0)+1;const details=featureDetails(o);state.labels.set(o.id,o.name||`${base} ${String(ops[base]).padStart(3,'0')}${details?` · ${details}`:''}`)}}}
     const label=id=>state.labels.get(id)||state.byId.get(id)?.name||id?.split(':')[0]||'—';
@@ -211,8 +216,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           disclosure.onclick=()=>{if(expandedFeatures.has(feature.id))expandedFeatures.delete(feature.id);else expandedFeatures.add(feature.id);renderTree()};
           const button=document.createElement('button');button.className='cad-tree-feature';button.type='button';button.dataset.id=feature.id;button.dataset.selected=String(feature.id===state.selected);button.innerHTML=`<span class="cad3-icon">${opIcon(feature)}</span><span class="cad-tree-label">${esc(featureName)}</span>`;button.onclick=()=>select(feature.id);
           row.append(disclosure,button);node.append(row);
-          const cloudStage=cadyxCloudStage(feature);
-          if(cloudStage){const summary=document.createElement('div');summary.className='cad3-model-note';summary.textContent=cloudStage.input==null?`${fmt(cloudStage.output)} точек`:`${fmt(cloudStage.input)} → ${fmt(cloudStage.output)} точек`;node.append(summary)}
+          const cloudStage=cadyxMeshStage(feature)||cadyxCloudStage(feature);
+          if(cloudStage){const summary=document.createElement('div');summary.className='cad3-model-note';const unit=feature.operation==='process_mesh'?'треугольников':'точек';summary.textContent=cloudStage.input==null?`${fmt(cloudStage.output)} ${unit}`:`${fmt(cloudStage.input)} → ${fmt(cloudStage.output)} ${unit}`;node.append(summary)}
           if(sketchObjects.length){const children=document.createElement('div');children.className='cad3-tree-children';children.hidden=!expanded;
             for(const sketch of sketchObjects){if(query&&!matchesFeature&&!matchingSketches.includes(sketch))continue;const child=document.createElement('button');child.className='cad-tree-feature cad3-sketch-child';child.type='button';child.dataset.id=sketch.id;child.dataset.selected=String(sketch.id===state.selected);child.innerHTML=`<span class="cad3-icon">${I.sketch}</span><span class="cad-tree-label">${esc(label(sketch.id))}</span>`;child.onclick=()=>select(sketch.id,true);children.append(child)}
             node.append(children);
@@ -234,6 +239,11 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const massMaterials = { pla: 1.24, petg: 1.27, abs: 1.04, asa: 1.07, aluminum: 2.70, steel: 7.80, stainless: 8.00, copper: 8.94 };
     renderProps = selected => {
       renderGeometryProps(selected);
+      if(selected?.operation==='process_mesh'){
+        const stats=selected.stats||{},before=stats.before||{},after=stats.after||{};
+        const rows=[['Треугольники',`${before.triangles} → ${after.triangles}`],['Фрагменты',`${before.components} → ${after.components}`],['Открытые рёбра',`${before.boundary_edges} → ${after.boundary_edges}`],['Неманифолдные рёбра',after.nonmanifold_edges],['Максимальное смещение',stats.max_vertex_displacement],['Результат PLY',selected.artifact?.file],['Самопересечения','Не проверены']];
+        props.insertAdjacentHTML('beforeend',`<section class="cad3-sec"><h3>Обработка сетки</h3><dl class="cad3-grid">${rows.map(([key,value])=>`<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join('')}</dl><button class="cad3-dep" data-dep="${esc(selected.previous_feature_id)}">Предыдущая операция</button></section>`);
+      }
       const stage=selected&&cadyxCloudStage(selected);
       if(stage){
         const stats=selected.stats||{},source=selected.source?.project_file||selected.source?.file,artifact=selected.artifact?.file;

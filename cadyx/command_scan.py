@@ -15,6 +15,37 @@ from .scan import DEFAULT_SCAN_PARAMETERS, normalize_scan_parameters, read_point
 
 
 class ScanCommands:
+    def _process_mesh(
+        self, document: Document, command: dict[str, Any], *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        from .mesh_processing import normalize_mesh_parameters
+        source_body = document.find_object(command.get("body_id"), "body")
+        if source_body is None or source_body.get("geometry", {}).get("kind") != "triangle_mesh":
+            raise ValidationError("Mesh processing requires a triangle-mesh body.")
+        if project_id is None or self.publish_project_scan_output is None:
+            raise ValidationError("Mesh processing requires a project artifact writer.")
+        method = command.get("method")
+        parameters = normalize_mesh_parameters(method, command.get("parameters", {}))
+        previous_id = source_body["feature_ids"][-1]
+        if progress:
+            progress({"phase": "process_mesh", "method": method})
+        geometry, stats = self.kernel.process_triangle_mesh(source_body["geometry"], method, parameters)
+        artifact = self._publish_scan_source_output({"project_file": "processed-mesh.ply"},
+                                                   "processed-mesh.ply", geometry, progress, project_id)
+        body_id, feature_id = f"body:{uuid4()}", f"feature:{uuid4()}"
+        body = {"id": body_id, "type": "body", "name": source_body["name"],
+                "feature_ids": [feature_id], "geometry": geometry}
+        feature = {"id": feature_id, "type": "feature", "operation": "process_mesh",
+                   "body_id": body_id, "source_body_id": source_body["id"],
+                   "previous_feature_id": previous_id, "source_geometry_sha256": source_body["geometry"]["sha256"],
+                   "method": method, "parameters": parameters, "artifact": artifact, "stats": stats,
+                   "processor": {"name": "CADYX mesh tools", "version": 1}}
+        document.objects.extend([body, feature])
+        source_body["visible"] = False
+        return {"body_id": body_id, "feature_id": feature_id, "method": method, "stats": stats, "artifact": artifact}
+
     def _process_point_cloud(
         self, document: Document, command: dict[str, Any], *,
         progress: Callable[[dict[str, Any]], None] | None = None,
@@ -361,7 +392,15 @@ def _handle_process_point_cloud(
     return self._process_point_cloud(document, command, progress=progress, project_id=project_id)
 
 
+def _handle_process_mesh(
+    self: Any, document: Document, command: dict[str, Any], *,
+    progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
+) -> dict[str, Any]:
+    return self._process_mesh(document, command, progress=progress, project_id=project_id)
+
+
 COMMAND_HANDLERS = {
+    "process_mesh": _handle_process_mesh,
     "process_point_cloud": _handle_process_point_cloud,
     "import_scan": _handle_import_scan,
     "import_project_scan": _handle_import_project_scan,

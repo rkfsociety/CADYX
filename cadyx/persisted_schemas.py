@@ -194,7 +194,27 @@ def _validate_cloud_processing(item: dict[str, Any], by_id: dict[str, dict[str, 
         raise ValidationError("Point-cloud stage counts are invalid.")
 
 
+def _validate_mesh_processing(item: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> None:
+    from .mesh_processing import normalize_mesh_parameters
+    normalize_mesh_parameters(item.get("method"), item.get("parameters"))
+    source = by_id.get(item.get("source_body_id"), {})
+    previous = by_id.get(item.get("previous_feature_id"), {})
+    if (source.get("type") != "body" or source.get("id") == item["body_id"]
+            or source.get("geometry", {}).get("kind") != "triangle_mesh"
+            or previous.get("body_id") != source.get("id")
+            or previous.get("id") not in source.get("feature_ids", [])
+            or item.get("source_geometry_sha256") != source.get("geometry", {}).get("sha256")):
+        raise ValidationError("Mesh processing requires its unchanged source body and preceding feature.")
+    artifact = item.get("artifact", {})
+    if not isinstance(artifact, dict) or not isinstance(artifact.get("sha256"), str) or not re.fullmatch(r"[a-f0-9]{64}", artifact["sha256"]):
+        raise ValidationError("Mesh processing requires a hashed result artifact.")
+    stats = item.get("stats")
+    if not isinstance(stats, dict) or any(not isinstance(stats.get(key), dict) for key in ("before", "after")):
+        raise ValidationError("Mesh processing requires before/after topology statistics.")
+
+
 FEATURE_SCHEMAS: MappingProxyType[str, PersistedValidator] = MappingProxyType({
+    'process_mesh': _validate_mesh_processing,
     'process_point_cloud': _validate_cloud_processing,
     'extrude_sketch': _validate_profile,
     'pad_sketch_to_body': _validate_pad,

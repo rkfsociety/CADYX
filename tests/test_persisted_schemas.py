@@ -52,6 +52,15 @@ def feature_document(operation):
         feature.update(previous_feature_id=previous["id"], method="deduplicate",
                        artifact={"file": "result.ply", "sha256": "b" * 64},
                        stats={"input_points": 4, "output_points": 3})
+    if operation == "process_mesh":
+        previous = {"id": identifier("feature"), "type": "feature",
+                    "body_id": source, "operation": "reconstruct_scan"}
+        document.objects[1].update(feature_ids=[previous["id"]],
+                                   geometry={"kind": "triangle_mesh", "sha256": "a"*64})
+        document.objects.insert(-1, previous)
+        feature.update(previous_feature_id=previous["id"], source_geometry_sha256="a"*64,
+                       method="clean", artifact={"file": "mesh.ply", "sha256": "b"*64},
+                       stats={"before": {}, "after": {}})
     return document, feature
 
 

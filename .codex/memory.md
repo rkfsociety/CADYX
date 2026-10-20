@@ -103,3 +103,5 @@
 - Confirmed: point-only cleanup uses `process_point_cloud` with full-resolution hashed PLY stages, not the display sample. The original and intermediate files remain intact. User direction: processing tools belong only to the AI agent; the web tree shows only tools actually used, their parameters and results. Contract: [point-cloud processing](../docs/point-cloud-processing.md).
 
 - Confirmed: main-preview triangle meshes use surface-only shading; do not re-enable inferred scan boundary/crease overlays when adjusting CAD edge display. Orthographic wireframes remain separate. Contract: [viewport rendering](docs/viewport-api.md).
+
+- Confirmed: `process_mesh` uses full saved geometry through GeometryKernel and retains source bodies/hash-bound history. Components are edge-connected, not vertex-connected. Smoothing pins open boundaries; strict orientation rejects non-orientable surfaces and explicit repair cuts conflicting faces. Agent tools and limits: [mesh processing](../docs/mesh-processing.md).

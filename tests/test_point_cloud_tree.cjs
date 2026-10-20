@@ -10,6 +10,10 @@ const filtered = stage({operation:'process_point_cloud',method:'radius_filter',s
 assert.equal(filtered.title, 'Фильтр изолированных точек');
 assert.equal(filtered.input - filtered.output, 154);
 assert.equal(stage({operation:'extrude_sketch'}), null);
+const meshStage = feature => vm.runInContext(`cadyxMeshStage(${JSON.stringify(feature)})`, context);
+assert.equal(meshStage({operation:'process_mesh',method:'smooth',stats:{before:{triangles:100},after:{triangles:100}}}).title, 'Сглаживание сетки');
+assert.equal(meshStage({operation:'process_mesh',method:'remove_small_components',stats:{before:{triangles:100},after:{triangles:80}}}).output, 80);
+assert.equal(meshStage({operation:'import_point_cloud'}), null);
 assert.ok(!source.includes('dataset.cloudTool'), 'Unused agent tools must not be rendered in the browser tree');
 assert.deepEqual(Array.from(vm.runInContext('Object.keys(cadyxCloudTools)', context)), ['deduplicate','radius_filter','crop','voxel_downsample']);
 console.log('Point-cloud tree presentation checks passed.');

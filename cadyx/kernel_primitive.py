@@ -16,6 +16,12 @@ class PrimitiveKernelAdapter:
 
         return OCCTKernelAdapter().tessellate(geometry)
 
+    def process_triangle_mesh(
+        self, geometry: MeshDescriptor, method: str, parameters: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        from .mesh_processing import process_mesh_geometry
+        return process_mesh_geometry(geometry, method, parameters)
+
     def create_point_cloud(self, points: list[tuple[float, float, float]]) -> MeshDescriptor:
         from .mesh_geometry import point_cloud_geometry
 
