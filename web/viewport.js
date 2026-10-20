@@ -1283,15 +1283,21 @@
     function renderPoints(pointCount, camera, screenX, screenY, scale, colors = null) {
       const step = Math.max(1, Math.ceil(pointCount / MAX_PREVIEW_POINTS));
       const pointSize = Math.max(1.2, Math.min(2.4, scale * 0.003));
+      let near = -Infinity, far = Infinity;
       for (let point = 0; point < pointCount; point += step) {
         const depth = camera[point * 3 + 2];
-        const shade = Math.max(0, Math.min(1, 0.5 + depth / (scale * 0.8)));
-        const green = Math.round(133 + shade * 86);
+        near = Math.max(near, depth);
+        far = Math.min(far, depth);
+      }
+      for (let point = 0; point < pointCount; point += step) {
+        const depth = camera[point * 3 + 2];
+        const proximity = near > far ? (depth - far) / (near - far) : 1;
+        const brightness = 0.35 + 0.65 * proximity;
         if (colors) {
           const offset = point * 3;
           context.fillStyle = `rgba(${colors[offset]}, ${colors[offset + 1]}, ${colors[offset + 2]}, 0.9)`;
         } else {
-          context.fillStyle = `rgba(${Math.round(green * 0.65)}, ${green}, ${Math.round(green * 0.7)}, 0.82)`;
+          context.fillStyle = `rgba(${Math.round(255 * brightness)}, ${Math.round(125 * brightness)}, ${Math.round(40 * brightness)}, 0.9)`;
         }
         context.fillRect(screenX[point], screenY[point], pointSize, pointSize);
       }
