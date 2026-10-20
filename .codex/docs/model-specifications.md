@@ -8,7 +8,9 @@ change model geometry.
 ## Agent API
 
 Call `POST /api/v1/agent/projects/{id}/validations/specification` with an exact
-`expected_revision` and a version 1 `specification`:
+`expected_revision` and a version 1 `specification`. The sample value `12`
+for `expected_revision` is a **project revision example**, not the document
+schema version (which currently happens to be v12):
 
 ```json
 {
@@ -74,4 +76,7 @@ agent run.
 
 This contract composes the existing engineering validators. It does not infer
 design intent, create checks automatically, or claim a tolerance/units system
-beyond the existing validation contracts.
+beyond the existing validation contracts. For an orchestrated, optional
+strict headless check that includes this specification alongside document,
+geometry and export-eligibility stages, see [project checks](project-checks.md).
+A model specification does not implicitly run all project-check stages.

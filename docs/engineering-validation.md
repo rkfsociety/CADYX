@@ -1,6 +1,11 @@
 # Engineering validation
 
-CADYX exposes read-only engineering checks through the Agent API. Checks use the saved document revision and geometry hash, and may optionally store immutable results in the project's validation sidecar. Validation does not change the model revision.
+CADYX exposes read-only engineering checks through the Agent API. Checks use the saved document revision and geometry hash, and may optionally store immutable results in the project's validation sidecar. Validation does not change the model revision. These are separate measurement
+operations; the [model specification](../.codex/docs/model-specifications.md)
+composes selected requirements, while [project checks](../.codex/docs/project-checks.md)
+orchestrate document/geometry/specification/export-preflight stages.
+[Assembly fit](assembly-fit.md) evaluates sampled assembly poses independently;
+none of these calls certifies a manufacturing process by default.
 
 ## Global minimum thickness
 

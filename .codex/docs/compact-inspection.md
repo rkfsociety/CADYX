@@ -4,7 +4,11 @@ CADYX preserves its original full document and history endpoints. An external ag
 can avoid returning B-rep strings, meshes, and large command arguments by using
 read-only **GET** `/api/v1/agent/projects/{project_id}/inspection`. MCP exposes
 the same endpoint through `cadyx_inspect_compact`. No edit lease, extra state
-store, or browser automation is involved.
+store, or browser automation is involved. The ordinary MCP
+`cadyx_inspect_project` and in-process AgentRuntime project summary default
+to this compact summary; `cadyx_inspect_project_full` is an explicit full
+model/history read for tasks that require it. Page large inspections by
+`expected_revision` rather than repeatedly requesting complete B-reps.
 
 ## Query contract
 

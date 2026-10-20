@@ -46,8 +46,12 @@ stage has `id`, `status` (`pass`, `fail` or `untested`),
   System feature rebuild used by parameter edits, preserving their saved profile,
   plane origin, normal, local X axis and depth. Native work is cooperatively
   budgeted at stage boundaries, not preemptible.
-- `assembly`, `drawings`: unsupported and `untested`, required only if
-  explicitly requested. No fabricated evidence for unavailable backends.
+- `assembly`, `drawings`: unsupported **inside the composite project-check
+  pipeline** and `untested`, required only if explicitly requested. Separate
+  revision-bound [assembly mass](../../docs/assembly-mass.md) and
+  [discrete-pose assembly fit](../../docs/assembly-fit.md) endpoints exist;
+  they are **not silently substituted** for the `assembly` project-check
+  stage. No fabricated evidence for unavailable composite backends.
 
 Only **required** stages determine overall `status`: fail takes precedence,
 then untested, otherwise pass. `strict` additionally makes `passed=false`

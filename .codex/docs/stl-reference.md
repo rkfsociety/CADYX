@@ -4,6 +4,9 @@
 
 Binary STL (including headers starting with `solid`) and strict ASCII STL are supported. Inputs are limited to 64 MiB; triangle count has no separate ceiling and is bounded by source size. Non-finite coordinates, invalid structure and degenerate triangles are rejected before document mutation. Vertices are welded by exact coordinate equality; source coordinates and scale are preserved. STL does not specify physical units: results are unitless until confirmed separately.
 
-The imported body is a `cadyx-mesh-v1` reference, not a B-rep. Existing `create_sketch_from_scan_section`, `create_scan_sections`, `compare_body_to_scan` and `align_scan` accept this mesh. STL alignment uses the saved source mesh so later alignment edits always start from the unchanged coordinates. Construct the final editable model from sketches and solid features; importing STL alone does not recreate a parametric model.
+The imported body is a triangle-bearing `cadyx-mesh-v1` reference, not a B-rep.
+This differs from staged point-only PLY import (`import_project_point_cloud`),
+which stores vertices for scene inspection but has no faces and cannot be used
+for mesh-section or mesh-deviation operations. See the [scan contract](scan-reverse-engineering.md). Existing `create_sketch_from_scan_section`, `create_scan_sections`, `compare_body_to_scan` and `align_scan` accept this mesh. STL alignment uses the saved source mesh so later alignment edits always start from the unchanged coordinates. Construct the final editable model from sketches and solid features; importing STL alone does not recreate a parametric model.
 
 Tests: `tests/test_stl_reference.py`.

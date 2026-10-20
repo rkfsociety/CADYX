@@ -1,6 +1,6 @@
 # Revision-bound assembly interference and fit checks
 
-The read-only `POST /api/v1/agent/projects/{id}/validations/assembly-fit` endpoint and `cadyx_validate_assembly_fit` MCP tool measure OCCT solid-to-solid minimum distance and Boolean common volume for **placed leaf instances**, including nested subassemblies. Results bind to the exact saved document revision and a SHA-256 of the source geometry, assembly graph, selected instance pairs, and pose inputs. They may be persisted as immutable validation records without a model revision change.
+The read-only `POST /api/v1/agent/projects/{id}/validations/assembly-fit` endpoint and `cadyx_validate_assembly_fit` MCP tool measure OCCT solid-to-solid minimum distance and Boolean common volume for **placed leaf instances**, including nested subassemblies. Results bind to the exact saved document revision and a SHA-256 of the source geometry, assembly graph, selected instance pairs, and pose inputs. They may be persisted as immutable validation records without a model revision change. This endpoint is distinct from the generic `check_project` composite `assembly` stage, which is still explicitly `untested`; see [project checks](../.codex/docs/project-checks.md).
 
 ## Request
 

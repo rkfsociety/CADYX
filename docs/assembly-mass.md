@@ -2,7 +2,8 @@
 
 ## Persisted schema
 
-Document **v11** upgrades assembly **v2 → v3**. Each part definition has a
+Document **v11** introduced assembly **v2 → v3** material fields; the
+**current** document schema is v12 and continues to use assembly graph v3. Each part definition has a
 `material` field which is either `null` (not assigned, the migration default)
 or exactly:
 

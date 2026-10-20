@@ -2,6 +2,22 @@
 
 These small command-line tools exercise the scanner and dual-axis turntable through Windows APIs. They do not use the paid Revopoint SDK or require Revo Scan to run. The device calibration files used by the tools are bundled in `tools/revopoint/calibration/`; they were copied from `%LOCALAPPDATA%\RevoScan5\cameraparam` on the connected scanner PC so the same hardware setup can be used from another checkout. This calibration bundle is specific to that scanner; it is not a universal MINI calibration.
 
+## CADYX persistent point-cloud reference
+
+A completed **point-only** PLY can be uploaded into a CADYX project through the
+Agent API/MCP staged scan-file upload and then imported with the leased
+`import_project_point_cloud` command (`file` is the staged PLY filename,
+`name` is optional). The saved scene/server PNG renders its vertices as points,
+with no surface reconstruction or invented physical units. The command accepts
+3–300,000 finite XYZ vertices with no faces. For section-based reverse
+engineering, use `import_project_scan`/`import_scan` to build a **triangle mesh**
+instead; scan alignment and section tools do not operate on the point-only
+reference. See [scan reverse engineering](../../.codex/docs/scan-reverse-engineering.md)
+and the [shared viewport contract](../../.codex/docs/viewport-api.md).
+
+This is a CADYX project operation, not a turntable-control command or an
+automatic step performed by every scanner capture.
+
 ## Build
 
 Run from the repository root in PowerShell:
