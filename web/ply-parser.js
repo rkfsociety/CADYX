@@ -1,6 +1,7 @@
 (() => {
   const MAX_PREVIEW_FACES = 36_000;
   const MAX_PREVIEW_POINTS = 24_000;
+  const MAX_CUSTOM_PREVIEW_POINTS = 100_000;
   const asciiDecoder = new TextDecoder("ascii");
   const scalarTypes = {
     char: { size: 1, read: (view, offset) => view.getInt8(offset) },
@@ -286,7 +287,7 @@
     return cursor;
   }
 
-  function parseAsciiPly(bytes, dataOffset, vertex, face, elementsBeforeFace) {
+  function parseAsciiPly(bytes, dataOffset, vertex, face, elementsBeforeFace, maxPreviewPoints) {
     const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     const coordinateReaders = ["x", "y", "z"].map((name) => {
       const index = vertex.properties.findIndex((property) => property.name === name);
@@ -302,7 +303,7 @@
     const normalReaders = getNormalReaders(vertex.properties);
 
     const pointCloud = !face || face.count === 0;
-    const previewVertexCount = pointCloud ? Math.min(vertex.count, MAX_PREVIEW_POINTS) : vertex.count;
+    const previewVertexCount = pointCloud ? Math.min(vertex.count, maxPreviewPoints) : vertex.count;
     const positions = new Float32Array(previewVertexCount * 3);
     const colors = colorReaders ? new Uint8Array(previewVertexCount * 3) : null;
     const vertexNormals = normalReaders && !pointCloud ? new Float32Array(previewVertexCount * 3) : null;
@@ -428,12 +429,17 @@
     };
   }
 
-  function parsePly(buffer) {
+  function parsePly(buffer, options = {}) {
+    const maxPreviewPoints = options?.maxPreviewPoints ?? MAX_PREVIEW_POINTS;
+    if (!Number.isSafeInteger(maxPreviewPoints) || maxPreviewPoints < 1
+        || maxPreviewPoints > MAX_CUSTOM_PREVIEW_POINTS) {
+      throw new Error(`Число точек предпросмотра должно быть от 1 до ${MAX_CUSTOM_PREVIEW_POINTS}.`);
+    }
     const bytes = new Uint8Array(buffer);
     const data = new DataView(buffer);
     const { dataOffset, vertex, face, elementsBeforeFace, littleEndian, format } = parseHeader(bytes);
     if (vertex.count === 0) throw new Error("В PLY нет вершин для предпросмотра.");
-    if (format === "ascii") return parseAsciiPly(bytes, dataOffset, vertex, face, elementsBeforeFace);
+    if (format === "ascii") return parseAsciiPly(bytes, dataOffset, vertex, face, elementsBeforeFace, maxPreviewPoints);
     const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     const offsets = { x: null, y: null, z: null };
     const colorOffsets = { red: null, r: null, green: null, g: null, blue: null, b: null };
@@ -459,7 +465,7 @@
       throw new Error("Данные вершин PLY обрезаны.");
     }
     const pointCloud = !face || face.count === 0;
-    const previewVertexCount = pointCloud ? Math.min(vertex.count, MAX_PREVIEW_POINTS) : vertex.count;
+    const previewVertexCount = pointCloud ? Math.min(vertex.count, maxPreviewPoints) : vertex.count;
     const positions = new Float32Array(previewVertexCount * 3);
     const colorProperties = [
       colorOffsets.red || colorOffsets.r,

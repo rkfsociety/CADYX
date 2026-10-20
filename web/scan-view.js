@@ -105,7 +105,7 @@
       const response = await fetcher(source.url, { cache: 'no-store' });
       if (!response.ok) throw new Error(`Не удалось открыть ${source.file} (HTTP ${response.status}).`);
       if (!window.CadyxPlyPreview?.parse) throw new Error('Не найден PLY-парсер.');
-      const geometry = window.CadyxPlyPreview.parse(await response.arrayBuffer());
+      const geometry = window.CadyxPlyPreview.parse(await response.arrayBuffer(), { maxPreviewPoints: 48_000 });
       if (geometry.faceCount > 0) throw new Error(`${source.file} содержит сетку, а не облако точек.`);
       const count = geometry.previewVertexCount ?? geometry.positions.length / 3;
       return {
