@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import json
+import os
 import struct
 import subprocess
 from dataclasses import dataclass
@@ -51,6 +52,9 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/workspace/folders/{folder}/files", "folder_files", "files"),
     RouteSpec("GET", "/api/v1/workspace/folders/{folder}/files/{filename}", "folder_file", "files"),
     RouteSpec("GET", "/api/v1/scanner/live-frame", "scanner_live_frame", "scanner"),
+    RouteSpec("GET", "/api/v1/scanner/live-preview", "scanner_live_preview_status", "scanner"),
+    RouteSpec("POST", "/api/v1/scanner/live-preview", "scanner_live_preview_start", "scanner", "json"),
+    RouteSpec("DELETE", "/api/v1/scanner/live-preview", "scanner_live_preview_stop", "scanner"),
     RouteSpec("GET", "/api/v1/scanner/point-cloud", "scanner_point_cloud", "scanner"),
     RouteSpec("GET", "/api/v1/scanner/calibration", "scanner_calibration", "scanner"),
     RouteSpec("GET", "/api/v1/projects", "projects", "project"),
@@ -328,19 +332,37 @@ def _resolve_scanner_point_cloud(core: CadyxCore, query_string: str) -> tuple[Pa
 
 
 def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: SplitResult) -> None:
+    if route.spec.name == "scanner_live_preview_status":
+        handler._json(200, {"preview": core.scanner_live_preview_status()})
+        return
+    if route.spec.name == "scanner_live_preview_start":
+        body = _require_json(handler)
+        if body:
+            raise ValidationError("Live scanner preview start accepts an empty object only.")
+        handler._json(202, {"preview": core.start_scanner_live_preview()})
+        return
+    if route.spec.name == "scanner_live_preview_stop":
+        handler._json(200, {"preview": core.stop_scanner_live_preview()})
+        return
     if route.spec.name == "scanner_live_frame":
         frame_path = core.workspace.root / ".revopoint-live.raw"
-        if not frame_path.is_file() or frame_path.stat().st_size != 640 * 400 * 2:
+        try:
+            with frame_path.open("rb") as stream:
+                frame_stat = os.fstat(stream.fileno())
+                payload = stream.read()
+        except OSError:
             handler._json(404, {"error": "NO_LIVE_FRAME", "message": "Live scanner frame is not available."})
             return
-        payload = frame_path.read_bytes()
+        if len(payload) != 640 * 400 * 2:
+            handler._json(404, {"error": "NO_LIVE_FRAME", "message": "Live scanner frame is not available."})
+            return
         handler.send_response(200)
         handler.send_header("Content-Type", "application/octet-stream")
         handler.send_header("Content-Length", str(len(payload)))
         handler.send_header("Cache-Control", "no-store")
         handler.send_header("X-CADYX-Frame-Width", "640")
         handler.send_header("X-CADYX-Frame-Height", "400")
-        handler.send_header("X-CADYX-Frame-Mtime", str(frame_path.stat().st_mtime_ns))
+        handler.send_header("X-CADYX-Frame-Mtime", str(frame_stat.st_mtime_ns))
         handler.end_headers()
         handler.wfile.write(payload)
         return

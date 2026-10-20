@@ -40,6 +40,9 @@ class WebRouteTableTests(unittest.TestCase):
     def test_matches_representative_route_families_without_socket(self) -> None:
         cases = (
             ("GET", "/api/v1/health", "health", {}),
+            ("GET", "/api/v1/scanner/live-preview", "scanner_live_preview_status", {}),
+            ("POST", "/api/v1/scanner/live-preview", "scanner_live_preview_start", {}),
+            ("DELETE", "/api/v1/scanner/live-preview", "scanner_live_preview_stop", {}),
             ("GET", "/api/v1/workspace/folders/source%20files/files/a.step", "folder_file",
              {"folder": "source%20files", "filename": "a.step"}),
             ("GET", "/api/v1/projects/p-1/viewport.png", "project_viewport_png", {"project_id": "p-1"}),

@@ -135,6 +135,15 @@ class CadyxCore:
     def scan_360_status(self, project_id: str) -> dict[str, Any]:
         return self._lifecycle.scan_360_status(project_id)
 
+    def start_scanner_live_preview(self) -> dict[str, Any]:
+        return self._scan_capture.start_live_preview()
+
+    def scanner_live_preview_status(self) -> dict[str, Any]:
+        return self._scan_capture.live_preview_status()
+
+    def stop_scanner_live_preview(self) -> dict[str, Any]:
+        return self._scan_capture.stop_live_preview()
+
     def copy_project_files(self, target_project_id: str, source_project_id: str) -> dict[str, Any]:
         return self._lifecycle.copy_project_files(target_project_id, source_project_id)
 

@@ -27,6 +27,15 @@ class _Scan360Job:
     started_at: str
 
 
+@dataclass
+class _LivePreviewJob:
+    process: subprocess.Popen[bytes]
+    raw_path: Path
+    stop_path: Path
+    ready_path: Path
+    log_path: Path
+
+
 class Scan360CaptureController:
     """Own one active physical 360 capture and expose compact progress."""
 
@@ -35,6 +44,7 @@ class Scan360CaptureController:
         self._workspace_root = workspace_root.resolve()
         self._guard = threading.RLock()
         self._job: _Scan360Job | None = None
+        self._live_preview: _LivePreviewJob | None = None
 
     def start(self, project_id: str, project_directory: Path) -> dict[str, Any]:
         if os.name != "nt":
@@ -50,6 +60,8 @@ class Scan360CaptureController:
             raise ValidationError("Windows PowerShell is unavailable on the CADYX scanner host.")
 
         with self._guard:
+            if self._live_preview is not None and self._live_preview.process.poll() is None:
+                raise ConflictError("Stop the live scanner preview before starting a 360 capture.", code="SCANNER_BUSY")
             if self._job is not None and self._job.process.poll() is None:
                 if self._job.project_id == project_id:
                     return self._snapshot_locked()
@@ -82,6 +94,108 @@ class Scan360CaptureController:
                 started_at=datetime.now(timezone.utc).isoformat(),
             )
             return self._snapshot_locked()
+
+    def start_live_preview(self) -> dict[str, Any]:
+        if os.name != "nt":
+            raise ValidationError("Live Revopoint preview is available only on the Windows scanner host.")
+        capture_executable = self._repository_root / "tools" / "revopoint" / "build" / "CaptureY16.exe"
+        if not capture_executable.is_file():
+            raise ValidationError("The CaptureY16 live-preview executable is unavailable; build the Revopoint tools first.")
+
+        raw_path = self._workspace_root / ".revopoint-live.raw"
+        stop_path = self._workspace_root / ".revopoint-live-preview.stop"
+        ready_path = self._workspace_root / ".revopoint-live-preview.ready"
+        log_path = self._workspace_root / ".revopoint-live-preview.log"
+        with self._guard:
+            if self._job is not None and self._job.process.poll() is None:
+                raise ConflictError("Stop the 360 capture before starting a live scanner preview.", code="SCANNER_BUSY")
+            if self._live_preview is not None and self._live_preview.process.poll() is None:
+                return self._live_preview_snapshot_locked()
+            self._live_preview = None
+            for path in (raw_path, stop_path, ready_path):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise ValidationError(f"The previous live-preview buffer could not be cleared: {exc}.") from exc
+
+            startup_info = subprocess.STARTUPINFO()
+            startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startup_info.wShowWindow = subprocess.SW_HIDE
+            try:
+                with log_path.open("wb") as log_stream:
+                    process = subprocess.Popen(
+                        [str(capture_executable), "--live-only", "--live-raw", str(raw_path),
+                         "--stop-file", str(stop_path), "--ready-file", str(ready_path), "--fps", "15"],
+                        cwd=str(self._repository_root), stdin=subprocess.DEVNULL,
+                        stdout=log_stream, stderr=subprocess.STDOUT,
+                        creationflags=subprocess.CREATE_NO_WINDOW, startupinfo=startup_info,
+                    )
+            except OSError as exc:
+                raise ValidationError(f"The live scanner preview could not be started: {exc}.") from exc
+            self._live_preview = _LivePreviewJob(process, raw_path, stop_path, ready_path, log_path)
+            return self._live_preview_snapshot_locked()
+
+    def live_preview_status(self) -> dict[str, Any]:
+        with self._guard:
+            if self._live_preview is None:
+                return {"state": "idle"}
+            return self._live_preview_snapshot_locked()
+
+    def stop_live_preview(self) -> dict[str, Any]:
+        with self._guard:
+            job = self._live_preview
+            if job is None:
+                return {"state": "idle"}
+            if job.process.poll() is None:
+                try:
+                    with job.stop_path.open("xb"):
+                        pass
+                except FileExistsError:
+                    pass
+                except OSError as exc:
+                    raise ValidationError(f"The live scanner preview could not be stopped cleanly: {exc}.") from exc
+                try:
+                    job.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    job.process.terminate()
+                    job.process.wait(timeout=2)
+            self._live_preview = None
+            for path in (job.raw_path, job.stop_path, job.ready_path):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise ValidationError(f"A temporary live-preview file could not be removed: {exc}.") from exc
+            return {"state": "idle"}
+
+    def _live_preview_snapshot_locked(self) -> dict[str, Any]:
+        assert self._live_preview is not None
+        job = self._live_preview
+        return_code = job.process.poll()
+        if return_code is not None:
+            try:
+                message = job.log_path.read_bytes()[-4096:].decode("utf-8", errors="replace").strip()
+            except OSError:
+                message = ""
+            self._live_preview = None
+            for path in (job.raw_path, job.stop_path, job.ready_path):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    message = f"{message}\nTemporary frame cleanup failed: {exc}.".strip()
+            return {"state": "failed", "return_code": return_code, "message": message}
+        if not job.ready_path.is_file():
+            return {"state": "starting"}
+        try:
+            mtime_ns = job.raw_path.stat().st_mtime_ns
+        except OSError:
+            return {"state": "starting"}
+        return {"state": "running", "frame_mtime_ns": mtime_ns}
 
     def status(self, project_id: str, project_directory: Path) -> dict[str, Any]:
         with self._guard:

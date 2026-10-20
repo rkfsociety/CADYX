@@ -238,6 +238,24 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual((status, response["scan"]), (202, expected))
         start.assert_called_once()
 
+    def test_scanner_live_preview_routes_start_report_and_stop_without_capture_records(self) -> None:
+        expected = {"state": "starting"}
+        with patch.object(self.core, "start_scanner_live_preview", return_value=expected) as start:
+            status, response = self.request("/api/v1/scanner/live-preview", {})
+        self.assertEqual((status, response["preview"]), (202, expected))
+        start.assert_called_once_with()
+        with patch.object(self.core, "scanner_live_preview_status", return_value={"state": "running"}) as current:
+            status, response = self.request("/api/v1/scanner/live-preview")
+        self.assertEqual((status, response["preview"]["state"]), (200, "running"))
+        current.assert_called_once_with()
+
+        request = Request(self.base_url + "/api/v1/scanner/live-preview", method="DELETE")
+        with patch.object(self.core, "stop_scanner_live_preview", return_value={"state": "idle"}) as stop:
+            with urlopen(request, timeout=3) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(json.loads(response.read())["preview"]["state"], "idle")
+        stop.assert_called_once_with()
+
     def test_legacy_migration_uses_both_api_command_paths(self) -> None:
         for prefix, owner in (("/api/v1/projects", "human"), ("/api/v1/agent/projects", "agent")):
             with self.subTest(owner=owner):

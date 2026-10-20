@@ -3,11 +3,75 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from cadyx.errors import ConflictError
 from cadyx.scan_capture import Scan360CaptureController
 
 
 class Scan360CaptureTests(unittest.TestCase):
+    def test_live_preview_uses_only_the_ephemeral_frame_buffer_and_stops_cleanly(self) -> None:
+        class FakeProcess:
+            returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                self.returncode = 0
+                return self.returncode
+
+            def terminate(self):
+                self.returncode = -1
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "tools" / "revopoint" / "build" / "CaptureY16.exe"
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            workspace = root / "projects"
+            workspace.mkdir()
+            controller = Scan360CaptureController(root, workspace)
+            process = FakeProcess()
+            with patch("cadyx.scan_capture.subprocess.Popen", return_value=process) as popen:
+                self.assertEqual(controller.start_live_preview()["state"], "starting")
+                command = popen.call_args.args[0]
+                self.assertIn("--live-only", command)
+                self.assertIn("--live-raw", command)
+                self.assertNotIn("--out-prefix", command)
+                self.assertNotIn("--frames", command)
+                self.assertNotIn("--q-file", command)
+                raw_path = workspace / ".revopoint-live.raw"
+                stop_path = workspace / ".revopoint-live-preview.stop"
+                controller._live_preview.ready_path.touch()
+                raw_path.write_bytes(b"current frame")
+                self.assertEqual(controller.live_preview_status()["state"], "running")
+                self.assertEqual(controller.stop_live_preview(), {"state": "idle"})
+                self.assertFalse(raw_path.exists(), "stopping the preview removes its one-frame cache")
+                self.assertFalse(stop_path.exists())
+
+    def test_live_preview_and_360_capture_share_one_scanner_lease(self) -> None:
+        class FakeProcess:
+            returncode = None
+
+            def poll(self):
+                return self.returncode
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "tools" / "revopoint" / "build" / "CaptureY16.exe"
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            project = root / "projects" / "part"
+            project.mkdir(parents=True)
+            script = root / "tools" / "revopoint" / "scan_360.ps1"
+            script.touch()
+            controller = Scan360CaptureController(root, project.parent)
+            controller._live_preview = type("Preview", (), {"process": FakeProcess()})()
+            with patch("cadyx.scan_capture.shutil.which", return_value="powershell.exe"):
+                with self.assertRaises(ConflictError):
+                    controller.start("part", project)
+
     def test_latest_complete_capture_survives_host_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

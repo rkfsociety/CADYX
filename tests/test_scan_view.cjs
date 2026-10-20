@@ -19,7 +19,7 @@ const element = () => {
     click() { if (!this.disabled) listeners.click?.(); },
   };
 };
-const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply") }, URL, URLSearchParams };
+const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply") }, URL, URLSearchParams, setTimeout, clearTimeout };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"), sandbox);
 
 const cloudButton = element();
@@ -63,6 +63,15 @@ assert.equal(layer.dataset.mode, "mesh", "status polls for the same scan preserv
 const messageCount = frame.messages.length;
 view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
 assert.equal(frame.messages.length, messageCount, "polling an unchanged capture does not resend the same preview mode");
+view.showLivePreview({ open: true });
+assert.equal(layer.hidden, false);
+assert.equal(layer.dataset.mode, "live");
+assert.equal(frame.title, "Предпросмотр сканера в реальном времени");
+assert.equal(new URL(frame.src).searchParams.get("live_only"), "1");
+view.showCapture({ preview_folder: "scan folder", preview_file: "new-saved-capture.ply", preview_kind: "single" });
+assert.equal(new URL(frame.src).searchParams.get("live_only"), "1", "360 status polling does not replace active live preview");
+view.closeLivePreview();
+assert.equal(layer.hidden, true, "stopping the live preview closes the shared viewport");
 
 const blockedCloudButton = element();
 const blockedMeshButton = element();
@@ -106,8 +115,45 @@ const scannerHtml = fs.readFileSync(path.join(__dirname, "../web/scanner.html"),
 assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/button>/);
 assert.match(html, /id="viewport-scan-mesh"[^>]*>Сетка<\/button>/);
 assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/button>/);
+assert.match(html, /id="viewport-live-camera"[^>]*>Сканер<\/button>/);
 assert.ok(html.indexOf('id="viewport-live-scan"') < html.indexOf('id="viewport-scan-360"'));
 assert.doesNotMatch(html, /live-scan-tabs|live-scan-cloud-tab|live-scan-mesh-tab/);
 assert.match(html, /viewport\[data-scan-preview="true"\]\s*>\s*#model-preview/);
 assert.match(scannerHtml, /<a class="brand" href="\/" aria-label="CADYX — проекты"><svg class="brand-mark"/);
 console.log("scan view controls passed");
+
+(async () => {
+  let apiState = { state: "idle" };
+  const previewCalls = [];
+  const cameraButton = element();
+  const captureButton = element();
+  const liveViewCalls = [];
+  const liveController = sandbox.window.CadyxScanView.initializeLivePreview({
+    button: cameraButton,
+    captureButton,
+    view: {
+      showLivePreview(options) { liveViewCalls.push(["show", options]); },
+      closeLivePreview() { liveViewCalls.push(["close"]); },
+    },
+  }, undefined, async (url, options = {}) => {
+    previewCalls.push({ url, method: options.method || "GET" });
+    if (options.method === "POST") apiState = { state: "starting" };
+    if (options.method === "DELETE") apiState = { state: "idle" };
+    return { ok: true, async json() { return { preview: apiState }; } };
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  await cameraButton.listeners.click();
+  assert.equal(captureButton.disabled, true, "live preview prevents a concurrent saved 360 capture");
+  assert.equal(liveViewCalls.at(-1)[0], "show");
+  assert.equal(liveViewCalls.at(-1)[1].open, true);
+  await cameraButton.listeners.click();
+  assert.equal(captureButton.disabled, false, "stopping live preview re-enables 360 capture");
+  assert.equal(liveViewCalls.at(-1)[0], "close");
+  assert.deepEqual(previewCalls.map(call => call.method), ["GET", "POST", "DELETE"]);
+  assert.equal(cameraButton.attributes["aria-pressed"], "false");
+  await liveController.poll();
+  liveController.dispose();
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

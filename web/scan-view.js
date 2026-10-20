@@ -20,7 +20,17 @@
     return scannerUrl;
   };
 
+  const liveScannerUrlFromPage = location => {
+    const scannerUrl = new URL('/scanner', location.origin);
+    scannerUrl.searchParams.set('embed', '1');
+    scannerUrl.searchParams.set('live_only', '1');
+    const projectId = new URLSearchParams(location.search).get('project_id');
+    if (projectId) scannerUrl.searchParams.set('project_id', projectId);
+    return scannerUrl;
+  };
+
   const initialize = ({ cloudButton, meshButton, viewport, layer, frame, meshReady = false }, location = window.location) => {
+    let livePreviewOwned = false;
     const setAttribute = (element, name, value) => {
       const current = element.getAttribute(name);
       if (current !== value) element.setAttribute(name, value);
@@ -45,7 +55,7 @@
       if (meshButton.title !== meshTitle) meshButton.title = meshTitle;
     };
     const setMode = mode => {
-      if (mode !== 'cloud' && mode !== 'mesh') throw new TypeError(`Unknown scan view: ${mode}`);
+      if (mode !== 'cloud' && mode !== 'mesh' && mode !== 'live') throw new TypeError(`Unknown scan view: ${mode}`);
       if (mode === 'mesh' && !meshReady) return;
       if (!layer.hidden && layer.dataset.mode === mode && frame.getAttribute('src')) {
         updateButton();
@@ -53,12 +63,32 @@
       }
       if (layer.hidden) layer.hidden = false;
       layer.dataset.mode = mode;
-      frame.title = mode === 'cloud'
-        ? 'Облако точек скана: перетаскивание вращает, колесо меняет масштаб'
-        : 'Треугольная сетка скана: перетаскивание вращает, колесо меняет масштаб';
-      if (mode === 'cloud' && !frame.getAttribute('src')) frame.src = scannerUrlFromPage(location).href;
-      frame.contentWindow?.postMessage({ type: 'cadyx-scan-view', mode }, location.origin);
+      frame.title = mode === 'live'
+        ? 'Предпросмотр сканера в реальном времени'
+        : mode === 'cloud' ? 'Облако точек скана: перетаскивание вращает, колесо меняет масштаб'
+          : 'Треугольная сетка скана: перетаскивание вращает, колесо меняет масштаб';
+      if (mode === 'live') frame.src = liveScannerUrlFromPage(location).href;
+      else if (mode === 'cloud' && (!frame.getAttribute('src') || frame.src === 'about:blank'
+        || new URL(frame.src).searchParams.has('live_only'))) {
+        frame.src = scannerUrlFromPage(location).href;
+      }
+      frame.contentWindow?.postMessage({ type: 'cadyx-scan-view', mode: mode === 'mesh' ? 'mesh' : 'cloud' }, location.origin);
       updateButton();
+    };
+    const showLivePreview = ({ open = false } = {}) => {
+      livePreviewOwned = true;
+      if (frame.src !== liveScannerUrlFromPage(location).href) frame.src = liveScannerUrlFromPage(location).href;
+      layer.dataset.mode = 'live';
+      frame.title = 'Предпросмотр сканера в реальном времени';
+      if (open && layer.hidden) layer.hidden = false;
+      updateButton();
+    };
+    const closeLivePreview = () => {
+      if (livePreviewOwned) {
+        frame.src = 'about:blank';
+        setOpen(false);
+      }
+      livePreviewOwned = false;
     };
     const setOpen = visible => {
       const nextHidden = !visible;
@@ -67,6 +97,7 @@
       else updateButton();
     };
     const showCapture = (scan, { open = false } = {}) => {
+      if (livePreviewOwned) return;
       const previewUrl = new URL('/scanner', location.origin);
       previewUrl.searchParams.set('embed', '1');
       if (scan?.preview_file && scan?.preview_folder) {
@@ -79,6 +110,7 @@
       if (projectId) previewUrl.searchParams.set('project_id', projectId);
       const previewChanged = frame.src !== previewUrl.href;
       if (previewChanged) {
+        livePreviewOwned = false;
         frame.src = previewUrl.href;
         layer.dataset.mode = 'cloud';
         if (layer.hidden) updateButton();
@@ -98,11 +130,73 @@
       else setMode('mesh');
     });
     frame.addEventListener('load', () => frame.contentWindow?.postMessage(
-      { type: 'cadyx-scan-view', mode: layer.dataset.mode || 'cloud' }, location.origin));
+      { type: 'cadyx-scan-view', mode: layer.dataset.mode === 'mesh' ? 'mesh' : 'cloud' }, location.origin));
     updateButton();
     if (new URLSearchParams(location.search).get('live_scan') === '1') setOpen(true);
-    return { setOpen, setMode, showCapture };
+    return { setOpen, setMode, showCapture, showLivePreview, closeLivePreview };
   };
 
-  window.CadyxScanView = { initialize };
+  const initializeLivePreview = ({ button, view, captureButton }, location = window.location, fetcher = fetch) => {
+    let state = 'idle';
+    let pending = false;
+    let pollTimer = null;
+    let previouslyActive = false;
+    const active = () => state === 'starting' || state === 'running';
+    const updateButton = preview => {
+      state = preview?.state || 'idle';
+      const nowActive = active();
+      if (nowActive && !previouslyActive) view.showLivePreview({ open: true });
+      else if (!nowActive && previouslyActive) view.closeLivePreview();
+      previouslyActive = nowActive;
+      button.setAttribute('aria-pressed', String(active()));
+      button.title = active() ? 'Остановить предпросмотр сканера'
+        : state === 'failed' ? preview.message || 'Сканер остановил поток'
+          : 'Показать сканер в реальном времени';
+      if (captureButton && active() && !captureButton.disabled) {
+        captureButton.disabled = true;
+        captureButton.dataset.livePreviewLock = 'true';
+      } else if (captureButton && !active() && captureButton.dataset.livePreviewLock === 'true') {
+        captureButton.disabled = false;
+        delete captureButton.dataset.livePreviewLock;
+      }
+      if (state === 'failed') view.closeLivePreview();
+    };
+    const poll = async () => {
+      try {
+        const response = await fetcher('/api/v1/scanner/live-preview', { cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error?.message || payload.message || 'Не удалось получить состояние сканера');
+        updateButton(payload.preview);
+      } catch (error) {
+        updateButton({ state: 'failed', message: error.message });
+      }
+      clearTimeout(pollTimer);
+      pollTimer = setTimeout(poll, active() ? 900 : 3500);
+    };
+    button.addEventListener('click', async () => {
+      if (pending) return;
+      pending = true;
+      button.disabled = true;
+      try {
+        const stopping = active();
+        const response = await fetcher('/api/v1/scanner/live-preview', stopping
+          ? { method: 'DELETE' }
+          : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error?.message || payload.message || 'Не удалось переключить предпросмотр сканера');
+        updateButton(payload.preview);
+      } catch (error) {
+        updateButton({ state: 'failed', message: error.message });
+      } finally {
+        pending = false;
+        button.disabled = false;
+        clearTimeout(pollTimer);
+        pollTimer = setTimeout(poll, active() ? 900 : 3500);
+      }
+    });
+    poll();
+    return { poll, dispose: () => clearTimeout(pollTimer) };
+  };
+
+  window.CadyxScanView = { initialize, initializeLivePreview };
 })();
