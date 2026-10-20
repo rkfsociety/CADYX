@@ -2,6 +2,7 @@
 const nodeTraceDraftApi=typeof module!=="undefined"&&module.exports?require("./trace-draft.js"):null;
 function createTraceDraft(...args){const api=nodeTraceDraftApi||(typeof window!=="undefined"?window.CadyxTraceDraft:null);if(!api?.createTraceDraft)throw Error("CADYX trace-draft primitive is not loaded");return api.createTraceDraft(...args)}
 function rotateScannerPoint(dx,dy,dz,yaw,pitch){const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch),x=dx*cy-dz*sy,depth=dx*sy+dz*cy;return[x,dy*cp-depth*sp,dy*sp+depth*cp]}
+function scannerOrbitDelta(deltaX,deltaY){return{yaw:-deltaX*.008,pitch:-deltaY*.008}}
 function scannerPreviewPoint(dx,dy,dz,yaw,pitch){const p=rotateScannerPoint(dx,dy,dz,yaw,pitch);return[-p[0],-p[1],p[2]]}
 function scannerDepthOrder(points){return points.map((_,index)=>index).sort((a,b)=>points[a][2]-points[b][2])}
 function scannerReprojectDepthPixel(x,y,rawValue,q,depthScale){const depth=Number(rawValue)*Number(depthScale);if(!Number.isFinite(depth)||depth<1||!q||q.length!==16)return null;const px=q[0]*x+q[1]*y+q[2]*depth+q[3],py=q[4]*x+q[5]*y+q[6]*depth+q[7],pz=q[8]*x+q[9]*y+q[10]*depth+q[11];if(!Number.isFinite(pz)||Math.abs(pz)<1e-12)return null;const point=[px*depth/pz,-py*depth/pz,-depth];return point.every(Number.isFinite)?point:null}
@@ -28,8 +29,8 @@ function traceSegmentGeometry(s){
 function traceSegmentStart(s){return{...traceSegmentGeometry(s).start}}
 function traceSegmentEnd(s){return{...traceSegmentGeometry(s).end}}
 function traceIsClosed(a,t=1e-5){if(!a?.length)return false;const s=traceSegmentGeometry(a[0]).start,e=traceSegmentGeometry(a.at(-1)).end;return Math.hypot(s.x-e.x,s.y-e.y)<=t}
-if(typeof window!=="undefined"){window.rotateScannerPoint=rotateScannerPoint;window.scannerDepthOrder=scannerDepthOrder;window.scannerPreviewPoint=scannerPreviewPoint;window.scannerReprojectDepthPixel=scannerReprojectDepthPixel;window.scannerSupportColor=scannerSupportColor;window.CadyxTraceGeometry=Object.freeze({normalizeTraceSweepDegrees,traceArcFromPoints,traceSegmentGeometry,traceSegmentStart,traceSegmentEnd,traceIsClosed,createTraceDraft})}
-if(typeof module!=="undefined"&&module.exports)module.exports={rotateScannerPoint,scannerDepthOrder,scannerPreviewPoint,scannerReprojectDepthPixel,scannerSupportColor,normalizeTraceSweepDegrees,traceArcFromPoints,traceSegmentGeometry,traceSegmentStart,traceSegmentEnd,traceIsClosed,createTraceDraft};
+if(typeof window!=="undefined"){window.rotateScannerPoint=rotateScannerPoint;window.scannerOrbitDelta=scannerOrbitDelta;window.scannerDepthOrder=scannerDepthOrder;window.scannerPreviewPoint=scannerPreviewPoint;window.scannerReprojectDepthPixel=scannerReprojectDepthPixel;window.scannerSupportColor=scannerSupportColor;window.CadyxTraceGeometry=Object.freeze({normalizeTraceSweepDegrees,traceArcFromPoints,traceSegmentGeometry,traceSegmentStart,traceSegmentEnd,traceIsClosed,createTraceDraft})}
+if(typeof module!=="undefined"&&module.exports)module.exports={rotateScannerPoint,scannerOrbitDelta,scannerDepthOrder,scannerPreviewPoint,scannerReprojectDepthPixel,scannerSupportColor,normalizeTraceSweepDegrees,traceArcFromPoints,traceSegmentGeometry,traceSegmentStart,traceSegmentEnd,traceIsClosed,createTraceDraft};
 
 if(typeof window!=="undefined"&&typeof document!=="undefined"){
 const boot=()=>{if(document.querySelector("#trace-editor"))return;

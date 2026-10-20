@@ -218,8 +218,9 @@
       });
       cloudCanvas.addEventListener("pointermove", event => {
         if (!drag) return;
-        yaw += (event.clientX - drag.x) * .008;
-        pitch += (event.clientY - drag.y) * .008;
+        const orbit = window.scannerOrbitDelta(event.clientX - drag.x, event.clientY - drag.y);
+        yaw += orbit.yaw;
+        pitch += orbit.pitch;
         drag = { x: event.clientX, y: event.clientY };
         if (window.latestCloud) drawCloud(window.latestCloud);
       });

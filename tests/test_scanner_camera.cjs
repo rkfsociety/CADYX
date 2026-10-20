@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const {
   rotateScannerPoint,
+  scannerOrbitDelta,
   scannerDepthOrder,
   scannerPreviewPoint,
   scannerReprojectDepthPixel,
@@ -19,6 +20,8 @@ const closeTo = (actual, expected, message) => {
 };
 
 assert.deepEqual(rotateScannerPoint(2, -3, 4, 0, 0), [2, -3, 4], "zero orbit preserves camera-space coordinates");
+assert.deepEqual(scannerOrbitDelta(10, 10), { yaw: -0.08, pitch: -0.08 }, "dragging right or down reverses the previous orbit direction");
+assert.deepEqual(scannerOrbitDelta(-10, -10), { yaw: 0.08, pitch: 0.08 }, "dragging left or up reverses the previous orbit direction");
 
 const yawed = rotateScannerPoint(0, 1, 0, Math.PI / 2, 0);
 closeTo(yawed[0], 0, "yaw leaves the vertical axis horizontal coordinate unchanged");
