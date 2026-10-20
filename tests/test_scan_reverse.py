@@ -3,7 +3,8 @@ import struct
 import unittest
 
 from cadyx.commands import CommandSystem
-from cadyx.mesh_geometry import geometry_from_native_buffer, tessellate_mesh_geometry
+from cadyx.errors import ValidationError
+from cadyx.mesh_geometry import geometry_from_native_buffer, point_cloud_geometry, tessellate_mesh_geometry
 from cadyx.models import Document
 
 
@@ -63,6 +64,17 @@ def _document_with_scan(geometry):
 
 
 class ScanReverseTests(unittest.TestCase):
+    def test_reverse_engineering_commands_reject_point_only_clouds(self):
+        document = Document.create()
+        body_id = "body:33333333-3333-4333-8333-333333333333"
+        document.objects.append({
+            "id": body_id, "type": "body", "name": "Point cloud", "feature_ids": [],
+            "geometry": point_cloud_geometry([(0, 0, 0), (1, 0, 0), (0, 1, 0)]),
+        })
+        system = CommandSystem(_Kernel())
+        with self.assertRaisesRegex(ValidationError, "triangle-mesh"):
+            system.execute(document, {"type": "align_scan", "body_id": body_id})
+
     def test_align_scan_maps_dominant_axis_to_y_and_records_units(self):
         geometry = _box_mesh(x=2.0, y=10.0, z=1.0)
         document, body_id, feature_id = _document_with_scan(geometry)

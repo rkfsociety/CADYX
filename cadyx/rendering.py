@@ -138,6 +138,7 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         if kind == "body" and item.get("geometry") is not None:
             mesh = kernel.tessellate(item["geometry"])
             positions, triangles = mesh["positions"], mesh["triangles"]
+            points = mesh.get("points", [])
             selected_faces = selected_feature_faces(item, mesh)
             feature_id = next(iter(item.get("feature_ids", [])), None)
             feature_face_ranges = [

@@ -1,4 +1,4 @@
-"""Compact, validated storage for editable triangle meshes in documents."""
+"""Compact, validated storage for point clouds and triangle meshes in documents."""
 
 from __future__ import annotations
 
@@ -9,13 +9,14 @@ import struct
 import sys
 import zlib
 from array import array
-from typing import Any
+from typing import Any, Iterable
 
 from .errors import ValidationError
 
 
 _MESH_KERNEL = "cadyx-mesh-v1"
-_MESH_KIND = "triangle_mesh"
+_TRIANGLE_MESH = "triangle_mesh"
+_POINT_CLOUD = "point_cloud"
 _MESH_ENCODING = "zlib-f32-u32-le-v1"
 _HEADER = struct.Struct("<4s6If")
 _MAX_VERTICES = 300_000
@@ -43,7 +44,7 @@ def geometry_from_native_buffer(buffer: bytes) -> tuple[dict[str, Any], dict[str
     packed = zlib.compress(memoryview(buffer)[_HEADER.size :], level=6)
     geometry = {
         "kernel": _MESH_KERNEL,
-        "kind": _MESH_KIND,
+        "kind": _TRIANGLE_MESH,
         "encoding": _MESH_ENCODING,
         "vertex_count": vertex_count,
         "triangle_count": triangle_count,
@@ -61,42 +62,79 @@ def geometry_from_native_buffer(buffer: bytes) -> tuple[dict[str, Any], dict[str
     }
 
 
+def point_cloud_geometry(points: Iterable[tuple[float, float, float]]) -> dict[str, Any]:
+    """Pack source XYZ points as a persistent, renderable point-only mesh descriptor."""
+    positions = array("f")
+    count = 0
+    for point in points:
+        if not isinstance(point, (list, tuple)) or len(point) != 3:
+            raise ValidationError("Point cloud coordinates must contain XYZ triples.")
+        values = []
+        for value in point:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValidationError("Point cloud contains a non-finite coordinate.")
+            values.append(float(value))
+        positions.extend(values)
+        count += 1
+        if count > _MAX_VERTICES:
+            raise ValidationError("Point cloud exceeds the supported 300000 point limit.")
+    if count < 3:
+        raise ValidationError("Point cloud must contain at least three points.")
+    if sys.byteorder != "little":
+        positions.byteswap()
+    packed = zlib.compress(positions.tobytes(), level=6)
+    geometry = {
+        "kernel": _MESH_KERNEL,
+        "kind": _POINT_CLOUD,
+        "encoding": _MESH_ENCODING,
+        "vertex_count": count,
+        "triangle_count": 0,
+        "sha256": hashlib.sha256(packed).hexdigest(),
+        "data": base64.b64encode(packed).decode("ascii"),
+    }
+    validate_mesh_geometry(geometry)
+    return geometry
+
+
 def _decode_payload(geometry: dict[str, Any]) -> tuple[array, array]:
     expected_keys = {
         "kernel", "kind", "encoding", "vertex_count", "triangle_count", "sha256", "data",
     }
     if not isinstance(geometry, dict) or set(geometry) != expected_keys:
-        raise ValidationError("Geometry does not match the supported triangle mesh format.")
-    if (geometry.get("kernel") != _MESH_KERNEL or geometry.get("kind") != _MESH_KIND or
+        raise ValidationError("Geometry does not match the supported mesh or point-cloud format.")
+    kind = geometry.get("kind")
+    if (geometry.get("kernel") != _MESH_KERNEL or kind not in {_TRIANGLE_MESH, _POINT_CLOUD} or
             geometry.get("encoding") != _MESH_ENCODING):
-        raise ValidationError("Geometry does not match the supported triangle mesh format.")
+        raise ValidationError("Geometry does not match the supported mesh or point-cloud format.")
 
     vertex_count = geometry.get("vertex_count")
     triangle_count = geometry.get("triangle_count")
     if (type(vertex_count) is not int or type(triangle_count) is not int or
-            vertex_count < 3 or vertex_count > _MAX_VERTICES or triangle_count < 1):
-        raise ValidationError("Triangle mesh counts are missing or invalid.")
+            vertex_count < 3 or vertex_count > _MAX_VERTICES or triangle_count < 0 or
+            (kind == _TRIANGLE_MESH and triangle_count < 1) or
+            (kind == _POINT_CLOUD and triangle_count != 0)):
+        raise ValidationError("Mesh or point-cloud vertex/triangle counts are invalid.")
     checksum = geometry.get("sha256")
     encoded = geometry.get("data")
     if (not isinstance(checksum, str) or len(checksum) != 64 or
             not isinstance(encoded, str) or len(encoded) > 8_000_000):
-        raise ValidationError("Triangle mesh data is missing or invalid.")
+        raise ValidationError("Mesh or point-cloud data is missing or invalid.")
     try:
         compressed = base64.b64decode(encoded, validate=True)
     except (ValueError, base64.binascii.Error) as exc:
-        raise ValidationError("Triangle mesh data is not valid Base64.") from exc
+        raise ValidationError("Mesh or point-cloud data is not valid Base64.") from exc
     if hashlib.sha256(compressed).hexdigest() != checksum:
-        raise ValidationError("Triangle mesh checksum does not match its data.")
+        raise ValidationError("Mesh or point-cloud checksum does not match its data.")
 
     expected_size = vertex_count * 12 + triangle_count * 12
     try:
         inflater = zlib.decompressobj()
         payload = inflater.decompress(compressed, expected_size + 1)
     except zlib.error as exc:
-        raise ValidationError("Triangle mesh compressed data is invalid.") from exc
+        raise ValidationError("Mesh or point-cloud compressed data is invalid.") from exc
     if (len(payload) != expected_size or not inflater.eof or inflater.unused_data or
             inflater.unconsumed_tail):
-        raise ValidationError("Triangle mesh data size does not match its counts.")
+        raise ValidationError("Mesh or point-cloud data size does not match its counts.")
 
     positions = array("f")
     payload_view = memoryview(payload)
@@ -107,9 +145,9 @@ def _decode_payload(geometry: dict[str, Any]) -> tuple[array, array]:
         positions.byteswap()
         triangles.byteswap()
     if len(positions) != vertex_count * 3 or len(triangles) != triangle_count * 3:
-        raise ValidationError("Triangle mesh data is not aligned to its counts.")
+        raise ValidationError("Mesh or point-cloud data is not aligned to its counts.")
     if not all(math.isfinite(value) for value in positions):
-        raise ValidationError("Triangle mesh contains a non-finite vertex.")
+        raise ValidationError("Mesh or point cloud contains a non-finite vertex.")
     for offset in range(0, len(triangles), 3):
         first = triangles[offset]
         second = triangles[offset + 1]
@@ -121,7 +159,7 @@ def _decode_payload(geometry: dict[str, Any]) -> tuple[array, array]:
 
 
 def validate_mesh_geometry(geometry: dict[str, Any]) -> None:
-    """Validate packed triangle mesh geometry without exposing native objects."""
+    """Validate packed point-cloud or triangle mesh geometry."""
     _decode_payload(geometry)
 
 
@@ -136,11 +174,14 @@ def mesh_bounds(geometry: dict[str, Any]) -> dict[str, list[float]]:
 
 def tessellate_mesh_geometry(geometry: dict[str, Any]) -> dict[str, list[int] | list[float]]:
     positions, triangles = _decode_payload(geometry)
-    return {"positions": positions.tolist(), "triangles": triangles.tolist()}
+    result = {"positions": positions.tolist(), "triangles": triangles.tolist()}
+    if geometry["kind"] == _POINT_CLOUD:
+        result["points"] = list(range(geometry["vertex_count"]))
+    return result
 
 
 def mesh_ply_bytes(geometry: dict[str, Any]) -> bytes:
-    """Encode validated editable mesh geometry as a binary little-endian PLY."""
+    """Encode validated point-cloud or triangle-mesh geometry as binary PLY."""
     positions, triangles = _decode_payload(geometry)
     if sys.byteorder != "little":
         positions.byteswap()
@@ -152,9 +193,9 @@ def mesh_ply_bytes(geometry: dict[str, Any]) -> bytes:
         "property float x\n"
         "property float y\n"
         "property float z\n"
-        f"element face {geometry['triangle_count']}\n"
-        "property list uchar uint vertex_indices\n"
-        "end_header\n"
+        + (f"element face {geometry['triangle_count']}\n"
+           "property list uchar uint vertex_indices\n" if geometry["kind"] == _TRIANGLE_MESH else "")
+        + "end_header\n"
     ).encode("ascii")
     faces = bytearray(geometry["triangle_count"] * 13)
     triangle_bytes = memoryview(triangles).cast("B")

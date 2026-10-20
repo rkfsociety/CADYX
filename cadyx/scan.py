@@ -6,6 +6,7 @@ import hashlib
 import math
 import os
 import shutil
+import struct
 import tempfile
 from pathlib import Path
 from contextlib import contextmanager
@@ -29,6 +30,7 @@ _MAX_PLY_BYTES = 512 * 1024 * 1024
 _MAX_PLY_HEADER_BYTES = 64 * 1024
 _MAX_PLY_VERTICES = 2_000_000
 _MAX_PLY_FACES = 5_000_000
+_MAX_POINT_CLOUD_VERTICES = 300_000
 
 
 @contextmanager
@@ -149,6 +151,113 @@ def _ply_counts(path: Path) -> tuple[int, int]:
                                                "maximum_vertices": 2_000_000, "maximum_faces": 5_000_000},
                               "correction_hint": "Use a smaller scan or reduce its mesh density before import."})
     return vertices, faces
+
+
+def read_point_cloud_ply(path: str | Path) -> tuple[list[tuple[float, float, float]], str, dict[str, Any]]:
+    """Read a direct point-only PLY for persistence in the server viewport."""
+    source = Path(path).resolve(strict=True)
+    if source.suffix.casefold() != ".ply" or not source.is_file():
+        raise ValidationError("Point-cloud source must be a regular PLY file.")
+    if source.stat().st_size > _MAX_PLY_BYTES:
+        raise ValidationError("PLY source exceeds the 512 MiB processing limit.", code="RESOURCE_LIMIT")
+    source_hash = _sha256_file(source)
+    property_types = {
+        "char": "b", "int8": "b", "uchar": "B", "uint8": "B",
+        "short": "h", "int16": "h", "ushort": "H", "uint16": "H",
+        "int": "i", "int32": "i", "uint": "I", "uint32": "I",
+        "float": "f", "float32": "f", "double": "d", "float64": "d",
+    }
+    try:
+        with source.open("rb") as stream:
+            header = bytearray()
+            while len(header) <= _MAX_PLY_HEADER_BYTES:
+                line = stream.readline(4096)
+                if not line:
+                    break
+                header.extend(line)
+                if line.strip() == b"end_header":
+                    break
+            if len(header) > _MAX_PLY_HEADER_BYTES or not header.rstrip().endswith(b"end_header"):
+                raise ValidationError("PLY header is missing, incomplete, or exceeds 64 KiB.")
+            try:
+                lines = header.decode("ascii").splitlines()
+            except UnicodeDecodeError as exc:
+                raise ValidationError("PLY header must use ASCII encoding.") from exc
+            if not lines or lines[0].strip() != "ply":
+                raise ValidationError("File does not contain a valid PLY header.")
+            ply_format = None
+            elements: list[tuple[str, int, list[tuple[str, str]]]] = []
+            current: tuple[str, int, list[tuple[str, str]]] | None = None
+            for line in lines[1:]:
+                fields = line.split()
+                if not fields or fields[0] in {"comment", "obj_info", "end_header"}:
+                    continue
+                if fields[0] == "format" and len(fields) == 3:
+                    ply_format = fields[1]
+                elif fields[0] == "element" and len(fields) == 3:
+                    try:
+                        count = int(fields[2])
+                    except ValueError as exc:
+                        raise ValidationError("PLY element count is invalid.") from exc
+                    if count < 0:
+                        raise ValidationError("PLY element count cannot be negative.")
+                    current = (fields[1], count, [])
+                    elements.append(current)
+                elif fields[0] == "property":
+                    if current is None or len(fields) != 3:
+                        raise ValidationError("Point-cloud PLY properties must be scalar fields.")
+                    if fields[1] not in property_types:
+                        raise ValidationError(f"PLY property type is unsupported: {fields[1]!r}.")
+                    current[2].append((fields[2], fields[1]))
+            if ply_format not in {"ascii", "binary_little_endian", "binary_big_endian"}:
+                raise ValidationError("Point-cloud PLY format must be ASCII or binary little/big endian.")
+            if len(elements) != 1 or elements[0][0] != "vertex":
+                raise ValidationError("Point-cloud import requires a point-only PLY with no faces or other elements.")
+            _, vertex_count, properties = elements[0]
+            if not 3 <= vertex_count <= _MAX_POINT_CLOUD_VERTICES:
+                raise ValidationError("Point cloud must contain 3–300000 vertices.", code="RESOURCE_LIMIT")
+            names = [name for name, _ in properties]
+            if len(names) != len(set(names)) or not all(name in names for name in ("x", "y", "z")):
+                raise ValidationError("Point-cloud PLY must contain unique x, y and z properties.")
+            xyz_indices = tuple(names.index(axis) for axis in ("x", "y", "z"))
+            points: list[tuple[float, float, float]] = []
+            if ply_format == "ascii":
+                for index in range(vertex_count):
+                    row = stream.readline()
+                    if not row:
+                        raise ValidationError(f"PLY ended after {index} of {vertex_count} vertices.")
+                    try:
+                        fields = row.decode("ascii").split()
+                        if len(fields) != len(properties):
+                            raise ValueError("property count mismatch")
+                        point = tuple(float(fields[column]) for column in xyz_indices)
+                        points.append(point)
+                    except (UnicodeDecodeError, ValueError, IndexError) as exc:
+                        raise ValidationError(f"PLY vertex {index} is malformed.") from exc
+            else:
+                endian = "<" if ply_format == "binary_little_endian" else ">"
+                record = struct.Struct(endian + "".join(property_types[prop_type] for _, prop_type in properties))
+                if record.size * vertex_count > source.stat().st_size - len(header):
+                    raise ValidationError("Binary PLY ended before all vertex records were read.")
+                for index in range(vertex_count):
+                    row = stream.read(record.size)
+                    if len(row) != record.size:
+                        raise ValidationError(f"PLY ended after {index} of {vertex_count} vertices.")
+                    values = record.unpack(row)
+                    point = tuple(float(values[column]) for column in xyz_indices)
+                    points.append(point)
+            for index, point in enumerate(points):
+                if not all(math.isfinite(value) for value in point):
+                    raise ValidationError(f"PLY vertex {index} contains a non-finite coordinate.")
+    except OSError as exc:
+        raise ValidationError(f"PLY source could not be read: {exc}.") from exc
+    if _sha256_file(source) != source_hash:
+        raise ValidationError("Source PLY changed while it was being read; no model change was saved.")
+    bounds = {
+        "min": [min(point[axis] for point in points) for axis in range(3)],
+        "max": [max(point[axis] for point in points) for axis in range(3)],
+    }
+    return points, source_hash, {"point_count": vertex_count, "bounds": bounds}
 
 
 def _sha256_file(path: Path) -> str:

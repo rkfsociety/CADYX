@@ -68,8 +68,9 @@ def _mesh_body(document, body_id: Any) -> dict[str, Any]:
     if body is None:
         raise NotFoundError("Scan body was not found.")
     geometry = body.get("geometry")
-    if not isinstance(geometry, dict) or geometry.get("kernel") != "cadyx-mesh-v1":
-        raise ValidationError("This operation requires a cadyx-mesh-v1 scan body.")
+    if (not isinstance(geometry, dict) or geometry.get("kernel") != "cadyx-mesh-v1"
+            or geometry.get("kind") != "triangle_mesh"):
+        raise ValidationError("This operation requires a cadyx-mesh-v1 triangle-mesh scan body.")
     return body
 
 def _scan_feature(document, body_id: str) -> dict[str, Any] | None:

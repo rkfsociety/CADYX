@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import struct
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
 from cadyx.command_scan import ScanCommands
-from cadyx.mesh_geometry import geometry_from_native_buffer
+from cadyx.mesh_geometry import geometry_from_native_buffer, point_cloud_geometry
 from cadyx.models import Document
 
 
@@ -22,6 +23,32 @@ def _mesh():
 
 
 class ProjectScanImportTests(unittest.TestCase):
+    def test_import_point_cloud_keeps_project_provenance_without_reconstruction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "merged.ply"
+            path.write_text(
+                "ply\nformat ascii 1.0\nelement vertex 3\n"
+                "property float x\nproperty float y\nproperty float z\nend_header\n"
+                "0 0 0\n1 0 0\n0 1 0\n", encoding="ascii")
+            commands = ScanCommands()
+            commands.resolve_project_file = Mock(return_value=path)
+            commands.kernel = Mock()
+            commands.kernel.create_point_cloud.side_effect = point_cloud_geometry
+            document = Document.create()
+
+            imported = commands._import_project_point_cloud(
+                document, {"file": "merged.ply", "name": "One point cloud"},
+                project_id="project-1",
+            )
+
+            body, feature = document.objects
+            self.assertEqual(body["geometry"]["kind"], "point_cloud")
+            self.assertEqual(body["geometry"]["triangle_count"], 0)
+            self.assertEqual(feature["operation"], "import_point_cloud")
+            self.assertEqual(feature["source"], imported["source"])
+            self.assertEqual(imported["point_count"], 3)
+            document.validate()
+
     def test_import_and_parameter_edit_keep_project_source_provenance(self):
         geometry, _ = _mesh()
         stats = {

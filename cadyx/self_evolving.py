@@ -21,6 +21,7 @@ from .models import Document
 
 _BLOCKED_COMMANDS = {
     "clear_model", "remove_body", "remove_objects", "import_scan", "import_project_scan",
+    "import_project_point_cloud",
     "set_scan_parameter",
     "import_step", "export_brep", "export_stl", "export_mesh",
 }

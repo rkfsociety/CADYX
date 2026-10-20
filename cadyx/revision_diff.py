@@ -13,6 +13,7 @@ import math
 import sqlite3
 import zlib
 from copy import deepcopy
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -57,21 +58,22 @@ class RevisionArchive:
             return
         # Write ahead of project.json. An interrupted project save leaves an
         # uncommitted row, but the reader checks the committed history prefix.
-        with sqlite3.connect(self.path, timeout=10.0) as connection:
-            self._initialize(connection)
-            for record in (previous, updated):
-                document = record["document"]
-                revision = _revision(document["revision"])
-                payload = _canonical(document)
-                connection.execute(
-                    "INSERT INTO snapshots VALUES (?, ?, ?, ?) "
-                    "ON CONFLICT(revision) DO UPDATE SET "
-                    "document_hash=excluded.document_hash, "
-                    "history_hash=excluded.history_hash, document_zlib=excluded.document_zlib",
-                    (revision, hashlib.sha256(payload).hexdigest(),
-                     _history_digest(record["history"], revision),
-                     sqlite3.Binary(zlib.compress(payload, level=6))),
-                )
+        with closing(sqlite3.connect(self.path, timeout=10.0)) as connection:
+            with connection:
+                self._initialize(connection)
+                for record in (previous, updated):
+                    document = record["document"]
+                    revision = _revision(document["revision"])
+                    payload = _canonical(document)
+                    connection.execute(
+                        "INSERT INTO snapshots VALUES (?, ?, ?, ?) "
+                        "ON CONFLICT(revision) DO UPDATE SET "
+                        "document_hash=excluded.document_hash, "
+                        "history_hash=excluded.history_hash, document_zlib=excluded.document_zlib",
+                        (revision, hashlib.sha256(payload).hexdigest(),
+                         _history_digest(record["history"], revision),
+                         sqlite3.Binary(zlib.compress(payload, level=6))),
+                    )
 
     def load(self, project: dict[str, Any], revision: int) -> dict[str, Any]:
         revision = _revision(revision)
@@ -81,7 +83,7 @@ class RevisionArchive:
         if revision > current["revision"] or not self.path.is_file():
             raise ValidationError("The requested revision has no saved model checkpoint.",
                                   code="REVISION_UNAVAILABLE")
-        with sqlite3.connect(self.path, timeout=10.0) as connection:
+        with closing(sqlite3.connect(self.path, timeout=10.0)) as connection:
             try:
                 record = connection.execute(
                     "SELECT document_hash, history_hash, document_zlib "
@@ -111,7 +113,7 @@ class RevisionArchive:
         current = project["document"]
         revisions = {current["revision"]: _digest(current)}
         if self.path.is_file():
-            with sqlite3.connect(self.path, timeout=10.0) as connection:
+            with closing(sqlite3.connect(self.path, timeout=10.0)) as connection:
                 try:
                     records = connection.execute(
                         "SELECT revision, document_hash, history_hash FROM snapshots "

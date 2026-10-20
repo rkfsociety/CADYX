@@ -68,12 +68,22 @@ not hidden-line tested.
 Editable OCCT solids include boxes, closed-profile extrusions and
 revolutions, swept pipes, Boolean fuses, fillets, and external metric threads.
 Generated involute spur gears render as ordinary XY sketch linework until
-extruded through the profile-feature command. Imported scans remain validated
-`cadyx-mesh-v1` triangle meshes rather than B-reps. XY sketch points/lines lie at Z=0; XZ
+extruded through the profile-feature command. Reconstructed imported scans
+remain validated `cadyx-mesh-v1` triangle meshes rather than B-reps. Direct
+project point-cloud imports use the same validated descriptor with zero
+triangles and explicit vertex indices; the shared scene and server PNG render
+them as points. Point clouds are not B-reps or triangle meshes. XY sketch
+points/lines lie at Z=0; XZ
 sketches map their points/lines onto Y=0 with stored y becoming global Z.
 Circles use 64 closed segments, a display approximation rather than replacement
 CAD geometry. Coordinates retain document units without inventing a physical
 unit convention.
+
+For 360 capture, the current frame uses a transient preview in the same canvas.
+After the completed preview PLY is imported as a point-cloud body, the project
+view restores the saved server scene and disables the duplicate file preview.
+The viewport API and server PNG then render the persisted body; its source units
+and physical scale remain unverified unless a known reference dimension is used.
 
 The browser checks inspection and scene revisions before presenting a snapshot;
 if a command commits between requests, it refreshes again. SSE refreshes the

@@ -39,15 +39,18 @@ for (const frame of liveRawFrames) {
     for (let y = centerY - 16; y <= centerY + 16; y += 1) for (let x = centerX - 16; x <= centerX + 16; x += 1) {
       if ((x - centerX) ** 2 + (y - centerY) ** 2 > 16 ** 2) continue;
       const pixel = y * 640 + x;
-      if (pixel % 2) continue;
       const depth = Math.round(100 + 0.12 * (x - 320) - 0.08 * (y - 200));
       frame[pixel * 2] = depth & 0xff;
       frame[pixel * 2 + 1] = depth >> 8;
-      markerPointCount += 1;
+      if (pixel % 2 === 0) markerPointCount += 1;
     }
   }
 }
 let liveFrameSequence = 0;
+const waitUntil = async predicate => {
+  const deadline = Date.now() + 2000;
+  while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+};
 const fetchPreview = async url => {
   if (url.includes("point-cloud?")) return { ok: true, async text() { return url.includes("origin.ply") ? originCloud : pointCloud; } };
   if (url.includes("/calibration")) return { ok: true, async json() { return { width: 640, height: 400, matrix: [1, 0, 0, -320, 0, 1, 0, -200, 0, 0, 1, 0, 0, 0, 0, 0], depth_scale_mm_per_raw_unit: 1 }; } };
@@ -102,10 +105,10 @@ const loadCount = viewerLoads.length;
 view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", origin_file: "origin.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
 assert.equal(viewerLoads.length, loadCount, "repeated status polls do not reload the mesh or reset the camera");
 view.showLivePreview({ open: true });
-await new Promise(resolve => setTimeout(resolve, 10));
+await waitUntil(() => viewerLoads.at(-1)?.geometry.positions.length === markerPointCount * 3);
 assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "live");
-assert.equal(viewerLoads.at(-1).geometry.positions.length, markerPointCount * 3);
+assert.equal(viewerLoads.at(-1).geometry.positions.length, markerPointCount * 3, cloudButton.title);
 assert.ok(Math.abs(viewerLoads.at(-1).geometry.bounds.min[2]) < 2 && Math.abs(viewerLoads.at(-1).geometry.bounds.max[2]) < 2,
   "sparse table markers define XY and lie on that plane after alignment");
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0],
@@ -159,6 +162,27 @@ polled.setOpen(false);
 polled.showCapture({ ...capture, preview_file: "frame-2.ply" });
 assert.equal(polledCloudButton.attributes["aria-pressed"], "false", "new frames update without reopening a preview the user closed");
 
+const serverPointCloudButton = element();
+const serverModelGeometry = {
+  positions: new Float64Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), triangles: new Uint32Array(0),
+  points: new Uint32Array([0, 1, 2]), bounds: { min: [0, 0, 0], max: [1, 1, 0] },
+};
+const serverPreview = sandbox.window.CadyxScanView.initialize({
+  cloudButton: serverPointCloudButton, meshButton: element(), viewport: element(), viewer,
+  getModelGeometry: () => serverModelGeometry,
+  hasPersistentPointCloud: file => file === "merged.ply",
+  meshReady: false,
+}, undefined, fetchPreview);
+serverPreview.showCapture({ ...capture, state: "running" }, { open: true });
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(serverPointCloudButton.attributes["aria-pressed"], "true");
+serverPreview.showCapture({ ...capture, state: "completed", preview_file: "merged.ply" });
+assert.equal(serverPointCloudButton.disabled, true, "a persisted fusion stays in the CAD model viewer");
+assert.equal(serverPointCloudButton.attributes["aria-pressed"], "false");
+assert.equal(viewerLoads.at(-1).geometry, serverModelGeometry, "completion restores the server-rendered point-cloud body");
+serverPointCloudButton.click();
+assert.equal(viewerLoads.at(-1).geometry, serverModelGeometry, "the scan overlay cannot replace the persisted CAD cloud");
+
 const html = fs.readFileSync(path.join(__dirname, "../web/index.html"), "utf8");
 const scannerHtml = fs.readFileSync(path.join(__dirname, "../web/scanner.html"), "utf8");
 const appJs = fs.readFileSync(path.join(__dirname, "../web/app.js"), "utf8");
@@ -170,6 +194,9 @@ assert.ok(html.indexOf('id="viewport-live-scan"') < html.indexOf('id="viewport-s
 assert.doesNotMatch(html, /live-scan-tabs|live-scan-cloud-tab|live-scan-mesh-tab/);
 assert.doesNotMatch(html, /live-scan-layer|live-scan-frame|<iframe/);
 assert.match(appJs, /viewer:modelViewer/);
+assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);
+assert.match(appJs, /showCapturePreview\(scan,\{open:captureStarted\}\)/);
+assert.match(appJs, /import_point_cloud:\['Облако точек','cloud'\]/);
 assert.match(scannerHtml, /<a class="brand" href="\/" aria-label="CADYX — проекты"><svg class="brand-mark"/);
 assert.match(appJs, /\.model-toolbar \.cad3-tool/);
 console.log("scan view controls passed");

@@ -12,11 +12,11 @@ from collections import OrderedDict
 from typing import Any, Callable, Protocol
 
 from .errors import ValidationError
-from .mesh_geometry import tessellate_mesh_geometry
+from .mesh_geometry import point_cloud_geometry, tessellate_mesh_geometry
 from .native_kernel import NativeKernel
 from .kernel_descriptors import (
     GeometryDescriptor, GeometryDescriptorValidation,
-    BRepDescriptor, BooleanDescriptor, BoxDescriptor, CircleDescriptor, FilletDescriptor, HoledProfileDescriptor, LoftDescriptor, MulticontourLoftDescriptor, PipeDescriptor, ProfileDescriptor, RuledShellDescriptor, ThreadDescriptor,
+    BRepDescriptor, BooleanDescriptor, BoxDescriptor, CircleDescriptor, FilletDescriptor, HoledProfileDescriptor, LoftDescriptor, MeshDescriptor, MulticontourLoftDescriptor, PipeDescriptor, ProfileDescriptor, RuledShellDescriptor, ThreadDescriptor,
     serialize_geometry,
 )
 from .kernel_primitive import PrimitiveKernelAdapter as PrimitiveKernelAdapter
@@ -60,6 +60,8 @@ def _estimated_mesh_bytes(value: Any) -> int:
 
 
 class GeometryKernel(Protocol):
+    def create_point_cloud(self, points: list[tuple[float, float, float]]) -> MeshDescriptor: ...
+
     def create_box(self, *, width: float, height: float, depth: float) -> BoxDescriptor: ...
 
     def create_extruded_profile(
@@ -207,6 +209,9 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
                 _tessellation_cache[cache_key] = (copy.deepcopy(mesh), size)
                 _tessellation_cache_bytes += size
         return mesh
+
+    def create_point_cloud(self, points: list[tuple[float, float, float]]) -> MeshDescriptor:
+        return point_cloud_geometry(points)
 
     def create_box(self, *, width: float, height: float, depth: float) -> BoxDescriptor:
         dimensions = _box_dimensions(width, height, depth)

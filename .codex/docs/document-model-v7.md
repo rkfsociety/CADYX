@@ -702,6 +702,15 @@ sources are recorded by filename and SHA-256, then re-read and hash-checked when
 scan parameters or alignment are recomputed. Both import commands preserve the
 original PLY and publish the processed PLY beside it in the source's folder.
 
+`import_project_point_cloud` stores a staged point-only PLY directly as one
+point-cloud body in the document. It preserves source coordinates and scale,
+records the project filename and SHA-256 in feature provenance, and renders the
+points in the normal CAD scene and server PNG. It accepts ASCII or binary
+little/big-endian PLY with scalar XYZ vertex properties, 3–300000 points, and no
+faces or other elements. The source file remains unchanged. This representation
+is point-only scan data, not a triangle mesh or an OCCT B-rep. Physical units
+and scale are not inferred; feature statistics mark them unverified.
+
 `folder` and `file` must resolve to a direct regular `.ply` file in the project
 workspace; traversal and symlinks are rejected. The command stores the source
 relative path and SHA-256 in the feature. Changing a processing parameter

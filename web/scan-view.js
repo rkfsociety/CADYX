@@ -1,6 +1,8 @@
 (() => {
-  const initialize = ({ cloudButton, meshButton, viewport, viewer, getModelGeometry = () => null, meshReady = false }, location = window.location, fetcher = fetch) => {
+  const initialize = ({ cloudButton, meshButton, viewport, viewer, getModelGeometry = () => null,
+    hasPersistentPointCloud = () => false, meshReady = false }, location = window.location, fetcher = fetch) => {
     let livePreviewOwned = false;
+    let serverPointCloudVisible = false;
     let cloudPreviewOpen = false;
     let meshPreviewOpen = false;
     let cloudSource = null;
@@ -25,9 +27,11 @@
       const previewVisible = String(livePreviewOwned);
       viewport.dataset.scanPreviewMode = livePreviewOwned ? 'live' : cloudSelected ? 'cloud' : meshSelected ? 'mesh' : '';
       if (viewport.dataset.scanPreview !== previewVisible) viewport.dataset.scanPreview = previewVisible;
+      cloudButton.disabled = serverPointCloudVisible;
       setAttribute(cloudButton, 'aria-label', 'Облако точек');
       setAttribute(cloudButton, 'aria-pressed', String(cloudSelected));
-      const cloudTitle = cloudSelected ? 'Скрыть предпросмотр скана'
+      const cloudTitle = serverPointCloudVisible ? 'Объединённое облако уже показано как тело CAD-проекта'
+        : cloudSelected ? 'Скрыть предпросмотр скана'
         : meshSelected ? 'Переключить на облако точек' : 'Показать облако точек';
       if (cloudButton.title !== cloudTitle) cloudButton.title = cloudTitle;
       const meshDisabled = !meshReady;
@@ -409,6 +413,17 @@
       else updateButton();
     };
     const showCapture = (scan, { open = false } = {}) => {
+      if (scan?.state === 'completed' && scan.preview_file && hasPersistentPointCloud(scan.preview_file)) {
+        serverPointCloudVisible = true;
+        if (livePreviewOwned) closeLivePreview();
+        else if (cloudPreviewOpen || meshPreviewOpen) { restoreModel(); updateButton(); }
+        else updateButton();
+        return;
+      }
+      if (serverPointCloudVisible) {
+        serverPointCloudVisible = false;
+        updateButton();
+      }
       if (livePreviewOwned) return;
       const source = pointCloudUrl(scan);
       const nextOriginSource = originUrl(scan);
@@ -435,6 +450,7 @@
       if (open) { void showCloud(true); return; }
     };
     cloudButton.addEventListener('click', () => {
+      if (serverPointCloudVisible) return;
       if (cloudPreviewOpen) void showCloud(false);
       else void showCloud(true);
     });

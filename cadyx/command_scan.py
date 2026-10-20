@@ -11,7 +11,7 @@ from uuid import uuid4
 from .errors import NotFoundError, ValidationError
 from .mesh_geometry import mesh_ply_bytes
 from .models import Document
-from .scan import DEFAULT_SCAN_PARAMETERS, normalize_scan_parameters
+from .scan import DEFAULT_SCAN_PARAMETERS, normalize_scan_parameters, read_point_cloud_ply
 
 
 class ScanCommands:
@@ -86,6 +86,59 @@ class ScanCommands:
             document, command, source, self.resolve_project_file(project_id, filename),
             progress=progress, project_id=project_id,
         )
+
+    def _import_project_point_cloud(
+        self,
+        document: Document,
+        command: dict[str, Any],
+        *,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        filename = command.get("file")
+        if (self.resolve_project_file is None or project_id is None or not isinstance(filename, str)
+                or Path(filename).suffix.casefold() != ".ply"):
+            raise ValidationError("Point-cloud import requires a staged PLY filename and project context.")
+        name = command.get("name", Path(filename).stem)
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+            raise ValidationError("Point-cloud name must be a non-empty string of at most 120 characters.")
+        if progress is not None:
+            progress({"phase": "read_point_cloud"})
+        points, source_hash, stats = read_point_cloud_ply(
+            self.resolve_project_file(project_id, filename),
+        )
+        stats.update({"coordinate_units": "source_unverified", "scale_status": "unverified"})
+        geometry = self.kernel.create_point_cloud(points)
+        body_id = f"body:{uuid4()}"
+        feature_id = f"feature:{uuid4()}"
+        source = {"project_file": filename, "sha256": source_hash}
+        document.objects.extend([
+            {
+                "id": body_id,
+                "type": "body",
+                "name": name.strip(),
+                "feature_ids": [feature_id],
+                "geometry": geometry,
+            },
+            {
+                "id": feature_id,
+                "type": "feature",
+                "operation": "import_point_cloud",
+                "body_id": body_id,
+                "source": source,
+                "source_kind": "point_cloud",
+                "stats": stats,
+                "processor": {"name": "CADYX point-cloud codec", "version": 1},
+            },
+        ])
+        return {
+            "body_id": body_id,
+            "feature_id": feature_id,
+            "source": source,
+            "source_kind": "point_cloud",
+            "point_count": stats["point_count"],
+            "bounds": stats["bounds"],
+        }
 
     def _import_scan_source(
         self,
@@ -229,6 +282,13 @@ def _handle_import_project_scan(
     return self._import_project_scan(document, command, progress=progress, project_id=project_id)
 
 
+def _handle_import_project_point_cloud(
+    self: Any, document: Document, command: dict[str, Any], *,
+    progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
+) -> dict[str, Any]:
+    return self._import_project_point_cloud(document, command, progress=progress, project_id=project_id)
+
+
 def _handle_set_scan_parameter(
     self: Any, document: Document, command: dict[str, Any], *,
     progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
@@ -239,5 +299,6 @@ def _handle_set_scan_parameter(
 COMMAND_HANDLERS = {
     "import_scan": _handle_import_scan,
     "import_project_scan": _handle_import_project_scan,
+    "import_project_point_cloud": _handle_import_project_point_cloud,
     "set_scan_parameter": _handle_set_scan_parameter,
 }

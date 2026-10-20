@@ -819,7 +819,7 @@ class CommandActivityService(_CoreService):
                     if exc.code == "VALIDATION_ERROR":
                         if command_name == "add_sketch_constraint":
                             exc.code = "SKETCH_CONSTRAINT_INVALID"
-                        elif command_name in {"import_scan", "set_scan_parameter"}:
+                        elif command_name in {"import_scan", "import_project_point_cloud", "set_scan_parameter"}:
                             exc.code = "SCAN_OPERATION_FAILED"
                         elif command_name == "export_brep":
                             exc.code = "EXPORT_VERIFICATION_FAILED"

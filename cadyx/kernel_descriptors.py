@@ -133,7 +133,7 @@ class FilletDescriptor(OCCTDescriptor):
 
 class MeshDescriptor(TypedDict):
     kernel: Literal["cadyx-mesh-v1"]
-    kind: Literal["triangle_mesh"]
+    kind: Literal["triangle_mesh", "point_cloud"]
     encoding: Literal["zlib-f32-u32-le-v1"]
     vertex_count: int
     triangle_count: int

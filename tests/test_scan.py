@@ -11,10 +11,12 @@ from cadyx.kernel import OCCTKernelAdapter
 from cadyx.mesh_geometry import (
     geometry_from_native_buffer,
     mesh_ply_bytes,
+    point_cloud_geometry,
     tessellate_mesh_geometry,
     validate_mesh_geometry,
 )
-from cadyx.scan import DEFAULT_SCAN_PARAMETERS, ScanProcessor, normalize_scan_parameters
+from cadyx.scan import (DEFAULT_SCAN_PARAMETERS, ScanProcessor, normalize_scan_parameters,
+                        read_point_cloud_ply)
 
 
 def _native_mesh_buffer(*, source_kind=1, input_vertices=4, input_triangles=4):
@@ -74,6 +76,52 @@ class _FakeScanProcessor:
 
 
 class ScanGeometryTests(unittest.TestCase):
+    def test_point_cloud_descriptor_round_trips_without_faces(self):
+        points = [(0.0, 1.0, 2.0), (3.0, 4.0, 5.0), (-1.0, 2.0, 0.5)]
+        geometry = point_cloud_geometry(points)
+        kernel = OCCTKernelAdapter()
+        kernel.validate(geometry)
+        rendered = kernel.tessellate(geometry)
+        self.assertEqual(geometry["kind"], "point_cloud")
+        self.assertEqual(geometry["triangle_count"], 0)
+        self.assertEqual(rendered["triangles"], [])
+        self.assertEqual(rendered["points"], [0, 1, 2])
+        self.assertEqual(rendered["positions"], [coordinate for point in points for coordinate in point])
+        ply = mesh_ply_bytes(geometry)
+        self.assertIn(b"element vertex 3\n", ply)
+        self.assertNotIn(b"element face", ply)
+
+    def test_read_ascii_and_binary_point_only_ply(self):
+        points = [(0.0, 1.0, 2.0), (3.0, 4.0, 5.0), (-1.0, 2.0, 0.5)]
+        with tempfile.TemporaryDirectory() as directory:
+            ascii_path = Path(directory) / "ascii.ply"
+            ascii_path.write_text(
+                "ply\nformat ascii 1.0\nelement vertex 3\n"
+                "property float x\nproperty float y\nproperty float z\nend_header\n"
+                "0 1 2\n3 4 5\n-1 2 0.5\n", encoding="ascii")
+            parsed, source_hash, stats = read_point_cloud_ply(ascii_path)
+            self.assertEqual(parsed, points)
+            self.assertEqual(stats["point_count"], 3)
+            self.assertEqual(source_hash, hashlib.sha256(ascii_path.read_bytes()).hexdigest())
+
+            binary_path = Path(directory) / "binary.ply"
+            header = ("ply\nformat binary_big_endian 1.0\nelement vertex 3\n"
+                      "property float x\nproperty float y\nproperty float z\nend_header\n").encode("ascii")
+            binary_path.write_bytes(header + b"".join(struct.pack(">fff", *point) for point in points))
+            parsed, _, _ = read_point_cloud_ply(binary_path)
+            self.assertEqual(parsed, points)
+
+    def test_read_point_cloud_rejects_mesh_faces(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mesh.ply"
+            path.write_text(
+                "ply\nformat ascii 1.0\nelement vertex 3\n"
+                "property float x\nproperty float y\nproperty float z\n"
+                "element face 1\nproperty list uchar int vertex_indices\nend_header\n",
+                encoding="ascii")
+            with self.assertRaisesRegex(ValidationError, "scalar fields|no faces"):
+                read_point_cloud_ply(path)
+
     def test_native_mesh_descriptor_round_trips_through_geometry_kernel(self):
         geometry, metadata = geometry_from_native_buffer(_native_mesh_buffer())
         kernel = OCCTKernelAdapter()

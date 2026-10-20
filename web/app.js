@@ -10,7 +10,7 @@
   const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
   const svg=(d)=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
   const I={model:svg('m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z M4 7.5l8 4.5 8-4.5M12 12v9'),sketch:svg('M5 18 17 6M7 6h10v10 M5 18h3M16 6h3'),fillet:svg('M5 19V9a4 4 0 0 1 4-4h10M9 19V11a2 2 0 0 1 2-2h8'),thread:svg('M6 5h12M6 9h12M6 13h12M6 17h12M9 3 7 21M17 3l-2 18'),cut:svg('M5 5h14v14H5zM9 5v10h10'),origin:svg('M12 3v18M3 12h18 M9 12a3 3 0 1 0 6 0 3 3 0 1 0-6 0'),plane:svg('m5 8 11-3 3 11-11 3-3-11Z'),files:svg('M4 7.5h6l2-2h8v13H4v-11Z'),projects:svg('M4 5h7v6H4zM13 5h7v6h-7zM4 13h7v6H4zM13 13h7v6h-7z'),activity:svg('M4 12h4l2-5 4 10 2-5h4'),settings:svg('M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z M19 12l2-1-2-3-2 .5-1.5-1L15 5H9l-.5 2.5-1.5 1L5 8l-2 3 2 1v2l-2 1 2 3 2-.5 1.5 1L9 21h6l.5-2.5 1.5-1 2 .5 2-3-2-1v-2Z'),comment:svg('M5 5h14v11H9l-4 3V5Z M8 9h8M8 12h6'),cloud:svg('M7 18h10a4 4 0 0 0 .4-8A6 6 0 0 0 6.1 8.5 4.5 4.5 0 0 0 7 18Z'),select:svg('m5 3 12 10-6 1.2L9 20 5 3Z'),orbit:svg('M4 12a8 8 0 0 1 13.5-5.8L20 9M20 4v5h-5M20 12a8 8 0 0 1-13.5 5.8L4 15M4 20v-5h5'),fit:svg('M8 4H4v4M16 4h4v4M20 16v4h-4M8 20H4v-4M8 8h8v8H8z')};
-  const meta={create_box:['Блок','model'],metric_thread:['Резьба','thread'],reconstruct_scan:['Реконструкция скана','model'],import_step:['Импорт STEP','model'],extrude_sketch:['Выдавливание','model'],revolve_sketch:['Вращение','model'],loft_sketches:['Переход по сечениям','model'],loft_profiles:['Переход по сечениям','model'],create_ruled_shell:['Линейчатая оболочка','model'],fuse_bodies:['Объединение тел','model'],cut_bodies:['Вырезание','cut'],sweep_sketch:['Протяжка','model'],fillet_edges:['Скругление','fillet'],variable_fillet_edges:['Переменное скругление','fillet'],chamfer_edges:['Фаска','model'],shell_body:['Оболочка','model'],offset_body:['Смещение поверхности','model'],draft_faces:['Уклон граней','model'],mirror_body:['Зеркальное отражение','model'],linear_pattern_body:['Линейный массив','model'],circular_pattern_body:['Круговой массив','model'],boss:['Выступ','model'],hole:['Отверстие','cut'],through_hole:['Сквозное отверстие','cut'],counterbore_hole:['Отверстие с цековкой','cut'],countersink_hole:['Отверстие с зенковкой','cut'],threaded_hole:['Резьбовое отверстие','cut'],pad_sketch_to_body:['Выдавливание','model'],rib_from_sketch:['Ребро жёсткости','model'],pocket_sketch:['Карман','cut'],extrude_profile_on_plane:['Выдавливание профиля','model'],resize_imported_thread:['Изменение резьбы','thread'],transform_imported_brep:['Преобразование тела','model']};
+  const meta={create_box:['Блок','model'],metric_thread:['Резьба','thread'],reconstruct_scan:['Реконструкция скана','model'],import_point_cloud:['Облако точек','cloud'],import_step:['Импорт STEP','model'],extrude_sketch:['Выдавливание','model'],revolve_sketch:['Вращение','model'],loft_sketches:['Переход по сечениям','model'],loft_profiles:['Переход по сечениям','model'],create_ruled_shell:['Линейчатая оболочка','model'],fuse_bodies:['Объединение тел','model'],cut_bodies:['Вырезание','cut'],sweep_sketch:['Протяжка','model'],fillet_edges:['Скругление','fillet'],variable_fillet_edges:['Переменное скругление','fillet'],chamfer_edges:['Фаска','model'],shell_body:['Оболочка','model'],offset_body:['Смещение поверхности','model'],draft_faces:['Уклон граней','model'],mirror_body:['Зеркальное отражение','model'],linear_pattern_body:['Линейный массив','model'],circular_pattern_body:['Круговой массив','model'],boss:['Выступ','model'],hole:['Отверстие','cut'],through_hole:['Сквозное отверстие','cut'],counterbore_hole:['Отверстие с цековкой','cut'],countersink_hole:['Отверстие с зенковкой','cut'],threaded_hole:['Резьбовое отверстие','cut'],pad_sketch_to_body:['Выдавливание','model'],rib_from_sketch:['Ребро жёсткости','model'],pocket_sketch:['Карман','cut'],extrude_profile_on_plane:['Выдавливание профиля','model'],resize_imported_thread:['Изменение резьбы','thread'],transform_imported_brep:['Преобразование тела','model']};
   const editable={create_box:['width','height','depth'],metric_thread:['major_diameter','pitch','length'],extrude_sketch:['depth'],revolve_sketch:['angle_degrees','outer_diameter','height'],sweep_sketch:['radius'],fillet_edges:['radius']};
   const pLabel={width:'Ширина',height:'Высота',depth:'Глубина',outer_diameter:'Наружный диаметр',major_diameter:'Номинальный диаметр',pitch:'Шаг',length:'Длина',angle_degrees:'Угол',radius:'Радиус',centered:'По центру',handedness:'Направление резьбы',diameter_delta:'Изменение диаметра',rotation_axis:'Ось вращения',translation:'Перемещение',section_offsets:'Смещения сечений',sewing_tolerance:'Допуск сшивания'};
   const fmt=v=>Number.isFinite(Number(v))?new Intl.NumberFormat('ru-RU',{maximumFractionDigits:3}).format(Number(v)):'—';
@@ -428,9 +428,61 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     canvas.addEventListener('pointercancel',()=>{down=null},true);
     const toolbar=$('.model-toolbar'),presets=$('#viewport-camera-presets'),fit=$('#viewport-fit'),four=$('#viewport-four-views'),divider=$('.viewport-toolbar-divider'),liveScan=$('#viewport-live-scan'),scanMesh=$('#viewport-scan-mesh'),liveCamera=$('#viewport-live-camera'),scanViewport=$('#viewport'),scan360=$('#viewport-scan-360'),scanStatus=$('#viewport-scan-360-status');if(toolbar&&presets&&fit&&four&&divider){detail.dataset.cadTool='orbit';fit.innerHTML=`${I.fit}<span class="toolbar-label">Вписать</span>`;fit.classList.add('cad3-tool');four.classList.add('cad3-tool');liveScan?.classList.add('cad3-tool');scanMesh?.classList.add('cad3-tool');liveCamera?.classList.add('cad3-tool');const views=document.createElement('details');views.className='cad3-views';views.innerHTML='<summary class="cad3-tool">Ракурсы ▾</summary>';views.append(presets);toolbar.replaceChildren(fit,four,divider,views,...(liveScan?[liveScan]:[]),...(scanMesh?[scanMesh]:[]),...(scan360?[scan360]:[]),...(liveCamera?[liveCamera]:[]),...(scanStatus?[scanStatus]:[]))}
     const scanParams=new URLSearchParams(location.search),scanMeshReady=scanParams.get('scan_mesh_ready')==='1'&&scanParams.get('scan_kind')!=='provisional_fusion';
-    const scanView=liveScan&&scanMesh&&scanViewport?window.CadyxScanView?.initialize({cloudButton:liveScan,meshButton:scanMesh,viewport:scanViewport,viewer:modelViewer,getModelGeometry:()=>currentModelViewportGeometry,meshReady:scanMeshReady}):null;
+    const scanView=liveScan&&scanMesh&&scanViewport?window.CadyxScanView?.initialize({cloudButton:liveScan,meshButton:scanMesh,viewport:scanViewport,viewer:modelViewer,getModelGeometry:()=>currentModelViewportGeometry,hasPersistentPointCloud:file=>state.objects.some(o=>o.type==='feature'&&o.operation==='import_point_cloud'&&o.source?.project_file===file),meshReady:scanMeshReady}):null;
     if(liveCamera&&scanView)window.CadyxScanView?.initializeLivePreview({button:liveCamera,view:scanView,captureButton:scan360});
-    if(scan360&&scanStatus){let pollTimer=null;const projectId=()=>window.cadyxSelectedProjectId?.();const showCapturePreview=(scan,options)=>scanView?.showCapture(scan,options);const pollScan=async id=>{try{const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{cache:'no-store'});const payload=await response.json();if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось получить статус съёмки');const scan=payload.scan;scanStatus.textContent=scan.state==='completed'||scan.state==='idle'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;scan360.disabled=scan.state==='running'||scan.state==='busy'||scan360.dataset.livePreviewLock==='true';if(scan.state==='running'){showCapturePreview(scan);pollTimer=setTimeout(()=>pollScan(id),1200)}else if(scan.state==='completed'){showCapturePreview(scan);scan360.disabled=scan360.dataset.livePreviewLock==='true';pollTimer=setTimeout(()=>pollScan(id),4000)}else if(scan.state==='failed'){scan360.disabled=scan360.dataset.livePreviewLock==='true';pollTimer=setTimeout(()=>pollScan(id),4000)}else if(scan.state==='busy'){pollTimer=setTimeout(()=>pollScan(id),2500)}else{pollTimer=setTimeout(()=>pollScan(id),2500)}}catch(error){scan360.disabled=scan360.dataset.livePreviewLock==='true';scanStatus.textContent=error.message;pollTimer=setTimeout(()=>pollScan(id),4000)}};const waitForProjectId=()=>{const id=projectId();if(id)pollScan(id);else pollTimer=setTimeout(waitForProjectId,500)};scan360.addEventListener('click',async()=>{const id=projectId();if(!id){scanStatus.textContent='Сначала выберите проект.';return}scan360.disabled=true;scanStatus.textContent='Запускаю съёмку…';try{const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const payload=await response.json();if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось запустить сканирование');showCapturePreview(payload.scan,{open:true});scanStatus.textContent='Кадр 0/12';clearTimeout(pollTimer);pollScan(id)}catch(error){scan360.disabled=scan360.dataset.livePreviewLock==='true';scanStatus.textContent=error.message}});waitForProjectId()}
+    if(scan360&&scanStatus){
+      let pollTimer=null,scanWasRunning=false;
+      const projectId=()=>window.cadyxSelectedProjectId?.();
+      const showCapturePreview=(scan,options)=>scanView?.showCapture(scan,options);
+      const pollScan=async id=>{
+        try{
+          const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{cache:'no-store'});
+          const payload=await response.json();
+          if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось получить статус съёмки');
+          const scan=payload.scan;
+          const captureStarted=scan.state==='running'&&!scanWasRunning;
+          scanWasRunning=scan.state==='running';
+          scanStatus.textContent=scan.state==='completed'||scan.state==='idle'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;
+          scan360.disabled=scan.state==='running'||scan.state==='busy'||scan360.dataset.livePreviewLock==='true';
+          if(scan.state==='running'){
+            showCapturePreview(scan,{open:captureStarted});
+            pollTimer=setTimeout(()=>pollScan(id),1200);
+          }else if(scan.state==='completed'){
+            showCapturePreview(scan);
+            scan360.disabled=scan360.dataset.livePreviewLock==='true';
+            pollTimer=setTimeout(()=>pollScan(id),4000);
+          }else if(scan.state==='failed'){
+            scan360.disabled=scan360.dataset.livePreviewLock==='true';
+            pollTimer=setTimeout(()=>pollScan(id),4000);
+          }else{
+            pollTimer=setTimeout(()=>pollScan(id),2500);
+          }
+        }catch(error){
+          scan360.disabled=scan360.dataset.livePreviewLock==='true';
+          scanStatus.textContent=error.message;
+          pollTimer=setTimeout(()=>pollScan(id),4000);
+        }
+      };
+      const waitForProjectId=()=>{const id=projectId();if(id)pollScan(id);else pollTimer=setTimeout(waitForProjectId,500)};
+      scan360.addEventListener('click',async()=>{
+        const id=projectId();
+        if(!id){scanStatus.textContent='Сначала выберите проект.';return}
+        scan360.disabled=true;scanStatus.textContent='Запускаю съёмку…';
+        try{
+          const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+          const payload=await response.json();
+          if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось запустить сканирование');
+          showCapturePreview(payload.scan,{open:true});
+          scanWasRunning=payload.scan.state==='running';
+          scanStatus.textContent='Кадр 0/12';
+          clearTimeout(pollTimer);pollScan(id);
+        }catch(error){
+          scan360.disabled=scan360.dataset.livePreviewLock==='true';
+          scanStatus.textContent=error.message;
+        }
+      });
+      waitForProjectId();
+    }
     async function refresh(){const id=new URLSearchParams(location.search).get('project_id');if(!id||detail.hidden)return;try{const [info,scene]=await Promise.all([fetch(`/api/v1/projects/${encodeURIComponent(id)}`,{cache:'no-store'}).then(r=>r.json()),fetch(`/api/v1/projects/${encodeURIComponent(id)}/viewport`,{cache:'no-store'}).then(r=>r.json())]);if(scene.revision!==info.document.revision)return;const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};state.bindings=info.document.parameter_bindings||[];state.assembly=info.document.assembly||null;state.byId=new Map(state.objects.map(o=>[o.id,o]));state.scene=scene;makeLabels();if(projectChanged||(state.selected&&!state.byId.has(state.selected))){clearSelection();return}renderTree();state.selected?select(state.selected):renderProps(null);syncOverlay()}catch(e){console.debug('CAD semantic refresh',e)}}
     let timer;const schedule=()=>{clearTimeout(timer);timer=setTimeout(refresh,80)};['#document-revision','#document-title'].forEach(s=>{const e=$(s);if(e)new MutationObserver(schedule).observe(e,{childList:true,subtree:true,characterData:true})});new MutationObserver(schedule).observe(detail,{attributes:true,attributeFilter:['hidden']});schedule();setTimeout(refresh,600);
   }

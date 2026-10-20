@@ -43,6 +43,26 @@ class RenderingTests(unittest.TestCase):
             volume += (a[0]*(b[1]*c[2]-b[2]*c[1]) + a[1]*(b[2]*c[0]-b[0]*c[2]) + a[2]*(b[0]*c[1]-b[1]*c[0])) / 6
         self.assertAlmostEqual(volume, 30)
 
+    def test_project_point_cloud_is_present_in_server_scene_and_png(self):
+        project_directory = self.core.workspace._project_dir(self.project)
+        source = project_directory / "merged.ply"
+        source.write_text(
+            "ply\nformat ascii 1.0\nelement vertex 4\n"
+            "property float x\nproperty float y\nproperty float z\nend_header\n"
+            "0 0 0\n4 0 0\n0 4 0\n0 0 4\n", encoding="ascii")
+        result = self.command({"type": "import_project_point_cloud", "file": source.name,
+                               "name": "Unified scan"})
+        scene = self.core.render_project(self.project)
+        body = next(item for item in scene["objects"] if item["object_id"] == result["body_id"])
+        self.assertEqual(body["triangles"], [])
+        self.assertEqual(body["points"], [0, 1, 2, 3])
+        self.assertEqual(body["positions"], [0.0, 0.0, 0.0, 4.0, 0.0, 0.0,
+                                             0.0, 4.0, 0.0, 0.0, 0.0, 4.0])
+        image = self.core.render_project_png(self.project)
+        empty = render_scene_png({"objects": []})
+        self.assertGreater(len(image), 100)
+        self.assertNotEqual(image, empty)
+
     def test_hidden_imported_reference_is_not_in_viewport_or_scene_bounds(self):
         document = Document.create()
         body_id = f"body:{uuid4()}"

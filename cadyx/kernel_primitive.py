@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from typing import Any, Callable
 from .errors import ValidationError
-from .kernel_descriptors import GeometryDescriptor
+from .kernel_descriptors import GeometryDescriptor, MeshDescriptor
 
 
 class PrimitiveKernelAdapter:
@@ -15,6 +15,11 @@ class PrimitiveKernelAdapter:
         from .kernel import OCCTKernelAdapter
 
         return OCCTKernelAdapter().tessellate(geometry)
+
+    def create_point_cloud(self, points: list[tuple[float, float, float]]) -> MeshDescriptor:
+        from .mesh_geometry import point_cloud_geometry
+
+        return point_cloud_geometry(points)
 
     def create_box(self, *, width: float, height: float, depth: float) -> dict[str, Any]:
         dimensions = {"width": width, "height": height, "depth": depth}
