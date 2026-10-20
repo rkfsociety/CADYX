@@ -5,7 +5,7 @@ const {
   scannerDepthOrder,
   scannerPreviewPoint,
   scannerReprojectDepthPixel,
-  scannerSupportColor,
+  scannerDepthColor,
   normalizeTraceSweepDegrees,
   traceArcFromPoints,
   traceSegmentGeometry,
@@ -52,11 +52,11 @@ assert.ok(depthPoint[1] < 0, "scanner camera Y is inverted into viewport-up coor
 assert.equal(scannerReprojectDepthPixel(153, 299, 0, qMatrix, 0.005), null, "zero depth remains invalid");
 assert.equal(scannerReprojectDepthPixel(153, 299, 1, qMatrix, 0.005), null, "near-zero invalid readings are filtered");
 
-assert.equal(scannerSupportColor(1, 4), "hsl(25 88% 58%)", "one-frame points use the low-support color");
-assert.equal(scannerSupportColor(2, 4), "hsl(174 88% 58%)", "two-frame points use the medium-support color");
-assert.equal(scannerSupportColor(4, 4), "hsl(275 88% 58%)", "maximum-support points use the high-support color");
-assert.equal(scannerSupportColor(12, 4), "hsl(275 88% 58%)", "support colors clamp to the file's maximum");
-assert.equal(scannerSupportColor(0, 4), "hsl(0 0% 55%)", "invalid support is visibly neutral");
+assert.equal(scannerDepthColor(0), "hsl(25 90% 38%)", "far points use dark orange");
+assert.equal(scannerDepthColor(0.5), "hsl(25 90% 52%)", "depth changes brightness without changing hue");
+assert.equal(scannerDepthColor(1), "hsl(25 90% 66%)", "near points use bright orange");
+assert.equal(scannerDepthColor(-1), "hsl(25 90% 38%)", "depth color clamps below the range");
+assert.equal(scannerDepthColor(2), "hsl(25 90% 66%)", "depth color clamps above the range");
 
 const pitched = rotateScannerPoint(0, 0, 1, 0, Math.PI / 2);
 closeTo(pitched[0], 0, "pitch leaves the horizontal coordinate unchanged");

@@ -76,7 +76,6 @@
     .scanner-modes { display: flex; gap: 5px; }
     .scanner-modes button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: #151e25; font: 600 11px var(--ui-font); cursor: pointer; }
     .scanner-modes button[aria-pressed="true"] { border-color: #9b6038; color: #ffad73; background: #26190f; }
-    .scanner-modes select { min-height: 34px; max-width: 185px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: #151e25; font: 600 10px var(--ui-font); }
     .panel-note { color: var(--dim); font: 10px var(--mono); letter-spacing: .03em; }
     .scanner-stage { display: grid; min-width: 0; min-height: 0; place-items: center; padding: 16px; background-color: #0b1116; background-image: linear-gradient(#18212838 1px,transparent 1px),linear-gradient(90deg,#18212838 1px,transparent 1px); background-size: 24px 24px; }
     .screen { display: grid; width: min(100%, 1120px); max-height: 100%; aspect-ratio: 8/5; place-items: center; overflow: hidden; background: transparent; }
@@ -144,10 +143,6 @@
         <div class="scanner-modes" role="group" aria-label="Режим предпросмотра">
           <button id="depth-mode" type="button" aria-pressed="false">ГЛУБИНА</button>
           <button id="cloud-mode" type="button" aria-pressed="true">3D-ТОЧКИ</button>
-          <select id="cloud-color-mode" aria-label="Окраска облака точек" hidden>
-            <option value="depth">ЦВЕТ: ГЛУБИНА</option>
-            <option value="support">ЦВЕТ: ПОДДЕРЖКА КАДРАМИ</option>
-          </select>
         </div>
       </div>
       <div class="scanner-stage"><div class="screen"><canvas id="depth" width="640" height="400" aria-label="Кадр глубины Revopoint" hidden></canvas><canvas id="cloud" width="640" height="400" aria-label="Облако точек Revopoint: перетаскивание вращает, колесо меняет масштаб" title="Перетаскивание — вращение · колёсико — масштаб"></canvas></div></div>
@@ -184,7 +179,6 @@
       const cloudInfo = document.querySelector("#cloud-info");
       const depthMode = document.querySelector("#depth-mode");
       const cloudMode = document.querySelector("#cloud-mode");
-      const cloudColorMode = document.querySelector("#cloud-color-mode");
       const image = context.createImageData(640, 400);
       let lastMtime = "", lastArrival = 0, intervals = [], qMatrix = null, depthScale = null;
       let yaw = .55, pitch = .55, drag = null, cloudSupportMax = 0;
@@ -209,9 +203,6 @@
       }
       depthMode.addEventListener("click", () => setMode("depth"));
       cloudMode.addEventListener("click", () => setMode("cloud"));
-      cloudColorMode.addEventListener("change", () => {
-        if (window.latestCloud) drawCloud(window.latestCloud);
-      });
       cloudCanvas.addEventListener("pointerdown", event => {
         drag = { x: event.clientX, y: event.clientY };
         cloudCanvas.setPointerCapture(event.pointerId);
@@ -267,16 +258,12 @@
         const scale = Math.min(500 / spanX, 290 / spanY) * zoom;
         const offsetX = 320 - (minX + maxX) * scale / 2, offsetY = 200 - (minY + maxY) * scale / 2;
         const spanZ = Math.max(1e-6, maxZ - minZ);
-        const supportValues = window.latestCloudSupport;
-        const useSupportColor = cloudColorMode.value === "support" && Array.isArray(supportValues) && supportValues.length === projected.length;
         const pointOrder = window.scannerDepthOrder(projected);
         for (const i of pointOrder) {
           const p = projected[i];
           const x = offsetX + p[0] * scale, y = offsetY + p[1] * scale;
           const t = (p[2] - minZ) / spanZ;
-          c.fillStyle = useSupportColor
-            ? window.scannerSupportColor(supportValues[i], cloudSupportMax)
-            : `hsl(${Math.round(95 + 175 * t)} 88% 58%)`;
+          c.fillStyle = window.scannerDepthColor(t);
           c.fillRect(x, y, 1.15, 1.15);
         }
       }
@@ -322,10 +309,7 @@
         window.latestCloud = points;
         const hasSupport = supportColumn >= 0 && supportValues.length === points.length
           && supportValues.every(value => Number.isInteger(value) && value >= 1 && value <= 255);
-        window.latestCloudSupport = hasSupport ? supportValues : null;
         cloudSupportMax = hasSupport ? supportValues.reduce((maximum, value) => Math.max(maximum, value), 1) : 0;
-        cloudColorMode.hidden = !hasSupport;
-        cloudColorMode.value = hasSupport ? "support" : "depth";
         yaw = 0;
         pitch = 0;
         setMode("cloud");
@@ -405,10 +389,7 @@
               (canvas.width - drawWidth) / 2, (canvas.height - drawHeight) / 2, drawWidth, drawHeight);
             context.restore();
             window.latestCloud = points;
-            window.latestCloudSupport = null;
             cloudSupportMax = 0;
-            cloudColorMode.hidden = true;
-            cloudColorMode.value = "depth";
             drawCloud(points);
             cloudInfo.textContent = `${points.length.toLocaleString("ru-RU")} ТОЧЕК · Z=${depthScale.toLocaleString("ru-RU")} ММ/ОТСЧЁТ · ОДИН КАДР`;
             const now = performance.now();
