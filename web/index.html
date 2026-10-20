@@ -838,8 +838,8 @@ window.addEventListener("DOMContentLoaded", () => {
     featureList.replaceChildren();
     let shown = 0;
     rows.forEach((row, index) => {
-      const firstCell = row.querySelector("td");
-      const label = (firstCell?.textContent || row.textContent || "").replace(/\s+/g, " ").trim();
+      const nameCell = row.querySelector("th[scope='row']");
+      const label = (nameCell?.textContent || row.textContent || "").replace(/\s+/g, " ").trim();
       if (!label || (query && !label.toLowerCase().includes(query))) return;
       const button = document.createElement("button");
       button.type = "button";

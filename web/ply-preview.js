@@ -1887,8 +1887,11 @@ async function refreshDetail() {
       bounds.max = [0, 0, 0];
     }
     if (!targetFound) transition = null;
+    const hasPointCloud = visibleObjects.some((item) => item.type === "feature"
+      && item.operation === "import_point_cloud");
     const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes,
-      bodyLineRanges, bodyTriangleRanges, featureTriangleRanges, overlayTriangleRanges };
+      bodyLineRanges, bodyTriangleRanges, featureTriangleRanges, overlayTriangleRanges,
+      ...(hasPointCloud ? { pointStyle: { size: 1.5, opacity: 0.94, color: "#ff7417" } } : {}) };
     currentModelViewportGeometry = viewportGeometry;
     modelViewer.load(viewportGeometry, {
       reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition, smoothShading: true,
