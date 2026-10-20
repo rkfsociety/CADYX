@@ -242,7 +242,9 @@
         const scale = Math.min(500 / spanX, 290 / spanY);
         const offsetX = 320 - (minX + maxX) * scale / 2, offsetY = 200 - (minY + maxY) * scale / 2;
         const spanZ = Math.max(1e-6, maxZ - minZ);
-        for (const p of projected) {
+        const pointOrder = window.scannerDepthOrder(projected);
+        for (const i of pointOrder) {
+          const p = projected[i];
           const x = offsetX + p[0] * scale, y = offsetY + p[1] * scale;
           const t = (p[2] - minZ) / spanZ;
           c.fillStyle = `hsl(${Math.round(95 + 175 * t)} 88% 58%)`;

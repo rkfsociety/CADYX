@@ -2,6 +2,7 @@
 const nodeTraceDraftApi=typeof module!=="undefined"&&module.exports?require("./trace-draft.js"):null;
 function createTraceDraft(...args){const api=nodeTraceDraftApi||(typeof window!=="undefined"?window.CadyxTraceDraft:null);if(!api?.createTraceDraft)throw Error("CADYX trace-draft primitive is not loaded");return api.createTraceDraft(...args)}
 function rotateScannerPoint(dx,dy,dz,yaw,pitch){const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch),x=dx*cy-dz*sy,depth=dx*sy+dz*cy;return[x,dy*cp-depth*sp,dy*sp+depth*cp]}
+function scannerDepthOrder(points){return points.map((_,index)=>index).sort((a,b)=>points[a][2]-points[b][2])}
 function normalizeTraceSweepDegrees(v){let n=((Number(v)+180)%360+360)%360-180;return n<=-180?180:n}
 function traceArcFromPoints(start,center,target){const r=Math.hypot(start.x-center.x,start.y-center.y);if(!Number.isFinite(r)||r<=1e-7)throw Error("Центр дуги должен отличаться от начальной точки.");const tr=Math.hypot(target.x-center.x,target.y-center.y);if(!Number.isFinite(tr)||tr<=1e-7)throw Error("Конец дуги не может совпадать с центром.");const a=Math.atan2(start.y-center.y,start.x-center.x)*180/Math.PI,b=Math.atan2(target.y-center.y,target.x-center.x)*180/Math.PI,s=normalizeTraceSweepDegrees(b-a);if(Math.abs(s)<=1e-5)throw Error("Дуга должна иметь ненулевой угол.");return{kind:"arc",center:{...center},radius_pixels:r,start_angle_degrees:a,sweep_degrees:s}}
 const traceGeometryCache=new WeakMap();
@@ -24,8 +25,8 @@ function traceSegmentGeometry(s){
 function traceSegmentStart(s){return{...traceSegmentGeometry(s).start}}
 function traceSegmentEnd(s){return{...traceSegmentGeometry(s).end}}
 function traceIsClosed(a,t=1e-5){if(!a?.length)return false;const s=traceSegmentGeometry(a[0]).start,e=traceSegmentGeometry(a.at(-1)).end;return Math.hypot(s.x-e.x,s.y-e.y)<=t}
-if(typeof window!=="undefined"){window.rotateScannerPoint=rotateScannerPoint;window.CadyxTraceGeometry=Object.freeze({normalizeTraceSweepDegrees,traceArcFromPoints,traceSegmentGeometry,traceSegmentStart,traceSegmentEnd,traceIsClosed,createTraceDraft})}
-if(typeof module!=="undefined"&&module.exports)module.exports={rotateScannerPoint,normalizeTraceSweepDegrees,traceArcFromPoints,traceSegmentGeometry,traceSegmentStart,traceSegmentEnd,traceIsClosed,createTraceDraft};
+if(typeof window!=="undefined"){window.rotateScannerPoint=rotateScannerPoint;window.scannerDepthOrder=scannerDepthOrder;window.CadyxTraceGeometry=Object.freeze({normalizeTraceSweepDegrees,traceArcFromPoints,traceSegmentGeometry,traceSegmentStart,traceSegmentEnd,traceIsClosed,createTraceDraft})}
+if(typeof module!=="undefined"&&module.exports)module.exports={rotateScannerPoint,scannerDepthOrder,normalizeTraceSweepDegrees,traceArcFromPoints,traceSegmentGeometry,traceSegmentStart,traceSegmentEnd,traceIsClosed,createTraceDraft};
 
 if(typeof window!=="undefined"&&typeof document!=="undefined"){
 const boot=()=>{if(document.querySelector("#trace-editor"))return;

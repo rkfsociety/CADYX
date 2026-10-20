@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const {
   rotateScannerPoint,
+  scannerDepthOrder,
   normalizeTraceSweepDegrees,
   traceArcFromPoints,
   traceSegmentGeometry,
@@ -23,6 +24,7 @@ closeTo(yawed[2], 0, "yaw leaves a vertical-axis point on the vertical axis");
 
 const horizontal = rotateScannerPoint(0, 0, 1, Math.PI / 2, 0);
 closeTo(horizontal[0], -1, "yaw rotates depth into horizontal view");
+assert.deepEqual(scannerDepthOrder([[0, 0, -150], [0, 0, -200], [0, 0, -175]]), [1, 2, 0], "cloud points are drawn far-to-near so foreground points occlude the rear during orbit");
 closeTo(horizontal[1], 0, "yaw does not roll depth into vertical view");
 
 const pitched = rotateScannerPoint(0, 0, 1, 0, Math.PI / 2);
