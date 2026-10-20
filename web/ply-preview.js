@@ -126,6 +126,7 @@ const integerFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 
 const projectDateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 let projects = [];
 let projectSort = "name";
+let projectsRenderSignature = null;
 let projectGroups = [];
 let folders = [];
 let selectedProjectId = readSelectedProject();
@@ -855,6 +856,7 @@ function renderProjectCard(entry) {
   const projectAvailable = canSelectProject(project.id);
   const card = document.createElement("article");
   card.className = "workspace-project-card";
+  card.dataset.projectId = project.id;
   card.dataset.active = String(active);
   card.setAttribute("role", "listitem");
 
@@ -1007,6 +1009,27 @@ $("#projects-list-view").addEventListener("click", () => setProjectsLayout("list
 
 function renderProjects() {
   const list = $("#projects-list");
+  const signature = JSON.stringify([
+    projectSort,
+    $("#projects-search").value.trim().toLocaleLowerCase("ru-RU"),
+    projectGroups.map(({ id, name }) => [id, name]),
+    projects.map((entry) => [entry.project.id, entry.project.name, entry.group_id,
+      entry.project.id === selectedProjectId, canSelectProject(entry.project.id)]),
+  ]);
+  if (signature === projectsRenderSignature) {
+    for (const entry of projects) {
+      const timestamp = $("#projects-list").querySelector(
+        `[data-project-id="${CSS.escape(entry.project.id)}"] time`,
+      );
+      const modifiedAt = Date.parse(entry.project.modified_at || "");
+      if (timestamp) {
+        timestamp.dateTime = Number.isFinite(modifiedAt) ? new Date(modifiedAt).toISOString() : "";
+        timestamp.textContent = Number.isFinite(modifiedAt) ? projectDateFormat.format(new Date(modifiedAt)) : "—";
+      }
+    }
+    return;
+  }
+  projectsRenderSignature = signature;
   const scrollTop = list.scrollTop;
   list.replaceChildren();
   $("#projects-count").textContent = integerFormat.format(projects.length);
