@@ -22,19 +22,30 @@ const element = () => {
 const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply") }, URL, URLSearchParams, setTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"), sandbox);
 
-const pointCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n0 0 0\n1 0 0\n0 1 0\n";
-const originCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n10 20 30\n12 20 30\n10 22 30\n";
+const pointCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n0 0 -100\n1 0 -100\n0 1 -100\n";
+const originCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n0 0 -120\n2 0 -120\n0 2 -120\n";
 const viewerLoads = [];
 const viewer = { load(geometry, options) { viewerLoads.push({ geometry, options }); } };
 const baseGeometry = { positions: new Float64Array([0, 0, 0]), triangles: new Uint32Array(0), bounds: { min: [0, 0, 0], max: [0, 0, 0] } };
 const getModelGeometry = () => baseGeometry;
 const fetchCloud = async url => ({ ok: true, async text() { assert.match(url, /point-cloud\?/); return pointCloud; } });
-const liveRaw = new Uint8Array(640 * 400 * 2);
-for (const pixel of [0, 2, 4]) { liveRaw[pixel * 2] = 100; liveRaw[pixel * 2 + 1] = 0; }
+const centerPixel = 200 * 640 + 320;
+const liveRawFrames = [new Uint8Array(640 * 400 * 2), new Uint8Array(640 * 400 * 2)];
+for (const [frameIndex, offsets] of liveRawFrames.entries()) {
+  const frame = liveRawFrames[frameIndex];
+  for (const offset of (frameIndex ? [-4, 0, 4] : [-2, 0, 2])) {
+    const pixel = centerPixel + offset;
+    frame[pixel * 2] = 100;
+  }
+}
+let liveFrameSequence = 0;
 const fetchPreview = async url => {
   if (url.includes("point-cloud?")) return { ok: true, async text() { return url.includes("origin.ply") ? originCloud : pointCloud; } };
-  if (url.includes("/calibration")) return { ok: true, async json() { return { matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], depth_scale_mm_per_raw_unit: 1 }; } };
-  if (url.includes("/live-frame")) return { ok: true, headers: { get() { return "1000"; } }, async arrayBuffer() { return liveRaw.buffer; } };
+  if (url.includes("/calibration")) return { ok: true, async json() { return { width: 640, height: 400, matrix: [1, 0, 0, -320, 0, 1, 0, -200, 0, 0, 0, 1, 0, 0, 0, 0], depth_scale_mm_per_raw_unit: 1 }; } };
+  if (url.includes("/live-frame")) {
+    const index = liveFrameSequence++;
+    return { ok: true, headers: { get() { return String(1000 + index); } }, async arrayBuffer() { return liveRawFrames[Math.min(index, 1)].buffer; } };
+  }
   throw new Error(`Unexpected preview request: ${url}`);
 };
 
@@ -50,7 +61,7 @@ assert.equal(viewport.dataset.scanPreview, "false");
 assert.equal(viewport.dataset.scanPreviewMode, "cloud");
 assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
 assert.equal(viewerLoads.at(-1).geometry.triangles.length, 0);
-assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [-0.5, -0.5, 0], "first saved cloud frame is centered at the global origin");
+assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [0, 0, 0], "the saved frame point nearest the camera resolution center is the origin");
 meshButton.click();
 await new Promise(resolve => setImmediate(resolve));
 assert.equal(viewport.dataset.scanPreview, "false");
@@ -71,7 +82,7 @@ assert.equal(viewerLoads.at(-1).options.reset, false, "reopening the same cloud 
 view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", origin_file: "origin.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
 await new Promise(resolve => setImmediate(resolve));
 assert.match(viewerLoads.at(-1).geometry.positions.length.toString(), /^9$/);
-assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [-11, -21, -30], "registered fusion is aligned to the first capture frame origin");
+assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [0, 0, 20], "registered fusion uses the first frame camera-center origin");
 meshButton.click();
 await new Promise(resolve => setImmediate(resolve));
 view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", origin_file: "origin.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
@@ -84,7 +95,14 @@ await new Promise(resolve => setTimeout(resolve, 10));
 assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "live");
 assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
-assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [-2, 0, 0], "live first frame is centered at the global origin");
+assert.deepEqual([...viewerLoads.at(-1).geometry.bounds.min], [-200, 0, 0], "live first frame is centered on the resolution center");
+assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0]);
+const firstLiveFitRadius = viewerLoads.at(-1).geometry.fitRadius;
+await new Promise(resolve => setTimeout(resolve, 380));
+assert.ok(liveFrameSequence >= 2, "the live point cloud accepted a newer camera frame");
+assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0], "live frames keep the first-frame camera pivot");
+assert.equal(viewerLoads.at(-1).geometry.fitRadius, firstLiveFitRadius, "live frames keep a fixed view scale");
+assert.equal(viewerLoads.at(-1).options.reset, false, "new live frames never reset the camera");
 view.showCapture({ preview_folder: "scan folder", preview_file: "new-saved-capture.ply", preview_kind: "single" });
 assert.equal(viewport.dataset.scanPreview, "true", "360 status polling does not replace the live canvas preview");
 view.closeLivePreview();

@@ -168,6 +168,15 @@ viewer.load({ ...geometry, lines: undefined });
 assert.ok(drawnPoints[1][1] < drawnPoints[0][1], "Positive Z projects upward");
 const projectedOrigin = drawnPoints[0];
 const projectedZ = drawnPoints[1];
+const fixedLiveGeometry = {
+  positions: [-1, 0, 0, 1, 0, 0, 0, 1, 0], triangles: [], lines: undefined,
+  bounds: { min: [-1, 0, 0], max: [1, 1, 0] }, orbitCenter: [0, 0, 0], fitRadius: 2,
+};
+viewer.load(fixedLiveGeometry);
+const firstLiveProjection = drawnPoints.map(point => point.slice());
+viewer.load({ ...fixedLiveGeometry, bounds: { min: [-100, -40, -10], max: [80, 60, 5] } }, { reset: false });
+assert.deepEqual(drawnPoints, firstLiveProjection,
+  "Live frame bounds cannot move or rescale the viewport when its orbit center and fit radius are fixed");
 viewer.load(geometry);
 assert.equal(segments, 4, "Sketch lines and the three coordinate axes render in the shared viewport");
 assert.deepEqual(drawnLabels.filter((label) => ["X", "Y", "Z"].includes(label)).sort(), ["X", "Y", "Z"]);

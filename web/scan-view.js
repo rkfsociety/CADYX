@@ -13,6 +13,7 @@
     let liveMtime = null;
     let liveCalibration = null;
     let liveOriginOffset = null;
+    let liveFitRadius = null;
     let modelGeometry = null;
     const setAttribute = (element, name, value) => {
       const current = element.getAttribute(name);
@@ -111,6 +112,31 @@
       if (validCount < 3) throw new Error('В PLY недостаточно корректных точек.');
       return { positions: validCount === vertexCount ? positions : positions.slice(0, validCount * 3), bounds, count: validCount };
     };
+    const centerRay = calibration => {
+      const matrix = calibration.matrix, depth = 100;
+      const x = (calibration.width || 640) / 2, y = (calibration.height || 400) / 2;
+      const px = matrix[0] * x + matrix[1] * y + matrix[2] * depth + matrix[3];
+      const py = matrix[4] * x + matrix[5] * y + matrix[6] * depth + matrix[7];
+      const pz = matrix[8] * x + matrix[9] * y + matrix[10] * depth + matrix[11];
+      if (!Number.isFinite(pz) || Math.abs(pz) < 1e-12) throw new Error('Луч центра разрешения сканера некорректен.');
+      const ray = [px * depth / pz, -py * depth / pz, -depth];
+      const length = Math.hypot(...ray);
+      return ray.map(value => value / length);
+    };
+    const pointNearestCenterRay = (positions, ray) => {
+      let nearest = null, minimumDistance = Infinity;
+      for (let index = 0; index < positions.length; index += 3) {
+        const x = positions[index], y = positions[index + 1], z = positions[index + 2];
+        const along = x * ray[0] + y * ray[1] + z * ray[2];
+        if (along <= 0) continue;
+        const distance = Math.max(0, x * x + y * y + z * z - along * along);
+        if (distance < minimumDistance) {
+          minimumDistance = distance;
+          nearest = [x, y, z];
+        }
+      }
+      return nearest;
+    };
     cloudSource = pointCloudUrl(null);
     cloudOriginSource = originUrl(null);
     const loadCloud = async ({ reset = true } = {}) => {
@@ -123,7 +149,13 @@
       if (!offset) {
         const origin = cloudOriginSource && cloudOriginSource !== cloudSource
           ? await readPointCloud(cloudOriginSource) : cloud;
-        offset = origin.bounds.min.map((minimum, axis) => (minimum + origin.bounds.max[axis]) / 2);
+        if (!liveCalibration) {
+          const response = await fetcher('/api/v1/scanner/calibration', { cache: 'no-store' });
+          if (!response.ok) throw new Error(`Калибровка сканера недоступна (HTTP ${response.status}).`);
+          liveCalibration = await response.json();
+        }
+        offset = pointNearestCenterRay(origin.positions, centerRay(liveCalibration))
+          || origin.bounds.min.map((minimum, axis) => (minimum + origin.bounds.max[axis]) / 2);
       }
       if (request !== cloudRequest || !cloudPreviewOpen) return;
       const bounds = { min: cloud.bounds.min.map((value, axis) => value - offset[axis]),
@@ -172,6 +204,7 @@
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
       liveMtime = null;
       liveOriginOffset = null;
+      liveFitRadius = null;
       cloudRequest += 1;
       cloudPreviewOpen = false;
       meshPreviewOpen = false;
@@ -199,6 +232,8 @@
               const { matrix, depth_scale_mm_per_raw_unit: scale } = liveCalibration;
               const positions = new Float32Array(640 * 400 * 3 / 2);
               const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+              const centerX = 320, centerY = 200;
+              let centerAnchor = null, nearestCenterPixel = Infinity;
               let count = 0;
               for (let pixel = 0; pixel < 640 * 400; pixel += 2) {
                 const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
@@ -211,6 +246,11 @@
                 if (!Number.isFinite(pz) || Math.abs(pz) < 1e-12) continue;
                 const point = [px * depth / pz, -py * depth / pz, -depth];
                 if (!point.every(Number.isFinite)) continue;
+                const centerDistance = (x - centerX) ** 2 + (y - centerY) ** 2;
+                if (centerDistance < nearestCenterPixel) {
+                  nearestCenterPixel = centerDistance;
+                  centerAnchor = point;
+                }
                 for (let axis = 0; axis < 3; axis += 1) {
                   positions[count * 3 + axis] = point[axis];
                   bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
@@ -219,15 +259,19 @@
                 count += 1;
               }
               if (count >= 3 && request === liveRequest && livePreviewOwned) {
-                liveOriginOffset ||= bounds.min.map((minimum, axis) => (minimum + bounds.max[axis]) / 2);
+                liveOriginOffset ||= centerAnchor || bounds.min.map((minimum, axis) => (minimum + bounds.max[axis]) / 2);
+                let frameRadius = 0;
                 for (let index = 0; index < count * 3; index += 3) {
                   for (let axis = 0; axis < 3; axis += 1) positions[index + axis] -= liveOriginOffset[axis];
+                  frameRadius = Math.max(frameRadius, Math.hypot(positions[index], positions[index + 1], positions[index + 2]));
                 }
+                liveFitRadius ||= Math.max(frameRadius, 0.001);
                 for (let axis = 0; axis < 3; axis += 1) {
                   bounds.min[axis] -= liveOriginOffset[axis];
                   bounds.max[axis] -= liveOriginOffset[axis];
                 }
-                viewer.load({ positions: positions.slice(0, count * 3), triangles: new Uint32Array(0), lines: null, bounds },
+                viewer.load({ positions: positions.slice(0, count * 3), triangles: new Uint32Array(0), lines: null,
+                  bounds, orbitCenter: [0, 0, 0], fitRadius: liveFitRadius },
                   { reset: liveMtime === null });
                 liveMtime = mtime;
               }
@@ -247,6 +291,7 @@
         restoreModel();
         liveMtime = null;
         liveOriginOffset = null;
+        liveFitRadius = null;
         updateButton();
       }
     };

@@ -1452,8 +1452,11 @@
       load(value, { reset = true, transition: nextTransition = null, smoothShading = false } = {}) {
         bodyMotionFrame += 1;
         bodyMotion = null;
-        const orbitCenter = orbitCenterFor(value);
+        const orbitCenter = Array.isArray(value.orbitCenter) && value.orbitCenter.length === 3
+          && value.orbitCenter.every(Number.isFinite) ? value.orbitCenter.slice() : orbitCenterFor(value);
         const fitCenter = orbitCenter || value.bounds.min.map((min, axis) => min / 2 + value.bounds.max[axis] / 2);
+        const fitRadius = Number.isFinite(value.fitRadius) && value.fitRadius > 0
+          ? value.fitRadius : fitRadiusFromPositions(value.positions, fitCenter);
         const sourceTriangles = value.triangles || [];
         let meshEdges = meshEdgesCache.get(sourceTriangles);
         if (!meshEdges) {
@@ -1474,7 +1477,7 @@
         geometry = {
           ...value,
           orbitCenter,
-          fitRadius: fitRadiusFromPositions(value.positions, fitCenter),
+          fitRadius,
           featureEdges: explicitBodyEdges || rangedBodyEdges || meshEdges.featureEdges,
           featureEdgeFaces: explicitBodyEdges || rangedBodyEdges ? null : meshEdges.featureEdgeFaces,
           silhouetteCandidates: meshEdges.silhouetteCandidates,
