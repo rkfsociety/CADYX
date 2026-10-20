@@ -1043,6 +1043,10 @@
       wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = [], overlayRanges = []) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
+      // A broad key and weaker fill keep both sides readable without a flat glow.
+      const studioLight = (right, up, depth) => 0.24
+        + 0.62 * Math.abs(right * light[0] + up * light[1] + depth * light[2])
+        + 0.14 * Math.abs(-0.62 * right + 0.16 * up + 0.76 * depth);
       const smooth = vertexNormals && (!transition || progress >= 1);
       if (smooth) {
         for (let vertex = 0; vertex < vertexLight.length; vertex += 1) {
@@ -1054,9 +1058,7 @@
           const right = orientation[0] * worldX + orientation[1] * worldY + orientation[2] * worldZ;
           const depth = orientation[3] * worldX + orientation[4] * worldY + orientation[5] * worldZ;
           const up = orientation[6] * worldX + orientation[7] * worldY + orientation[8] * worldZ;
-          vertexLight[vertex] = 0.34 + 0.66 * Math.abs(
-            right * light[0] + up * light[1] + depth * light[2],
-          );
+          vertexLight[vertex] = studioLight(right, up, depth);
         }
       }
       let visibleCount = 0;
@@ -1083,9 +1085,7 @@
           const right = orientation[0] * worldX + orientation[1] * worldY + orientation[2] * worldZ;
           const depth = orientation[3] * worldX + orientation[4] * worldY + orientation[5] * worldZ;
           const up = orientation[6] * worldX + orientation[7] * worldY + orientation[8] * worldZ;
-          brightness = 0.34 + 0.66 * Math.abs(
-            right * light[0] + up * light[1] + depth * light[2],
-          );
+          brightness = studioLight(right, up, depth);
         } else {
           const ax = camera[a], ay = camera[a + 1], bx = camera[b], by = camera[b + 1];
           const cx = camera[c], cy = camera[c + 1];
@@ -1095,9 +1095,7 @@
           const ny = uz * vx - ux * vz;
           const nz = ux * vy - uy * vx;
           const normalLength = Math.hypot(nx, ny, nz) || 1;
-          brightness = 0.34 + 0.66 * Math.abs(
-            (nx * light[0] + ny * light[1] + nz * light[2]) / normalLength,
-          );
+          brightness = studioLight(nx / normalLength, ny / normalLength, nz / normalLength);
         }
         const offset = face * 8;
         faceRecords[offset] = screenX[first];
@@ -1474,6 +1472,27 @@
         if (!meshEdges) {
           meshEdges = buildFeatureEdges(value.positions, sourceTriangles);
           meshEdgesCache.set(sourceTriangles, meshEdges);
+        }
+        if (shaded && value.surfaceTriangleRanges?.length) {
+          // Scan holes and noisy creases remain geometry, without bright edge ink.
+          // Keep the cached CAD edge graph intact for other views of the same mesh.
+          const surfaceFaces = new Uint8Array(sourceTriangles.length / 3);
+          for (const { start, end } of value.surfaceTriangleRanges) surfaceFaces.fill(1, start, end);
+          const featureEdges = [], featureEdgeFaces = [], silhouetteCandidates = [];
+          for (let index = 0; index < meshEdges.featureEdges.length; index += 2) {
+            const a = meshEdges.featureEdgeFaces[index], b = meshEdges.featureEdgeFaces[index + 1];
+            if (surfaceFaces[a] || surfaceFaces[b]) continue;
+            featureEdges.push(meshEdges.featureEdges[index], meshEdges.featureEdges[index + 1]);
+            featureEdgeFaces.push(a, b);
+          }
+          for (let index = 0; index < meshEdges.silhouetteCandidates.length; index += 4) {
+            if (surfaceFaces[meshEdges.silhouetteCandidates[index + 2]]
+                || surfaceFaces[meshEdges.silhouetteCandidates[index + 3]]) continue;
+            silhouetteCandidates.push(...meshEdges.silhouetteCandidates.subarray(index, index + 4));
+          }
+          meshEdges = { ...meshEdges, featureEdges: Uint32Array.from(featureEdges),
+            featureEdgeFaces: Int32Array.from(featureEdgeFaces),
+            silhouetteCandidates: Uint32Array.from(silhouetteCandidates) };
         }
         const explicitBodyEdges = value.type === "body" ? Uint32Array.from(value.lines || []) : null;
         const rangedBodyEdges = value.bodyLineRanges?.length

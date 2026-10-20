@@ -559,5 +559,35 @@ animationTime = 1600;
 animationFrames.pop()(animationTime);
 assert.deepEqual(rasterizedBounds, motionBoundsBefore,
   "Temporary gear motion restores the saved viewport pose after its bounded duration");
-console.log("Viewport: Z-up, camera controls, sketch, solid transitions, temporary body motion, zoom, refresh and fit passed.");
+const scanSurfaceViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: true,
+});
+const scanSurfaceGeometry = {
+  positions: [-2, 0, 0, -1, 0, 0, -2, 0, 1, 1, 0, 0, 2, 0, 0, 2, 0, 1],
+  triangles: [0, 1, 2, 3, 4, 5], lines: [], points: [],
+  bounds: { min: [-2, 0, 0], max: [2, 0, 1] },
+};
+scanSurfaceViewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: 'orthographic' });
+scanSurfaceViewer.load(scanSurfaceGeometry);
+const cadEdgeSegments = segments;
+assert.ok(cadEdgeSegments > 0);
+scanSurfaceViewer.load({ ...scanSurfaceGeometry, surfaceTriangleRanges: [{ start: 0, end: 1 }] });
+assert.ok(segments > 0 && segments < cadEdgeSegments,
+  'Mixed scenes retain CAD edges while suppressing the scan overlay');
+scanSurfaceViewer.load({ ...scanSurfaceGeometry, surfaceTriangleRanges: [{ start: 0, end: 2 }] });
+assert.equal(segments, 0, 'Shaded scans have no bright boundary or crease overlay');
+assert.ok(rasterizedPixels > 0, 'Removing the overlay retains the shaded surface');
+scanSurfaceViewer.load(scanSurfaceGeometry);
+assert.equal(segments, cadEdgeSegments, 'Scan styling does not mutate the cached CAD edge graph');
+scanSurfaceViewer.load({ positions: cylinderPositions, triangles: cylinderTriangles, lines: [], points: [],
+  bounds: { min: [-20, -20, 0], max: [20, 20, 40] },
+  surfaceTriangleRanges: [{ start: 0, end: cylinderTriangles.length / 3 }] });
+assert.equal(segments, 0, 'Scan surfaces also suppress inferred smooth silhouette ink');
+const scanDrawingViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false,
+});
+scanDrawingViewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: 'orthographic' });
+scanDrawingViewer.load({ ...scanSurfaceGeometry, surfaceTriangleRanges: [{ start: 0, end: 2 }] });
+assert.ok(segments > 0, 'Orthographic wireframe scans remain visible');
+console.log("Viewport: camera, geometry, transitions, depth-tested edges and scan surface styling passed.");
 

@@ -272,6 +272,14 @@ canvas rendering to one animation-frame callback. CAD body shading averages
 adjacent triangle normals at shared vertices so the lighter viewport mesh
 keeps a smooth surface appearance.
 
+The browser uses a broad two-sided key light with a weaker fill light. Imported
+triangle-mesh bodies render as shaded surfaces in the main preview, without the
+bright automatically inferred boundary, crease and silhouette overlay. Holes
+remain visible as real geometry. Client-side `surfaceTriangleRanges` mark these
+faces in a combined scene; mixed scenes retain explicit CAD body curves and CAD
+edge styling. Unshaded orthographic views retain mesh wireframes. This affects
+presentation only and does not modify saved geometry or the viewport API scene.
+
 Camera orientation maps world XYZ into camera `[right, depth, up]` coordinates.
 Dragging uses a virtual trackball, allowing unrestricted rotation around all
 three axes, including complete turns and roll. The camera triad and view cube

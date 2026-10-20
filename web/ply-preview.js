@@ -1810,7 +1810,7 @@ async function refreshDetail() {
   }
   if (renderedSceneKey !== key) {
     const positions = [], bodyPositions = [], triangles = [], lines = [], points = [], rotationAxes = [];
-    const bodyLineRanges = [], bodyTriangleRanges = [], featureTriangleRanges = [], overlayTriangleRanges = [];
+    const bodyLineRanges = [], bodyTriangleRanges = [], featureTriangleRanges = [], overlayTriangleRanges = [], surfaceTriangleRanges = [];
     let targetFound = false;
     for (const object of scene.objects) {
       const source = objectsById.get(object.object_id);
@@ -1824,6 +1824,9 @@ async function refreshDetail() {
         if (source?.type === "body" && object.type === "body") bodyPositions.push(value);
       }
       for (const index of object.triangles) triangles.push(index + offset);
+      if (source?.geometry?.kind === "triangle_mesh" && object.triangles.length) {
+        surfaceTriangleRanges.push({ start: triangleStart, end: triangles.length / 3 });
+      }
       if (source?.type === "body" && object.type === "body" && object.triangles.length) {
         bodyTriangleRanges.push({ objectId: object.object_id, start: triangleStart, end: triangles.length / 3 });
       }
@@ -1890,7 +1893,7 @@ async function refreshDetail() {
     const hasPointCloud = visibleObjects.some((item) => item.type === "feature"
       && item.operation === "import_point_cloud");
     const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes,
-      bodyLineRanges, bodyTriangleRanges, featureTriangleRanges, overlayTriangleRanges,
+      bodyLineRanges, bodyTriangleRanges, featureTriangleRanges, overlayTriangleRanges, surfaceTriangleRanges,
       ...(hasPointCloud ? { pointStyle: { size: 1.5, opacity: 0.94, color: "#ff7417" } } : {}) };
     currentModelViewportGeometry = viewportGeometry;
     modelViewer.load(viewportGeometry, {
