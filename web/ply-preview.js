@@ -125,6 +125,8 @@ const numberFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }
 const integerFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
 const projectDateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 let projects = [];
+let projectRouteSlugSource = null;
+let projectRouteSlugCache = new Map();
 let projectSort = "name";
 let projectsRenderSignature = null;
 let projectGroups = [];
@@ -225,7 +227,8 @@ let agentWorkProjectIds = savedAgentWorkLock.projectIds;
 let agentWorkStatusConnected = false;
 const FOLDER_SELECTION_PREFIX = "folder:";
 const initialAddress = new URLSearchParams(window.location.search);
-let projectAddressPinned = (initialAddress.has("project_id") || initialAddress.has("folder"))
+const initialProjectPath = /^\/p\/[^/]+\/?$/.test(window.location.pathname);
+let projectAddressPinned = (initialAddress.has("project_id") || initialAddress.has("folder") || initialProjectPath)
   && initialAddress.get("view") !== "projects";
 const projectsChooserPinned = initialAddress.get("view") === "projects";
 let workspaceSelectionRestoreAttempted = !projectAddressPinned || initialAddress.get("view") === "projects";
@@ -417,7 +420,16 @@ function readSelectedProject() {
   const address = new URLSearchParams(window.location.search);
   const projectId = address.get("project_id");
   const folderName = address.get("folder");
-  return projectId || (folderName ? `folder:${folderName}` : null);
+  if (projectId || folderName) return projectId || `folder:${folderName}`;
+  const projectPathMatch = /^\/p\/([^/]+)\/?$/.exec(window.location.pathname);
+  if (!projectPathMatch) return null;
+  try {
+    const requestedSlug = decodeURIComponent(projectPathMatch[1]);
+    for (const [id, slug] of projectRouteSlugs()) {
+      if (slug === requestedSlug) return id;
+    }
+  } catch { /* Malformed path escapes do not resolve to a project. */ }
+  return null;
 }
 
 function notify(message, isError = false, durationMs = 3000) {
@@ -769,6 +781,35 @@ function getProject(id) {
   return projects.find((item) => item.project.id === id);
 }
 
+function projectSlugBase(name) {
+  return String(name || "").normalize("NFKC").toLowerCase()
+    .replace(/[^\p{L}\p{N}_-]+/gu, "-")
+    .replace(/-+/g, "-").replace(/^[-_]+|[-_]+$/g, "") || "project";
+}
+
+function projectRouteSlugs() {
+  if (projectRouteSlugSource === projects) return projectRouteSlugCache;
+  const entries = projects.map(({ project }) => ({ project, base: projectSlugBase(project.name) }));
+  const baseCounts = new Map();
+  entries.forEach(({ base }) => baseCounts.set(base, (baseCounts.get(base) || 0) + 1));
+  const used = new Set();
+  projectRouteSlugCache = new Map(entries.map(({ project, base }) => {
+    const shortId = project.id.replace(/[^a-z0-9]/gi, "").slice(0, 8).toLowerCase();
+    let slug = baseCounts.get(base) > 1 ? `${base}-${shortId}` : base;
+    if (used.has(slug) || (slug !== base && baseCounts.has(slug))) slug = `${base}-${project.id.toLowerCase()}`;
+    while (used.has(slug) || (slug !== base && baseCounts.has(slug))) slug = `${slug}-${shortId}`;
+    used.add(slug);
+    return [project.id, slug];
+  }));
+  projectRouteSlugSource = projects;
+  return projectRouteSlugCache;
+}
+
+function projectPath(projectId) {
+  const slug = projectRouteSlugs().get(projectId);
+  return slug ? `/p/${encodeURIComponent(slug)}` : null;
+}
+
 function canSelectProject(id) {
   const lock = agentLocksByProject.get(id) || getProject(id)?.lock;
   const agentIsActive = (activitiesByProject.get(id) || []).some((item) => item.state === "running");
@@ -777,7 +818,8 @@ function canSelectProject(id) {
 
 async function navigateToWorkspaceProject(projectId, projectName) {
   const address = new URL(window.location.href);
-  address.searchParams.set("project_id", projectId);
+  address.pathname = projectPath(projectId) || "/";
+  address.searchParams.delete("project_id");
   address.searchParams.delete("folder");
   address.searchParams.delete("view");
   window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
@@ -937,7 +979,7 @@ function renderProjectCard(entry) {
 
   const open = document.createElement("a");
   open.className = "button workspace-project-open workspace-project-open-new-tab";
-  open.href = `/?project_id=${encodeURIComponent(project.id)}`;
+  open.href = projectPath(project.id) || `/?project_id=${encodeURIComponent(project.id)}`;
   open.target = "_blank";
   open.rel = "noopener";
   open.setAttribute("aria-label", `Открыть проект «${project.name}» в новой вкладке`);
@@ -1383,6 +1425,18 @@ async function refreshWorkspacePass() {
   const requestedSelection = projectAddressPinned
     ? [readSelectedProject(), selectedProjectId].find((id) => id && workspaceSelectionExists(id)) : null;
   selectedProjectId = requestedSelection || null;
+  if (selectedProjectId && !getSelectedFolder()) {
+    const canonicalPath = projectPath(selectedProjectId);
+    if (canonicalPath && window.location.pathname !== canonicalPath) {
+      const address = new URL(window.location.href);
+      address.pathname = canonicalPath;
+      address.searchParams.delete("project_id");
+      address.searchParams.delete("folder");
+      address.searchParams.delete("view");
+      window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
+      projectAddressPinned = true;
+    }
+  }
   if (new URLSearchParams(window.location.search).get("view") === "projects") {
     projectDetail.hidden = false;
     noSelection.hidden = true;

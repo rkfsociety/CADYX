@@ -121,6 +121,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases/recover", "agent_lease_recover", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases/{lease_id}/heartbeat", "agent_lease_heartbeat", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases/{lease_id}/release", "agent_lease_release", "agent", "json"),
+    RouteSpec("GET", "/p/{slug}", "ui_project", "static"),
     RouteSpec("GET", "/", "ui_index", "static"),
     RouteSpec("GET", "/scanner", "ui_scanner", "static"),
     RouteSpec("GET", "/favicon.svg", "ui_favicon", "static"),
@@ -796,6 +797,7 @@ def _dispatch_static(handler: Any, core: CadyxCore, route: RouteMatch, parsed: S
     del core, parsed
     assets = {
         "ui_index": ("index.html", "text/html; charset=utf-8"),
+        "ui_project": ("index.html", "text/html; charset=utf-8"),
         "ui_scanner": ("scanner.html", "text/html; charset=utf-8"),
         "ui_favicon": ("favicon.svg", "image/svg+xml"),
         "asset_app": ("app.js", "text/javascript; charset=utf-8"),

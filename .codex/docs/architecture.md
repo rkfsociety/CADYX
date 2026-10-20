@@ -361,14 +361,18 @@ project without changing selection. MCP delegates these checks to Core through
 the Agent API. The browser's Projects (07) view lists saved projects and opens each
 project in a separate tab; this does not change the process-local Agent API
 selection. Workspace-folder selection remains Agent API-only.
-The browser loads a model when its address contains `project_id`. An
+The browser loads a model from a readable `/p/<project-slug>` address. Slugs
+derive from the display name; duplicate or colliding slugs receive an ID suffix.
+Existing `?project_id=<UUID>` links remain supported and canonicalize to the
+readable path after the project list loads. Renaming a project changes its
+canonical slug. An
 unqualified root address opens Projects without restoring the current host
 selection; `?view=projects` has the same behavior. A project or folder is shown
-only when its address explicitly contains `project_id` or `folder`.
-Explicit `project_id`, `folder`, and `view=projects` routes remain pinned across
+only when its address explicitly contains a project slug, `project_id`, or
+`folder`. Explicit project, `folder`, and `view=projects` routes remain pinned across
 SSE workspace-selection events; only an explicit navigation action or a newly
 created project can change the address.
-Opening a project from Projects creates a tab at `/?project_id=<project UUID>`;
+Opening a project from Projects creates a tab at `/p/<project-slug>`;
 folder selection uses `?folder=<folder name>`. A resource address pins the tab's
 displayed project or folder, so separate tabs can keep different resources
 visible. Project cards open their URL in a new tab even when the project is
