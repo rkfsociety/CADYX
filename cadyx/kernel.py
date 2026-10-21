@@ -90,9 +90,12 @@ class GeometryKernel(Protocol):
 
     def create_lofted_profiles(
         self, sections: list[list[dict[str, float]]], *, section_offsets: list[float],
+        alignment: str = "minimum-displacement-v2", compute_volume: bool = True,
+        section_axis: str = "Y",
     ) -> LoftDescriptor: ...
     def create_multicontour_loft(
         self, section_groups: list[list[list[dict[str, float]]]], *, section_offsets: list[float],
+        compute_volume: bool = True, section_axis: str = "Y",
     ) -> MulticontourLoftDescriptor: ...
     def create_ruled_shell(
         self, patches: list[dict[str, list[list[float]]]], *,
@@ -455,7 +458,7 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
 
     def create_multicontour_loft(
         self, section_groups: list[list[list[dict[str, float]]]], *, section_offsets: list[float],
-        compute_volume: bool = True,
+        compute_volume: bool = True, section_axis: str = "Y",
     ) -> MulticontourLoftDescriptor:
         """Build and fuse adjacent-station loft branches when section contour counts change."""
         if (not isinstance(section_groups, list) or len(section_groups) < 2
@@ -463,6 +466,9 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
             raise ValidationError("A grouped loft needs at least two paired stations and offsets.")
         if type(compute_volume) is not bool:
             raise ValidationError("compute_volume must be a boolean.")
+        if section_axis not in {"Y", "Z"}:
+            raise ValidationError("Loft section_axis must be Y or Z.")
+        plane = "XZ" if section_axis == "Y" else "XY"
         offsets = [_finite_coordinate(value, "Loft section offset") for value in section_offsets]
         if any(right <= left for left, right in zip(offsets, offsets[1:])):
             raise ValidationError("Loft section offsets must be strictly increasing.")
@@ -473,7 +479,7 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
                 raise ValidationError("Each loft station needs one or more closed contour profiles.")
             normalized_group = []
             for section in group:
-                points, _ = _profile_values(section, "XZ")
+                points, _ = _profile_values(section, plane)
                 area, center_x, center_y, _ = _loft_contour_signature(points)
                 normalized_group.append((points, area, center_x, center_y))
             normalized_groups.append(normalized_group)
@@ -487,12 +493,15 @@ class OCCTKernelAdapter(GeometryDescriptorValidation):
                     [left_profile[0], right_profile[0]],
                     section_offsets=[offsets[index], offsets[index + 1]],
                     compute_volume=False,
+                    section_axis=section_axis,
                 )
                 all_branches.append(loft)
         if not all_branches:
             raise ValidationError("Grouped loft produced no branch geometry.")
         result = {"kernel": self.kernel_id, "kind": "multicontour_loft",
                   "branches": all_branches, "volume": 0.0}
+        if section_axis != "Y":
+            result["section_axis"] = section_axis
         result["volume"] = (NativeKernel().geometry_graph(result)["volume"]
                              if compute_volume else 0.0)
         return result

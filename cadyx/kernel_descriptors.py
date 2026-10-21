@@ -87,6 +87,7 @@ class LoftDescriptor(OCCTDescriptor):
 class MulticontourLoftDescriptor(OCCTDescriptor):
     kind: Literal["multicontour_loft"]
     branches: list[LoftDescriptor]
+    section_axis: NotRequired[Literal["Y", "Z"]]
 
 
 class RuledShellDescriptor(OCCTDescriptor):
@@ -430,12 +431,17 @@ class GeometryDescriptorValidation:
         self._same_saved_volume(geometry, rebuilt["volume"])
 
     def _validate_multicontour_loft_geometry(self, geometry: GeometryDescriptor) -> None:
-        if (set(geometry) != {"kernel", "kind", "branches", "volume"}
+        if (set(geometry) not in (
+                    {"kernel", "kind", "branches", "volume"},
+                    {"kernel", "kind", "branches", "section_axis", "volume"})
                 or geometry.get("kind") != "multicontour_loft"
                 or not isinstance(geometry.get("branches"), list) or len(geometry["branches"]) < 2
                 or any(not isinstance(branch, dict) or branch.get("kind") != "lofted_profiles"
                        for branch in geometry["branches"])):
             raise ValidationError("Multi-contour loft geometry descriptor is invalid.")
+        geometry_axis = geometry.get("section_axis", "Y")
+        if geometry_axis not in {"Y", "Z"}:
+            raise ValidationError("Loft section axis must be Y or Z.")
         for branch in geometry["branches"]:
             if (set(branch) not in (
                         {"kernel", "kind", "sections", "section_offsets", "profile_alignment", "volume"},
@@ -448,7 +454,7 @@ class GeometryDescriptorValidation:
                         "independent-start-v1", "minimum-displacement-v1", "minimum-displacement-v2"}):
                 raise ValidationError("Multi-contour loft branch descriptor is invalid.")
             axis = branch.get("section_axis", "Y")
-            if axis not in {"Y", "Z"}:
+            if axis not in {"Y", "Z"} or axis != geometry_axis:
                 raise ValidationError("Loft section axis must be Y or Z.")
             for profile in branch["sections"]:
                 _profile_values(profile, "XZ" if axis == "Y" else "XY")

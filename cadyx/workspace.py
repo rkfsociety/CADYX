@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import hashlib
 import json
 import os
@@ -223,6 +224,8 @@ class ProjectWorkspace:
         document_validated: bool = False,
     ) -> None:
         project_id = project.get("id") if isinstance(project, dict) else None
+        if not isinstance(project_id, str):
+            raise ValidationError("Project record is missing its id.")
         project_dir = self._project_dir(project_id)
         # Never admit invalid staged documents to the checkpoint archive.
         self._projects.validate_current(
@@ -315,13 +318,17 @@ class ProjectWorkspace:
     def list_project_files(self, project_id: str) -> list[dict[str, Any]]:
         return self._artifacts.list_project_files(self._project_dir(project_id))
 
-    def list_project_folders(self, project_id: str) -> list[dict[str, Any]]:
+    def list_project_folders(self, project_id: str) -> builtins.list[dict[str, Any]]:
         return self._artifacts.list_project_folders(self._project_dir(project_id))
 
-    def list_project_subfolder_files(self, project_id: str, folder_name: str) -> list[dict[str, Any]]:
+    def list_project_subfolder_files(
+        self, project_id: str, folder_name: str,
+    ) -> builtins.list[dict[str, Any]]:
         return self._artifacts.list_project_subfolder_files(self._project_dir(project_id), folder_name)
 
-    def list_project_subfolders(self, project_id: str, folder_name: str) -> list[dict[str, Any]]:
+    def list_project_subfolders(
+        self, project_id: str, folder_name: str,
+    ) -> builtins.list[dict[str, Any]]:
         return self._artifacts.list_project_subfolders(self._project_dir(project_id), folder_name)
 
     def resolve_project_subfolder_file(self, project_id: str, folder_name: str, file_name: str) -> Path:
@@ -330,20 +337,22 @@ class ProjectWorkspace:
         )
 
     def remove_project_subfolder_files(
-        self, project_id: str, folder_name: str, file_names: list[str],
+        self, project_id: str, folder_name: str, file_names: builtins.list[str],
     ) -> dict[str, Any]:
         return self._artifacts.remove_project_subfolder_files(
             self._project_dir(project_id), folder_name, file_names,
         )
 
     def move_project_files_to_subfolder(
-        self, project_id: str, file_names: list[str], folder_name: str,
+        self, project_id: str, file_names: builtins.list[str], folder_name: str,
     ) -> dict[str, Any]:
         return self._artifacts.move_project_files_to_subfolder(
             self._project_dir(project_id), file_names, folder_name,
         )
 
-    def remove_project_files(self, project_id: str, file_names: list[str]) -> dict[str, Any]:
+    def remove_project_files(
+        self, project_id: str, file_names: builtins.list[str],
+    ) -> dict[str, Any]:
         return self._artifacts.remove_project_files(self._project_dir(project_id), file_names)
 
     def remove_project_subfolder(self, project_id: str, folder_name: str) -> dict[str, Any]:

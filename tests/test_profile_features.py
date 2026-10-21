@@ -7,6 +7,7 @@ import unittest
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
 from cadyx.kernel import _loft_contour_signature, _match_loft_contours
+from cadyx.migrations import DOCUMENT_VERSION
 from cadyx.models import Document
 
 
@@ -82,7 +83,7 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertGreater(handle["geometry"]["volume"], 0)
 
         document = self.core.inspect_project(self.project_id)["document"]
-        self.assertEqual(document["version"], 8)
+        self.assertEqual(document["version"], DOCUMENT_VERSION)
         self.assertEqual(Document.from_dict(document).to_dict(), document)
         features = [item for item in document["objects"] if item["type"] == "feature"]
         self.assertEqual([item["operation"] for item in features], ["revolve_sketch", "extrude_sketch"])
@@ -228,6 +229,16 @@ class ProfileFeatureTests(unittest.TestCase):
         self.assertEqual(topology["topology"]["solid_count"], 1)
         self.assertGreaterEqual(topology["bounds"]["min"][0], -10.000001)
         self.assertLessEqual(topology["bounds"]["max"][0], 10.000001)
+
+        z_geometry = self.core.kernel.create_multicontour_loft(
+            [[circle(0.0, 10.0)], [circle(-5.0, 4.0), circle(5.0, 4.0)], [circle(0.0, 10.0)]],
+            section_offsets=[0.0, 5.0, 10.0], section_axis="Z",
+        )
+        self.assertEqual(z_geometry["section_axis"], "Z")
+        self.assertIsNone(self.core.kernel.validate(z_geometry))
+        z_bounds = self.core.kernel.metrics(z_geometry)["bounds"]
+        self.assertAlmostEqual(z_bounds["min"][2], 0.0, places=5)
+        self.assertAlmostEqual(z_bounds["max"][2], 10.0, places=5)
 
     def test_multicontour_pairing_tracks_spatial_contours_over_area(self) -> None:
         def circle(cx, radius, samples=32):

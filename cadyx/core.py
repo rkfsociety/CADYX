@@ -10,7 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterator, Literal
+from typing import Any, Callable, Iterator, Literal, cast
 
 from .commands import CommandSystem
 from .capability_registry import CapabilityRegistry
@@ -24,6 +24,7 @@ from .core_services import (
 from .errors import CadyxError, ConflictError, ValidationError
 from .events import EventBroker
 from .kernel import GeometryKernel, OCCTKernelAdapter
+from .kernel_descriptors import GeometryDescriptor
 from .lease import EditLeaseManager
 from .models import Document, OwnerType
 from .runtime_cache import RuntimeCachePolicy
@@ -871,6 +872,8 @@ class CadyxCore:
                 source = by_id.get(item.get("source_body_id"))
                 feature_geometry = item.get("geometry")
                 sketch_id = item.get("source_sketch_id")
+                if not isinstance(sketch_id, str):
+                    raise ValidationError("Pad feature source sketch id is invalid.")
                 sketch = by_id.get(sketch_id)
                 parameters = item.get("parameters")
                 if (body is None or source is None or sketch is None or sketch.get("type") != "sketch"
@@ -886,25 +889,26 @@ class CadyxCore:
                     candidates = [segment_profiles, None] if segment_profiles is not None else [None]
                 # Older documents without per-contour arc descriptors remain readable.
                 for candidate in candidates:
+                    pad_tool: GeometryDescriptor
                     if len(profiles) == 1:
                         options = {"segments": candidate} if candidate is not None else {}
-                        tool = self.kernel.create_extruded_profile(
+                        pad_tool = cast(GeometryDescriptor, self.kernel.create_extruded_profile(
                             profiles[0], plane=plane, depth=parameters["depth"],
                             centered=parameters["centered"], **options,
-                        )
+                        ))
                     else:
                         options = {"segment_profiles": candidate} if candidate is not None else {}
-                        tool = self.kernel.create_extruded_profile_with_holes(
+                        pad_tool = cast(GeometryDescriptor, self.kernel.create_extruded_profile_with_holes(
                             profiles, plane=plane, depth=parameters["depth"],
                             centered=parameters["centered"], **options,
-                        )
+                        ))
                     offset = sketch.get("section_offset", 0.0)
                     if offset:
                         shift = [0.0, 0.0, 0.0]
                         shift[2 if plane == "XY" and sketch.get("section_normal_axis") == "Z" else 1] = offset
-                        tool = self.kernel.translate_solid(tool, shift)
-                    expected = self.kernel.fuse_profiles(source["geometry"], tool)
-                    if expected == feature_geometry:
+                        pad_tool = cast(GeometryDescriptor, self.kernel.translate_solid(pad_tool, shift))
+                    pad_expected = self.kernel.fuse_profiles(source["geometry"], pad_tool)
+                    if pad_expected == feature_geometry:
                         break
                 else:
                     raise ValidationError("Pad feature geometry is out of date with its source sketch or body.")
@@ -913,8 +917,10 @@ class CadyxCore:
                 feature_geometry = item.get("geometry")
                 body = by_id.get(item.get("body_id"))
                 base = by_id.get(item.get("base_body_id"))
-                tool = by_id.get(item.get("tool_body_id"))
-                if any(value is None or value.get("type") != "body" for value in (body, base, tool)):
+                tool_body = by_id.get(item.get("tool_body_id"))
+                if (body is None or body.get("type") != "body"
+                        or base is None or base.get("type") != "body"
+                        or tool_body is None or tool_body.get("type") != "body"):
                     raise ValidationError("Boolean feature refers to a missing body.")
                 if feature_geometry != body.get("geometry"):
                     raise ValidationError("Boolean feature geometry must match its body.")
@@ -922,7 +928,7 @@ class CadyxCore:
                 if (not isinstance(feature_geometry, dict)
                         or feature_geometry.get("kind") not in expected_kind
                         or feature_geometry.get("base") != base.get("geometry")
-                        or feature_geometry.get("tool") != tool.get("geometry")):
+                        or feature_geometry.get("tool") != tool_body.get("geometry")):
                     raise ValidationError("Boolean feature geometry is out of date with its source bodies.")
                 continue
             if item.get("operation") == "fillet_edges":
@@ -989,13 +995,13 @@ class CadyxCore:
                         or not isinstance(parameters, dict)
                         or set(parameters) != {"patches", "sewing_tolerance"}):
                     raise ValidationError("Ruled shell feature geometry must match its body and patch parameters.")
-                expected = self.kernel.create_ruled_shell(
+                shell_expected = dict(self.kernel.create_ruled_shell(
                     parameters["patches"], sewing_tolerance=parameters["sewing_tolerance"],
                     compute_volume=False,
-                )
-                expected.pop("volume", None)
+                ))
+                shell_expected.pop("volume", None)
                 comparable_geometry = {key: value for key, value in feature_geometry.items() if key != "volume"}
-                if expected != comparable_geometry:
+                if shell_expected != comparable_geometry:
                     raise ValidationError("Ruled shell geometry is out of date with its saved rail patches.")
                 continue
             if item.get("operation") == "loft_sketches":
@@ -1024,7 +1030,10 @@ class CadyxCore:
                         section_axes.append(axis)
                         _, profile = closed_profile(document.objects, sketch_id)
                         group_profiles.append(profile)
-                        group_offsets.append(sketch.get("section_offset"))
+                        offset = sketch.get("section_offset")
+                        if isinstance(offset, bool) or not isinstance(offset, (int, float)):
+                            raise ValidationError("Loft source sketch section offset is invalid.")
+                        group_offsets.append(float(offset))
                     if not group_offsets or any(value != group_offsets[0] for value in group_offsets):
                         raise ValidationError("Loft feature contour group has inconsistent section offsets.")
                     sections.append(group_profiles)
@@ -1032,26 +1041,26 @@ class CadyxCore:
                 if len(set(section_axes)) != 1 or section_axes[0] != parameters.get("section_axis", "Y"):
                     raise ValidationError("Loft feature normal axis does not match its saved section sketches.")
                 if any(len(group) != 1 for group in sections):
-                    expected = self.kernel.create_multicontour_loft(
+                    loft_expected = dict(self.kernel.create_multicontour_loft(
                         sections, section_offsets=offsets, compute_volume=False, section_axis=section_axes[0],
-                    )
+                    ))
                 else:
-                    expected = self.kernel.create_lofted_profiles(
+                    loft_expected = dict(self.kernel.create_lofted_profiles(
                         [group[0] for group in sections], section_offsets=offsets,
                         alignment=feature_geometry.get("profile_alignment", "independent-start-v1"),
                         section_axis=section_axes[0],
-                    )
+                    ))
                     if "profile_alignment" not in feature_geometry:
-                        expected.pop("profile_alignment", None)
-                if expected.get("kind") == "multicontour_loft":
-                    expected.pop("volume", None)
+                        loft_expected.pop("profile_alignment", None)
+                if loft_expected.get("kind") == "multicontour_loft":
+                    loft_expected.pop("volume", None)
                     comparable_geometry = copy.deepcopy(feature_geometry)
                     comparable_geometry.pop("volume", None)
-                    for branch in expected["branches"] + comparable_geometry.get("branches", []):
+                    for branch in loft_expected["branches"] + comparable_geometry.get("branches", []):
                         branch.pop("volume", None)
                 else:
                     comparable_geometry = feature_geometry
-                if expected != comparable_geometry:
+                if loft_expected != comparable_geometry:
                     raise ValidationError("Loft feature geometry is out of date with its section sketches.")
                 continue
             if item.get("operation") == "import_step":
@@ -1097,6 +1106,8 @@ class CadyxCore:
                 body = by_id.get(item.get("body_id"))
                 feature_geometry = item.get("geometry")
                 source_id = item.get("source_sketch_id")
+                if not isinstance(source_id, str):
+                    raise ValidationError("Sweep feature source sketch id is invalid.")
                 if body is None or feature_geometry != body.get("geometry"):
                     raise ValidationError("Sweep feature geometry must match its body.")
                 plane, path = open_path(document.objects, source_id)
@@ -1110,6 +1121,8 @@ class CadyxCore:
             feature_geometry = item.get("geometry")
             body = by_id.get(item.get("body_id"))
             source_id = item.get("source_sketch_id")
+            if not isinstance(source_id, str):
+                raise ValidationError("Profile feature source sketch id is invalid.")
             if body is None or feature_geometry != body.get("geometry"):
                 raise ValidationError("Profile feature geometry must match its body.")
             operation = item["operation"]
@@ -1139,15 +1152,15 @@ class CadyxCore:
             if spline_profile is not None:
                 plane, profile, curve_points = spline_profile
                 if operation == "extrude_sketch":
-                    expected = self.kernel.create_extruded_profile(
+                    spline_expected = self.kernel.create_extruded_profile(
                         profile, plane=plane, depth=parameters["depth"],
                         centered=parameters.get("centered", False), curve_points=curve_points,
                     )
                 else:
-                    expected = self.kernel.create_revolved_profile(
+                    spline_expected = self.kernel.create_revolved_profile(
                         profile, angle_degrees=parameters["angle_degrees"], curve_points=curve_points,
                     )
-                if expected != feature_geometry:
+                if spline_expected != feature_geometry:
                     if accepts_legacy_gear_geometry(plane):
                         continue
                     raise ValidationError("Spline profile feature geometry is out of date with its source sketch or parameters.")
@@ -1157,19 +1170,19 @@ class CadyxCore:
                 if len(profiles) > 1:
                     curve_profiles = generated_gear_curve_profiles(document.objects, source_id, profiles)
                     segment_profiles = sketch_segment_profiles(document.objects, source_id)
-                    expected = self.kernel.create_extruded_profile_with_holes(
+                    profiles_expected = self.kernel.create_extruded_profile_with_holes(
                         profiles, plane=plane, depth=parameters["depth"],
                         centered=parameters.get("centered", False),
                         curve_profiles=curve_profiles,
                         segment_profiles=segment_profiles,
                     )
-                    if expected != feature_geometry and segment_profiles is not None:
-                        expected = self.kernel.create_extruded_profile_with_holes(
+                    if profiles_expected != feature_geometry and segment_profiles is not None:
+                        profiles_expected = self.kernel.create_extruded_profile_with_holes(
                             profiles, plane=plane, depth=parameters["depth"],
                             centered=parameters.get("centered", False),
                             curve_profiles=curve_profiles,
                         )
-                    if expected != feature_geometry:
+                    if profiles_expected != feature_geometry:
                         if accepts_legacy_gear_geometry(plane):
                             continue
                         raise ValidationError(
@@ -1185,8 +1198,8 @@ class CadyxCore:
                 raise ValidationError("Profile feature parameters are invalid.")
             if feature_geometry.get("kind") != expected_kind or feature_geometry.get("plane") != plane or feature_geometry.get("profile") != profile:
                 raise ValidationError("Profile feature geometry is out of date with its source sketch.")
-            parameter_name = "depth" if operation == "extrude_sketch" else "angle_degrees"
-            if feature_geometry.get(parameter_name) != parameters.get(parameter_name):
+            profile_parameter_name = "depth" if operation == "extrude_sketch" else "angle_degrees"
+            if feature_geometry.get(profile_parameter_name) != parameters.get(profile_parameter_name):
                 raise ValidationError("Profile feature geometry is out of date with its parameters.")
             if feature_geometry.get("centered", False) != parameters.get("centered", False):
                 raise ValidationError("Profile feature centered-extrusion state is out of date.")
