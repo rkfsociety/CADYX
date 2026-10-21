@@ -24,11 +24,12 @@
   const scannerSelect = document.querySelector('#scanner-device-select');
   const tableSelect = document.querySelector('#turntable-device-select');
   const qFile = document.querySelector('#scanner-q-matrix');
+  const replaceQFile = document.querySelector('#scanner-q-matrix-replace');
   const depthScale = document.querySelector('#scanner-depth-scale');
   const period = document.querySelector('#turntable-rotation-period');
   const status = document.querySelector('#device-settings-status');
   const calibrationStatus = document.querySelector('#scanner-calibration-status');
-  if (!dialog || !open || !close || !save || !refresh || !scannerSelect || !tableSelect || !qFile || !depthScale || !period || !status || !calibrationStatus) return;
+  if (!dialog || !open || !close || !save || !refresh || !scannerSelect || !tableSelect || !qFile || !replaceQFile || !depthScale || !period || !status || !calibrationStatus) return;
 
   let devices = { scanners: [], turntables: [] };
   let activeDevice = read().activeDevice;
@@ -113,11 +114,12 @@
     qFile.value = '';
     updateCalibrationStatus();
   });
+  replaceQFile.addEventListener('click', () => qFile.click());
   qFile.addEventListener('change', () => {
     calibrationRequest += 1;
     depthScale.value = '';
     depthScale.readOnly = false;
-    if (qFile.files?.length) calibrationStatus.textContent = 'Укажите масштаб для выбранного Q.bin.';
+    if (qFile.files?.length) calibrationStatus.textContent = `Выбран файл ${qFile.files[0].name}. Укажите масштаб глубины.`;
     else updateCalibrationStatus();
   });
   open.addEventListener('click', () => {

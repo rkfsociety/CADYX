@@ -779,8 +779,9 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
           <select id="scanner-device-select" class="device-settings-select"><option value="">Нажмите «Обновить список»</option></select>
           <p class="device-settings-note">Для разных сканеров требуется отдельная калибровка Q.bin и масштаба глубины.</p>
           <p id="scanner-calibration-status" class="device-settings-note" role="status" aria-live="polite">Калибровка ещё не загружена.</p>
-          <label class="device-settings-field" for="scanner-q-matrix">Заменить Q.bin (необязательно)</label>
-          <input id="scanner-q-matrix" class="device-settings-file" type="file" accept=".bin,application/octet-stream">
+          <span class="device-settings-field">Файл калибровки Q.bin</span>
+          <button id="scanner-q-matrix-replace" class="button" type="button">ВЫБРАТЬ ДРУГОЙ Q.BIN</button>
+          <input id="scanner-q-matrix" class="device-settings-file" type="file" accept=".bin,application/octet-stream" hidden>
           <label class="device-settings-field" for="scanner-depth-scale">Масштаб глубины (мм на единицу Y16)</label>
           <input id="scanner-depth-scale" class="device-settings-number" type="number" min="0.0000001" step="any" inputmode="decimal" placeholder="Введите значение из калибровки">
         </section>
