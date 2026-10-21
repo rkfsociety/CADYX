@@ -43,10 +43,16 @@ class ReadOnlyAssemblyMateInspectionTests(unittest.TestCase):
             def agent_dashboard_is_active(project_id):
                 return False
 
+        class ScanCapture:
+            @staticmethod
+            def is_running(project_id):
+                return False
+
         class Core:
             workspace = Workspace()
             leases = LeaseManager()
             events = Events()
+            _scan_capture = ScanCapture()
 
             @staticmethod
             def _summary(saved_project):

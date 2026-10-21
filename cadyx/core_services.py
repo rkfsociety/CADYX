@@ -442,6 +442,9 @@ class CommandActivityService(_CoreService):
                      else self.leases.require(project_id, lease_id).as_dict())
             if lease.get("owner_id") != owner_id or lease.get("owner_type") != OwnerType.AGENT.value:
                 raise ConflictError("The agent lease does not belong to this MCP session.", code="PROJECT_LOCKED")
+            active_lease = (lease["lease_id"], owner_id)
+            with self._core._server_agent_lease_guard:
+                self._core._server_agent_leases[project_id] = active_lease
             try:
                 result = self.execute_command(
                     project_id, lease["lease_id"], command,
@@ -487,7 +490,12 @@ class CommandActivityService(_CoreService):
                     "lease_released": True,
                 }
             finally:
-                self.release_lease(project_id, lease["lease_id"])
+                try:
+                    self.release_lease(project_id, lease["lease_id"])
+                finally:
+                    with self._core._server_agent_lease_guard:
+                        if self._core._server_agent_leases.get(project_id) == active_lease:
+                            self._core._server_agent_leases.pop(project_id, None)
 
     def agent_dashboard_snapshot(self, project_id: str) -> dict[str, Any]:
         self.workspace.load(project_id, include_history=False)
@@ -743,6 +751,10 @@ class CommandActivityService(_CoreService):
             return {"stopped": True, **detail}
 
     def stop_agent_owner(self, project_id: str, owner_id: str) -> dict[str, Any]:
+        with self._core._server_agent_lease_guard:
+            active = self._core._server_agent_leases.get(project_id)
+        if active is not None and active[1] == owner_id:
+            return self.stop_agent(project_id, active[0])
         lease = self.leases.get(project_id)
         if lease is None or lease.owner_type is not OwnerType.AGENT or lease.owner_id != owner_id:
             raise ConflictError("This MCP session does not own the current agent lease.", code="PROJECT_LOCKED")

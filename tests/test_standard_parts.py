@@ -6,6 +6,7 @@ import unittest
 from types import SimpleNamespace
 
 from cadyx.errors import ValidationError
+from cadyx.kernel import PrimitiveKernelAdapter
 from cadyx.standard_parts import list_standard_parts, resolve_standard_part, _execute
 from cadyx.capabilities import agent_api_capabilities
 from cadyx.web_routes import match_route
@@ -100,6 +101,7 @@ class StandardPartsTests(unittest.TestCase):
         ):
             with self.subTest(catalog_id=catalog_id):
                 fake = _StubCommands()
+                fake.kernel = PrimitiveKernelAdapter()
                 fake.circles = []
                 document = SimpleNamespace(objects=[])
                 command = resolve_standard_part(self.request(catalog_id, params))["command"]

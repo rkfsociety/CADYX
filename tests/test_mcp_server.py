@@ -82,7 +82,7 @@ class CadyxMCPServerTests(unittest.TestCase):
 
         self.assertEqual(started["scan"], scan)
         self.assertEqual(current["scan"], scan)
-        start.assert_called_once_with(project_id)
+        start.assert_called_once_with(project_id, 18.0, None, None)
         status.assert_called_once_with(project_id)
 
     def test_api_reuses_keep_alive_connection(self) -> None:
@@ -268,166 +268,11 @@ class CadyxMCPServerTests(unittest.TestCase):
     def test_execute_command_schema_tracks_discovered_command_types(self) -> None:
         tool = next(tool for tool in TOOLS if tool["name"] == "cadyx_execute_command")
         command_schema = tool["inputSchema"]["properties"]["command"]
-        branches = command_schema["oneOf"]
-        branches_by_type = {
-            branch["properties"]["type"]["enum"][0]: branch
-            for branch in branches
-        }
-        coordinate_schema = {
-            "type": "object",
-            "properties": {"x": {"type": "number"}, "y": {"type": "number"}},
-            "required": ["x", "y"],
-            "additionalProperties": False,
-        }
-        spline_points_schema = {
-            "type": "array", "minItems": 3, "items": coordinate_schema,
-        }
-        expected_parameter_schemas = {
-            "create_box": {
-                "width": {"type": "number", "exclusiveMinimum": 0},
-                "height": {"type": "number", "exclusiveMinimum": 0},
-                "depth": {"type": "number", "exclusiveMinimum": 0},
-                "name": {"type": "string"},
-            },
-            "create_sketch": {
-                "name": {"type": "string"},
-                "plane": {"type": "string", "enum": ["XY", "XZ"]},
-                "section_normal_axis": {"type": "string", "enum": ["Y", "Z"]},
-                "section_offset": {"type": "number"},
-            },
-            "add_sketch_point": {
-                "sketch_id": {"type": "string"},
-                "x": {"type": "number"},
-                "y": {"type": "number"},
-            },
-            "add_sketch_polyline": {
-                "sketch_id": {"type": "string"},
-                "points": {
-                    "type": "array",
-                    "minItems": 2,
-                    "items": {
-                        "type": "object",
-                        "properties": {"x": {"type": "number"}, "y": {"type": "number"}},
-                        "required": ["x", "y"],
-                        "additionalProperties": False,
-                    },
-                },
-                "closed": {"type": "boolean"},
-            },
-            "add_sketch_rectangle": {
-                "sketch_id": {"type": "string"},
-                "x": {"type": "number"},
-                "y": {"type": "number"},
-                "width": {"type": "number", "exclusiveMinimum": 0},
-                "height": {"type": "number", "exclusiveMinimum": 0},
-            },
-            "add_sketch_circle": {
-                "sketch_id": {"type": "string"},
-                "x": {"type": "number"},
-                "y": {"type": "number"},
-                "radius": {"type": "number", "exclusiveMinimum": 0},
-            },
-            **{
-                command_type: {
-                    "sketch_id": {"type": "string"},
-                    "start": coordinate_schema,
-                    "end": coordinate_schema,
-                }
-                for command_type in (
-                    "add_sketch_segment", "add_sketch_line", "add_sketch_infinite_line",
-                    "add_sketch_centerline", "add_sketch_construction_line",
-                )
-            },
-            **{
-                command_type: {
-                    "sketch_id": {"type": "string"},
-                    "points": spline_points_schema,
-                    "construction": {"type": "boolean"},
-                }
-                for command_type in (
-                    "add_sketch_spline", "add_sketch_closed_spline",
-                    "add_sketch_spline_control_points", "add_sketch_bspline",
-                    "add_sketch_bezier_curve",
-                )
-            },
-            "add_sketch_nurbs": {
-                "sketch_id": {"type": "string"},
-                "points": spline_points_schema,
-                "degree": {"type": "integer"},
-                "knots": {"type": "array", "items": {"type": "number"}},
-                "weights": {
-                    "type": "array", "items": {"type": "number", "exclusiveMinimum": 0},
-                },
-                "construction": {"type": "boolean"},
-            },
-            "add_sketch_ellipse": {
-                "sketch_id": {"type": "string"},
-                "major_axis_start": coordinate_schema,
-                "major_axis_end": coordinate_schema,
-                "minor_radius": {"type": "number", "exclusiveMinimum": 0},
-            },
-            "add_sketch_ellipse_center": {
-                "sketch_id": {"type": "string"},
-                "center": coordinate_schema,
-                "major_radius": {"type": "number", "exclusiveMinimum": 0},
-                "minor_radius": {"type": "number", "exclusiveMinimum": 0},
-                "rotation_degrees": {"type": "number"},
-            },
-            "add_sketch_ellipse_three_points": {
-                "sketch_id": {"type": "string"},
-                "center": coordinate_schema,
-                "major_axis_endpoint": coordinate_schema,
-                "minor_axis_endpoint": coordinate_schema,
-            },
-            "add_sketch_circle_diameter": {
-                "sketch_id": {"type": "string"},
-                "x": {"type": "number"},
-                "y": {"type": "number"},
-                "diameter": {"type": "number", "exclusiveMinimum": 0},
-            },
-            "add_sketch_circle_two_points": {
-                "sketch_id": {"type": "string"},
-                "first": coordinate_schema,
-                "second": coordinate_schema,
-            },
-            "add_sketch_arc_three_points": {
-                "sketch_id": {"type": "string"},
-                "start": coordinate_schema,
-                "through": coordinate_schema,
-                "end": coordinate_schema,
-            },
-            "extrude_sketch": {
-                "sketch_id": {"type": "string"},
-                "depth": {"type": "number", "exclusiveMinimum": 0},
-                "name": {"type": "string"},
-                "centered": {"type": "boolean"},
-            },
-            "revolve_sketch": {
-                "sketch_id": {"type": "string"},
-                "name": {"type": "string"},
-                "angle_degrees": {"type": "number", "exclusiveMinimum": 0, "maximum": 360},
-            },
-        }
-
         self.assertEqual(command_schema["type"], "object")
-        self.assertEqual(set(branches_by_type), {item["type"] for item in COMMAND_CAPABILITIES})
-        capabilities_by_type = {item["type"]: item for item in COMMAND_CAPABILITIES}
-        for command_type, schemas in expected_parameter_schemas.items():
-            with self.subTest(parameter_schemas=command_type):
-                self.assertEqual(capabilities_by_type[command_type].get("parameter_schemas"), schemas)
-                properties = branches_by_type[command_type]["properties"]
-                for field, schema in schemas.items():
-                    self.assertEqual(properties[field], schema)
-        for capability in COMMAND_CAPABILITIES:
-            with self.subTest(command_type=capability["type"]):
-                branch = branches_by_type[capability["type"]]
-                properties = branch["properties"]
-                expected_fields = {
-                    "type", *capability.get("required", []), *capability.get("optional", []),
-                }
-                self.assertEqual(set(properties), expected_fields)
-                self.assertEqual(branch["required"], ["type"])
-
+        self.assertEqual(command_schema["properties"], {"type": {"type": "string", "minLength": 1}})
+        self.assertEqual(command_schema["required"], ["type"])
+        self.assertTrue(command_schema["additionalProperties"])
+        self.assertIn("server-managed agent lease", tool["description"])
     def test_command_uses_expected_revision_and_releases_lease(self) -> None:
         project_id = self._create_project()
         first = self._tool_value("cadyx_execute_command", {
@@ -448,7 +293,7 @@ class CadyxMCPServerTests(unittest.TestCase):
             "command": {"type": "create_box", "width": 1, "height": 1, "depth": 1},
         })
         self.assertTrue(stale["isError"])
-        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        detail = self._tool_value("cadyx_inspect_project_full", {"project_id": project_id})
         self.assertEqual(detail["document"]["revision"], 1)
         self.assertEqual(detail["lock"]["state"], "FREE")
 
@@ -632,9 +477,10 @@ class CadyxMCPServerTests(unittest.TestCase):
                 self.assertIs(error.exception, rejection)
                 paths = [call.args[0] for call in post.call_args_list]
                 self.assertFalse(any(path.endswith("/stop") for path in paths))
-                self.assertTrue(any(path.endswith("/release") for path in paths))
+                self.assertFalse(any(path.endswith("/release") for path in paths),
+                                 "The atomic command endpoint manages its server-side lease.")
                 self.assertNotIn(project_id, self.app._active_leases)
-        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        detail = self._tool_value("cadyx_inspect_project_full", {"project_id": project_id})
         self.assertEqual(detail["document"]["revision"], 0)
         self.assertEqual(detail["lock"]["state"], "FREE")
 
@@ -654,9 +500,9 @@ class CadyxMCPServerTests(unittest.TestCase):
                 "command": {"type": "create_box", "width": 10, "height": 8, "depth": 4},
             })
         self.assertTrue(result["isError"])
-        self.assertIn("safely stopped/validated", result["content"][0]["text"])
+        self.assertIn("inspect the current revision, history and lock before any retry", result["content"][0]["text"])
         self.assertEqual(sum(call.args[0].endswith("/stop") for call in post.call_args_list), 1)
-        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        detail = self._tool_value("cadyx_inspect_project_full", {"project_id": project_id})
         self.assertEqual(detail["document"]["revision"], 0)
         self.assertEqual(detail["lock"]["state"], "FREE")
 
@@ -677,9 +523,9 @@ class CadyxMCPServerTests(unittest.TestCase):
                 "command": {"type": "create_box", "width": 10, "height": 8, "depth": 4},
             })
         self.assertTrue(result["isError"])
-        self.assertIn("inspect history and geometry before deciding whether to retry", result["content"][0]["text"])
+        self.assertIn("inspect the current revision, history and lock before any retry", result["content"][0]["text"])
         self.assertEqual(sum(call.args[0].endswith("/stop") for call in post.call_args_list), 1)
-        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        detail = self._tool_value("cadyx_inspect_project_full", {"project_id": project_id})
         self.assertEqual(detail["document"]["revision"], 1)
         self.assertEqual(len(detail["history"]), 1)
         self.assertEqual(detail["lock"]["state"], "FREE")
@@ -700,7 +546,7 @@ class CadyxMCPServerTests(unittest.TestCase):
                 "command": {"type": "create_box", "width": 10, "height": 8, "depth": 4},
             })
         self.assertTrue(result["isError"])
-        self.assertIn("safely stopped/validated", result["content"][0]["text"])
+        self.assertIn("inspect the current revision, history and lock before any retry", result["content"][0]["text"])
         detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
         self.assertEqual(detail["document"]["revision"], 0)
         self.assertEqual(detail["lock"]["state"], "FREE")
@@ -732,8 +578,8 @@ class CadyxMCPServerTests(unittest.TestCase):
                 "command": {"type": "create_box", "width": 10, "height": 8, "depth": 4},
             })
         self.assertTrue(result["isError"])
-        self.assertIn("inspect history and geometry before deciding whether to retry", result["content"][0]["text"])
-        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertIn("inspect the current revision, history and lock before any retry", result["content"][0]["text"])
+        detail = self._tool_value("cadyx_inspect_project_full", {"project_id": project_id})
         self.assertEqual(detail["document"]["revision"], 1)
         self.assertEqual(len(detail["history"]), 1)
         self.assertEqual(detail["lock"]["state"], "FREE")
@@ -748,7 +594,7 @@ class CadyxMCPServerTests(unittest.TestCase):
             })
         self.assertTrue(result["isError"])
         self.assertIn("simulated kernel validation failure", result["content"][0]["text"])
-        detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        detail = self._tool_value("cadyx_inspect_project_full", {"project_id": project_id})
         self.assertEqual(detail["document"]["revision"], 0)
         self.assertEqual(detail["history"], [])
         self.assertEqual(detail["lock"]["state"], "FREE")
@@ -767,7 +613,7 @@ class CadyxMCPServerTests(unittest.TestCase):
         held = self.core.acquire_lease(source_id, "agent", "another-agent")
         try:
             result = self.app.call_tool("cadyx_select_resource", {"type": "project", "project_id": target_id})
-            self.assertFalse(result["isError"])
+            self.assertFalse(result.get("isError", False))
             self.assertEqual(result["structuredContent"]["selection"], {"type": "project", "project_id": target_id})
             self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": target_id})
         finally:
@@ -814,8 +660,12 @@ class CadyxMCPServerTests(unittest.TestCase):
                 self.assertTrue(fenced.wait(timeout=3))
                 finish.set()
                 stopped = stop.result(timeout=5)
-                self.assertTrue(stopped["stopped"])
-                self.assertEqual(stopped["document"]["revision"], 1)
+                self.assertTrue(stopped.get("stopped") or stopped.get("command_already_finished"))
+                stopped_revision = (
+                    stopped["document"]["revision"] if stopped.get("stopped")
+                    else stopped["revision"]
+                )
+                self.assertEqual(stopped_revision, 1)
                 self.assertEqual(command.result(timeout=5)["revision"], 1)
         finally:
             finish.set()

@@ -69,7 +69,9 @@ class CadyxCore:
             dashboard_state_path=self.workspace.root / ".cadyx-agent-dashboards.json",
             dashboard_database_path=self.workspace.root / ".cadyx-agent-dashboards.sqlite3",
         )
-        self.events.prune_agent_dashboards({project["id"] for project in self.workspace.list()})
+        self._server_agent_lease_guard = threading.RLock()
+        self._server_agent_leases: dict[str, tuple[str, str]] = {}
+        self.events.prune_agent_dashboards(self.workspace._project_ids_for_dashboard_cleanup())
         self._lifecycle = ProjectLifecycleService(self)
         self._command_activity = CommandActivityService(self)
         self._rendering = RenderingCacheService(self, cache_policy=cache_policy)

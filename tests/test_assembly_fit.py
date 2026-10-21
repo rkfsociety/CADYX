@@ -24,8 +24,8 @@ class AssemblyFitTests(unittest.TestCase):
         self.b = self.cmd("add_assembly_instance", target_id=part, name="B",
                           translation=[0, 0, 3])["instance_id"]
 
-    def cmd(self, kind, **fields):
-        result = self.commands.execute(self.document, {"type": kind, **fields})
+    def cmd(self, command_type, **fields):
+        result = self.commands.execute(self.document, {"type": command_type, **fields})
         self.document.validate()
         return result
 

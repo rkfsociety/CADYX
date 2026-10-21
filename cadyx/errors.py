@@ -61,6 +61,7 @@ def _classification(code: str, message: str, diagnostics: dict[str, Any]) -> tup
     else:
         category = category or "validation"
         failed = failed or "the request must satisfy the command and document contract"
+        hint = hint or "Review the supplied fields and documented limits, then submit a corrected request."
     return category, failed, hint
 
 

@@ -223,7 +223,7 @@ class SketchDocumentTests(unittest.TestCase):
         foreign = self.command(type="add_sketch_element", sketch_id=other,
                                element_type="point", x=0, y=1)["object_id"]
         for command in [
-            {"type": "create_sketch", "plane": "YZ"},
+            {"type": "create_sketch", "plane": "bad"},
             {"type": "create_sketch", "name": ""},
             *[{"type": "add_sketch_element", "sketch_id": self.sketch, "element_type": "point", "x": x, "y": 0}
               for x in [True, "1", None, float("inf"), float("nan")]],
@@ -281,12 +281,20 @@ class SketchDocumentTests(unittest.TestCase):
         self.assertEqual(document.to_dict(), before)
 
     def test_tolerance_and_storage_order_are_explicit(self):
+        self.constraint("fixed", [self.a])
+        fixed_end = self.constraint("fixed", [self.b])
         self.constraint("horizontal", [self.line])
-        self.command(type="update_sketch_elements", updates=[{"object_id": self.b, "changes": {"y": 5e-8}}])
-        self.rejected(type="update_sketch_elements", updates=[{"object_id": self.b, "changes": {"y": 2e-7}}])
-        document = self.core.inspect_project(self.project)["document"]
-        document["objects"].reverse()
-        self.assertEqual(Document.from_dict(document).to_dict(), document)
+        document = Document.from_dict(self.core.inspect_project(self.project)["document"])
+        fixed_constraint = document.find_object(fixed_end, "constraint")
+        fixed_constraint["fixed_position"][1] = 5e-8
+        result = solve_sketch(document.objects, self.sketch, document.parameter_bindings)
+        self.assertLessEqual(result["max_residual"], 1e-7)
+        fixed_constraint["fixed_position"][1] = 4e-7
+        with self.assertRaises(ValidationError):
+            solve_sketch(document.objects, self.sketch, document.parameter_bindings)
+        snapshot = self.core.inspect_project(self.project)["document"]
+        snapshot["objects"].reverse()
+        self.assertEqual(Document.from_dict(snapshot).to_dict(), snapshot)
 
     def test_mirror_copies_selected_geometry_and_its_point_dependencies(self):
         result = self.command(

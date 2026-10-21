@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 from cadyx.core import CadyxCore
 from cadyx.api_contracts import VALIDATION_OPERATIONS
 from cadyx.models import Document
+from cadyx.migrations import DOCUMENT_VERSION
 from cadyx.web import CadyxHTTPServer, make_request_handler
 import cadyx.web as web_module
 
@@ -68,6 +69,11 @@ class WebApiTests(unittest.TestCase):
     def test_validation_routes_preserve_field_errors_and_core_delegation(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "Validation contracts"})
         project_id = created["project"]["id"]
+        core_methods = {
+            "assembly_fit": "validate_assembly_fit",
+            "mass_properties": "validate_assembly_mass_properties",
+            "cloud_processing": "validate_body_cloud_processing",
+        }
         for name, operation in VALIDATION_OPERATIONS.items():
             path = operation["path"].replace("{id}", project_id)
             body = dict.fromkeys(operation["input_schema"]["required"], "value")
@@ -76,13 +82,16 @@ class WebApiTests(unittest.TestCase):
                     status, error = self.request(path, invalid)
                     self.assertEqual(status, 400)
                     self.assertEqual(error["message"], operation["field_error"])
-                with patch.object(self.core, "validate_body_" + name,
+                with patch.object(self.core, core_methods.get(name, "validate_body_" + name),
                                   return_value={"status": "untested"}) as validate:
                     status, result = self.request(path, body)
                     self.assertEqual(status, 200)
                     self.assertEqual(result, {"status": "untested"})
                     validate.assert_called_once()
-                    self.assertFalse(validate.call_args.kwargs["persist"])
+                    if "persist" in validate.call_args.kwargs:
+                        self.assertFalse(validate.call_args.kwargs["persist"])
+                    if name == "cloud_processing":
+                        self.assertIsNone(validate.call_args.args[-1])
                     if name == "thickness":
                         self.assertEqual(validate.call_args.kwargs["method"], "sampled")
 
@@ -161,10 +170,21 @@ class WebApiTests(unittest.TestCase):
         self.assertIn(status, {400, 404})
 
     def test_scanner_calibration_exposes_configured_depth_scale(self) -> None:
-        status, calibration = self.request("/api/v1/scanner/calibration")
+        with tempfile.TemporaryDirectory() as temporary:
+            q_file = Path(temporary) / "Q.bin"
+            q_file.write_bytes(struct.pack("<16f", *([1.0] * 16)))
+            (q_file.parent / "depth_scale.json").write_text(json.dumps({
+                "depth_scale_mm_per_raw_unit": 0.005,
+            }), encoding="utf-8")
+            with patch.object(self.core._scan_capture, "list_connected_devices", return_value={
+                "scanners": [{"device_id": "scanner-1", "profile_id": "revopoint-mini-y16"}],
+                "turntables": [],
+            }), patch.object(self.core._scan_capture, "_resolve_scanner_calibration",
+                             return_value=(q_file, 0.005)):
+                status, calibration = self.request("/api/v1/scanner/calibration?device_id=scanner-1")
         self.assertEqual(status, 200)
         self.assertEqual(calibration["depth_scale_mm_per_raw_unit"], 0.005)
-        self.assertEqual(calibration["depth_scale_status"], "provisional_for_direct_UVC")
+        self.assertEqual(calibration["depth_scale_status"], "unverified")
         self.assertEqual(len(calibration["matrix"]), 16)
 
     def test_turntable_settings_and_marker_map_routes_are_device_bound(self) -> None:
@@ -267,7 +287,7 @@ class WebApiTests(unittest.TestCase):
         with patch.object(self.core, "start_scanner_live_preview", return_value=expected) as start:
             status, response = self.request("/api/v1/scanner/live-preview", {})
         self.assertEqual((status, response["preview"]), (202, expected))
-        start.assert_called_once_with()
+        start.assert_called_once_with(None)
         with patch.object(self.core, "scanner_live_preview_status", return_value={"state": "running"}) as current:
             status, response = self.request("/api/v1/scanner/live-preview")
         self.assertEqual((status, response["preview"]["state"]), (200, "running"))
@@ -353,7 +373,7 @@ class WebApiTests(unittest.TestCase):
                 before = path.read_bytes()
                 status, detail = self.request(f"{prefix}/{project_id}")
                 self.assertEqual(status, 200)
-                self.assertEqual(detail["document"]["version"], 11)
+                self.assertEqual(detail["document"]["version"], DOCUMENT_VERSION)
                 _, acquired = self.request(f"{prefix}/{project_id}/leases",
                                           {"owner_type": owner, "owner_id": "migration-test"})
                 lease = acquired["lease"]["lease_id"]
@@ -366,7 +386,7 @@ class WebApiTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 saved = json.loads(path.read_text())
                 self.assertEqual(saved["version"], 1)
-                self.assertEqual(saved["document"]["version"], 11)
+                self.assertEqual(saved["document"]["version"], DOCUMENT_VERSION)
                 saved = self.core.workspace.load(project_id)
                 self.assertEqual(saved["history"][0]["actor_type"], owner)
                 self.core.release_lease(project_id, lease)
@@ -1475,7 +1495,7 @@ class WebApiTests(unittest.TestCase):
                 line = command({"type": "add_sketch_element", "sketch_id": sketch, "element_type": "line", "start_id": points[0], "end_id": points[1]})["history_entry"]["result"]["object_id"]
                 command({"type": "add_sketch_constraint", "sketch_id": sketch, "kind": "horizontal", "references": [line]})
                 _, before = self.request(base)
-                command({"type": "update_sketch_elements", "updates": [{"object_id": points[1], "changes": {"y": 1}}]}, 400)
+                command({"type": "update_sketch_elements", "updates": [{"object_id": points[1], "changes": {"unsupported": 1}}]}, 400)
                 _, after = self.request(base)
                 self.assertEqual(before["document"], after["document"])
                 self.assertEqual(before["history"], after["history"])

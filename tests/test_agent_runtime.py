@@ -135,7 +135,9 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(self.core.inspect_project(self.project_id)["lock"]["state"], "FREE")
         self.assertEqual(
             tuple(spec.name for spec in provider.requests[0][1]),
-            ("list_capabilities", "develop_capability", "inspect_project", "get_viewport", "execute_command"),
+            ("list_capabilities", "read_source_file", "list_source_extensions",
+             "develop_source_extension", "rollback_source_extension", "develop_capability",
+             "inspect_project", "get_viewport", "validate_specification", "execute_command"),
         )
         tool_messages = [message for message in provider.requests[1][0] if message.role == "tool"]
         self.assertEqual(

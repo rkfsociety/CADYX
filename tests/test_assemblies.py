@@ -9,7 +9,7 @@ from cadyx.assemblies import flatten_assembly, transform_point
 from cadyx.commands import CommandSystem
 from cadyx.errors import ValidationError
 from cadyx.kernel import PrimitiveKernelAdapter
-from cadyx.migrations import migrate_document
+from cadyx.migrations import DOCUMENT_VERSION, migrate_document
 from cadyx.models import Document
 from cadyx.rendering import render_scene
 
@@ -31,7 +31,7 @@ class AssemblyTests(unittest.TestCase):
         before = copy.deepcopy(old)
         new = migrate_document(old)
         self.assertEqual(old, before)
-        self.assertEqual(new["version"], 11)
+        self.assertEqual(new["version"], DOCUMENT_VERSION)
         self.assertEqual(new["assembly"], {"version": 3, "units": "mm",
                                          "parts": [], "subassemblies": [], "instances": [], "mates": []})
         self.assertEqual(Document.from_dict(new).to_dict(), new)

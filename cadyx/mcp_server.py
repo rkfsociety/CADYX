@@ -713,6 +713,13 @@ class MCPApplication:
             # A lost or malformed response is ambiguous; never replay the command.
             if isinstance(exc, APIError) and exc.status in _DEFINITIVE_COMMAND_REJECTION_STATUSES:
                 raise
+            try:
+                self._stop_agent_work(project_id)
+            except Exception as stop_error:
+                raise OutcomeUncertainError(
+                    f"{exc}. Safe stop could not be confirmed: {stop_error}. "
+                    "Inspect the current revision, history and lock before any retry."
+                ) from exc
             raise OutcomeUncertainError(f"{exc}. The atomic command response was not confirmed; inspect the current revision, history and lock before any retry.") from exc
 
     def _commit_command_proposal(self, project_id: str, expected_revision: int, proposal_id: str) -> Any:

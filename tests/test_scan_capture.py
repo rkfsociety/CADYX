@@ -34,7 +34,7 @@ class Scan360CaptureTests(unittest.TestCase):
                 q_file, depth_scale = controller._resolve_scanner_calibration(
                     "scanner-1", 1, "revopoint-mini-y16",
                 )
-        self.assertEqual(q_file, profile / "Q.bin")
+                self.assertTrue(q_file.samefile(profile / "Q.bin"))
         self.assertEqual(depth_scale, 0.005)
 
     def test_turntable_settings_and_marker_map_are_device_scoped(self) -> None:

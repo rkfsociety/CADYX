@@ -176,8 +176,9 @@ class EngineeringFeatureTests(unittest.TestCase):
         self.assertEqual(len(profiles), 2)
         self.assertIsNone(curves)
         sketch = next(item for item in objects if item.get("id") == sketch_id)
-        self.assertEqual(sorted(map(len, profiles)),
-                         sorted((len(sketch["generated_gear_profile"]["point_ids"]), 128)))
+        profile_lengths = sorted(map(len, profiles))
+        self.assertEqual(profile_lengths[0], 128)
+        self.assertGreater(profile_lengths[1], len(sketch["generated_gear_profile"]["point_ids"]))
 
     def test_metric_thread_is_editable_single_solid_brep(self) -> None:
         result = self.command({

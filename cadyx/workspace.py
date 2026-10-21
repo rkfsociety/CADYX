@@ -488,8 +488,8 @@ class ProjectWorkspace:
             return False
         return True
 
-    def _project_directories(self) -> list[Path]:
-        directories: list[Path] = []
+    def _project_directories(self) -> builtins.list[Path]:
+        directories: builtins.list[Path] = []
         try:
             entries = self.root.iterdir()
             for entry in entries:
@@ -511,6 +511,14 @@ class ProjectWorkspace:
         except OSError:
             return directories
         return directories
+
+    def _project_ids_for_dashboard_cleanup(self) -> set[str]:
+        """Resolve project identities without loading possibly corrupt model snapshots."""
+        return {
+            project_id
+            for directory in self._project_directories()
+            if (project_id := self._project_id_for_directory(directory)) is not None
+        }
 
     def _cleanup_deleted_project_directories(self) -> None:
         try:

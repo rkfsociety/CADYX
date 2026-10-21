@@ -15,9 +15,10 @@ class ExtensionKernel:
         return {"kernel": "occt-v1", "kind": "filleted_solid", "base": base,
                 "edge_indices": edge_indices, "radius": radius, "volume": 9.0}
 
-    def create_extruded_profile(self, profile, *, plane, depth, centered=False):
+    def create_extruded_profile(self, profile, *, plane, depth, centered=False, segments=None):
         return {"kernel": "occt-v1", "kind": "extruded_profile", "plane": plane,
-                "profile": profile, "depth": depth, "centered": centered, "volume": 1.0}
+                "profile": profile, "depth": depth, "centered": centered,
+                **({"segments": segments} if segments is not None else {}), "volume": 1.0}
 
     def fuse_profiles(self, base, tool):
         self.fused = (base, tool)

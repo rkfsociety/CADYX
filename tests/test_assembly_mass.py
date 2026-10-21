@@ -10,8 +10,9 @@ from cadyx.assembly_mass import evaluate_assembly_mass_properties
 from cadyx.assemblies import validate_assembly
 from cadyx.commands import CommandSystem
 from cadyx.core import CadyxCore
-from cadyx.errors import ConflictError, ValidationError
+from cadyx.errors import ConflictError, NotFoundError, ValidationError
 from cadyx.kernel_primitive import PrimitiveKernelAdapter
+from cadyx.migrations import DOCUMENT_VERSION
 from cadyx.migrations import migrate_document
 from cadyx.models import Document
 
@@ -87,14 +88,14 @@ class MassPropertiesTests(unittest.TestCase):
         for part in old["assembly"]["parts"]:
             part.pop("material")
         migrated = migrate_document(old)
-        self.assertEqual(migrated["version"], 11)
+        self.assertEqual(migrated["version"], DOCUMENT_VERSION)
         self.assertEqual(migrated["assembly"]["version"], 3)
         self.assertIsNone(migrated["assembly"]["parts"][0]["material"])
         self.assertEqual(old["assembly"]["version"], 2)
         self.cmd("set_assembly_part_material", part_id=self.part, material=None)
         self.document.validate()
         self.assertIsNone(self.document.assembly["parts"][0]["material"])
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(NotFoundError):
             self.cmd("set_assembly_part_material", part_id="part:missing", material=self.material)
 
     def test_revision_bound_core_measurement(self):

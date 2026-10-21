@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 from cadyx.assembly_mates import inspect_assembly_mates
+from cadyx.migrations import DOCUMENT_VERSION
 from cadyx.commands import CommandSystem
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
@@ -133,7 +134,7 @@ class AssemblyMateTests(unittest.TestCase):
         before = copy.deepcopy(old)
         upgraded = migrate_document(old)
         self.assertEqual(old, before)
-        self.assertEqual(upgraded["version"], 11)
+        self.assertEqual(upgraded["version"], DOCUMENT_VERSION)
         self.assertEqual(upgraded["assembly"]["version"], 3)
         self.assertEqual(upgraded["assembly"]["mates"], [])
         self.assertEqual(Document.from_dict(upgraded).to_dict(), upgraded)

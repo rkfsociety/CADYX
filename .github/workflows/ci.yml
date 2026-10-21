@@ -72,6 +72,18 @@ jobs:
       - name: Set up CMake
         uses: lukka/get-cmake@latest
 
+      - name: Read reviewed Python version for tests
+        id: test-python
+        shell: pwsh
+        run: |
+          $versions = Get-Content scripts/runtime-versions.json -Raw | ConvertFrom-Json
+          "python=$($versions.python.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Set up Python with site packages for tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.test-python.outputs.python }}
+
       # Cache only archives: setup rechecks hashes and extracts/builds afresh.
       # Never restore executable SDK trees or DLLs from an unchecked cache.
       - name: Restore runtime archives
@@ -84,13 +96,14 @@ jobs:
         shell: pwsh
         run: ./scripts/setup-runtime.ps1 -WithNode
 
+      - name: Install pinned development and test dependencies
+        run: python -m pip install -r requirements-dev.txt
+
       - name: Run Python tests
-        shell: pwsh
-        run: ./.runtime/python/python.exe -m unittest discover -s tests -v
+        run: python -m unittest discover -s tests -v
 
       - name: Compile Python sources
-        shell: pwsh
-        run: ./.runtime/python/python.exe -m compileall -q cadyx tests
+        run: python -m compileall -q cadyx tests
 
       - name: Run browser tests
         shell: pwsh

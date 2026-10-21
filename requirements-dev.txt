@@ -1,6 +1,7 @@
-# Development checks only; reviewed against PyPI on 2026-10-17.
+# Development and test dependencies only; reviewed against PyPI on 2026-10-21.
 ruff==0.17.1
 mypy==2.4.0
+numpy==2.5.4
 ast-serialize==0.13.1
 librt==0.16.0
 mypy_extensions==1.1.0
