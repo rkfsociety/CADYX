@@ -27,10 +27,12 @@
   const depthScale = document.querySelector('#scanner-depth-scale');
   const period = document.querySelector('#turntable-rotation-period');
   const status = document.querySelector('#device-settings-status');
-  if (!dialog || !open || !close || !save || !refresh || !scannerSelect || !tableSelect || !qFile || !depthScale || !period || !status) return;
+  const calibrationStatus = document.querySelector('#scanner-calibration-status');
+  if (!dialog || !open || !close || !save || !refresh || !scannerSelect || !tableSelect || !qFile || !depthScale || !period || !status || !calibrationStatus) return;
 
   let devices = { scanners: [], turntables: [] };
   let activeDevice = read().activeDevice;
+  let calibrationRequest = 0;
   const selectDevice = (name) => {
     activeDevice = name === 'turntable' ? 'turntable' : 'scanner';
     for (const tab of dialog.querySelectorAll('[data-device-tab]')) {
@@ -59,12 +61,30 @@
     const preferred = list.find(item => item.device_id === selectedId) || (list.length === 1 ? list[0] : null);
     select.value = preferred?.device_id || '';
   };
-  const updateCalibrationStatus = () => {
+  const updateCalibrationStatus = async () => {
+    const request = ++calibrationRequest;
     const scanner = devices.scanners.find(item => item.device_id === scannerSelect.value);
-    if (scanner?.calibrated) {
-      status.textContent = 'Калибровка сканера настроена.';
-    } else if (scanner) {
-      status.textContent = 'Для этого сканера нужно добавить калибровку.';
+    depthScale.value = '';
+    depthScale.readOnly = false;
+    if (!scanner) {
+      calibrationStatus.textContent = 'Выберите подключённый сканер.';
+      return;
+    }
+    if (!scanner.calibrated) {
+      calibrationStatus.textContent = 'Для этого сканера загрузите его Q.bin и укажите масштаб глубины.';
+      return;
+    }
+    try {
+      const response = await fetch(`/api/v1/scanner/calibration?device_id=${encodeURIComponent(scanner.device_id)}`, { cache: 'no-store' });
+      const payload = await response.json();
+      if (request !== calibrationRequest) return;
+      if (!response.ok) throw new Error(payload.message || payload.error || 'Не удалось загрузить калибровку.');
+      depthScale.value = String(payload.depth_scale_mm_per_raw_unit);
+      depthScale.readOnly = true;
+      calibrationStatus.textContent = `Q.bin уже выбрана и будет использована · масштаб ${depthScale.value} мм/единицу Y16.`;
+    } catch (error) {
+      if (request !== calibrationRequest) return;
+      calibrationStatus.textContent = error.message;
     }
   };
   const discover = async () => {
@@ -79,7 +99,7 @@
       options(scannerSelect, devices.scanners, saved.scannerDeviceId, 'Выберите подключённый сканер');
       options(tableSelect, devices.turntables, saved.turntableDeviceId, 'Выберите подключённый стол');
       status.textContent = `Найдено: сканеров ${devices.scanners.length}, столов ${devices.turntables.length}.`;
-      updateCalibrationStatus();
+      await updateCalibrationStatus();
     } catch (error) {
       status.textContent = error.message;
     } finally {
@@ -91,8 +111,14 @@
   }
   scannerSelect.addEventListener('change', () => {
     qFile.value = '';
-    depthScale.value = '';
     updateCalibrationStatus();
+  });
+  qFile.addEventListener('change', () => {
+    calibrationRequest += 1;
+    depthScale.value = '';
+    depthScale.readOnly = false;
+    if (qFile.files?.length) calibrationStatus.textContent = 'Укажите масштаб для выбранного Q.bin.';
+    else updateCalibrationStatus();
   });
   open.addEventListener('click', () => {
     const saved = read();

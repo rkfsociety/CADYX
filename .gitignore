@@ -11,9 +11,11 @@ projects/*
 *.tmp
 .runtime/
 tools/revopoint/build/
-# Device-specific scanner calibration is installed locally and is never tracked.
+# Auxiliary device calibration stays local; the default MINI Q matrix and scale are tracked.
 tools/revopoint/calibration/*
 !tools/revopoint/calibration/README.md
+!tools/revopoint/calibration/Q.bin
+!tools/revopoint/calibration/depth_scale.json
 
 # Local credentials and runtime configuration (never commit real tokens).
 .env

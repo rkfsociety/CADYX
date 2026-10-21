@@ -778,7 +778,8 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
           <label class="device-settings-field" for="scanner-device-select">Подключённый USB-сканер</label>
           <select id="scanner-device-select" class="device-settings-select"><option value="">Нажмите «Обновить список»</option></select>
           <p class="device-settings-note">Для разных сканеров требуется отдельная калибровка Q.bin и масштаба глубины.</p>
-          <label class="device-settings-field" for="scanner-q-matrix">Калибровка выбранного сканера · Q.bin</label>
+          <p id="scanner-calibration-status" class="device-settings-note" role="status" aria-live="polite">Калибровка ещё не загружена.</p>
+          <label class="device-settings-field" for="scanner-q-matrix">Заменить Q.bin (необязательно)</label>
           <input id="scanner-q-matrix" class="device-settings-file" type="file" accept=".bin,application/octet-stream">
           <label class="device-settings-field" for="scanner-depth-scale">Масштаб глубины (мм на единицу Y16)</label>
           <input id="scanner-depth-scale" class="device-settings-number" type="number" min="0.0000001" step="any" inputmode="decimal" placeholder="Введите значение из калибровки">

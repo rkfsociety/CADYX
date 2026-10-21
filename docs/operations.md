@@ -185,7 +185,7 @@ and [Self-Evolving Capability Engine](../.codex/docs/architecture.md#self-evolvi
 
 CADYX is a **development prototype**, not a hosted CAD service or a production-ready public server. The supported reference setup is **Windows x64** with the versions pinned in `scripts/runtime-versions.json`. Native OCCT and Open3D components are built locally; other platforms are not verified. The browser is an observation interface, while CAD agents operate through the Agent API and the shared Command System. Human edits are admitted only when the project's edit lease and running-activity state allow them. A model-provider adapter is **not** bundled.
 
-The HTTP host binds to loopback by default. Non-loopback access requires authentication, but the built-in server does not provide TLS. Do not expose it directly to the public Internet. Experimental scanner capture requires device-specific calibration supplied locally under `tools/revopoint/calibration/`; those data files are ignored by Git and are not general-purpose calibration data. See the [local setup](../tools/revopoint/calibration/README.md). Read [SECURITY.md](../SECURITY.md) before enabling network access.
+The HTTP host binds to loopback by default. Non-loopback access requires authentication, but the built-in server does not provide TLS. Do not expose it directly to the public Internet. Experimental capture defaults to the tracked, device-specific Revopoint MINI calibration under `tools/revopoint/calibration/`; calibration for other devices remains local and is not general-purpose. See the [calibration guide](../tools/revopoint/calibration/README.md). Read [SECURITY.md](../SECURITY.md) before enabling network access.
 
 ## Publication readiness
 

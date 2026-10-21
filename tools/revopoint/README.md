@@ -8,13 +8,13 @@
 
 ### Экспериментальные инструменты Revopoint
 
-Инструменты предназначены для прямого UVC-захвата и управления столом в Windows без запуска Revo Scan. Для захвата сначала установите локальную калибровку своего устройства по [инструкции](calibration/README.md); файлы калибровки не входят в Git. Источники RAW, PLY, метаданные и позы сохраняются в пользовательском workspace. Захват выполняйте при неподвижном столе, поворачивая его между кадрами; обычный режим — шаг 30° и наклон 0°. Установленный пользователем предел наклона ±10°. Физический масштаб и регистрация требуют проверки. Нельзя выдавать облако или удачное совмещение за метрически подтверждённую модель.
+Инструменты предназначены для прямого UVC-захвата и управления столом в Windows без запуска Revo Scan. Для подключённого Revopoint MINI используется отслеживаемая калибровка `Q.bin` и `depth_scale.json`; для другого устройства установите его локальную калибровку по [инструкции](calibration/README.md). Источники RAW, PLY, метаданные и позы сохраняются в пользовательском workspace. Захват выполняйте при неподвижном столе, поворачивая его между кадрами; обычный режим — шаг 30° и наклон 0°. Установленный пользователем предел наклона ±10°. Физический масштаб и регистрация требуют проверки. Нельзя выдавать облако или удачное совмещение за метрически подтверждённую модель.
 
 Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
 
 ## English reference
 
-These small command-line tools exercise the scanner and dual-axis turntable through Windows APIs. They do not use the paid Revopoint SDK or require Revo Scan to run during capture. The commands require a local device calibration in `tools/revopoint/calibration/`; it is not included in Git. Follow the [local calibration setup](calibration/README.md) before capture. Calibration is specific to one scanner, not a universal MINI calibration.
+These small command-line tools exercise the scanner and dual-axis turntable through Windows APIs. They do not use the paid Revopoint SDK or require Revo Scan to run during capture. The original connected Revopoint MINI uses the tracked `tools/revopoint/calibration/Q.bin` and `depth_scale.json`; another device needs its own local calibration. Follow the [calibration guide](calibration/README.md). Calibration is specific to one scanner, not a universal MINI calibration.
 
 ## CADYX persistent point-cloud reference
 
@@ -47,7 +47,7 @@ The build uses the installed Visual Studio C++ Build Tools, Windows SDK, and .NE
 Close Revo Scan before capturing so it does not hold the depth camera. The Q matrix must come from the same scanner calibration. Revo Scan 5 stores it at:
 
 ```powershell
-$qFile = Join-Path $PWD 'tools\revopoint\calibration\Q.bin' # locally supplied for this scanner; not tracked by Git
+$qFile = Join-Path $PWD 'tools\revopoint\calibration\Q.bin' # tracked default for the connected original MINI
 $outPrefix = Join-Path $PWD 'projects\revopoint_probe\frame'
 & .\tools\revopoint\build\CaptureY16.exe `
     --out-prefix $outPrefix `
