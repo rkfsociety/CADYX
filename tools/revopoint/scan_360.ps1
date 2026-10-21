@@ -164,7 +164,9 @@ if ($ManifestOnly) {
     return
 }
 $complete = $false
+$rotationPeriodSeconds = 18
 try {
+    Invoke-Turntable -Arguments @('speed', [string]$rotationPeriodSeconds) | Out-Null
     Invoke-Turntable -Arguments @(
         'capture-sweep', '12', '30', '0', $poseLog, $captureExe, $prefix,
         $projectCalibration, $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw
@@ -184,6 +186,7 @@ try {
         format = 'revopoint-y16-turntable-capture-v2'
         frame_count = $frames.Count
         step_degrees = 30
+        turntable_rotation_period_seconds = $rotationPeriodSeconds
         table_tilt_degrees = 0
         starting_position_preserved = $true
         projection_method = 'Q_ray_scaled_to_depth'
