@@ -63,7 +63,8 @@ class Scan360CaptureController:
         try:
             catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
             camera_result = subprocess.run([str(capture_executable), "--list-devices"],
-                                           capture_output=True, timeout=12, check=True)
+                                           capture_output=True, timeout=12, check=True,
+                                           creationflags=subprocess.CREATE_NO_WINDOW)
             camera_text = camera_result.stdout.decode("utf-8")
         except (OSError, subprocess.SubprocessError, UnicodeError, json.JSONDecodeError) as exc:
             raise ValidationError(f"Could not discover Revopoint devices: {exc}.") from exc
@@ -95,6 +96,7 @@ class Scan360CaptureController:
                         sorted({profile["advertisement_uuid"] for profile in supported_table_profiles})
                     )],
                     capture_output=True, timeout=15, check=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
                 )
                 table_text = result.stdout.decode("utf-8")
             except (OSError, subprocess.SubprocessError, UnicodeError, KeyError) as exc:
