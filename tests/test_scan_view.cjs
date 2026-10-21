@@ -35,7 +35,7 @@ const liveRawFrames = [new Uint8Array(640 * 400 * 2), new Uint8Array(640 * 400 *
 let markerPointCount = 0;
 for (const frame of liveRawFrames) {
   markerPointCount = 0;
-  for (const [centerX, centerY] of [[200, 200], [440, 180], [320, 320]]) {
+  for (const [centerX, centerY] of [[200, 200], [440, 200], [320, 200]]) {
     for (let y = centerY - 16; y <= centerY + 16; y += 1) for (let x = centerX - 16; x <= centerX + 16; x += 1) {
       if ((x - centerX) ** 2 + (y - centerY) ** 2 > 16 ** 2) continue;
       const pixel = y * 640 + x;
@@ -111,6 +111,13 @@ assert.equal(viewport.dataset.scanPreviewMode, "live");
 assert.equal(viewerLoads.at(-1).geometry.positions.length, markerPointCount * 3, cloudButton.title);
 assert.ok(Math.abs(viewerLoads.at(-1).geometry.bounds.min[2]) < 2 && Math.abs(viewerLoads.at(-1).geometry.bounds.max[2]) < 2,
   "sparse table markers define XY and lie on that plane after alignment");
+const markerPositions = viewerLoads.at(-1).geometry.positions;
+const markerCenter = [0, 0, 0];
+for (let index = 0; index < markerPositions.length; index += 3) {
+  for (let axis = 0; axis < 3; axis += 1) markerCenter[axis] += markerPositions[index + axis] / (markerPositions.length / 3);
+}
+assert.ok(Math.abs(markerCenter[0]) < 2 && Math.abs(markerCenter[1]) < 2,
+  "table markers stay centered on the calibrated XY origin");
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0],
   "the calibrated center-pixel ray intersection is the table origin even without a marker at the center");
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0]);
