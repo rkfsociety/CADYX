@@ -56,6 +56,7 @@ const $ = (selector) => document.querySelector(selector);
 const projectDetail = $("#project-detail");
 const noSelection = $("#no-selection");
 const folderFileList = $("#folder-file-list");
+folderFileList.tabIndex = -1;
 const folderPreviewCanvas = $("#ply-preview-canvas");
 const folderPreviewPlaceholder = $("#folder-preview-placeholder");
 const folderImportModelFileButton = $("#folder-import-model-file");
@@ -1323,6 +1324,7 @@ function openProjectFilesView() {
   selectedProjectScanRunId = null;
   $("#folder-files-title").textContent = "Файлы проекта";
   folderInspector.hidden = true;
+  folderFileList.focus({ preventScroll: true });
   loadProjectFiles(projectId).catch((error) => showProjectFilesLoadError(projectId, error));
 }
 
@@ -1371,6 +1373,9 @@ async function loadFiles(context) {
 }
 
 function renderFolderFiles() {
+  const focusedFileName = folderFileList.contains(document.activeElement)
+    && document.activeElement.matches("button[data-file-name]")
+    ? document.activeElement.dataset.fileName : null;
   folderFileList.replaceChildren();
   const isProjectFileList = !getSelectedFolder() && primaryGrid.dataset.view === "files";
   if (isProjectFileList && selectedProjectScanRunId) {
@@ -1426,6 +1431,11 @@ function renderFolderFiles() {
     size.textContent = formatFileSize(file.size);
     button.append(name, size);
     folderFileList.append(button);
+  }
+  if (focusedFileName) {
+    [...folderFileList.querySelectorAll("button[data-file-name]")]
+      .find((button) => button.dataset.fileName === focusedFileName)
+      ?.focus({ preventScroll: true });
   }
 }
 
@@ -2452,6 +2462,7 @@ folderFileList.addEventListener("click", (event) => {
   if (backButton && selectedProjectScanRunId) {
     selectedProjectScanRunId = null;
     $("#folder-files-title").textContent = "Файлы проекта";
+    folderFileList.focus({ preventScroll: true });
     loadProjectFiles(selectedProjectId).catch((error) => showProjectFilesLoadError(selectedProjectId, error));
     return;
   }
@@ -2459,6 +2470,7 @@ folderFileList.addEventListener("click", (event) => {
   if (scanRunButton && primaryGrid.dataset.view === "files" && canOpenFilesView()) {
     selectedProjectScanRunId = scanRunButton.dataset.scanRunId;
     $("#folder-files-title").textContent = scanRunLabel(selectedProjectScanRunId);
+    folderFileList.focus({ preventScroll: true });
     loadProjectFiles(selectedProjectId).catch((error) => showProjectFilesLoadError(selectedProjectId, error));
     return;
   }
@@ -2468,6 +2480,22 @@ folderFileList.addEventListener("click", (event) => {
   const folderName = getSelectedFolder();
   if (folderName) previewFolderFile(folderName, file);
   else if (primaryGrid.dataset.view === "files" && canOpenFilesView()) previewProjectFile(selectedProjectId, file);
+});
+
+folderFileList.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  const files = [...folderFileList.querySelectorAll("button[data-file-name]")];
+  if (!files.length) return;
+  const focusedFile = event.target.closest("button[data-file-name]");
+  const currentName = focusedFile?.dataset.fileName || selectedFolderFileName;
+  const currentIndex = files.findIndex((button) => button.dataset.fileName === currentName);
+  const nextIndex = currentIndex < 0
+    ? event.key === "ArrowDown" ? 0 : files.length - 1
+    : Math.max(0, Math.min(files.length - 1, currentIndex + (event.key === "ArrowDown" ? 1 : -1)));
+  event.preventDefault();
+  const next = files[nextIndex];
+  next.focus({ preventScroll: true });
+  if (nextIndex !== currentIndex) next.click();
 });
 
 folderImportModelFileButton.addEventListener("click", () => {
