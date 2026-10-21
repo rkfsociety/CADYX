@@ -110,6 +110,18 @@ class PointCloudProcessingTests(unittest.TestCase):
         self.assertEqual(low[:len(surface)], surface)
         self.assertEqual(process_points(surface, "isolation_filter", {"rate": 15}), surface)
 
+    def test_uniform_and_geometric_simplification_respect_ratio_and_geometry(self):
+        points = [(float(x), float(y), .1 * ((x * y) % 3)) for x in range(20) for y in range(15)]
+        uniform = process_points(points, "simplify", {"strategy": "uniform", "ratio": 40})
+        geometric = process_points(points, "simplify", {"strategy": "geometric", "ratio": 40})
+        self.assertEqual(len(uniform), 180)
+        self.assertEqual(len(set(uniform)), len(uniform))
+        self.assertGreaterEqual(len(geometric), 3)
+        self.assertLess(len(geometric), len(points))
+        self.assertTrue(all(all(min(point[axis] for point in points) <= value <= max(point[axis] for point in points)
+                                for axis, value in enumerate(candidate)) for candidate in geometric))
+        self.assertEqual(points[0], (0., 0., 0.))
+
     def test_surface_budget_fails_without_mutating_input(self):
         from unittest.mock import patch
         points = [(float(x), float(y), 0.) for x in range(4) for y in range(4)]
@@ -157,7 +169,7 @@ class PointCloudProcessingTests(unittest.TestCase):
         self.assertIn("process_point_cloud", COMMAND_REGISTRY.command_types)
         from cadyx.capabilities import COMMAND_CAPABILITIES
         process_schema = next(item for item in COMMAND_CAPABILITIES if item["type"] == "process_point_cloud")
-        self.assertIn("isolation_filter", process_schema["parameter_schemas"]["method"]["enum"])
+        self.assertIn("simplify", process_schema["parameter_schemas"]["method"]["enum"])
         document, feature = feature_document("process_point_cloud")
         document.validate()
         self.assertEqual(Document.from_dict(document.to_dict()).to_dict(), document.to_dict())

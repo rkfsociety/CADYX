@@ -397,7 +397,7 @@ class CadyxCore:
         method: str, parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Analyze the full hashed cloud without saving files, features or a revision."""
-        if not isinstance(method, str) or method not in {"isolation_filter", "remove_overlaps", "smooth"}:
+        if not isinstance(method, str) or method not in {"simplify", "isolation_filter", "remove_overlaps", "smooth"}:
             raise ValidationError("Unsupported point-cloud analysis method.")
         with self._project_guard(project_id):
             self._require_project_policy(project_id, "read", "Project is not available for cloud analysis.")

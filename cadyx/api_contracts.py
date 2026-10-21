@@ -327,14 +327,14 @@ VALIDATION_OPERATIONS["project_check"] = {
 
 VALIDATION_OPERATIONS["cloud_processing"] = {
     "tool_name": "cadyx_analyze_point_cloud",
-    "description": "Analyze full-resolution point-cloud isolation filtering, overlap removal or smoothing at an exact revision without changing files, geometry or history. Apply separately using process_point_cloud with the returned normalized parameters.",
+    "description": "Analyze full-resolution point-cloud simplification, isolation filtering, overlap removal or smoothing at an exact revision without changing files, geometry or history. Apply separately using process_point_cloud with the returned normalized parameters.",
     "method": "POST",
     "path": "/api/v1/agent/projects/{id}/validations/cloud-processing",
     "input_schema": {
         "type": "object", "properties": {
             "expected_revision": {"type": "integer", "minimum": 0},
             "body_id": {"type": "string", "minLength": 1},
-            "method": {"type": "string", "enum": ["isolation_filter", "remove_overlaps", "smooth"]},
+            "method": {"type": "string", "enum": ["simplify", "isolation_filter", "remove_overlaps", "smooth"]},
             "parameters": {"type": "object"},
         },
         "required": ["expected_revision", "body_id", "method"], "additionalProperties": False,

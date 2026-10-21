@@ -6,6 +6,7 @@ const cadyxCloudTools = {
   voxel_downsample: 'Прореживание по вокселям',
   remove_overlaps: 'Удаление совпадающих слоёв',
   isolation_filter: 'Удаление изолированных точек',
+  simplify: 'Упрощение облака точек',
   smooth: 'Сглаживание облака точек',
 };
 function cadyxCloudStage(feature) {

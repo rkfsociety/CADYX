@@ -9,6 +9,16 @@ from .errors import ValidationError
 
 
 def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
+    if method == "simplify":
+        defaults = {"strategy": "uniform", "ratio": 40.}
+        if not isinstance(parameters, dict) or set(parameters) - defaults.keys():
+            raise ValidationError("Simplification accepts only strategy and ratio.")
+        p = {**defaults, **parameters}
+        if not isinstance(p["strategy"], str) or p["strategy"] not in {"uniform", "geometric"}:
+            raise ValidationError("Simplification strategy must be uniform or geometric.")
+        if type(p["ratio"]) not in (int, float) or not math.isfinite(p["ratio"]) or not 0 < p["ratio"] <= 95:
+            raise ValidationError("Simplification ratio must be in (0,95].")
+        return p
     if method == "isolation_filter":
         if not isinstance(parameters, dict) or set(parameters) - {"rate"}:
             raise ValidationError("Isolation filtering accepts only rate in percent.")
@@ -52,7 +62,34 @@ def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
 
 def process_points(points: list[tuple[float, float, float]], method: str, parameters: dict[str, Any]) -> list[tuple[float, float, float]]:
     p = normalize_cloud_parameters(method, parameters)
-    if method in {"remove_overlaps", "smooth", "isolation_filter"}:
+    if method == "simplify":
+        target = max(3, math.floor(len(points) * (100 - p["ratio"]) / 100))
+        if p["strategy"] == "uniform":
+            result = [points[(i * len(points)) // target] for i in range(target)]
+        else:
+            bounds = [max(point[a] for point in points) - min(point[a] for point in points) for a in range(3)]
+            high = math.sqrt(math.fsum(side * side for side in bounds)) or 1.
+            low = high / (len(points) ** (1 / 3) * 4)
+            best: list[tuple[float, float, float]] | None = None
+            best_gap = math.inf
+            for _ in range(18):
+                size = (low + high) / 2
+                buckets: dict[tuple[int, int, int], list[tuple[float, float, float]]] = {}
+                for point in points:
+                    key = tuple(math.floor(value / size) for value in point)
+                    buckets.setdefault(key, []).append(point)
+                candidate = [tuple(math.fsum(point[a] for point in group) / len(group) for a in range(3))
+                             for group in buckets.values()]
+                if len(candidate) >= 3 and abs(len(candidate) - target) < best_gap:
+                    best, best_gap = candidate, abs(len(candidate) - target)
+                if len(candidate) > target:
+                    low = size
+                else:
+                    high = size
+            if best is None:
+                raise ValidationError("Geometric simplification must retain at least three voxels.")
+            result = best
+    elif method in {"remove_overlaps", "smooth", "isolation_filter"}:
         from .point_cloud_surface import isolation_points, surface_points
         result = isolation_points(points, p["rate"]) if method == "isolation_filter" else surface_points(points, method, p)
     elif method == "deduplicate":
