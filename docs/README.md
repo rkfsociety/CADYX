@@ -43,7 +43,7 @@
 
 ### Языковое покрытие
 
-README, эта карта, руководства участия, безопасности и публикации содержат русскую и английскую версии. Запуск описан в отдельных RU/EN-руководствах. Полноценные русские и английские версии технических спецификаций — обязательное требование перед созданием Wiki. Сейчас во многих спецификациях есть лишь русские обзоры; они не считаются выполненным переводом. Сохраняйте обе полные языковые версии и общую навигацию для будущей RU/EN Wiki. Имена API, поля JSON, команды и пути сохраняются без перевода. Агентные правила и рабочая память `.codex/` не являются пользовательской локализацией. Wiki не включена, публикация не выполнялась.
+README, эта карта, руководства участия, безопасности и выпуска содержат русскую и английскую версии. Запуск описан в отдельных RU/EN-руководствах. GitHub Wiki включена и содержит RU/EN-навигацию, а также доступные полные пары спецификаций; незавершённые переводы явно отмечены. Завершите все русские версии и обновите Wiki по мере готовности. Имена API, поля JSON, команды и пути сохраняются без перевода. Агентные правила и рабочая память `.codex/` не являются пользовательской локализацией.
 
 ## English
 
@@ -95,4 +95,4 @@ The [project roadmap](../.codex/roadmap.md), [architectural decisions](../.codex
 
 ## Language coverage
 
-The README, this map, contribution guide, security policy and publication gates have Russian and English sections. Setup has separate RU/EN guides. Complete Russian and English technical specifications are required before creating the Wiki. Many specifications currently have only Russian overviews; these do not count as translations. Maintain both full language versions and shared navigation for the future RU/EN Wiki. API identifiers, JSON keys, commands and paths stay unchanged. Agent rules and working memory are not user-facing localization. GitHub Wiki remains disabled; documentation preparation does not authorize publication.
+The README, this map, contribution guide, security policy and release readiness guide have Russian and English sections. Setup has separate RU/EN guides. GitHub Wiki is enabled and has RU/EN navigation with completed specification pairs; unfinished translations are explicitly marked. Complete remaining Russian counterparts and update the Wiki as they are ready. API identifiers, JSON keys, commands and paths stay unchanged. Agent rules and working memory are not user-facing localization.

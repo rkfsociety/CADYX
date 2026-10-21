@@ -15,7 +15,7 @@ CADYX — прототип CAD-системы, в которой ИИ-агент
 
 Откройте [локальный интерфейс](http://127.0.0.1:8888). Подробнее: [запуск и настройка](docs/operations.ru.md), [документация](docs/README.md#русский), [разработка](CONTRIBUTING.md#русский), [безопасность](SECURITY.md#русский).
 
-Проект находится в разработке. До публичного распространения выполните [проверки готовности](PUBLISHING.md#русский). HTTP-сервер нельзя напрямую открывать в Интернет. Лицензия кода — [MIT](LICENSE); сторонние материалы имеют собственные условия.
+Исходный репозиторий уже публичен, но CADYX остаётся прототипом. До выпуска релиза или публичного развёртывания сервиса выполните [проверки готовности](PUBLISHING.md#русский). Встроенный HTTP-сервер нельзя напрямую открывать в Интернет. Лицензия кода — [MIT](LICENSE); сторонние материалы имеют собственные условия. См. также [двуязычную Wiki](https://github.com/rkfsociety/CADYX/wiki).
 
 ## English
 
@@ -30,4 +30,4 @@ Environment: **Windows x64**, PowerShell 7+, CMake and MSVC C++ Build Tools. Com
 
 Open the [local viewer](http://127.0.0.1:8888). Read the [setup guide](docs/operations.md), [documentation map](docs/README.md#english), [contribution guide](CONTRIBUTING.md#english), and [security policy](SECURITY.md#english).
 
-This project is under development. Public distribution requires completing the [publication gates](PUBLISHING.md#english). Do not expose the HTTP server directly to the Internet. Source code is [MIT-licensed](LICENSE); third-party materials retain their own terms.
+The source repository is public, while CADYX remains a development prototype. Complete the [release readiness gates](PUBLISHING.md#english) before publishing releases or deploying a public service. Do not expose the built-in HTTP server directly to the Internet. Source code is [MIT-licensed](LICENSE); third-party materials retain their own terms. See the [bilingual Wiki](https://github.com/rkfsociety/CADYX/wiki).
