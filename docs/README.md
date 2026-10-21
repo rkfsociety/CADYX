@@ -43,7 +43,7 @@
 
 ### Языковое покрытие
 
-README, эта карта, руководства участия, безопасности и выпуска содержат русскую и английскую версии. Запуск описан в отдельных RU/EN-руководствах. GitHub Wiki включена и содержит RU/EN-навигацию, а также доступные полные пары спецификаций; незавершённые переводы явно отмечены. Завершите все русские версии и обновите Wiki по мере готовности. Имена API, поля JSON, команды и пути сохраняются без перевода. Агентные правила и рабочая память `.codex/` не являются пользовательской локализацией.
+README, эта карта, руководства участия, безопасности, выпуска и сканера содержат русскую и английскую версии. Запуск описан в отдельных RU/EN-руководствах. Для каждой текущей технической спецификации есть полный русский аналог; Wiki содержит RU/EN-навигацию и соответствующие страницы. При добавлении спецификации обновляйте обе языковые версии и карту документации. Имена API, поля JSON, команды и пути сохраняются без перевода. Агентные правила и рабочая память `.codex/` не являются пользовательской локализацией.
 
 ## English
 
@@ -95,4 +95,4 @@ The [project roadmap](../.codex/roadmap.md), [architectural decisions](../.codex
 
 ## Language coverage
 
-The README, this map, contribution guide, security policy and release readiness guide have Russian and English sections. Setup has separate RU/EN guides. GitHub Wiki is enabled and has RU/EN navigation with completed specification pairs; unfinished translations are explicitly marked. Complete remaining Russian counterparts and update the Wiki as they are ready. API identifiers, JSON keys, commands and paths stay unchanged. Agent rules and working memory are not user-facing localization.
+The README, this map, contribution guide, security policy, release readiness guide and scanner manual have Russian and English versions. Setup has separate RU/EN guides. Every current technical specification has a full Russian counterpart, and the Wiki contains matching RU/EN navigation and pages. Update both language versions and the documentation map when adding a specification. API identifiers, JSON keys, commands and paths stay unchanged. Agent rules and working memory are not user-facing localization.
