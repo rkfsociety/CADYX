@@ -11,7 +11,7 @@
 - [Запуск и эксплуатация на русском](operations.ru.md) / [English](operations.md): установка Windows x64, сеть, MCP и проверки.
 - [Подготовка к публикации](../PUBLISHING.md#русский), [участие в разработке](../CONTRIBUTING.md#русский), [безопасность](../SECURITY.md#русский).
 - [Правила агента](../AGENTS.md), [CADYX Operator](../.agents/skills/cadyx-operator/SKILL.md).
-- [Архитектура](../.codex/docs/architecture.md), [viewport API EN](../.codex/docs/viewport-api.md) · [RU](../.codex/docs/viewport-api.ru.md), [хранение и миграции EN](../.codex/docs/project-format-v1.md) · [RU](../.codex/docs/project-format-v1.ru.md).
+- [Архитектура EN](../.codex/docs/architecture.md) · [RU, в процессе](../.codex/docs/architecture.ru.md), [viewport API EN](../.codex/docs/viewport-api.md) · [RU](../.codex/docs/viewport-api.ru.md), [хранение и миграции EN](../.codex/docs/project-format-v1.md) · [RU](../.codex/docs/project-format-v1.ru.md).
 - [Отмена Agent Runtime](../.codex/docs/agent-runtime-execution.md), [компактная инспекция](../.codex/docs/compact-inspection.md), [проверка проекта](../.codex/docs/project-checks.md).
 
 ### Контракты по темам
@@ -55,7 +55,7 @@ README, эта карта, руководства участия, безопас
 - [Publication readiness gate](../PUBLISHING.md): security, third-party rights, Git history and CI evidence required before opening the repository or releasing software.
 - [Contributing](../CONTRIBUTING.md), [security](../SECURITY.md) and [agent instructions](../AGENTS.md).
 - [CADYX Operator skill](../.agents/skills/cadyx-operator/SKILL.md): modeling operations via Agent API/MCP, without browser automation.
-- [Project architecture](../.codex/docs/architecture.md), [viewport contract](../.codex/docs/viewport-api.md) · [RU](../.codex/docs/viewport-api.ru.md), [project persistence/migrations](../.codex/docs/project-format-v1.md) · [RU](../.codex/docs/project-format-v1.ru.md).
+- [Project architecture](../.codex/docs/architecture.md) · [RU in progress](../.codex/docs/architecture.ru.md), [viewport contract](../.codex/docs/viewport-api.md) · [RU](../.codex/docs/viewport-api.ru.md), [project persistence/migrations](../.codex/docs/project-format-v1.md) · [RU](../.codex/docs/project-format-v1.ru.md).
 - [Agent Runtime cancellation](../.codex/docs/agent-runtime-execution.md) · [RU](../.codex/docs/agent-runtime-execution.ru.md), [compact inspection](../.codex/docs/compact-inspection.md) · [RU](../.codex/docs/compact-inspection.ru.md), [project checks](../.codex/docs/project-checks.md) · [RU](../.codex/docs/project-checks.ru.md).
 - Russian scan reverse-engineering contract: [RU](../.codex/docs/scan-reverse-engineering.ru.md).
 

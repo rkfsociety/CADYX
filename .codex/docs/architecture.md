@@ -1,5 +1,7 @@
 # CADYX architecture foundation
 
+[Русский перевод (в процессе)](architecture.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор
