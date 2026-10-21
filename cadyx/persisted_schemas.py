@@ -243,6 +243,8 @@ FEATURE_SCHEMAS: MappingProxyType[str, PersistedValidator] = MappingProxyType({
     'cut_bodies': _validate_boolean,
     'fuse_bodies': _validate_boolean,
     'import_step': _validate_step_import,
+    'import_stl': _validate_legacy,
+    'import_point_cloud': _validate_legacy,
     'create_box': _validate_legacy,
     'metric_thread': _validate_legacy,
     'reconstruct_scan': _validate_legacy,

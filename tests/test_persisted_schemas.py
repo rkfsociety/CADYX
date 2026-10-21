@@ -8,6 +8,7 @@ import unittest
 from uuid import uuid4
 
 from cadyx.errors import ValidationError
+from cadyx.migrations import DOCUMENT_VERSION
 from cadyx.models import Document
 from cadyx.persisted_schemas import FEATURE_SCHEMAS, OBJECT_SCHEMAS
 
@@ -119,16 +120,28 @@ class PersistedSchemaTests(unittest.TestCase):
             document.validate()
 
     def test_legacy_extensions_and_versions_remain_copy_only(self):
-        for version in range(1, 9):
+        for version in range(1, DOCUMENT_VERSION + 1):
             document, _ = feature_document("legacy_extension")
             saved = document.to_dict()
             saved["version"] = version
+            if version < 9:
+                saved.pop("assembly", None)
+            elif version == 9:
+                saved["assembly"] = {
+                    "version": 1, "units": "mm", "parts": [],
+                    "subassemblies": [], "instances": [],
+                }
+            elif version == 10:
+                saved["assembly"] = {
+                    "version": 2, "units": "mm", "parts": [],
+                    "subassemblies": [], "instances": [], "mates": [],
+                }
             if version == 1:
                 saved["objects"] = [item for item in saved["objects"] if item["type"] != "sketch"]
             original = deepcopy(saved)
             migrated = Document.from_dict(saved)
             self.assertEqual(saved, original)
-            self.assertEqual(migrated.version, 8)
+            self.assertEqual(migrated.version, DOCUMENT_VERSION)
 
     def test_object_registry_is_closed_and_body_visibility_is_checked(self):
         self.assertEqual(set(OBJECT_SCHEMAS), {"body", "feature", "sketch", "point", "line",

@@ -31,8 +31,9 @@ class ExtensionRegistryTests(unittest.TestCase):
         first = ExtensionRegistry(BASE_COMMAND_CAPABILITIES, builtin_extensions(), base_handlers=base_command_handlers())
         second = ExtensionRegistry(BASE_COMMAND_CAPABILITIES, builtin_extensions(), base_handlers=base_command_handlers())
         self.assertEqual(first.extension_names, (
-            "advanced_features", "agent_authoring", "curve_editing", "manufacturing_features",
-            "semantic_selection", "selector_contracts", "scan_reverse"))
+            "stl_reference", "advanced_features", "agent_authoring", "curve_editing",
+            "manufacturing_features", "standard_parts", "semantic_selection",
+            "selector_contracts", "scan_reverse"))
         self.assertEqual(first.capabilities, public)
         self.assertEqual(second.capabilities, public)
         self.assertEqual(first.command_types, COMMAND_REGISTRY.command_types)

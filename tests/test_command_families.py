@@ -34,6 +34,8 @@ def call(module, context, document, command, **options):
 
 
 def sketch_document(context):
+    if not hasattr(context, "kernel"):
+        context.kernel = PrimitiveKernelAdapter()
     document = Document.create()
     result = call(command_sketches, context, document, {"type": "create_sketch"})
     return document, result["sketch_id"]
@@ -207,7 +209,9 @@ class CommandFamilyTests(unittest.TestCase):
         with patch("cadyx.semantic_selection._resolve", side_effect=ValidationError("changed")), \
              patch("cadyx.semantic_selection.resolve_edge_references", return_value=[7]) as resolve:
             self.assertEqual(context._resolve_feature_edges(feature, geometry, [1]), [7])
-            resolve.assert_called_once_with(context.kernel, geometry, feature["edge_references"])
+        resolve.assert_called_once_with(
+            context.kernel, geometry, feature["edge_references"], topology=None,
+        )
 
     def test_failed_family_batch_preserves_saved_revision_document_and_history(self):
         with tempfile.TemporaryDirectory() as temporary:
