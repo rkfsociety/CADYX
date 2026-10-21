@@ -388,14 +388,23 @@ class CadyxCore:
             lambda: self.capability_registry.rollback(capability_id),
         )
 
-    def inspect_compact(self, project_id: str, **options: Any) -> dict[str, Any]:
+    def inspect_compact(
+        self, project_id: str, *, section: str = "summary",
+        expected_revision: int | None = None, kind: str | None = None,
+        body_id: str | None = None, shape: str | None = None,
+        since_revision: int | None = None, offset: int = 0, limit: int = 25,
+        include_metrics: bool = False,
+    ) -> dict[str, Any]:
         from .compact_inspection import inspect_compact
 
         # workspace.load returns a validated, migrated committed snapshot; do not
         # copy its geometry or command payloads into a full inspect response.
-        include_history = options.get("section", "summary") == "changes"
+        include_history = section == "changes"
         return inspect_compact(
-            self.workspace.load(project_id, include_history=include_history), self.kernel, **options,
+            self.workspace.load(project_id, include_history=include_history), self.kernel,
+            section=section, expected_revision=expected_revision, kind=kind,
+            body_id=body_id, shape=shape, since_revision=since_revision,
+            offset=offset, limit=limit, include_metrics=include_metrics,
         )
 
     def inspect_project(self, project_id: str) -> dict[str, Any]:
@@ -440,12 +449,13 @@ class CadyxCore:
         return self._rendering.inspect_body_topology(project_id, body_id)
 
     def query_body_topology(
-        self, project_id: str, body_id: str, expected_revision: Any, query: Any,
+        self, project_id: str, body_id: str, expected_revision: int,
+        query: dict[str, Any],
     ) -> dict[str, Any]:
         return self._rendering.query_body_topology(project_id, body_id, expected_revision, query)
 
     def validate_body_cloud_processing(
-        self, project_id: str, body_id: str, expected_revision: Any,
+        self, project_id: str, body_id: str, expected_revision: int,
         method: str, parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Analyze the full hashed cloud without saving files, features or a revision."""
@@ -469,10 +479,10 @@ class CadyxCore:
         return self._engineering_validation.validate_body_dimensions(project_id, body_id, expected_revision, expected_dimensions, tolerance, persist=persist)
 
     def validate_planetary_kinematics(
-        self, project_id: str, expected_revision: Any, sun_sketch_id: Any,
-        planet_sketch_ids: Any, ring_sketch_id: Any,
-        sun_speed_radians_per_second: Any, ring_speed_radians_per_second: Any,
-        *, carrier_body_id: Any = None, persist: bool = False,
+        self, project_id: str, expected_revision: int, sun_sketch_id: str,
+        planet_sketch_ids: list[str], ring_sketch_id: str,
+        sun_speed_radians_per_second: float, ring_speed_radians_per_second: float,
+        *, carrier_body_id: str | None = None, persist: bool = False,
     ) -> dict[str, Any]:
         return self._engineering_validation.validate_planetary_kinematics(
             project_id, expected_revision, sun_sketch_id, planet_sketch_ids,
@@ -480,9 +490,18 @@ class CadyxCore:
             carrier_body_id=carrier_body_id, persist=persist,
         )
 
-    def validate_body_planetary_kinematics(self, project_id: str, **values: Any) -> dict[str, Any]:
+    def validate_body_planetary_kinematics(
+        self, project_id: str, expected_revision: int, sun_sketch_id: str,
+        planet_sketch_ids: list[str], ring_sketch_id: str,
+        sun_speed_radians_per_second: float, ring_speed_radians_per_second: float,
+        *, carrier_body_id: str | None = None, persist: bool = False,
+    ) -> dict[str, Any]:
         """Operation-named adapter for contract-driven validation dispatch."""
-        return self.validate_planetary_kinematics(project_id, **values)
+        return self.validate_planetary_kinematics(
+            project_id, expected_revision, sun_sketch_id, planet_sketch_ids,
+            ring_sketch_id, sun_speed_radians_per_second, ring_speed_radians_per_second,
+            carrier_body_id=carrier_body_id, persist=persist,
+        )
 
     def validate_body_clearance(
         self, project_id: str, first_body_id: str, second_body_id: str,
@@ -492,9 +511,10 @@ class CadyxCore:
         return self._engineering_validation.validate_body_clearance(project_id, first_body_id, second_body_id, expected_revision, minimum_clearance, tolerance, progress=progress, persist=persist)
 
     def validate_assembly_fit(
-        self, project_id: str, expected_revision: Any,
-        minimum_clearance: Any, tolerance: Any, *,
-        instance_pairs: Any = None, pose_samples: Any = None,
+        self, project_id: str, expected_revision: int,
+        minimum_clearance: float, tolerance: float, *,
+        instance_pairs: list[dict[str, str]] | None = None,
+        pose_samples: list[dict[str, Any]] | None = None,
         progress: Callable[[str, float], None] | None = None,
         persist: bool = False,
     ) -> dict[str, Any]:
@@ -505,7 +525,7 @@ class CadyxCore:
         )
 
     def validate_assembly_mass_properties(
-        self, project_id: str, expected_revision: Any, *, persist: bool = False,
+        self, project_id: str, expected_revision: int, *, persist: bool = False,
     ) -> dict[str, Any]:
         return self._engineering_validation.validate_assembly_mass_properties(
             project_id, expected_revision, persist=persist,
@@ -548,7 +568,7 @@ class CadyxCore:
         self._check_revision(Document.from_dict(project["document"]), expected_revision)
         archive = self.workspace.revision_archive(project_id)
 
-        def resolve(selector: Any) -> dict[str, Any]:
+        def resolve(selector: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(selector, dict) or len(selector) != 1:
                 raise ValidationError("Each comparison selector needs exactly revision or proposal_id.")
             if "revision" in selector:
@@ -579,27 +599,45 @@ class CadyxCore:
         return result
 
     def check_project(
-        self, project_id: str, expected_revision: Any, **options: Any,
+        self, project_id: str, expected_revision: int, *,
+        specification: dict[str, Any] | None = None, strict: bool = False,
+        export_body_id: str | None = None, require_assembly: bool = False,
+        require_drawings: bool = False, max_bodies: int = 128,
+        time_budget_seconds: float = 30.0, deterministic_rebuild: bool = False,
+        cancelled: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         """Read-only headless validation of one saved project revision."""
         from .project_checks import check_project
-        return check_project(self, project_id, expected_revision, **options)
+        return check_project(
+            self, project_id, expected_revision, specification=specification,
+            strict=strict, export_body_id=export_body_id, require_assembly=require_assembly,
+            require_drawings=require_drawings, max_bodies=max_bodies,
+            time_budget_seconds=time_budget_seconds, deterministic_rebuild=deterministic_rebuild,
+            cancelled=cancelled,
+        )
 
     def validate_body_project_check(
-        self, project_id: str, expected_revision: Any, *,
-        specification: Any = None, strict: bool = False, persist: bool = False,
-        **options: Any,
+        self, project_id: str, expected_revision: int, *,
+        specification: dict[str, Any] | None = None, strict: bool = False,
+        persist: bool = False, export_body_id: str | None = None,
+        require_assembly: bool = False, require_drawings: bool = False,
+        max_bodies: int = 128, time_budget_seconds: float = 30.0,
+        deterministic_rebuild: bool = False,
+        cancelled: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         if type(persist) is not bool:
             raise ValidationError("persist must be a boolean.")
         result = self.check_project(
             project_id, expected_revision, specification=specification,
-            strict=strict, **options,
+            strict=strict, export_body_id=export_body_id,
+            require_assembly=require_assembly, require_drawings=require_drawings,
+            max_bodies=max_bodies, time_budget_seconds=time_budget_seconds,
+            deterministic_rebuild=deterministic_rebuild, cancelled=cancelled,
         )
         return self._maybe_persist_validation(project_id, "project_check", result, persist)
 
     def validate_body_specification(
-        self, project_id: str, expected_revision: Any, specification: Any,
+        self, project_id: str, expected_revision: int, specification: dict[str, Any],
         *, persist: bool = False,
     ) -> dict[str, Any]:
         return self._engineering_validation.validate_model_specification(
