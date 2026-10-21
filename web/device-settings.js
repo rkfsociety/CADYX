@@ -44,9 +44,17 @@
   };
   const options = (select, list, selectedId, placeholder) => {
     select.replaceChildren(new Option(placeholder, ''));
+    const profileCounts = new Map();
     for (const device of list) {
-      const suffix = device.device_id.length > 26 ? ` · …${device.device_id.slice(-16)}` : ` · ${device.device_id}`;
-      select.add(new Option(`${device.profile_name}: ${device.name}${suffix}`, device.device_id));
+      profileCounts.set(device.profile_name, (profileCounts.get(device.profile_name) || 0) + 1);
+    }
+    const profileOrdinals = new Map();
+    for (const device of list) {
+      const ordinal = (profileOrdinals.get(device.profile_name) || 0) + 1;
+      profileOrdinals.set(device.profile_name, ordinal);
+      const name = profileCounts.get(device.profile_name) > 1
+        ? `${device.profile_name} ${ordinal}` : device.profile_name;
+      select.add(new Option(name, device.device_id));
     }
     const preferred = list.find(item => item.device_id === selectedId) || (list.length === 1 ? list[0] : null);
     select.value = preferred?.device_id || '';
