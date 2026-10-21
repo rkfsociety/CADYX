@@ -30,12 +30,12 @@
 | Треугольные сетки | [Обработка EN](mesh-processing.md) · [RU](mesh-processing.ru.md) |
 | Опоры для реконструкции | [Распознавание EN](mesh-recognition.md) · [RU](mesh-recognition.ru.md) |
 | Стандартные детали | [Каталог EN](standard-part-catalog.md) · [RU](standard-part-catalog.ru.md) |
-| Отложенные инструменты | [Backlog эскизов — не список реализованного](sketch-tools-backlog.md) |
-| Revopoint | [Инструменты сканера — EN, RU в процессе](../tools/revopoint/README.md), [калибровка RU/EN](../tools/revopoint/calibration/README.md) |
+| Отложенные инструменты | [Backlog эскизов EN](sketch-tools-backlog.md) · [RU](sketch-tools-backlog.ru.md) |
+| Revopoint | [Инструменты сканера EN](../tools/revopoint/README.md) · [RU](../tools/revopoint/README.ru.md), [калибровка RU/EN](../tools/revopoint/calibration/README.md) |
 
 ### Версии и достоверность
 
-Исторические [v4 EN](../.codex/docs/document-model-v4.md) · [RU](../.codex/docs/document-model-v4.ru.md), [v5 EN](../.codex/docs/document-model-v5.md) · [RU](../.codex/docs/document-model-v5.ru.md), [v6 EN](../.codex/docs/document-model-v6.md) · [RU](../.codex/docs/document-model-v6.ru.md) и [v7 EN](../.codex/docs/document-model-v7.md) · [RU](../.codex/docs/document-model-v7.ru.md) описывают последовательные изменения эскизов, геометрии и импорта. [v8](../.codex/docs/document-model-v8.ru.md) добавила параметры; [v9](../.codex/docs/document-model-v9.ru.md) — граф сборки v1; [v10](../.codex/docs/document-model-v10.ru.md) — сопряжения и граф v2; [v11](../.codex/docs/document-model-v11.md) · [RU](../.codex/docs/document-model-v11.ru.md) — материалы и граф v3; [v12](../.codex/docs/document-model-v12.md) — сохраняемые системы координат эскизов.
+Исторические [v4 EN](../.codex/docs/document-model-v4.md) · [RU](../.codex/docs/document-model-v4.ru.md), [v5 EN](../.codex/docs/document-model-v5.md) · [RU](../.codex/docs/document-model-v5.ru.md), [v6 EN](../.codex/docs/document-model-v6.md) · [RU](../.codex/docs/document-model-v6.ru.md) и [v7 EN](../.codex/docs/document-model-v7.md) · [RU](../.codex/docs/document-model-v7.ru.md) описывают последовательные изменения эскизов, геометрии и импорта. [v8](../.codex/docs/document-model-v8.ru.md) добавила параметры; [v9](../.codex/docs/document-model-v9.ru.md) — граф сборки v1; [v10](../.codex/docs/document-model-v10.ru.md) — сопряжения и граф v2; [v11](../.codex/docs/document-model-v11.md) · [RU](../.codex/docs/document-model-v11.ru.md) — материалы и граф v3; [v12 EN](../.codex/docs/document-model-v12.md) · [RU](../.codex/docs/document-model-v12.ru.md) — сохраняемые плоскости эскизов.
 
 Текущие команды доступны через `GET /api/v1/agent/capabilities`, ограниченная инспекция — через `GET /api/v1/agent/projects/{id}/inspection`. [CI](../.github/workflows/ci.yml) содержит source-проверки и нативные Windows-проверки. Документационная правка не подтверждает прохождение нативных тестов.
 
@@ -76,7 +76,7 @@ README, эта карта, руководства участия, безопас
 | Reconstruction datums, sections and support curves | [Mesh recognition](mesh-recognition.md) |
 | Catalog and standard parts | [Standard-part presets](standard-part-catalog.md) |
 | Backlog, not implemented feature list | [Sketch tool backlog](sketch-tools-backlog.md) |
-| Revopoint scanner tooling | [Scanner README — EN, RU in progress](../tools/revopoint/README.md), [calibration notes RU/EN](../tools/revopoint/calibration/README.md) |
+| Revopoint scanner tooling | [Scanner README EN](../tools/revopoint/README.md) · [RU](../tools/revopoint/README.ru.md), [calibration notes RU/EN](../tools/revopoint/calibration/README.md) |
 
 ## Version history (not current-limit declarations)
 
@@ -85,7 +85,7 @@ README, эта карта, руководства участия, безопас
 - [Document v9](../.codex/docs/document-model-v9.md): assembly graph v1.
 - [Document v10](../.codex/docs/document-model-v10.md): assembly mates, graph v2.
 - [Document v11](../.codex/docs/document-model-v11.md) · [RU](../.codex/docs/document-model-v11.ru.md): material records, graph v3.
-- [Document v12](../.codex/docs/document-model-v12.md): current-schema entry point and [persistent work-plane frames](sketch-workplanes.md).
+- [Document v12 EN](../.codex/docs/document-model-v12.md) · [RU](../.codex/docs/document-model-v12.ru.md): current-schema entry point and [persistent work-plane frames](sketch-workplanes.md).
 
 ## Validation and scope
 
