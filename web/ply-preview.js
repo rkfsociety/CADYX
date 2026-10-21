@@ -234,6 +234,9 @@ const initialProjectPath = /^\/p\/[^/]+\/?$/.test(window.location.pathname);
 let projectAddressPinned = (initialAddress.has("project_id") || initialAddress.has("folder") || initialProjectPath)
   && initialAddress.get("view") !== "projects";
 const projectsChooserPinned = !projectAddressPinned;
+const restorableProjectViews = new Set(["geometry", "analysis", "manufacturing", "activity", "files"]);
+let pendingInitialWorkspaceView = projectAddressPinned && !initialAddress.has("folder")
+  && restorableProjectViews.has(initialAddress.get("view")) ? initialAddress.get("view") : null;
 let projectCreationPending = false;
 let workspaceSelectionRestoreAttempted = !projectAddressPinned || initialAddress.get("view") === "projects";
 const primaryGrid = $("#primary-grid");
@@ -268,6 +271,23 @@ function workspaceControlLockReason() {
   return null;
 }
 
+function restorePendingWorkspaceView() {
+  const view = pendingInitialWorkspaceView;
+  if (!view || !selectedProjectId || getSelectedFolder() || detailedProjectId !== selectedProjectId) return;
+  if (workspaceControlLockReason() !== null || (view === "files" && !canOpenFilesView())) return;
+  pendingInitialWorkspaceView = null;
+  setWorkspaceNavigation(view);
+  if (primaryGrid.dataset.view !== view) {
+    pendingInitialWorkspaceView = view;
+    return;
+  }
+  if (view === "files") openProjectFilesView();
+  else if (view === "analysis") {
+    refreshValidationRecords().catch(showValidationRecordsError);
+    refreshDetail().catch(handleRefreshError);
+  }
+}
+
 function updateWorkspaceControls() {
   const lockReason = workspaceControlLockReason();
   const available = lockReason === null;
@@ -298,6 +318,7 @@ function updateWorkspaceControls() {
         ? "Доступно, когда агент освободит панель и завершит текущую работу" : "");
     }
   });
+  restorePendingWorkspaceView();
   if (!available && primaryGrid.dataset.view === "files") {
     setWorkspaceNavigation("overview");
   }
@@ -307,6 +328,7 @@ $("#workspace-navigation").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-workspace-view]");
   if (!button || button.disabled) return;
   const view = button.dataset.workspaceView;
+  pendingInitialWorkspaceView = null;
   setWorkspaceNavigation(view);
   if (view === "overview") {
     $("#viewport-fit").focus({ preventScroll: true });
@@ -321,11 +343,7 @@ $("#workspace-navigation").addEventListener("click", (event) => {
   } else if (view === "activity") {
     $("#workflow-panel").focus({ preventScroll: true });
   } else if (view === "files") {
-    const projectId = selectedProjectId;
-    selectedProjectScanRunId = null;
-    $("#folder-files-title").textContent = "Файлы проекта";
-    folderInspector.hidden = true;
-    loadProjectFiles(projectId).catch((error) => showProjectFilesLoadError(projectId, error));
+    openProjectFilesView();
     folderFileList.focus({ preventScroll: true });
   } else if (view === "projects") {
     $("#projects-list").focus({ preventScroll: true });
@@ -339,6 +357,8 @@ function setWorkspaceNavigation(view) {
     && (view !== "files" || canOpenFilesView()) ? view : "overview";
   const address = new URL(window.location.href);
   if (activeView === "projects") address.searchParams.set("view", "projects");
+  else if (activeView !== "overview") address.searchParams.set("view", activeView);
+  else if (pendingInitialWorkspaceView) address.searchParams.set("view", pendingInitialWorkspaceView);
   else address.searchParams.delete("view");
   window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
   primaryGrid.dataset.view = activeView;
@@ -356,6 +376,7 @@ function setWorkspaceNavigation(view) {
 setWorkspaceNavigation(projectsChooserPinned ? "projects" : "overview");
 
 $("#open-projects").addEventListener("click", () => {
+  pendingInitialWorkspaceView = null;
   projectDetail.hidden = false;
   noSelection.hidden = true;
   renderProjects();
@@ -365,11 +386,16 @@ $("#open-projects").addEventListener("click", () => {
 window.addEventListener("popstate", () => {
   const requestedView = new URLSearchParams(window.location.search).get("view");
   if (requestedView === "projects") {
+    pendingInitialWorkspaceView = null;
     projectDetail.hidden = false;
     noSelection.hidden = true;
     renderProjects();
     setWorkspaceNavigation("projects");
+  } else if (restorableProjectViews.has(requestedView)) {
+    pendingInitialWorkspaceView = requestedView;
+    restorePendingWorkspaceView();
   } else {
+    pendingInitialWorkspaceView = null;
     setWorkspaceNavigation("overview");
   }
 });
@@ -781,6 +807,7 @@ function canSelectProject(id) {
 }
 
 async function navigateToWorkspaceProject(projectId, projectName) {
+  pendingInitialWorkspaceView = null;
   const address = new URL(window.location.href);
   address.pathname = projectPath(projectId) || "/";
   address.searchParams.delete("project_id");
@@ -1175,6 +1202,7 @@ function getSelectedFolder() {
 }
 
 function showFolderDetail(name) {
+  pendingInitialWorkspaceView = null;
   selectedProjectScanRunId = null;
   const fileContextKey = `folder:${name}`;
   const folderChanged = fileListContextKey !== fileContextKey;
@@ -1288,6 +1316,14 @@ async function loadFolderFiles(name) {
 
 async function loadProjectFiles(projectId) {
   return loadFiles({ type: "project", id: projectId, scanRunId: selectedProjectScanRunId });
+}
+
+function openProjectFilesView() {
+  const projectId = selectedProjectId;
+  selectedProjectScanRunId = null;
+  $("#folder-files-title").textContent = "Файлы проекта";
+  folderInspector.hidden = true;
+  loadProjectFiles(projectId).catch((error) => showProjectFilesLoadError(projectId, error));
 }
 
 async function loadFiles(context) {
@@ -2035,6 +2071,7 @@ async function refreshDetail() {
   window.dispatchEvent(new CustomEvent("cadyx:model-tree-updated", { detail: { objects: visibleObjects } }));
   updateProjectModelFileImportButton();
   refreshValidationRecords(projectId).catch(showValidationRecordsError);
+  restorePendingWorkspaceView();
 }
 
 async function refreshActivitySnapshot(projectId) {
