@@ -5,6 +5,7 @@ import unittest
 import json
 import os
 import struct
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -106,7 +107,11 @@ class Scan360CaptureTests(unittest.TestCase):
             workspace.mkdir()
             controller = Scan360CaptureController(root, workspace)
             process = FakeProcess()
-            with patch("cadyx.scan_capture.subprocess.Popen", return_value=process) as popen:
+            devices = {"scanners": [{"device_id": "scanner-1", "profile_id": "revopoint-mini-y16"}],
+                       "turntables": []}
+            with patch.object(controller, "list_connected_devices", return_value=devices), \
+                    patch.object(controller, "_resolve_scanner_calibration", return_value=(root / "Q.bin", 0.005)), \
+                    patch("cadyx.scan_capture.subprocess.Popen", return_value=process) as popen:
                 self.assertEqual(controller.start_live_preview()["state"], "starting")
                 command = popen.call_args.args[0]
                 self.assertIn("--live-only", command)
@@ -141,9 +146,56 @@ class Scan360CaptureTests(unittest.TestCase):
             script.touch()
             controller = Scan360CaptureController(root, project.parent)
             controller._live_preview = type("Preview", (), {"process": FakeProcess()})()
-            with patch("cadyx.scan_capture.shutil.which", return_value="powershell.exe"):
+            devices = {
+                "scanners": [{"device_id": "scanner-1", "profile_id": "revopoint-mini-y16"}],
+                "turntables": [{"device_id": "table-1", "profile_id": "revopoint-dual-axis-table",
+                                "expected_name": "table", "advertisement_uuid": "adv",
+                                "service_uuid": "service", "characteristic_uuid": "char"}],
+            }
+            with patch.object(controller, "list_connected_devices", return_value=devices), \
+                    patch.object(controller, "_resolve_scanner_calibration", return_value=(root / "Q.bin", 0.005)), \
+                    patch.object(controller, "_turntable_marker_map_path", return_value=root / "table.mkf"), \
+                    patch("cadyx.scan_capture.shutil.which", return_value="powershell.exe"):
                 with self.assertRaises(ConflictError):
                     controller.start("part", project)
+
+    @unittest.skipUnless(os.name == "nt", "Revopoint 360 capture runs on the Windows scanner host")
+    def test_360_capture_passes_the_selected_table_map_and_python_runtime(self) -> None:
+        class FakeProcess:
+            def poll(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = root / "projects" / "part"
+            project.mkdir(parents=True)
+            script = root / "tools" / "revopoint" / "scan_360.ps1"
+            script.parent.mkdir(parents=True)
+            script.touch()
+            marker_map = root / "table.mkf"
+            marker_map.touch()
+            calibration = root / "Q.bin"
+            calibration.touch()
+            controller = Scan360CaptureController(root, project.parent)
+            devices = {
+                "scanners": [{"device_id": "scanner-1", "profile_id": "revopoint-mini-y16"}],
+                "turntables": [{"device_id": "table-1", "profile_id": "revopoint-dual-axis-table",
+                                "expected_name": "table", "advertisement_uuid": "adv",
+                                "service_uuid": "service", "characteristic_uuid": "char"}],
+            }
+            with patch.object(controller, "list_connected_devices", return_value=devices), \
+                    patch.object(controller, "_resolve_scanner_calibration", return_value=(calibration, 0.005)), \
+                    patch.object(controller, "_turntable_marker_map_path", return_value=marker_map), \
+                    patch("cadyx.scan_capture.shutil.which", return_value="powershell.exe"), \
+                    patch("cadyx.scan_capture.subprocess.Popen", return_value=FakeProcess()) as popen:
+                controller.start("part", project, scanner_device_id="scanner-1", turntable_device_id="table-1")
+                command = popen.call_args.args[0]
+
+        self.assertEqual(command[command.index("-TurntableMarkerMap") + 1], str(marker_map))
+        expected_python = Path(sys.executable)
+        if expected_python.name.lower() == "pythonw.exe" and expected_python.with_name("python.exe").is_file():
+            expected_python = expected_python.with_name("python.exe")
+        self.assertEqual(command[command.index("-PythonExecutable") + 1], str(expected_python))
 
     def test_latest_complete_capture_survives_host_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -177,6 +229,34 @@ class Scan360CaptureTests(unittest.TestCase):
         self.assertEqual(status["preview_kind"], "provisional_fusion")
         self.assertEqual(status["preview_frame_count"], 12)
         self.assertEqual(status["origin_file"], f"{run_id}_pose_000.ply")
+
+    def test_partial_marker_alignment_previews_the_latest_aligned_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261020T103638Z"
+            (project / f"{run_id}_table_alignment.json").write_text(
+                json.dumps({"status": "partial"}), encoding="utf-8",
+            )
+            (project / f"{run_id}_pose_010_table_aligned.ply").touch()
+            (project / f"{run_id}_pose_011.ply").touch()
+            (project / f"{run_id}_first_frame_geometric_candidate.ply").touch()
+
+            preview = Scan360CaptureController._preview_payload(project, run_id, 12)
+
+        self.assertEqual(preview["preview_file"], f"{run_id}_pose_010_table_aligned.ply")
+        self.assertEqual(preview["preview_coordinate_frame"], "table_marker_map_center_xy")
+        self.assertEqual(preview["preview_frame_index"], 10)
+
+    def test_unaligned_capture_preview_keeps_the_current_frame_coordinate_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261020T103638Z"
+            (project / f"{run_id}_pose_011.ply").touch()
+
+            preview = Scan360CaptureController._preview_payload(project, run_id, 12)
+
+        self.assertEqual(preview["preview_file"], f"{run_id}_pose_011.ply")
+        self.assertEqual(preview["origin_file"], f"{run_id}_pose_011.ply")
 
     def test_partial_capture_is_not_reported_as_complete(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

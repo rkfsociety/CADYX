@@ -536,6 +536,13 @@
       const request = ++cloudRequest;
       if (!cloudPreviewOpen) modelGeometry = getModelGeometry();
       const cloud = await readPointCloud(cloudSource);
+      const sourceFile = new URL(cloudSource, location.href).searchParams.get('file') || '';
+      if (sourceFile.toLowerCase().endsWith('_table_aligned.ply')) {
+        if (request !== cloudRequest || !cloudPreviewOpen) return;
+        viewer.load({ positions: cloud.positions, triangles: new Uint32Array(0), lines: null, bounds: cloud.bounds }, { reset });
+        renderedCloudSource = cloudSource;
+        return;
+      }
       let frame = cloudTableFrame;
       if (!frame) {
         const origin = cloudOriginSource && cloudOriginSource !== cloudSource

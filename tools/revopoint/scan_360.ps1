@@ -6,6 +6,10 @@ param(
 
     [string]$CalibrationFile = '',
 
+    [string]$TurntableMarkerMap = '',
+
+    [string]$PythonExecutable = '',
+
     [string]$RunId = '',
 
     [ValidateRange(18, 90)]
@@ -31,6 +35,14 @@ $toolRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ([string]::IsNullOrWhiteSpace($CalibrationFile)) {
     $CalibrationFile = Join-Path $toolRoot 'calibration\scanners\revopoint-mini-y16\Q.bin'
 }
+if ([string]::IsNullOrWhiteSpace($TurntableMarkerMap)) {
+    $TurntableMarkerMap = Join-Path $toolRoot 'calibration\tables\revopoint-dual-axis-table\framesmall.mkf'
+}
+if (-not $ManifestOnly -and [string]::IsNullOrWhiteSpace($PythonExecutable)) {
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $pythonCommand) { throw 'Python is required to align captured frames to the table marker map.' }
+    $PythonExecutable = $pythonCommand.Source
+}
 $repoRoot = (Resolve-Path (Join-Path $toolRoot '..\..')).Path
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'projects')).TrimEnd([char[]]@('\', '/'))
 $ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
@@ -46,6 +58,7 @@ if ($projectRecord.format -ne 'cadyx-project' -or -not [guid]::TryParse([string]
 }
 $captureExe = Join-Path $toolRoot 'build\CaptureY16.exe'
 $turntableExe = Join-Path $toolRoot 'build\TurntableController.exe'
+$alignmentScript = Join-Path $toolRoot 'align_y16_to_table.py'
 $depthScaleConfig = Join-Path $toolRoot 'calibration\scanners\revopoint-mini-y16\depth_scale.json'
 if (-not $PSBoundParameters.ContainsKey('DepthScale')) {
     $DepthScale = [double](Get-Content -LiteralPath $depthScaleConfig -Raw | ConvertFrom-Json).depth_scale_mm_per_raw_unit
@@ -70,6 +83,7 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
 }
 $projectCalibration = Join-Path $ProjectPath "${runPrefix}_Q.bin"
 $projectDepthScale = Join-Path $ProjectPath "${runPrefix}_depth_scale.json"
+$projectMarkerMap = Join-Path $ProjectPath "${runPrefix}_table_marker_map.mkf"
 if ($ManifestOnly) {
     foreach ($path in @($projectCalibration, $projectDepthScale)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -77,9 +91,16 @@ if ($ManifestOnly) {
         }
     }
 } else {
+    foreach ($path in @($TurntableMarkerMap, $alignmentScript, $PythonExecutable)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Required table-alignment input was not found: $path"
+        }
+    }
     if (Test-Path -LiteralPath $projectCalibration) { throw "Calibration copy already exists: $projectCalibration" }
     if (Test-Path -LiteralPath $projectDepthScale) { throw "Depth-scale copy already exists: $projectDepthScale" }
-    Copy-Item -LiteralPath $CalibrationFile -Destination $projectCalibration
+    if (Test-Path -LiteralPath $projectMarkerMap) { throw "Table-map copy already exists: $projectMarkerMap" }
+    [IO.File]::Copy($CalibrationFile, $projectCalibration, $false)
+    [IO.File]::Copy($TurntableMarkerMap, $projectMarkerMap, $false)
     $selectedDepthScale = [ordered]@{
         depth_scale_mm_per_raw_unit = $DepthScale
         status = 'selected_device_profile'
@@ -146,6 +167,9 @@ if ($ManifestOnly) {
         }
     }
     $frames = @()
+    $alignmentPath = Join-Path $ProjectPath "${runPrefix}_table_alignment.json"
+    try { $alignmentResult = Get-Content -LiteralPath $alignmentPath -Raw | ConvertFrom-Json }
+    catch { $alignmentResult = $null }
     foreach ($capture in $captures) {
         $prefixName = [IO.Path]::GetFileName([string]$capture.command)
         foreach ($extension in @('.raw', '.ply', '.json')) {
@@ -153,6 +177,8 @@ if ($ManifestOnly) {
                 throw "Capture $($capture.step_index) is missing $($prefixName + $extension); no manifest was written."
             }
         }
+        $alignedName = "${prefixName}_table_aligned.ply"
+        $aligned = Test-Path -LiteralPath (Join-Path $ProjectPath $alignedName) -PathType Leaf
         $frames += [pscustomobject]@{
             index = [int]$capture.step_index
             commanded_angle_degrees = [int]$capture.step_index * 30
@@ -160,6 +186,8 @@ if ($ManifestOnly) {
             tilt_degrees = [double]::Parse([string]$capture.tilt_degrees, [Globalization.CultureInfo]::InvariantCulture)
             raw_file = "$prefixName.raw"
             ply_file = "$prefixName.ply"
+            coordinate_frame = if ($aligned) { 'table_marker_map_center_xy' } else { 'source_camera' }
+            table_aligned_ply_file = if ($aligned) { $alignedName } else { $null }
             metadata_file = "$prefixName.json"
         }
     }
@@ -175,10 +203,18 @@ if ($ManifestOnly) {
         projection_method = 'Q_ray_scaled_to_depth'
         depth_scale_mm_per_raw_unit = $DepthScale
         depth_scale_status = 'provisional_for_direct_UVC'
+        coordinate_frame = 'per_frame; see frames[].coordinate_frame'
+        table_marker_map_file = if (Test-Path -LiteralPath $projectMarkerMap -PathType Leaf) {
+            [IO.Path]::GetFileName($projectMarkerMap)
+        } else { $null }
+        table_alignment_file = if ($alignmentResult) { [IO.Path]::GetFileName($alignmentPath) } else { $null }
+        table_alignment_status = if ($alignmentResult) { $alignmentResult.status } else { 'not_performed' }
         calibration_file = [IO.Path]::GetFileName($projectCalibration)
         depth_scale_config = [IO.Path]::GetFileName($projectDepthScale)
         poses_file = [IO.Path]::GetFileName($poseLog)
-        frame_registration = 'not_performed'
+        frame_registration = if ($alignmentResult) {
+            'table markers when four or more reliable correspondences are visible; unresolved frames stay in source coordinates'
+        } else { 'not_performed' }
         frames = $frames
     }
     $manifestJson = $manifest | ConvertTo-Json -Depth 6
@@ -200,13 +236,29 @@ try {
         $TurntableServiceUuid, $TurntableCharacteristicUuid
     ) | Out-Null
 
+    & $PythonExecutable $alignmentScript --project $ProjectPath --run-id $runPrefix `
+        --marker-map $projectMarkerMap --calibration-file $projectCalibration --depth-scale $DepthScale
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Table-map alignment failed; the original RAW and PLY capture frames were preserved.'
+    }
+
+    $alignmentPath = Join-Path $ProjectPath "${runPrefix}_table_alignment.json"
+    $alignmentResult = Get-Content -LiteralPath $alignmentPath -Raw | ConvertFrom-Json
     $frames = @()
     for ($index = 0; $index -lt 12; $index++) {
         $prefixName = '{0}_pose_{1:D3}' -f $runPrefix, $index
+        if (-not (Test-Path -LiteralPath (Join-Path $ProjectPath "$prefixName.raw") -PathType Leaf)) {
+            $prefixName = '{0}_pose_pose_{1:D3}' -f $runPrefix, $index
+        }
+        $alignedName = '{0}_pose_{1:D3}_table_aligned.ply' -f $runPrefix, $index
+        $alignedPath = Join-Path $ProjectPath $alignedName
+        $isAligned = Test-Path -LiteralPath $alignedPath -PathType Leaf
         $frames += [pscustomobject]@{
             index = $index
             raw_file = "$prefixName.raw"
             ply_file = "$prefixName.ply"
+            coordinate_frame = if ($isAligned) { 'table_marker_map_center_xy' } else { 'source_camera' }
+            table_aligned_ply_file = if ($isAligned) { $alignedName } else { $null }
             metadata_file = "$prefixName.json"
         }
     }
@@ -220,10 +272,14 @@ try {
         projection_method = 'Q_ray_scaled_to_depth'
         depth_scale_mm_per_raw_unit = $DepthScale
         depth_scale_status = 'provisional_for_direct_UVC'
+        coordinate_frame = 'per_frame; see frames[].coordinate_frame'
+        table_marker_map_file = [IO.Path]::GetFileName($projectMarkerMap)
+        table_alignment_file = "${runPrefix}_table_alignment.json"
+        table_alignment_status = $alignmentResult.status
         calibration_file = [IO.Path]::GetFileName($projectCalibration)
         depth_scale_config = [IO.Path]::GetFileName($projectDepthScale)
         poses_file = [IO.Path]::GetFileName($poseLog)
-        frame_registration = 'not_performed'
+        frame_registration = 'table markers when four or more reliable correspondences are visible; unresolved frames stay in source coordinates'
         frames = $frames
     }
     $manifestPath = Join-Path $ProjectPath "${runPrefix}_scan_360.json"
@@ -231,7 +287,7 @@ try {
     [IO.File]::WriteAllText($manifestPath, $manifestJson, [Text.UTF8Encoding]::new($false))
     $complete = $true
     Write-Host "Captured 12 Y16 frames in CADYX project $ProjectPath; original table position preserved."
-    Write-Host 'Live preview follows the latest captured frame. Registration and fusion are not performed during capture.'
+    Write-Host ("Table-marker alignment: {0} of 12 frames; physical scale remains provisional." -f $alignmentResult.aligned_frame_count)
 }
 finally {
     if (-not $complete) {

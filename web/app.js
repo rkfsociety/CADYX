@@ -527,7 +527,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           const scan=payload.scan;
           const captureStarted=scan.state==='running'&&!scanWasRunning;
           scanWasRunning=scan.state==='running';
-          scanStatus.textContent=scan.state==='completed'||scan.state==='idle'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;
+          scanStatus.textContent=scan.state==='idle'||scan.state==='completed'&&scan.table_alignment_status==='aligned_provisional'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;
           scan360.disabled=scan.state==='running'||scan.state==='busy'||scan360.dataset.livePreviewLock==='true';
           if(scan.state==='running'){
             showCapturePreview(scan,{open:captureStarted});
@@ -537,6 +537,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
             scan360.disabled=scan360.dataset.livePreviewLock==='true';
             pollTimer=setTimeout(()=>pollScan(id),4000);
           }else if(scan.state==='failed'){
+            if(scan.completed_frames>0)showCapturePreview(scan);
             scan360.disabled=scan360.dataset.livePreviewLock==='true';
             pollTimer=setTimeout(()=>pollScan(id),4000);
           }else{
