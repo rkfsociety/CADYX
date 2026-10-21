@@ -700,7 +700,7 @@ class EventBroker:
                         cursor_id = int(number)
                         if cursor_id > self._next_id - 1:
                             reason = "invalid_cursor"
-                        elif cursor_id < self._replay_floor:
+                        elif self._replay_floor > 0 and cursor_id <= self._replay_floor:
                             reason = "history_expired"
                 if reason is None:
                     replay = [
