@@ -6,13 +6,13 @@
 
 ### Экспериментальные инструменты Revopoint
 
-Инструменты предназначены для прямого UVC-захвата и управления столом в Windows без запуска Revo Scan. Источники RAW, PLY, метаданные и позы сохраняются в пользовательском workspace. Захват выполняйте при неподвижном столе, поворачивая его между кадрами; обычный режим — шаг 30° и наклон 0°. Установленный пользователем предел наклона ±10°. Калибровка привязана к конкретному сканеру; физический масштаб и регистрация требуют проверки. Нельзя выдавать облако или удачное совмещение за метрически подтверждённую модель. Права на публичное распространение калибровочных файлов не установлены. Ниже сохранены команды, эксперименты и ограничения.
+Инструменты предназначены для прямого UVC-захвата и управления столом в Windows без запуска Revo Scan. Для захвата сначала установите локальную калибровку своего устройства по [инструкции](calibration/README.md); файлы калибровки не входят в Git. Источники RAW, PLY, метаданные и позы сохраняются в пользовательском workspace. Захват выполняйте при неподвижном столе, поворачивая его между кадрами; обычный режим — шаг 30° и наклон 0°. Установленный пользователем предел наклона ±10°. Физический масштаб и регистрация требуют проверки. Нельзя выдавать облако или удачное совмещение за метрически подтверждённую модель.
 
 Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
 
 ## English reference
 
-These small command-line tools exercise the scanner and dual-axis turntable through Windows APIs. They do not use the paid Revopoint SDK or require Revo Scan to run. The device calibration files used by the tools are bundled in `tools/revopoint/calibration/`; they were copied from `%LOCALAPPDATA%\RevoScan5\cameraparam` on the connected scanner PC so the same hardware setup can be used from another checkout. This calibration bundle is specific to that scanner; it is not a universal MINI calibration.
+These small command-line tools exercise the scanner and dual-axis turntable through Windows APIs. They do not use the paid Revopoint SDK or require Revo Scan to run during capture. The commands require a local device calibration in `tools/revopoint/calibration/`; it is not included in Git. Follow the [local calibration setup](calibration/README.md) before capture. Calibration is specific to one scanner, not a universal MINI calibration.
 
 ## CADYX persistent point-cloud reference
 
@@ -45,7 +45,7 @@ The build uses the installed Visual Studio C++ Build Tools, Windows SDK, and .NE
 Close Revo Scan before capturing so it does not hold the depth camera. The Q matrix must come from the same scanner calibration. Revo Scan 5 stores it at:
 
 ```powershell
-$qFile = Join-Path $PWD 'tools\revopoint\calibration\Q.bin'
+$qFile = Join-Path $PWD 'tools\revopoint\calibration\Q.bin' # locally supplied for this scanner; not tracked by Git
 $outPrefix = Join-Path $PWD 'projects\revopoint_probe\frame'
 & .\tools\revopoint\build\CaptureY16.exe `
     --out-prefix $outPrefix `
@@ -53,7 +53,7 @@ $outPrefix = Join-Path $PWD 'projects\revopoint_probe\frame'
     --depth-scale 0.005
 ```
 
-The command writes `frame.raw`, `frame.ply`, and `frame.json` side by side. It refuses to overwrite any of them. The raw file contains one 640×400 little-endian Y16 frame. Reprojection treats each uint16 sample as depth (`raw × depth_scale` mm), uses the first three rows of `Q.bin` to obtain the camera ray, then scales that ray so its Z equals the measured depth. The point-cloud PLY uses candidate millimeter units; direct UVC byte-for-byte equivalence with the SDK frame is still marked provisional. The shared per-scanner scale and its status are in `tools/revopoint/calibration/depth_scale.json`.
+The command writes `frame.raw`, `frame.ply`, and `frame.json` side by side. It refuses to overwrite any of them. The raw file contains one 640×400 little-endian Y16 frame. Reprojection treats each uint16 sample as depth (`raw × depth_scale` mm), uses the first three rows of this device's local `Q.bin` to obtain the camera ray, then scales that ray so its Z equals the measured depth. The point-cloud PLY uses candidate millimeter units; direct UVC byte-for-byte equivalence with the SDK frame is still marked provisional. The local per-scanner scale and its status are read from `tools/revopoint/calibration/depth_scale.json`; see setup instructions before capture.
 
 To reproject a saved raw frame after a processing change without reconnecting to the camera, use `reproject_y16.py`. Its output prefix must be in an existing folder (normally the same CADYX project) and existing outputs are never overwritten:
 

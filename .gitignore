@@ -11,6 +11,9 @@ projects/*
 *.tmp
 .runtime/
 tools/revopoint/build/
+# Device-specific scanner calibration is installed locally and is never tracked.
+tools/revopoint/calibration/*
+!tools/revopoint/calibration/README.md
 
 # Local credentials and runtime configuration (never commit real tokens).
 .env

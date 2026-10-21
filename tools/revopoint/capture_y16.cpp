@@ -91,7 +91,7 @@ void PrintUsage() {
               << "       Optional --ready-file PATH is created after the first valid frame is received.\n"
               << "       Optional --stop-file PATH ends a burst after the next valid frame.\n"
               << "       CaptureY16.exe --list-modes\n"
-              << "Depth scale converts each uint16 sample to millimeters; read it from calibration/depth_scale.json.\n";
+              << "Depth scale converts each uint16 sample to millimeters; supply the local device value from calibration/depth_scale.json.\n";
 }
 
 Options ParseOptions(int argc, wchar_t** argv) {

@@ -22,11 +22,14 @@
 - `rkfsociety/CADYX` имеет видимость **public**, Wiki включена. Документационные RU/EN-переводы публикуются в `main`; двуязычная Wiki доступна в `master` репозитория Wiki. Не все спецификации уже переведены, незавершённые страницы помечены.
 - Проверенный после этих изменений [запуск CI 39560320922](https://github.com/rkfsociety/CADYX/actions/runs/39560320922) завершился ошибкой в source-job на статической проверке mypy legacy-error baseline; Windows-job был пропущен. Это не является успешной проверкой нативной сборки или тестов.
 - На момент последней проверки GitHub Releases отсутствовали. Права на распространение файлов калибровки из установки Revo Scan по-прежнему не подтверждены.
-- Этот обзор не включает отдельную проверку полной истории репозитория, секретов или всех сторонних материалов.
+- Проверка истории показала, что бинарный набор попал в публичную историю через `c764cdf`, а `depth_scale.json` — через `4b7a287`. Источник — `%LOCALAPPDATA%\RevoScan5\cameraparam` на ПК с подключённым сканером; разрешение на распространение не установлено. Эта рабочая копия исключает файлы данных из текущего дерева и игнорирует локальные копии, но изменение ещё не отправлено. Старые blobs остаются в публичной истории.
+- Проверка отслеживаемых путей нашла в этом наборе калибровки единственные бинарные данные сканера и настройки устройства. Полный аудит секретов, зависимостей и всех сторонних материалов не выполнялся.
 
 ### Обязательные проверки
 
-- [ ] **Права на распространение.** Установить происхождение и права на калибровочные бинарные файлы, настройки устройства и сторонние материалы. MIT-лицензия CADYX не предоставляет права на них. При отсутствии разрешения отдельно заменить или удалить набор, обновить настройку сканера и оценить содержимое истории Git.
+- [x] **Текущие калибровочные файлы.** Происхождение прежнего набора задокументировано, разрешение на распространение не подтверждено. Бинарные файлы и настройка масштаба исключены из текущего Git-дерева, локальные пути игнорируются, инструкции захвата требуют калибровку пользователя. MIT CADYX не распространяется на эти данные.
+- [ ] **Историческое раскрытие калибровки.** Данные остаются в уже публичной истории (`c764cdf`, `4b7a287`). Эта рабочая копия историю не переписывает; оценить и отдельно согласовать её переписывание. Коммит удаления не удаляет старые blobs.
+- [ ] **Остальные сторонние права.** Проверить зависимости, лицензии/уведомления и другие материалы поставщиков перед распространением. Целевая проверка сканера не является полным аудитом лицензий.
 - [ ] **Содержимое и история Git.** Проверить отслеживаемые пути, особенно `.codex/`, `.agents/`, `tools/`, настройки, инженерные заметки и примеры на секреты, локальные пути и пользовательские данные. Проверить достижимые коммиты, ветки и теги, выполнить согласованное сканирование секретов. Раскрытые учётные данные отозвать; переписывание истории согласовать отдельно.
 - [ ] **CI целевого коммита.** Установить причину падения source-job. Требуются зелёные source- и нативный Windows-job. Пропущенная задача, недоступные журналы или обзор документации не доказывают прохождение тестов.
 - [ ] **Зависимости и лицензии.** Повторно проверить версии, хеши, требования Windows, воспроизводимость сборки и лицензии Python, OCCT, Open3D, Node и инструментов сканера. Не включать скачанные среды и SDK в архив без проверки прав.
@@ -49,7 +52,7 @@ This checklist tracks release and deployment readiness; it does not certify prod
 - `LICENSE` (MIT), `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `.github/workflows/ci.yml` are present.
 - Latest inspected Actions CI [run 39509118965](https://github.com/rkfsociety/CADYX/actions/runs/39509118965) for that revision: **source failed**, **windows skipped**. The failure cause was not established; job logs were inaccessible through the connected interface.
 - No GitHub Releases were present when inspected.
-- Scanner-specific assets under `tools/revopoint/calibration/` are tracked and documented as copied from a Revo Scan installation. Their public redistribution rights are **not verified**.
+- Scanner-specific assets under `tools/revopoint/calibration/` are documented as copied from a Revo Scan installation; redistribution rights are **not verified**. This checkout removes local calibration data from the tracked tree and ignores local copies. See the current-state review below for historical exposure.
 - **No local tests were run** during this preparation. This review does not establish test success.
 
 This is a historical snapshot. Refresh all evidence against the exact revision proposed for publication.
@@ -59,11 +62,14 @@ This is a historical snapshot. Refresh all evidence against the exact revision p
 - `rkfsociety/CADYX` is **public** and GitHub Wiki is enabled. RU/EN documentation translations are maintained in `main`; the bilingual Wiki is published from its `master` branch. Not all specifications are translated yet; incomplete pages are marked.
 - The latest inspected Actions [run 39560320922](https://github.com/rkfsociety/CADYX/actions/runs/39560320922), after those changes, failed in the source job during the mypy legacy-error baseline check. The Windows job was skipped. This does not establish successful native build or tests.
 - No GitHub Releases were present at the latest check. Redistribution rights for calibration files copied from Revo Scan remain unverified.
-- This status update did not audit the full repository history, secrets, or all third-party material.
+- The current review found the calibration bundle in public `origin/main` history at `c764cdf` and the device-derived scale setting at `4b7a287`. Local removal is not pushed, and old blobs remain reachable.
+- The full history, secrets, dependency licenses and all third-party materials have not been audited.
 
 ## Blocking gates
 
-- [ ] **Redistribution rights:** Establish the provenance and redistribution rights of scanner calibration binaries, device-derived settings and other vendor or third-party assets. Document each decision. The CADYX MIT license does not grant rights over third-party materials. If rights cannot be confirmed, remove or replace the tracked bundle in a separately reviewed change, adapt scanner setup/docs, and consider exposure in Git history.
+- [x] **Current calibration files:** Provenance of the former scanner calibration bundle is documented; permission to redistribute remains unconfirmed. The data files are removed from this checkout's tracked tree, local paths are ignored, and capture instructions require user-supplied local calibration. The CADYX MIT license does not grant rights over third-party material.
+- [ ] **Historical calibration exposure:** The files remain reachable in already-public Git history (`c764cdf`, `4b7a287`). This checkout did not rewrite history; coordinate that separately. A normal deletion commit does not remove old blobs.
+- [ ] **Other third-party rights:** Review dependencies, notices and vendor/third-party materials before distribution. The targeted scanner-file review is not a complete license audit.
 - [ ] **Tracked content and history:** Review all current tracked paths, particularly `.codex/`, `.agents/`, `tools/`, configuration, engineering notes and examples, for sensitive data, machine-specific paths, customer models, credentials and material unsuitable for public distribution. Audit all reachable commits, tags and branches; perform an approved secret scan and resolve findings. `.gitignore` does not erase already committed files or history. Revoke exposed credentials; coordinate history rewriting separately.
 - [ ] **Passing CI on target commit:** Investigate the failure of the `source` job and require green source checks **and** a successful native Windows `windows` job for the intended commit. A skipped job, unavailable logs, or documentation-only review is not evidence that tests pass.
 - [ ] **Dependencies and licenses:** Revalidate pinned runtime versions, download hashes, supported Windows prerequisites, build reproducibility and vendor licenses/notices (Python, OCCT, Open3D, Node, scanner tools). Bundled data or binaries have additional distribution obligations. Do not add downloaded runtimes or generated SDK files to source archives without confirming rights.
