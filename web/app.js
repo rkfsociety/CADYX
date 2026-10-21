@@ -187,6 +187,20 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     function deps(o){if(!o)return[];const d=[];const add=(id,role)=>{if(id&&state.byId.has(id))d.push({id,role})};add(o.source_sketch_id,'Профиль');(o.source_sketch_ids||[]).forEach(id=>add(id,'Сечение'));add(o.source_body_id,'Исходное тело');add(o.base_body_id,'Основное тело');add(o.tool_body_id,'Инструментальное тело');for(const x of state.objects){if(x===o||x.type!=='feature')continue;if(x.source_sketch_id===o.id||(x.source_sketch_ids||[]).includes(o.id)||x.source_body_id===o.body_id||x.base_body_id===o.body_id||x.tool_body_id===o.body_id)add(x.id,'Используется в')}return d}
     const expandedFeatures=new Set();
     const collapsedClouds=new Set();
+    function saveModelTreeState(){
+      const projectId=state.project;
+      if(!projectId)return;
+      try{localStorage.setItem(`cadyx-model-tree:${projectId}`,JSON.stringify({collapsedClouds:[...collapsedClouds],expandedFeatures:[...expandedFeatures]}))}catch{}
+    }
+    function restoreModelTreeState(projectId){
+      collapsedClouds.clear();expandedFeatures.clear();
+      try{const saved=JSON.parse(localStorage.getItem(`cadyx-model-tree:${projectId}`)||'{}');
+        const bodyIds=new Set(state.objects.filter(o=>o.type==='body').map(o=>o.id));
+        const featureIds=new Set(state.objects.filter(o=>o.type==='feature').map(o=>o.id));
+        for(const id of Array.isArray(saved.collapsedClouds)?saved.collapsedClouds:[])if(bodyIds.has(id))collapsedClouds.add(id);
+        for(const id of Array.isArray(saved.expandedFeatures)?saved.expandedFeatures:[])if(featureIds.has(id))expandedFeatures.add(id);
+      }catch{}
+    }
     const hasAssemblyStructure=()=>Boolean(state.assembly&&((state.assembly.instances||[]).length||(state.assembly.subassemblies||[]).length));
     function modelGroups(){
       const features=state.objects.filter(o=>o.type==='feature'),byBody=new Map(),consumed=new Set();
@@ -218,7 +232,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           const disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-cloud-disclosure';
           disclosure.setAttribute('aria-label',expanded?'Свернуть облако точек':'Развернуть облако точек');disclosure.setAttribute('aria-expanded',String(expanded));
           disclosure.innerHTML=`<span class="cad-tree-chevron">${expanded?'−':'+'}</span>`;
-          disclosure.onclick=()=>{if(collapsedClouds.has(group.body.id))collapsedClouds.delete(group.body.id);else collapsedClouds.add(group.body.id);renderTree()};
+          disclosure.onclick=()=>{if(collapsedClouds.has(group.body.id))collapsedClouds.delete(group.body.id);else collapsedClouds.add(group.body.id);saveModelTreeState();renderTree()};
           const root=document.createElement('button');root.className='cad-tree-feature cad3-cloud-root';root.type='button';root.dataset.id=group.body.id;
           root.dataset.selected=String(group.body.id===state.selected);root.title=group.body.name;root.innerHTML=`<span class="cad3-icon">${I.cloud}</span><span class="cad-tree-label">Облако точек</span>`;root.onclick=()=>select(group.body.id);
           row.append(disclosure,root);container.append(row);
@@ -236,7 +250,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           const expanded=expandedFeatures.has(feature.id)||(!matchesFeature&&matchingSketches.length>0);
           let disclosure=null;
           if(sketchObjects.length){disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-tree-disclosure';disclosure.setAttribute('aria-label',expanded?'Свернуть исходные эскизы':'Показать исходные эскизы');disclosure.setAttribute('aria-expanded',String(expanded));disclosure.innerHTML='<span class="cad-tree-chevron">+</span>';
-            disclosure.onclick=()=>{if(expandedFeatures.has(feature.id))expandedFeatures.delete(feature.id);else expandedFeatures.add(feature.id);renderTree()};}
+            disclosure.onclick=()=>{if(expandedFeatures.has(feature.id))expandedFeatures.delete(feature.id);else expandedFeatures.add(feature.id);saveModelTreeState();renderTree()};}
           const button=document.createElement('button');button.className='cad-tree-feature';button.type='button';button.title=featureName;button.dataset.id=feature.id;button.dataset.selected=String(feature.id===state.selected);button.innerHTML=`<span class="cad3-icon">${opIcon(feature)}</span><span class="cad-tree-label">${esc(featureName)}</span>`;button.onclick=()=>select(feature.id);
           if(disclosure)row.append(disclosure);row.append(button);node.append(row);
           if(feature.operation==='recognize_mesh'){const note=document.createElement('div');note.className='cad3-model-note';note.textContent=`Плоскости: ${feature.report?.planes?.length||0} · сечения: ${feature.report?.sections?.length||0} · проекции: ${feature.report?.projections?.length||0} · окружности: ${feature.report?.circles?.length||0}`;node.append(note)}
@@ -341,7 +355,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     };
     props.addEventListener('click',e=>{const b=e.target.closest('[data-dep]');if(b)select(b.dataset.dep,true)});
     const tabs=$('.cad-inspector-tabs');tabs?.addEventListener('click',()=>queueMicrotask(()=>{const active=$('.cad-inspector-tab[aria-selected=true]',tabs)?.dataset.cadInspector||'properties';props.hidden=active!=='properties'}));
-    function select(id,reveal=false){if(!state.byId.has(id))return;const selected=state.byId.get(id);if(selected.type==='sketch'){const owner=state.objects.find(item=>item.type==='feature'&&(item.source_sketch_id===id||(item.source_sketch_ids||[]).includes(id)));if(owner)expandedFeatures.add(owner.id)}const selectedBodyId=selected.type==='body'?selected.id:selected.body_id;const ownerGroup=modelGroups().find(group=>group.body.id===selectedBodyId||group.features.some(feature=>feature.id===id));if(ownerGroup)state.activeModelBodyId=ownerGroup.body.id;state.selected=id;state.selectionCleared=false;try{selectedObjectId=id}catch{}if(selected.type==='feature'&&['fillet_edges','variable_fillet_edges','chamfer_edges'].includes(selected.operation))modelViewer?.setSelectedFeature?.(selected.id);else modelViewer?.setSelectedBody?.(bodyFor(selected)?.id||null);renderTree();renderProps(selected);if(reveal)list?.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'nearest'});detail.dataset.v2Selection='true';syncOverlay()}
+    function select(id,reveal=false){if(!state.byId.has(id))return;const selected=state.byId.get(id);if(selected.type==='sketch'){const owner=state.objects.find(item=>item.type==='feature'&&(item.source_sketch_id===id||(item.source_sketch_ids||[]).includes(id)));if(owner){expandedFeatures.add(owner.id);saveModelTreeState()}}const selectedBodyId=selected.type==='body'?selected.id:selected.body_id;const ownerGroup=modelGroups().find(group=>group.body.id===selectedBodyId||group.features.some(feature=>feature.id===id));if(ownerGroup)state.activeModelBodyId=ownerGroup.body.id;state.selected=id;state.selectionCleared=false;try{selectedObjectId=id}catch{}if(selected.type==='feature'&&['fillet_edges','variable_fillet_edges','chamfer_edges'].includes(selected.operation))modelViewer?.setSelectedFeature?.(selected.id);else modelViewer?.setSelectedBody?.(bodyFor(selected)?.id||null);renderTree();renderProps(selected);if(reveal)list?.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'nearest'});detail.dataset.v2Selection='true';syncOverlay()}
     function clearSelection(){if(!state.selected&&state.selectionCleared)return;state.selected=null;state.selectionCleared=true;try{selectedObjectId=null}catch{}modelViewer?.setSelectedBody?.(null);renderTree();renderProps(null);detail.dataset.v2Selection='true';syncOverlay()}
     sidebar?.addEventListener('click',event=>{if(event.target.closest('button,input,select,textarea,a,[contenteditable="true"]'))return;clearSelection()},true);
     function bodyFor(o){if(!o)return null;if(o.type==='body')return o;return state.byId.get(o.body_id)||null}
@@ -559,7 +573,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
       return response.json();
     }
-    async function refresh(){const request=++semanticRequest;const id=semanticProjectId();if(!id||detail.hidden)return;try{const [info,scene]=await Promise.all([semanticJson(`/api/v1/projects/${encodeURIComponent(id)}`),semanticJson(`/api/v1/projects/${encodeURIComponent(id)}/viewport`)]);if(request!==semanticRequest||id!==semanticProjectId()||detail.hidden)return;if(scene.revision!==info.document.revision){schedule();return}const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};state.bindings=info.document.parameter_bindings||[];state.assembly=info.document.assembly||null;state.byId=new Map(state.objects.map(o=>[o.id,o]));state.scene=scene;makeLabels();if(projectChanged||(state.selected&&!state.byId.has(state.selected))){clearSelection();return}renderTree();state.selected?select(state.selected):renderProps(null);syncOverlay()}catch(e){console.debug('CAD semantic refresh',e)}}
+    async function refresh(){const request=++semanticRequest;const id=semanticProjectId();if(!id||detail.hidden)return;try{const [info,scene]=await Promise.all([semanticJson(`/api/v1/projects/${encodeURIComponent(id)}`),semanticJson(`/api/v1/projects/${encodeURIComponent(id)}/viewport`)]);if(request!==semanticRequest||id!==semanticProjectId()||detail.hidden)return;if(scene.revision!==info.document.revision){schedule();return}const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};state.bindings=info.document.parameter_bindings||[];state.assembly=info.document.assembly||null;state.byId=new Map(state.objects.map(o=>[o.id,o]));if(projectChanged)restoreModelTreeState(id);state.scene=scene;makeLabels();if(projectChanged||(state.selected&&!state.byId.has(state.selected))){clearSelection();return}renderTree();state.selected?select(state.selected):renderProps(null);syncOverlay()}catch(e){console.debug('CAD semantic refresh',e)}}
     let timer;const schedule=()=>{clearTimeout(timer);timer=setTimeout(refresh,80)};['#document-revision','#document-title'].forEach(s=>{const e=$(s);if(e)new MutationObserver(schedule).observe(e,{childList:true,subtree:true,characterData:true})});new MutationObserver(schedule).observe(detail,{attributes:true,attributeFilter:['hidden']});schedule();setTimeout(refresh,600);
   }
   const boot=()=>setTimeout(enhance,0);if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();

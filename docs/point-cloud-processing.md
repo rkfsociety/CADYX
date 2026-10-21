@@ -63,6 +63,9 @@ in the model tree with their parameters, counts, source/result artifacts and
 previous-stage link. No processing controls or unused tool palette are exposed
 to the user.
 
+The model-tree disclosure state is stored locally per project and restored after
+page reloads; it does not alter the saved CAD document.
+
 The model tree renders each point-cloud body as one expandable parent and nests
 all import/processing stages beneath it. A stage with no children has no
 disclosure control.
