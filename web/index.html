@@ -757,6 +757,11 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
         <h2 id="create-project-title">НОВЫЙ ПРОЕКТ</h2>
         <label for="new-project-name">Название проекта</label>
         <input id="new-project-name" name="name" type="text" required autocomplete="off">
+        <label for="new-project-type">Тип проекта</label>
+        <select id="new-project-type" name="project_type" class="workspace-project-group-select">
+          <option value="single_model">Одиночная модель</option>
+          <option value="assembly">Сборка</option>
+        </select>
         <p id="create-project-error" role="alert" hidden></p>
         <div class="project-group-dialog-actions"><button id="cancel-create-project" class="button" type="button">ОТМЕНА</button><button id="submit-create-project" class="button" type="submit">СОЗДАТЬ</button></div>
       </form>

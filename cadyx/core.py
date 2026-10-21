@@ -120,8 +120,13 @@ class CadyxCore:
         with self._lifecycle._project_lifecycle_lock(project_id):
             yield
 
-    def create_project(self, name: str, *, select: bool = True, url_slug: str | None = None) -> dict[str, Any]:
-        return self._lifecycle.create_project(name, select=select, url_slug=url_slug)
+    def create_project(
+        self, name: str, *, select: bool = True, url_slug: str | None = None,
+        project_type: str = "single_model",
+    ) -> dict[str, Any]:
+        return self._lifecycle.create_project(
+            name, select=select, url_slug=url_slug, project_type=project_type,
+        )
 
     def upload_project_step(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
         return self._lifecycle.upload_project_step(project_id, filename, content)
@@ -1175,7 +1180,9 @@ class CadyxCore:
 
     @staticmethod
     def _summary(project: dict[str, Any]) -> dict[str, Any]:
-        return {
+        summary = {
             key: project[key]
             for key in ("id", "format", "version", "name", "url_slug", "created_at", "modified_at")
         }
+        summary["project_type"] = project.get("project_type", "single_model")
+        return summary

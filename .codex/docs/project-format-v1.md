@@ -10,6 +10,8 @@
 
 Оболочка проекта v1 отделена от версии документа модели, сейчас v12. Авторитетное состояние сохраняет ProjectWorkspace, атомарно заменяя `project.json`; служебная история, B-rep и блокировки имеют собственные файлы. Пользовательские исходники в `projects/` нужно сохранять и резервировать независимо от Git. Изменения выполняются только через Core/Command System с защитой ревизии и блокировки. Старые версии мигрируют по правилам `cadyx/migrations.py`; чтение не даёт разрешения переписывать исходные файлы.
 
+Новые проекты помечаются типом `single_model` (одиночная модель) или `assembly` (сборка). Для старых записей без поля тип определяется по графу сборки.
+
 Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
 
 ## English reference
@@ -22,6 +24,7 @@ Every project lives at `projects/<project-name>/project.json`. Newly created pro
   "version": 1,
   "id": "<uuid>",
   "name": "Example",
+  "project_type": "single_model",
   "url_slug": "example",
   "created_at": "<UTC ISO-8601>",
   "modified_at": "<UTC ISO-8601>",
@@ -49,6 +52,13 @@ Every project lives at `projects/<project-name>/project.json`. Newly created pro
 `url_slug` is the stable lowercase English route key used by `/p/<slug>`; it
 contains ASCII letters, digits, and single hyphens. Older records without this
 field receive a deterministic Latin fallback from their title when loaded.
+
+`project_type` identifies the project interface: `single_model` for a single
+model or `assembly` for an assembly. New projects default to `single_model`;
+creation APIs accept either value. Older records infer the type as `assembly`
+when their document has any parts, subassemblies, instances or mates, and
+`single_model` otherwise. The project envelope remains version 1 because this
+field is additive and old records remain readable.
 
 The document and its successful command history are committed together. `project.json` is replaced atomically; history entries are appended to `.cadyx-history.jsonl` and fsynced before the project snapshot advances its committed history count and byte offset. A crash before the snapshot replacement leaves an ignored journal tail; a crash after it leaves the durable history and document revision together. Edit leases are stored separately in a per-project `.cadyx-leases.sqlite3` runtime sidecar; live host sessions and leases are not serialized into `project.json`. See the [local multi-process lease contract](architecture.md#edit-leases) for lifecycle and backup restrictions. Unknown project or document versions are rejected rather than silently interpreted.
 

@@ -133,16 +133,19 @@ class ProjectLifecycleService(_CoreService):
         with lock:
             yield
 
-    def create_project(self, name: str, *, select: bool = True, url_slug: str | None = None) -> dict[str, Any]:
+    def create_project(
+        self, name: str, *, select: bool = True, url_slug: str | None = None,
+        project_type: str = "single_model",
+    ) -> dict[str, Any]:
         if not select:
-            project = self.workspace.create(name, url_slug=url_slug)
+            project = self.workspace.create(name, url_slug=url_slug, project_type=project_type)
             summary = self._summary(project)
             lock = self.leases.snapshot(project["id"])
             self.events.publish("project.lock.changed", project["id"], lock)
             return {"project": summary, "lock": lock}
 
         with self._workspace_selection_guard:
-            project = self.workspace.create(name, url_slug=url_slug)
+            project = self.workspace.create(name, url_slug=url_slug, project_type=project_type)
             summary = self._summary(project)
             lock = self.leases.snapshot(project["id"])
             self._workspace_selection = {"type": "project", "project_id": project["id"]}

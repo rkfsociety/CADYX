@@ -9,8 +9,9 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from cadyx.errors import NotFoundError
+from cadyx.errors import NotFoundError, ValidationError
 from cadyx.workspace import ProjectWorkspace
+from cadyx.workspace_projects import ProjectRecordStore
 
 
 class ProjectWorkspaceTests(unittest.TestCase):
@@ -37,6 +38,30 @@ class ProjectWorkspaceTests(unittest.TestCase):
         self.assertEqual(renamed["name"], "Гипсовая фигурка — 5 ракурсов v2")
         self.assertEqual(renamed["url_slug"], "gypsum-figurine-5-views")
         self.assertEqual(self.workspace.load(project["id"])["url_slug"], "gypsum-figurine-5-views")
+
+    def test_project_type_persists_and_legacy_type_is_inferred(self) -> None:
+        assembly = self.workspace.create("Assembly project", project_type="assembly")
+        self.assertEqual(self.workspace.load(assembly["id"])["project_type"], "assembly")
+        self.assertEqual(
+            next(item for item in self.workspace.list() if item["id"] == assembly["id"])["project_type"],
+            "assembly",
+        )
+
+        legacy = self.workspace.create("Legacy project")
+        record_path = self.workspace._project_dir(legacy["id"]) / "project.json"
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        record.pop("project_type")
+        record_path.write_text(json.dumps(record), encoding="utf-8")
+        self.assertEqual(self.workspace.load(legacy["id"])["project_type"], "single_model")
+        self.assertEqual(
+            ProjectRecordStore.infer_project_type({
+                "document": {"assembly": {"parts": [{}], "subassemblies": [], "instances": [], "mates": []}}
+            }),
+            "assembly",
+        )
+
+        with self.assertRaises(ValidationError):
+            self.workspace.create("Invalid project type", project_type="group")
 
     def test_legacy_project_gets_ascii_url_slug(self) -> None:
         project = self.workspace.create("Гипсовая фигурка — 5 ракурсов")

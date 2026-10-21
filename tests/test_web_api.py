@@ -431,11 +431,16 @@ class WebApiTests(unittest.TestCase):
     def test_project_api_keeps_english_url_slug_separate_from_russian_title(self) -> None:
         status, created = self.request("/api/v1/agent/projects", {
             "name": "Гипсовая фигурка — 5 ракурсов", "url_slug": "gypsum-figurine-5-views",
+            "project_type": "assembly",
         })
         self.assertEqual(status, 201)
         project_id = created["project"]["id"]
         self.assertEqual(created["project"]["name"], "Гипсовая фигурка — 5 ракурсов")
         self.assertEqual(created["project"]["url_slug"], "gypsum-figurine-5-views")
+        self.assertEqual(created["project"]["project_type"], "assembly")
+        status, inspected = self.request(f"/api/v1/projects/{project_id}")
+        self.assertEqual(status, 200)
+        self.assertEqual(inspected["project"]["project_type"], "assembly")
 
         status, renamed = self.request(f"/api/v1/agent/projects/{project_id}/rename", {
             "name": "Фигурка из гипса", "url_slug": "plaster-figurine",
@@ -446,6 +451,33 @@ class WebApiTests(unittest.TestCase):
 
         status, error = self.request(f"/api/v1/agent/projects/{project_id}/rename", {
             "name": "Некорректный slug", "url_slug": "Гипсовая фигурка",
+        })
+        self.assertEqual(status, 400)
+        self.assertEqual(error["error"], "VALIDATION_ERROR")
+
+    def test_project_type_is_selected_at_creation_and_returned_by_workspace_api(self) -> None:
+        status, single = self.request("/api/v1/projects", {"name": "Single model"})
+        self.assertEqual(status, 201)
+        self.assertEqual(single["project"]["project_type"], "single_model")
+
+        status, assembly = self.request("/api/v1/projects", {
+            "name": "Assembly", "project_type": "assembly",
+        })
+        self.assertEqual(status, 201)
+        project_id = assembly["project"]["id"]
+        self.assertEqual(assembly["project"]["project_type"], "assembly")
+        status, listing = self.request("/api/v1/projects")
+        self.assertEqual(status, 200)
+        listed = next(item["project"] for item in listing["projects"] if item["project"]["id"] == project_id)
+        self.assertEqual(listed["project_type"], "assembly")
+
+    def test_project_create_defaults_to_single_model_and_rejects_unknown_type(self) -> None:
+        status, created = self.request("/api/v1/projects", {"name": "Одиночная модель"})
+        self.assertEqual(status, 201)
+        self.assertEqual(created["project"]["project_type"], "single_model")
+
+        status, error = self.request("/api/v1/projects", {
+            "name": "Некорректный тип", "project_type": "subassembly",
         })
         self.assertEqual(status, 400)
         self.assertEqual(error["error"], "VALIDATION_ERROR")

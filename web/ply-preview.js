@@ -772,6 +772,10 @@ function getProject(id) {
   return projects.find((item) => item.project.id === id);
 }
 
+function projectTypeLabel(projectType) {
+  return projectType === "assembly" ? "Сборка" : "Одиночная модель";
+}
+
 function projectSlugBase(name) {
   return String(name || "").normalize("NFKC").toLowerCase()
     .replace(/[^\p{L}\p{N}_-]+/gu, "-")
@@ -826,6 +830,7 @@ async function navigateToWorkspaceProject(projectId, projectName) {
 
 $("#create-project").addEventListener("click", () => {
   $("#new-project-name").value = "";
+  $("#new-project-type").value = "single_model";
   $("#create-project-error").hidden = true;
   $("#create-project-dialog").showModal();
   $("#new-project-name").focus();
@@ -837,13 +842,16 @@ $("#create-project-dialog").addEventListener("cancel", (event) => {
 $("#create-project-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const name = $("#new-project-name").value.trim();
+  const projectType = $("#new-project-type").value;
   if (!name || projectCreationPending) return;
   projectCreationPending = true;
-  const controls = [$("#new-project-name"), $("#cancel-create-project"), $("#submit-create-project")];
+  const controls = [$("#new-project-name"), $("#new-project-type"), $("#cancel-create-project"), $("#submit-create-project")];
   controls.forEach((control) => { control.disabled = true; });
   $("#create-project-error").hidden = true;
   try {
-    const result = await api("/api/v1/projects", { method: "POST", body: JSON.stringify({ name }) });
+    const result = await api("/api/v1/projects", {
+      method: "POST", body: JSON.stringify({ name, project_type: projectType }),
+    });
     window.location.assign(`/?project_id=${encodeURIComponent(result.project.id)}`);
   } catch (error) {
     $("#create-project-error").textContent = `Не удалось создать проект: ${error.message}`;
@@ -921,12 +929,13 @@ function renderProjectCard(entry) {
   const card = document.createElement("article");
   card.className = "workspace-project-card";
   card.dataset.projectId = project.id;
+  card.dataset.projectType = project.project_type || "single_model";
   card.dataset.active = String(active);
   card.setAttribute("role", "listitem");
 
   const state = document.createElement("span");
   state.className = "workspace-project-state";
-  state.textContent = active ? "Текущий проект" : projectAvailable ? "Готов к просмотру" : "Занят · просмотр доступен";
+  state.textContent = `${projectTypeLabel(project.project_type)} · ${active ? "Текущий проект" : projectAvailable ? "Готов к просмотру" : "Занят · просмотр доступен"}`;
 
   const thumbnail = document.createElement("div");
   thumbnail.className = "workspace-project-thumbnail";
@@ -969,6 +978,11 @@ function renderProjectCard(entry) {
 
   const meta = document.createElement("div");
   meta.className = "workspace-project-meta";
+  const typeBadge = document.createElement("span");
+  typeBadge.className = "readonly-badge workspace-project-type";
+  typeBadge.textContent = projectTypeLabel(project.project_type);
+  typeBadge.setAttribute("aria-label", `Тип проекта: ${typeBadge.textContent}`);
+  meta.append(typeBadge);
   const modified = document.createElement("span");
   modified.className = "workspace-project-modified";
   modified.setAttribute("aria-label", "Дата изменения");
@@ -1077,7 +1091,8 @@ function renderProjects() {
     projectSort,
     $("#projects-search").value.trim().toLocaleLowerCase("ru-RU"),
     projectGroups.map(({ id, name }) => [id, name]),
-    projects.map((entry) => [entry.project.id, entry.project.name, entry.project.modified_at, entry.group_id,
+    projects.map((entry) => [entry.project.id, entry.project.name, entry.project.project_type,
+      entry.project.modified_at, entry.group_id,
       entry.project.id === selectedProjectId, canSelectProject(entry.project.id)]),
   ]);
   if (signature === projectsRenderSignature) {
@@ -1125,6 +1140,8 @@ function showProjectLoading(name) {
   folderInspector.hidden = true;
   primaryGrid.classList.remove("folder-mode");
   projectDetail.hidden = false;
+  const projectType = getProject(selectedProjectId)?.project.project_type || "single_model";
+  projectDetail.dataset.projectType = projectType;
   noSelection.hidden = true;
   $("#object-panel").hidden = true;
   $("#geometry-rows").replaceChildren();
@@ -1134,7 +1151,7 @@ function showProjectLoading(name) {
   renderAgentActivity([], null);
   renderAgentDashboard(null);
   $("#document-title").textContent = name;
-  $("#document-kind").textContent = "ПРОЕКТ";
+  $("#document-kind").textContent = projectTypeLabel(projectType).toLocaleUpperCase("ru-RU");
   $("#project-light").classList.add("active");
   $("#sidebar-project-name").textContent = name;
   $("#project-short-id").textContent = selectedProjectId?.slice(0, 8).toUpperCase() || "—";
@@ -1205,6 +1222,7 @@ function getSelectedFolder() {
 function showFolderDetail(name) {
   pendingInitialWorkspaceView = null;
   selectedProjectScanRunId = null;
+  projectDetail.removeAttribute("data-project-type");
   const fileContextKey = `folder:${name}`;
   const folderChanged = fileListContextKey !== fileContextKey;
   activeFolderName = name;
@@ -1711,6 +1729,7 @@ async function refreshWorkspacePass() {
     if (!projectAddressPinned) setWorkspaceNavigation("projects");
     const browsingProjects = !projectAddressPinned && primaryGrid.dataset.view === "projects";
     projectDetail.hidden = !browsingProjects;
+    projectDetail.removeAttribute("data-project-type");
     $("#object-panel").hidden = true;
     $("#folder-detail").hidden = true;
     noSelection.hidden = browsingProjects;
@@ -2065,6 +2084,9 @@ async function refreshDetail() {
   modelViewer.render();
   renderSceneMetrics(scene, objectsById, visibleSketchId);
   $("#sidebar-project-name").textContent = info.project.name;
+  const projectType = info.project.project_type || "single_model";
+  projectDetail.dataset.projectType = projectType;
+  $("#document-kind").textContent = projectTypeLabel(projectType).toLocaleUpperCase("ru-RU");
 
   $("#folder-detail").hidden = true;
   $("#object-panel").hidden = false;

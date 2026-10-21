@@ -433,16 +433,21 @@ def _project_activity(handler: Any, core: CadyxCore, project_id: str) -> None:
 def _create_project(handler: Any, core: CadyxCore, *, agent_api: bool) -> None:
     body = _require_json(handler)
     if agent_api:
-        if not body.keys() <= {"name", "url_slug", "select"} or "name" not in body:
-            raise ValidationError("Agent project creation requires name and accepts optional url_slug and select.")
+        if not body.keys() <= {"name", "url_slug", "project_type", "select"} or "name" not in body:
+            raise ValidationError(
+                "Agent project creation requires name and accepts optional url_slug, project_type and select."
+            )
         select = body.get("select", True)
         if not isinstance(select, bool):
             raise ValidationError("select must be a boolean.")
     else:
-        if not body.keys() <= {"name", "url_slug"} or "name" not in body:
-            raise ValidationError("Project creation requires name and accepts optional url_slug.")
+        if not body.keys() <= {"name", "url_slug", "project_type"} or "name" not in body:
+            raise ValidationError("Project creation requires name and accepts optional url_slug and project_type.")
         select = True
-    handler._json(201, core.create_project(body["name"], select=select, url_slug=body.get("url_slug")))
+    handler._json(201, core.create_project(
+        body["name"], select=select, url_slug=body.get("url_slug"),
+        project_type=body.get("project_type", "single_model"),
+    ))
 
 
 def _dispatch_project(handler: Any, core: CadyxCore, route: RouteMatch, parsed: SplitResult) -> None:

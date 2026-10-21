@@ -27,6 +27,7 @@ _CYRILLIC_TO_LATIN = str.maketrans({
 _GEOMETRY_REF = "$cadyx_geometry_ref"
 _STORAGE_KEY = "$cadyx_storage"
 _HISTORY_FILE = ".cadyx-history.jsonl"
+PROJECT_TYPES = frozenset({"single_model", "assembly"})
 
 
 def _brep_key(geometry: dict[str, Any]) -> str:
@@ -167,12 +168,16 @@ class ProjectRecordStore:
         self._history_state.pop(str(project_file), None)
 
     @staticmethod
-    def new_record(project_id: str, name: str, *, timestamp: str, url_slug: str | None = None) -> dict[str, Any]:
+    def new_record(
+        project_id: str, name: str, *, timestamp: str, url_slug: str | None = None,
+        project_type: str = "single_model",
+    ) -> dict[str, Any]:
         return {
             "format": "cadyx-project",
             "version": PROJECT_VERSION,
             "id": project_id,
             "name": name,
+            "project_type": ProjectRecordStore.normalize_project_type(project_type),
             "url_slug": ProjectRecordStore.normalize_url_slug(url_slug) if url_slug is not None else
             ProjectRecordStore.default_url_slug(name),
             "created_at": timestamp,
@@ -226,6 +231,8 @@ class ProjectRecordStore:
             project = migrate_project(project)
         if "url_slug" not in project and isinstance(project.get("name"), str):
             project["url_slug"] = self.default_url_slug(project["name"])
+        if "project_type" not in project:
+            project["project_type"] = self.infer_project_type(project)
         self.validate_current(
             project, expected_id=project_id, history_start=project.get("_history_count", 0),
         )
@@ -338,6 +345,7 @@ class ProjectRecordStore:
             raise ValidationError("Project name is invalid.")
         if not isinstance(project.get("url_slug"), str) or not _URL_SLUG.fullmatch(project["url_slug"]):
             raise ValidationError("Project URL slug must contain lowercase English letters, digits and single hyphens.")
+        ProjectRecordStore.normalize_project_type(project.get("project_type", "single_model"))
         if not isinstance(project.get("created_at"), str) or not isinstance(project.get("modified_at"), str):
             raise ValidationError("Project timestamps are invalid.")
         document = (Document.from_validated_dict(project.get("document")) if document_validated else
@@ -369,6 +377,22 @@ class ProjectRecordStore:
                 raise ValidationError("History entry command and result must be objects.")
             if not isinstance(entry.get("timestamp"), str) or entry.get("revision") != history_base_count + index + 1:
                 raise ValidationError("History entry timestamp or revision is invalid.")
+
+    @staticmethod
+    def normalize_project_type(value: Any) -> str:
+        if not isinstance(value, str) or value not in PROJECT_TYPES:
+            raise ValidationError("Project type must be 'single_model' or 'assembly'.")
+        return value
+
+    @staticmethod
+    def infer_project_type(project: dict[str, Any]) -> str:
+        document = project.get("document")
+        assembly = document.get("assembly") if isinstance(document, dict) else None
+        if isinstance(assembly, dict) and any(
+            assembly.get(key) for key in ("parts", "subassemblies", "instances", "mates")
+        ):
+            return "assembly"
+        return "single_model"
 
     @staticmethod
     def normalize_url_slug(value: str) -> str:
