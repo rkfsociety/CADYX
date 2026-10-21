@@ -9,6 +9,8 @@ Use the `cadyx_*` MCP tools for every CADYX document operation: workspace select
 
 For reference-driven reconstruction, keep imported source/reference bodies hidden in the viewport and retain them only for comparison or validation. Follow `.codex/rules.md` for the project-specific source lifecycle.
 
+Before reconstructing a triangle mesh from a point-cloud PLY, first import it as a point-only reference, then follow `.codex/rules.md` to alternate agent-only `remove_overlaps` and `isolation_filter` analysis/application until both report zero removals. Start reconstruction only from the final cleaned full-resolution PLY; do not mesh the untouched scan. `simplify` and `smooth` require a direct user request.
+
 ## Prepare
 
 1. Call `cadyx_health`, `cadyx_get_selection`, `cadyx_list_workspace`, and `cadyx_capabilities`. If the host is unavailable, report that fact and point to the README host setup; do not infer current project state.

@@ -71,6 +71,11 @@ for explicit user requests. If varied valid parameters cannot clear candidates,
 or analysis hits its comparison budget, leave the remaining points intact and
 report the unresolved count and limit; do not describe the cloud as clean.
 
+This cleanup is a required preprocessing step before scan-to-mesh reconstruction.
+Import the source PLY as a point-only reference first, complete the alternating
+overlap/removal cycle, then run mesh reconstruction on the latest cleaned
+full-resolution stage. Never reconstruct directly from the untouched source PLY.
+
 Distances use the original coordinates. Physical scale and units remain
 unverified. Processing does not reconstruct a mesh or certify scan accuracy.
 It accepts at most 2 million input points, requires at least three output points,
