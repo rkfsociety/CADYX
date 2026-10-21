@@ -5,6 +5,7 @@
 ## Get started and operate
 
 - [README](../README.md): Windows x64 setup, authentication, operator MCP integration, CI entry points.
+- [Publication readiness gate](../PUBLISHING.md): security, third-party rights, Git history and CI evidence required before opening the repository or releasing software.
 - [Contributing](../CONTRIBUTING.md), [security](../SECURITY.md) and [agent instructions](../AGENTS.md).
 - [CADYX Operator skill](../.agents/skills/cadyx-operator/SKILL.md): modeling operations via Agent API/MCP, without browser automation.
 - [Project architecture](../.codex/docs/architecture.md), [viewport contract](../.codex/docs/viewport-api.md), [project persistence/migrations](../.codex/docs/project-format-v1.md).

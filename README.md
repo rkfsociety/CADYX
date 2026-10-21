@@ -181,6 +181,10 @@ CADYX is a **development prototype**, not a hosted CAD service or a production-r
 
 The HTTP host binds to loopback by default. Non-loopback access requires authentication, but the built-in server does not provide TLS. Do not expose it directly to the public Internet. Hardware-specific experimental scanner calibration assets under `tools/revopoint/calibration/` are not general-purpose calibration data. Read [SECURITY.md](SECURITY.md) before enabling network access.
 
+## Publication readiness
+
+CADYX is not cleared for public distribution or a GitHub release. Complete the [publication readiness gate](PUBLISHING.md) before changing repository visibility, publishing a source archive, or creating a release. In particular, resolve CI failures, check the redistribution rights for scanner calibration files, and review tracked content and Git history for sensitive material. A pushed commit alone is not publication approval.
+
 ## Contributing and licensing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for environment prerequisites, checks, and the AI-first editing contract. For responsible disclosure, see [SECURITY.md](SECURITY.md).
