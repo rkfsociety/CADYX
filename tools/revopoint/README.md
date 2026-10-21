@@ -261,6 +261,21 @@ The project's **Облако точек** and **Сетка** controls sit beside
 
 If all twelve frames exist but manifest creation failed, rebuild only that metadata from the saved pose log with `-ManifestOnly -RunId revopoint_<UTC run id>`. This mode verifies all capture files, level tilt and return-to-start telemetry, then writes the manifest without starting the scanner or table.
 
+## Continuous RGB/Y16 capture and colorized fusion
+
+The separate continuous-turn workflow keeps the live DepthCam Y16 reader and RGBCam MJPG reader active while the table receives one `+CT,TURNANGLE=360;` command. It archives every changed Y16 frame and every RGB image under one `revopoint_<UTC timestamp>` project folder. Run it from the scan-processing environment while the CADYX host is available:
+
+```powershell
+$runId = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
+$project = 'projects\<existing CADYX project folder>'
+& .\.runtime\scan-reconstruction\venv\Scripts\python.exe `
+    tools\revopoint\capture_continuous_turn.py $project --run-id "revopoint_$runId"
+```
+
+Frame registration and fusion use every archived Y16 frame. The selected 30° samples are loop-closure anchors only. Geometric loop closures with ICP fitness below 0.6 are rejected; the report keeps all candidate scores and post-optimization edge residuals so weak matches are visible. The resulting point-only geometric cloud and JSON registration report remain in the series folder. When `LC_RT.bin` and `Prgb.bin` exist under `%LOCALAPPDATA%\RevoScan5\cameraparam`, the capture copies them into that folder and also writes a separate colorized PLY. Color mapping uses unique depth/RGB pairs within 15 ms, rejects RGB-occluded depth samples with a per-image depth buffer, and transfers sampled colors to nearby vertices of the already fused cloud; vertices without a nearby color sample are neutral gray. The geometric PLY and all source frames remain unchanged.
+
+The `LC_RT.bin` transform interpretation is empirical: the local 48-byte file is decoded as a 3×3 rotation followed by a translation, then checked against paired RGB images and visible table-marker regions at multiple poses. The vendor format is undocumented here, no RGB lens-distortion correction is applied, and direct-UVC depth scale remains provisional. Keep both color and geometric results marked provisional until a known-size target and full surface coverage are independently checked. The manifest and color-mapping sidecar record pair counts, coverage, calibration hashes and limits.
+
 ## Register a turntable scan by geometry in the first-frame coordinate system
 
 This optional offline tool does not use the turntable encoder, a table axis, or a guessed pivot to align point clouds. It computes FPFH descriptors, initializes each geometric pair with RANSAC, refines with robust point-to-plane ICP, then optimizes adjacent and first-frame loop-closure constraints in an Open3D pose graph. It downsamples and keeps the largest connected point-cloud component. The output remains a point-only PLY; no mesh is built. Open3D documents global feature registration and multiway pose-graph registration in its [global registration guide](https://www.open3d.org/docs/latest/tutorial/pipelines/global_registration.html) and [multiway registration guide](https://open3d.org/docs/latest/tutorial/pipelines/multiway_registration.html).

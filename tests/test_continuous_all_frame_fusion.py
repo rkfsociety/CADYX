@@ -4,7 +4,12 @@ import unittest
 
 import numpy as np
 
-from tools.revopoint.fuse_continuous_scan import compose_camera_to_reference, marker_similarity_matrix
+from tools.revopoint.fuse_continuous_scan import (
+    compose_camera_to_reference,
+    loop_edge_is_acceptable,
+    marker_similarity_matrix,
+    rigid_pose_residual,
+)
 
 
 class ContinuousAllFrameFusionTests(unittest.TestCase):
@@ -28,6 +33,23 @@ class ContinuousAllFrameFusionTests(unittest.TestCase):
         matrix = marker_similarity_matrix(frame, transform)
         point = np.array([2.0, 3.0, 4.0, 1.0])
         np.testing.assert_allclose(matrix @ point, [5.0, 6.0, 2.0, 1.0])
+
+    def test_loop_closure_threshold_rejects_weak_or_high_residual_matches(self) -> None:
+        self.assertTrue(loop_edge_is_acceptable(0.75, 1.0, 0.6, 3.0))
+        self.assertFalse(loop_edge_is_acceptable(0.55, 1.0, 0.6, 3.0))
+        self.assertFalse(loop_edge_is_acceptable(0.9, 3.1, 0.6, 3.0))
+
+    def test_pose_graph_edge_residual_uses_source_to_target_transform_direction(self) -> None:
+        target_pose = np.eye(4)
+        source_pose = np.eye(4)
+        source_pose[0, 3] = 5.0
+        measured = np.eye(4)
+        measured[0, 3] = 5.0
+
+        self.assertEqual(rigid_pose_residual(measured, source_pose, target_pose), (0.0, 0.0))
+        rotation, translation = rigid_pose_residual(np.eye(4), source_pose, target_pose)
+        self.assertEqual(rotation, 0.0)
+        self.assertEqual(translation, 5.0)
 
 
 if __name__ == "__main__":

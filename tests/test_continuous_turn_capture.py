@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from tools.revopoint.capture_continuous_turn import interpolate_angle, select_uniform_frames
+from tools.revopoint.capture_continuous_turn import (
+    interpolate_angle,
+    select_uniform_frames,
+    snapshot_rgb_calibration,
+)
 
 
 class ContinuousTurnCaptureTests(unittest.TestCase):
@@ -29,6 +33,30 @@ class ContinuousTurnCaptureTests(unittest.TestCase):
         encoder = [(start, float(index * 30)) for index in range(12)]
         with self.assertRaisesRegex(ValueError, "No distinct Y16 frame"):
             select_uniform_frames(rows, encoder)
+
+    def test_snapshots_valid_rgb_calibration_next_to_the_capture(self) -> None:
+        import struct
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "calibration"
+            run = root / "scan"
+            source.mkdir()
+            run.mkdir()
+            (source / "LC_RT.bin").write_bytes(
+                struct.pack("<12f", 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0),
+            )
+            (source / "Prgb.bin").write_bytes(
+                struct.pack("<10f", 0, 900, 0, 320, 0, 900, 200, 0, 0, 1),
+            )
+
+            result = snapshot_rgb_calibration(run, source)
+
+            self.assertEqual(result["status"], "available")
+            self.assertEqual((run / "LC_RT.bin").read_bytes(), (source / "LC_RT.bin").read_bytes())
+            self.assertEqual((run / "Prgb.bin").read_bytes(), (source / "Prgb.bin").read_bytes())
 
 
 if __name__ == "__main__":

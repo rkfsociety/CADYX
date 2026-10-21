@@ -166,6 +166,30 @@ def pair_rgb_frames(depth_rows: list[dict[str, str]], rgb_csv: Path,
     return result
 
 
+def snapshot_rgb_calibration(run_directory: Path, calibration_directory: Path) -> dict[str, Any]:
+    """Preserve the local scanner's RGB projection files beside this scan's paired frames."""
+    from tools.revopoint.colorize_continuous_scan import parse_rgb_calibration
+
+    names = ("LC_RT.bin", "Prgb.bin")
+    sources = [calibration_directory / name for name in names]
+    missing = [path.name for path in sources if not path.is_file()]
+    if missing:
+        return {"status": "unavailable", "missing_files": missing}
+    contents = [path.read_bytes() for path in sources]
+    parse_rgb_calibration(contents[0], contents[1])
+    hashes = {}
+    for name, source, payload in zip(names, sources, contents):
+        destination = run_directory / name
+        destination.write_bytes(payload)
+        hashes[name] = hashlib.sha256(payload).hexdigest()
+    return {
+        "status": "available",
+        "source": "local Revo Scan camera calibration",
+        "files": list(names),
+        "sha256": hashes,
+    }
+
+
 def wait_ready(path: Path, process: subprocess.Popen[bytes], timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -218,6 +242,8 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
     (run_dir / "rgb_frames").mkdir()
     shutil.copy2(q_path, run_dir / "Q.bin")
     shutil.copy2(scale_path, run_dir / "depth_scale.json")
+    local_app_data = Path(os.environ.get("LOCALAPPDATA", ""))
+    rgb_calibration = snapshot_rgb_calibration(run_dir, local_app_data / "RevoScan5" / "cameraparam")
     frame_rows_path = run_dir / "depth_frames.csv"
     rgb_prefix = run_dir / "rgb_frames" / "rgb"
     rgb_ready = run_dir / "rgb.ready"
@@ -244,6 +270,8 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
         "tilt_expected_degrees": 0,
         "depth_scale_status": "provisional_for_direct_UVC",
         "cloud_registration": "not_started",
+        "rgb_calibration": rgb_calibration,
+        "color_mapping": {"status": "pending" if rgb_calibration["status"] == "available" else "unavailable"},
     }
     (run_dir / "capture_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     turntable_args: list[str] = []
@@ -368,8 +396,10 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
         (run_dir / "capture_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         raise
     manifest["status"] = "candidate_ready"
-    manifest["frame_registration"] = f"provisional_all_{len(frames)}_frames"
+    loop_threshold = float(registration["minimum_loop_fitness"])
+    manifest["frame_registration"] = f"provisional_all_{len(frames)}_frames_loop_fitness_{loop_threshold:g}"
     manifest["cloud_registration"] = manifest["frame_registration"]
+    manifest["minimum_loop_fitness"] = loop_threshold
     manifest["all_captured_frames_used"] = registration["all_captured_frames_used"]
     manifest["selected_depth_poses_role"] = "loop-closure anchors only; all archived frames are fused"
     saved_candidate = run_dir / f"{run_id}_all_frames_fused.ply"
@@ -380,6 +410,27 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
     manifest["registration_report"] = saved_report.name
     manifest["registration_metrics"] = registration
     (run_dir / "capture_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    if rgb_calibration["status"] == "available":
+        from tools.revopoint.colorize_continuous_scan import colorize_continuous_scan
+        colorized_path = run_dir / f"{run_id}_all_frames_colored_candidate.ply"
+        try:
+            color_result = colorize_continuous_scan(
+                run_dir, saved_candidate, saved_report, colorized_path,
+            )
+            manifest["colorized_candidate"] = colorized_path.name
+            manifest["color_mapping_report"] = colorized_path.with_suffix(".json").name
+            manifest["color_mapping"] = {
+                "status": color_result["status"],
+                "paired_depth_frames": color_result["paired_depth_frames"],
+                "rgb_frames_used": color_result["rgb_frames_used"],
+                "colorized_vertices": color_result["colorized_vertices"],
+                "total_vertices": color_result["output_points"],
+                "coverage": color_result["color_coverage"],
+                "report": colorized_path.with_suffix(".json").name,
+            }
+        except (OSError, ValueError, RuntimeError) as exc:
+            manifest["color_mapping"] = {"status": "failed", "error": str(exc)}
+        (run_dir / "capture_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"run_directory": str(run_dir), "frames": len(frames), "rgb_frames": manifest["rgb_frame_count"],
                       "loop_closure_anchors": len(selected), "paired_rgb_depth": manifest["rgb_depth_pairs_within_45ms"]}, indent=2))
     return manifest

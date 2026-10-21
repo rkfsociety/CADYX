@@ -48,6 +48,21 @@ def compose_camera_to_reference(previous_pose: np.ndarray, current_to_previous: 
     return previous_pose @ current_to_previous
 
 
+def loop_edge_is_acceptable(fitness: float, inlier_rmse: float,
+                            minimum_fitness: float, maximum_rmse: float) -> bool:
+    return fitness >= minimum_fitness and inlier_rmse <= maximum_rmse
+
+
+def rigid_pose_residual(measured_transform: np.ndarray, source_pose: np.ndarray,
+                        target_pose: np.ndarray) -> tuple[float, float]:
+    """Compare an observed source-to-target edge with its optimized node-pose relation."""
+    predicted = np.linalg.inv(target_pose) @ source_pose
+    residual = np.linalg.inv(measured_transform) @ predicted
+    rotation = float(np.degrees(np.arccos(np.clip((np.trace(residual[:3, :3]) - 1.0) / 2.0, -1.0, 1.0))))
+    translation = float(np.linalg.norm(residual[:3, 3]))
+    return rotation, translation
+
+
 def _read_rows(path: Path) -> list[dict[str, str]]:
     with path.open(encoding="utf-8-sig", newline="") as source:
         rows = list(csv.DictReader(source))
@@ -91,7 +106,8 @@ def _cloud(points: np.ndarray, o3d: Any) -> Any:
 
 
 def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
-                    fused_voxel_size: float = 0.75) -> dict[str, Any]:
+                    fused_voxel_size: float = 0.75,
+                    minimum_loop_fitness: float = 0.6) -> dict[str, Any]:
     import open3d as o3d
 
     run_dir = run_dir.resolve(strict=True)
@@ -106,6 +122,8 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
         raise FileExistsError("refusing to overwrite an existing all-frame candidate")
     if not math.isfinite(voxel_size) or voxel_size <= 0 or not math.isfinite(fused_voxel_size) or fused_voxel_size <= 0:
         raise ValueError("voxel sizes must be finite and positive")
+    if not math.isfinite(minimum_loop_fitness) or not 0.0 <= minimum_loop_fitness <= 1.0:
+        raise ValueError("minimum loop fitness must be finite and between zero and one")
 
     rows = _read_rows(run_dir / "depth_frames.csv")
     if len(rows) < 12:
@@ -179,7 +197,8 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
             adjacent_transforms.append(transform)
             adjacent_information.append(information)
             adjacent_edges.append({"source": index, "target": index - 1,
-                                   "fitness": float(result.fitness), "inlier_rmse": float(result.inlier_rmse)})
+                                   "fitness": float(result.fitness), "inlier_rmse": float(result.inlier_rmse),
+                                   "transformation": transform.tolist()})
             pose_graph_node = current if index in loop_indices else None
             downsampled.append(pose_graph_node)
             previous_down = current
@@ -197,6 +216,7 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
             pose_graph.edges.append(registration.PoseGraphEdge(source, target, transform, information, uncertain=False))
 
         loop_edges = []
+        loop_edge_candidates = []
         anchor_clouds = {index: cloud for index, cloud in enumerate(downsampled) if cloud is not None}
         for source in sorted(set(loop_indices) | {len(rows) - 1}):
             if source == 0 or source not in anchor_clouds:
@@ -205,7 +225,19 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
                 anchor_clouds[source], first_down, correspondence_distance, odometry[source],
                 registration.TransformationEstimationPointToPlane(registration.TukeyLoss(1.0)),
             )
-            if candidate.fitness >= 0.35 and candidate.inlier_rmse <= voxel_size * 1.5:
+            accepted = loop_edge_is_acceptable(
+                float(candidate.fitness), float(candidate.inlier_rmse),
+                minimum_loop_fitness, voxel_size * 1.5,
+            )
+            candidate_record = {
+                "source": source, "target": 0,
+                "fitness": float(candidate.fitness),
+                "inlier_rmse": float(candidate.inlier_rmse),
+                "accepted": accepted,
+                "transformation": np.asarray(candidate.transformation).tolist(),
+            }
+            loop_edge_candidates.append(candidate_record)
+            if accepted:
                 information = registration.get_information_matrix_from_point_clouds(
                     anchor_clouds[source], first_down, correspondence_distance, candidate.transformation)
                 pose_graph.edges.append(registration.PoseGraphEdge(
@@ -221,10 +253,56 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
                                                    edge_prune_threshold=0.25, reference_node=0),
         )
 
+        residual_values = {"adjacent_rotation": [], "adjacent_translation": [],
+                           "loop_rotation": [], "loop_translation": []}
+        for edge in adjacent_edges:
+            rotation_residual, translation_residual = rigid_pose_residual(
+                np.asarray(edge["transformation"], dtype=np.float64),
+                np.asarray(pose_graph.nodes[edge["source"]].pose),
+                np.asarray(pose_graph.nodes[edge["target"]].pose),
+            )
+            edge["pose_graph_residual_rotation_degrees"] = rotation_residual
+            edge["pose_graph_residual_translation_map_units"] = translation_residual
+            residual_values["adjacent_rotation"].append(rotation_residual)
+            residual_values["adjacent_translation"].append(translation_residual)
+        for edge in loop_edge_candidates:
+            if not edge["accepted"]:
+                continue
+            rotation_residual, translation_residual = rigid_pose_residual(
+                np.asarray(edge["transformation"], dtype=np.float64),
+                np.asarray(pose_graph.nodes[edge["source"]].pose),
+                np.asarray(pose_graph.nodes[edge["target"]].pose),
+            )
+            edge["pose_graph_residual_rotation_degrees"] = rotation_residual
+            edge["pose_graph_residual_translation_map_units"] = translation_residual
+            residual_values["loop_rotation"].append(rotation_residual)
+            residual_values["loop_translation"].append(translation_residual)
+        loop_residual_summary = {
+            "accepted_loop_rotation_median_degrees": (
+                float(np.median(residual_values["loop_rotation"])) if residual_values["loop_rotation"] else None
+            ),
+            "accepted_loop_rotation_max_degrees": (
+                float(np.max(residual_values["loop_rotation"])) if residual_values["loop_rotation"] else None
+            ),
+            "accepted_loop_translation_median_map_units": (
+                float(np.median(residual_values["loop_translation"])) if residual_values["loop_translation"] else None
+            ),
+            "accepted_loop_translation_max_map_units": (
+                float(np.max(residual_values["loop_translation"])) if residual_values["loop_translation"] else None
+            ),
+        }
+
         anchor_pose = np.asarray(pose_graph.nodes[anchor_index].pose)
         first_to_map = anchor_to_map @ np.linalg.inv(anchor_pose)
         fused_chunks = []
+        frame_poses = []
         for index, node in enumerate(pose_graph.nodes):
+            scanner_to_map = first_to_map @ np.asarray(node.pose)
+            frame_poses.append({
+                "frame_index": int(rows[index]["index"]),
+                "source_file": rows[index]["file"],
+                "scanner_to_map": scanner_to_map.tolist(),
+            })
             points = np.load(temporary_path / f"frame_{index:05d}.npy", allow_pickle=False)
             cloud = _cloud(points, o3d)
             cloud.transform(node.pose)
@@ -270,10 +348,20 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
             "depth_scale_status": scale_data.get("status", "unverified"),
             "registration_voxel_size": voxel_size,
             "fusion_voxel_size": fused_voxel_size,
+            "minimum_loop_fitness": minimum_loop_fitness,
             "output_points": len(fused.points),
             "dimensions_map_units": (upper - lower).tolist(),
+            "frame_poses": frame_poses,
             "adjacent_edges": adjacent_edges,
+            "loop_edge_candidates": loop_edge_candidates,
             "loop_edges_to_first_frame": loop_edges,
+            "pose_graph_residual_summary": {
+                "adjacent_rotation_median_degrees": float(np.median(residual_values["adjacent_rotation"])),
+                "adjacent_rotation_p95_degrees": float(np.quantile(residual_values["adjacent_rotation"], 0.95)),
+                "adjacent_translation_median_map_units": float(np.median(residual_values["adjacent_translation"])),
+                "adjacent_translation_p95_map_units": float(np.quantile(residual_values["adjacent_translation"], 0.95)),
+                **loop_residual_summary,
+            },
             "last_to_first_closure": {
                 "fitness": float(closure.fitness), "inlier_rmse": float(closure.inlier_rmse),
                 "local_correction_degrees": closure_rotation,
@@ -291,10 +379,12 @@ def main() -> int:
     parser.add_argument("output_ply", type=Path)
     parser.add_argument("--voxel-size", type=float, default=2.0)
     parser.add_argument("--fused-voxel-size", type=float, default=0.75)
+    parser.add_argument("--minimum-loop-fitness", type=float, default=0.6)
     args = parser.parse_args()
     try:
         print(json.dumps(fuse_all_frames(args.run_directory, args.output_ply,
-                                         args.voxel_size, args.fused_voxel_size), indent=2))
+                                         args.voxel_size, args.fused_voxel_size,
+                                         args.minimum_loop_fitness), indent=2))
         return 0
     except (OSError, ValueError, RuntimeError) as error:
         print(f"error: {error}")
