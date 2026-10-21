@@ -297,6 +297,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_read_project_file", "description": "Read a project file through the read-only Agent API; optionally select a project subfolder.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING, "folder_name": _STRING}, ["project_id", "name"])},
     {"name": "cadyx_remove_project_files", "description": "Remove explicitly listed, unused files from a project or project subfolder after checking the project is free.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING, "filenames": {"type": "array", "items": _STRING, "minItems": 1, "maxItems": 1000}}, ["project_id", "filenames"])},
     {"name": "cadyx_remove_project_folder", "description": "Remove one existing project subfolder recursively after checking it is unused and the project is free.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING}, ["project_id", "folder_name"])},
+    {"name": "cadyx_move_project_files", "description": "Move explicitly listed direct project files into a scan-series subfolder after checking the project is free and files are unused.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING, "filenames": {"type": "array", "items": _STRING, "minItems": 1, "maxItems": 1000}}, ["project_id", "folder_name", "filenames"])},
     {"name": "cadyx_start_scan_360", "description": "Start the native direct-UVC 360-degree point capture in a free project. The physical turntable must be level; the project viewer displays each captured frame while the scan runs.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_get_scan_360_status", "description": "Read native 360-degree scan progress and the latest captured point-cloud preview for a project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_upload_project_step", "description": "Copy a local STEP file into a project through the Agent API without overwriting existing files or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
@@ -546,6 +547,10 @@ class MCPApplication:
             folder = urllib.parse.quote(args["folder_name"], safe="")
             path = self._project(args["project_id"], f"/folders/{folder}/delete")
             return self.api.post(path, {})
+        if name == "cadyx_move_project_files":
+            return self.api.post(self._project(args["project_id"], "/files/move"), {
+                "filenames": args["filenames"], "folder_name": args["folder_name"],
+            })
         if name == "cadyx_start_scan_360":
             return self.api.post(self._project(args["project_id"], "/scans/360"), {})
         if name == "cadyx_get_scan_360_status":

@@ -112,6 +112,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/viewport/camera", "agent_viewport_camera", "viewport", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/files", "agent_project_files", "files"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/files/delete", "agent_project_files_delete", "files", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/files/move", "agent_project_files_move", "files", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/folders/{folder_name}/files", "agent_project_subfolder_files", "files"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/folders/{folder_name}/files/{filename}", "agent_project_subfolder_file", "files"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/folders/{folder_name}/files/delete", "agent_project_subfolder_files_delete", "files", "json"),
@@ -520,6 +521,13 @@ def _dispatch_files(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         if set(body) != {"filenames"} or not isinstance(body["filenames"], list):
             raise ValidationError("Project file deletion requires only a filenames array.")
         handler._json(200, core.remove_project_files(project_id, body["filenames"]))
+    elif name == "agent_project_files_move":
+        body = _require_json(handler)
+        if set(body) != {"filenames", "folder_name"} or not isinstance(body["filenames"], list):
+            raise ValidationError("Project file move requires only filenames and folder_name.")
+        handler._json(200, core.move_project_files_to_subfolder(
+            project_id, body["filenames"], body["folder_name"],
+        ))
     elif name == "agent_project_subfolder_delete":
         body = _require_json(handler)
         if body:

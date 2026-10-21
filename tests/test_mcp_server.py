@@ -559,6 +559,26 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(removed["removed_count"], 1)
         self.assertFalse(candidate.exists())
 
+    def test_can_move_scan_assets_into_a_series_folder_through_agent_api(self) -> None:
+        project_id = self._create_project("Move scan assets")
+        project_dir = self.core.workspace._project_dir(project_id)
+        names = ["revopoint_20261021T073711Z_pose_000.raw", "revopoint_20261021T073711Z_pose_000.ply"]
+        for index, name in enumerate(names):
+            (project_dir / name).write_bytes(f"asset-{index}".encode())
+
+        moved = self._tool_value("cadyx_move_project_files", {
+            "project_id": project_id, "folder_name": "revopoint_20261021T073711Z",
+            "filenames": names,
+        })
+
+        self.assertEqual(moved["moved_count"], 2)
+        self.assertEqual(moved["moved_bytes"], len(b"asset-0") + len(b"asset-1"))
+        self.assertTrue(all(not (project_dir / name).exists() for name in names))
+        self.assertEqual(
+            [(project_dir / "revopoint_20261021T073711Z" / name).read_bytes() for name in names],
+            [b"asset-0", b"asset-1"],
+        )
+
     def test_errors_keep_saved_document_and_free_the_lease(self) -> None:
         project_id = self._create_project()
         with patch.object(self.app.api, "post", wraps=self.app.api.post) as post:

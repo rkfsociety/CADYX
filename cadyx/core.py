@@ -193,6 +193,11 @@ class CadyxCore:
     def remove_project_files(self, project_id: str, filenames: list[str]) -> dict[str, Any]:
         return self._lifecycle.remove_project_files(project_id, filenames)
 
+    def move_project_files_to_subfolder(
+        self, project_id: str, filenames: list[str], folder_name: str,
+    ) -> dict[str, Any]:
+        return self._lifecycle.move_project_files_to_subfolder(project_id, filenames, folder_name)
+
     def remove_project_subfolder(self, project_id: str, folder_name: str) -> dict[str, Any]:
         return self._lifecycle.remove_project_subfolder(project_id, folder_name)
 

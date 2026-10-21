@@ -253,6 +253,22 @@ class ProjectLifecycleService(_CoreService):
                                     code="FILE_IN_USE")
             return self.workspace.remove_project_files(project_id, filenames)
 
+    def move_project_files_to_subfolder(
+        self, project_id: str, filenames: list[str], folder_name: str,
+    ) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            self._require_project_policy(
+                project_id, "file_management",
+                "Project files can only be moved from a free project with no running operation.",
+            )
+            project = self.workspace.load(project_id, include_history=False)
+            document = Document.from_validated_dict(project["document"])
+            if any(item.get("type") == "feature" and item.get("source", {}).get("file") in filenames
+                   for item in document.objects):
+                raise ConflictError("A project file is still used by a model feature and cannot be moved.",
+                                    code="FILE_IN_USE")
+            return self.workspace.move_project_files_to_subfolder(project_id, filenames, folder_name)
+
     def remove_project_subfolder(self, project_id: str, folder_name: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
             self._require_project_policy(

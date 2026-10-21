@@ -336,6 +336,13 @@ class ProjectWorkspace:
             self._project_dir(project_id), folder_name, file_names,
         )
 
+    def move_project_files_to_subfolder(
+        self, project_id: str, file_names: list[str], folder_name: str,
+    ) -> dict[str, Any]:
+        return self._artifacts.move_project_files_to_subfolder(
+            self._project_dir(project_id), file_names, folder_name,
+        )
+
     def remove_project_files(self, project_id: str, file_names: list[str]) -> dict[str, Any]:
         return self._artifacts.remove_project_files(self._project_dir(project_id), file_names)
 

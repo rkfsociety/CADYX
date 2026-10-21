@@ -127,6 +127,65 @@ class WorkspaceArtifactStore:
     def resolve_project_subfolder_file(self, directory: Path, folder_name: str, file_name: str) -> Path:
         return self.resolve_folder_file(self._project_subfolder(directory, folder_name), file_name)
 
+    def move_project_files_to_subfolder(
+        self, directory: Path, file_names: list[str], folder_name: str,
+    ) -> dict[str, Any]:
+        if (not isinstance(folder_name, str) or not _is_single_path_segment(folder_name)
+                or folder_name.startswith(".") or ":" in folder_name):
+            raise ValidationError("A safe direct project subfolder name is required.")
+        if not isinstance(file_names, list) or not file_names or len(file_names) > 1000:
+            raise ValidationError("Provide between 1 and 1000 project files to move.")
+        if any(not isinstance(name, str) for name in file_names) or len(set(file_names)) != len(file_names):
+            raise ValidationError("Project file names must be unique strings.")
+
+        sources = [self.resolve_project_file(directory, name) for name in file_names]
+        target = directory / folder_name
+        created = False
+        if target.exists() or target.is_symlink():
+            if target.is_symlink() or not target.is_dir() or target.resolve(strict=True).parent != directory.resolve(strict=True):
+                raise ConflictError("Project scan destination is not a safe folder.", code="ARTIFACT_CONFLICT")
+        else:
+            target.mkdir()
+            created = True
+        destinations = [target / name for name in file_names]
+        if any(path.exists() or path.is_symlink() for path in destinations):
+            if created:
+                target.rmdir()
+            raise ConflictError("Moving project files would overwrite an existing file; no files were moved.",
+                                code="ARTIFACT_CONFLICT")
+
+        sizes = [path.stat().st_size for path in sources]
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for source, destination in zip(sources, destinations):
+                os.link(source, destination)
+                try:
+                    source.unlink()
+                except OSError:
+                    destination.unlink(missing_ok=True)
+                    raise
+                moved.append((source, destination))
+        except OSError as exc:
+            for source, destination in reversed(moved):
+                try:
+                    os.link(destination, source)
+                    destination.unlink()
+                except OSError:
+                    pass
+            if created:
+                try:
+                    target.rmdir()
+                except OSError:
+                    pass
+            raise ValidationError(f"Project scan files could not be moved safely: {exc}.") from exc
+
+        return {
+            "folder": folder_name,
+            "moved": [{"name": name, "size": size} for name, size in zip(file_names, sizes)],
+            "moved_count": len(sources),
+            "moved_bytes": sum(sizes),
+        }
+
     def remove_project_subfolder_files(
         self, directory: Path, folder_name: str, file_names: list[str],
     ) -> dict[str, Any]:
