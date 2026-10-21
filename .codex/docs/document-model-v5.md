@@ -1,5 +1,17 @@
 # Document Model v5
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Исторический контракт документа v5
+
+Описание схемы v5 сохраняет контракты на момент её введения. Это исторический источник для миграций и развития эскизов и геометрии, не перечень актуальных ограничений. Текущая схема — v12; поздние контракты и код имеют приоритет при определении сегодняшних возможностей. Номера схемы и ревизии проекта — разные значения. Английские определения, поля и примеры сохранены ниже без изменения.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 > **Versioned contract (5), not the current schema.** This document records the behavior introduced with Document v5. Current saved documents use **v12**; the project envelope remains v1. Read the [current documentation map](../../docs/README.md) and subsequent version contracts before interpreting introduction-era limits as current restrictions. The historical command/schema examples below are retained for migration and compatibility work.
 
 
@@ -453,7 +465,7 @@ depth 5–9. The CPU processor caps itself at four threads and downsamples point
 clouds to at most 100,000 points; input PLYs are limited to 512 MiB, 2 million
 vertices, and 5 million faces. The processor is the hash-pinned CPU Open3D
 0.20.0 SDK behind a native C ABI bridge, so it does not depend on CADYX's Python
-ABI. See [runtime setup](../../README.md#run-locally).
+ABI. See [runtime setup](../../docs/operations.md#run-locally).
 
 The Core emits `agent.activity` SSE snapshots as the scan moves through source
 validation, mesh or point-cloud cleanup, reconstruction, validation, sidecar

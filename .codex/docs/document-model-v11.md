@@ -1,5 +1,17 @@
 # CADYX Document Model v11 — Assembly material assignment
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Документ v11: материалы сборки
+
+Исторический v11 ввёл граф сборки v3 и nullable-материал определения детали с именем, плотностью в кг/м³ и источником. Материал задаётся явно, не подбирается автоматически. Миграция сохраняет идентификаторы и ставит `null` для неизвестного материала. Сейчас документ v12 продолжает использовать граф v3. Расчёт массы, центра масс и инерции описан в [отдельном контракте](../../docs/assembly-mass.md).
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 Document v11 upgrades the assembly graph from version 2 to version 3. Each
 assembly part now stores an explicit nullable `material` record. Earlier
 documents migrate on read; v10 parts receive `material: null`. Project envelope

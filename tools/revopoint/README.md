@@ -1,5 +1,17 @@
 # Revopoint tools for Windows
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Экспериментальные инструменты Revopoint
+
+Инструменты предназначены для прямого UVC-захвата и управления столом в Windows без запуска Revo Scan. Источники RAW, PLY, метаданные и позы сохраняются в пользовательском workspace. Захват выполняйте при неподвижном столе, поворачивая его между кадрами; обычный режим — шаг 30° и наклон 0°. Установленный пользователем предел наклона ±10°. Калибровка привязана к конкретному сканеру; физический масштаб и регистрация требуют проверки. Нельзя выдавать облако или удачное совмещение за метрически подтверждённую модель. Права на публичное распространение калибровочных файлов не установлены. Ниже сохранены команды, эксперименты и ограничения.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 These small command-line tools exercise the scanner and dual-axis turntable through Windows APIs. They do not use the paid Revopoint SDK or require Revo Scan to run. The device calibration files used by the tools are bundled in `tools/revopoint/calibration/`; they were copied from `%LOCALAPPDATA%\RevoScan5\cameraparam` on the connected scanner PC so the same hardware setup can be used from another checkout. This calibration bundle is specific to that scanner; it is not a universal MINI calibration.
 
 ## CADYX persistent point-cloud reference

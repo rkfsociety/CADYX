@@ -1,5 +1,17 @@
 # Compact model inspection (P0-6)
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Компактная инспекция модели
+
+`GET /api/v1/agent/projects/{project_id}/inspection` и `cadyx_inspect_compact` дают ограниченные разделы `summary`, `entities`, `parameters`, `topology`, `changes`, без полной геометрии и длинных аргументов истории. MCP-инспекция проекта по умолчанию компактная; полная доступна явно. Страницы используют `offset`/`limit` и одну `expected_revision`; конфликт 409 требует нового чтения, не смешивания ревизий. Индексы топологии не постоянны. `changes` содержит только явно указанные историей ссылки и не является полным геометрическим diff. Возможное ускорение требует фактического измерения.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 CADYX preserves its original full document and history endpoints. An external agent
 can avoid returning B-rep strings, meshes, and large command arguments by using
 read-only **GET** `/api/v1/agent/projects/{project_id}/inspection`. MCP exposes

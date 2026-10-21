@@ -1,5 +1,17 @@
 # Model specifications
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Спецификации требований к модели
+
+JSON-спецификация версии 1 объединяет именованные требования и существующие инженерные проверки одной сохранённой ревизии. Вызов `/validations/specification` требует точного `expected_revision`; это ревизия проекта, не номер схемы документа. Проверки размеров, зазоров, сохранности и толщины сохраняют собственную доказательность и статусы `pass`/`fail`/`untested`. Опциональное сохранение пишет отдельный отчёт, не геометрию. Композиция не делает выборочные измерения полными сертификатами.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 CADYX can evaluate a small, versioned JSON specification against one saved
 document revision. A specification groups existing engineering validations
 under named requirements and returns their evidence together. It does not

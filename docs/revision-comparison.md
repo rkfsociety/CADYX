@@ -1,5 +1,17 @@
 # Revision-bound model comparison
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Сравнение ревизий модели
+
+`cadyx_list_revision_checkpoints` перечисляет сохранённые контрольные точки, `cadyx_compare_revisions` сравнивает их или существующие preview-предложения внутри одного проекта. Проверка read-only и привязана к текущему `expected_revision`. Старые ревизии без снимков не восстанавливаются из истории команд: возвращается `REVISION_UNAVAILABLE`. Отчёт включает изменения объектов, параметров, сборки и доступные измерения B-rep. Бюджет — 32 геометрических измерения; пробелы отражаются через `partial` и `untested`. Разность объёмов отдельных тел не доказывает глобальную разность объединённых моделей. Архив `.cadyx-revisions.sqlite3` нужно учитывать в резервных копиях.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 CADYX exposes read-only comparisons of two **committed model checkpoints** or
 two in-process **transaction preview proposals** in one project. A comparison
 does not acquire an edit lease, modify a document, refresh its revision, publish

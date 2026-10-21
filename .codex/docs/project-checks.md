@@ -1,5 +1,17 @@
 # Headless project checks
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Комплексная проверка проекта
+
+`check_project` объединяет проверки сохранённого документа, ссылок, геометрии, необязательной спецификации и готовности экспорта с привязкой к ревизии. Доступен через Core, Agent API, MCP и `python -m cadyx.check_project`. Каждый этап явно сообщает `pass`, `fail` или `untested`; отсутствие backend не считается успехом. Опциональный `deterministic_rebuild` сравнивает сохранённое состояние с изолированными холодным и повторными тёплыми перестроениями. Неизвестные операции и неоднозначные расхождения остаются `untested`. Холодное перестроение — свежая копия документа в том же процессе, не отдельный процесс.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 `check_project` composes existing CADYX validators for an exact saved revision,
 without editing the document or taking an edit lease. It is an external-agent
 tool, not an autonomous CAD controller.

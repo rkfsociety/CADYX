@@ -1,5 +1,17 @@
 # Agent Runtime execution budgets and cancellation
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Выполнение и отмена Agent Runtime
+
+`run_timeout_seconds` задаёт необязательный положительный бюджет времени, `cancel_event` — кооперативную отмену. Отмена и дедлайн проверяются до/после вызовов провайдера и инструментов; уже принятая атомарная команда может завершиться. Рассуждение провайдера и read-only инспекция не удерживают блокировку. Каждая команда получает отдельную блокировку с проверкой ревизии и heartbeat, затем освобождает её в `finally`. Ошибка команды остаётся основной, ошибка очистки добавляется примечанием. Аварийно оставленную блокировку восстанавливают через проверенный механизм Core.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 `AgentRuntime` keeps provider execution limits separate from project edit-lease expiry. `run_timeout_seconds` is an optional positive finite monotonic budget; its default `None` permits an unlimited provider run. `run(..., cancel_event=...)` optionally accepts a `threading.Event` for cooperative cancellation.
 
 A deadline or cancellation raises `AgentRunDeadlineExceeded` or `AgentRunCancelled`, both subclasses of `AgentRuntimeError`. The guard is checked before and after provider turns, before tool calls, and while a command lease is held. An already admitted atomic Core command may finish; no subsequent command is accepted after cancellation.

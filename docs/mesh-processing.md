@@ -1,5 +1,17 @@
 # Mesh processing for the AI agent
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Обработка треугольных сеток
+
+`process_mesh` обрабатывает сохранённую сетку через GeometryKernel и обычный путь команд агента. Методы: `clean` удаляет точные дубликаты и вырожденные треугольники; `remove_small_components` удаляет малые компоненты связности по рёбрам; `orient` согласует обход, отклоняя неподходящую сетку; `repair_orientation` удаляет конфликтующие треугольники; `smooth` выполняет Taubin-сглаживание с фиксацией открытой границы. Лимит — 200000 треугольников. Каждая операция сохраняет новое тело и полноразмерный PLY, исходники остаются. Это не заполнение дыр, не проверка самопересечений и не превращение в B-rep.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 The discovered `process_mesh` command takes `body_id`, `method` and optional
 `parameters`. It works through the shared GeometryKernel, Command System,
 revision-checked Agent API and MCP command wrapper. These are agent tools;

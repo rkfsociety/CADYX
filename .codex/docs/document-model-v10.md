@@ -1,5 +1,17 @@
 # CADYX Document Model v10 — Assembly mates and rigid kinematics
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Документ v10: сопряжения сборки
+
+Исторический v10 ввёл граф сборки v2 и явные сопряжения между соседними экземплярами деталей и подсборок. Решатель вызывается отдельно и определяет жёсткие размещения по локальным системам координат и заданным координатам сочленений. Несогласованные циклы отклоняются, лишние связи диагностируются. Это не непрерывная динамика и не общий нелинейный решатель замкнутых механизмов. Текущий документ v12 использует граф v3 после добавления материалов в v11.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 Document v10 upgrades the independent assembly graph from v1 to **v2**,
 adding a `mates` array. Earlier documents migrate on read; v9 instances,
 sources, transforms and envelope v1 remain unchanged. Edits use the existing

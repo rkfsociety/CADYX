@@ -1,5 +1,17 @@
 # CADYX architecture foundation
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Архитектура CADYX
+
+Core владеет состоянием проекта, общий Command System проверяет и атомарно сохраняет изменения. Агент использует Agent API/MCP; браузер показывает модель, прогресс и события. Геометрическое ядро скрыто за GeometryKernel. Защита проекта объединяет edit lease, ожидаемую ревизию и контроль активности. Ниже описаны HTTP-аутентификация, SSE, хранение, композиция расширений, нативный ABI, инспекция и механизм проверяемых расширений. Для запуска см. [русское руководство](../../docs/operations.ru.md). Точные поля и ограничения приведены в английском контракте ниже.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 ## Product boundary
 
 CADYX is AI-first: agents use a versioned API and the shared Core command system. The browser is a read-only, full-window detail viewer; agents create projects and edit models through the Agent API, while human API clients can use the Web API's lease-protected write routes. The object tree is in Geometry; project-file browsing is gated by the active agent lock and activity. The browser does not call a geometry kernel or own CAD state. It renders the live model and a single-line current-action/result status without a raw command or transcript feed.
@@ -494,7 +506,7 @@ The local MCP adapter exposes `cadyx_start_scan_360` and `cadyx_get_scan_360_sta
 
 The MCP HTTP bridge reads responses in bounded 64 KiB chunks and rejects oversized `Content-Length` before reading the body; missing/incorrect length does not bypass the streaming cap. The wire-body budgets are **16 MiB for normal JSON**, **64 MiB for full project/scene/topology/command JSON**, **8 MiB for paged compact inspection JSON**, **24 MiB for viewport PNG**, **8 MiB per thumbnail**, **64 MiB for project/folder files**, and **64 KiB for HTTP error bodies**. These limits apply before decoding or base64 encoding, and do not imply that downstream JSON decoding or MCP serialization consumes no additional memory. Read-side excess returns `RESPONSE_TOO_LARGE` with a byte limit and guidance: page `cadyx_inspect_compact` via `section`/`limit`/`offset`, use a thumbnail in place of an oversized viewport PNG, or use the supported staged STEP/PLY import command rather than transferring a large source through MCP text. Oversized HTTP error bodies return `HTTP_ERROR_BODY_TOO_LARGE` with the original HTTP status (including the definitive/ambiguous mutation distinction). Oversized successful **mutation** responses remain outcome-uncertain, are fenced and inspected, and are never retried automatically. This is a transport memory guard, not server-side pagination or proof of unchanged geometry.
 
-The repository entry point is [`AGENTS.md`](../../AGENTS.md), which points to the repo-local skill at `.agents/skills/cadyx-operator/SKILL.md`. `.codex/config.toml` registers the stdio process at project scope after this trusted checkout is opened in Codex; see [README](../../README.md#codex-operator-integration). The client accepts a token from process environment or `CADYX_API_TOKEN_FILE`; token contents are not passed as process arguments or logged. No MCP package or provider SDK is required.
+The repository entry point is [`AGENTS.md`](../../AGENTS.md), which points to the repo-local skill at `.agents/skills/cadyx-operator/SKILL.md`. `.codex/config.toml` registers the stdio process at project scope after this trusted checkout is opened in Codex; see [README](../../docs/operations.md#codex-operator-integration). The client accepts a token from process environment or `CADYX_API_TOKEN_FILE`; token contents are not passed as process arguments or logged. No MCP package or provider SDK is required.
 
 ## Foundation roadmap
 

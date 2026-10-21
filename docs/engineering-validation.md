@@ -1,5 +1,17 @@
 # Engineering validation
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Инженерные проверки
+
+Проверки используют сохранённую ревизию и хеш геометрии; отчёты можно сохранить отдельно без изменения модели. Метод `sampled` проверяет толщину ограниченной выборкой лучей: найденное нарушение даёт `fail`, отсутствие нарушения — `untested`, а не доказательство глобальной толщины. `global_minimum` сертифицирует минимальную ширину только подходящего выпуклого многогранника с плоскими гранями и прямыми рёбрами. Криволинейные, вогнутые и неподдерживаемые тела остаются `untested`. Спецификации и комплексные проверки проекта используют отдельные контракты.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 CADYX exposes read-only engineering checks through the Agent API. Checks use the saved document revision and geometry hash, and may optionally store immutable results in the project's validation sidecar. Validation does not change the model revision. These are separate measurement
 operations; the [model specification](../.codex/docs/model-specifications.md)
 composes selected requirements, while [project checks](../.codex/docs/project-checks.md)

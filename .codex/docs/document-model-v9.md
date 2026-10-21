@@ -1,5 +1,17 @@
 # CADYX Document Model v9 — Assembly graph
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Документ v9: граф сборки
+
+Историческая версия v9 ввела граф сборки v1: определения деталей, вложенные подсборки и экземпляры с жёстким XYZ/quaternion-размещением в мм. Исходная B-rep не дублируется для каждого экземпляра. Циклические и потерянные ссылки и некорректные преобразования отклоняются. Сопряжения и материалы появились в последующих версиях. Сейчас документ v12 использует граф v3; ограничения этого исторического контракта нужно читать с учётом v10 и v11.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 Document v9 adds `assembly` as a separately versioned graph alongside the
 existing sketch/feature model. Earlier snapshots through v8 migrate on **read**
 to an empty graph; no read overwrites project.json. A successful leased Core

@@ -1,5 +1,17 @@
 # Document Model v8
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Документ v8: параметры и перестроение
+
+Исторический контракт v8 ввёл именованные параметры, привязки и атомарное перестроение через `create_model_parameters`, `bind_model_parameters` и `set_model_parameter`. Он также описывает перестроение элементов, зависящих от топологии. Текущая версия документа — v12; используйте этот текст вместе с последующими версиями, а не как полный перечень текущих ограничений. Перед выбором рёбер инспектируйте актуальную топологию.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 > **Versioned contract (8), not the current schema.** This document records the behavior introduced with Document v8. Current saved documents use **v12**; the project envelope remains v1. Read the [current documentation map](../../docs/README.md) and subsequent version contracts before interpreting introduction-era limits as current restrictions. The historical command/schema examples below are retained for migration and compatibility work.
 
 

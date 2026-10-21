@@ -1,5 +1,17 @@
 # Document Model v7
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Документ v7: геометрия, импорт и элементы
+
+Исторический v7 описывает эскизные твёрдые тела, OCCT B-rep, импорт STEP и сканов, обработку импортированных тел и проверяемый экспорт. B-rep, треугольная сетка и облако точек не взаимозаменяемы. Геометрия изменяется через общий Command System с блокировкой и проверкой ревизии. Текущий документ — v12; параметры, сборки и произвольные рабочие плоскости описаны в поздних контрактах. При экспорте проверяйте соответствие сохранённой ревизии, хеши и фактическую геометрию.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 > **Versioned contract (7), not the current schema.** This document records the behavior introduced with Document v7. Current saved documents use **v12**; the project envelope remains v1. Read the [current documentation map](../../docs/README.md) and subsequent version contracts before interpreting introduction-era limits as current restrictions. The historical command/schema examples below are retained for migration and compatibility work.
 
 
@@ -756,7 +768,7 @@ depth 5–9, density quantile 0–0.5. The CPU processor caps itself at four
 threads and downsamples point clouds to at most 100,000 points; input PLYs are
 limited to 512 MiB, 2 million vertices, and 5 million faces. The processor is the hash-pinned CPU Open3D
 0.20.0 SDK behind a native C ABI bridge, so it does not depend on CADYX's Python
-ABI. See [runtime setup](../../README.md#run-locally).
+ABI. See [runtime setup](../../docs/operations.md#run-locally).
 
 The Core emits `agent.activity` SSE snapshots as the scan moves through source
 validation, mesh or point-cloud cleanup, reconstruction, validation, sidecar

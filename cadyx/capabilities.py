@@ -236,7 +236,7 @@ def agent_api_capabilities(reusable_capabilities: list[dict[str, Any]] | None = 
         "contracts": [
             ".codex/docs/architecture.md#edit-leases",
             ".codex/docs/architecture.md#safe-agent-stop-and-resume",
-            ".codex/docs/document-model-v11.md",
+            ".codex/docs/document-model-v12.md",
             ".codex/docs/viewport-api.md",
         ],
         "reusable_capabilities": deepcopy(reusable_capabilities or []),

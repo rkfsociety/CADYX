@@ -1,5 +1,17 @@
 # Versioned standard-part catalog — built-in foundation
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Версионированный каталог деталей
+
+`/agent/catalog` публикует неизменяемые манифесты, `/agent/catalog/resolve` проверяет версию, SHA-256 и параметры и возвращает `create_catalog_part`. Изменение выполняется обычной командой с ревизией и блокировкой. Есть резьбовая шпилька, кольцевой профиль, шестигранный пруток, прямоугольное тело и заранее помещённый STEP. Пресеты не являются сертификатами стандартов и посадок. Для стороннего STEP нужны хеш и явное подтверждение прав; CADYX не скачивает файл и не проверяет лицензию независимо. Происхождение фиксирует параметры создания, а не соответствие после последующих правок.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 The catalog is caller-invoked, deterministic and read-only until the ordinary
 leased Command System creates a part. Its built-in CADYX-authored presets are
 MIT-licensed data declarations, **not** manufacturing standards, calibrated

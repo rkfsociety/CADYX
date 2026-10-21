@@ -1,5 +1,17 @@
 # Revision-bound assembly interference and fit checks
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Зазоры и пересечения в сборке
+
+`cadyx_validate_assembly_fit` и `/validations/assembly-fit` измеряют минимальное расстояние и общий объём размещённых конечных экземпляров, включая вложенные сборки. Результат привязан к ревизии и хешу геометрии. Проверяются сохранённое положение и до 16 заданных положений сопряжений, не более 32 пар и 128 измерений. Единицы — мм и мм³. `pass` относится только к проверенным положениям, не ко всему движению. Сетки и неопределённые численные случаи получают `untested`. Сохранение отчёта не меняет ревизию модели.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 The read-only `POST /api/v1/agent/projects/{id}/validations/assembly-fit` endpoint and `cadyx_validate_assembly_fit` MCP tool measure OCCT solid-to-solid minimum distance and Boolean common volume for **placed leaf instances**, including nested subassemblies. Results bind to the exact saved document revision and a SHA-256 of the source geometry, assembly graph, selected instance pairs, and pose inputs. They may be persisted as immutable validation records without a model revision change. This endpoint is distinct from the generic `check_project` composite `assembly` stage, which is still explicitly `untested`; see [project checks](../.codex/docs/project-checks.md).
 
 ## Request

@@ -1,5 +1,17 @@
 # STL reference import
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### STL как геометрический референс
+
+Импорт STL сохраняет автономную треугольную геометрию для сравнения и реконструкции. Это референсная сетка, а не редактируемое OCCT-тело и не автоматически восстановленная параметрическая модель. Команды используют обычную ревизионную защиту и блокировку проекта. Точные правила входных файлов, сохранения и ограничений приведены ниже; масштаб и инженерная пригодность требуют отдельного подтверждения.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 `import_stl` accepts either a staged `.stl` filename in the current project or a regular non-symlink local `.stl` file identified by absolute `source_path` and exact lowercase `expected_sha256`. Optional `name` controls the reference body name. Both forms require the normal project lease and exact revision. Project imports compute and record the source hash; the file remains unchanged and saved mesh geometry is self-contained.
 
 Project-file imports resolve `file` through the current project's workspace, store the relative source filename and computed SHA-256 in feature provenance, and are available to the Files tab alongside STEP and PLY import actions.

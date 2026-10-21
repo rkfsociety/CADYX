@@ -1,5 +1,17 @@
 # Editable sketch work planes — Document Model v12
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Рабочие плоскости эскизов — документ v12
+
+`create_sketch` и `set_sketch_workplane` поддерживают XY, XZ, YZ, CUSTOM и FACE. Элементы остаются в локальных 2D-координатах. CUSTOM задаёт начало, нормаль и ось X; FACE использует текущий `semantic_key` плоской грани. Некорректные оси и неоднозначная привязка отклоняются. Перестроение сохраняет ревизионную и атомарную защиту. `revolve_sketch` по-прежнему требует XZ, `loft_sketches` сохраняет ограничения XY/XZ, а сечения сканов — нормали Y/Z. Миграция v11→v12 сохраняет прежние координаты и смещения.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 The leased Agent API/MCP command `create_sketch` accepts `plane` = `XY` (default), `XZ`, `YZ`, `CUSTOM`, or `FACE`. `set_sketch_workplane` additionally requires `sketch_id` and accepts the same placement fields. Every sketch element remains editable in its original local two-dimensional coordinates; the existing constraint system is unchanged. Dependent solid rebuilds occur within the existing revision-checked atomic command path. The browser remains observation-only.
 
 - **Named planes:** XY and XZ retain their legacy orientation and section offsets. YZ has local X=global Y, local Y=global Z, normal=global X. A named offset requires a matching `section_normal_axis` (Z, Y, X respectively) and finite `section_offset` in mm.

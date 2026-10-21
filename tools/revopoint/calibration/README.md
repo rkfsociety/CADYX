@@ -1,5 +1,17 @@
 # Revopoint camera calibration bundle
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Калибровочные данные камеры Revopoint
+
+Набор скопирован без изменения из `%LOCALAPPDATA%\RevoScan5\cameraparam` конкретного ПК со сканером. Наличие в приватном Git не подтверждает права на публичное распространение. `Q.bin` — матрица float32 little-endian размером 64 байта; `Pl.bin` и `Prgb.bin` содержат размеры 640×400 и матрицу 3×3. Остальные бинарные схемы установлены не полностью. `depth_scale.json` хранит коэффициент 0.005 из SDK с предварительным статусом для прямого UVC. Не меняйте его ради улучшения совмещения и не подменяйте калибровкой другого устройства. Масштаб требует проверки известным размером. Пользовательский `framesmall.mkf` и содержимое `projects/` не включены в Git.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 This device-specific bundle was copied as-is from `%LOCALAPPDATA%\RevoScan5\cameraparam` on the connected scanner PC. It lets the repository's UVC capture and offline marker-calibration work continue from another checkout without finding that PC's AppData folder or launching Revo Scan.
 
 The files originate from scanner-specific Revo Scan installation data. Their presence in this private repository does **not** establish permission to redistribute them publicly. Keep the bundle out of a public release until its provenance and redistribution rights are reviewed. If those rights cannot be confirmed, replace the tracked bundle with a documented, user-supplied local calibration workflow before publication.

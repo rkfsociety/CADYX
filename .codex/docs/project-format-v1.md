@@ -1,5 +1,17 @@
 # CADYX Project Format v1
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Формат хранения проекта v1
+
+Оболочка проекта v1 отделена от версии документа модели, сейчас v12. Авторитетное состояние сохраняет ProjectWorkspace, атомарно заменяя `project.json`; служебная история, B-rep и блокировки имеют собственные файлы. Пользовательские исходники в `projects/` нужно сохранять и резервировать независимо от Git. Изменения выполняются только через Core/Command System с защитой ревизии и блокировки. Старые версии мигрируют по правилам `cadyx/migrations.py`; чтение не даёт разрешения переписывать исходные файлы.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 Every project lives at `projects/<project-name>/project.json`. Newly created projects use a filesystem-safe directory name, with a numeric suffix when a folder already exists. Existing workspace directories are adopted in place and keep their names. A local `.cadyx-project-id` marker keeps the stable UUID addressable even if `project.json` is damaged; the UUID remains the API and lease identity. Legacy `projects/<project-id>/` directories remain readable. The JSON document is UTF-8 and uses `format: "cadyx-project"` with `version: 1`.
 
 ```json

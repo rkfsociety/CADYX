@@ -1,5 +1,17 @@
 # Scan reverse-engineering contract
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Реконструкция CAD по сканам
+
+Сеточный scan-to-CAD использует измерения, сечения и редактируемые эскизы для последующего построения твёрдых тел. Облако точек и треугольная сетка — разные виды геометрии: команды сечений и выравнивания сетки не принимают автоматически точечный PLY. Проверяйте масштаб, опорные системы координат, замкнутость профилей и итоговую B-rep-топологию. Сохранение исходных сканов обязательно; правдоподобное изображение не подтверждает метрическую точность или соответствие готовой детали.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 This contract extends the Document Model v7 scan workflow from reconstructed triangle meshes to editable CAD reconstruction. It does not change the persisted document version: the new operations use existing body, feature, sketch, point, and line objects and the existing OCCT loft/Boolean/fillet pipeline.
 
 ## Scope and evidence

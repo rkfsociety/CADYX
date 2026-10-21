@@ -1,5 +1,17 @@
 # Point-cloud processing and history
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Обработка облаков точек и история
+
+`process_point_cloud` работает с полным сохранённым PLY, проверяя SHA-256. Методы: `deduplicate` убирает одинаковые XYZ; `radius_filter` фильтрует по соседям; `crop` оставляет точки внутри включённых границ; `voxel_downsample` заменяет точки вокселя центроидом. Максимум 2 млн входных точек, минимум три выходные; радиусный фильтр ограничен 20 млн сравнений. Каждая операция добавляет этап истории того же тела и отдельный XYZ PLY. Исходники сохраняются, цвета и нормали в выходной XYZ не переносятся. До 125000 точек документа служат только отображению; масштаб и точность скана этим не подтверждаются.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 `process_point_cloud` operates on a saved source-linked point-cloud `body_id`.
 It is available through the Command System, Agent API and discovered MCP command
 schema. Pass the current `expected_revision`; the MCP command wrapper manages

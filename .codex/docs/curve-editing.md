@@ -1,5 +1,17 @@
 # Human-in-the-loop traced-curve editing
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Трассировка и исправление кривой человеком
+
+Узкое исключение из режима наблюдения — отдельный диалог трассировки по изображению. Черновик и undo/redo остаются локальными, изображение не загружается; сохраняются его SHA-256 и система координат. Подтверждённое сохранение использует человеческую блокировку, ревизию и `save_traced_curve_version`. Каждая версия создаёт новый эскиз; предыдущие версии не меняются. Сервер пересчитывает геометрию из координат изображения. Поддерживаются XY/XZ и связная цепочка прямых и круговых дуг до 4096 сегментов, не общий браузерный CAD-редактор.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 CADYX keeps the browser observation-only for ordinary CAD authoring. Human curve correction is a narrow opt-in exception for reference tracing: a local client may prepare a draft of connected line and circular-arc segments, undo/redo that unsaved draft, and submit a confirmed version through the same human lease and Command System used by every browser-originated document mutation.
 
 ## Browser entry point

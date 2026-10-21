@@ -1,5 +1,17 @@
 # Shared rendering and viewport API v1
 
+[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+
+## Русский обзор
+
+### Контракт отображения модели
+
+Viewport API отдаёт read-only сцену, изображения и события для наблюдения за состоянием Core. Агент выбирает проект и камеру через API, не управляя DOM браузера. Координата Z направлена вверх. Точечные облака, треугольные сетки и OCCT B-rep сохраняют разные типы и пределы доказательности. PNG может быть снимком браузера либо серверным fallback; источник обозначается явно. Прогресс и действия должны отражать реальные операции. Полные схемы сцены, события и dashboard-контракт сохранены ниже.
+
+Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
+
+## English reference
+
 `GET /api/v1/projects/{id}/viewport` and
 `GET /api/v1/agent/projects/{id}/viewport` return identical JSON scenes.
 Core reads the atomically saved project snapshot, so each response reflects one
