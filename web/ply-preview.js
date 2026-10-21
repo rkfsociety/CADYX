@@ -1420,8 +1420,7 @@ async function loadFiles(context) {
   const request = ++folderListRequest;
   const response = await api(fileContextPath(context));
   if (request !== folderListRequest || !isCurrentFileContext(context)) return;
-  const modelFiles = context.type === "project" && context.folderName
-    ? response.files : response.files.filter(is3dModelFile);
+  const modelFiles = response.files.filter(is3dModelFile);
   const childFolders = context.type === "project" ? response.folders || [] : [];
   const previousSelection = folderFiles.find((file) => file.name === selectedFolderFileName);
   const signature = JSON.stringify({
@@ -1457,7 +1456,7 @@ async function loadFiles(context) {
     $("#folder-preview-title").textContent = hasScanRuns ? "Выберите папку серии сканирования" : "3D-файлов нет";
     $("#folder-preview-info").textContent = "";
     folderPreviewPlaceholder.hidden = false;
-    folderPreviewPlaceholder.textContent = hasScanRuns ? "Откройте папку серии, чтобы увидеть сырые кадры, RGB и результаты."
+    folderPreviewPlaceholder.textContent = hasScanRuns ? "Откройте папку серии, чтобы увидеть файлы 3D-моделей."
       : context.type === "folder" ? "В этой папке пока нет файлов 3D-моделей."
         : "В этом проекте пока нет файлов 3D-моделей.";
   }
@@ -1560,8 +1559,7 @@ function renderFolderFiles() {
 }
 
 function updateFolderInspector(file = folderFiles.find((item) => item.name === selectedFolderFileName) || null) {
-  $("#folder-inspector-count").textContent = selectedProjectFileFolderName
-    ? `ФАЙЛОВ: ${folderFiles.length}` : `3D-ФАЙЛОВ: ${folderFiles.length}`;
+  $("#folder-inspector-count").textContent = `3D-ФАЙЛОВ: ${folderFiles.length}`;
   $("#folder-model-file-count").textContent = String(folderFiles.length);
   $("#folder-inspector-file-name").textContent = file?.name || "Не выбран";
   $("#folder-inspector-file-size").textContent = file ? formatFileSize(file.size) : "—";
