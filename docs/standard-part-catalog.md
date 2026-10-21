@@ -1,5 +1,7 @@
 # Versioned standard-part catalog — built-in foundation
 
+[Полный русский перевод](standard-part-catalog.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

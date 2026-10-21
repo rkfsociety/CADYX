@@ -1,5 +1,7 @@
 # Headless project checks
 
+[Полный русский перевод](project-checks.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

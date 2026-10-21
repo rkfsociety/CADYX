@@ -1,5 +1,7 @@
 # Compact model inspection (P0-6)
 
+[Полный русский перевод](compact-inspection.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

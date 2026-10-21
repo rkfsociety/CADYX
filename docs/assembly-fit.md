@@ -1,5 +1,7 @@
 # Revision-bound assembly interference and fit checks
 
+[Полный русский перевод](assembly-fit.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

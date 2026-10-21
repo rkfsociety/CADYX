@@ -1,5 +1,7 @@
 # Mesh references for solid reconstruction
 
+[Полный русский перевод](mesh-recognition.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

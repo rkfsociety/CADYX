@@ -1,5 +1,7 @@
 # CADYX Document Model v10 — Assembly mates and rigid kinematics
 
+[Полный русский перевод](document-model-v10.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

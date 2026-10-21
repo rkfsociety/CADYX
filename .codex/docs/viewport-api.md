@@ -1,5 +1,7 @@
 # Shared rendering and viewport API v1
 
+[Полный русский перевод](viewport-api.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

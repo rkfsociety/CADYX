@@ -1,5 +1,7 @@
 # CADYX Project Format v1
 
+[Полный русский перевод](project-format-v1.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

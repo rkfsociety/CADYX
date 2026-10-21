@@ -1,5 +1,7 @@
 # Human-in-the-loop traced-curve editing
 
+[Полный русский перевод](curve-editing.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

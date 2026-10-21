@@ -1,5 +1,7 @@
 # Revision-bound assembly mass and inertia
 
+[Полный русский перевод](assembly-mass.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

@@ -1,5 +1,7 @@
 # Mesh processing for the AI agent
 
+[Полный русский перевод](mesh-processing.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

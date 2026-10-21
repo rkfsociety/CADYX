@@ -1,5 +1,7 @@
 # Advanced solid modeling
 
+[Полный русский перевод](advanced-solid-modeling.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

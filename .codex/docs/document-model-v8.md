@@ -1,5 +1,7 @@
 # Document Model v8
 
+[Полный русский перевод](document-model-v8.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

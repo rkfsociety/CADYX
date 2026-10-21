@@ -1,5 +1,7 @@
 # Engineering validation
 
+[Полный русский перевод](engineering-validation.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

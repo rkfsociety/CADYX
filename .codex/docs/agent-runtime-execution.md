@@ -1,5 +1,7 @@
 # Agent Runtime execution budgets and cancellation
 
+[Полный русский перевод](agent-runtime-execution.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

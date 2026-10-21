@@ -1,5 +1,7 @@
 # Model specifications
 
+[Полный русский перевод](model-specifications.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

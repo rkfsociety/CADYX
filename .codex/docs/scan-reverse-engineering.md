@@ -1,5 +1,7 @@
 # Scan reverse-engineering contract
 
+[Полный русский перевод](scan-reverse-engineering.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

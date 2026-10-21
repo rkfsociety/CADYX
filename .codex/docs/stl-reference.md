@@ -1,5 +1,7 @@
 # STL reference import
 
+[Полный русский перевод](stl-reference.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

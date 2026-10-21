@@ -1,5 +1,7 @@
 # CADYX Document Model v11 — Assembly material assignment
 
+[Полный русский перевод](document-model-v11.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

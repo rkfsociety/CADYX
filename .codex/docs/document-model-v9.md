@@ -1,5 +1,7 @@
 # CADYX Document Model v9 — Assembly graph
 
+[Полный русский перевод](document-model-v9.ru.md)
+
 [Русский обзор](#русский-обзор) · [English reference](#english-reference)
 
 ## Русский обзор

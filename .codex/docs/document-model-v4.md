@@ -1,6 +1,6 @@
 # Document Model v4
 
-[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+[Полный русский перевод](document-model-v4.ru.md) · [English reference](#english-reference)
 
 ## Русский обзор
 
