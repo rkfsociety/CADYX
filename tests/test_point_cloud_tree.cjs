@@ -15,7 +15,9 @@ assert.equal(meshStage({operation:'process_mesh',method:'smooth',stats:{before:{
 assert.equal(meshStage({operation:'process_mesh',method:'remove_small_components',stats:{before:{triangles:100},after:{triangles:80}}}).output, 80);
 assert.equal(meshStage({operation:'import_point_cloud'}), null);
 assert.ok(!source.includes('dataset.cloudTool'), 'Unused agent tools must not be rendered in the browser tree');
-assert.deepEqual(Array.from(vm.runInContext('Object.keys(cadyxCloudTools)', context)), ['deduplicate','radius_filter','crop','voxel_downsample']);
+assert.deepEqual(Array.from(vm.runInContext('Object.keys(cadyxCloudTools)', context)), ['deduplicate','radius_filter','crop','voxel_downsample','remove_overlaps','smooth']);
+assert.equal(stage({operation:'process_point_cloud',method:'remove_overlaps',stats:{input_points:100,output_points:50}}).title, 'Удаление совпадающих слоёв');
+assert.equal(stage({operation:'process_point_cloud',method:'smooth',stats:{input_points:100,output_points:100}}).title, 'Сглаживание облака точек');
 const groupStart = source.indexOf('function modelGroups(){');
 const groupEnd = source.indexOf('function renderTree(){', groupStart);
 context.state = {objects:[

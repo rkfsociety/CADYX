@@ -52,7 +52,8 @@ class SourceContractTests(unittest.TestCase):
                     body = dict.fromkeys(operation["input_schema"]["required"], "value")
                     expected = {**body, **operation["defaults"]}
                     if explicit:
-                        body.update(persist=True)
+                        if "persist" in operation["input_schema"]["properties"]:
+                            body.update(persist=True)
                         if "method" in operation["defaults"]:
                             body["method"] = "global_minimum"
                         expected.update(body)

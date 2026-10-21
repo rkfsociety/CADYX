@@ -392,6 +392,24 @@ class CadyxCore:
     ) -> dict[str, Any]:
         return self._rendering.query_body_topology(project_id, body_id, expected_revision, query)
 
+    def validate_body_cloud_processing(
+        self, project_id: str, body_id: str, expected_revision: Any,
+        method: str, parameters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Analyze the full hashed cloud without saving files, features or a revision."""
+        if not isinstance(method, str) or method not in {"remove_overlaps", "smooth"}:
+            raise ValidationError("Cloud analysis supports remove_overlaps or smooth.")
+        with self._project_guard(project_id):
+            self._require_project_policy(project_id, "read", "Project is not available for cloud analysis.")
+            project = self.workspace.load(project_id, include_history=False)
+            document = Document.from_validated_dict(project["document"])
+            self._check_revision(document, expected_revision)
+            result = self.commands._process_point_cloud(
+                document, {"body_id": body_id, "method": method, "parameters": parameters if parameters is not None else {}},
+                project_id=project_id, analysis_only=True,
+            )
+            return {"revision": document.revision, "read_only": True, **result}
+
     def validate_body_dimensions(
         self, project_id: str, body_id: str, expected_revision: Any,
         expected_dimensions: Any, tolerance: Any, *, persist: bool = False,

@@ -142,6 +142,7 @@ class ScanCommands:
         self, document: Document, command: dict[str, Any], *,
         progress: Callable[[dict[str, Any]], None] | None = None,
         project_id: str | None = None,
+        analysis_only: bool = False,
     ) -> dict[str, Any]:
         from .point_cloud import normalize_cloud_parameters, process_points
         from .scan import _sha256_file
@@ -165,6 +166,13 @@ class ScanCommands:
         if progress:
             progress({"phase": "filter_point_cloud"})
         result = process_points(points, method, parameters)
+        if analysis_only:
+            return {"body_id": body["id"], "method": method, "parameters": parameters,
+                    "source": {"project_file": filename, "sha256": digest},
+                    "stats": {"input_points": len(points), "output_points": len(result),
+                              "removed_points": len(points) - len(result),
+                              "moved_points": sum(a != b for a, b in zip(points, result)) if method == "smooth" else 0,
+                              "coordinate_units": "source_unverified", "scale_status": "unverified"}}
         # The artifact contains every output point; only the document/view uses a sample.
         full_geometry = self.kernel.create_point_cloud(result)
         sample = result[::max(1, (len(result) + 124999) // 125000)]
@@ -174,6 +182,7 @@ class ScanCommands:
                 sample[axis * 2 + 1] = max(result, key=lambda point: point[axis])
         geometry = self.kernel.create_point_cloud(sample)
         stats = {"input_points": len(points), "output_points": len(result),
+                 "moved_points": sum(a != b for a, b in zip(points, result)) if method == "smooth" else 0,
                  "removed_points": len(points) - len(result), "display_sample_count": len(sample),
                  "bounds": {"min": [min(v[a] for v in result) for a in range(3)],
                             "max": [max(v[a] for v in result) for a in range(3)]},

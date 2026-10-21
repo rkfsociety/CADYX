@@ -8,11 +8,135 @@ from cadyx.command_scan import ScanCommands
 from cadyx.errors import ValidationError
 from cadyx.mesh_geometry import point_cloud_geometry
 from cadyx.models import Document
-from cadyx.point_cloud import process_points
+from cadyx.point_cloud import normalize_cloud_parameters, process_points
 from cadyx.scan import read_point_cloud_ply
 
 
 class PointCloudProcessingTests(unittest.TestCase):
+    def test_agent_analysis_route_and_separate_apply(self):
+        import threading
+        from cadyx.core import CadyxCore
+        from cadyx.mcp_server import CadyxAPI, MCPApplication
+        from cadyx.web import CadyxHTTPServer, make_request_handler
+        from cadyx.mesh_geometry import mesh_ply_bytes
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            core = CadyxCore(directory)
+            server = CadyxHTTPServer(("127.0.0.1", 0), make_request_handler(core))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with patch.dict("os.environ", {"CADYX_API_URL": f"http://127.0.0.1:{server.server_port}"}):
+                    api = CadyxAPI()
+                    self.addCleanup(api.close)
+                    app = MCPApplication(api)
+                    project = core.create_project("Cloud agent test")
+                    project_id = project["project"]["id"]
+                    points = [(float(x), float(y), .08 * (-1)**(x+y)) for x in range(7) for y in range(7)]
+                    core.upload_project_scan(project_id, "cloud.ply", mesh_ply_bytes(point_cloud_geometry(points)))
+                    def call(tool, args):
+                        response = app.call_tool(tool, {"project_id": project_id, **args})
+                        self.assertNotIn("isError", response, response)
+                        return response["structuredContent"]
+                    imported = call("cadyx_execute_command", {"expected_revision": 0, "command": {"type": "import_project_point_cloud", "file": "cloud.ply"}})
+                    body_id = imported["command_result"]["history_entry"]["result"]["body_id"]
+                    before = core.workspace.load(project_id)
+                    files_before = core.workspace.list_project_files(project_id)
+                    detected = call("cadyx_analyze_point_cloud", {"expected_revision": 1, "body_id": body_id, "method": "smooth", "parameters": {"radius": 2.1, "strength": 50, "iterations": 2}})
+                    self.assertTrue(detected["read_only"])
+                    self.assertGreater(detected["stats"]["moved_points"], 0)
+                    self.assertEqual(core.workspace.load(project_id), before)
+                    self.assertEqual(core.workspace.list_project_files(project_id), files_before)
+                    applied = call("cadyx_execute_command", {"expected_revision": 1, "command": {"type": "process_point_cloud", "body_id": body_id, "method": "smooth", "parameters": detected["parameters"]}})
+                    self.assertEqual(applied["revision"], 2)
+                    saved = core.workspace.load(project_id)
+                    self.assertEqual(saved["document"]["objects"][-1]["method"], "smooth")
+                    stale = app.call_tool("cadyx_analyze_point_cloud", {"project_id": project_id, "expected_revision": 1, "body_id": body_id, "method": "smooth"})
+                    self.assertTrue(stale["isError"])
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+    def test_overlap_removes_near_layers_not_distant_layers_or_base_surface(self):
+        base = [(float(x), float(y), 0.) for x in range(7) for y in range(7)]
+        near = [(x, y, .1) for x, y, _ in base]
+        far = [(x, y, .8) for x, y, _ in base]
+        parameters = {"distance": .2, "radius": 2., "tangential_distance": .05}
+        self.assertEqual(process_points(base + near, "remove_overlaps", parameters), base)
+        self.assertEqual(process_points(base + far, "remove_overlaps", parameters), base + far)
+        # A rotated patch uses its local normal, rather than global vertical Z.
+        rotated = [(z, x, y) for x, y, z in base + near]
+        self.assertEqual(process_points(rotated, "remove_overlaps", parameters), rotated[:len(base)])
+
+    def test_smoothing_strength_and_passes_reduce_normal_noise(self):
+        points = [(float(x), float(y), .08 * (-1)**(x+y)) for x in range(9) for y in range(9)]
+        def roughness(p):
+            return sum(v[2]**2 for v in p)
+        weak = process_points(points, "smooth", {"strength": 10, "iterations": 1, "radius": 2.1})
+        strong = process_points(points, "smooth", {"strength": 50, "iterations": 1, "radius": 2.1})
+        repeated = process_points(points, "smooth", {"strength": 50, "iterations": 3, "radius": 2.1})
+        self.assertEqual(len(repeated), len(points))
+        self.assertLess(roughness(weak), roughness(points))
+        self.assertLess(roughness(strong), roughness(weak))
+        self.assertLess(roughness(repeated), roughness(strong))
+        self.assertEqual(points[0], (0., 0., .08))
+
+    def test_surface_tools_preserve_sparse_and_collinear_regions(self):
+        points = [(float(i), 0., 0.) for i in range(12)]
+        for method in ("smooth", "remove_overlaps"):
+            self.assertEqual(process_points(points, method, {"radius": 3.}), points)
+            self.assertEqual(process_points(points, method, {"radius": 1.}), points)
+
+    def test_surface_parameter_validation(self):
+        for method, parameters in [("smooth", {"strength": True}), ("smooth", {"iterations": 1.5}),
+                                   ("smooth", {"strength": 101}), ("smooth", {"radius": float("nan")}),
+                                   ("remove_overlaps", {"distance": 2.}), ("remove_overlaps", {"unknown": 1})]:
+            with self.subTest(method=method, parameters=parameters):
+                with self.assertRaises(ValidationError):
+                    normalize_cloud_parameters(method, parameters)
+
+    def test_surface_budget_fails_without_mutating_input(self):
+        from unittest.mock import patch
+        points = [(float(x), float(y), 0.) for x in range(4) for y in range(4)]
+        before = list(points)
+        with patch("cadyx.point_cloud_surface.MAX_SURFACE_COMPARISONS", 1):
+            with self.assertRaises(ValidationError) as caught:
+                process_points(points, "smooth", {"radius": 2.})
+        self.assertEqual(caught.exception.code, "RESOURCE_LIMIT")
+        self.assertEqual(points, before)
+
+    def test_analysis_does_not_publish_or_change_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "cloud.ply"
+            from cadyx.mesh_geometry import mesh_ply_bytes
+            base = [(float(x), float(y), 0.) for x in range(7) for y in range(7)]
+            path.write_bytes(mesh_ply_bytes(point_cloud_geometry(base + [(x,y,.1) for x,y,_ in base])))
+            commands = ScanCommands()
+            commands.kernel = Mock()
+            commands.kernel.create_point_cloud.side_effect = point_cloud_geometry
+            commands.resolve_project_file = lambda project_id, filename: root / filename
+            def publish(project_id, filename, content):
+                dest = root / "filtered.ply"
+                dest.write_bytes(content)
+                return {"file": dest.name}
+            commands.publish_project_scan_output = Mock(side_effect=publish)
+            document = Document.create()
+            imported = commands._import_project_point_cloud(document, {"file": path.name}, project_id="project")
+            before = document.to_dict()
+            command = {"body_id": imported["body_id"], "method": "remove_overlaps",
+                       "parameters": {"distance": .2, "radius": 2., "tangential_distance": .05}}
+            detected = commands._process_point_cloud(document, command, project_id="project", analysis_only=True)
+            self.assertEqual(document.to_dict(), before)
+            commands.publish_project_scan_output.assert_not_called()
+            self.assertEqual(list(root.iterdir()), [path])
+            applied = commands._process_point_cloud(document, command, project_id="project")
+            self.assertEqual(detected["stats"]["removed_points"], len(base))
+            self.assertEqual(applied["stats"]["output_points"], detected["stats"]["output_points"])
+            document.validate()
+            self.assertEqual(Document.from_dict(document.to_dict()).to_dict(), document.to_dict())
+
     def test_registered_command_and_persisted_schema(self):
         from cadyx.capabilities import COMMAND_REGISTRY
         from tests.test_persisted_schemas import feature_document

@@ -9,6 +9,21 @@ from .errors import ValidationError
 
 
 def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
+    if isinstance(method, str) and method in {"remove_overlaps", "smooth"}:
+        defaults = ({"distance": .56, "radius": 2., "tangential_distance": .1}
+                    if method == "remove_overlaps" else {"strength": 10., "iterations": 10, "radius": 1.})
+        if not isinstance(parameters, dict) or set(parameters) - defaults.keys():
+            raise ValidationError("Unknown local-surface point-cloud parameters.")
+        p = {**defaults, **parameters}
+        for key, value in p.items():
+            if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+                raise ValidationError("Surface parameters must be positive finite numbers.")
+        if method == "smooth":
+            if type(p["iterations"]) is not int or not 1 <= p["iterations"] <= 100 or p["strength"] > 100:
+                raise ValidationError("Smoothing requires strength in (0,100] and integer iterations in 1..100.")
+        elif p["radius"] <= max(p["distance"], p["tangential_distance"]):
+            raise ValidationError("Surface radius must exceed both overlap tolerances.")
+        return p
     allowed = {"deduplicate": set(), "radius_filter": {"radius", "min_neighbors"},
                "voxel_downsample": {"voxel_size"}, "crop": {"min", "max"}}
     if not isinstance(method, str) or method not in allowed or not isinstance(parameters, dict) or set(parameters) != allowed[method]:
@@ -30,7 +45,10 @@ def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
 
 def process_points(points: list[tuple[float, float, float]], method: str, parameters: dict[str, Any]) -> list[tuple[float, float, float]]:
     p = normalize_cloud_parameters(method, parameters)
-    if method == "deduplicate":
+    if method in {"remove_overlaps", "smooth"}:
+        from .point_cloud_surface import surface_points
+        result = surface_points(points, method, p)
+    elif method == "deduplicate":
         result = list(dict.fromkeys(points))
     elif method == "crop":
         result = [v for v in points if all(lo <= x <= hi for x, lo, hi in zip(v, p["min"], p["max"]))]

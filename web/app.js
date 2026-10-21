@@ -4,6 +4,8 @@ const cadyxCloudTools = {
   radius_filter: 'Фильтр изолированных точек',
   crop: 'Обрезка по границам',
   voxel_downsample: 'Прореживание по вокселям',
+  remove_overlaps: 'Удаление совпадающих слоёв',
+  smooth: 'Сглаживание облака точек',
 };
 function cadyxCloudStage(feature) {
   if (feature.operation === 'import_point_cloud') return {title:'Импорт облака точек', input:null, output:feature.stats?.point_count};
@@ -260,7 +262,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const stage=selected&&cadyxCloudStage(selected);
       if(stage){
         const stats=selected.stats||{},source=selected.source?.project_file||selected.source?.file,artifact=selected.artifact?.file;
-        const entries=[['Точек на входе',stage.input??stage.output],['Точек на выходе',stage.output],['Удалено точек',stats.removed_points??0],['Исходник',source],['Результат PLY',artifact],['Масштаб','Не проверен']].filter(([,value])=>value!=null);
+        const entries=[['Точек на входе',stage.input??stage.output],['Точек на выходе',stage.output],['Удалено точек',stats.removed_points??0],['Перемещено точек',stats.moved_points],['Исходник',source],['Результат PLY',artifact],['Масштаб','Не проверен']].filter(([,value])=>value!=null);
         props.insertAdjacentHTML('beforeend',`<section class="cad3-sec"><h3>История обработки облака</h3><dl class="cad3-grid">${entries.map(([key,value])=>`<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join('')}</dl>${selected.previous_feature_id?`<button class="cad3-dep" data-dep="${esc(selected.previous_feature_id)}">Предыдущая операция</button>`:''}</section>`);
       }
       document.querySelector('#object-panel .cad3-mass-calculator')?.remove();

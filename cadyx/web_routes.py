@@ -97,6 +97,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/thickness", "agent_validate_thickness", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/specification", "agent_validate_specification", "validation", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/project-check", "agent_validate_project_check", "validation", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/validations/cloud-processing", "agent_validate_cloud_processing", "validation", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/viewport", "agent_viewport", "viewport"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/viewport.png", "agent_viewport_png", "viewport"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/viewport/snapshot", "agent_viewport_snapshot", "viewport", "png"),
@@ -766,7 +767,13 @@ def _dispatch_validation(handler: Any, core: CadyxCore, route: RouteMatch, parse
         return
     validate_request_fields(operation, body)
     assert body is not None
-    if operation == "dimensions":
+    if operation == "cloud_processing":
+        result = core.observe_agent_operation(
+            project_id, "Анализирует обработку облака точек",
+            lambda: core.validate_body_cloud_processing(project_id, body["body_id"], body["expected_revision"],
+                                                       body["method"], body.get("parameters")),
+        )
+    elif operation == "dimensions":
         result = core.observe_agent_operation(project_id, "Проверяет габариты тела", lambda: core.validate_body_dimensions(project_id, body["body_id"], body["expected_revision"], body["expected_dimensions"], body["tolerance"], persist=body.get("persist", False)))
     elif operation == "clearance":
         result = core.observe_agent_operation(project_id, "Измеряет зазор между телами", lambda progress: core.validate_body_clearance(project_id, body["first_body_id"], body["second_body_id"], body["expected_revision"], body["minimum_clearance"], body["tolerance"], progress=progress, persist=body.get("persist", False)), reports_progress=True)
