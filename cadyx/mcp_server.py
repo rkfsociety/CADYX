@@ -293,8 +293,10 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_list_source_extensions", "description": "List persistent source extensions and test status in the local CADYX installation.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_develop_source_extension", "description": "Run focused source tests in a no-network Windows AppContainer, then checkpoint and apply the patch only on success.", "inputSchema": _schema({"project_id": _STRING, "proposal": _OBJECT}, ["project_id", "proposal"])},
     {"name": "cadyx_rollback_source_extension", "description": "Restore a checked source-extension checkpoint without overwriting files changed since integration.", "inputSchema": _schema({"project_id": _STRING, "extension_id": _STRING}, ["project_id", "extension_id"])},
-    {"name": "cadyx_list_project_files", "description": "List direct user files in a saved project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
-    {"name": "cadyx_read_project_file", "description": "Read a direct project file through the read-only Agent API; small images are returned as image content.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING}, ["project_id", "name"])},
+    {"name": "cadyx_list_project_files", "description": "List user files in a saved project or an optional project subfolder.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING}, ["project_id"])},
+    {"name": "cadyx_read_project_file", "description": "Read a project file through the read-only Agent API; optionally select a project subfolder.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING, "folder_name": _STRING}, ["project_id", "name"])},
+    {"name": "cadyx_remove_project_files", "description": "Remove explicitly listed, unused files from a project or project subfolder after checking the project is free.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING, "filenames": {"type": "array", "items": _STRING, "minItems": 1, "maxItems": 1000}}, ["project_id", "filenames"])},
+    {"name": "cadyx_remove_project_folder", "description": "Remove one existing project subfolder recursively after checking it is unused and the project is free.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING}, ["project_id", "folder_name"])},
     {"name": "cadyx_start_scan_360", "description": "Start the native direct-UVC 360-degree point capture in a free project. The physical turntable must be level; the project viewer displays each captured frame while the scan runs.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_get_scan_360_status", "description": "Read native 360-degree scan progress and the latest captured point-cloud preview for a project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_upload_project_step", "description": "Copy a local STEP file into a project through the Agent API without overwriting existing files or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
@@ -521,9 +523,29 @@ class MCPApplication:
             extension_id = urllib.parse.quote(args["extension_id"], safe="")
             return self.api.post(self._project(args["project_id"], f"/source-extensions/{extension_id}/rollback"), {})
         if name == "cadyx_list_project_files":
+            if args.get("folder_name"):
+                folder = urllib.parse.quote(args["folder_name"], safe="")
+                return self.api.get(self._project(args["project_id"], f"/folders/{folder}/files"))
             return self.api.get(self._project(args["project_id"], "/files"))
         if name == "cadyx_read_project_file":
-            return self._read_file(self._project(args["project_id"], "/files/" + urllib.parse.quote(args["name"], safe="")), args["name"])
+            if args.get("folder_name"):
+                folder = urllib.parse.quote(args["folder_name"], safe="")
+                path = self._project(args["project_id"], f"/folders/{folder}/files/{urllib.parse.quote(args['name'], safe='')}")
+            else:
+                path = self._project(args["project_id"], "/files/" + urllib.parse.quote(args["name"], safe=""))
+            return self._read_file(path, args["name"])
+        if name == "cadyx_remove_project_files":
+            if args.get("folder_name"):
+                folder = urllib.parse.quote(args["folder_name"], safe="")
+                path = self._project(args["project_id"], f"/folders/{folder}/files/delete")
+            else:
+                path = self._project(args["project_id"], "/files/delete")
+            raw, _ = self.api.request("POST", path, {"filenames": args["filenames"]})
+            return json.loads(raw.decode("utf-8"))
+        if name == "cadyx_remove_project_folder":
+            folder = urllib.parse.quote(args["folder_name"], safe="")
+            path = self._project(args["project_id"], f"/folders/{folder}/delete")
+            return self.api.post(path, {})
         if name == "cadyx_start_scan_360":
             return self.api.post(self._project(args["project_id"], "/scans/360"), {})
         if name == "cadyx_get_scan_360_status":

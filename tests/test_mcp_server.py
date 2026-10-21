@@ -531,6 +531,34 @@ class CadyxMCPServerTests(unittest.TestCase):
                          source.read_bytes())
         self.assertEqual(self.core.workspace_selection_snapshot(), {"type": "project", "project_id": active_id})
 
+    def test_can_remove_an_unused_scan_series_folder_through_agent_api(self) -> None:
+        staged = self._tool_value("cadyx_create_project", {"name": "Remove scan series"})
+        project_id = staged["project"]["id"]
+        series_name = "revopoint_20261021T103419Z"
+        series = self.core.workspace._project_dir(project_id) / series_name
+        (series / "depth_frames").mkdir(parents=True)
+        (series / "depth_frames" / "frame_00000.raw").write_bytes(b"depth")
+
+        removed = self._tool_value("cadyx_remove_project_folder", {
+            "project_id": project_id, "folder_name": series_name,
+        })
+
+        self.assertTrue(removed["removed"])
+        self.assertEqual(removed["removed_file_count"], 1)
+        self.assertFalse(series.exists())
+
+    def test_can_remove_an_unused_direct_scan_candidate_through_agent_api(self) -> None:
+        project_id = self._create_project("Remove scan candidate")
+        candidate = self.core.workspace._project_dir(project_id) / "revopoint_20261021T103419Z_geometric_only_candidate.ply"
+        candidate.write_bytes(b"ply")
+
+        removed = self._tool_value("cadyx_remove_project_files", {
+            "project_id": project_id, "filenames": [candidate.name],
+        })
+
+        self.assertEqual(removed["removed_count"], 1)
+        self.assertFalse(candidate.exists())
+
     def test_errors_keep_saved_document_and_free_the_lease(self) -> None:
         project_id = self._create_project()
         with patch.object(self.app.api, "post", wraps=self.app.api.post) as post:

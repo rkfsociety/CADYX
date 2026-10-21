@@ -221,6 +221,57 @@ class ProjectLifecycleService(_CoreService):
                 raise ConflictError("The STEP file is still used by an imported body and cannot be removed.", code="FILE_IN_USE")
             return self.workspace.remove_project_step(project_id, filename)
 
+    def remove_project_subfolder_files(
+        self, project_id: str, folder_name: str, filenames: list[str],
+    ) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            self._require_project_policy(
+                project_id, "file_management",
+                "Project files can only be removed from a free project with no running operation.",
+            )
+            project = self.workspace.load(project_id, include_history=False)
+            document = Document.from_validated_dict(project["document"])
+            if any(item.get("type") == "feature" and item.get("source", {}).get("file") in filenames
+                   for item in document.objects):
+                raise ConflictError(
+                    "The project file is still used by a model feature and cannot be removed.",
+                    code="FILE_IN_USE",
+                )
+            return self.workspace.remove_project_subfolder_files(project_id, folder_name, filenames)
+
+    def remove_project_files(self, project_id: str, filenames: list[str]) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            self._require_project_policy(
+                project_id, "file_management",
+                "Project files can only be removed from a free project with no running operation.",
+            )
+            project = self.workspace.load(project_id, include_history=False)
+            document = Document.from_validated_dict(project["document"])
+            if any(item.get("type") == "feature" and item.get("source", {}).get("file") in filenames
+                   for item in document.objects):
+                raise ConflictError("A project file is still used by a model feature and cannot be removed.",
+                                    code="FILE_IN_USE")
+            return self.workspace.remove_project_files(project_id, filenames)
+
+    def remove_project_subfolder(self, project_id: str, folder_name: str) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            self._require_project_policy(
+                project_id, "file_management",
+                "Project files can only be removed from a free project with no running operation.",
+            )
+            project = self.workspace.load(project_id, include_history=False)
+            document = Document.from_validated_dict(project["document"])
+            if any(
+                item.get("type") == "feature"
+                and item.get("source", {}).get("project_folder") == folder_name
+                for item in document.objects
+            ):
+                raise ConflictError(
+                    "The project folder is still used by a model feature and cannot be removed.",
+                    code="FILE_IN_USE",
+                )
+            return self.workspace.remove_project_subfolder(project_id, folder_name)
+
     def prune_project_files(self, project_id: str, keep_files: list[str]) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
             self._require_project_policy(

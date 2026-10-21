@@ -301,6 +301,23 @@ class WebApiTests(unittest.TestCase):
         with urlopen(Request(self.base_url + f"/api/v1/projects/{project_id}/folders/{encoded_folder}/files/frame_00000.raw"), timeout=3) as response:
             self.assertEqual(response.read(), b"raw-y16")
 
+    def test_agent_can_remove_an_unused_nested_scan_series(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "Remove scan series"})
+        project_id = created["project"]["id"]
+        series_name = "revopoint_20261021T103419Z"
+        series = self.core.workspace._project_dir(project_id) / series_name
+        (series / "depth_frames").mkdir(parents=True)
+        (series / "depth_frames" / "frame_00000.raw").write_bytes(b"depth")
+        (series / "capture_manifest.json").write_text("{}", encoding="utf-8")
+
+        route = (f"/api/v1/agent/projects/{project_id}/folders/"
+                 f"{quote(series_name, safe='')}/delete")
+        status, removed = self.request(route, {})
+
+        self.assertEqual(status, 200)
+        self.assertEqual(removed["removed_file_count"], 2)
+        self.assertFalse(series.exists())
+
     def test_scanner_point_cloud_preview_resolves_a_ply_inside_a_project_scan_series(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Nested scan preview"})
         project_id = created["project"]["id"]

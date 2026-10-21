@@ -111,6 +111,11 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/viewport/snapshot", "agent_viewport_snapshot", "viewport", "png"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/viewport/camera", "agent_viewport_camera", "viewport", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/files", "agent_project_files", "files"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/files/delete", "agent_project_files_delete", "files", "json"),
+    RouteSpec("GET", "/api/v1/agent/projects/{project_id}/folders/{folder_name}/files", "agent_project_subfolder_files", "files"),
+    RouteSpec("GET", "/api/v1/agent/projects/{project_id}/folders/{folder_name}/files/{filename}", "agent_project_subfolder_file", "files"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/folders/{folder_name}/files/delete", "agent_project_subfolder_files_delete", "files", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/folders/{folder_name}/delete", "agent_project_subfolder_delete", "files", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/files/{filename}", "agent_project_file", "files"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/files/{filename}", "agent_project_file_upload", "files", "project_source"),
     RouteSpec("DELETE", "/api/v1/agent/projects/{project_id}/files/{filename}", "agent_project_file_delete", "files"),
@@ -498,6 +503,29 @@ def _dispatch_files(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
             project_id, unquote(route.params["folder_name"]), filename))
     elif name == "agent_project_files":
         handler._json(200, {"files": core.workspace.list_project_files(project_id)})
+    elif name == "agent_project_subfolder_files":
+        folder_name = unquote(route.params["folder_name"])
+        handler._json(200, {"files": core.workspace.list_project_subfolder_files(project_id, folder_name)})
+    elif name == "agent_project_subfolder_file":
+        handler._binary_file(core.workspace.resolve_project_subfolder_file(
+            project_id, unquote(route.params["folder_name"]), filename))
+    elif name == "agent_project_subfolder_files_delete":
+        body = _require_json(handler)
+        if set(body) != {"filenames"} or not isinstance(body["filenames"], list):
+            raise ValidationError("Project subfolder deletion requires only a filenames array.")
+        folder_name = unquote(route.params["folder_name"])
+        handler._json(200, core.remove_project_subfolder_files(project_id, folder_name, body["filenames"]))
+    elif name == "agent_project_files_delete":
+        body = _require_json(handler)
+        if set(body) != {"filenames"} or not isinstance(body["filenames"], list):
+            raise ValidationError("Project file deletion requires only a filenames array.")
+        handler._json(200, core.remove_project_files(project_id, body["filenames"]))
+    elif name == "agent_project_subfolder_delete":
+        body = _require_json(handler)
+        if body:
+            raise ValidationError("Project subfolder deletion does not accept options.")
+        folder_name = unquote(route.params["folder_name"])
+        handler._json(200, core.remove_project_subfolder(project_id, folder_name))
     elif name in {"project_file", "agent_project_file"}:
         handler._binary_file(core.workspace.resolve_project_file(project_id, filename))
     elif name == "agent_project_file_upload":

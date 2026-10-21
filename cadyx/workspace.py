@@ -329,6 +329,19 @@ class ProjectWorkspace:
             self._project_dir(project_id), folder_name, file_name
         )
 
+    def remove_project_subfolder_files(
+        self, project_id: str, folder_name: str, file_names: list[str],
+    ) -> dict[str, Any]:
+        return self._artifacts.remove_project_subfolder_files(
+            self._project_dir(project_id), folder_name, file_names,
+        )
+
+    def remove_project_files(self, project_id: str, file_names: list[str]) -> dict[str, Any]:
+        return self._artifacts.remove_project_files(self._project_dir(project_id), file_names)
+
+    def remove_project_subfolder(self, project_id: str, folder_name: str) -> dict[str, Any]:
+        return self._artifacts.remove_project_subfolder(self._project_dir(project_id), folder_name)
+
     def copy_project_files(
         self, source_project_id: str, target_project_id: str
     ) -> dict[str, Any]:

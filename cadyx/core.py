@@ -185,6 +185,17 @@ class CadyxCore:
     def remove_staged_project_step(self, project_id: str, filename: str) -> dict[str, Any]:
         return self._lifecycle.remove_staged_project_step(project_id, filename)
 
+    def remove_project_subfolder_files(
+        self, project_id: str, folder_name: str, filenames: list[str],
+    ) -> dict[str, Any]:
+        return self._lifecycle.remove_project_subfolder_files(project_id, folder_name, filenames)
+
+    def remove_project_files(self, project_id: str, filenames: list[str]) -> dict[str, Any]:
+        return self._lifecycle.remove_project_files(project_id, filenames)
+
+    def remove_project_subfolder(self, project_id: str, folder_name: str) -> dict[str, Any]:
+        return self._lifecycle.remove_project_subfolder(project_id, folder_name)
+
     def prune_project_files(self, project_id: str, keep_files: list[str]) -> dict[str, Any]:
         return self._lifecycle.prune_project_files(project_id, keep_files)
 

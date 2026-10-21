@@ -78,6 +78,7 @@ class WebRouteTableTests(unittest.TestCase):
     def test_every_declared_route_matches_its_own_template(self) -> None:
         replacements = {
             "folder": "folder%20name",
+            "folder_name": "folder%20name",
             "filename": "part%20name.step",
             "project_id": "project-123",
             "lease_id": "lease-456",

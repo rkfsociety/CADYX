@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import mimetypes
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
@@ -125,6 +126,64 @@ class WorkspaceArtifactStore:
 
     def resolve_project_subfolder_file(self, directory: Path, folder_name: str, file_name: str) -> Path:
         return self.resolve_folder_file(self._project_subfolder(directory, folder_name), file_name)
+
+    def remove_project_subfolder_files(
+        self, directory: Path, folder_name: str, file_names: list[str],
+    ) -> dict[str, Any]:
+        if not isinstance(file_names, list) or not file_names or len(file_names) > 1000:
+            raise ValidationError("Provide between 1 and 1000 project subfolder files to remove.")
+        if any(not isinstance(name, str) for name in file_names) or len(set(file_names)) != len(file_names):
+            raise ValidationError("Project subfolder file names must be unique strings.")
+        paths = [self.resolve_project_subfolder_file(directory, folder_name, name) for name in file_names]
+        sizes = [path.stat().st_size for path in paths]
+        for path in paths:
+            path.unlink()
+        return {
+            "folder": folder_name,
+            "removed": [{"name": name, "size": size} for name, size in zip(file_names, sizes)],
+            "removed_count": len(paths),
+            "removed_bytes": sum(sizes),
+        }
+
+    def remove_project_files(self, directory: Path, file_names: list[str]) -> dict[str, Any]:
+        if not isinstance(file_names, list) or not file_names or len(file_names) > 1000:
+            raise ValidationError("Provide between 1 and 1000 project files to remove.")
+        if any(not isinstance(name, str) for name in file_names) or len(set(file_names)) != len(file_names):
+            raise ValidationError("Project file names must be unique strings.")
+        paths = [self.resolve_project_file(directory, name) for name in file_names]
+        sizes = [path.stat().st_size for path in paths]
+        for path in paths:
+            path.unlink()
+        return {
+            "removed": [{"name": name, "size": size} for name, size in zip(file_names, sizes)],
+            "removed_count": len(paths),
+            "removed_bytes": sum(sizes),
+        }
+
+    def remove_project_subfolder(
+        self, directory: Path, folder_name: str,
+    ) -> dict[str, Any]:
+        target = self._project_subfolder(directory, folder_name)
+        files: list[Path] = []
+        for current, dir_names, file_names in os.walk(target, followlinks=False):
+            current_path = Path(current)
+            for name in dir_names:
+                if (current_path / name).is_symlink() or name.startswith("."):
+                    raise ValidationError("Refusing to remove a project folder containing a link or internal directory.")
+            for name in file_names:
+                path = current_path / name
+                if (path.is_symlink() or name.startswith(".cadyx-")
+                        or self._is_internal_file(current_path, name)):
+                    raise ValidationError("Refusing to remove a project folder containing a link or internal file.")
+                files.append(path)
+        total_bytes = sum(path.stat().st_size for path in files)
+        shutil.rmtree(target)
+        return {
+            "folder": folder_name,
+            "removed": True,
+            "removed_file_count": len(files),
+            "removed_bytes": total_bytes,
+        }
 
     @staticmethod
     def copy_project_files(
