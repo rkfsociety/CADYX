@@ -31,7 +31,7 @@
 | Опоры для реконструкции | [Распознавание EN](mesh-recognition.md) · [RU](mesh-recognition.ru.md) |
 | Стандартные детали | [Каталог EN](standard-part-catalog.md) · [RU](standard-part-catalog.ru.md) |
 | Отложенные инструменты | [Backlog эскизов EN](sketch-tools-backlog.md) · [RU](sketch-tools-backlog.ru.md) |
-| Revopoint | [Инструменты сканера — EN, RU в процессе](../tools/revopoint/README.md), [калибровка RU/EN](../tools/revopoint/calibration/README.md) |
+| Revopoint | [Инструменты сканера EN](../tools/revopoint/README.md) · [RU](../tools/revopoint/README.ru.md), [калибровка RU/EN](../tools/revopoint/calibration/README.md) |
 
 ### Версии и достоверность
 
@@ -76,7 +76,7 @@ README, эта карта, руководства участия, безопас
 | Reconstruction datums, sections and support curves | [Mesh recognition](mesh-recognition.md) |
 | Catalog and standard parts | [Standard-part presets](standard-part-catalog.md) |
 | Backlog, not implemented feature list | [Sketch tool backlog](sketch-tools-backlog.md) |
-| Revopoint scanner tooling | [Scanner README — EN, RU in progress](../tools/revopoint/README.md), [calibration notes RU/EN](../tools/revopoint/calibration/README.md) |
+| Revopoint scanner tooling | [Scanner README EN](../tools/revopoint/README.md) · [RU](../tools/revopoint/README.ru.md), [calibration notes RU/EN](../tools/revopoint/calibration/README.md) |
 
 ## Version history (not current-limit declarations)
 
