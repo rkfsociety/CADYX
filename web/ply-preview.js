@@ -64,6 +64,26 @@ const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
 const modelViewer = window.CadyxViewport.createViewer($("#model-preview"), {
   showViewCube: true, wireframe: true, onRender: queueViewportSnapshot,
 });
+const reloadCameraStorageKey = `cadyx:ui-update-camera:${window.location.pathname}`;
+try {
+  const savedCamera = sessionStorage.getItem(reloadCameraStorageKey);
+  if (savedCamera) {
+    const savedState = JSON.parse(savedCamera);
+    window.cadyxUiReloadCamera = savedState.camera || savedState;
+    window.cadyxUiReloadCameraAppliedToModel = false;
+    window.cadyxUiReloadCameraPreset = savedState.cameraPreset;
+    const restorableViews = new Set(["overview", "geometry", "analysis", "manufacturing", "activity", "files", "projects"]);
+    if (restorableViews.has(savedState.workspaceView)) {
+      const address = new URL(window.location.href);
+      if (savedState.workspaceView === "overview") address.searchParams.delete("view");
+      else address.searchParams.set("view", savedState.workspaceView);
+      window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
+    }
+    sessionStorage.removeItem(reloadCameraStorageKey);
+  }
+} catch {
+  try { sessionStorage.removeItem(reloadCameraStorageKey); } catch { /* Storage may be disabled. */ }
+}
 const emptyViewportGeometry = {
   positions: new Float64Array(0), triangles: new Uint32Array(0), lines: [], points: [],
   bounds: { min: [0, 0, 0], max: [0, 0, 0] },
@@ -84,20 +104,39 @@ const cameraPresets = {
   right: { yaw: Math.PI / 2, pitch: 0 },
   top: { yaw: 0, pitch: Math.PI / 2 },
 };
+if (window.cadyxUiReloadCameraPreset && cameraPresets[window.cadyxUiReloadCameraPreset]
+    && window.cadyxUiReloadCamera) {
+  window.cadyxUiReloadCamera = {
+    ...cameraPresets[window.cadyxUiReloadCameraPreset],
+    zoom: window.cadyxUiReloadCamera.zoom,
+    panX: window.cadyxUiReloadCamera.panX,
+    panY: window.cadyxUiReloadCamera.panY,
+    projection: "orthographic",
+  };
+}
 function setCameraPresetState(selectedPreset) {
   cameraPresetButtons.forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.cameraPreset === selectedPreset));
   });
 }
+if (window.cadyxUiReloadCameraPreset !== undefined) {
+  setCameraPresetState(window.cadyxUiReloadCameraPreset);
+  window.cadyxUiReloadCameraPreset = undefined;
+}
 $("#viewport-camera-presets").addEventListener("click", (event) => {
   const button = event.target.closest("[data-camera-preset]");
   const preset = button?.dataset.cameraPreset;
   if (!preset || !cameraPresets[preset]) return;
+  clearReloadCamera();
   modelViewer.setCamera({ ...cameraPresets[preset], zoom: modelViewer.getCamera().zoom, projection: "orthographic" });
   setCameraPresetState(preset);
 });
-$("#model-preview").addEventListener("pointerdown", () => setCameraPresetState(null));
-$("#model-preview").addEventListener("wheel", () => setCameraPresetState(null), { passive: true });
+const clearReloadCamera = () => {
+  window.cadyxUiReloadCamera = null;
+  window.cadyxUiReloadCameraAppliedToModel = false;
+};
+$("#model-preview").addEventListener("pointerdown", () => { clearReloadCamera(); setCameraPresetState(null); });
+$("#model-preview").addEventListener("wheel", () => { clearReloadCamera(); setCameraPresetState(null); }, { passive: true });
 let cameraAnimationId = 0;
 let renderedSceneKey = null;
 let renderedSceneProjectId = null;
@@ -223,6 +262,24 @@ let automaticUpdateInFlight = false;
 let automaticUpdatesUnavailable = false;
 let workspaceAvailabilityConnected = false;
 let filesAvailabilityConnected = false;
+
+function reloadForUiAssetChange() {
+  persistViewportState();
+  window.location.reload();
+}
+
+function persistViewportState() {
+  try {
+    sessionStorage.setItem(reloadCameraStorageKey, JSON.stringify({
+      camera: modelViewer.getCamera(),
+      cameraPreset: cameraPresetButtons.find((button) => button.getAttribute("aria-pressed") === "true")?.dataset.cameraPreset || null,
+      workspaceView: primaryGrid.dataset.view,
+    }));
+  }
+  catch { /* Current session state remains usable when browser storage is unavailable. */ }
+}
+window.addEventListener("pagehide", persistViewportState);
+
 let validationRecordsRequest = 0;
 const activitiesByProject = new Map();
 const activityRevisionsByProject = new Map();
@@ -1794,7 +1851,7 @@ async function checkAutomaticUpdates() {
     }
     if (!previous) {
       if (loadedUiVersion && current.ui_version !== loadedUiVersion) {
-        window.location.reload();
+        reloadForUiAssetChange();
         return;
       }
       updateWorkspaceControls();
@@ -1812,7 +1869,7 @@ async function checkAutomaticUpdates() {
       dashboardRevisionsByProject.delete(selectedProjectId);
     }
     if (current.ui_version !== previous.ui_version) {
-      window.location.reload();
+      reloadForUiAssetChange();
       return;
     }
     if (current.folder_revision !== previous.folder_revision && folder) {
@@ -2070,9 +2127,16 @@ async function refreshDetail() {
       bodyLineRanges, bodyTriangleRanges, featureTriangleRanges, overlayTriangleRanges, surfaceTriangleRanges,
       ...(hasPointCloud ? { pointStyle: { size: 1.5, opacity: 0.94, color: "#ff7417" } } : {}) };
     currentModelViewportGeometry = viewportGeometry;
-    modelViewer.load(viewportGeometry, {
-      reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition, smoothShading: true,
-    });
+    const livePreviewActive = $("#viewport")?.dataset.scanPreviewMode === "live";
+    if (!livePreviewActive) {
+      modelViewer.load(viewportGeometry, {
+        reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition, smoothShading: true,
+      });
+      if (window.cadyxUiReloadCamera) {
+        modelViewer.setCamera(window.cadyxUiReloadCamera);
+        window.cadyxUiReloadCameraAppliedToModel = true;
+      }
+    }
     for (const view of orthographicViewers) {
       view.viewer.load(viewportGeometry, { reset: false });
     }

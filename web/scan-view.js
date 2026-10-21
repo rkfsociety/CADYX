@@ -1,4 +1,204 @@
 (() => {
+  const parseTableMarkerMap = buffer => {
+    const view = new DataView(buffer);
+    if (view.byteLength < 16) throw new Error('Карта стола короче заголовка MKF.');
+    const version = view.getUint32(0, true), count = view.getUint32(12, true);
+    const recordSize = 64;
+    if (version !== 1 || count < 4 || count > 10000 || view.byteLength !== 16 + count * recordSize) {
+      throw new Error('Файл карты стола имеет неверную структуру MKF.');
+    }
+    const points = [], normals = [];
+    for (let index = 0; index < count; index += 1) {
+      const offset = 16 + index * recordSize + 16;
+      const point = [0, 1, 2].map(axis => view.getFloat64(offset + axis * 8, true));
+      const normal = [0, 1, 2].map(axis => view.getFloat64(offset + (axis + 3) * 8, true));
+      const length = Math.hypot(...normal);
+      if (![...point, ...normal].every(Number.isFinite) || length < 0.5 || length > 1.5) {
+        throw new Error(`В записи карты стола ${index + 1} некорректны координаты или нормаль.`);
+      }
+      points.push(point);
+      normals.push(normal.map(value => value / length));
+    }
+    const mean = [0, 1, 2].map(axis => points.reduce((sum, point) => sum + point[axis] / points.length, 0));
+    let normal = [0, 1, 2].map(axis => normals.reduce((sum, value) => sum + value[axis], 0));
+    const normalLength = Math.hypot(...normal);
+    if (normalLength < 1e-6) throw new Error('Нормали карты стола не задают одну плоскость.');
+    normal = normal.map(value => value / normalLength);
+    if (normals.some(value => value[0] * normal[0] + value[1] * normal[1] + value[2] * normal[2] < 0.5)) {
+      throw new Error('Нормали маркеров карты стола противоречат друг другу.');
+    }
+    let xAxis = [1, 0, 0].map((value, axis) => value - normal[axis] * normal[0]);
+    let xLength = Math.hypot(...xAxis);
+    if (xLength < 1e-6) {
+      xAxis = [0, 1, 0].map((value, axis) => value - normal[axis] * normal[1]);
+      xLength = Math.hypot(...xAxis);
+    }
+    xAxis = xAxis.map(value => value / xLength);
+    const yAxis = [normal[1] * xAxis[2] - normal[2] * xAxis[1],
+      normal[2] * xAxis[0] - normal[0] * xAxis[2],
+      normal[0] * xAxis[1] - normal[1] * xAxis[0]];
+    const projectedMean = points.map(point => {
+      const relative = point.map((value, axis) => value - mean[axis]);
+      return [xAxis, yAxis].map(axis => axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]);
+    });
+    const centerIndex = projectedMean.reduce((best, point, index) =>
+      Math.hypot(...point) < best.distance ? { index, distance: Math.hypot(...point) } : best,
+    { index: -1, distance: Infinity }).index;
+    if (centerIndex < 0) throw new Error('Не удалось найти центральную точку карты стола.');
+    const center = points[centerIndex];
+    return {
+      count, center, centerIndex, normal, xAxis, yAxis,
+      points: points.map(point => {
+        const relative = point.map((value, axis) => value - center[axis]);
+        return [xAxis, yAxis].map(axis => axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]);
+      }),
+    };
+  };
+
+  const transformFromPair = (sourceA, sourceB, targetA, targetB, reflection) => {
+    const sx = sourceB[0] - sourceA[0], sy = reflection * (sourceB[1] - sourceA[1]);
+    const tx = targetB[0] - targetA[0], ty = targetB[1] - targetA[1];
+    const sourceLength = Math.hypot(sx, sy), targetLength = Math.hypot(tx, ty);
+    if (sourceLength < 1e-8 || targetLength < 1e-8) return null;
+    const scale = targetLength / sourceLength;
+    const cosine = (sx * tx + sy * ty) / (sourceLength * targetLength);
+    const sine = (sx * ty - sy * tx) / (sourceLength * targetLength);
+    const a = scale * cosine, b = -scale * sine * reflection;
+    const c = scale * sine, d = scale * cosine * reflection;
+    return { a, b, c, d, tx: targetA[0] - a * sourceA[0] - b * sourceA[1],
+      ty: targetA[1] - c * sourceA[0] - d * sourceA[1], scale, reflection };
+  };
+
+  const applyMapTransform = (point, transform) => [
+    transform.a * point[0] + transform.b * point[1] + transform.tx,
+    transform.c * point[0] + transform.d * point[1] + transform.ty,
+  ];
+
+  const buildTableMapOverlay = tableMap => {
+    const positions = [];
+    const markerPoints = [];
+    const lines = [];
+    for (const point of tableMap.points) {
+      markerPoints.push(positions.length / 3);
+      positions.push(point[0], point[1], 0);
+    }
+    const segments = 48;
+    for (const [x, y] of tableMap.points) {
+      const radius = Math.hypot(x, y);
+      if (radius < 1e-6) continue;
+      const start = positions.length / 3;
+      for (let step = 0; step <= segments; step += 1) {
+        const angle = 2 * Math.PI * step / segments;
+        positions.push(radius * Math.cos(angle), radius * Math.sin(angle), 0);
+      }
+      for (let step = 0; step < segments; step += 1) lines.push(start + step, start + step + 1);
+    }
+    const maxRadius = tableMap.points.reduce((maximum, point) => Math.max(maximum, Math.hypot(...point)), 0);
+    return { positions: new Float32Array(positions), markerPoints: new Uint32Array(markerPoints),
+      lines: new Uint32Array(lines), maxRadius };
+  };
+
+  const mutualMarkerMatches = (source, target, transform, threshold) => {
+    const projected = source.map(point => applyMapTransform(point, transform));
+    const nearestTarget = projected.map(point => target.reduce((best, candidate, index) => {
+      const distance = Math.hypot(point[0] - candidate[0], point[1] - candidate[1]);
+      return distance < best.distance ? { index, distance } : best;
+    }, { index: -1, distance: Infinity }));
+    const nearestSource = target.map(point => projected.reduce((best, candidate, index) => {
+      const distance = Math.hypot(point[0] - candidate[0], point[1] - candidate[1]);
+      return distance < best.distance ? { index, distance } : best;
+    }, { index: -1, distance: Infinity }));
+    return nearestTarget.map((match, sourceIndex) => ({ sourceIndex, targetIndex: match.index, distance: match.distance }))
+      .filter(match => match.distance <= threshold && nearestSource[match.targetIndex]?.index === match.sourceIndex);
+  };
+
+  const fitMarkerSimilarity = (source, target, pairs) => {
+    let best = null;
+    for (const reflection of [1, -1]) {
+      const sourceCenter = [0, 0], targetCenter = [0, 0];
+      for (const pair of pairs) for (let axis = 0; axis < 2; axis += 1) {
+        sourceCenter[axis] += (axis ? reflection * source[pair.sourceIndex][axis] : source[pair.sourceIndex][axis]) / pairs.length;
+        targetCenter[axis] += target[pair.targetIndex][axis] / pairs.length;
+      }
+      let dot = 0, cross = 0, norm = 0;
+      for (const pair of pairs) {
+        const sx = source[pair.sourceIndex][0] - sourceCenter[0];
+        const sy = reflection * source[pair.sourceIndex][1] - sourceCenter[1];
+        const tx = target[pair.targetIndex][0] - targetCenter[0];
+        const ty = target[pair.targetIndex][1] - targetCenter[1];
+        dot += sx * tx + sy * ty;
+        cross += sx * ty - sy * tx;
+        norm += sx * sx + sy * sy;
+      }
+      const magnitude = Math.hypot(dot, cross);
+      if (norm < 1e-10 || magnitude < 1e-10) continue;
+      const scale = magnitude / norm, cosine = dot / magnitude, sine = cross / magnitude;
+      const a = scale * cosine, b = -scale * sine * reflection;
+      const c = scale * sine, d = scale * cosine * reflection;
+      const transform = { a, b, c, d, tx: targetCenter[0] - a * sourceCenter[0] - b * reflection * sourceCenter[1],
+        ty: targetCenter[1] - c * sourceCenter[0] - d * reflection * sourceCenter[1], scale, reflection };
+      const error = pairs.reduce((sum, pair) => {
+        const predicted = applyMapTransform(source[pair.sourceIndex], transform);
+        return sum + (predicted[0] - target[pair.targetIndex][0]) ** 2
+          + (predicted[1] - target[pair.targetIndex][1]) ** 2;
+      }, 0);
+      if (!best || error < best.error) best = { transform, error };
+    }
+    return best?.transform || null;
+  };
+
+  const registerTableMarkers = (livePoints, tableMap, threshold = 5) => {
+    if (!Array.isArray(livePoints) || livePoints.length < 4 || tableMap?.points?.length < 4) {
+      throw new Error('Для привязки к карте стола нужны минимум четыре маркера.');
+    }
+    let seed = 0x51f15e5d;
+    const randomIndex = length => {
+      seed = (Math.imul(seed ^ seed >>> 15, 1 | seed) + 0x6d2b79f5) | 0;
+      let value = Math.imul(seed ^ seed >>> 7, 61 | seed) ^ seed;
+      return ((value ^ value >>> 14) >>> 0) % length;
+    };
+    let best = null;
+    for (let iteration = 0; iteration < 512; iteration += 1) {
+      const sourceA = randomIndex(livePoints.length), sourceB = randomIndex(livePoints.length);
+      const targetA = randomIndex(tableMap.points.length), targetB = randomIndex(tableMap.points.length);
+      if (sourceA === sourceB || targetA === targetB) continue;
+      for (const reflection of [1, -1]) {
+        const transform = transformFromPair(livePoints[sourceA], livePoints[sourceB],
+          tableMap.points[targetA], tableMap.points[targetB], reflection);
+        if (!transform) continue;
+        const pairs = mutualMarkerMatches(livePoints, tableMap.points, transform, threshold);
+        const error = pairs.length ? pairs.reduce((sum, pair) => sum + pair.distance, 0) / pairs.length : Infinity;
+        if (pairs.length >= 4 && (!best || pairs.length > best.pairs.length
+            || pairs.length === best.pairs.length && error < best.error)) best = { pairs, transform, error };
+      }
+    }
+    if (!best) throw new Error('Карта стола не сопоставилась: нужно минимум четыре надёжных соответствия маркеров.');
+    let pairs = best.pairs, transform = best.transform;
+    for (let iteration = 0; iteration < 5; iteration += 1) {
+      const refined = fitMarkerSimilarity(livePoints, tableMap.points, pairs);
+      if (!refined) break;
+      const matches = mutualMarkerMatches(livePoints, tableMap.points, refined, threshold);
+      if (matches.length < 4) break;
+      transform = refined;
+      if (matches.length === pairs.length && matches.every((pair, index) =>
+        pair.sourceIndex === pairs[index].sourceIndex && pair.targetIndex === pairs[index].targetIndex)) {
+        pairs = matches;
+        break;
+      }
+      pairs = matches;
+    }
+    const residuals = pairs.map(pair => {
+      const predicted = applyMapTransform(livePoints[pair.sourceIndex], transform);
+      return Math.hypot(predicted[0] - tableMap.points[pair.targetIndex][0],
+        predicted[1] - tableMap.points[pair.targetIndex][1]);
+    }).sort((a, b) => a - b);
+    const medianResidual = residuals[Math.floor(residuals.length / 2)];
+    if (!Number.isFinite(medianResidual) || medianResidual > threshold) {
+      throw new Error('Соответствие карте стола неоднозначно; предпросмотр оставлен без смещения.');
+    }
+    return { ...transform, matches: pairs, medianResidual };
+  };
+
   const initialize = ({ cloudButton, meshButton, viewport, viewer, getModelGeometry = () => null,
     getProjectId = () => null,
     hasPersistentPointCloud = () => false, meshReady = false }, location = window.location, fetcher = fetch) => {
@@ -16,7 +216,11 @@
     let liveMtime = null;
     let liveCalibration = null;
     let liveTableFrame = null;
+    let liveTableMap = null;
+    let liveTableOverlay = null;
+    let liveMapTransform = null;
     let liveFitRadius = null;
+    let liveViewportInitialized = false;
     let modelGeometry = null;
     const setAttribute = (element, name, value) => {
       const current = element.getAttribute(name);
@@ -294,6 +498,29 @@
       }
       return bounds;
     };
+    const transformLiveToTableFrame = (positions, frame, mapTransform, markerFlags) => {
+      const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+      const markerIndices = [];
+      let accepted = 0;
+      for (let index = 0; index < positions.length; index += 3) {
+        const relative = [positions[index] - frame.origin[0], positions[index + 1] - frame.origin[1], positions[index + 2] - frame.origin[2]];
+        const point = [frame.xAxis, frame.yAxis, frame.zAxis].map(axis => axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]);
+        const mapPoint = applyMapTransform(point, mapTransform);
+        point[0] = mapPoint[0];
+        point[1] = mapPoint[1];
+        point[2] *= mapTransform.scale;
+        if (point[2] < -2.5) continue;
+        if (point[2] < 0) point[2] = 0;
+        for (let axis = 0; axis < 3; axis += 1) {
+          positions[accepted * 3 + axis] = point[axis];
+          bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
+          bounds.max[axis] = Math.max(bounds.max[axis], point[axis]);
+        }
+        if (markerFlags[index / 3] && point[2] <= 2.5) markerIndices.push(accepted);
+        accepted += 1;
+      }
+      return { bounds, markerIndices, count: accepted };
+    };
     cloudSource = pointCloudUrl(null);
     cloudOriginSource = originUrl(null);
     const loadCloud = async ({ reset = true } = {}) => {
@@ -368,7 +595,11 @@
       liveMtime = null;
       liveCalibration = null;
       liveTableFrame = null;
+      liveTableMap = null;
+      liveTableOverlay = null;
+      liveMapTransform = null;
       liveFitRadius = null;
+      liveViewportInitialized = false;
       cloudRequest += 1;
       cloudPreviewOpen = false;
       meshPreviewOpen = false;
@@ -378,6 +609,43 @@
       const pollFrame = async () => {
         if (request !== liveRequest || !livePreviewOwned) return;
         try {
+          if (!liveTableMap) {
+            const tableId = window.CadyxDeviceSettings?.turntableDeviceId?.();
+            const profileId = window.CadyxDeviceSettings?.turntableProfileId?.();
+            const query = new URLSearchParams();
+            if (tableId) query.set('device_id', tableId);
+            if (profileId) query.set('profile_id', profileId);
+            const queryString = query.toString();
+            const mapResponse = await fetcher(`/api/v1/scanner/turntable/map${queryString ? `?${queryString}` : ''}`, { cache: 'no-store' });
+            if (!mapResponse.ok) throw new Error(`Карта стола недоступна (HTTP ${mapResponse.status}).`);
+            liveTableMap = parseTableMarkerMap(await mapResponse.arrayBuffer());
+            liveTableOverlay = buildTableMapOverlay(liveTableMap);
+            const mapBounds = { min: [Infinity, Infinity, 0], max: [-Infinity, -Infinity, 0] };
+            for (let index = 0; index < liveTableOverlay.positions.length; index += 3) {
+              mapBounds.min[0] = Math.min(mapBounds.min[0], liveTableOverlay.positions[index]);
+              mapBounds.max[0] = Math.max(mapBounds.max[0], liveTableOverlay.positions[index]);
+              mapBounds.min[1] = Math.min(mapBounds.min[1], liveTableOverlay.positions[index + 1]);
+              mapBounds.max[1] = Math.max(mapBounds.max[1], liveTableOverlay.positions[index + 1]);
+            }
+            viewer.load({ positions: liveTableOverlay.positions, triangles: new Uint32Array(0),
+              lines: liveTableOverlay.lines, pointCloudVertexCount: 0, bounds: mapBounds,
+              pointLayers: [{ points: liveTableOverlay.markerPoints,
+                style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } }],
+              lineStyle: { color: '#5aaac6', opacity: 0.42, width: 1, dash: [5, 5] },
+              orbitCenter: [0, 0, 0], fitRadius: Math.max(liveTableOverlay.maxRadius, 0.001) * 1.05 },
+              { reset: !liveViewportInitialized });
+            liveViewportInitialized = true;
+            if (window.cadyxUiReloadCamera) {
+              const cameraToRestore = window.cadyxUiReloadCamera;
+              viewer.setCamera(cameraToRestore);
+              window.setTimeout(() => {
+                if (window.cadyxUiReloadCamera !== cameraToRestore || !livePreviewOwned) return;
+                viewer.setCamera(cameraToRestore);
+                window.cadyxUiReloadCamera = null;
+                window.cadyxUiReloadCameraAppliedToModel = false;
+              }, 650);
+            }
+          }
           if (!liveCalibration) {
             const scannerId = window.CadyxDeviceSettings?.scannerDeviceId?.();
             const response = await fetcher(`/api/v1/scanner/calibration${scannerId ? `?device_id=${encodeURIComponent(scannerId)}` : ''}`, { cache: 'no-store' });
@@ -396,34 +664,49 @@
               if (raw.length !== 640 * 400 * 2) throw new Error('Размер кадра Y16 не совпадает.');
               const { matrix, depth_scale_mm_per_raw_unit: scale } = liveCalibration;
               const positions = new Float32Array(640 * 400 * 3 / 2);
+              const markerFlags = new Uint8Array(640 * 400 / 2);
               const markerPixels = new Set();
-              if (!liveTableFrame) {
-                const seen = new Uint8Array(640 * 400);
-                const valid = i => (raw[i * 2] | raw[i * 2 + 1] << 8) !== 0;
-                let regions = 0;
-                for (let seed = 0; seed < seen.length; seed += 1) {
-                  if (seen[seed] || !valid(seed)) continue;
-                  const pixels = [seed]; seen[seed] = 1;
-                  let minX = 640, maxX = 0, minY = 400, maxY = 0;
-                  for (let cursor = 0; cursor < pixels.length; cursor += 1) {
-                    const i = pixels[cursor], x = i % 640, y = Math.floor(i / 640);
-                    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-                    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-                    for (const n of [x > 0 ? i - 1 : -1, x < 639 ? i + 1 : -1,
-                      y > 0 ? i - 640 : -1, y < 399 ? i + 640 : -1]) {
-                      if (n >= 0 && !seen[n] && valid(n)) { seen[n] = 1; pixels.push(n); }
-                    }
-                  }
-                  const width = maxX - minX + 1, height = maxY - minY + 1;
-                  if (pixels.length >= 20 && pixels.length <= 1000 && width / height > 0.3
-                      && width / height < 3 && pixels.length / (width * height) > 0.45) {
-                    regions += 1;
-                    for (const i of pixels) markerPixels.add(i);
+              const markerCenterPixels = new Set();
+              const seen = new Uint8Array(640 * 400);
+              const valid = i => (raw[i * 2] | raw[i * 2 + 1] << 8) !== 0;
+              let regions = 0;
+              for (let seed = 0; seed < seen.length; seed += 1) {
+                if (seen[seed] || !valid(seed)) continue;
+                const pixels = [seed]; seen[seed] = 1;
+                let minX = 640, maxX = 0, minY = 400, maxY = 0;
+                for (let cursor = 0; cursor < pixels.length; cursor += 1) {
+                  const i = pixels[cursor], x = i % 640, y = Math.floor(i / 640);
+                  minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+                  minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+                  for (const n of [x > 0 ? i - 1 : -1, x < 639 ? i + 1 : -1,
+                    y > 0 ? i - 640 : -1, y < 399 ? i + 640 : -1]) {
+                    if (n >= 0 && !seen[n] && valid(n)) { seen[n] = 1; pixels.push(n); }
                   }
                 }
-                if (regions < 3) throw new Error('Для плоскости XY нужны минимум три видимых маркера стола.');
+                const width = maxX - minX + 1, height = maxY - minY + 1;
+                if (pixels.length >= 20 && pixels.length <= 1000 && width / height > 0.3
+                    && width / height < 3 && pixels.length / (width * height) > 0.45) {
+                  regions += 1;
+                  for (const i of pixels) markerPixels.add(i);
+                  const centerX = pixels.reduce((sum, i) => sum + i % 640, 0) / pixels.length;
+                  const centerY = pixels.reduce((sum, i) => sum + Math.floor(i / 640), 0) / pixels.length;
+                  let nearest = -1, nearestDistance = Infinity;
+                  for (const i of pixels) {
+                    if (i % 2) continue;
+                    const dx = i % 640 - centerX, dy = Math.floor(i / 640) - centerY;
+                    const distance = dx * dx + dy * dy;
+                    if (distance < nearestDistance) { nearest = i; nearestDistance = distance; }
+                  }
+                  if (nearest >= 0) markerCenterPixels.add(nearest);
+                }
+              }
+              if (!liveTableFrame && regions < 4) {
+                const error = new Error('Для привязки к карте стола нужны минимум четыре видимых маркера.');
+                error.code = 'TABLE_MARKERS_PENDING';
+                throw error;
               }
               const markerPositions = [];
+              const markerCenterPositions = [];
               let count = 0;
               for (let pixel = 0; pixel < 640 * 400; pixel += 2) {
                 const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
@@ -437,27 +720,59 @@
                 const point = [px * depth / pz, -py * depth / pz, -depth];
                 if (!point.every(Number.isFinite)) continue;
                 if (markerPixels.has(pixel)) markerPositions.push(...point);
+                if (markerCenterPixels.has(pixel)) markerCenterPositions.push(...point);
+                markerFlags[count] = markerPixels.has(pixel) ? 1 : 0;
                 positions[count * 3] = point[0];
                 positions[count * 3 + 1] = point[1];
                 positions[count * 3 + 2] = point[2];
                 count += 1;
               }
               if (count >= 3 && request === liveRequest && livePreviewOwned) {
-                liveTableFrame ||= fitTableFrame(markerPositions, centerRay(liveCalibration));
-                const tableFrame = liveTableFrame;
-                let frameRadius = 0;
-                const transformedBounds = transformToTableFrame(positions.subarray(0, count * 3), tableFrame);
-                for (let index = 0; index < count * 3; index += 3) frameRadius = Math.max(frameRadius, Math.hypot(positions[index], positions[index + 1], positions[index + 2]));
-                liveFitRadius ||= Math.max(frameRadius, 0.001);
-                viewer.load({ positions: positions.slice(0, count * 3), triangles: new Uint32Array(0), lines: null,
-                  bounds: transformedBounds, orbitCenter: [0, 0, 0], fitRadius: liveFitRadius },
-                  { reset: liveMtime === null });
+                const tableFrame = liveTableFrame || fitTableFrame(markerPositions, centerRay(liveCalibration));
+                const markerCoordinates = [];
+                for (let index = 0; index < markerCenterPositions.length; index += 3) {
+                  const relative = [markerCenterPositions[index] - tableFrame.origin[0],
+                    markerCenterPositions[index + 1] - tableFrame.origin[1], markerCenterPositions[index + 2] - tableFrame.origin[2]];
+                  markerCoordinates.push([tableFrame.xAxis, tableFrame.yAxis].map(axis =>
+                    axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]));
+                }
+                const mapTransform = liveMapTransform || registerTableMarkers(markerCoordinates, liveTableMap);
+                liveTableFrame ||= tableFrame;
+                liveMapTransform ||= mapTransform;
+                const transformed = transformLiveToTableFrame(positions.subarray(0, count * 3), tableFrame,
+                  liveMapTransform, markerFlags);
+                count = transformed.count;
+                if (count < 3) throw new Error('В кадре нет точек над плоскостью стола.');
+                liveFitRadius ||= Math.max(liveTableOverlay.maxRadius, 0.001) * 1.05;
+                const cloudPointCount = count;
+                const combinedPositions = new Float32Array(cloudPointCount * 3 + liveTableOverlay.positions.length);
+                combinedPositions.set(positions.subarray(0, cloudPointCount * 3));
+                combinedPositions.set(liveTableOverlay.positions, cloudPointCount * 3);
+                const mapMarkerPoints = Uint32Array.from(liveTableOverlay.markerPoints,
+                  index => index + cloudPointCount);
+                const trajectoryLines = Uint32Array.from(liveTableOverlay.lines,
+                  index => index + cloudPointCount);
+                const bounds = { min: [...transformed.bounds.min], max: [...transformed.bounds.max] };
+                for (let index = cloudPointCount * 3; index < combinedPositions.length; index += 3) {
+                  for (let axis = 0; axis < 3; axis += 1) {
+                    bounds.min[axis] = Math.min(bounds.min[axis], combinedPositions[index + axis]);
+                    bounds.max[axis] = Math.max(bounds.max[axis], combinedPositions[index + axis]);
+                  }
+                }
+                viewer.load({ positions: combinedPositions, triangles: new Uint32Array(0), lines: trajectoryLines,
+                  pointCloudVertexCount: cloudPointCount,
+                  bounds, points: transformed.markerIndices, pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' },
+                  pointLayers: [{ points: mapMarkerPoints, style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } }],
+                  lineStyle: { color: '#5aaac6', opacity: 0.42, width: 1, dash: [5, 5] },
+                  orbitCenter: [0, 0, 0], fitRadius: liveFitRadius },
+                  { reset: !liveViewportInitialized });
+                liveViewportInitialized = true;
                 liveMtime = mtime;
               }
             }
           } else if (response.status !== 404) throw new Error(`Кадр сканера недоступен (HTTP ${response.status}).`);
         } catch (error) {
-          cloudButton.title = error.message;
+          if (error.code !== 'TABLE_MARKERS_PENDING') cloudButton.title = error.message;
         } finally {
           if (request === liveRequest && livePreviewOwned) liveTimer = setTimeout(pollFrame, 350);
         }
@@ -470,7 +785,11 @@
         restoreModel();
         liveMtime = null;
         liveTableFrame = null;
+        liveTableMap = null;
+        liveTableOverlay = null;
+        liveMapTransform = null;
         liveFitRadius = null;
+        liveViewportInitialized = false;
         updateButton();
       }
     };
@@ -543,6 +862,10 @@
       const nowActive = active();
       if (nowActive && !previouslyActive) view.showLivePreview({ open: true });
       else if (!nowActive && previouslyActive) view.closeLivePreview();
+      if (!nowActive && window.cadyxUiReloadCameraAppliedToModel) {
+        window.cadyxUiReloadCamera = null;
+        window.cadyxUiReloadCameraAppliedToModel = false;
+      }
       previouslyActive = nowActive;
       button.setAttribute('aria-pressed', String(active()));
       button.title = active() ? 'Остановить предпросмотр сканера'
@@ -594,5 +917,5 @@
     return { poll, dispose: () => clearTimeout(pollTimer) };
   };
 
-  window.CadyxScanView = { initialize, initializeLivePreview };
+  window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers };
 })();

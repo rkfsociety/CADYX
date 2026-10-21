@@ -4,18 +4,23 @@ __pycache__/
 venv/
 projects/*
 !projects/.gitkeep
-# Local Revopoint export samples; do not publish device capture data.
+# Local Revopoint map and export samples; do not publish device capture data.
 /framesmall.mkf
 /framesmall_points.csv
 /framesmall_points.ply
 *.tmp
 .runtime/
 tools/revopoint/build/
-# Auxiliary device calibration stays local; the default MINI Q matrix and scale are tracked.
+# Keep device calibration inside its scanner/table profile. Only the MINI's
+# Q matrix and scale are tracked; marker maps and auxiliary calibration remain local.
 tools/revopoint/calibration/*
 !tools/revopoint/calibration/README.md
-!tools/revopoint/calibration/Q.bin
-!tools/revopoint/calibration/depth_scale.json
+!tools/revopoint/calibration/scanners/
+tools/revopoint/calibration/scanners/*
+!tools/revopoint/calibration/scanners/revopoint-mini-y16/
+tools/revopoint/calibration/scanners/revopoint-mini-y16/*
+!tools/revopoint/calibration/scanners/revopoint-mini-y16/Q.bin
+!tools/revopoint/calibration/scanners/revopoint-mini-y16/depth_scale.json
 
 # Local credentials and runtime configuration (never commit real tokens).
 .env

@@ -149,6 +149,21 @@ class CadyxCore:
     def scanner_calibration(self, scanner_device_id: str | None = None) -> dict[str, Any]:
         return self._scan_capture.scanner_calibration(scanner_device_id)
 
+    def turntable_settings(self, turntable_device_id: str | None = None,
+                           profile_id: str | None = None) -> dict[str, Any]:
+        return self._scan_capture.turntable_settings(turntable_device_id, profile_id)
+
+    def save_turntable_settings(self, turntable_device_id: str,
+                                rotation_period_seconds: float,
+                                profile_id: str | None = None) -> dict[str, Any]:
+        return self._scan_capture.save_turntable_settings(
+            turntable_device_id, rotation_period_seconds, profile_id,
+        )
+
+    def turntable_marker_map(self, turntable_device_id: str | None = None,
+                             profile_id: str | None = None) -> tuple[bytes, int]:
+        return self._scan_capture.turntable_marker_map(turntable_device_id, profile_id)
+
     def save_scanner_calibration(self, scanner_device_id: str, q_matrix: bytes,
                                  depth_scale_mm_per_raw_unit: float) -> dict[str, Any]:
         return self._scan_capture.save_scanner_calibration(

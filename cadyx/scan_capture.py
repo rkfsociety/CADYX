@@ -120,13 +120,14 @@ class Scan360CaptureController:
                             "characteristic_uuid": profile["characteristic_uuid"],
                         })
                     break
-        legacy_q_file = tool_root / "calibration" / "Q.bin"
-        legacy_scale_file = tool_root / "calibration" / "depth_scale.json"
-        legacy_available = legacy_q_file.is_file() and legacy_scale_file.is_file()
+        default_scanner_calibration = tool_root / "calibration" / "scanners" / "revopoint-mini-y16"
+        default_q_file = default_scanner_calibration / "Q.bin"
+        default_scale_file = default_scanner_calibration / "depth_scale.json"
+        default_available = default_q_file.is_file() and default_scale_file.is_file()
         for scanner in scanners:
             q_file, scale_file = self._scanner_calibration_paths(scanner["device_id"])
             scanner["calibrated"] = (q_file.is_file() and scale_file.is_file()) or (
-                len(scanners) == 1 and scanner["profile_id"] == "revopoint-mini-y16" and legacy_available
+                len(scanners) == 1 and scanner["profile_id"] == "revopoint-mini-y16" and default_available
             )
         return {"scanners": scanners, "turntables": tables}
 
@@ -161,7 +162,8 @@ class Scan360CaptureController:
         if not (q_file.is_file() and scale_file.is_file()):
             if scanner_count != 1 or profile_id != "revopoint-mini-y16":
                 raise ValidationError("This scanner has no device-specific calibration; add its Q.bin and depth scale in device settings.")
-            calibration_root = self._repository_root / "tools" / "revopoint" / "calibration"
+            calibration_root = (self._repository_root / "tools" / "revopoint" / "calibration"
+                                / "scanners" / profile_id)
             q_file = calibration_root / "Q.bin"
             scale_file = calibration_root / "depth_scale.json"
         if not q_file.is_file() or not scale_file.is_file() or q_file.stat().st_size != 64:
@@ -201,6 +203,164 @@ class Scan360CaptureController:
             "depth_scale_status": scale_config.get("status", "unverified"),
             "depth_scale_source": scale_config.get("source", "device-specific profile"),
         }
+
+    def _turntable_settings_directory(self, turntable_device_id: str) -> Path:
+        app_data = os.environ.get("LOCALAPPDATA")
+        if not app_data:
+            raise ValidationError("The Windows user profile path is unavailable for turntable settings storage.")
+        profile_key = hashlib.sha256(turntable_device_id.encode("utf-8")).hexdigest()
+        return Path(app_data) / "CADYX" / "turntable-settings" / profile_key
+
+    def _connected_turntable(self, turntable_device_id: str | None) -> dict[str, Any]:
+        turntables = self.list_connected_devices()["turntables"]
+        if turntable_device_id is None and len(turntables) == 1:
+            turntable_device_id = turntables[0]["device_id"]
+        turntable = next((item for item in turntables if item["device_id"] == turntable_device_id), None)
+        if turntable is None:
+            raise ValidationError("Select a currently connected supported turntable in device settings.")
+        return turntable
+
+    @staticmethod
+    def _validate_marker_map(data: bytes) -> int:
+        header = struct.Struct("<4I")
+        record = struct.Struct("<2i2f6d")
+        if len(data) < header.size:
+            raise ValidationError("The selected turntable marker map is shorter than its header.")
+        version, _, _, count = header.unpack_from(data)
+        if version != 1 or count < 4 or count > 10000 or len(data) != header.size + count * record.size:
+            raise ValidationError("The selected turntable marker map has an invalid header or record count.")
+        for index in range(count):
+            fields = record.unpack_from(data, header.size + index * record.size)
+            coordinates_and_normal = fields[4:]
+            if not all(math.isfinite(value) for value in coordinates_and_normal):
+                raise ValidationError(f"Turntable marker map record {index + 1} contains non-finite values.")
+            normal_length = math.sqrt(sum(value * value for value in coordinates_and_normal[3:]))
+            if not 0.5 <= normal_length <= 1.5:
+                raise ValidationError(f"Turntable marker map record {index + 1} has an invalid normal.")
+        return count
+
+    def turntable_settings(self, turntable_device_id: str | None,
+                           profile_id: str | None = None) -> dict[str, Any]:
+        if profile_id:
+            profile_id = self._known_turntable_profile(profile_id)
+            if not turntable_device_id:
+                turntable = self._connected_turntable(None)
+                if profile_id != turntable["profile_id"]:
+                    raise ValidationError("The selected turntable profile does not match the connected table.")
+                turntable_device_id = turntable["device_id"]
+        else:
+            turntable = self._connected_turntable(turntable_device_id)
+            turntable_device_id = turntable["device_id"]
+            profile_id = turntable["profile_id"]
+        settings_path = self._turntable_settings_directory(turntable_device_id) / "settings.json"
+        if not settings_path.is_file():
+            return {"turntable_device_id": turntable_device_id,
+                    "profile_id": profile_id,
+                    "rotation_period_seconds": 18.0, "configured": False}
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            period = settings["rotation_period_seconds"]
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ValidationError("The selected turntable's settings file is invalid.") from exc
+        if (isinstance(period, bool) or not isinstance(period, (int, float))
+                or not math.isfinite(period) or not 18.0 <= period <= 90.0):
+            raise ValidationError("The selected turntable's rotation period must be between 18 and 90 seconds.")
+        saved_profile = settings.get("profile_id", profile_id)
+        if saved_profile != profile_id:
+            raise ValidationError("The selected turntable's saved profile does not match the device catalog.")
+        return {"turntable_device_id": turntable_device_id,
+                "profile_id": profile_id,
+                "rotation_period_seconds": float(period), "configured": True}
+
+    def save_turntable_settings(self, turntable_device_id: str, rotation_period_seconds: float,
+                                profile_id: str | None = None) -> dict[str, Any]:
+        if (not isinstance(turntable_device_id, str) or not turntable_device_id
+                or isinstance(rotation_period_seconds, bool)
+                or not isinstance(rotation_period_seconds, (int, float))
+                or not math.isfinite(rotation_period_seconds)
+                or not 18.0 <= rotation_period_seconds <= 90.0):
+            raise ValidationError("Turntable settings require a connected device ID and a rotation period from 18 to 90 seconds.")
+        if profile_id:
+            profile_id = self._known_turntable_profile(profile_id)
+        else:
+            turntable = self._connected_turntable(turntable_device_id)
+            profile_id = turntable["profile_id"]
+        directory = self._turntable_settings_directory(turntable_device_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        profile_map = (self._repository_root / "tools" / "revopoint" / "calibration"
+                       / "tables" / profile_id / "framesmall.mkf")
+        device_map = directory / "framesmall.mkf"
+        if profile_map.is_file() and not device_map.exists():
+            temporary_map = directory / "framesmall.mkf.tmp"
+            try:
+                shutil.copyfile(profile_map, temporary_map)
+                temporary_map.replace(device_map)
+            except OSError as exc:
+                temporary_map.unlink(missing_ok=True)
+                raise ValidationError("Could not initialize the selected table's marker map.") from exc
+        destination = directory / "settings.json"
+        temporary = directory / "settings.json.tmp"
+        payload = json.dumps({"profile_id": profile_id,
+                              "rotation_period_seconds": float(rotation_period_seconds)}, indent=2) + "\n"
+        try:
+            temporary.write_text(payload, encoding="utf-8")
+            temporary.replace(destination)
+        except OSError as exc:
+            temporary.unlink(missing_ok=True)
+            raise ValidationError("Could not save the selected turntable's settings file.") from exc
+        return {"turntable_device_id": turntable_device_id,
+                "profile_id": profile_id,
+                "rotation_period_seconds": float(rotation_period_seconds), "configured": True}
+
+    def _known_turntable_profile(self, profile_id: str | None) -> str:
+        if not isinstance(profile_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", profile_id):
+            raise ValidationError("The selected turntable profile ID is invalid.")
+        catalog_path = self._repository_root / "tools" / "revopoint" / "devices.json"
+        try:
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+            known = any(item.get("id") == profile_id
+                        and item.get("control_protocol") == "revopoint-dual-axis-v1"
+                        for item in catalog.get("turntables", []))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise ValidationError("The turntable device catalog could not be read.") from exc
+        if not known:
+            raise ValidationError("The selected turntable profile is not supported by this host.")
+        return profile_id
+
+    def turntable_marker_map(self, turntable_device_id: str | None,
+                             profile_id: str | None = None) -> tuple[bytes, int]:
+        if not profile_id and turntable_device_id:
+            settings_path = self._turntable_settings_directory(turntable_device_id) / "settings.json"
+            try:
+                settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                raise ValidationError("Select the turntable profile before loading its marker map.") from exc
+            profile_id = settings.get("profile_id")
+        if not profile_id:
+            turntable = self._connected_turntable(turntable_device_id)
+            profile_id = turntable.get("profile_id")
+            turntable_device_id = turntable["device_id"]
+        profile_id = self._known_turntable_profile(profile_id)
+        device_directory = (self._turntable_settings_directory(turntable_device_id)
+                            if turntable_device_id else None)
+        if device_directory is not None:
+            settings_path = device_directory / "settings.json"
+            if settings_path.is_file():
+                try:
+                    configured_profile = json.loads(settings_path.read_text(encoding="utf-8")).get("profile_id")
+                except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                    raise ValidationError("The selected turntable's settings file is invalid.") from exc
+                if configured_profile is not None and configured_profile != profile_id:
+                    raise ValidationError("The selected table's marker map profile does not match its device settings.")
+        device_map = device_directory / "framesmall.mkf" if device_directory is not None else None
+        profile_map = (self._repository_root / "tools" / "revopoint" / "calibration"
+                       / "tables" / profile_id / "framesmall.mkf")
+        source = device_map if device_map is not None and device_map.is_file() else profile_map
+        try:
+            data = source.read_bytes()
+        except OSError as exc:
+            raise ValidationError("No marker map is configured for the selected turntable.") from exc
+        return data, self._validate_marker_map(data)
 
     def start(self, project_id: str, project_directory: Path,
               rotation_period_seconds: float = 18.0,

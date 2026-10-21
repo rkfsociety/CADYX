@@ -55,6 +55,9 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/scanner/live-frame", "scanner_live_frame", "scanner"),
     RouteSpec("GET", "/api/v1/scanner/devices", "scanner_devices", "scanner"),
     RouteSpec("POST", "/api/v1/scanner/calibration", "scanner_calibration_save", "scanner", "json"),
+    RouteSpec("GET", "/api/v1/scanner/turntable/settings", "turntable_settings", "scanner"),
+    RouteSpec("POST", "/api/v1/scanner/turntable/settings", "turntable_settings_save", "scanner", "json"),
+    RouteSpec("GET", "/api/v1/scanner/turntable/map", "turntable_marker_map", "scanner"),
     RouteSpec("GET", "/api/v1/scanner/live-preview", "scanner_live_preview_status", "scanner"),
     RouteSpec("POST", "/api/v1/scanner/live-preview", "scanner_live_preview_start", "scanner", "json"),
     RouteSpec("DELETE", "/api/v1/scanner/live-preview", "scanner_live_preview_stop", "scanner"),
@@ -339,6 +342,48 @@ def _resolve_scanner_point_cloud(core: CadyxCore, query_string: str) -> tuple[Pa
 def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: SplitResult) -> None:
     if route.spec.name == "scanner_devices":
         handler._json(200, core.scanner_devices())
+        return
+    if route.spec.name == "turntable_settings":
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if (set(query) - {"device_id", "profile_id"}
+                or any(len(query.get(key, [])) > 1 for key in ("device_id", "profile_id"))):
+            raise ValidationError("Turntable settings accept one device_id and one profile_id at most.")
+        device_id = query.get("device_id", [None])[0]
+        profile_id = query.get("profile_id", [None])[0]
+        handler._json(200, core.turntable_settings(device_id or None, profile_id or None))
+        return
+    if route.spec.name == "turntable_settings_save":
+        body = _require_json(handler)
+        required = {"turntable_device_id", "rotation_period_seconds"}
+        if set(body) not in (required, required | {"profile_id"}):
+            raise ValidationError("Turntable settings require a device ID and rotation period.")
+        device_id = body["turntable_device_id"]
+        period = body["rotation_period_seconds"]
+        profile_id = body.get("profile_id")
+        if not isinstance(device_id, str):
+            raise ValidationError("The turntable device ID must be a string.")
+        if profile_id is not None and not isinstance(profile_id, str):
+            raise ValidationError("The turntable profile ID must be a string.")
+        if (isinstance(period, bool) or not isinstance(period, (int, float))
+                or not math.isfinite(period) or not 18.0 <= period <= 90.0):
+            raise ValidationError("The turntable rotation period must be between 18 and 90 seconds.")
+        handler._json(200, core.save_turntable_settings(device_id, period, profile_id))
+        return
+    if route.spec.name == "turntable_marker_map":
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if (set(query) - {"device_id", "profile_id"}
+                or any(len(query.get(key, [])) > 1 for key in ("device_id", "profile_id"))):
+            raise ValidationError("Turntable marker maps accept one device_id and one profile_id at most.")
+        device_id = query.get("device_id", [None])[0]
+        profile_id = query.get("profile_id", [None])[0]
+        data, point_count = core.turntable_marker_map(device_id or None, profile_id or None)
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/octet-stream")
+        handler.send_header("Content-Length", str(len(data)))
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("X-CADYX-Table-Map-Count", str(point_count))
+        handler.end_headers()
+        handler.wfile.write(data)
         return
     if route.spec.name == "scanner_calibration_save":
         body = _require_json(handler)

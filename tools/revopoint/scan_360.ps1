@@ -29,7 +29,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $toolRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ([string]::IsNullOrWhiteSpace($CalibrationFile)) {
-    $CalibrationFile = Join-Path $toolRoot 'calibration\Q.bin'
+    $CalibrationFile = Join-Path $toolRoot 'calibration\scanners\revopoint-mini-y16\Q.bin'
 }
 $repoRoot = (Resolve-Path (Join-Path $toolRoot '..\..')).Path
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'projects')).TrimEnd([char[]]@('\', '/'))
@@ -46,7 +46,7 @@ if ($projectRecord.format -ne 'cadyx-project' -or -not [guid]::TryParse([string]
 }
 $captureExe = Join-Path $toolRoot 'build\CaptureY16.exe'
 $turntableExe = Join-Path $toolRoot 'build\TurntableController.exe'
-$depthScaleConfig = Join-Path $toolRoot 'calibration\depth_scale.json'
+$depthScaleConfig = Join-Path $toolRoot 'calibration\scanners\revopoint-mini-y16\depth_scale.json'
 if (-not $PSBoundParameters.ContainsKey('DepthScale')) {
     $DepthScale = [double](Get-Content -LiteralPath $depthScaleConfig -Raw | ConvertFrom-Json).depth_scale_mm_per_raw_unit
 }

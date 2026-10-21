@@ -486,8 +486,11 @@
           : geometry.bodyTriangleRanges?.filter((range) => range.objectId === selectedBodyId) || [],
         geometry.overlayTriangleRanges || [],
       );
-      else if (!geometry.lines) renderPoints(positions.length / 3, camera, screenX, screenY, scale, geometry.colors);
+      else if (geometry.pointCloudVertexCount != null || !geometry.lines) {
+        renderPoints(geometry.pointCloudVertexCount ?? positions.length / 3, camera, screenX, screenY, scale, geometry.colors);
+      }
       const directLineCount = geometry.type === "body" ? 0 : (geometry.lines || []).length;
+      const lineStyle = geometry.lineStyle || {};
       let bodyLineRangeIndex = 0;
       for (let index = 0; index < directLineCount; index += 2) {
         while (bodyLineRangeIndex < (geometry.bodyLineRanges || []).length
@@ -517,10 +520,12 @@
           segmentProgress = Math.max(0, Math.min(1, progress * segments - segment));
           if (segmentProgress <= 0) continue;
         }
-        context.strokeStyle = segmentProgress < 1 ? "#b8f2ff" : "#8ed4ed";
-        context.globalAlpha = segmentProgress < 1 ? 0.72 + 0.28 * segmentProgress : 1;
-        context.lineWidth = segmentProgress < 1 ? 2.4 : 2;
-        context.setLineDash(geometry.construction || lineMode === "centerline" ? [6, 5] : []);
+        context.strokeStyle = lineStyle.color || (segmentProgress < 1 ? "#b8f2ff" : "#8ed4ed");
+        context.globalAlpha = Number.isFinite(lineStyle.opacity) ? lineStyle.opacity
+          : segmentProgress < 1 ? 0.72 + 0.28 * segmentProgress : 1;
+        context.lineWidth = Number.isFinite(lineStyle.width) ? Math.max(0.5, Math.min(4, lineStyle.width))
+          : segmentProgress < 1 ? 2.4 : 2;
+        context.setLineDash(lineStyle.dash || (geometry.construction || lineMode === "centerline" ? [6, 5] : []));
         context.beginPath();
         context.moveTo(startX, startY);
         context.lineTo(startX + (endX - startX) * segmentProgress,
@@ -548,6 +553,24 @@
           context.stroke();
         } else {
           context.fillRect(screenX[point] - size / 2, screenY[point] - size / 2, size, size);
+        }
+      }
+      for (const layer of geometry.pointLayers || []) {
+        const style = layer.style || {};
+        const size = Number.isFinite(style.size) ? Math.max(0.75, Math.min(8, style.size)) : 3;
+        context.fillStyle = style.color || "#c3ecff";
+        context.globalAlpha = Number.isFinite(style.opacity) ? Math.max(0.1, Math.min(1, style.opacity)) : 1;
+        for (const point of layer.points || []) {
+          if (point < 0 || point >= screenX.length) continue;
+          if (geometry.construction) {
+            context.strokeStyle = context.fillStyle;
+            context.lineWidth = 1.5;
+            context.beginPath();
+            context.arc(screenX[point], screenY[point], Math.max(2, size), 0, Math.PI * 2);
+            context.stroke();
+          } else {
+            context.fillRect(screenX[point] - size / 2, screenY[point] - size / 2, size, size);
+          }
         }
       }
       context.globalAlpha = 1;

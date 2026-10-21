@@ -32,8 +32,8 @@ if ($projectRecord.format -ne 'cadyx-project' -or -not [guid]::TryParse([string]
 $captureY16 = Join-Path $toolRoot 'build\CaptureY16.exe'
 $captureRgb = Join-Path $toolRoot 'build\CaptureRgb.exe'
 $turntable = Join-Path $toolRoot 'build\TurntableController.exe'
-$calibration = Join-Path $toolRoot 'calibration\Q.bin'
-$depthScaleConfig = Join-Path $toolRoot 'calibration\depth_scale.json'
+$calibration = Join-Path $toolRoot 'calibration\scanners\revopoint-mini-y16\Q.bin'
+$depthScaleConfig = Join-Path $toolRoot 'calibration\scanners\revopoint-mini-y16\depth_scale.json'
 if (-not $PSBoundParameters.ContainsKey('DepthScale')) {
     $DepthScale = [double](Get-Content -LiteralPath $depthScaleConfig -Raw | ConvertFrom-Json).depth_scale_mm_per_raw_unit
 }

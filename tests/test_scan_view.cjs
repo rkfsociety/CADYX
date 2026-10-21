@@ -32,10 +32,35 @@ const baseGeometry = { positions: new Float64Array([0, 0, 0]), triangles: new Ui
 const getModelGeometry = () => baseGeometry;
 const fetchCloud = async url => ({ ok: true, async text() { assert.match(url, /point-cloud\?/); return pointCloud; } });
 const liveRawFrames = [new Uint8Array(640 * 400 * 2), new Uint8Array(640 * 400 * 2)];
+const centers = [[220, 180], [420, 180], [220, 220], [420, 220], [320, 200]];
+const zAxis = [0.12, 0.08, 1].map(value => value / Math.hypot(0.12, 0.08, 1));
+let xAxis = [1 - zAxis[0] * zAxis[0], -zAxis[0] * zAxis[1], -zAxis[0] * zAxis[2]];
+xAxis = xAxis.map(value => value / Math.hypot(...xAxis));
+const yAxis = [zAxis[1] * xAxis[2] - zAxis[2] * xAxis[1],
+  zAxis[2] * xAxis[0] - zAxis[0] * xAxis[2], zAxis[0] * xAxis[1] - zAxis[1] * xAxis[0]];
+const mapBuffer = new ArrayBuffer(16 + centers.length * 64);
+const mapView = new DataView(mapBuffer);
+mapView.setUint32(0, 1, true);
+mapView.setUint32(12, centers.length, true);
+for (let index = 0; index < centers.length; index += 1) {
+  const [centerX, centerY] = centers[index];
+  const px = centerX - 320, py = 200 - centerY;
+  const depth = 100 + 0.12 * px + 0.08 * py;
+  const cameraPoint = [px, py, -depth];
+  const x = xAxis.reduce((sum, value, axis) => sum + value * cameraPoint[axis], 0);
+  const y = yAxis.reduce((sum, value, axis) => sum + value * cameraPoint[axis], 0);
+  const offset = 16 + index * 64;
+  mapView.setInt32(offset, 0, true);
+  mapView.setInt32(offset + 4, -1, true);
+  mapView.setFloat32(offset + 8, 1, true);
+  mapView.setFloat32(offset + 12, 0, true);
+  for (let axis = 0; axis < 3; axis += 1) mapView.setFloat64(offset + 16 + axis * 8, x * xAxis[axis] + y * yAxis[axis], true);
+  for (let axis = 0; axis < 3; axis += 1) mapView.setFloat64(offset + 40 + axis * 8, zAxis[axis], true);
+}
 let markerPointCount = 0;
 for (const frame of liveRawFrames) {
   markerPointCount = 0;
-  for (const [centerX, centerY] of [[200, 200], [440, 200], [320, 200]]) {
+  for (const [centerX, centerY] of centers) {
     for (let y = centerY - 16; y <= centerY + 16; y += 1) for (let x = centerX - 16; x <= centerX + 16; x += 1) {
       if ((x - centerX) ** 2 + (y - centerY) ** 2 > 16 ** 2) continue;
       const pixel = y * 640 + x;
@@ -45,6 +70,10 @@ for (const frame of liveRawFrames) {
       if (pixel % 2 === 0) markerPointCount += 1;
     }
   }
+  for (let y = 280; y < 340; y += 1) for (let x = 280; x < 360; x += 1) {
+    const pixel = y * 640 + x;
+    frame[pixel * 2] = 80;
+  }
 }
 let liveFrameSequence = 0;
 const waitUntil = async predicate => {
@@ -53,6 +82,7 @@ const waitUntil = async predicate => {
 };
 const fetchPreview = async url => {
   if (url.includes("point-cloud?")) return { ok: true, async text() { return url.includes("origin.ply") ? originCloud : pointCloud; } };
+  if (url.includes("/turntable/map")) return { ok: true, async arrayBuffer() { return mapBuffer; } };
   if (url.includes("/calibration")) return { ok: true, async json() { return { width: 640, height: 400, matrix: [1, 0, 0, -320, 0, 1, 0, -200, 0, 0, 1, 0, 0, 0, 0, 0], depth_scale_mm_per_raw_unit: 1 }; } };
   if (url.includes("/live-frame")) {
     const index = liveFrameSequence++;
@@ -68,7 +98,7 @@ const viewport = element();
 const view = sandbox.window.CadyxScanView.initialize({ cloudButton, meshButton, viewport, viewer, getModelGeometry, meshReady: true }, undefined, fetchPreview);
 cloudButton.click();
 await new Promise(resolve => setImmediate(resolve));
-assert.equal(cloudButton.attributes["aria-pressed"], "true");
+assert.equal(cloudButton.attributes["aria-pressed"], "true", cloudButton.title);
 assert.equal(viewport.dataset.scanPreview, "false");
 assert.equal(viewport.dataset.scanPreviewMode, "cloud");
 assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
@@ -105,21 +135,34 @@ const loadCount = viewerLoads.length;
 view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", origin_file: "origin.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
 assert.equal(viewerLoads.length, loadCount, "repeated status polls do not reload the mesh or reset the camera");
 view.showLivePreview({ open: true });
-await waitUntil(() => viewerLoads.at(-1)?.geometry.positions.length === markerPointCount * 3);
+await waitUntil(() => viewerLoads.at(-1)?.geometry.points?.length === markerPointCount);
 assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "live");
-assert.equal(viewerLoads.at(-1).geometry.positions.length, markerPointCount * 3, cloudButton.title);
-assert.ok(Math.abs(viewerLoads.at(-1).geometry.bounds.min[2]) < 2 && Math.abs(viewerLoads.at(-1).geometry.bounds.max[2]) < 2,
-  "sparse table markers define XY and lie on that plane after alignment");
+assert.ok(viewerLoads.at(-1).geometry.positions.length > markerPointCount * 3, cloudButton.title);
+assert.equal(viewerLoads.at(-1).geometry.points.length, markerPointCount,
+  "only the sparse table markers receive the preview highlight");
+assert.equal(viewerLoads.at(-1).geometry.pointStyle.size, 3);
+assert.equal(viewerLoads.at(-1).geometry.pointStyle.opacity, 1);
+assert.equal(viewerLoads.at(-1).geometry.pointStyle.color, "#59d9ff");
 const markerPositions = viewerLoads.at(-1).geometry.positions;
 const markerCenter = [0, 0, 0];
-for (let index = 0; index < markerPositions.length; index += 3) {
-  for (let axis = 0; axis < 3; axis += 1) markerCenter[axis] += markerPositions[index + axis] / (markerPositions.length / 3);
+const markerIndices = new Set(viewerLoads.at(-1).geometry.points);
+let minimumObjectZ = Infinity;
+for (let point = 0; point < markerPositions.length / 3; point += 1) {
+  const z = markerPositions[point * 3 + 2];
+  if (!markerIndices.has(point)) minimumObjectZ = Math.min(minimumObjectZ, z);
 }
-assert.ok(Math.abs(markerCenter[0]) < 2 && Math.abs(markerCenter[1]) < 2,
-  "table markers stay centered on the calibrated XY origin");
+assert.ok(minimumObjectZ >= 0, "object points remain at or above the table-marker plane");
+for (const pointIndex of viewerLoads.at(-1).geometry.points) {
+  const index = pointIndex * 3;
+  assert.ok(Math.abs(markerPositions[index + 2]) < 2,
+    "table markers lie in the XY plane even when object points are off that plane");
+  for (let axis = 0; axis < 3; axis += 1) markerCenter[axis] += markerPositions[index + axis] / markerPointCount;
+}
+assert.ok(Math.abs(markerCenter[0]) < 5 && Math.abs(markerCenter[1]) < 5,
+  `table markers stay centered on the calibrated XY origin: ${markerCenter}`);
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0],
-  "the calibrated center-pixel ray intersection is the table origin even without a marker at the center");
+  "the mapped table-marker centroid is the preview origin");
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0]);
 const firstTurntableCloud = viewerLoads.at(-1).geometry.positions.slice(0, 3);
 const firstLiveFitRadius = viewerLoads.at(-1).geometry.fitRadius;

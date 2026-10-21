@@ -95,7 +95,7 @@ void PrintUsage() {
               << "       CaptureY16.exe --list-modes\n"
               << "       CaptureY16.exe --list-devices\n"
               << "       Optional --device-id SYMBOLIC_LINK selects one enumerated camera.\n"
-              << "Depth scale converts each uint16 sample to millimeters; supply the local device value from calibration/depth_scale.json.\n";
+              << "Depth scale converts each uint16 sample to millimeters; use the local scanner profile's calibration/scanners/<profile_id>/depth_scale.json value.\n";
 }
 
 Options ParseOptions(int argc, wchar_t** argv) {

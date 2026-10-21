@@ -167,6 +167,30 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(calibration["depth_scale_status"], "provisional_for_direct_UVC")
         self.assertEqual(len(calibration["matrix"]), 16)
 
+    def test_turntable_settings_and_marker_map_routes_are_device_bound(self) -> None:
+        settings = {"turntable_device_id": "table-1", "rotation_period_seconds": 30.0, "configured": True}
+        with patch.object(self.core, "turntable_settings", return_value=settings) as read_settings:
+            status, result = self.request("/api/v1/scanner/turntable/settings?device_id=table-1")
+        self.assertEqual((status, result), (200, settings))
+        read_settings.assert_called_once_with("table-1", None)
+
+        with patch.object(self.core, "save_turntable_settings", return_value=settings) as save_settings:
+            status, result = self.request("/api/v1/scanner/turntable/settings", {
+                "turntable_device_id": "table-1", "rotation_period_seconds": 30,
+            })
+        self.assertEqual((status, result), (200, settings))
+        save_settings.assert_called_once_with("table-1", 30, None)
+
+        marker_map = b"table marker map"
+        with patch.object(self.core, "turntable_marker_map", return_value=(marker_map, 34)) as read_map:
+            status, headers, body = self.get_binary(
+                "/api/v1/scanner/turntable/map?device_id=table-1&profile_id=revopoint-dual-axis-table",
+            )
+        self.assertEqual((status, body), (200, marker_map))
+        normalized_headers = {name.casefold(): value for name, value in headers.items()}
+        self.assertEqual(normalized_headers["x-cadyx-table-map-count"], "34")
+        read_map.assert_called_once_with("table-1", "revopoint-dual-axis-table")
+
     def test_agent_project_can_be_created_without_changing_selection_and_receive_step(self) -> None:
         _, current = self.request("/api/v1/agent/projects", {"name": "Current project"})
         current_id = current["project"]["id"]

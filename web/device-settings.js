@@ -1,7 +1,8 @@
 (() => {
   const storageKey = 'cadyx-device-settings-v1';
   const allowedPeriods = new Set([18, 30, 45, 60, 90]);
-  const defaults = { activeDevice: 'scanner', scannerDeviceId: '', turntableDeviceId: '', turntableRotationPeriodSeconds: 18 };
+  const defaults = { activeDevice: 'scanner', scannerDeviceId: '', turntableDeviceId: '',
+    turntableProfileId: '', turntableRotationPeriodSeconds: 18 };
   const read = () => {
     try {
       const value = JSON.parse(localStorage.getItem(storageKey) || '{}');
@@ -9,6 +10,7 @@
         activeDevice: value.activeDevice === 'turntable' ? 'turntable' : 'scanner',
         scannerDeviceId: typeof value.scannerDeviceId === 'string' ? value.scannerDeviceId : '',
         turntableDeviceId: typeof value.turntableDeviceId === 'string' ? value.turntableDeviceId : '',
+        turntableProfileId: typeof value.turntableProfileId === 'string' ? value.turntableProfileId : '',
         turntableRotationPeriodSeconds: allowedPeriods.has(Number(value.turntableRotationPeriodSeconds))
           ? Number(value.turntableRotationPeriodSeconds) : defaults.turntableRotationPeriodSeconds,
       };
@@ -33,7 +35,11 @@
 
   let devices = { scanners: [], turntables: [] };
   let activeDevice = read().activeDevice;
+  let turntableProfileId = read().turntableProfileId;
+  let turntableRotationPeriodSeconds = read().turntableRotationPeriodSeconds;
   let calibrationRequest = 0;
+  let tableSettingsRequest = 0;
+  const tableMigrations = new Set();
   const selectDevice = (name) => {
     activeDevice = name === 'turntable' ? 'turntable' : 'scanner';
     for (const tab of dialog.querySelectorAll('[data-device-tab]')) {
@@ -88,6 +94,56 @@
       calibrationStatus.textContent = error.message;
     }
   };
+  const updateTurntableSettings = async (selectedDeviceId = null) => {
+    const request = ++tableSettingsRequest;
+    const deviceId = selectedDeviceId || tableSelect.value || read().turntableDeviceId;
+    const detected = devices.turntables.find(item => item.device_id === deviceId);
+    const profileHint = detected?.profile_id
+      || (deviceId === read().turntableDeviceId ? read().turntableProfileId : '');
+    if (profileHint) turntableProfileId = profileHint;
+    const query = new URLSearchParams();
+    if (deviceId) query.set('device_id', deviceId);
+    if (profileHint) query.set('profile_id', profileHint);
+    const queryString = query.toString();
+    try {
+      const response = await fetch(`/api/v1/scanner/turntable/settings${queryString ? `?${queryString}` : ''}`, { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || payload.error || 'Не удалось загрузить настройки стола.');
+      if (request !== tableSettingsRequest) return;
+      const resolvedDeviceId = payload.turntable_device_id || deviceId;
+      turntableProfileId = typeof payload.profile_id === 'string' ? payload.profile_id : '';
+      if (turntableProfileId && resolvedDeviceId) {
+        try {
+          const saved = read();
+          if (saved.turntableDeviceId !== resolvedDeviceId || saved.turntableProfileId !== turntableProfileId) {
+            localStorage.setItem(storageKey, JSON.stringify({ ...saved, turntableDeviceId: resolvedDeviceId, turntableProfileId }));
+          }
+        } catch { /* The current table remains selected for this page session. */ }
+      }
+      turntableRotationPeriodSeconds = payload.configured
+        ? Number(payload.rotation_period_seconds) : read().turntableRotationPeriodSeconds;
+      period.value = String(turntableRotationPeriodSeconds);
+      if (!payload.configured && resolvedDeviceId && turntableProfileId && !tableMigrations.has(resolvedDeviceId)) {
+        tableMigrations.add(resolvedDeviceId);
+        try {
+          const migration = await fetch('/api/v1/scanner/turntable/settings', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ turntable_device_id: resolvedDeviceId, profile_id: turntableProfileId,
+              rotation_period_seconds: turntableRotationPeriodSeconds }),
+          });
+          const result = await migration.json();
+          if (!migration.ok) throw new Error(result.message || result.error || 'Не удалось создать настройки выбранного стола.');
+        } catch (error) {
+          if (request === tableSettingsRequest) status.textContent = error.message;
+        } finally {
+          tableMigrations.delete(resolvedDeviceId);
+        }
+      }
+    } catch (error) {
+      if (request !== tableSettingsRequest) return;
+      status.textContent = error.message;
+    }
+  };
   const discover = async () => {
     refresh.disabled = true;
     status.textContent = 'Идёт поиск USB-сканеров и Bluetooth-столов…';
@@ -101,6 +157,7 @@
       options(tableSelect, devices.turntables, saved.turntableDeviceId, 'Выберите подключённый стол');
       status.textContent = `Найдено: сканеров ${devices.scanners.length}, столов ${devices.turntables.length}.`;
       await updateCalibrationStatus();
+      await updateTurntableSettings();
     } catch (error) {
       status.textContent = error.message;
     } finally {
@@ -114,6 +171,7 @@
     qFile.value = '';
     updateCalibrationStatus();
   });
+  tableSelect.addEventListener('change', () => updateTurntableSettings());
   replaceQFile.addEventListener('click', () => qFile.click());
   qFile.addEventListener('change', () => {
     calibrationRequest += 1;
@@ -143,6 +201,11 @@
       return;
     }
     const scanner = devices.scanners.find(item => item.device_id === scannerSelect.value);
+    const turntable = devices.turntables.find(item => item.device_id === tableSelect.value);
+    if (!scanner || !turntable) {
+      status.textContent = 'Обновите список устройств и выберите подключённый сканер и стол.';
+      return;
+    }
     const file = qFile.files?.[0];
     if (file || !scanner?.calibrated) {
       const scale = Number(depthScale.value);
@@ -169,11 +232,25 @@
       }
       save.disabled = false;
     }
+    try {
+      const tableResponse = await fetch('/api/v1/scanner/turntable/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turntable_device_id: tableSelect.value, profile_id: turntable.profile_id,
+          rotation_period_seconds: value }),
+      });
+      const tableResult = await tableResponse.json();
+      if (!tableResponse.ok) throw new Error(tableResult.message || tableResult.error || 'Не удалось сохранить настройки стола.');
+      turntableProfileId = turntable.profile_id;
+      turntableRotationPeriodSeconds = value;
+    } catch (error) {
+      status.textContent = error.message;
+      return;
+    }
     const settings = {
       activeDevice,
       scannerDeviceId: scannerSelect.value,
       turntableDeviceId: tableSelect.value,
-      turntableRotationPeriodSeconds: value,
+      turntableProfileId,
     };
     try {
       localStorage.setItem(storageKey, JSON.stringify(settings));
@@ -183,10 +260,12 @@
     }
   });
   selectDevice(activeDevice);
+  void updateTurntableSettings(read().turntableDeviceId);
 
   window.CadyxDeviceSettings = Object.freeze({
     scannerDeviceId: () => read().scannerDeviceId || null,
     turntableDeviceId: () => read().turntableDeviceId || null,
-    turntableRotationPeriodSeconds: () => read().turntableRotationPeriodSeconds,
+    turntableProfileId: () => turntableProfileId || read().turntableProfileId || null,
+    turntableRotationPeriodSeconds: () => turntableRotationPeriodSeconds,
   });
 })();
