@@ -8,6 +8,8 @@
 
 Отслеживаемый `Q.bin` был скопирован из `%LOCALAPPDATA%\RevoScan5\cameraparam` на ПК с подключённым сканером; правообладатель и разрешение на распространение не установлены. Пользователь решил включить эти два файла в Git; удалённый `origin` публичный. Это решение не подтверждает права на распространение. В [пользовательском соглашении Revopoint](https://www.revopoint3d.com/pages/user-agreement) права на ПО и относящиеся к нему данные не переданы явно; разрешение распространять извлечённую калибровку не установлено.
 
+Контакт сопровождающего для правообладателя по вопросам этих файлов: [romankuzminvital@gmail.com](mailto:romankuzminvital@gmail.com).
+
 `Q.bin` — матрица перепроецирования float32 little-endian размером 64 байта, которую `CaptureY16.exe` использует для расчёта луча камеры. Сначала значение uint16 преобразуется в кандидатную глубину по `depthScale` этого устройства, затем луч масштабируется так, чтобы глубина по камере Z совпадала с этим значением. Прямое соответствие глубины UVC всё ещё нужно проверить по известному физическому размеру.
 
 `depth_scale.json` хранит `depth_scale_mm_per_raw_unit` (положительное число) и статус. Для встроенного MINI указан коэффициент `0.005`, считанный из журнала SDK Revo Scan; статус для прямого UVC остаётся предварительным. Если создаёте профиль другого устройства, держите его локально, пока право на распространение не подтверждено. Соответствие UVC и абсолютный масштаб требуют проверки.
@@ -23,6 +25,8 @@
 The repository tracks `Q.bin` and `depth_scale.json` for the connected original Revopoint MINI. CADYX selects this bundled calibration automatically when exactly one scanner of that profile is detected. For another device, obtain its own calibration from Revo Scan or a source whose redistribution rights you hold; auxiliary device files remain local and ignored by Git. Never use another device's calibration.
 
 The tracked `Q.bin` was copied from `%LOCALAPPDATA%\RevoScan5\cameraparam` on the connected scanner PC. Redistribution rights remain unconfirmed. The user directed these two files to be included in Git, and the remote `origin` is public; that decision does not establish redistribution permission. The [Revopoint User Agreement](https://www.revopoint3d.com/pages/user-agreement) does not expressly grant rights to redistribute extracted device calibration data.
+
+Maintainer contact for the rights holder's questions about these files: [romankuzminvital@gmail.com](mailto:romankuzminvital@gmail.com).
 
 Local capture requires `Q.bin`, a 64-byte little-endian float32 reprojection matrix used by `CaptureY16.exe` to obtain a camera ray. The uint16 sample is converted to candidate depth using this device's `depthScale`, then the ray is scaled so camera Z equals that depth. Direct UVC mapping still needs validation against a known physical dimension.
 
