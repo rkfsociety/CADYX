@@ -10,7 +10,7 @@ from unittest.mock import patch
 from cadyx.core import CadyxCore
 from cadyx.errors import LeaseRequiredError, ValidationError
 from cadyx.kernel import PrimitiveKernelAdapter
-from cadyx.migrations import _migrate, migrate_document, migrate_project
+from cadyx.migrations import DOCUMENT_VERSION, _migrate, migrate_document, migrate_project
 from cadyx.models import Document
 
 
@@ -36,7 +36,7 @@ class MigrationTests(unittest.TestCase):
     def test_migration_preserves_snapshot_and_is_idempotent(self):
         original = copy.deepcopy(self.legacy)
         expected = copy.deepcopy(original)
-        expected["document"]["version"] = 11
+        expected["document"]["version"] = DOCUMENT_VERSION
         expected["document"]["assembly"] = {"version": 3, "units": "mm", "parts": [], "subassemblies": [], "instances": [], "mates": []}
         expected["document"]["model_parameters"] = {}
         expected["document"]["parameter_bindings"] = []
@@ -52,7 +52,7 @@ class MigrationTests(unittest.TestCase):
         document = {"id": "document:legacy", "version": 7, "revision": 3, "objects": []}
         migrated = migrate_document(document)
 
-        self.assertEqual(migrated["version"], 11)
+        self.assertEqual(migrated["version"], DOCUMENT_VERSION)
         self.assertEqual(migrated["assembly"]["version"], 3)
         self.assertEqual(migrated["model_parameters"], {})
         self.assertEqual(migrated["parameter_bindings"], [])
@@ -69,7 +69,7 @@ class MigrationTests(unittest.TestCase):
 
     def test_reads_failed_commands_and_failed_save_preserve_bytes(self):
         before = self.path.read_bytes()
-        self.assertEqual(self.core.workspace.load(self.id)["document"]["version"], 11)
+        self.assertEqual(self.core.workspace.load(self.id)["document"]["version"], DOCUMENT_VERSION)
         self.core.list_projects()
         self.core.inspect_project(self.id)
         self.core.heartbeat(self.id, self.lease)
@@ -90,7 +90,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(saved["document"]["objects"][:-1], self.legacy["document"]["objects"])
         self.assertEqual(saved["document"]["id"], self.legacy["document"]["id"])
         self.assertEqual(saved["document"]["revision"], 2)
-        self.assertEqual(saved["document"]["version"], 11)
+        self.assertEqual(saved["document"]["version"], DOCUMENT_VERSION)
         reloaded = CadyxCore(self.temp.name, kernel=PrimitiveKernelAdapter()).inspect_project(self.id)
         self.assertEqual(reloaded["document"], saved["document"])
         self.assertEqual(reloaded["history"], saved["history"])
