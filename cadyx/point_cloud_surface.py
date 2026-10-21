@@ -79,7 +79,10 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
 def isolation_points(points: list[tuple[float, float, float]], rate: float) -> list[tuple[float, float, float]]:
     """Remove at most ``rate`` percent of points with unusually large nearest spacing."""
     bounds = [max(p[a] for p in points) - min(p[a] for p in points) for a in range(3)]
-    cell_size = max(bounds) / max(1., len(points) ** (1 / 3))
+    # Captured clouds are predominantly sampled surfaces. Surface-density cells
+    # reduce candidate comparisons; shell expansion still gives exact 3-D nearest
+    # neighbors for volumetric inputs and sparse outliers.
+    cell_size = max(bounds) / max(1., len(points) ** .5)
     if not math.isfinite(cell_size) or cell_size <= 1e-12:
         cell_size = 1.
     buckets: dict[tuple[int, int, int], list[int]] = {}
