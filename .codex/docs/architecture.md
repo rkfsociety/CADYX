@@ -2,7 +2,7 @@
 
 [Русский перевод (в процессе)](architecture.ru.md)
 
-[Русский обзор](#русский-обзор) · [English reference](#english-reference)
+[Полный русский перевод](architecture.ru.md) · [English reference](#english-reference)
 
 ## Русский обзор
 
