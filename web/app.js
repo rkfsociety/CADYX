@@ -527,7 +527,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           const scan=payload.scan;
           const captureStarted=scan.state==='running'&&!scanWasRunning;
           scanWasRunning=scan.state==='running';
-          scanStatus.textContent=scan.state==='idle'||scan.state==='completed'&&scan.table_alignment_status==='aligned_provisional'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;
+          scanStatus.textContent=scan.state==='idle'||scan.state==='completed'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;
           scan360.disabled=scan.state==='running'||scan.state==='busy'||scan360.dataset.livePreviewLock==='true';
           if(scan.state==='running'){
             showCapturePreview(scan,{open:captureStarted});

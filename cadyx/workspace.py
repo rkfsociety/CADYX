@@ -315,6 +315,20 @@ class ProjectWorkspace:
     def list_project_files(self, project_id: str) -> list[dict[str, Any]]:
         return self._artifacts.list_project_files(self._project_dir(project_id))
 
+    def list_project_folders(self, project_id: str) -> list[dict[str, Any]]:
+        return self._artifacts.list_project_folders(self._project_dir(project_id))
+
+    def list_project_subfolder_files(self, project_id: str, folder_name: str) -> list[dict[str, Any]]:
+        return self._artifacts.list_project_subfolder_files(self._project_dir(project_id), folder_name)
+
+    def list_project_subfolders(self, project_id: str, folder_name: str) -> list[dict[str, Any]]:
+        return self._artifacts.list_project_subfolders(self._project_dir(project_id), folder_name)
+
+    def resolve_project_subfolder_file(self, project_id: str, folder_name: str, file_name: str) -> Path:
+        return self._artifacts.resolve_project_subfolder_file(
+            self._project_dir(project_id), folder_name, file_name
+        )
+
     def copy_project_files(
         self, source_project_id: str, target_project_id: str
     ) -> dict[str, Any]:

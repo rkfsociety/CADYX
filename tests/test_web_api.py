@@ -280,6 +280,49 @@ class WebApiTests(unittest.TestCase):
                 self.assertEqual(json.loads(response.read())["preview"]["state"], "idle")
         stop.assert_called_once_with()
 
+    def test_project_files_expose_scan_series_folders_and_nested_raw_frames(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "Scan files"})
+        project_id = created["project"]["id"]
+        project_dir = self.core.workspace._project_dir(project_id)
+        series = project_dir / "revopoint_20261021T103419Z"
+        depth = series / "depth_frames"
+        depth.mkdir(parents=True)
+        (series / "capture_manifest.json").write_text("{}", encoding="utf-8")
+        (depth / "frame_00000.raw").write_bytes(b"raw-y16")
+
+        status, root = self.request(f"/api/v1/projects/{project_id}/files")
+        self.assertEqual(status, 200)
+        self.assertEqual([folder["name"] for folder in root["folders"]], [series.name])
+        status, run = self.request(f"/api/v1/projects/{project_id}/folders/{series.name}/files")
+        self.assertEqual(status, 200)
+        self.assertEqual([file["name"] for file in run["files"]], ["capture_manifest.json"])
+        self.assertEqual([folder["name"] for folder in run["folders"]], ["depth_frames"])
+        encoded_folder = quote(f"{series.name}/depth_frames", safe="")
+        with urlopen(Request(self.base_url + f"/api/v1/projects/{project_id}/folders/{encoded_folder}/files/frame_00000.raw"), timeout=3) as response:
+            self.assertEqual(response.read(), b"raw-y16")
+
+    def test_scanner_point_cloud_preview_resolves_a_ply_inside_a_project_scan_series(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "Nested scan preview"})
+        project_id = created["project"]["id"]
+        project_path = self.core.workspace._project_dir(project_id)
+        project_name = self.core.workspace.load(project_id, include_history=False)["name"]
+        series = project_path / "revopoint_20261021T103419Z"
+        series.mkdir()
+        ply = series / "candidate.ply"
+        ply.write_text(
+            "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\n"
+            "property float z\nend_header\n0 0 0\n1 0 0\n0 1 0\n",
+            encoding="ascii",
+        )
+
+        query = quote(project_name, safe="")
+        url = (f"{self.base_url}/api/v1/scanner/point-cloud?folder={query}&file=candidate.ply"
+               f"&project_id={project_id}&subfolder={series.name}")
+        with urlopen(url, timeout=3) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers["X-CADYX-Point-Count"], "3")
+            self.assertIn(b"element vertex 3", response.read())
+
     def test_legacy_migration_uses_both_api_command_paths(self) -> None:
         for prefix, owner in (("/api/v1/projects", "human"), ("/api/v1/agent/projects", "agent")):
             with self.subTest(owner=owner):

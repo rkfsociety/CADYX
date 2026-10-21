@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from cadyx.errors import NotFoundError
 from cadyx.workspace_files import WorkspaceArtifactStore
 from cadyx.workspace_groups import ProjectGroupStore
 from cadyx.workspace_projects import ProjectRecordStore
@@ -71,6 +72,33 @@ class WorkspaceServiceTests(unittest.TestCase):
         files = store.list_project_files(directory)
 
         self.assertEqual([item["name"] for item in files], ["part.step"])
+
+    def test_artifact_store_lists_project_subfolders_and_their_direct_contents(self) -> None:
+        directory = (self.root / "project-with-scan").resolve()
+        series = directory / "revopoint_20261021T103419Z"
+        depth = series / "depth_frames"
+        directory.mkdir()
+        depth.mkdir(parents=True)
+        (depth / "frame_00000.raw").write_bytes(b"Y16")
+        (depth / ".cadyx-private").write_bytes(b"private")
+        (series / "capture_manifest.json").write_text("{}", encoding="utf-8")
+        (directory / "outside.txt").write_text("root", encoding="utf-8")
+        store = WorkspaceArtifactStore(lambda _directory, name: name.startswith(".cadyx"))
+
+        folders = store.list_project_folders(directory)
+        run_files = store.list_project_subfolder_files(directory, series.name)
+        children = store.list_project_subfolders(directory, series.name)
+        raw_files = store.list_project_subfolder_files(directory, f"{series.name}/depth_frames")
+        manifest_path = store.resolve_project_subfolder_file(directory, series.name, "capture_manifest.json")
+
+        self.assertEqual([item["name"] for item in folders], [series.name])
+        self.assertEqual([item["name"] for item in run_files], ["capture_manifest.json"])
+        self.assertEqual([item["name"] for item in children], ["depth_frames"])
+        self.assertTrue(manifest_path.is_file())
+        self.assertEqual([item["name"] for item in raw_files], ["frame_00000.raw"])
+        for unsafe in ("..", "nested/name", ".private", "missing"):
+            with self.subTest(folder_name=unsafe), self.assertRaises(NotFoundError):
+                store.list_project_subfolder_files(directory, unsafe)
 
 
 if __name__ == "__main__":

@@ -213,6 +213,28 @@ class Scan360CaptureTests(unittest.TestCase):
         self.assertEqual((status["completed_frames"], status["frame_count"]), (12, 12))
         self.assertEqual(status["preview_file"], f"{run_id}_pose_pose_011.ply")
 
+    def test_latest_complete_capture_is_discovered_inside_its_project_series_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261021T103419Z"
+            series = project / run_id
+            series.mkdir()
+            (project / "project.json").write_text(json.dumps({"id": "project-id"}), encoding="utf-8")
+            (series / f"{run_id}_poses.csv").write_text("poses", encoding="utf-8")
+            (project / ".cadyx-scan360-20261021T103419Z.log").write_text(
+                "sweep completed: 12 steps", encoding="utf-8",
+            )
+            for index in range(12):
+                (series / f"{run_id}_pose_{index:03d}.raw").touch()
+            (series / f"{run_id}_pose_011.ply").touch()
+
+            status = Scan360CaptureController._latest_completed_snapshot(project)
+
+        self.assertEqual(status["state"], "completed")
+        self.assertEqual(status["preview_project_id"], "project-id")
+        self.assertEqual(status["preview_subfolder"], run_id)
+        self.assertEqual(status["preview_file"], f"{run_id}_pose_011.ply")
+
     def test_fused_first_frame_cloud_becomes_project_preview(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

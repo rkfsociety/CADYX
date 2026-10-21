@@ -191,6 +191,8 @@ let folderFilesSignature = null;
 let fileListContextKey = null;
 let selectedFolderFileName = null;
 let selectedProjectScanRunId = null;
+let selectedProjectFileFolderName = null;
+let projectFileFolders = [];
 let selectedFolderFileGeometry = null;
 let projectModelFileImportInFlight = false;
 let folderListRequest = 0;
@@ -1339,6 +1341,7 @@ function resetFileList(contextKey) {
   fileListContextKey = contextKey;
   folderFiles = [];
   folderFilesSignature = null;
+  projectFileFolders = [];
   selectedFolderFileName = null;
   selectedFolderFileGeometry = null;
   folderListRequest++;
@@ -1355,8 +1358,9 @@ function resetFileList(contextKey) {
 }
 
 function fileContextPath(context) {
-  return context.type === "folder"
-    ? `/api/v1/workspace/folders/${encodeURIComponent(context.name)}/files`
+  if (context.type === "folder") return `/api/v1/workspace/folders/${encodeURIComponent(context.name)}/files`;
+  return context.folderName
+    ? `/api/v1/projects/${encodeURIComponent(context.id)}/folders/${encodeURIComponent(context.folderName)}/files`
     : `/api/v1/projects/${encodeURIComponent(context.id)}/files`;
 }
 
@@ -1365,6 +1369,7 @@ function isCurrentFileContext(context) {
     return activeFolderName === context.name && getSelectedFolder() === context.name;
   }
   return selectedProjectId === context.id && context.scanRunId === selectedProjectScanRunId
+    && (context.folderName || null) === selectedProjectFileFolderName
     && primaryGrid.dataset.view === "files" && canOpenFilesView(context.id);
 }
 
@@ -1373,7 +1378,9 @@ function showFolderLoadError(name, error) {
 }
 
 function showProjectFilesLoadError(projectId, error) {
-  showFileLoadError({ type: "project", id: projectId, scanRunId: selectedProjectScanRunId }, error);
+  showFileLoadError({ type: "project", id: projectId,
+    scanRunId: selectedProjectFileFolderName ? null : selectedProjectScanRunId,
+    folderName: selectedProjectFileFolderName }, error);
 }
 
 function showFileLoadError(context, error) {
@@ -1390,13 +1397,16 @@ async function loadFolderFiles(name) {
   return loadFiles({ type: "folder", name });
 }
 
-async function loadProjectFiles(projectId) {
-  return loadFiles({ type: "project", id: projectId, scanRunId: selectedProjectScanRunId });
+async function loadProjectFiles(projectId, folderName = selectedProjectFileFolderName) {
+  return loadFiles({ type: "project", id: projectId, scanRunId: folderName ? null : selectedProjectScanRunId,
+    folderName: folderName || null });
 }
 
 function openProjectFilesView() {
   const projectId = selectedProjectId;
   selectedProjectScanRunId = null;
+  selectedProjectFileFolderName = null;
+  projectFileFolders = [];
   $("#folder-files-title").textContent = "Файлы проекта";
   folderInspector.hidden = true;
   folderFileList.focus({ preventScroll: true });
@@ -1405,18 +1415,24 @@ function openProjectFilesView() {
 
 async function loadFiles(context) {
   const contextKey = context.type === "folder" ? `folder:${context.name}`
-    : `project:${context.id}${context.scanRunId ? `:scan:${context.scanRunId}` : ""}`;
+    : `project:${context.id}${context.folderName ? `:folder:${context.folderName}` : ""}${context.scanRunId ? `:scan:${context.scanRunId}` : ""}`;
   if (fileListContextKey !== contextKey) resetFileList(contextKey);
   const request = ++folderListRequest;
   const response = await api(fileContextPath(context));
   if (request !== folderListRequest || !isCurrentFileContext(context)) return;
-  const modelFiles = response.files.filter(is3dModelFile);
+  const modelFiles = context.type === "project" && context.folderName
+    ? response.files : response.files.filter(is3dModelFile);
+  const childFolders = context.type === "project" ? response.folders || [] : [];
   const previousSelection = folderFiles.find((file) => file.name === selectedFolderFileName);
-  const signature = JSON.stringify(modelFiles.map((file) => [file.name, file.size, file.modified_at_ns]));
+  const signature = JSON.stringify({
+    files: modelFiles.map((file) => [file.name, file.size, file.modified_at_ns]),
+    folders: childFolders.map((folder) => [folder.name, folder.modified_at_ns]),
+  });
   if (signature === folderFilesSignature) return;
   folderFilesSignature = signature;
   folderFiles = modelFiles;
-  $("#folder-file-count").textContent = String(folderFiles.length);
+  projectFileFolders = childFolders;
+  $("#folder-file-count").textContent = String(folderFiles.length + projectFileFolders.length);
   updateFolderInspector();
   renderFolderFiles();
   const selected = folderFiles.find((file) => file.name === selectedFolderFileName);
@@ -1427,7 +1443,7 @@ async function loadFiles(context) {
     }
     return;
   }
-  const visibleFiles = context.type === "project"
+  const visibleFiles = context.type === "project" && !context.folderName
     ? context.scanRunId ? filesForProjectScanRun(folderFiles, context.scanRunId)
       : folderFiles.filter((file) => !scanRunIdForFile(file.name))
     : folderFiles;
@@ -1436,12 +1452,12 @@ async function loadFiles(context) {
   else {
     selectedFolderFileName = null;
     updateFolderInspector();
-    const hasScanRuns = context.type === "project" && !context.scanRunId
-      && folderFiles.some((file) => scanRunIdForFile(file.name));
-    $("#folder-preview-title").textContent = hasScanRuns ? "Выберите серию сканирования" : "3D-файлов нет";
+    const hasScanRuns = context.type === "project" && !context.folderName && !context.scanRunId
+      && (projectFileFolders.length > 0 || folderFiles.some((file) => scanRunIdForFile(file.name)));
+    $("#folder-preview-title").textContent = hasScanRuns ? "Выберите папку серии сканирования" : "3D-файлов нет";
     $("#folder-preview-info").textContent = "";
     folderPreviewPlaceholder.hidden = false;
-    folderPreviewPlaceholder.textContent = hasScanRuns ? "Откройте папку серии в списке файлов, чтобы просмотреть её кадры."
+    folderPreviewPlaceholder.textContent = hasScanRuns ? "Откройте папку серии, чтобы увидеть сырые кадры, RGB и результаты."
       : context.type === "folder" ? "В этой папке пока нет файлов 3D-моделей."
         : "В этом проекте пока нет файлов 3D-моделей.";
   }
@@ -1453,27 +1469,56 @@ function renderFolderFiles() {
     ? document.activeElement.dataset.fileName : null;
   folderFileList.replaceChildren();
   const isProjectFileList = !getSelectedFolder() && primaryGrid.dataset.view === "files";
-  if (isProjectFileList && selectedProjectScanRunId) {
+  if (isProjectFileList && (selectedProjectScanRunId || selectedProjectFileFolderName)) {
     const back = document.createElement("button");
     back.type = "button";
     back.className = "folder-file-item folder-scan-back";
-    back.dataset.scanRunBack = "true";
-    back.innerHTML = `<span aria-hidden="true">‹</span><strong>Все файлы проекта</strong>`;
+    if (selectedProjectFileFolderName) {
+      back.dataset.projectFolderBack = "true";
+      const parent = selectedProjectFileFolderName.includes("/")
+        ? selectedProjectFileFolderName.slice(0, selectedProjectFileFolderName.lastIndexOf("/")) : "";
+      back.dataset.parentFolder = parent;
+      back.innerHTML = `<span aria-hidden="true">‹</span><strong>${parent ? parent.split("/").at(-1) : "Все файлы проекта"}</strong>`;
+    } else {
+      back.dataset.scanRunBack = "true";
+      back.innerHTML = `<span aria-hidden="true">‹</span><strong>Все файлы проекта</strong>`;
+    }
     folderFileList.append(back);
   }
-  const visibleFiles = isProjectFileList
+  const visibleFiles = isProjectFileList && !selectedProjectFileFolderName
     ? selectedProjectScanRunId ? filesForProjectScanRun(folderFiles, selectedProjectScanRunId)
       : folderFiles.filter((file) => !scanRunIdForFile(file.name))
     : folderFiles;
-  let folderCount = 0;
-  if (isProjectFileList && !selectedProjectScanRunId) {
+  const visibleFolders = selectedProjectScanRunId ? [] : projectFileFolders;
+  let folderCount = visibleFolders.length;
+  for (const folder of visibleFolders) {
+    const name = selectedProjectFileFolderName ? `${selectedProjectFileFolderName}/${folder.name}` : folder.name;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "folder-file-item folder-scan-run";
+    button.dataset.projectFolderName = name;
+    const scanLabel = scanRunLabel(folder.name);
+    const label = scanLabel.startsWith("Сканирование ·") ? scanLabel : folder.name;
+    button.setAttribute("aria-label", `${label}, папка`);
+    const icon = document.createElement("span");
+    icon.className = "folder-scan-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = "▰";
+    const title = document.createElement("strong");
+    title.textContent = label;
+    const detail = document.createElement("small");
+    detail.textContent = "Папка серии сканирования";
+    button.append(icon, title, detail);
+    folderFileList.append(button);
+  }
+  if (isProjectFileList && !selectedProjectScanRunId && !selectedProjectFileFolderName) {
     const scanRuns = new Map();
     for (const file of folderFiles) {
       const runId = scanRunIdForFile(file.name);
       if (runId) scanRuns.set(runId, (scanRuns.get(runId) || 0) + 1);
     }
     const sortedRuns = [...scanRuns].sort(([left], [right]) => right.localeCompare(left));
-    folderCount = sortedRuns.length;
+    folderCount += sortedRuns.length;
     for (const [runId, frameCount] of sortedRuns) {
       const button = document.createElement("button");
       button.type = "button";
@@ -1515,7 +1560,8 @@ function renderFolderFiles() {
 }
 
 function updateFolderInspector(file = folderFiles.find((item) => item.name === selectedFolderFileName) || null) {
-  $("#folder-inspector-count").textContent = `3D-ФАЙЛОВ: ${folderFiles.length}`;
+  $("#folder-inspector-count").textContent = selectedProjectFileFolderName
+    ? `ФАЙЛОВ: ${folderFiles.length}` : `3D-ФАЙЛОВ: ${folderFiles.length}`;
   $("#folder-model-file-count").textContent = String(folderFiles.length);
   $("#folder-inspector-file-name").textContent = file?.name || "Не выбран";
   $("#folder-inspector-file-size").textContent = file ? formatFileSize(file.size) : "—";
@@ -1528,7 +1574,7 @@ function updateProjectModelFileImportButton() {
   const file = folderFiles.find((item) => item.name === selectedFolderFileName) || null;
   const extension = file?.name.match(/\.([^.]+)$/)?.[1]?.toLowerCase();
   const supported = ["ply", "stl", "step", "stp"].includes(extension);
-  const isProjectImport = Boolean(selectedProjectId && !getSelectedFolder()
+  const isProjectImport = Boolean(selectedProjectId && !getSelectedFolder() && !selectedProjectFileFolderName
     && primaryGrid.dataset.view === "files" && supported);
   button.hidden = !isProjectImport;
   if (!isProjectImport) return;
@@ -1631,7 +1677,9 @@ async function previewFolderFile(folderName, file) {
 }
 
 async function previewProjectFile(projectId, file) {
-  return previewResourceFile({ type: "project", id: projectId, scanRunId: selectedProjectScanRunId }, file);
+  return previewResourceFile({ type: "project", id: projectId,
+    scanRunId: selectedProjectFileFolderName ? null : selectedProjectScanRunId,
+    folderName: selectedProjectFileFolderName }, file);
 }
 
 async function previewResourceFile(context, file) {
@@ -1753,7 +1801,11 @@ async function refreshWorkspacePass() {
     setWorkspaceNavigation("projects");
   }
   const selectionChanged = selectedProjectId !== previousSelection;
-  if (selectionChanged) selectedProjectScanRunId = null;
+  if (selectionChanged) {
+    selectedProjectScanRunId = null;
+    selectedProjectFileFolderName = null;
+    projectFileFolders = [];
+  }
   renderProjects();
   if (selectionChanged) {
     workspaceAvailabilityConnected = false;
@@ -2544,6 +2596,29 @@ function handleStreamEvent(type, event) {
 }
 
 folderFileList.addEventListener("click", (event) => {
+  const projectFolderBack = event.target.closest("button[data-project-folder-back]");
+  if (projectFolderBack && selectedProjectFileFolderName) {
+    selectedProjectFileFolderName = projectFolderBack.dataset.parentFolder || null;
+    selectedProjectScanRunId = null;
+    const currentName = selectedProjectFileFolderName?.split("/").at(-1);
+    const label = currentName ? scanRunLabel(currentName) : "Файлы проекта";
+    $("#folder-files-title").textContent = label.startsWith("Сканирование ·") ? label : currentName || label;
+    folderFileList.focus({ preventScroll: true });
+    loadProjectFiles(selectedProjectId).catch((error) => showProjectFilesLoadError(selectedProjectId, error));
+    return;
+  }
+  const projectFolderButton = event.target.closest("button[data-project-folder-name]");
+  if (projectFolderButton && primaryGrid.dataset.view === "files" && canOpenFilesView()) {
+    selectedProjectFileFolderName = projectFolderButton.dataset.projectFolderName;
+    selectedProjectScanRunId = null;
+    selectedFolderFileName = null;
+    const currentName = selectedProjectFileFolderName.split("/").at(-1);
+    const label = scanRunLabel(currentName);
+    $("#folder-files-title").textContent = label.startsWith("Сканирование ·") ? label : currentName;
+    folderFileList.focus({ preventScroll: true });
+    loadProjectFiles(selectedProjectId).catch((error) => showProjectFilesLoadError(selectedProjectId, error));
+    return;
+  }
   const backButton = event.target.closest("button[data-scan-run-back]");
   if (backButton && selectedProjectScanRunId) {
     selectedProjectScanRunId = null;

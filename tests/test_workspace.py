@@ -308,6 +308,26 @@ class ProjectWorkspaceTests(unittest.TestCase):
         self.assertEqual(files[0]["size"], len(b"step source"))
         self.assertIn("media_type", files[0])
 
+    def test_project_files_can_browse_nested_scan_series_without_following_links(self) -> None:
+        project = self.workspace.create("Continuous scan")
+        root = self.workspace._project_dir(project["id"])
+        series = root / "revopoint_20261021T103419Z"
+        depth = series / "depth_frames"
+        depth.mkdir(parents=True)
+        (series / "capture_manifest.json").write_text("{}", encoding="utf-8")
+        (depth / "frame_00000.raw").write_bytes(b"Y16")
+
+        self.assertEqual([item["name"] for item in self.workspace.list_project_folders(project["id"])],
+                         [series.name])
+        self.assertEqual([item["name"] for item in self.workspace.list_project_subfolder_files(
+            project["id"], series.name)], ["capture_manifest.json"])
+        self.assertEqual([item["name"] for item in self.workspace.list_project_subfolders(
+            project["id"], series.name)], ["depth_frames"])
+        self.assertEqual(self.workspace.resolve_project_subfolder_file(
+            project["id"], f"{series.name}/depth_frames", "frame_00000.raw"), depth / "frame_00000.raw")
+        with self.assertRaises(NotFoundError):
+            self.workspace.list_project_subfolder_files(project["id"], f"{series.name}/../outside")
+
 
 if __name__ == "__main__":
     unittest.main()

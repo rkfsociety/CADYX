@@ -22,7 +22,7 @@ class WorkspaceArtifactStore:
         files: list[dict[str, Any]] = []
         for entry in folder.iterdir():
             if (
-                entry.name.startswith(".cadyx-tmp-")
+                entry.name.startswith(".cadyx-")
                 or self._is_internal_file(folder, entry.name)
                 or entry.is_symlink()
                 or not entry.is_file()
@@ -76,6 +76,55 @@ class WorkspaceArtifactStore:
             )
         files.sort(key=lambda item: item["name"].casefold())
         return files
+
+    @staticmethod
+    def list_project_folders(directory: Path) -> list[dict[str, Any]]:
+        folders: list[dict[str, Any]] = []
+        for entry in directory.iterdir():
+            if entry.name.startswith(".") or entry.is_symlink() or not entry.is_dir():
+                continue
+            try:
+                resolved = entry.resolve(strict=True)
+                if resolved.parent != directory:
+                    continue
+                stat = resolved.stat()
+            except OSError:
+                continue
+            folders.append({"name": entry.name, "modified_at_ns": str(stat.st_mtime_ns)})
+        folders.sort(key=lambda item: item["name"].casefold())
+        return folders
+
+    @staticmethod
+    def _project_subfolder(directory: Path, folder_name: str) -> Path:
+        if not isinstance(folder_name, str) or "\x00" in folder_name or ":" in folder_name:
+            raise NotFoundError("Project folder was not found.")
+        parts = folder_name.replace("\\", "/").split("/")
+        if not parts or any(part in {"", ".", ".."} or part.startswith(".") for part in parts):
+            raise NotFoundError("Project folder was not found.")
+        current = directory
+        for part in parts:
+            if not _is_single_path_segment(part):
+                raise NotFoundError("Project folder was not found.")
+            folder = current / part
+            if folder.is_symlink() or not folder.is_dir():
+                raise NotFoundError("Project folder was not found.")
+            try:
+                resolved = folder.resolve(strict=True)
+            except OSError as exc:
+                raise NotFoundError("Project folder was not found.") from exc
+            if resolved.parent != current:
+                raise NotFoundError("Project folder was not found.")
+            current = resolved
+        return current
+
+    def list_project_subfolder_files(self, directory: Path, folder_name: str) -> list[dict[str, Any]]:
+        return self.list_folder_files(self._project_subfolder(directory, folder_name))
+
+    def list_project_subfolders(self, directory: Path, folder_name: str) -> list[dict[str, Any]]:
+        return self.list_project_folders(self._project_subfolder(directory, folder_name))
+
+    def resolve_project_subfolder_file(self, directory: Path, folder_name: str, file_name: str) -> Path:
+        return self.resolve_folder_file(self._project_subfolder(directory, folder_name), file_name)
 
     @staticmethod
     def copy_project_files(

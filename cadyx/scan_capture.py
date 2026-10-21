@@ -421,7 +421,12 @@ class Scan360CaptureController:
                 raise ConflictError("The scanner is already capturing a 360 scan for another project.", code="SCANNER_BUSY")
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             run_id = f"revopoint_{stamp}"
-            log_path = project_directory / f".cadyx-scan360-{stamp}.log"
+            run_directory = project_directory / run_id
+            try:
+                run_directory.mkdir()
+            except FileExistsError as exc:
+                raise ConflictError("A scan series folder already exists; no files were replaced.", code="SCAN_LOG_EXISTS") from exc
+            log_path = run_directory / f".cadyx-scan360-{stamp}.log"
             startup_info = subprocess.STARTUPINFO()
             startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startup_info.wShowWindow = subprocess.SW_HIDE
@@ -619,7 +624,8 @@ class Scan360CaptureController:
             "message": message,
         }
         snapshot.update(self._preview_payload(
-            self._job.project_directory, self._job.run_id, completed,
+            self._run_directory(self._job.project_directory, self._job.run_id),
+            self._job.run_id, completed,
         ))
         snapshot["table_alignment_status"] = self._alignment_status(
             self._job.project_directory, self._job.run_id,
@@ -636,7 +642,8 @@ class Scan360CaptureController:
 
     @staticmethod
     def _alignment_status(project_directory: Path, run_id: str) -> str:
-        result_path = project_directory / f"{run_id}_table_alignment.json"
+        run_directory = Scan360CaptureController._run_directory(project_directory, run_id)
+        result_path = run_directory / f"{run_id}_table_alignment.json"
         try:
             result = json.loads(result_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -645,28 +652,43 @@ class Scan360CaptureController:
 
     @staticmethod
     def _count_run_frames(project_directory: Path, run_id: str) -> int:
+        run_directory = Scan360CaptureController._run_directory(project_directory, run_id)
         return sum(1 for index in range(_FRAME_COUNT)
-                   if (project_directory / f"{run_id}_pose_{index:03d}.raw").is_file()
-                   or (project_directory / f"{run_id}_pose_pose_{index:03d}.raw").is_file())
+                   if (run_directory / f"{run_id}_pose_{index:03d}.raw").is_file()
+                   or (run_directory / f"{run_id}_pose_pose_{index:03d}.raw").is_file())
+
+    @staticmethod
+    def _run_directory(project_directory: Path, run_id: str) -> Path:
+        run_directory = project_directory / run_id
+        return run_directory if run_directory.is_dir() else project_directory
 
     @classmethod
     def _latest_completed_snapshot(cls, project_directory: Path) -> dict[str, Any]:
-        captures = sorted(project_directory.glob("revopoint_*_poses.csv"), key=lambda path: path.stat().st_mtime_ns, reverse=True)
+        captures = sorted(
+            (*project_directory.glob("revopoint_*_poses.csv"),
+             *project_directory.glob("revopoint_*/revopoint_*_poses.csv")),
+            key=lambda path: path.stat().st_mtime_ns,
+            reverse=True,
+        )
         for pose_log in captures:
             match = re.fullmatch(r"(revopoint_\d{8}T\d{6}Z)_poses\.csv", pose_log.name)
             if not match:
                 continue
             run_id = match.group(1)
-            completed = cls._count_run_frames(project_directory, run_id)
+            run_directory = pose_log.parent
+            completed = cls._count_run_frames(run_directory, run_id)
             stamp = run_id.removeprefix("revopoint_")
-            scan_log = project_directory / f".cadyx-scan360-{stamp}.log"
+            run_directory = pose_log.parent
+            scan_log = run_directory / f".cadyx-scan360-{stamp}.log"
+            if not scan_log.is_file():
+                scan_log = project_directory / f".cadyx-scan360-{stamp}.log"
             try:
                 completed_turn = "sweep completed: 12 steps" in scan_log.read_bytes().decode("utf-8", errors="replace").lower()
             except OSError:
                 completed_turn = False
             if completed == _FRAME_COUNT and completed_turn:
-                manifest = project_directory / f"{run_id}_scan_360.json"
-                alignment_status = cls._alignment_status(project_directory, run_id)
+                manifest = run_directory / f"{run_id}_scan_360.json"
+                alignment_status = cls._alignment_status(run_directory, run_id)
                 try:
                     log_text = scan_log.read_bytes().decode("utf-8", errors="replace").lower()
                 except OSError:
@@ -695,12 +717,24 @@ class Scan360CaptureController:
                     "frame_count": _FRAME_COUNT,
                     "message": message,
                     "table_alignment_status": "failed" if alignment_failed else alignment_status,
-                    **cls._preview_payload(project_directory, run_id, completed),
+                    **cls._preview_payload(run_directory, run_id, completed),
                 }
         return {"state": "idle", "completed_frames": 0, "frame_count": _FRAME_COUNT}
 
     @classmethod
     def _preview_payload(cls, project_directory: Path, run_id: str, completed: int) -> dict[str, str | int]:
+        project_root = project_directory.parent if project_directory.name == run_id else project_directory
+        series_name = project_directory.name if project_directory.name == run_id else None
+        relative_series = series_name or ""
+        try:
+            project_record = json.loads((project_root / "project.json").read_text(encoding="utf-8"))
+            project_id = project_record.get("id")
+            project_name = project_record.get("name")
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            project_id = None
+            project_name = None
+        project_context = {"preview_project_id": project_id} if isinstance(project_id, str) else {}
+        preview_folder = project_name if series_name and isinstance(project_name, str) else project_root.name
         if completed > 0:
             index = min(completed, _FRAME_COUNT) - 1
             alignment = project_directory / f"{run_id}_table_alignment.json"
@@ -713,7 +747,9 @@ class Scan360CaptureController:
                     aligned_name = f"{run_id}_pose_{aligned_index:03d}_table_aligned.ply"
                     if (project_directory / aligned_name).is_file():
                         return {
-                            "preview_folder": project_directory.name,
+                            "preview_folder": preview_folder,
+                            **project_context,
+                            **({"preview_subfolder": relative_series} if relative_series else {}),
                             "preview_file": aligned_name,
                             "preview_kind": "table_aligned",
                             "preview_frame_count": _FRAME_COUNT,
@@ -726,7 +762,9 @@ class Scan360CaptureController:
             origin_name = next((name for name in (f"{run_id}_pose_000.ply", f"{run_id}_pose_pose_000.ply")
                                 if (project_directory / name).is_file()), None)
             return {
-                "preview_folder": project_directory.name,
+                "preview_folder": preview_folder,
+                **project_context,
+                **({"preview_subfolder": relative_series} if relative_series else {}),
                 "preview_file": fused_name,
                 "preview_kind": "provisional_fusion",
                 "preview_frame_count": _FRAME_COUNT,
@@ -737,7 +775,9 @@ class Scan360CaptureController:
             for name in (f"{run_id}_pose_{index:03d}.ply", f"{run_id}_pose_pose_{index:03d}.ply"):
                 if (project_directory / name).is_file():
                     return {
-                        "preview_folder": project_directory.name,
+                        "preview_folder": preview_folder,
+                        **project_context,
+                        **({"preview_subfolder": relative_series} if relative_series else {}),
                         "preview_file": name,
                         "preview_kind": "single",
                         "preview_frame_count": _FRAME_COUNT,

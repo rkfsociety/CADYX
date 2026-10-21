@@ -81,9 +81,23 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
 } else {
     throw 'RunId must use the CADYX revopoint_YYYYMMDDTHHMMSSZ identifier format.'
 }
-$projectCalibration = Join-Path $ProjectPath "${runPrefix}_Q.bin"
-$projectDepthScale = Join-Path $ProjectPath "${runPrefix}_depth_scale.json"
-$projectMarkerMap = Join-Path $ProjectPath "${runPrefix}_table_marker_map.mkf"
+$runDirectory = Join-Path $ProjectPath $runPrefix
+if (-not $ManifestOnly) {
+    if (Test-Path -LiteralPath $runDirectory) {
+        $expectedLog = ".cadyx-scan360-$runId.log"
+        $existingEntries = @(Get-ChildItem -LiteralPath $runDirectory -Force)
+        if ($existingEntries.Count -gt 1 -or
+            ($existingEntries.Count -eq 1 -and $existingEntries[0].Name -ne $expectedLog)) {
+            throw "Scan series folder already contains data; refusing to overwrite: $runDirectory"
+        }
+    }
+} elseif (-not (Test-Path -LiteralPath $runDirectory -PathType Container)) {
+    # Keep manifest repair compatible with scans captured before per-series folders existed.
+    $runDirectory = $ProjectPath
+}
+$projectCalibration = Join-Path $runDirectory "${runPrefix}_Q.bin"
+$projectDepthScale = Join-Path $runDirectory "${runPrefix}_depth_scale.json"
+$projectMarkerMap = Join-Path $runDirectory "${runPrefix}_table_marker_map.mkf"
 if ($ManifestOnly) {
     foreach ($path in @($projectCalibration, $projectDepthScale)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -99,6 +113,9 @@ if ($ManifestOnly) {
     if (Test-Path -LiteralPath $projectCalibration) { throw "Calibration copy already exists: $projectCalibration" }
     if (Test-Path -LiteralPath $projectDepthScale) { throw "Depth-scale copy already exists: $projectDepthScale" }
     if (Test-Path -LiteralPath $projectMarkerMap) { throw "Table-map copy already exists: $projectMarkerMap" }
+    if (-not (Test-Path -LiteralPath $runDirectory -PathType Container)) {
+        New-Item -ItemType Directory -Path $runDirectory | Out-Null
+    }
     [IO.File]::Copy($CalibrationFile, $projectCalibration, $false)
     [IO.File]::Copy($TurntableMarkerMap, $projectMarkerMap, $false)
     $selectedDepthScale = [ordered]@{
@@ -132,14 +149,14 @@ function Read-ReportedAngle {
     return [double]::Parse($match.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
 }
 
-$poseLog = Join-Path $ProjectPath "${runPrefix}_poses.csv"
-$prefix = Join-Path $ProjectPath $runPrefix
+$poseLog = Join-Path $runDirectory "${runPrefix}_poses.csv"
+$prefix = Join-Path $runDirectory $runPrefix
 $liveRaw = Join-Path $workspaceRoot '.revopoint-live.raw'
 if ($ManifestOnly) {
     if (-not (Test-Path -LiteralPath $poseLog -PathType Leaf)) {
         throw "Manifest-only repair requires the existing pose log: $poseLog"
     }
-    $manifestPath = Join-Path $ProjectPath "${runPrefix}_scan_360.json"
+    $manifestPath = Join-Path $runDirectory "${runPrefix}_scan_360.json"
     if (Test-Path -LiteralPath $manifestPath) {
         throw "Manifest already exists; refusing to overwrite: $manifestPath"
     }
@@ -167,18 +184,18 @@ if ($ManifestOnly) {
         }
     }
     $frames = @()
-    $alignmentPath = Join-Path $ProjectPath "${runPrefix}_table_alignment.json"
+    $alignmentPath = Join-Path $runDirectory "${runPrefix}_table_alignment.json"
     try { $alignmentResult = Get-Content -LiteralPath $alignmentPath -Raw | ConvertFrom-Json }
     catch { $alignmentResult = $null }
     foreach ($capture in $captures) {
         $prefixName = [IO.Path]::GetFileName([string]$capture.command)
         foreach ($extension in @('.raw', '.ply', '.json')) {
-            if (-not (Test-Path -LiteralPath (Join-Path $ProjectPath ($prefixName + $extension)) -PathType Leaf)) {
+            if (-not (Test-Path -LiteralPath (Join-Path $runDirectory ($prefixName + $extension)) -PathType Leaf)) {
                 throw "Capture $($capture.step_index) is missing $($prefixName + $extension); no manifest was written."
             }
         }
         $alignedName = "${prefixName}_table_aligned.ply"
-        $aligned = Test-Path -LiteralPath (Join-Path $ProjectPath $alignedName) -PathType Leaf
+        $aligned = Test-Path -LiteralPath (Join-Path $runDirectory $alignedName) -PathType Leaf
         $frames += [pscustomobject]@{
             index = [int]$capture.step_index
             commanded_angle_degrees = [int]$capture.step_index * 30
@@ -236,22 +253,22 @@ try {
         $TurntableServiceUuid, $TurntableCharacteristicUuid
     ) | Out-Null
 
-    & $PythonExecutable $alignmentScript --project $ProjectPath --run-id $runPrefix `
+    & $PythonExecutable $alignmentScript --project $runDirectory --run-id $runPrefix `
         --marker-map $projectMarkerMap --calibration-file $projectCalibration --depth-scale $DepthScale
     if ($LASTEXITCODE -ne 0) {
         throw 'Table-map alignment failed; the original RAW and PLY capture frames were preserved.'
     }
 
-    $alignmentPath = Join-Path $ProjectPath "${runPrefix}_table_alignment.json"
+    $alignmentPath = Join-Path $runDirectory "${runPrefix}_table_alignment.json"
     $alignmentResult = Get-Content -LiteralPath $alignmentPath -Raw | ConvertFrom-Json
     $frames = @()
     for ($index = 0; $index -lt 12; $index++) {
         $prefixName = '{0}_pose_{1:D3}' -f $runPrefix, $index
-        if (-not (Test-Path -LiteralPath (Join-Path $ProjectPath "$prefixName.raw") -PathType Leaf)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $runDirectory "$prefixName.raw") -PathType Leaf)) {
             $prefixName = '{0}_pose_pose_{1:D3}' -f $runPrefix, $index
         }
         $alignedName = '{0}_pose_{1:D3}_table_aligned.ply' -f $runPrefix, $index
-        $alignedPath = Join-Path $ProjectPath $alignedName
+        $alignedPath = Join-Path $runDirectory $alignedName
         $isAligned = Test-Path -LiteralPath $alignedPath -PathType Leaf
         $frames += [pscustomobject]@{
             index = $index
@@ -282,7 +299,7 @@ try {
         frame_registration = 'table markers when four or more reliable correspondences are visible; unresolved frames stay in source coordinates'
         frames = $frames
     }
-    $manifestPath = Join-Path $ProjectPath "${runPrefix}_scan_360.json"
+    $manifestPath = Join-Path $runDirectory "${runPrefix}_scan_360.json"
     $manifestJson = $manifest | ConvertTo-Json -Depth 6
     [IO.File]::WriteAllText($manifestPath, $manifestJson, [Text.UTF8Encoding]::new($false))
     $complete = $true

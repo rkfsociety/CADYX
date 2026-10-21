@@ -268,6 +268,10 @@
       if (!folder || !file) return null;
       url.searchParams.set('folder', folder);
       url.searchParams.set('file', file);
+      if (scan?.preview_project_id && scan.preview_subfolder) {
+        url.searchParams.set('project_id', scan.preview_project_id);
+        url.searchParams.set('subfolder', scan.preview_subfolder);
+      }
       return url.href;
     };
     const originUrl = scan => {
@@ -278,6 +282,10 @@
       const url = new URL('/api/v1/scanner/point-cloud', location.origin);
       url.searchParams.set('folder', folder);
       url.searchParams.set('file', file);
+      if (scan?.preview_project_id && scan.preview_subfolder) {
+        url.searchParams.set('project_id', scan.preview_project_id);
+        url.searchParams.set('subfolder', scan.preview_subfolder);
+      }
       return url.href;
     };
     const projectPointCloudUrl = async () => {

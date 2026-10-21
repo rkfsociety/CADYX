@@ -129,6 +129,18 @@ internal static class Program
                     throw new ArgumentException("sweep cannot command more than 360 degrees of total rotation.");
                 monitorPath = args[3];
             }
+            else if (operation == "continuous-turn")
+            {
+                if ((args.Length != 2 && args.Length != 7) || String.IsNullOrWhiteSpace(args[1]))
+                    throw new ArgumentException("continuous-turn requires a telemetry CSV path and optional turntable profile parameters.");
+                degrees = 360.0;
+                monitorPath = args[1];
+                if (args.Length == 7)
+                {
+                    turntableAddress = args[2]; turntableName = args[3];
+                    advertisementUuid = args[4]; serviceUuid = args[5]; characteristicUuid = args[6];
+                }
+            }
             else if (operation == "capture-sweep")
             {
                 double expectedTilt, depthScale;
@@ -163,7 +175,7 @@ internal static class Program
             {
                 throw new ArgumentException("query, zero and stop do not accept extra arguments.");
             }
-            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed" && operation != "tilt" && operation != "monitor" && operation != "sweep" && operation != "capture-sweep")
+            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed" && operation != "tilt" && operation != "monitor" && operation != "sweep" && operation != "continuous-turn" && operation != "capture-sweep")
             {
                 throw new ArgumentException("Operation must be query, zero, stop, speed, tilt, monitor, sweep, capture-sweep, or rotate.");
             }
@@ -191,6 +203,7 @@ internal static class Program
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv>");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv> <rotate-delay-seconds> <degrees>");
         Console.WriteLine("TurntableController.exe sweep <steps> <degrees-per-step> <output.csv>   (one BLE connection; each step is verified before the next)");
+        Console.WriteLine("TurntableController.exe continuous-turn <output.csv> [address name advertisement-uuid service-uuid characteristic-uuid]   (one uninterrupted 360-degree move; requires live Y16 and RGB capture)");
         Console.WriteLine("TurntableController.exe capture-sweep <steps> <degrees-per-step> <tilt> <poses.csv> <CaptureY16.exe> <output-prefix> <Q.bin> <depth-scale> <live.raw> <scanner-id> <table-address> <table-name> <advertisement-uuid> <service-uuid> <characteristic-uuid>");
         Console.WriteLine("The app does not pair the turntable. It discovers the BLE device by its advertised FFE1 service,\n" +
                           "then confirms the GATT device name before sending any command.");
@@ -214,15 +227,38 @@ internal static class Program
             throw new InvalidOperationException("Turntable motion is blocked while scanner processes are active: " + String.Join(", ", active) + ". Stop and disconnect the scanner before moving the table.");
     }
 
+    private static void EnsureContinuousCaptureActive()
+    {
+        string[] unsafeProcesses = { "RevoScan", "RevoScan5", "RevoAssistant" };
+        Process[] running = Process.GetProcesses();
+        string[] names;
+        try
+        {
+            names = running.Select(process => process.ProcessName).ToArray();
+        }
+        finally
+        {
+            foreach (Process process in running) process.Dispose();
+        }
+        string[] activeVendor = names.Where(name => unsafeProcesses.Contains(name, StringComparer.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (activeVendor.Length > 0)
+            throw new InvalidOperationException("Continuous table motion cannot run alongside vendor scanner software: " + String.Join(", ", activeVendor) + ".");
+        if (!names.Any(name => String.Equals(name, "CaptureY16", StringComparison.OrdinalIgnoreCase)) ||
+            !names.Any(name => String.Equals(name, "CaptureRgb", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Continuous table motion requires active CaptureY16 live preview and CaptureRgb acquisition.");
+    }
+
     private static async Task<int> RunAsync(string operation, double degrees, double rotationPeriod,
                                             int monitorSeconds, string monitorPath, int rotateAfterSeconds,
                                             int sweepSteps, ScanCaptureOptions scanCapture,
                                             string turntableAddress, string turntableName,
                                             string advertisementUuid, string serviceUuid, string characteristicUuid)
     {
-        bool motionRequested = operation == "rotate" || operation == "sweep" || operation == "capture-sweep" ||
+        bool motionRequested = operation == "rotate" || operation == "sweep" || operation == "capture-sweep" || operation == "continuous-turn" ||
             operation == "tilt" || operation == "zero" || (operation == "monitor" && rotateAfterSeconds >= 0);
-        if (motionRequested) EnsureScannerDisconnected();
+        if (operation == "continuous-turn") EnsureContinuousCaptureActive();
+        else if (motionRequested) EnsureScannerDisconnected();
         using (Connection connection = await ConnectAsync(
             scanCapture != null ? scanCapture.TurntableAddress : turntableAddress,
             scanCapture != null ? scanCapture.TurntableName : turntableName,
@@ -277,6 +313,116 @@ internal static class Program
                         }
                         await Task.Delay(50);
                     }
+                }
+                return 0;
+            }
+
+            if (operation == "continuous-turn")
+            {
+                string fullPath = System.IO.Path.GetFullPath(monitorPath);
+                if (System.IO.File.Exists(fullPath))
+                    throw new InvalidOperationException("Continuous-turn output already exists; refusing to overwrite: " + fullPath);
+                string directory = System.IO.Path.GetDirectoryName(fullPath);
+                if (!String.IsNullOrEmpty(directory)) System.IO.Directory.CreateDirectory(directory);
+                using (var writer = new System.IO.StreamWriter(fullPath, false, new UTF8Encoding(false)))
+                {
+                    writer.WriteLine("utc,elapsed_seconds,angle_degrees,tilt_degrees,unwrapped_degrees,event,rotation_response,tilt_response");
+                    string angleText = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
+                    string tiltText = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
+                    double baselineAngle, baselineTilt;
+                    if (!TryAngle(angleText, out baselineAngle) || !TryAngle(tiltText, out baselineTilt))
+                        throw new InvalidOperationException("Could not read both table axes; no full-turn command was sent.");
+                    if (Math.Abs(baselineTilt) > 0.5)
+                        throw new InvalidOperationException("Continuous rotation requires the table tilt to be zero.");
+
+                    var turnTimer = Stopwatch.StartNew();
+                    DateTime startedUtc = DateTime.UtcNow;
+                    writer.WriteLine(String.Join(",", new[] {
+                        startedUtc.ToString("o", CultureInfo.InvariantCulture), "0.000",
+                        baselineAngle.ToString("F2", CultureInfo.InvariantCulture),
+                        baselineTilt.ToString("F2", CultureInfo.InvariantCulture), "0.000", "baseline",
+                        Csv(angleText), Csv(tiltText),
+                    }));
+                    writer.Flush();
+                    Console.WriteLine("continuous full turn baseline: angle=" + baselineAngle.ToString("F1", CultureInfo.InvariantCulture) +
+                                      " deg, tilt=" + baselineTilt.ToString("F1", CultureInfo.InvariantCulture));
+                    string command = "+CT,TURNANGLE=360;";
+                    string commandReply = await SendAndReadAsync(connection, command);
+                    writer.WriteLine(String.Join(",", new[] {
+                        DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture), turnTimer.Elapsed.TotalSeconds.ToString("F3", CultureInfo.InvariantCulture),
+                        baselineAngle.ToString("F2", CultureInfo.InvariantCulture), baselineTilt.ToString("F2", CultureInfo.InvariantCulture),
+                        "0.000", "command_sent", Csv(command), Csv(commandReply),
+                    }));
+                    writer.Flush();
+                    if (commandReply.IndexOf("ERR", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        commandReply.IndexOf("FAIL", StringComparison.OrdinalIgnoreCase) >= 0)
+                        throw new InvalidOperationException("Turntable rejected the full-turn command: " + commandReply);
+                    Console.WriteLine(command + " => " + commandReply);
+
+                    double previousAngle = baselineAngle;
+                    double unwrapped = 0;
+                    double currentAngle = baselineAngle;
+                    double currentTilt = baselineTilt;
+                    DateTime turnDeadline = DateTime.UtcNow.AddSeconds(120);
+                    bool completed = false;
+                    int stableAfterFullTurn = 0;
+                    while (DateTime.UtcNow < turnDeadline)
+                    {
+                        string rotationResponse = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
+                        string currentTiltText = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
+                        DateTime observedUtc = DateTime.UtcNow;
+                        if (!TryAngle(rotationResponse, out currentAngle) || !TryAngle(currentTiltText, out currentTilt))
+                        {
+                            writer.WriteLine(String.Join(",", new[] {
+                                observedUtc.ToString("o", CultureInfo.InvariantCulture), turnTimer.Elapsed.TotalSeconds.ToString("F3", CultureInfo.InvariantCulture),
+                                "", "", unwrapped.ToString("F2", CultureInfo.InvariantCulture), "unreadable_telemetry",
+                                Csv(rotationResponse), Csv(currentTiltText),
+                            }));
+                            writer.Flush();
+                            await Task.Delay(50);
+                            continue;
+                        }
+
+                        double delta = currentAngle - previousAngle;
+                        if (delta > 180.0) delta -= 360.0;
+                        else if (delta < -180.0) delta += 360.0;
+                        unwrapped += delta;
+                        previousAngle = currentAngle;
+                        bool nearFullTurn = Math.Abs(Math.Abs(unwrapped) - 360.0) <= 5.0;
+                        stableAfterFullTurn = nearFullTurn && Math.Abs(delta) <= 0.2 ? stableAfterFullTurn + 1 : 0;
+                        string eventName = stableAfterFullTurn >= 2 ? "target_reached" : "telemetry";
+                        writer.WriteLine(String.Join(",", new[] {
+                            observedUtc.ToString("o", CultureInfo.InvariantCulture), turnTimer.Elapsed.TotalSeconds.ToString("F3", CultureInfo.InvariantCulture),
+                            currentAngle.ToString("F2", CultureInfo.InvariantCulture), currentTilt.ToString("F2", CultureInfo.InvariantCulture),
+                            unwrapped.ToString("F2", CultureInfo.InvariantCulture), eventName, Csv(rotationResponse), Csv(currentTiltText),
+                        }));
+                        writer.Flush();
+
+                        if (Math.Abs(currentTilt - baselineTilt) > 0.5)
+                        {
+                            await SendAndReadAsync(connection, "+CT,STOP;");
+                            throw new InvalidOperationException("Turntable tilt changed during continuous rotation; rotation was stopped.");
+                        }
+                        if (stableAfterFullTurn >= 2)
+                        {
+                            completed = true;
+                            break;
+                        }
+                        await Task.Delay(50);
+                    }
+
+                    if (!completed)
+                    {
+                        await SendAndReadAsync(connection, "+CT,STOP;");
+                        throw new InvalidOperationException("Full-turn telemetry timed out; a stop command was sent.");
+                    }
+                    double closure = SignedAngleDelta(baselineAngle, currentAngle);
+                    if (Math.Abs(closure) > 2.0 || Math.Abs(Math.Abs(unwrapped) - 360.0) > 3.0)
+                        throw new InvalidOperationException("Full-turn closure failed: unwrapped=" + unwrapped.ToString("F2", CultureInfo.InvariantCulture) +
+                            " deg, modulo closure=" + closure.ToString("F2", CultureInfo.InvariantCulture) + " deg.");
+                    Console.WriteLine("continuous turn completed: " + unwrapped.ToString("F1", CultureInfo.InvariantCulture) +
+                                      " deg, closure=" + closure.ToString("F1", CultureInfo.InvariantCulture) + " deg, elapsed=" +
+                                      turnTimer.Elapsed.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + " s");
                 }
                 return 0;
             }

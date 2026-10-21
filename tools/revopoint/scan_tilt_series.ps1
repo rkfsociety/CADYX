@@ -42,7 +42,18 @@ if ($busy) { throw "Scanner/table software is already using the hardware: $($bus
 
 $runId = $RunId
 if ($runId -notmatch '^[0-9]{8}T[0-9]{6}Z$') { throw 'RunId must use the UTC form yyyyMMddTHHmmssZ.' }
-$manifestPath = Join-Path $ProjectPath "revopoint_scan_$runId.json"
+$seriesDirectory = Join-Path $ProjectPath "revopoint_$runId"
+if (Test-Path -LiteralPath $seriesDirectory -PathType Leaf) {
+    throw "Scan series path is not a directory: $seriesDirectory"
+}
+if (-not (Test-Path -LiteralPath $seriesDirectory -PathType Container)) {
+    New-Item -ItemType Directory -Path $seriesDirectory | Out-Null
+}
+$manifestPath = Join-Path $seriesDirectory "capture_manifest.json"
+$seriesEntries = @(Get-ChildItem -LiteralPath $seriesDirectory -Force)
+if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -and $seriesEntries.Count -gt 0) {
+    throw "Existing scan series folder has files but no resumable manifest; refusing to overwrite: $seriesDirectory"
+}
 $tiltPasses = @(
     [pscustomobject]@{ degrees = 0; key = 'p000' },
     [pscustomobject]@{ degrees = 5; key = 'p005' },
@@ -148,7 +159,7 @@ try {
     foreach ($pass in $tiltPasses) {
         $tilt = [double]$pass.degrees
         $key = [string]$pass.key
-        $prefix = Join-Path $ProjectPath "revopoint_${runId}_tilt_${key}"
+        $prefix = Join-Path $seriesDirectory "revopoint_${runId}_tilt_${key}"
         $poseCsv = "${prefix}_poses.csv"
         if (Test-Path -LiteralPath $poseCsv) {
             $captureRows = @(Get-ValidatedCaptureRows -PoseCsv $poseCsv -ExpectedTilt $tilt)

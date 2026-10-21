@@ -75,6 +75,8 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/projects/{project_id}/viewport/snapshot", "project_viewport_snapshot", "viewport", "png"),
     RouteSpec("GET", "/api/v1/projects/{project_id}/files", "project_files", "files"),
     RouteSpec("GET", "/api/v1/projects/{project_id}/files/{filename}", "project_file", "files"),
+    RouteSpec("GET", "/api/v1/projects/{project_id}/folders/{folder_name}/files", "project_subfolder_files", "files"),
+    RouteSpec("GET", "/api/v1/projects/{project_id}/folders/{folder_name}/files/{filename}", "project_subfolder_file", "files"),
     RouteSpec("POST", "/api/v1/projects/{project_id}/group", "project_group_assign", "project", "json"),
     RouteSpec("POST", "/api/v1/projects/{project_id}/leases", "project_lease", "project", "json"),
     RouteSpec("POST", "/api/v1/projects/{project_id}/commands", "project_command", "project", "json"),
@@ -318,9 +320,23 @@ def _resolve_scanner_point_cloud(core: CadyxCore, query_string: str) -> tuple[Pa
             not folder_values[0].strip() or not file_values[0].strip()):
         raise ValidationError("Point-cloud preview requires one workspace folder and PLY filename.")
     folder, filename = folder_values[0], file_values[0]
+    project_values, subfolder_values = query.get("project_id", []), query.get("subfolder", [])
+    if len(project_values) > 1 or len(subfolder_values) > 1:
+        raise ValidationError("Point-cloud preview accepts at most one project id and subfolder.")
     if Path(filename).name != filename or Path(filename).suffix.casefold() != ".ply":
         raise ValidationError("Point-cloud preview requires a direct PLY filename.")
-    source = core.workspace.resolve_folder_file(folder, filename)
+    if project_values:
+        if not subfolder_values or not subfolder_values[0].strip():
+            raise ValidationError("Project point-cloud preview requires its scan-series subfolder.")
+        project_id = project_values[0]
+        project = core.workspace.load(project_id, include_history=False)
+        if project["name"] != folder:
+            raise ValidationError("Point-cloud preview project folder does not match the selected project.")
+        source = core.workspace.resolve_project_subfolder_file(project_id, subfolder_values[0], filename)
+    elif subfolder_values:
+        raise ValidationError("Point-cloud preview subfolder requires a project id.")
+    else:
+        source = core.workspace.resolve_folder_file(folder, filename)
     if source.stat().st_size > 32 * 1024 * 1024:
         raise ValidationError("Point-cloud preview PLY exceeds the 32 MiB display limit.")
     try:
@@ -470,7 +486,17 @@ def _dispatch_files(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         handler._json(200, {"files": core.workspace.list_folder_files(unquote(route.params["folder"]))})
     elif name == "folder_file":
         handler._binary_file(core.workspace.resolve_folder_file(unquote(route.params["folder"]), filename))
-    elif name in {"project_files", "agent_project_files"}:
+    elif name == "project_files":
+        handler._json(200, {"files": core.workspace.list_project_files(project_id),
+                            "folders": core.workspace.list_project_folders(project_id)})
+    elif name == "project_subfolder_files":
+        folder_name = unquote(route.params["folder_name"])
+        handler._json(200, {"files": core.workspace.list_project_subfolder_files(project_id, folder_name),
+                            "folders": core.workspace.list_project_subfolders(project_id, folder_name)})
+    elif name == "project_subfolder_file":
+        handler._binary_file(core.workspace.resolve_project_subfolder_file(
+            project_id, unquote(route.params["folder_name"]), filename))
+    elif name == "agent_project_files":
         handler._json(200, {"files": core.workspace.list_project_files(project_id)})
     elif name in {"project_file", "agent_project_file"}:
         handler._binary_file(core.workspace.resolve_project_file(project_id, filename))
