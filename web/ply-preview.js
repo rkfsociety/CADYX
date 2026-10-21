@@ -1205,6 +1205,10 @@ function formatFileSize(size) {
   return `${numberFormat.format(size / (1024 * 1024))} МБ`;
 }
 
+function is3dModelFile(file) {
+  return /\.(ply|stl|step|stp)$/i.test(file.name);
+}
+
 function resetFileList(contextKey) {
   fileListContextKey = contextKey;
   folderFiles = [];
@@ -1269,11 +1273,12 @@ async function loadFiles(context) {
   const request = ++folderListRequest;
   const response = await api(fileContextPath(context));
   if (request !== folderListRequest || !isCurrentFileContext(context)) return;
+  const modelFiles = response.files.filter(is3dModelFile);
   const previousSelection = folderFiles.find((file) => file.name === selectedFolderFileName);
-  const signature = JSON.stringify(response.files.map((file) => [file.name, file.size, file.modified_at_ns]));
+  const signature = JSON.stringify(modelFiles.map((file) => [file.name, file.size, file.modified_at_ns]));
   if (signature === folderFilesSignature) return;
   folderFilesSignature = signature;
-  folderFiles = response.files;
+  folderFiles = modelFiles;
   $("#folder-file-count").textContent = String(folderFiles.length);
   updateFolderInspector();
   renderFolderFiles();
@@ -1290,11 +1295,12 @@ async function loadFiles(context) {
   else {
     selectedFolderFileName = null;
     updateFolderInspector();
-    $("#folder-preview-title").textContent = "Файлов нет";
+    $("#folder-preview-title").textContent = "3D-файлов нет";
     $("#folder-preview-info").textContent = "";
     folderPreviewPlaceholder.hidden = false;
     folderPreviewPlaceholder.textContent = context.type === "folder"
-      ? "В этой папке пока нет файлов." : "В этом проекте пока нет файлов.";
+      ? "В этой папке пока нет файлов 3D-моделей."
+      : "В этом проекте пока нет файлов 3D-моделей.";
   }
 }
 
@@ -1317,10 +1323,8 @@ function renderFolderFiles() {
 }
 
 function updateFolderInspector(file = folderFiles.find((item) => item.name === selectedFolderFileName) || null) {
-  $("#folder-inspector-count").textContent = `ФАЙЛОВ: ${folderFiles.length}`;
-  $("#folder-model-file-count").textContent = String(
-    folderFiles.filter((item) => /\.(ply|stl|step|stp)$/i.test(item.name)).length,
-  );
+  $("#folder-inspector-count").textContent = `3D-ФАЙЛОВ: ${folderFiles.length}`;
+  $("#folder-model-file-count").textContent = String(folderFiles.length);
   $("#folder-inspector-file-name").textContent = file?.name || "Не выбран";
   $("#folder-inspector-file-size").textContent = file ? formatFileSize(file.size) : "—";
   const extension = file?.name.match(/\.([^.]+)$/)?.[1];
