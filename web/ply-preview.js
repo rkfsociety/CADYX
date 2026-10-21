@@ -232,7 +232,8 @@ const initialAddress = new URLSearchParams(window.location.search);
 const initialProjectPath = /^\/p\/[^/]+\/?$/.test(window.location.pathname);
 let projectAddressPinned = (initialAddress.has("project_id") || initialAddress.has("folder") || initialProjectPath)
   && initialAddress.get("view") !== "projects";
-const projectsChooserPinned = initialAddress.get("view") === "projects";
+const projectsChooserPinned = !projectAddressPinned;
+let projectCreationPending = false;
 let workspaceSelectionRestoreAttempted = !projectAddressPinned || initialAddress.get("view") === "projects";
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
@@ -349,6 +350,8 @@ function setWorkspaceNavigation(view) {
     else item.removeAttribute("aria-current");
   });
 }
+
+setWorkspaceNavigation(projectsChooserPinned ? "projects" : "overview");
 
 $("#open-projects").addEventListener("click", () => {
   projectDetail.hidden = false;
@@ -790,6 +793,36 @@ async function navigateToWorkspaceProject(projectId, projectName) {
     notify(`Не удалось открыть проект: ${error.message}`, true);
   }
 }
+
+$("#create-project").addEventListener("click", () => {
+  $("#new-project-name").value = "";
+  $("#create-project-error").hidden = true;
+  $("#create-project-dialog").showModal();
+  $("#new-project-name").focus();
+});
+$("#cancel-create-project").addEventListener("click", () => $("#create-project-dialog").close());
+$("#create-project-dialog").addEventListener("cancel", (event) => {
+  if (projectCreationPending) event.preventDefault();
+});
+$("#create-project-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("#new-project-name").value.trim();
+  if (!name || projectCreationPending) return;
+  projectCreationPending = true;
+  const controls = [$("#new-project-name"), $("#cancel-create-project"), $("#submit-create-project")];
+  controls.forEach((control) => { control.disabled = true; });
+  $("#create-project-error").hidden = true;
+  try {
+    const result = await api("/api/v1/projects", { method: "POST", body: JSON.stringify({ name }) });
+    window.location.assign(`/?project_id=${encodeURIComponent(result.project.id)}`);
+  } catch (error) {
+    $("#create-project-error").textContent = `Не удалось создать проект: ${error.message}`;
+    $("#create-project-error").hidden = false;
+  } finally {
+    projectCreationPending = false;
+    controls.forEach((control) => { control.disabled = false; });
+  }
+});
 
 $("#create-project-group").addEventListener("click", () => {
   const dialog = $("#project-group-dialog");
@@ -2211,6 +2244,7 @@ function animateModelCamera(change) {
 }
 
 function handleStreamEvent(type, event) {
+  if (type === "project.created" && projectCreationPending) return;
   if (type === "workspace.selection.changed" && (projectAddressPinned || projectsChooserPinned)) return;
   const projectId = event.project_id;
   if (type === "workspace.selection.changed" || type === "project.created") {

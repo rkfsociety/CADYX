@@ -131,6 +131,77 @@ const jsonResponse = (status, value) => ({
 });
 
 setImmediate(async () => {
+  // Exercise the actual form handlers without starting the viewport or touching saved projects.
+  const source = fs.readFileSync(path.join(__dirname, "../web/ply-preview.js"), "utf8");
+  const startupSource = source.slice(source.indexOf("const initialAddress ="), source.indexOf("const primaryGrid ="));
+  for (const [url, chooser] of [
+    ["http://localhost/", true],
+    ["http://localhost/?view=projects", true],
+    ["http://localhost/p/housing", false],
+    ["http://localhost/?project_id=saved-project", false],
+    ["http://localhost/?folder=scans", false],
+  ]) {
+    assert.equal(vm.runInNewContext(`${startupSource}\nprojectsChooserPinned`, {
+      URLSearchParams, window: { location: new URL(url) },
+    }), chooser, url);
+  }
+  const elements = new Map();
+  const element = (id) => {
+    if (!elements.has(id)) elements.set(id, {
+      value: "", hidden: false, disabled: false, handlers: {},
+      addEventListener(type, callback) { this.handlers[type] = callback; },
+      showModal() { this.open = true; }, close() { this.open = false; }, focus() {},
+    });
+    return elements.get(id);
+  };
+  const requests = [];
+  const navigations = [];
+  let completeRequest;
+  const formSandbox = {
+    $: element, encodeURIComponent,
+    window: { location: { assign: (url) => navigations.push(url) } },
+    api: (url, options) => {
+      requests.push({ url, options });
+      return new Promise((resolve, reject) => { completeRequest = { resolve, reject }; });
+    },
+  };
+  vm.runInNewContext(`let projectCreationPending = false;\n${source.slice(
+    source.indexOf('$("#create-project").addEventListener'),
+    source.indexOf('$("#create-project-group").addEventListener'),
+  )}`, formSandbox);
+  const submit = () => element("#create-project-form").handlers.submit({ preventDefault() {} });
+  element("#create-project").handlers.click();
+  assert.equal(element("#create-project-dialog").open, true);
+  element("#cancel-create-project").handlers.click();
+  assert.equal(element("#create-project-dialog").open, false);
+  element("#new-project-name").value = "   ";
+  await submit();
+  assert.equal(requests.length, 0);
+  element("#create-project").handlers.click();
+  element("#new-project-name").value = "  Новый корпус  ";
+  const pending = submit();
+  await submit();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "/api/v1/projects");
+  assert.equal(requests[0].options.method, "POST");
+  assert.equal(JSON.parse(requests[0].options.body).name, "Новый корпус");
+  assert.equal(element("#submit-create-project").disabled, true);
+  let cancelPrevented = false;
+  element("#create-project-dialog").handlers.cancel({ preventDefault() { cancelPrevented = true; } });
+  assert.equal(cancelPrevented, true);
+  completeRequest.reject(new Error("Нет связи"));
+  await pending;
+  assert.equal(element("#new-project-name").value, "  Новый корпус  ");
+  assert.equal(element("#create-project-dialog").open, true);
+  assert.equal(element("#create-project-error").hidden, false);
+  assert.match(element("#create-project-error").textContent, /Нет связи/);
+  assert.equal(element("#submit-create-project").disabled, false);
+  const retry = submit();
+  completeRequest.resolve({ project: { id: "new-project" } });
+  await retry;
+  assert.deepEqual(navigations, ["/?project_id=new-project"]);
+  assert.equal(element("#create-project-error").hidden, true);
+
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(captures, 1);
   assert.equal(publishes, 1);

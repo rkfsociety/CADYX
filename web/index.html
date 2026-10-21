@@ -646,14 +646,14 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 
     <div class="app-shell">
       <main class="workspace">
-        <section id="no-selection" class="empty-workspace">
+        <section id="no-selection" class="empty-workspace" hidden>
           <div class="empty-mark" aria-hidden="true">◇</div>
           <h1>Ожидание модели</h1>
           <p>Выберите проект, чтобы открыть его модель.</p>
           <button id="open-projects" class="button" type="button">ВЫБРАТЬ ПРОЕКТ</button>
         </section>
 
-        <div id="project-detail" class="project-detail" hidden>
+        <div id="project-detail" class="project-detail">
           <aside class="section-sidebar">
             <div class="sidebar-heading"><p class="section-label">РАБОЧАЯ ОБЛАСТЬ</p><h2>Навигация</h2></div>
             <nav id="workspace-navigation" class="workspace-navigation" aria-label="Рабочая область">
@@ -669,7 +669,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
           </aside>
 
           <div class="project-main">
-            <div id="primary-grid" class="primary-grid" data-view="overview">
+            <div id="primary-grid" class="primary-grid" data-view="projects">
               <section class="panel model-panel" aria-labelledby="model-title">
                 <div class="panel-heading viewport-heading">
                   <div><h2 id="model-title">3D-МОДЕЛЬ</h2><span class="viewport-mode">ОРТОГОНАЛЬНАЯ ПРОЕКЦИЯ</span></div>
@@ -730,13 +730,14 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 
               <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" tabindex="-1"><div class="panel-heading"><h2 id="comparison-title">СРАВНЕНИЕ С ОРИГИНАЛОМ</h2><span id="comparison-metrics" class="panel-note"></span></div><div class="comparison-stage"><p id="comparison-description" class="comparison-description" hidden>Оригинал показан контуром · результат — поверхностью.</p><p id="comparison-empty" class="comparison-empty">Для этого проекта пока нет данных сравнения.</p><canvas id="comparison-preview" class="comparison-preview" aria-label="Совмещённые оригинал и изменённая модель" hidden></canvas></div><section class="validation-records" aria-labelledby="validation-records-title"><div class="validation-records-heading"><h3 id="validation-records-title">СОХРАНЁННЫЕ ПРОВЕРКИ</h3><span id="validation-records-status" role="status" aria-live="polite"></span><span id="validation-records-count">0</span></div><div id="validation-records-list" class="validation-records-list" role="list" aria-label="Результаты инженерных проверок"><p id="validation-records-empty" class="validation-records-empty">Сохранённых результатов пока нет.</p></div></section></section>
               <section id="manufacturing-panel" class="panel manufacturing-panel" aria-labelledby="manufacturing-title" hidden><div class="panel-heading"><h2 id="manufacturing-title">ПОДГОТОВКА ПРОИЗВОДСТВА</h2></div><div class="manufacturing-empty"><span class="empty-cube" aria-hidden="true">⌁</span><p>Данные для производства пока не подготовлены.</p><small>Для этого проекта пока нет траекторий инструмента или плана обработки.</small></div></section>
-              <section id="projects-panel" class="panel projects-panel" data-layout="grid" aria-labelledby="projects-title" hidden>
+              <section id="projects-panel" class="panel projects-panel" data-layout="grid" aria-labelledby="projects-title">
                 <div class="projects-page-heading">
                   <div class="projects-title-block"><span class="projects-eyebrow">Проекты</span><h2 id="projects-title">Все проекты <span id="projects-count" class="projects-count">0</span></h2></div>
                   <div class="projects-toolbar">
                     <label class="visually-hidden" for="projects-search">Поиск проектов</label><input id="projects-search" type="search" placeholder="Поиск проектов…" autocomplete="off">
                     <label for="projects-sort">Сортировка:</label><select id="projects-sort" aria-label="Сортировка проектов"><option value="name">Имя</option><option value="modified-desc" selected>Изменение ↓</option><option value="modified-asc">Изменение ↑</option></select>
                     <div class="projects-layout-toggle" role="group" aria-label="Вид проектов"><button id="projects-grid-view" class="projects-layout-button" type="button" aria-label="Показать сеткой" aria-pressed="true" title="Сетка"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></button><button id="projects-list-view" class="projects-layout-button" type="button" aria-label="Показать списком" aria-pressed="false" title="Список"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h11M9 12h11M9 19h11M4 5h.01M4 12h.01M4 19h.01"/></svg></button></div>
+                    <button id="create-project" class="button" type="button" data-project-navigation="true">Новый проект</button>
                     <button id="create-project-group" class="button projects-create-group" type="button">Новая папка</button>
                   </div>
                 </div>
@@ -751,6 +752,15 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 
     <dialog id="project-group-dialog" class="project-group-dialog" aria-labelledby="project-group-dialog-title"><form id="project-group-form"><h2 id="project-group-dialog-title">НОВАЯ ПАПКА ПРОЕКТОВ</h2><label for="project-group-name">Название папки</label><input id="project-group-name" name="name" type="text" maxlength="80" required autocomplete="off"><div class="project-group-dialog-actions"><button id="cancel-project-group" class="button" type="button">ОТМЕНА</button><button class="button" type="submit">СОЗДАТЬ</button></div></form></dialog>
 
+    <dialog id="create-project-dialog" class="project-group-dialog" aria-labelledby="create-project-title">
+      <form id="create-project-form">
+        <h2 id="create-project-title">НОВЫЙ ПРОЕКТ</h2>
+        <label for="new-project-name">Название проекта</label>
+        <input id="new-project-name" name="name" type="text" required autocomplete="off">
+        <p id="create-project-error" role="alert" hidden></p>
+        <div class="project-group-dialog-actions"><button id="cancel-create-project" class="button" type="button">ОТМЕНА</button><button id="submit-create-project" class="button" type="submit">СОЗДАТЬ</button></div>
+      </form>
+    </dialog>
     <p id="toast" class="toast" role="status" aria-live="polite"></p>
     <script src="/assets/viewport.js" defer></script>
     <script src="/assets/ply-parser.js" defer></script>

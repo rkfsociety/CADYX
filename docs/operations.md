@@ -19,6 +19,8 @@ Run setup again after moving the checkout (the embedded Python import path is lo
 
 Open <http://127.0.0.1:8888>. Port `8888` is the default; to use another port or workspace, pass `--port` / `--projects-dir`, or set `CADYX_PORT`, `CADYX_HOST`, and `CADYX_PROJECTS_DIR`. The default host is loopback and remains usable without HTTP authentication. A non-loopback bind is refused unless an authentication token is configured.
 
+The home page opens the project list. Click “Новый проект”, enter a name and click “Создать” to save and open an empty project. Errors keep the entered name in the dialog and display the failure. Direct `/p/<slug>` links still open the selected model.
+
 ## Authentication and LAN access
 
 CADYX treats LAN exposure as an explicit authenticated mode. Configure one reusable token of at least 32 non-whitespace characters through `CADYX_AUTH_TOKEN`, or store it in a UTF-8 file and pass `--auth-token-file` (or set `CADYX_AUTH_TOKEN_FILE`). Do not configure both sources. For example, in PowerShell:
