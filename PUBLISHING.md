@@ -19,7 +19,7 @@
 
 ### Текущее состояние (2026-10-21)
 
-- `rkfsociety/CADYX` имеет видимость **public**, Wiki включена. Переводы документации опубликованы в `main` (`b7fafe1`); двуязычная Wiki опубликована в `master` репозитория Wiki (`0cedf95`).
+- `rkfsociety/CADYX` имеет видимость **public**, Wiki включена. Документационные RU/EN-переводы публикуются в `main`; двуязычная Wiki доступна в `master` репозитория Wiki. Не все спецификации уже переведены, незавершённые страницы помечены.
 - Проверенный после этих изменений [запуск CI 39560320922](https://github.com/rkfsociety/CADYX/actions/runs/39560320922) завершился ошибкой в source-job на статической проверке mypy legacy-error baseline; Windows-job был пропущен. Это не является успешной проверкой нативной сборки или тестов.
 - На момент последней проверки GitHub Releases отсутствовали. Права на распространение файлов калибровки из установки Revo Scan по-прежнему не подтверждены.
 - Этот обзор не включает отдельную проверку полной истории репозитория, секретов или всех сторонних материалов.
@@ -56,7 +56,7 @@ This is a historical snapshot. Refresh all evidence against the exact revision p
 
 ## Current state (2026-10-21)
 
-- `rkfsociety/CADYX` is **public** and GitHub Wiki is enabled. Documentation translations were pushed to `main` (`b7fafe1`); the bilingual Wiki was pushed to its `master` branch (`0cedf95`).
+- `rkfsociety/CADYX` is **public** and GitHub Wiki is enabled. RU/EN documentation translations are maintained in `main`; the bilingual Wiki is published from its `master` branch. Not all specifications are translated yet; incomplete pages are marked.
 - The latest inspected Actions [run 39560320922](https://github.com/rkfsociety/CADYX/actions/runs/39560320922), after those changes, failed in the source job during the mypy legacy-error baseline check. The Windows job was skipped. This does not establish successful native build or tests.
 - No GitHub Releases were present at the latest check. Redistribution rights for calibration files copied from Revo Scan remain unverified.
 - This status update did not audit the full repository history, secrets, or all third-party material.
