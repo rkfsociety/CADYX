@@ -269,6 +269,10 @@ button.object-row.selected { border-color: #9b6038; background: #ff874012; }
 .folder-files-layout { display: grid; height: 100%; min-height: 0; grid-template-columns: clamp(320px, 28vw, 420px) minmax(0, 1fr); }
 .folder-file-list { display: grid; align-content: start; gap: 4px; min-height: 0; max-height: 650px; overflow-y: auto; padding: 8px; border-right: 1px solid var(--line-soft); }
 .folder-file-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 42px; padding: 7px 9px; border: 1px solid transparent; border-radius: 4px; background: transparent; text-align: left; cursor: pointer; }
+.folder-scan-run { grid-template-columns: 18px minmax(0, 1fr) auto; }
+.folder-scan-icon, .folder-scan-back > span { color: var(--accent); font-size: 14px; text-align: center; }
+.folder-scan-back { grid-template-columns: 18px minmax(0, 1fr); color: var(--muted); }
+.folder-scan-back > span { font-size: 19px; line-height: 1; }
 .folder-file-item:hover { background: var(--surface-soft); }
 .folder-file-item.selected { border-color: #9b6038; background: #ff874012; }
 .folder-file-item strong { overflow: hidden; color: var(--text); font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
