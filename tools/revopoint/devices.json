@@ -1,0 +1,22 @@
+{
+  "format": "cadyx-revopoint-device-catalog-v1",
+  "scanners": [
+    {
+      "id": "revopoint-mini-y16",
+      "name": "Revopoint MINI",
+      "friendly_name_prefix": "DepthCam",
+      "capture_protocol": "media-foundation-y16"
+    }
+  ],
+  "turntables": [
+    {
+      "id": "revopoint-dual-axis-table",
+      "name": "Revopoint Dual-axis Turntable",
+      "gatt_name": "REVO_DUAL_AXIS_TABLE",
+      "advertisement_uuid": "0000FFE1-0000-1000-8000-00805F9B34FB",
+      "service_uuid": "0000FFE0-0000-1000-8000-00805F9B34FB",
+      "characteristic_uuid": "0000FFE1-0000-1000-8000-00805F9B34FB",
+      "control_protocol": "revopoint-dual-axis-v1"
+    }
+  ]
+}

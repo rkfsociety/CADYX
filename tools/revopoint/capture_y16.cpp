@@ -36,6 +36,8 @@ struct Options {
     std::filesystem::path live_raw_path;
     std::filesystem::path ready_file;
     std::filesystem::path stop_file;
+    std::wstring device_id;
+    bool list_devices = false;
     bool list_modes = false;
     bool measure_only = false;
     bool live_only = false;
@@ -91,6 +93,8 @@ void PrintUsage() {
               << "       Optional --ready-file PATH is created after the first valid frame is received.\n"
               << "       Optional --stop-file PATH ends a burst after the next valid frame.\n"
               << "       CaptureY16.exe --list-modes\n"
+              << "       CaptureY16.exe --list-devices\n"
+              << "       Optional --device-id SYMBOLIC_LINK selects one enumerated camera.\n"
               << "Depth scale converts each uint16 sample to millimeters; supply the local device value from calibration/depth_scale.json.\n";
 }
 
@@ -103,6 +107,7 @@ Options ParseOptions(int argc, wchar_t** argv) {
             std::exit(0);
         }
         if (argument == L"--list-modes") { options.list_modes = true; continue; }
+        if (argument == L"--list-devices") { options.list_devices = true; continue; }
         if (argument == L"--measure-only") { options.measure_only = true; continue; }
         if (argument == L"--live-only") { options.live_only = true; continue; }
         if (i + 1 >= argc) {
@@ -137,11 +142,13 @@ Options ParseOptions(int argc, wchar_t** argv) {
             options.ready_file = value;
         } else if (argument == L"--stop-file") {
             options.stop_file = value;
+        } else if (argument == L"--device-id") {
+            options.device_id = value;
         } else {
             throw std::runtime_error("Unknown command-line option.");
         }
     }
-    if (options.list_modes) return options;
+    if (options.list_modes || options.list_devices) return options;
     if (options.live_only) {
         if (options.live_raw_path.empty() || options.stop_file.empty() || options.measure_only ||
             options.width != 640 || options.height != 400 ||
@@ -163,8 +170,46 @@ Options ParseOptions(int argc, wchar_t** argv) {
 }
 
 bool IsY16(REFGUID subtype);
-ComPtr<IMFActivate> FindDepthCamera();
+ComPtr<IMFActivate> FindDepthCamera(const std::wstring& device_id);
 std::wstring GetFriendlyName(IMFActivate* activation);
+std::wstring GetSymbolicLink(IMFActivate* activation);
+
+std::string ToUtf8(const std::wstring& value) {
+    if (value.empty()) return {};
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+                                         nullptr, 0, nullptr, nullptr);
+    if (size <= 0) throw std::runtime_error("Could not encode camera information as UTF-8.");
+    std::string result(static_cast<std::size_t>(size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+                        result.data(), size, nullptr, nullptr);
+    return result;
+}
+
+void ListVideoDevices() {
+    ComPtr<IMFAttributes> attributes;
+    CheckHr(MFCreateAttributes(&attributes, 1), "Create camera-list attributes");
+    CheckHr(attributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+                                MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID),
+            "Set video-capture source type");
+    IMFActivate** devices = nullptr;
+    UINT32 count = 0;
+    CheckHr(MFEnumDeviceSources(attributes.Get(), &devices, &count), "Enumerate video cameras");
+    try {
+        for (UINT32 i = 0; i < count; ++i) {
+            const std::string id = ToUtf8(GetSymbolicLink(devices[i]));
+            const std::string name = ToUtf8(GetFriendlyName(devices[i]));
+            if (id.find_first_of("\t\r\n") != std::string::npos || name.find_first_of("\t\r\n") != std::string::npos)
+                continue;
+            std::cout << id << '\t' << name << '\n';
+        }
+    } catch (...) {
+        for (UINT32 i = 0; i < count; ++i) if (devices[i]) devices[i]->Release();
+        CoTaskMemFree(devices);
+        throw;
+    }
+    for (UINT32 i = 0; i < count; ++i) if (devices[i]) devices[i]->Release();
+    CoTaskMemFree(devices);
+}
 
 void ListNativeModes() {
     ComPtr<IMFAttributes> attributes;
@@ -230,7 +275,17 @@ std::wstring GetFriendlyName(IMFActivate* activation) {
     return result;
 }
 
-ComPtr<IMFActivate> FindDepthCamera() {
+std::wstring GetSymbolicLink(IMFActivate* activation) {
+    WCHAR* link = nullptr;
+    UINT32 length = 0;
+    CheckHr(activation->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
+                                           &link, &length), "Get camera symbolic link");
+    std::wstring result(link, length);
+    CoTaskMemFree(link);
+    return result;
+}
+
+ComPtr<IMFActivate> FindDepthCamera(const std::wstring& device_id) {
     ComPtr<IMFAttributes> attributes;
     CheckHr(MFCreateAttributes(&attributes, 1), "MFCreateAttributes");
     CheckHr(attributes->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
@@ -245,9 +300,11 @@ ComPtr<IMFActivate> FindDepthCamera() {
     for (UINT32 i = 0; i < count; ++i) {
         try {
             const std::wstring name = GetFriendlyName(devices[i]);
-            if (name.rfind(L"DepthCam", 0) == 0) {
+            const std::wstring symbolic_link = GetSymbolicLink(devices[i]);
+            if ((!device_id.empty() && symbolic_link == device_id) ||
+                (device_id.empty() && name.rfind(L"DepthCam", 0) == 0)) {
                 if (selected) {
-                    throw std::runtime_error("More than one DepthCam is present; disconnect extras before capture.");
+                    throw std::runtime_error("More than one matching camera is present; choose a specific device.");
                 }
                 selected.Attach(devices[i]);
                 devices[i] = nullptr;
@@ -271,7 +328,9 @@ ComPtr<IMFActivate> FindDepthCamera() {
     CoTaskMemFree(devices);
 
     if (!selected) {
-        throw std::runtime_error("No UVC camera whose name starts with DepthCam was found.");
+        throw std::runtime_error(device_id.empty()
+            ? "No UVC camera whose name starts with DepthCam was found."
+            : "The selected UVC camera is no longer connected.");
     }
     std::wcout << L"Camera: " << selected_name << L"\n";
     return selected;
@@ -287,9 +346,10 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
                                                         const std::filesystem::path& live_raw_path,
                                                         const std::filesystem::path& ready_file,
                                                         const std::filesystem::path& stop_file,
+                                                        const std::wstring& device_id,
                                                         bool live_only,
                                                         std::size_t& captured_frame_count) {
-    ComPtr<IMFActivate> activation = FindDepthCamera();
+    ComPtr<IMFActivate> activation = FindDepthCamera(device_id);
     ComPtr<IMFMediaSource> source;
     CheckHr(activation->ActivateObject(IID_PPV_ARGS(&source)), "Activate depth camera");
 
@@ -582,6 +642,7 @@ int wmain(int argc, wchar_t** argv) {
         if (!options.stop_file.empty() && std::filesystem::exists(options.stop_file))
             throw std::runtime_error("Stop signal already exists; refusing to start a stopped capture.");
         MediaFoundationRuntime runtime;
+        if (options.list_devices) { ListVideoDevices(); return 0; }
         if (options.list_modes) { ListNativeModes(); return 0; }
         std::array<double, 16> q{};
         if (!options.measure_only && !options.live_only) q = ReadQMatrix(options.q_file);
@@ -596,7 +657,7 @@ int wmain(int argc, wchar_t** argv) {
                                              options.width, options.height, timestamps, utc_epoch_us,
                                              sample_flags, empty_sample_flags, null_sample_count,
                                              options.live_raw_path, options.ready_file, options.stop_file,
-                                             options.live_only, captured_frame_count);
+                                             options.device_id, options.live_only, captured_frame_count);
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         if (options.live_only) {
             std::cout << "Live-only preview ended after " << captured_frame_count << " frames. No scan files were saved.\n";

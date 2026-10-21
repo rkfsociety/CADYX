@@ -43,7 +43,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 }
 .topbar-start { grid-area: brand; padding-right: 22px; border-right: 1px solid var(--line); }
 .topbar-project { grid-area: project; position: relative; gap: 22px; padding-left: 22px; border: 0; }
-.topbar-sync { grid-area: sync; width: 28px; justify-content: center; gap: 0; margin-left: 12px; padding: 0; border: 0; }
+.topbar-sync { grid-area: sync; width: auto; min-width: 0; justify-content: flex-end; gap: 12px; margin-left: 12px; padding: 0; border: 0; }
 .brand {
   color: var(--accent);
   font-size: 27px;
@@ -631,6 +631,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
           <span id="api-status-label" class="topbar-label">СВЯЗЬ С СЕРВЕРОМ…</span>
           <strong id="api-sync-time" class="document-title">—</strong>
         </div>
+        <button id="device-settings-open" class="device-settings-open" type="button" aria-haspopup="dialog" aria-controls="device-settings-dialog" title="Настройки сканера и стола"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z M19 12l2-1-2-3-2 .5-1.5-1L15 5H9l-.5 2.5-1.5 1L5 8l-2 3 2 1v2l-2 1 2 3 2-.5 1.5 1L9 21h6l.5-2.5 1.5-1 2 .5 2-3-2-1v-2Z"/></svg><span>Устройства</span></button>
       </div>
       <div class="topbar-project">
         <span id="project-light" class="project-light" aria-hidden="true"></span>
@@ -766,11 +767,37 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
         <div class="project-group-dialog-actions"><button id="cancel-create-project" class="button" type="button">ОТМЕНА</button><button id="submit-create-project" class="button" type="submit">СОЗДАТЬ</button></div>
       </form>
     </dialog>
+    <dialog id="device-settings-dialog" class="device-settings-dialog" aria-labelledby="device-settings-title">
+      <div class="device-settings-shell">
+        <header class="device-settings-heading"><div><span class="device-settings-kicker">ОБОРУДОВАНИЕ</span><h2 id="device-settings-title">Сканер и поворотный стол</h2></div><button id="device-settings-close" class="device-settings-close" type="button" aria-label="Закрыть настройки">×</button></header>
+        <div class="device-settings-tabs" role="tablist" aria-label="Выбрать устройство для настройки">
+          <button id="device-tab-scanner" class="device-settings-tab" type="button" role="tab" aria-selected="true" aria-controls="device-panel-scanner" data-device-tab="scanner">Сканер</button>
+          <button id="device-tab-turntable" class="device-settings-tab" type="button" role="tab" aria-selected="false" aria-controls="device-panel-turntable" data-device-tab="turntable">Стол</button>
+        </div>
+        <section id="device-panel-scanner" class="device-settings-panel" role="tabpanel" aria-labelledby="device-tab-scanner" data-device-panel="scanner">
+          <label class="device-settings-field" for="scanner-device-select">Подключённый USB-сканер</label>
+          <select id="scanner-device-select" class="device-settings-select"><option value="">Нажмите «Обновить список»</option></select>
+          <p class="device-settings-note">Для разных сканеров требуется отдельная калибровка Q.bin и масштаба глубины.</p>
+          <label class="device-settings-field" for="scanner-q-matrix">Калибровка выбранного сканера · Q.bin</label>
+          <input id="scanner-q-matrix" class="device-settings-file" type="file" accept=".bin,application/octet-stream">
+          <label class="device-settings-field" for="scanner-depth-scale">Масштаб глубины (мм на единицу Y16)</label>
+          <input id="scanner-depth-scale" class="device-settings-number" type="number" min="0.0000001" step="any" inputmode="decimal" placeholder="Введите значение из калибровки">
+        </section>
+        <section id="device-panel-turntable" class="device-settings-panel" role="tabpanel" aria-labelledby="device-tab-turntable" data-device-panel="turntable" hidden>
+          <label class="device-settings-field" for="turntable-device-select">Подключённый стол Bluetooth LE</label>
+          <select id="turntable-device-select" class="device-settings-select"><option value="">Нажмите «Обновить список»</option></select>
+          <label class="device-settings-field" for="turntable-rotation-period">Период полного оборота</label>
+          <div class="device-settings-control"><select id="turntable-rotation-period"><option value="18">18 с · максимум</option><option value="30">30 с</option><option value="45">45 с</option><option value="60">60 с</option><option value="90">90 с · минимум</option></select><span>Меньше секунд — быстрее вращение.</span></div>
+        </section>
+        <footer class="device-settings-footer"><span id="device-settings-status" role="status" aria-live="polite"></span><div><button id="device-settings-refresh" class="button" type="button">ОБНОВИТЬ СПИСОК</button><button id="device-settings-save" class="button" type="button">СОХРАНИТЬ</button></div></footer>
+      </div>
+    </dialog>
     <p id="toast" class="toast" role="status" aria-live="polite"></p>
     <script src="/assets/viewport.js" defer></script>
     <script src="/assets/ply-parser.js" defer></script>
     <script src="/assets/ply-preview.js" defer></script>
     <script src="/assets/scan-view.js" defer></script>
+    <script src="/assets/device-settings.js" defer></script>
     <script src="/assets/app.js" defer></script>
     <script id="cadyx-cad-reference-script">
 window.addEventListener("DOMContentLoaded", () => {

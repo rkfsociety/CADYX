@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import math
+import base64
 import json
+import math
 import os
 import struct
 import subprocess
@@ -52,6 +53,8 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/workspace/folders/{folder}/files", "folder_files", "files"),
     RouteSpec("GET", "/api/v1/workspace/folders/{folder}/files/{filename}", "folder_file", "files"),
     RouteSpec("GET", "/api/v1/scanner/live-frame", "scanner_live_frame", "scanner"),
+    RouteSpec("GET", "/api/v1/scanner/devices", "scanner_devices", "scanner"),
+    RouteSpec("POST", "/api/v1/scanner/calibration", "scanner_calibration_save", "scanner", "json"),
     RouteSpec("GET", "/api/v1/scanner/live-preview", "scanner_live_preview_status", "scanner"),
     RouteSpec("POST", "/api/v1/scanner/live-preview", "scanner_live_preview_start", "scanner", "json"),
     RouteSpec("DELETE", "/api/v1/scanner/live-preview", "scanner_live_preview_stop", "scanner"),
@@ -140,6 +143,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/assets/ply-parser.js", "asset_ply_parser", "static"),
     RouteSpec("GET", "/assets/ply-preview.js", "asset_ply_preview", "static"),
     RouteSpec("GET", "/assets/scan-view.js", "asset_scan_view", "static"),
+    RouteSpec("GET", "/assets/device-settings.js", "asset_device_settings", "static"),
     RouteSpec("GET", "/assets/style.css", "asset_style", "static"),
 )
 
@@ -333,14 +337,38 @@ def _resolve_scanner_point_cloud(core: CadyxCore, query_string: str) -> tuple[Pa
 
 
 def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: SplitResult) -> None:
+    if route.spec.name == "scanner_devices":
+        handler._json(200, core.scanner_devices())
+        return
+    if route.spec.name == "scanner_calibration_save":
+        body = _require_json(handler)
+        if set(body) != {"scanner_device_id", "q_matrix_base64", "depth_scale_mm_per_raw_unit"}:
+            raise ValidationError("Scanner calibration requires a device ID, Q matrix and depth scale.")
+        device_id = body["scanner_device_id"]
+        encoded_matrix = body["q_matrix_base64"]
+        depth_scale = body["depth_scale_mm_per_raw_unit"]
+        if not isinstance(device_id, str) or not isinstance(encoded_matrix, str):
+            raise ValidationError("Scanner calibration identifiers and matrix must be strings.")
+        if (isinstance(depth_scale, bool) or not isinstance(depth_scale, (int, float))
+                or not math.isfinite(depth_scale) or depth_scale <= 0):
+            raise ValidationError("The scanner depth scale must be positive and finite.")
+        try:
+            q_matrix = base64.b64decode(encoded_matrix, validate=True)
+        except (ValueError, base64.binascii.Error) as exc:
+            raise ValidationError("The Q matrix must be valid base64.") from exc
+        handler._json(200, core.save_scanner_calibration(device_id, q_matrix, depth_scale))
+        return
     if route.spec.name == "scanner_live_preview_status":
         handler._json(200, {"preview": core.scanner_live_preview_status()})
         return
     if route.spec.name == "scanner_live_preview_start":
         body = _require_json(handler)
-        if body:
-            raise ValidationError("Live scanner preview start accepts an empty object only.")
-        handler._json(202, {"preview": core.start_scanner_live_preview()})
+        if set(body) - {"scanner_device_id"}:
+            raise ValidationError("Live scanner preview accepts only a scanner device ID.")
+        scanner_device_id = body.get("scanner_device_id")
+        if scanner_device_id is not None and not isinstance(scanner_device_id, str):
+            raise ValidationError("The scanner device ID must be a string.")
+        handler._json(202, {"preview": core.start_scanner_live_preview(scanner_device_id)})
         return
     if route.spec.name == "scanner_live_preview_stop":
         handler._json(200, {"preview": core.stop_scanner_live_preview()})
@@ -367,6 +395,13 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
         handler.end_headers()
         handler.wfile.write(payload)
         return
+    if route.spec.name == "scanner_calibration":
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if set(query) - {"device_id"} or len(query.get("device_id", [])) > 1:
+            raise ValidationError("Scanner calibration accepts at most one device_id query parameter.")
+        device_id = query.get("device_id", [None])[0]
+        handler._json(200, core.scanner_calibration(device_id or None))
+        return
     if route.spec.name == "scanner_point_cloud":
         source, vertex_count = _resolve_scanner_point_cloud(core, parsed.query)
         payload = source.read_bytes()
@@ -378,23 +413,7 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
         handler.end_headers()
         handler.wfile.write(payload)
         return
-    del parsed
-    calibration_path = Path(__file__).resolve().parent.parent / "tools" / "revopoint" / "calibration" / "Q.bin"
-    calibration = calibration_path.read_bytes()
-    if len(calibration) != 64:
-        raise RuntimeError("Revopoint Q calibration must contain 64 bytes.")
-    matrix = struct.unpack("<16f", calibration)
-    if not all(math.isfinite(value) for value in matrix):
-        raise RuntimeError("Revopoint Q calibration contains a non-finite value.")
-    depth_scale_path = calibration_path.with_name("depth_scale.json")
-    depth_scale_config = json.loads(depth_scale_path.read_text(encoding="utf-8"))
-    depth_scale = float(depth_scale_config["depth_scale_mm_per_raw_unit"])
-    if not math.isfinite(depth_scale) or depth_scale <= 0:
-        raise RuntimeError("Revopoint depth scale must be positive and finite.")
-    handler._json(200, {"width": 640, "height": 400, "matrix": matrix,
-                        "depth_scale_mm_per_raw_unit": depth_scale,
-                        "depth_scale_status": depth_scale_config.get("status", "unverified"),
-                        "depth_scale_source": depth_scale_config.get("source", "unspecified")})
+    raise RuntimeError(f"Unhandled scanner route: {route.spec.name}")
 
 
 def _dispatch_files(handler: Any, core: CadyxCore, route: RouteMatch, parsed: SplitResult) -> None:
@@ -492,9 +511,21 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         handler._json(200, core.observe_agent_operation(project_id, "Изучает модель", lambda: core.inspect_project(project_id)))
     elif name == "agent_scan_360_start":
         body = _require_json(handler)
-        if body:
-            raise ValidationError("Starting a 360 scan does not accept options.")
-        handler._json(202, {"scan": core.start_scan_360(project_id)})
+        if set(body) - {"rotation_period_seconds", "scanner_device_id", "turntable_device_id"}:
+            raise ValidationError("A 360 scan accepts only device IDs and the turntable rotation period setting.")
+        rotation_period_seconds = body.get("rotation_period_seconds", 18.0)
+        if (isinstance(rotation_period_seconds, bool)
+                or not isinstance(rotation_period_seconds, (int, float))
+                or not 18.0 <= rotation_period_seconds <= 90.0):
+            raise ValidationError("The turntable rotation period must be between 18 and 90 seconds per revolution.")
+        scanner_device_id = body.get("scanner_device_id")
+        turntable_device_id = body.get("turntable_device_id")
+        if (scanner_device_id is not None and not isinstance(scanner_device_id, str)) or (
+                turntable_device_id is not None and not isinstance(turntable_device_id, str)):
+            raise ValidationError("Scanner and turntable device IDs must be strings.")
+        handler._json(202, {"scan": core.start_scan_360(
+            project_id, rotation_period_seconds, scanner_device_id, turntable_device_id,
+        )})
     elif name == "agent_scan_360_status":
         handler._json(200, {"scan": core.scan_360_status(project_id)})
     elif name == "agent_inspection":
@@ -858,6 +889,7 @@ def _dispatch_static(handler: Any, core: CadyxCore, route: RouteMatch, parsed: S
         "asset_ply_parser": ("ply-parser.js", "text/javascript; charset=utf-8"),
         "asset_ply_preview": ("ply-preview.js", "text/javascript; charset=utf-8"),
         "asset_scan_view": ("scan-view.js", "text/javascript; charset=utf-8"),
+        "asset_device_settings": ("device-settings.js", "text/javascript; charset=utf-8"),
         "asset_style": ("style.css", "text/css; charset=utf-8"),
     }
     filename, content_type = assets[route.spec.name]

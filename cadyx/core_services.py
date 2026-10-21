@@ -171,14 +171,18 @@ class ProjectLifecycleService(_CoreService):
             )
             return self.workspace.publish_project_scan(project_id, filename, content)
 
-    def start_scan_360(self, project_id: str) -> dict[str, Any]:
+    def start_scan_360(self, project_id: str, rotation_period_seconds: float = 18.0,
+                       scanner_device_id: str | None = None, turntable_device_id: str | None = None) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
             self._require_project_policy(
                 project_id,
                 "file_management",
                 "A 360 scan can start only in a free project with no running operation.",
             )
-            return self._scan_capture.start(project_id, self.workspace._project_dir(project_id))
+            return self._scan_capture.start(
+                project_id, self.workspace._project_dir(project_id), rotation_period_seconds,
+                scanner_device_id, turntable_device_id,
+            )
 
     def scan_360_status(self, project_id: str) -> dict[str, Any]:
         return self._scan_capture.status(project_id, self.workspace._project_dir(project_id))

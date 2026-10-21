@@ -134,14 +134,29 @@ class CadyxCore:
     def upload_project_scan(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
         return self._lifecycle.upload_project_scan(project_id, filename, content)
 
-    def start_scan_360(self, project_id: str) -> dict[str, Any]:
-        return self._lifecycle.start_scan_360(project_id)
+    def start_scan_360(self, project_id: str, rotation_period_seconds: float = 18.0,
+                       scanner_device_id: str | None = None, turntable_device_id: str | None = None) -> dict[str, Any]:
+        return self._lifecycle.start_scan_360(
+            project_id, rotation_period_seconds, scanner_device_id, turntable_device_id,
+        )
 
     def scan_360_status(self, project_id: str) -> dict[str, Any]:
         return self._lifecycle.scan_360_status(project_id)
 
-    def start_scanner_live_preview(self) -> dict[str, Any]:
-        return self._scan_capture.start_live_preview()
+    def scanner_devices(self) -> dict[str, list[dict[str, Any]]]:
+        return self._scan_capture.list_connected_devices()
+
+    def scanner_calibration(self, scanner_device_id: str | None = None) -> dict[str, Any]:
+        return self._scan_capture.scanner_calibration(scanner_device_id)
+
+    def save_scanner_calibration(self, scanner_device_id: str, q_matrix: bytes,
+                                 depth_scale_mm_per_raw_unit: float) -> dict[str, Any]:
+        return self._scan_capture.save_scanner_calibration(
+            scanner_device_id, q_matrix, depth_scale_mm_per_raw_unit,
+        )
+
+    def start_scanner_live_preview(self, scanner_device_id: str | None = None) -> dict[str, Any]:
+        return self._scan_capture.start_live_preview(scanner_device_id)
 
     def scanner_live_preview_status(self) -> dict[str, Any]:
         return self._scan_capture.live_preview_status()

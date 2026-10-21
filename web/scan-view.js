@@ -317,7 +317,8 @@
         const origin = cloudOriginSource && cloudOriginSource !== cloudSource
           ? await readPointCloud(cloudOriginSource) : cloud;
         if (!liveCalibration) {
-          const response = await fetcher('/api/v1/scanner/calibration', { cache: 'no-store' });
+          const scannerId = window.CadyxDeviceSettings?.scannerDeviceId?.();
+          const response = await fetcher(`/api/v1/scanner/calibration${scannerId ? `?device_id=${encodeURIComponent(scannerId)}` : ''}`, { cache: 'no-store' });
           if (!response.ok) throw new Error(`Калибровка сканера недоступна (HTTP ${response.status}).`);
           liveCalibration = await response.json();
         }
@@ -368,6 +369,7 @@
       if (!open) return;
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
       liveMtime = null;
+      liveCalibration = null;
       liveTableFrame = null;
       liveFitRadius = null;
       cloudRequest += 1;
@@ -380,7 +382,8 @@
         if (request !== liveRequest || !livePreviewOwned) return;
         try {
           if (!liveCalibration) {
-            const response = await fetcher('/api/v1/scanner/calibration', { cache: 'no-store' });
+            const scannerId = window.CadyxDeviceSettings?.scannerDeviceId?.();
+            const response = await fetcher(`/api/v1/scanner/calibration${scannerId ? `?device_id=${encodeURIComponent(scannerId)}` : ''}`, { cache: 'no-store' });
             if (!response.ok) throw new Error(`Калибровка сканера недоступна (HTTP ${response.status}).`);
             const calibration = await response.json();
             if (!Array.isArray(calibration.matrix) || calibration.matrix.length !== 16
@@ -577,7 +580,7 @@
         const stopping = active();
         const response = await fetcher('/api/v1/scanner/live-preview', stopping
           ? { method: 'DELETE' }
-          : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+          : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scanner_device_id: window.CadyxDeviceSettings?.scannerDeviceId?.() }) });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error?.message || payload.message || 'Не удалось переключить предпросмотр сканера');
         updateButton(payload.preview);

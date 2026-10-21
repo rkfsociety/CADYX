@@ -8,6 +8,21 @@ param(
 
     [string]$RunId = '',
 
+    [ValidateRange(18, 90)]
+    [double]$TurntableRotationPeriodSeconds = 18,
+
+    [string]$ScannerDeviceId = '',
+
+    [string]$TurntableAddress = '',
+
+    [string]$TurntableName = 'REVO_DUAL_AXIS_TABLE',
+
+    [string]$TurntableAdvertisementUuid = '0000FFE1-0000-1000-8000-00805F9B34FB',
+
+    [string]$TurntableServiceUuid = '0000FFE0-0000-1000-8000-00805F9B34FB',
+
+    [string]$TurntableCharacteristicUuid = '0000FFE1-0000-1000-8000-00805F9B34FB',
+
     [switch]$ManifestOnly
 )
 
@@ -65,7 +80,15 @@ if ($ManifestOnly) {
     if (Test-Path -LiteralPath $projectCalibration) { throw "Calibration copy already exists: $projectCalibration" }
     if (Test-Path -LiteralPath $projectDepthScale) { throw "Depth-scale copy already exists: $projectDepthScale" }
     Copy-Item -LiteralPath $CalibrationFile -Destination $projectCalibration
-    Copy-Item -LiteralPath $depthScaleConfig -Destination $projectDepthScale
+    $selectedDepthScale = [ordered]@{
+        depth_scale_mm_per_raw_unit = $DepthScale
+        status = 'selected_device_profile'
+    }
+    [IO.File]::WriteAllText(
+        $projectDepthScale,
+        ($selectedDepthScale | ConvertTo-Json -Depth 3),
+        [Text.UTF8Encoding]::new($false)
+    )
 }
 
 function Invoke-Turntable {
@@ -164,12 +187,17 @@ if ($ManifestOnly) {
     return
 }
 $complete = $false
-$rotationPeriodSeconds = 18
 try {
-    Invoke-Turntable -Arguments @('speed', [string]$rotationPeriodSeconds) | Out-Null
+    Invoke-Turntable -Arguments @(
+        'speed', $TurntableRotationPeriodSeconds.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture),
+        $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
+        $TurntableServiceUuid, $TurntableCharacteristicUuid
+    ) | Out-Null
     Invoke-Turntable -Arguments @(
         'capture-sweep', '12', '30', '0', $poseLog, $captureExe, $prefix,
-        $projectCalibration, $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw
+        $projectCalibration, $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw,
+        $ScannerDeviceId, $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
+        $TurntableServiceUuid, $TurntableCharacteristicUuid
     ) | Out-Null
 
     $frames = @()
@@ -186,7 +214,7 @@ try {
         format = 'revopoint-y16-turntable-capture-v2'
         frame_count = $frames.Count
         step_degrees = 30
-        turntable_rotation_period_seconds = $rotationPeriodSeconds
+        turntable_rotation_period_seconds = $TurntableRotationPeriodSeconds
         table_tilt_degrees = 0
         starting_position_preserved = $true
         projection_method = 'Q_ray_scaled_to_depth'

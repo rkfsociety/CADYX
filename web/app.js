@@ -554,7 +554,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         if(!id){scanStatus.textContent='Сначала выберите проект.';return}
         scan360.disabled=true;scanStatus.textContent='Запускаю съёмку…';
         try{
-          const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+          const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation_period_seconds:window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.()??18,scanner_device_id:window.CadyxDeviceSettings?.scannerDeviceId?.(),turntable_device_id:window.CadyxDeviceSettings?.turntableDeviceId?.()})});
           const payload=await response.json();
           if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
           if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось запустить сканирование');

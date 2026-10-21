@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
+import math
 import os
 import re
 import shutil
+import struct
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -46,7 +51,163 @@ class Scan360CaptureController:
         self._job: _Scan360Job | None = None
         self._live_preview: _LivePreviewJob | None = None
 
-    def start(self, project_id: str, project_directory: Path) -> dict[str, Any]:
+    def list_connected_devices(self) -> dict[str, list[dict[str, Any]]]:
+        if os.name != "nt":
+            raise ValidationError("Revopoint device discovery is available only on the Windows scanner host.")
+        tool_root = self._repository_root / "tools" / "revopoint"
+        capture_executable = tool_root / "build" / "CaptureY16.exe"
+        turntable_executable = tool_root / "build" / "TurntableController.exe"
+        catalog_path = tool_root / "devices.json"
+        if not capture_executable.is_file() or not turntable_executable.is_file():
+            raise ValidationError("Build the Revopoint tools before discovering connected devices.")
+        try:
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+            camera_result = subprocess.run([str(capture_executable), "--list-devices"],
+                                           capture_output=True, timeout=12, check=True)
+            camera_text = camera_result.stdout.decode("utf-8")
+        except (OSError, subprocess.SubprocessError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValidationError(f"Could not discover Revopoint devices: {exc}.") from exc
+        scanner_profiles = catalog.get("scanners", [])
+        table_profiles = catalog.get("turntables", [])
+        scanners: list[dict[str, str]] = []
+        for line in camera_text.splitlines():
+            device_id, separator, friendly_name = line.partition("\t")
+            if not separator:
+                continue
+            for profile in scanner_profiles:
+                prefix = profile.get("friendly_name_prefix", "")
+                if (prefix and friendly_name.startswith(prefix)
+                        and profile.get("capture_protocol") == "media-foundation-y16"):
+                    scanners.append({
+                        "device_id": device_id,
+                        "name": friendly_name,
+                        "profile_id": profile["id"],
+                        "profile_name": profile["name"],
+                    })
+                    break
+        tables: list[dict[str, str]] = []
+        supported_table_profiles = [profile for profile in table_profiles
+                                    if profile.get("control_protocol") == "revopoint-dual-axis-v1"]
+        if supported_table_profiles:
+            try:
+                result = subprocess.run(
+                    [str(turntable_executable), "devices", ",".join(
+                        sorted({profile["advertisement_uuid"] for profile in supported_table_profiles})
+                    )],
+                    capture_output=True, timeout=15, check=True,
+                )
+                table_text = result.stdout.decode("utf-8")
+            except (OSError, subprocess.SubprocessError, UnicodeError, KeyError) as exc:
+                raise ValidationError(f"Could not discover Bluetooth turntables: {exc}.") from exc
+            for line in table_text.splitlines():
+                address, separator, friendly_name = line.partition("\t")
+                if not separator:
+                    continue
+                for profile in supported_table_profiles:
+                    if friendly_name != profile.get("gatt_name"):
+                        continue
+                    if not any(item["device_id"] == address for item in tables):
+                        tables.append({
+                            "device_id": address,
+                            "name": friendly_name,
+                            "profile_id": profile["id"],
+                            "profile_name": profile["name"],
+                            "expected_name": profile["gatt_name"],
+                            "advertisement_uuid": profile["advertisement_uuid"],
+                            "service_uuid": profile["service_uuid"],
+                            "characteristic_uuid": profile["characteristic_uuid"],
+                        })
+                    break
+        legacy_q_file = tool_root / "calibration" / "Q.bin"
+        legacy_scale_file = tool_root / "calibration" / "depth_scale.json"
+        legacy_available = legacy_q_file.is_file() and legacy_scale_file.is_file()
+        for scanner in scanners:
+            q_file, scale_file = self._scanner_calibration_paths(scanner["device_id"])
+            scanner["calibrated"] = (q_file.is_file() and scale_file.is_file()) or (
+                len(scanners) == 1 and scanner["profile_id"] == "revopoint-mini-y16" and legacy_available
+            )
+        return {"scanners": scanners, "turntables": tables}
+
+    def save_scanner_calibration(self, scanner_device_id: str, q_matrix: bytes, depth_scale: float) -> dict[str, Any]:
+        if not scanner_device_id or len(q_matrix) != 64 or not math.isfinite(depth_scale) or depth_scale <= 0:
+            raise ValidationError("A scanner calibration requires a connected device, a 64-byte Q matrix, and a positive depth scale.")
+        if not all(math.isfinite(value) for value in struct.unpack("<16f", q_matrix)):
+            raise ValidationError("The scanner Q matrix must contain only finite float values.")
+        devices = self.list_connected_devices()
+        if not any(item["device_id"] == scanner_device_id for item in devices["scanners"]):
+            raise ValidationError("The selected scanner is not currently connected.")
+        q_file, scale_file = self._scanner_calibration_paths(scanner_device_id)
+        q_file.parent.mkdir(parents=True, exist_ok=True)
+        q_file.write_bytes(q_matrix)
+        scale_file.write_text(json.dumps({
+            "depth_scale_mm_per_raw_unit": depth_scale,
+            "status": "user_configured_for_selected_device",
+        }, indent=2) + "\n", encoding="utf-8")
+        return {"calibrated": True, "scanner_device_id": scanner_device_id}
+
+    def _scanner_calibration_paths(self, scanner_device_id: str) -> tuple[Path, Path]:
+        app_data = os.environ.get("LOCALAPPDATA")
+        if not app_data:
+            raise ValidationError("The Windows user profile path is unavailable for scanner calibration storage.")
+        profile_key = hashlib.sha256(scanner_device_id.encode("utf-8")).hexdigest()
+        profile = Path(app_data) / "CADYX" / "scanner-calibration" / profile_key
+        return profile / "Q.bin", profile / "depth_scale.json"
+
+    def _resolve_scanner_calibration(self, scanner_device_id: str, scanner_count: int,
+                                     profile_id: str) -> tuple[Path, float]:
+        q_file, scale_file = self._scanner_calibration_paths(scanner_device_id)
+        if not (q_file.is_file() and scale_file.is_file()):
+            if scanner_count != 1 or profile_id != "revopoint-mini-y16":
+                raise ValidationError("This scanner has no device-specific calibration; add its Q.bin and depth scale in device settings.")
+            calibration_root = self._repository_root / "tools" / "revopoint" / "calibration"
+            q_file = calibration_root / "Q.bin"
+            scale_file = calibration_root / "depth_scale.json"
+        if not q_file.is_file() or not scale_file.is_file() or q_file.stat().st_size != 64:
+            raise ValidationError("The selected scanner has no valid local calibration profile.")
+        try:
+            depth_scale = float(json.loads(scale_file.read_text(encoding="utf-8"))["depth_scale_mm_per_raw_unit"])
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ValidationError("The selected scanner's depth-scale profile is invalid.") from exc
+        if not math.isfinite(depth_scale) or depth_scale <= 0:
+            raise ValidationError("The selected scanner's depth scale must be positive and finite.")
+        return q_file, depth_scale
+
+    def scanner_calibration(self, scanner_device_id: str | None) -> dict[str, Any]:
+        scanners = self.list_connected_devices()["scanners"]
+        if scanner_device_id is None and len(scanners) == 1:
+            scanner_device_id = scanners[0]["device_id"]
+        if not any(item["device_id"] == scanner_device_id for item in scanners):
+            raise ValidationError("Select a currently connected supported scanner in device settings.")
+        scanner = next(item for item in scanners if item["device_id"] == scanner_device_id)
+        q_file, depth_scale = self._resolve_scanner_calibration(
+            scanner_device_id, len(scanners), scanner["profile_id"],
+        )
+        try:
+            matrix = struct.unpack("<16f", q_file.read_bytes())
+            profile_path = self._scanner_calibration_paths(scanner_device_id)[1]
+            scale_config = json.loads((profile_path if profile_path.is_file()
+                                        else q_file.with_name("depth_scale.json")).read_text(encoding="utf-8"))
+        except (OSError, ValueError, struct.error, json.JSONDecodeError) as exc:
+            raise ValidationError("The selected scanner calibration profile could not be read.") from exc
+        if not all(math.isfinite(value) for value in matrix):
+            raise ValidationError("The selected scanner Q matrix contains non-finite values.")
+        return {
+            "width": 640,
+            "height": 400,
+            "matrix": matrix,
+            "depth_scale_mm_per_raw_unit": depth_scale,
+            "depth_scale_status": scale_config.get("status", "unverified"),
+            "depth_scale_source": scale_config.get("source", "device-specific profile"),
+        }
+
+    def start(self, project_id: str, project_directory: Path,
+              rotation_period_seconds: float = 18.0,
+              scanner_device_id: str | None = None,
+              turntable_device_id: str | None = None) -> dict[str, Any]:
+        if (isinstance(rotation_period_seconds, bool)
+                or not isinstance(rotation_period_seconds, (int, float))
+                or not 18.0 <= rotation_period_seconds <= 90.0):
+            raise ValidationError("The turntable rotation period must be between 18 and 90 seconds per revolution.")
         if os.name != "nt":
             raise ValidationError("360-degree Revopoint capture is available only on the Windows scanner host.")
         project_directory = project_directory.resolve(strict=True)
@@ -58,6 +219,22 @@ class Scan360CaptureController:
         powershell = shutil.which("powershell.exe") or shutil.which("powershell")
         if powershell is None:
             raise ValidationError("Windows PowerShell is unavailable on the CADYX scanner host.")
+        devices = self.list_connected_devices()
+        scanners = devices["scanners"]
+        tables = devices["turntables"]
+        if scanner_device_id is None and len(scanners) == 1:
+            scanner_device_id = scanners[0]["device_id"]
+        if turntable_device_id is None and len(tables) == 1:
+            turntable_device_id = tables[0]["device_id"]
+        scanner = next((item for item in scanners if item["device_id"] == scanner_device_id), None)
+        turntable = next((item for item in tables if item["device_id"] == turntable_device_id), None)
+        if scanner is None:
+            raise ValidationError("Select a currently connected supported scanner in device settings.")
+        if turntable is None:
+            raise ValidationError("Select a currently connected supported turntable in device settings.")
+        calibration_file, depth_scale = self._resolve_scanner_calibration(
+            scanner_device_id, len(scanners), scanner["profile_id"],
+        )
 
         with self._guard:
             if self._live_preview is not None and self._live_preview.process.poll() is None:
@@ -76,7 +253,16 @@ class Scan360CaptureController:
                 with log_path.open("xb") as log_stream:
                     process = subprocess.Popen(
                         [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                         "-File", str(script), "-ProjectPath", str(project_directory), "-RunId", run_id],
+                         "-File", str(script), "-ProjectPath", str(project_directory), "-RunId", run_id,
+                         "-TurntableRotationPeriodSeconds", format(rotation_period_seconds, ".15g"),
+                         "-ScannerDeviceId", scanner_device_id,
+                         "-TurntableAddress", turntable_device_id,
+                         "-TurntableName", turntable["expected_name"],
+                         "-TurntableAdvertisementUuid", turntable["advertisement_uuid"],
+                         "-TurntableServiceUuid", turntable["service_uuid"],
+                         "-TurntableCharacteristicUuid", turntable["characteristic_uuid"],
+                         "-CalibrationFile", str(calibration_file),
+                         "-DepthScale", format(depth_scale, ".15g")],
                         cwd=str(self._repository_root), stdin=subprocess.DEVNULL,
                         stdout=log_stream, stderr=subprocess.STDOUT,
                         creationflags=subprocess.CREATE_NO_WINDOW, startupinfo=startup_info,
@@ -95,12 +281,19 @@ class Scan360CaptureController:
             )
             return self._snapshot_locked()
 
-    def start_live_preview(self) -> dict[str, Any]:
+    def start_live_preview(self, scanner_device_id: str | None = None) -> dict[str, Any]:
         if os.name != "nt":
             raise ValidationError("Live Revopoint preview is available only on the Windows scanner host.")
         capture_executable = self._repository_root / "tools" / "revopoint" / "build" / "CaptureY16.exe"
         if not capture_executable.is_file():
             raise ValidationError("The CaptureY16 live-preview executable is unavailable; build the Revopoint tools first.")
+        scanners = self.list_connected_devices()["scanners"]
+        if scanner_device_id is None and len(scanners) == 1:
+            scanner_device_id = scanners[0]["device_id"]
+        scanner = next((item for item in scanners if item["device_id"] == scanner_device_id), None)
+        if scanner is None:
+            raise ValidationError("Select a currently connected supported scanner in device settings.")
+        self._resolve_scanner_calibration(scanner_device_id, len(scanners), scanner["profile_id"])
 
         raw_path = self._workspace_root / ".revopoint-live.raw"
         stop_path = self._workspace_root / ".revopoint-live-preview.stop"
@@ -127,7 +320,8 @@ class Scan360CaptureController:
                 with log_path.open("wb") as log_stream:
                     process = subprocess.Popen(
                         [str(capture_executable), "--live-only", "--live-raw", str(raw_path),
-                         "--stop-file", str(stop_path), "--ready-file", str(ready_path), "--fps", "15"],
+                         "--stop-file", str(stop_path), "--ready-file", str(ready_path), "--fps", "15",
+                         "--device-id", scanner_device_id],
                         cwd=str(self._repository_root), stdin=subprocess.DEVNULL,
                         stdout=log_stream, stderr=subprocess.STDOUT,
                         creationflags=subprocess.CREATE_NO_WINDOW, startupinfo=startup_info,

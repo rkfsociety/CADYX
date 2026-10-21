@@ -18,7 +18,7 @@ internal static class Program
 {
     private static readonly Guid ServiceUuid = Guid.Parse("0000FFE0-0000-1000-8000-00805F9B34FB");
     private static readonly Guid CharacteristicUuid = Guid.Parse("0000FFE1-0000-1000-8000-00805F9B34FB");
-    private const string DeviceName = "REVO_DUAL_AXIS_TABLE";
+    private const string DefaultDeviceName = "REVO_DUAL_AXIS_TABLE";
     private const double MaxDegreesPerCommand = 30.0;
     private const double MaxSafeTiltDegrees = 10.0;
     private const double MinRotationPeriodSeconds = 18.0;
@@ -61,11 +61,23 @@ internal static class Program
             }
 
             string operation = args[0].ToLowerInvariant();
+            if (operation == "devices")
+            {
+                if (args.Length != 2) throw new ArgumentException("devices requires advertisement UUIDs from the device catalog.");
+                var advertisedUuids = args[1].Split(',').Select(value => Guid.Parse(value)).Distinct().ToArray();
+                Console.OutputEncoding = new UTF8Encoding(false);
+                return ListDevicesAsync(advertisedUuids).GetAwaiter().GetResult();
+            }
             double degrees = 0;
             double rotationPeriod = 0;
             int monitorSeconds = 0;
             int sweepSteps = 0;
             string monitorPath = null;
+            string turntableAddress = null;
+            string turntableName = DefaultDeviceName;
+            string advertisementUuid = CharacteristicUuid.ToString();
+            string serviceUuid = ServiceUuid.ToString();
+            string characteristicUuid = CharacteristicUuid.ToString();
             int rotateAfterSeconds = -1;
             ScanCaptureOptions scanCapture = null;
             if (operation == "rotate")
@@ -79,11 +91,16 @@ internal static class Program
             }
             else if (operation == "speed")
             {
-                if (args.Length != 2 || !double.TryParse(args[1], NumberStyles.Float,
+                if ((args.Length != 2 && args.Length != 7) || !double.TryParse(args[1], NumberStyles.Float,
                         CultureInfo.InvariantCulture, out rotationPeriod) || !IsFinite(rotationPeriod) ||
                     rotationPeriod < MinRotationPeriodSeconds || rotationPeriod > MaxRotationPeriodSeconds)
                 {
                     throw new ArgumentException("speed requires seconds per rotation from 18 to 90.");
+                }
+                if (args.Length == 7)
+                {
+                    turntableAddress = args[2]; turntableName = args[3];
+                    advertisementUuid = args[4]; serviceUuid = args[5]; characteristicUuid = args[6];
                 }
             }
             else if (operation == "tilt")
@@ -115,7 +132,7 @@ internal static class Program
             else if (operation == "capture-sweep")
             {
                 double expectedTilt, depthScale;
-                if (args.Length != 10 || !Int32.TryParse(args[1], out sweepSteps) || sweepSteps < 1 || sweepSteps > 360 ||
+                if (args.Length != 16 || !Int32.TryParse(args[1], out sweepSteps) || sweepSteps < 1 || sweepSteps > 360 ||
                     !double.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out degrees) ||
                     !IsFinite(degrees) || Math.Abs(degrees) < 0.1 || Math.Abs(degrees) > MaxDegreesPerCommand ||
                     Math.Abs(Math.Abs(degrees * sweepSteps) - 360.0) > 0.01 ||
@@ -132,6 +149,12 @@ internal static class Program
                     CalibrationFile = args[7],
                     DepthScale = depthScale,
                     LiveRawFile = args[9],
+                    ScannerDeviceId = args[10],
+                    TurntableAddress = args[11],
+                    TurntableName = args[12],
+                    AdvertisementUuid = args[13],
+                    ServiceUuid = args[14],
+                    CharacteristicUuid = args[15],
                 };
                 if (!File.Exists(scanCapture.CaptureExecutable) || !File.Exists(scanCapture.CalibrationFile))
                     throw new ArgumentException("CaptureY16.exe and Q.bin must exist before capture-sweep starts.");
@@ -145,7 +168,9 @@ internal static class Program
                 throw new ArgumentException("Operation must be query, zero, stop, speed, tilt, monitor, sweep, capture-sweep, or rotate.");
             }
 
-            return RunAsync(operation, degrees, rotationPeriod, monitorSeconds, monitorPath, rotateAfterSeconds, sweepSteps, scanCapture).GetAwaiter().GetResult();
+            return RunAsync(operation, degrees, rotationPeriod, monitorSeconds, monitorPath, rotateAfterSeconds,
+                sweepSteps, scanCapture, turntableAddress, turntableName,
+                advertisementUuid, serviceUuid, characteristicUuid).GetAwaiter().GetResult();
         }
         catch (Exception error)
         {
@@ -157,15 +182,16 @@ internal static class Program
     private static void Usage()
     {
         Console.WriteLine("TurntableController.exe query");
+        Console.WriteLine("TurntableController.exe devices <advertisement-uuid>");
         Console.WriteLine("TurntableController.exe zero");
-        Console.WriteLine("TurntableController.exe speed <seconds-per-rotation>   (18–90 seconds)");
+        Console.WriteLine("TurntableController.exe speed <seconds-per-rotation> [address name advertisement-uuid service-uuid characteristic-uuid]   (18–90 seconds)");
         Console.WriteLine("TurntableController.exe tilt <degrees>   (safe operating limit: -10–10 degrees)");
         Console.WriteLine("TurntableController.exe rotate <degrees>   (one bounded relative move, max 30 degrees)");
         Console.WriteLine("TurntableController.exe stop");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv>");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv> <rotate-delay-seconds> <degrees>");
         Console.WriteLine("TurntableController.exe sweep <steps> <degrees-per-step> <output.csv>   (one BLE connection; each step is verified before the next)");
-        Console.WriteLine("TurntableController.exe capture-sweep <steps> <degrees-per-step> <tilt> <poses.csv> <CaptureY16.exe> <output-prefix> <Q.bin> <depth-scale> <live.raw>   (one full turn; for example 24 steps of 15 degrees)");
+        Console.WriteLine("TurntableController.exe capture-sweep <steps> <degrees-per-step> <tilt> <poses.csv> <CaptureY16.exe> <output-prefix> <Q.bin> <depth-scale> <live.raw> <scanner-id> <table-address> <table-name> <advertisement-uuid> <service-uuid> <characteristic-uuid>");
         Console.WriteLine("The app does not pair the turntable. It discovers the BLE device by its advertised FFE1 service,\n" +
                           "then confirms the GATT device name before sending any command.");
     }
@@ -190,12 +216,19 @@ internal static class Program
 
     private static async Task<int> RunAsync(string operation, double degrees, double rotationPeriod,
                                             int monitorSeconds, string monitorPath, int rotateAfterSeconds,
-                                            int sweepSteps, ScanCaptureOptions scanCapture)
+                                            int sweepSteps, ScanCaptureOptions scanCapture,
+                                            string turntableAddress, string turntableName,
+                                            string advertisementUuid, string serviceUuid, string characteristicUuid)
     {
         bool motionRequested = operation == "rotate" || operation == "sweep" || operation == "capture-sweep" ||
             operation == "tilt" || operation == "zero" || (operation == "monitor" && rotateAfterSeconds >= 0);
         if (motionRequested) EnsureScannerDisconnected();
-        using (Connection connection = await ConnectAsync())
+        using (Connection connection = await ConnectAsync(
+            scanCapture != null ? scanCapture.TurntableAddress : turntableAddress,
+            scanCapture != null ? scanCapture.TurntableName : turntableName,
+            scanCapture != null ? scanCapture.AdvertisementUuid : advertisementUuid,
+            scanCapture != null ? scanCapture.ServiceUuid : serviceUuid,
+            scanCapture != null ? scanCapture.CharacteristicUuid : characteristicUuid))
         {
             await EnableNotificationsAsync(connection);
             if (operation == "query")
@@ -488,17 +521,33 @@ internal static class Program
         }
     }
 
-    private static async Task<Connection> ConnectAsync()
+    private static async Task<int> ListDevicesAsync(Guid[] advertisedUuids)
     {
-        Console.WriteLine("Searching nearby BLE devices for the Revopoint turntable...");
+        Console.WriteLine("Searching nearby BLE devices advertising the supported service...");
+        foreach (ulong address in await FindAdvertisedAddressesAsync(advertisedUuids))
+        {
+            using (BluetoothLEDevice device = await BluetoothLEDevice.FromBluetoothAddressAsync(address))
+            {
+                if (device != null)
+                    Console.WriteLine(address.ToString("X12", CultureInfo.InvariantCulture) + "\t" + device.Name);
+            }
+        }
+        return 0;
+    }
+
+    private static async Task<ulong[]> FindAdvertisedAddressesAsync(Guid advertisedUuid)
+    {
+        return await FindAdvertisedAddressesAsync(new[] { advertisedUuid });
+    }
+
+    private static async Task<ulong[]> FindAdvertisedAddressesAsync(Guid[] advertisedUuids)
+    {
         var addresses = new ConcurrentDictionary<ulong, byte>();
         var watcher = new BluetoothLEAdvertisementWatcher { ScanningMode = BluetoothLEScanningMode.Active };
         TypedEventHandler<BluetoothLEAdvertisementWatcher, BluetoothLEAdvertisementReceivedEventArgs> handler = (sender, eventArgs) =>
         {
-            if (eventArgs.Advertisement.ServiceUuids.Contains(CharacteristicUuid))
-            {
+            if (eventArgs.Advertisement.ServiceUuids.Any(advertisedUuids.Contains))
                 addresses[eventArgs.BluetoothAddress] = 0;
-            }
         };
         watcher.Received += handler;
         try
@@ -511,20 +560,37 @@ internal static class Program
             try { watcher.Stop(); } catch { }
             watcher.Received -= handler;
         }
+        return addresses.Keys.ToArray();
+    }
 
-        foreach (ulong address in addresses.Keys)
+    private static async Task<Connection> ConnectAsync(string selectedAddress, string expectedName,
+                                                        string advertisedUuidText, string serviceUuidText,
+                                                        string characteristicUuidText)
+    {
+        Console.WriteLine("Searching nearby BLE devices for the Revopoint turntable...");
+        ulong requestedAddress = 0;
+        Guid advertisedUuid, serviceUuid, characteristicUuid;
+        if (!Guid.TryParse(advertisedUuidText, out advertisedUuid) ||
+            !Guid.TryParse(serviceUuidText, out serviceUuid) ||
+            !Guid.TryParse(characteristicUuidText, out characteristicUuid))
+            throw new ArgumentException("The selected turntable GATT profile has invalid UUIDs.");
+        if (!String.IsNullOrWhiteSpace(selectedAddress) &&
+            !UInt64.TryParse(selectedAddress, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out requestedAddress))
+            throw new ArgumentException("The selected turntable address is invalid.");
+        foreach (ulong address in await FindAdvertisedAddressesAsync(advertisedUuid))
         {
+            if (requestedAddress != 0 && address != requestedAddress) continue;
             BluetoothLEDevice device = null;
             try
             {
                 device = await BluetoothLEDevice.FromBluetoothAddressAsync(address);
-                if (device == null || !String.Equals(device.Name, DeviceName, StringComparison.Ordinal))
+                if (device == null || !String.Equals(device.Name, expectedName, StringComparison.Ordinal))
                 {
                     if (device != null) device.Dispose();
                     continue;
                 }
 
-                var serviceResult = await device.GetGattServicesForUuidAsync(ServiceUuid, BluetoothCacheMode.Uncached);
+                var serviceResult = await device.GetGattServicesForUuidAsync(serviceUuid, BluetoothCacheMode.Uncached);
                 if (serviceResult.Status != GattCommunicationStatus.Success || serviceResult.Services.Count != 1)
                 {
                     foreach (var unmatchedService in serviceResult.Services) unmatchedService.Dispose();
@@ -533,7 +599,7 @@ internal static class Program
                 }
 
                 GattDeviceService service = serviceResult.Services[0];
-                var characteristicResult = await service.GetCharacteristicsForUuidAsync(CharacteristicUuid, BluetoothCacheMode.Uncached);
+                var characteristicResult = await service.GetCharacteristicsForUuidAsync(characteristicUuid, BluetoothCacheMode.Uncached);
                 if (characteristicResult.Status != GattCommunicationStatus.Success || characteristicResult.Characteristics.Count != 1)
                 {
                     service.Dispose();
@@ -551,7 +617,7 @@ internal static class Program
                     device.Dispose();
                     continue;
                 }
-                Console.WriteLine("Connected to " + DeviceName + " over BLE (no pairing performed).");
+                Console.WriteLine("Connected to " + expectedName + " at " + address.ToString("X12", CultureInfo.InvariantCulture) + " over BLE (no pairing performed).");
                 return new Connection { Device = device, Service = service, Characteristic = characteristic };
             }
             catch
@@ -559,7 +625,7 @@ internal static class Program
                 if (device != null) device.Dispose();
             }
         }
-        throw new InvalidOperationException("No nearby BLE device matched REVO_DUAL_AXIS_TABLE with the expected GATT service.");
+        throw new InvalidOperationException("The selected turntable is unavailable or does not expose the expected GATT service.");
     }
 
     private static async Task EnableNotificationsAsync(Connection connection)
@@ -639,6 +705,12 @@ internal static class Program
         public string CalibrationFile;
         public double DepthScale;
         public string LiveRawFile;
+        public string ScannerDeviceId;
+        public string TurntableAddress;
+        public string TurntableName;
+        public string AdvertisementUuid;
+        public string ServiceUuid;
+        public string CharacteristicUuid;
     }
 
     private static async Task PauseAfterCaptureAsync()
@@ -657,6 +729,7 @@ internal static class Program
                 "--depth-scale", options.DepthScale.ToString("R", CultureInfo.InvariantCulture),
                 "--frames", "1",
                 "--live-raw", options.LiveRawFile,
+                "--device-id", options.ScannerDeviceId,
             }.Select(QuoteWindowsArgument)),
             UseShellExecute = false,
             CreateNoWindow = true,
