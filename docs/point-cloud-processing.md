@@ -63,6 +63,10 @@ in the model tree with their parameters, counts, source/result artifacts and
 previous-stage link. No processing controls or unused tool palette are exposed
 to the user.
 
+The model tree renders each point-cloud body as one expandable parent and nests
+all import/processing stages beneath it. A stage with no children has no
+disclosure control.
+
 For agent cleanup runs, analyze `isolation_filter` and `remove_overlaps`, apply
 each result with nonzero `removed_points`, and repeat the analysis against the
 new saved stage while varying that operation's parameters. Stop each operation

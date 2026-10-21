@@ -169,7 +169,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
  .model-toolbar .cad3-tool,.model-toolbar>.button{font:600 12px/1.2 var(--ui-font)}
  @media(max-width:680px){:root{--cadyx-rail-width:48px;--cadyx-tree-width:52px}.project-detail{grid-template-columns:48px 52px minmax(0,1fr)!important}.project-detail[data-tree-collapsed=true]{grid-template-columns:48px 48px minmax(0,1fr)!important}.cad3-rail{gap:4px;padding:8px 4px}.cad3-rail button{width:36px;height:36px}}
 `;
-    style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}';
+    style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}.cad3-cloud-root-row{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:2px}.cad3-cloud-disclosure{display:grid;place-items:center;width:22px;height:32px;padding:0;border:1px solid transparent;border-radius:4px;background:transparent;color:#b6c0c6;font:500 18px/1 var(--ui-font);cursor:pointer}.cad3-cloud-disclosure:hover{border-color:#51331f;background:#ffffff08;color:#ff9653}.cad3-cloud-root{min-height:34px;font-weight:650;color:#e8eef1}.cad3-cloud-stages{display:grid;gap:2px;margin:2px 0 3px 24px;padding-left:6px;border-left:1px solid #32404a}.cad3-cloud-stages[hidden]{display:none!important}.cad3-cloud-stages .cad3-tree-node{grid-template-columns:minmax(0,1fr);gap:0}.cad3-tree-leaf-row{grid-column:1/-1;min-width:0}.cad3-tree-leaf-row>.cad-tree-feature{width:100%;min-height:32px;padding:5px 8px;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;font-size:11px}.cad3-cloud-stages .cad3-model-note{padding:2px 8px 5px}';
     document.head.appendChild(style);
     if(!$('.cad3-headrail')){const h=document.createElement('div');h.className='cad3-headrail';h.innerHTML=I.model;$('.topbar')?.prepend(h)}
     if(!$('.cad3-rail')){const r=document.createElement('nav');r.className='cad3-rail';r.setAttribute('aria-label','Основная навигация');r.innerHTML=`<button data-view="geometry" title="Геометрия">${I.model}</button><button data-view="files" title="Файлы">${I.files}</button><button data-view="projects" title="Проекты">${I.projects}</button><button data-view="activity" title="Активность">${I.activity}</button>`;detail.prepend(r);const syncRail=()=>{$$('[data-view]',r).forEach(b=>{const view=b.dataset.view,src=nav.querySelector(`[data-workspace-view="${view}"]`),active=view===(grid.dataset.view||'overview');b.setAttribute('aria-label',b.title);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');b.dataset.on=String(active);b.disabled=!src||src.disabled})};r.addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b||b.disabled)return;nav.querySelector(`[data-workspace-view="${b.dataset.view}"]`)?.click()});new MutationObserver(syncRail).observe(grid,{attributes:true,attributeFilter:['data-view']});new MutationObserver(syncRail).observe(nav,{subtree:true,attributes:true,attributeFilter:['disabled','aria-current']});syncRail()}
@@ -186,6 +186,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const sceneBody=id=>state.scene?.objects?.find(x=>x.object_id===id);
     function deps(o){if(!o)return[];const d=[];const add=(id,role)=>{if(id&&state.byId.has(id))d.push({id,role})};add(o.source_sketch_id,'Профиль');(o.source_sketch_ids||[]).forEach(id=>add(id,'Сечение'));add(o.source_body_id,'Исходное тело');add(o.base_body_id,'Основное тело');add(o.tool_body_id,'Инструментальное тело');for(const x of state.objects){if(x===o||x.type!=='feature')continue;if(x.source_sketch_id===o.id||(x.source_sketch_ids||[]).includes(o.id)||x.source_body_id===o.body_id||x.base_body_id===o.body_id||x.tool_body_id===o.body_id)add(x.id,'Используется в')}return d}
     const expandedFeatures=new Set();
+    const collapsedClouds=new Set();
     const hasAssemblyStructure=()=>Boolean(state.assembly&&((state.assembly.instances||[]).length||(state.assembly.subassemblies||[]).length));
     function modelGroups(){
       const features=state.objects.filter(o=>o.type==='feature'),byBody=new Map(),consumed=new Set();
@@ -208,6 +209,22 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       for(const group of visibleGroups){
         if(modelSelectorVisible||visibleGroups.length>1){const modelTitle=document.createElement('div');modelTitle.className='cad3-model-title';modelTitle.textContent=group.body.name;list.append(modelTitle)}
         const features=group.features;
+        const cloudGroup=features.some(feature=>cadyxCloudStage(feature));
+        let featureHost=list;
+        if(cloudGroup){
+          const container=document.createElement('div');container.className='cad3-cloud-group';
+          const row=document.createElement('div');row.className='cad3-cloud-root-row';
+          const expanded=!collapsedClouds.has(group.body.id);
+          const disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-cloud-disclosure';
+          disclosure.setAttribute('aria-label',expanded?'Свернуть облако точек':'Развернуть облако точек');disclosure.setAttribute('aria-expanded',String(expanded));
+          disclosure.innerHTML=`<span class="cad-tree-chevron">${expanded?'−':'+'}</span>`;
+          disclosure.onclick=()=>{if(collapsedClouds.has(group.body.id))collapsedClouds.delete(group.body.id);else collapsedClouds.add(group.body.id);renderTree()};
+          const root=document.createElement('button');root.className='cad-tree-feature cad3-cloud-root';root.type='button';root.dataset.id=group.body.id;
+          root.dataset.selected=String(group.body.id===state.selected);root.innerHTML=`<span class="cad3-icon">${I.cloud}</span><span class="cad-tree-label">${esc(group.body.name)}</span>`;root.onclick=()=>select(group.body.id);
+          row.append(disclosure,root);container.append(row);
+          const stages=document.createElement('div');stages.className='cad3-cloud-stages';stages.hidden=!expanded;container.append(stages);
+          list.append(container);featureHost=stages;
+        }
         for(const feature of features){
           const sketchIds=[...new Set([feature.source_sketch_id,...(feature.source_sketch_ids||[])].filter(id=>state.byId.get(id)?.type==='sketch'))];
           const sketchObjects=sketchIds.map(id=>state.byId.get(id));
@@ -215,12 +232,13 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           const matchingSketches=sketchObjects.filter(sk=>!query||label(sk.id).toLowerCase().includes(query));
           if(!matchesFeature&&matchingSketches.length===0)continue;
           const node=document.createElement('div');node.className='cad3-tree-node';
-          const row=document.createElement('div');row.className='cad3-tree-parent-row';
+          const row=document.createElement('div');row.className=sketchObjects.length?'cad3-tree-parent-row':'cad3-tree-leaf-row';
           const expanded=expandedFeatures.has(feature.id)||(!matchesFeature&&matchingSketches.length>0);
-          const disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-tree-disclosure';disclosure.disabled=!sketchObjects.length;disclosure.setAttribute('aria-label',expanded?'Свернуть исходные эскизы':'Показать исходные эскизы');disclosure.setAttribute('aria-expanded',String(expanded));disclosure.innerHTML='<span class="cad-tree-chevron">+</span>';
-          disclosure.onclick=()=>{if(expandedFeatures.has(feature.id))expandedFeatures.delete(feature.id);else expandedFeatures.add(feature.id);renderTree()};
+          let disclosure=null;
+          if(sketchObjects.length){disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-tree-disclosure';disclosure.setAttribute('aria-label',expanded?'Свернуть исходные эскизы':'Показать исходные эскизы');disclosure.setAttribute('aria-expanded',String(expanded));disclosure.innerHTML='<span class="cad-tree-chevron">+</span>';
+            disclosure.onclick=()=>{if(expandedFeatures.has(feature.id))expandedFeatures.delete(feature.id);else expandedFeatures.add(feature.id);renderTree()};}
           const button=document.createElement('button');button.className='cad-tree-feature';button.type='button';button.dataset.id=feature.id;button.dataset.selected=String(feature.id===state.selected);button.innerHTML=`<span class="cad3-icon">${opIcon(feature)}</span><span class="cad-tree-label">${esc(featureName)}</span>`;button.onclick=()=>select(feature.id);
-          row.append(disclosure,button);node.append(row);
+          if(disclosure)row.append(disclosure);row.append(button);node.append(row);
           if(feature.operation==='recognize_mesh'){const note=document.createElement('div');note.className='cad3-model-note';note.textContent=`Плоскости: ${feature.report?.planes?.length||0} · сечения: ${feature.report?.sections?.length||0} · проекции: ${feature.report?.projections?.length||0} · окружности: ${feature.report?.circles?.length||0}`;node.append(note)}
           const cloudStage=cadyxMeshStage(feature)||cadyxCloudStage(feature);
           if(cloudStage){const summary=document.createElement('div');summary.className='cad3-model-note';const unit=feature.operation==='process_mesh'?'треугольников':'точек';summary.textContent=cloudStage.input==null?`${fmt(cloudStage.output)} ${unit}`:`${fmt(cloudStage.input)} → ${fmt(cloudStage.output)} ${unit}`;node.append(summary)}
@@ -228,7 +246,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
             for(const sketch of sketchObjects){if(query&&!matchesFeature&&!matchingSketches.includes(sketch))continue;const child=document.createElement('button');child.className='cad-tree-feature cad3-sketch-child';child.type='button';child.dataset.id=sketch.id;child.dataset.selected=String(sketch.id===state.selected);child.innerHTML=`<span class="cad3-icon">${I.sketch}</span><span class="cad-tree-label">${esc(label(sketch.id))}</span>`;child.onclick=()=>select(sketch.id,true);children.append(child)}
             node.append(children);
           }
-          list.append(node);
+          featureHost.append(node);
         }
         const hasSketches=features.some(feature=>feature.source_sketch_id||feature.source_sketch_ids?.length);
         if(!hasSketches&&!features.some(feature=>cadyxCloudStage(feature))){const note=document.createElement('div');note.className='cad3-model-note';note.textContent=features.some(feature=>feature.operation==='reconstruct_scan')?'Редактируемого эскиза нет: сетка построена по данным сканирования.':'Редактируемого эскиза нет.';list.append(note)}
