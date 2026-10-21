@@ -63,6 +63,14 @@ in the model tree with their parameters, counts, source/result artifacts and
 previous-stage link. No processing controls or unused tool palette are exposed
 to the user.
 
+For agent cleanup runs, analyze `isolation_filter` and `remove_overlaps`, apply
+each result with nonzero `removed_points`, and repeat the analysis against the
+new saved stage while varying that operation's parameters. Stop each operation
+when analysis reports zero removable points. Keep simplification and smoothing
+for explicit user requests. If varied valid parameters cannot clear candidates,
+or analysis hits its comparison budget, leave the remaining points intact and
+report the unresolved count and limit; do not describe the cloud as clean.
+
 Distances use the original coordinates. Physical scale and units remain
 unverified. Processing does not reconstruct a mesh or certify scan accuracy.
 It accepts at most 2 million input points, requires at least three output points,
