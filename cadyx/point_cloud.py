@@ -9,6 +9,13 @@ from .errors import ValidationError
 
 
 def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
+    if method == "isolation_filter":
+        if not isinstance(parameters, dict) or set(parameters) - {"rate"}:
+            raise ValidationError("Isolation filtering accepts only rate in percent.")
+        rate = parameters.get("rate", 15.)
+        if type(rate) not in (int, float) or not math.isfinite(rate) or not 0 < rate <= 50:
+            raise ValidationError("Isolation rate must be a positive percentage at most 50.")
+        return {"rate": rate}
     if isinstance(method, str) and method in {"remove_overlaps", "smooth"}:
         defaults = ({"distance": .56, "radius": 2., "tangential_distance": .1}
                     if method == "remove_overlaps" else {"strength": 10., "iterations": 10, "radius": 1.})
@@ -45,9 +52,9 @@ def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
 
 def process_points(points: list[tuple[float, float, float]], method: str, parameters: dict[str, Any]) -> list[tuple[float, float, float]]:
     p = normalize_cloud_parameters(method, parameters)
-    if method in {"remove_overlaps", "smooth"}:
-        from .point_cloud_surface import surface_points
-        result = surface_points(points, method, p)
+    if method in {"remove_overlaps", "smooth", "isolation_filter"}:
+        from .point_cloud_surface import isolation_points, surface_points
+        result = isolation_points(points, p["rate"]) if method == "isolation_filter" else surface_points(points, method, p)
     elif method == "deduplicate":
         result = list(dict.fromkeys(points))
     elif method == "crop":

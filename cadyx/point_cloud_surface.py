@@ -74,3 +74,53 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
                         removed.add(j)
         current = [point for i, point in enumerate(updated) if i not in removed]
     return current
+
+
+def isolation_points(points: list[tuple[float, float, float]], rate: float) -> list[tuple[float, float, float]]:
+    """Remove at most ``rate`` percent of points with unusually large nearest spacing."""
+    bounds = [max(p[a] for p in points) - min(p[a] for p in points) for a in range(3)]
+    cell_size = max(bounds) / max(1., len(points) ** (1 / 3))
+    if not math.isfinite(cell_size) or cell_size <= 1e-12:
+        cell_size = 1.
+    buckets: dict[tuple[int, int, int], list[int]] = {}
+    keys = []
+    for i, point in enumerate(points):
+        try:
+            key = tuple(math.floor(value / cell_size) for value in point)
+        except (ValueError, OverflowError) as exc:
+            raise ValidationError("Isolation grid is too fine for these coordinates.") from exc
+        keys.append(key)
+        buckets.setdefault(key, []).append(i)
+    nearest = [math.inf] * len(points)
+    comparisons = 0
+    for i, point in enumerate(points):
+        key = keys[i]
+        best = math.inf
+        shell = 0
+        while shell * cell_size - cell_size < best:
+            offsets = ((0, 0, 0),) if shell == 0 else (
+                (x, y, z) for x in range(-shell, shell + 1)
+                for y in range(-shell, shell + 1) for z in range(-shell, shell + 1)
+                if max(abs(x), abs(y), abs(z)) == shell
+            )
+            for offset in offsets:
+                neighbor_key = tuple(key[a] + offset[a] for a in range(3))
+                for j in buckets.get(neighbor_key, ()):
+                    if i == j:
+                        continue
+                    comparisons += 1
+                    if comparisons > MAX_SURFACE_COMPARISONS:
+                        raise ValidationError("Isolation detection exceeds its 20M comparison budget; downsample first.", code="RESOURCE_LIMIT")
+                    best = min(best, math.dist(point, points[j]))
+            shell += 1
+            if shell > 10_000:
+                raise ValidationError("Isolation search exceeded its spatial range budget.", code="RESOURCE_LIMIT")
+        nearest[i] = best
+    finite = sorted(distance for distance in nearest if math.isfinite(distance))
+    if len(finite) < 3:
+        raise ValidationError("Isolation detection requires at least four points.")
+    median = finite[len(finite) // 2]
+    candidates = [i for i, distance in enumerate(nearest) if distance > median * 1.5]
+    count = min(len(candidates), math.floor(len(points) * rate / 100))
+    removed = set(sorted(candidates, key=lambda i: (nearest[i], i), reverse=True)[:count])
+    return [point for i, point in enumerate(points) if i not in removed]

@@ -5,6 +5,7 @@ const cadyxCloudTools = {
   crop: 'Обрезка по границам',
   voxel_downsample: 'Прореживание по вокселям',
   remove_overlaps: 'Удаление совпадающих слоёв',
+  isolation_filter: 'Удаление изолированных точек',
   smooth: 'Сглаживание облака точек',
 };
 function cadyxCloudStage(feature) {

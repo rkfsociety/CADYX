@@ -8,7 +8,7 @@
 
 `process_point_cloud` работает с полным сохранённым PLY, проверяя SHA-256. Методы: `deduplicate` убирает одинаковые XYZ; `radius_filter` фильтрует по соседям; `crop` оставляет точки внутри включённых границ; `voxel_downsample` заменяет точки вокселя центроидом. Максимум 2 млн входных точек, минимум три выходные; радиусный фильтр ограничен 20 млн сравнений. Каждая операция добавляет этап истории того же тела и отдельный XYZ PLY. Исходники сохраняются, цвета и нормали в выходной XYZ не переносятся. До 125000 точек документа служат только отображению; масштаб и точность скана этим не подтверждаются.
 
-Для ИИ-агента добавлены `remove_overlaps` (близкие совпадающие слои по нормали к локальной поверхности) и `smooth` (сила в процентах и число проходов). `cadyx_analyze_point_cloud` анализирует результат без записи; применение через `process_point_cloud` добавляет этап в дерево модели. Расстояния заданы в исходных координатах, миллиметры не подтверждены.
+Для ИИ-агента добавлены `isolation_filter` (процент изолированных точек, по умолчанию 15%), `remove_overlaps` (близкие совпадающие слои по нормали к локальной поверхности) и `smooth` (сила в процентах и число проходов). `cadyx_analyze_point_cloud` анализирует результат без записи; применение через `process_point_cloud` добавляет этап в дерево модели. Расстояния заданы в исходных координатах, миллиметры не подтверждены.
 
 Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
 
@@ -27,12 +27,13 @@ it does not expose a catalog or controls for unused processing tools.
 | `radius_filter` | `{radius, min_neighbors}` | Retain points having at least this many other points within the radius. |
 | `crop` | `{min: [x,y,z], max: [x,y,z]}` | Retain points inside the inclusive axis-aligned bounds. |
 | `voxel_downsample` | `{voxel_size}` | Replace each occupied world-origin-aligned voxel with its XYZ centroid. |
+| `isolation_filter` | `{rate: 15}` | Remove unusually sparse points whose nearest-neighbor distance exceeds 1.5 times the cloud median, capped at `rate` percent of the cloud. `rate` must be in `(0,50]`. |
 | `remove_overlaps` | `{distance: 0.56, radius: 2, tangential_distance: 0.1}` (defaults; any subset allowed) | Keep the first representative; remove later samples whose absolute normal separation is **less than** `distance` and tangential separation is at most `tangential_distance`. |
 | `smooth` | `{strength: 10, iterations: 10, radius: 1}` (defaults; any subset allowed) | Move each supported point toward its fitted local plane, along the plane normal, by `strength` percent per synchronous pass. Strength is in `(0,100]`; iterations is an integer in `1..100`. Point count stays unchanged. |
 
 ### Local-surface tools and detection
 
-The two surface tools use radius neighborhoods and a local PCA plane fitted to
+`isolation_filter` uses an exact spatial-grid nearest-neighbor search and applies the selected rate as a removal cap. It removes only points whose nearest-neighbor distance exceeds 1.5 times the cloud median; the 20-million candidate-comparison budget applies. The two surface tools use radius neighborhoods and a local PCA plane fitted to
 the nearest 48 samples. At least six samples and a two-dimensional neighborhood
 are required. Collinear regions and patches whose smallest covariance eigenvalue
 exceeds one quarter of the middle eigenvalue remain unchanged. Radius must be
@@ -49,7 +50,7 @@ neighbor comparisons across all passes; budget exhaustion saves no model stage.
 Use the read-only MCP tool `cadyx_analyze_point_cloud` or
 `POST /api/v1/agent/projects/{id}/validations/cloud-processing` with
 `{expected_revision, body_id, method, parameters}` to detect the prospective result.
-Methods are `remove_overlaps` and `smooth`. The response includes normalized
+Methods are `isolation_filter`, `remove_overlaps` and `smooth`. The response includes normalized
 parameters, the source file/hash, input/output/removed/moved counts and revision.
 It creates no artifact, geometry change, history entry or document revision.
 Apply separately with `process_point_cloud`, the same method/parameters and the

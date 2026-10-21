@@ -95,6 +95,20 @@ class PointCloudProcessingTests(unittest.TestCase):
             with self.subTest(method=method, parameters=parameters):
                 with self.assertRaises(ValidationError):
                     normalize_cloud_parameters(method, parameters)
+        for rate in (True, 0, -1, 51, float("nan")):
+            with self.subTest(rate=rate), self.assertRaises(ValidationError):
+                normalize_cloud_parameters("isolation_filter", {"rate": rate})
+
+    def test_isolation_rate_caps_removals_and_preserves_uniform_surface(self):
+        surface = [(float(x), float(y), 0.) for x in range(10) for y in range(10)]
+        isolated = [(30. + i * 3, 30., 30.) for i in range(10)]
+        points = surface + isolated
+        low = process_points(points, "isolation_filter", {"rate": 5})
+        high = process_points(points, "isolation_filter", {"rate": 15})
+        self.assertEqual(len(points) - len(low), 5)
+        self.assertEqual(len(points) - len(high), 10)
+        self.assertEqual(low[:len(surface)], surface)
+        self.assertEqual(process_points(surface, "isolation_filter", {"rate": 15}), surface)
 
     def test_surface_budget_fails_without_mutating_input(self):
         from unittest.mock import patch
@@ -141,6 +155,9 @@ class PointCloudProcessingTests(unittest.TestCase):
         from cadyx.capabilities import COMMAND_REGISTRY
         from tests.test_persisted_schemas import feature_document
         self.assertIn("process_point_cloud", COMMAND_REGISTRY.command_types)
+        from cadyx.capabilities import COMMAND_CAPABILITIES
+        process_schema = next(item for item in COMMAND_CAPABILITIES if item["type"] == "process_point_cloud")
+        self.assertIn("isolation_filter", process_schema["parameter_schemas"]["method"]["enum"])
         document, feature = feature_document("process_point_cloud")
         document.validate()
         self.assertEqual(Document.from_dict(document.to_dict()).to_dict(), document.to_dict())
