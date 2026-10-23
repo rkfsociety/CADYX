@@ -813,7 +813,6 @@ window.addEventListener("DOMContentLoaded", () => {
   const fourViewsButton = document.querySelector("#viewport-four-views");
   const workflowToggle = document.querySelector("#workflow-toggle");
   const copyProjectIdButton = document.querySelector("#copy-project-id");
-  const documentKind = document.querySelector("#document-kind");
   const geometryRows = document.querySelector("#geometry-rows");
 
   if (!detail || !grid || !sidebar || !navigation || !inspector || !workflow || !orthographic || !fourViewsButton || !workflowToggle) return;
@@ -1004,7 +1003,9 @@ window.addEventListener("DOMContentLoaded", () => {
     const hasProject = !detail.hidden;
     fourViewsButton.disabled = locked;
     workflowToggle.disabled = locked;
-    if (copyProjectIdButton) copyProjectIdButton.disabled = !hasProject || documentKind?.textContent?.trim() !== "ПРОЕКТ";
+    const selectedResource = window.cadyxSelectedProjectId?.();
+    const hasSelectedProject = Boolean(selectedResource) && !selectedResource.startsWith("folder:");
+    if (copyProjectIdButton) copyProjectIdButton.disabled = !hasProject || !hasSelectedProject;
     if (locked && grid.dataset.fourViews === "true") setFourViews(false);
   };
 
