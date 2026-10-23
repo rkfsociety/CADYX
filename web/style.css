@@ -45,9 +45,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .copy-project-id:disabled { opacity: .45; cursor: default; }
 .header-revision { display: grid; gap: 3px; min-width: 72px; padding-left: 14px; border-left: 1px solid var(--line); }
 .header-revision strong { color: var(--muted); font: 11px var(--mono); }
-.device-settings-open { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 0 11px; border: 1px solid var(--line); border-radius: 6px; background: #131c22; color: var(--muted); font: 11px var(--ui-font); white-space: nowrap; cursor: pointer; }
-.device-settings-open:hover { border-color: #8a461e; color: var(--accent); }
-.device-settings-open svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .device-settings-dialog { width: min(540px, calc(100vw - 36px)); padding: 0; overflow: hidden; border: 1px solid #30404a; border-radius: 12px; background: #0f171d; color: var(--text); box-shadow: 0 24px 80px #0009; }
 .device-settings-dialog::backdrop { background: #03070bcc; backdrop-filter: blur(3px); }
 .device-settings-shell { display: grid; gap: 19px; padding: 24px; }

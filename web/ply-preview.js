@@ -329,7 +329,6 @@ const projectsPanel = $("#projects-panel");
 const scanningFrame = $("#scanning-frame");
 const scanningCaptureButton = $("#scanning-capture");
 const scanningPreviewButton = $("#scanning-live-preview");
-const scanningDevicesButton = $("#scanning-devices");
 const scanningStatus = $("#scanning-status");
 const captureButtonSource = $("#viewport-scan-360");
 const previewButtonSource = $("#viewport-live-camera");
@@ -358,7 +357,6 @@ function syncScanningControls() {
 
 scanningCaptureButton?.addEventListener("click", () => captureButtonSource?.click());
 scanningPreviewButton?.addEventListener("click", () => previewButtonSource?.click());
-scanningDevicesButton?.addEventListener("click", () => $("#device-settings-open")?.click());
 syncScanningControls();
 const scanningControlsObserver = new MutationObserver(syncScanningControls);
 if (captureButtonSource) scanningControlsObserver.observe(captureButtonSource, { attributes: true, attributeFilter: ["disabled", "title"] });

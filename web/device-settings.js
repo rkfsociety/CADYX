@@ -19,7 +19,7 @@
     }
   };
   const dialog = document.querySelector('#device-settings-dialog');
-  const open = document.querySelector('#device-settings-open');
+  const open = document.querySelector('#scanning-devices');
   const close = document.querySelector('#device-settings-close');
   const save = document.querySelector('#device-settings-save');
   const refresh = document.querySelector('#device-settings-refresh');
