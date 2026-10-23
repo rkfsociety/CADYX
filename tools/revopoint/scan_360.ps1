@@ -297,7 +297,7 @@ try {
                 if (-not [string]::IsNullOrWhiteSpace($failureDetails)) { $workerError = $failureDetails }
             } catch { $workerError = "Could not read per-frame cleanup details: $($_.Exception.Message)" }
         }
-        throw "Per-frame cleanup failed; original captured RAW/PLY files are preserved. $workerError"
+        throw "Per-frame cleanup failed; RAW files and not-yet-processed PLY frames remain available. Completed PLY frames were cleaned in place. $workerError"
     }
     $preprocessingResult = Get-Content -LiteralPath $preprocessingReportPath -Raw | ConvertFrom-Json
     if ($preprocessingResult.state -ne 'completed' -or $preprocessingResult.cleaned_frame_count -ne $frameCount) {
@@ -326,8 +326,9 @@ try {
             index = $index
             raw_file = "$prefixName.raw"
             ply_file = "$prefixName.ply"
-            preprocessed_ply_file = "${prefixName}_cleaned.ply"
+            preprocessed_ply_file = "$prefixName.ply"
             preprocessing_report_file = "${prefixName}_cleaned.json"
+            preprocessing_mode = 'in_place'
             coordinate_frame = if ($isAligned) { 'table_marker_map_center_xy' } else { 'source_camera' }
             table_aligned_ply_file = if ($isAligned) { $alignedName } else { $null }
             metadata_file = "$prefixName.json"

@@ -99,7 +99,7 @@ def preprocess_points(points: list[tuple[float, float, float]], frame_index: int
                       marker_point_indices: set[int] | None = None,
                       detected_marker_count: int = 0
                       ) -> tuple[list[tuple[float, float, float]], dict[str, Any]]:
-    """Apply the same two CADYX filters, alternating until both report zero removals."""
+    """Apply the configured filters once in order to bound per-frame cleanup time."""
     from cadyx.point_cloud import normalize_cloud_parameters, process_points
 
     source_count = len(points)
@@ -115,22 +115,17 @@ def preprocess_points(points: list[tuple[float, float, float]], frame_index: int
     parameters = {method: normalize_cloud_parameters(method, _PARAMETERS[method]) for method in _METHODS}
     removed_by_method = {method: 0 for method in _METHODS}
     passes = []
-    for pass_index in range(1, 101):
-        pass_removed = {}
-        for method in _METHODS:
-            before = len(current)
-            diagnostics: dict[str, Any] = {}
-            current = process_points(current, method, parameters[method], diagnostics=diagnostics)
-            removed = before - len(current)
-            if removed < 0:
-                raise RuntimeError(f"{method} increased frame {frame_index} point count")
-            removed_by_method[method] += removed
-            pass_removed[method] = removed
-        passes.append(pass_removed)
-        if not any(pass_removed.values()):
-            break
-    else:
-        raise RuntimeError(f"frame {frame_index} cleanup did not converge in 100 passes")
+    pass_removed = {}
+    for method in _METHODS:
+        before = len(current)
+        diagnostics: dict[str, Any] = {}
+        current = process_points(current, method, parameters[method], diagnostics=diagnostics)
+        removed = before - len(current)
+        if removed < 0:
+            raise RuntimeError(f"{method} increased frame {frame_index} point count")
+        removed_by_method[method] += removed
+        pass_removed[method] = removed
+    passes.append(pass_removed)
     if len(current) < 100:
         raise ValueError(f"frame {frame_index} contains fewer than 100 points after cleanup")
     return current, {
@@ -192,11 +187,13 @@ def _table_marker_point_indices(raw_path: Path, calibration_path: Path, depth_sc
 def preprocess_frame_file(source_path: Path, cleaned_path: Path, report_path: Path,
                           frame_index: int, *, timing: str = "during_capture",
                           raw_path: Path | None = None, calibration_path: Path | None = None,
-                          depth_scale: float | None = None) -> dict[str, Any]:
+                          depth_scale: float | None = None, in_place: bool = False) -> dict[str, Any]:
     source_path = source_path.resolve(strict=True)
     cleaned_path = cleaned_path.resolve()
     report_path = report_path.resolve()
-    if cleaned_path.exists() or report_path.exists():
+    if in_place != (source_path == cleaned_path):
+        raise ValueError("in-place cleanup must target the source PLY; separate cleanup must use a different path")
+    if (not in_place and cleaned_path.exists()) or report_path.exists():
         raise FileExistsError("refusing to overwrite a cleaned frame or its report")
     started = time.perf_counter()
     points, source_bytes = read_ascii_xyz_ply(source_path)
@@ -225,22 +222,53 @@ def preprocess_frame_file(source_path: Path, cleaned_path: Path, report_path: Pa
         "source_sha256": _sha256(source_bytes),
         "source_raw_sha256": raw_hash,
         "table_marker_detection": "completed" if raw_hash else "not_requested",
-        "cleaned_file": cleaned_path.name,
+        "processing_mode": "in_place" if in_place else "separate_file",
+        "cleaned_file": source_path.name if in_place else cleaned_path.name,
         "cleaned_sha256": _sha256(cleaned_bytes),
         "frame_index": frame_index,
         "elapsed_seconds": round(time.perf_counter() - started, 3),
         **stats,
     }
-    try:
-        with cleaned_path.open("xb") as target:
-            target.write(cleaned_bytes)
-        with report_path.open("x", encoding="utf-8", newline="\n") as target:
-            json.dump(payload, target, indent=2)
-            target.write("\n")
-    except Exception:
-        cleaned_path.unlink(missing_ok=True)
-        report_path.unlink(missing_ok=True)
-        raise
+    if in_place:
+        temporary_ply = source_path.with_name(f".{source_path.name}.{os.getpid()}.tmp")
+        replaced_source = False
+        try:
+            with temporary_ply.open("xb") as target:
+                target.write(cleaned_bytes)
+                target.flush()
+                os.fsync(target.fileno())
+            with report_path.open("x", encoding="utf-8", newline="\n") as target:
+                json.dump(payload, target, indent=2)
+                target.write("\n")
+                target.flush()
+                os.fsync(target.fileno())
+            temporary_ply.replace(source_path)
+            replaced_source = True
+        except Exception:
+            temporary_ply.unlink(missing_ok=True)
+            if replaced_source:
+                restore_path = source_path.with_name(f".{source_path.name}.{os.getpid()}.restore")
+                try:
+                    with restore_path.open("xb") as target:
+                        target.write(source_bytes)
+                        target.flush()
+                        os.fsync(target.fileno())
+                    restore_path.replace(source_path)
+                finally:
+                    restore_path.unlink(missing_ok=True)
+            report_path.unlink(missing_ok=True)
+            raise
+    else:
+        try:
+            with cleaned_path.open("xb") as target:
+                target.write(cleaned_bytes)
+            with report_path.open("x", encoding="utf-8", newline="\n") as target:
+                json.dump(payload, target, indent=2)
+                target.write("\n")
+        except Exception:
+            cleaned_path.unlink(missing_ok=True)
+            report_path.unlink(missing_ok=True)
+            raise
     return payload
 
 
@@ -248,25 +276,33 @@ def verified_preprocessed_frame(source_path: Path) -> tuple[Path, dict[str, Any]
     """Return a cleanup artifact only when both source and output hashes still match."""
     source_path = source_path.resolve(strict=True)
     cleaned_path = source_path.with_name(source_path.stem + "_cleaned.ply")
-    report_path = cleaned_path.with_suffix(".json")
-    if not cleaned_path.exists() and not report_path.exists():
+    report_path = source_path.with_name(source_path.stem + "_cleaned.json")
+    if not report_path.exists() and not cleaned_path.exists():
         return None
-    if not cleaned_path.is_file() or not report_path.is_file():
-        raise ValueError(f"{source_path.name} has an incomplete preprocessed-frame pair")
+    if not report_path.is_file():
+        raise ValueError(f"{source_path.name} has no cleanup report")
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
         source_hash = _sha256(source_path.read_bytes())
-        cleaned_hash = _sha256(cleaned_path.read_bytes())
+        in_place = report.get("processing_mode") == "in_place" and report.get("cleaned_file") == source_path.name
+        if in_place:
+            output_path = source_path
+            cleaned_hash = source_hash
+        else:
+            output_path = cleaned_path
+            if not cleaned_path.is_file():
+                raise ValueError("separate cleanup output is missing")
+            cleaned_hash = _sha256(cleaned_path.read_bytes())
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError(f"{source_path.name} has an unreadable cleanup report") from exc
     if (report.get("format") != "cadyx-preprocessed-scan-frame-v1"
             or report.get("state") != "completed"
             or report.get("source_file") != source_path.name
-            or report.get("source_sha256") != source_hash
-            or report.get("cleaned_file") != cleaned_path.name
+            or (not in_place and report.get("source_sha256") != source_hash)
+            or report.get("cleaned_file") != output_path.name
             or report.get("cleaned_sha256") != cleaned_hash):
         raise ValueError(f"{source_path.name} cleanup artifact does not match its original source")
-    return cleaned_path, report
+    return output_path, report
 
 
 def _read_completed_rows(pose_log: Path) -> list[dict[str, str]]:
@@ -296,7 +332,7 @@ def _write_aggregate_report(path: Path, payload: dict[str, Any]) -> None:
 def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_frame_count: int,
                   stop_signal: Path, report_path: Path, *, max_workers: int = 4,
                   poll_seconds: float = 0.1, calibration_path: Path | None = None,
-                  depth_scale: float | None = None) -> dict[str, Any]:
+                  depth_scale: float | None = None, in_place: bool = True) -> dict[str, Any]:
     """Launch frame cleanup as soon as each capture-completed row is flushed."""
     run_directory = run_directory.resolve(strict=True)
     pose_log = pose_log.resolve()
@@ -371,11 +407,13 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
         while pending and len(active) < max_workers:
             index = min(pending)
             source_path = pending.pop(index)
-            cleaned_path = source_path.with_name(source_path.stem + "_cleaned.ply")
-            frame_report_path = cleaned_path.with_suffix(".json")
+            cleaned_path = source_path if in_place else source_path.with_name(source_path.stem + "_cleaned.ply")
+            frame_report_path = source_path.with_name(source_path.stem + "_cleaned.json")
             command = [sys.executable, str(script_path), "--input-ply", str(source_path),
                        "--cleaned-ply", str(cleaned_path), "--report-file", str(frame_report_path),
                        "--frame-index", str(index), "--timing", "during_capture"]
+            if in_place:
+                command.append("--in-place")
             if calibration_path is not None and depth_scale is not None:
                 command.extend(("--raw-file", str(source_path.with_suffix(".raw")),
                                 "--calibration-file", str(calibration_path),
@@ -410,6 +448,7 @@ def main() -> int:
     parser.add_argument("--expected-frame-count", type=int)
     parser.add_argument("--stop-signal", type=Path)
     parser.add_argument("--max-workers", type=int, default=4)
+    parser.add_argument("--in-place", action="store_true")
     parser.add_argument("--input-ply", type=Path)
     parser.add_argument("--cleaned-ply", type=Path)
     parser.add_argument("--report-file", type=Path, required=True)
@@ -428,7 +467,7 @@ def main() -> int:
             report = watch_capture(args.watch_pose_log, args.run_directory, args.run_id,
                                    args.expected_frame_count, args.stop_signal, args.report_file,
                                    max_workers=args.max_workers, calibration_path=args.calibration_file,
-                                   depth_scale=args.depth_scale)
+                                   depth_scale=args.depth_scale, in_place=True)
         except (OSError, ValueError, RuntimeError) as exc:
             print(f"capture preprocessing worker failed: {exc}", file=sys.stderr)
             return 2
@@ -441,7 +480,8 @@ def main() -> int:
     try:
         report = preprocess_frame_file(args.input_ply, args.cleaned_ply, args.report_file,
                                        args.frame_index, timing=args.timing, raw_path=args.raw_file,
-                                       calibration_path=args.calibration_file, depth_scale=args.depth_scale)
+                                       calibration_path=args.calibration_file, depth_scale=args.depth_scale,
+                                       in_place=args.in_place)
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"frame preprocessing failed: {exc}", file=sys.stderr)
         return 2

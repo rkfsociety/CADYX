@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 import csv
+import hashlib
 import json
 import struct
 import threading
@@ -41,7 +42,8 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
         self.assertEqual(len(cleaned), 144)
         self.assertEqual(report["removed_by_method"]["isolation_filter"], 4)
         self.assertEqual(report["removed_by_method"]["remove_overlaps"], 0)
-        self.assertEqual(report["passes"][-1], {"isolation_filter": 0, "remove_overlaps": 0})
+        self.assertEqual(len(report["passes"]), 1)
+        self.assertEqual(report["passes"][0], {"isolation_filter": 4, "remove_overlaps": 0})
 
     def test_table_marker_pixels_are_removed_before_cloud_filters(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -97,7 +99,7 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
             self.assertEqual(attempts, 3)
             self.assertEqual(json.loads(report_path.read_text(encoding="utf-8")), {"state": "running"})
 
-    def test_capture_worker_cleans_completed_source_without_modifying_it(self) -> None:
+    def test_capture_worker_overwrites_source_and_keeps_no_cleaned_ply_copy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             run_directory = Path(temporary)
             run_id = "revopoint_20261023T091200Z"
@@ -121,14 +123,17 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
             report = watch_capture(pose_log, run_directory, run_id, 1, stop_signal,
                                    run_directory / f"{run_id}_preprocessing.json", max_workers=1)
 
-            cleaned_path = run_directory / f"{run_id}_pose_000_cleaned.ply"
-            frame_report = json.loads(cleaned_path.with_suffix(".json").read_text(encoding="utf-8"))
+            report_path = run_directory / f"{run_id}_pose_000_cleaned.json"
+            frame_report = json.loads(report_path.read_text(encoding="utf-8"))
             verified = verified_preprocessed_frame(source_path)
             self.assertEqual(report["state"], "completed")
             self.assertEqual(report["cleaned_frame_count"], 1)
             self.assertEqual(frame_report["removed_by_method"]["isolation_filter"], 4)
-            self.assertEqual(verified[0], cleaned_path)
-            self.assertEqual(source_path.read_bytes(), source_bytes)
+            self.assertEqual(frame_report["processing_mode"], "in_place")
+            self.assertEqual(frame_report["source_sha256"], hashlib.sha256(source_bytes).hexdigest())
+            self.assertEqual(verified[0], source_path)
+            self.assertNotEqual(source_path.read_bytes(), source_bytes)
+            self.assertFalse(source_path.with_name(source_path.stem + "_cleaned.ply").exists())
 
     def test_capture_worker_finishes_frame_before_scan_stop_signal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -159,11 +164,11 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
                     "step_index": 0, "event": "capture_completed", "command": str(first_source.with_suffix("")),
                 })
 
-            first_cleaned = run_directory / f"{run_id}_pose_000_cleaned.ply"
+            first_report = run_directory / f"{run_id}_pose_000_cleaned.json"
             deadline = time.monotonic() + 5
-            while not first_cleaned.is_file() and time.monotonic() < deadline:
+            while not first_report.is_file() and time.monotonic() < deadline:
                 time.sleep(0.02)
-            first_was_cleaned_while_scanning = first_cleaned.is_file() and not stop_signal.exists()
+            first_was_cleaned_while_scanning = first_report.is_file() and not stop_signal.exists()
 
             second_source = run_directory / f"{run_id}_pose_001.ply"
             second_source.write_bytes(self._source_ply())
@@ -179,6 +184,7 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
             self.assertTrue(first_was_cleaned_while_scanning)
             self.assertEqual(result[0]["state"], "completed")
             self.assertEqual(result[0]["cleaned_frame_count"], 2)
+            self.assertFalse(first_source.with_name(first_source.stem + "_cleaned.ply").exists())
 
     def test_resolves_all_twelve_legacy_pose_clouds(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
