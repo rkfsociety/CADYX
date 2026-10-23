@@ -172,7 +172,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
  .model-toolbar .cad3-tool,.model-toolbar>.button{font:600 12px/1.2 var(--ui-font)}
  @media(max-width:680px){:root{--cadyx-rail-width:48px;--cadyx-tree-width:52px}.project-detail{grid-template-columns:48px 52px minmax(0,1fr)!important}.project-detail[data-tree-collapsed=true]{grid-template-columns:48px 48px minmax(0,1fr)!important}.cad3-rail{gap:4px;padding:8px 4px}.cad3-rail button{width:36px;height:36px}}
 `;
-    style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}.cad3-scan-file{overflow-wrap:anywhere;padding-left:32px!important}.cad3-cloud-root-row{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:2px}.cad3-cloud-disclosure{display:grid;place-items:center;width:22px;height:32px;padding:0;border:1px solid transparent;border-radius:4px;background:transparent;color:#b6c0c6;font:500 18px/1 var(--ui-font);cursor:pointer}.cad3-cloud-disclosure:hover{border-color:#51331f;background:#ffffff08;color:#ff9653}.cad3-cloud-root{min-height:34px;grid-template-columns:18px minmax(0,1fr)!important;font-weight:650;color:#e8eef1}.cad3-cloud-stages{display:grid;gap:2px;margin:2px 0 3px 24px;padding-left:6px;border-left:1px solid #32404a}.cad3-cloud-stages[hidden]{display:none!important}.cad3-cloud-stages .cad3-tree-node{grid-template-columns:minmax(0,1fr);gap:0}.cad3-tree-leaf-row{grid-column:1/-1;min-width:0}.cad3-tree-leaf-row>.cad-tree-feature{width:100%;min-height:32px;padding:5px 8px;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;font-size:11px}.cad3-cloud-stages .cad3-model-note{padding:2px 8px 5px}';
+    style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}.cad3-scan-file{overflow-wrap:anywhere;padding-left:32px!important}.cad3-scan-run-row{grid-template-columns:20px minmax(0,1fr) 28px}.cad3-scan-delete{display:grid;place-items:center;width:26px;height:30px;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:#f07171;cursor:pointer}.cad3-scan-delete:hover:not(:disabled){border-color:#713131;background:#351919;color:#ff8888}.cad3-scan-delete:disabled{color:#805454;cursor:not-allowed;opacity:.65}.cad3-scan-delete svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.cad3-cloud-root-row{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:2px}.cad3-cloud-disclosure{display:grid;place-items:center;width:22px;height:32px;padding:0;border:1px solid transparent;border-radius:4px;background:transparent;color:#b6c0c6;font:500 18px/1 var(--ui-font);cursor:pointer}.cad3-cloud-disclosure:hover{border-color:#51331f;background:#ffffff08;color:#ff9653}.cad3-cloud-root{min-height:34px;grid-template-columns:18px minmax(0,1fr)!important;font-weight:650;color:#e8eef1}.cad3-cloud-stages{display:grid;gap:2px;margin:2px 0 3px 24px;padding-left:6px;border-left:1px solid #32404a}.cad3-cloud-stages[hidden]{display:none!important}.cad3-cloud-stages .cad3-tree-node{grid-template-columns:minmax(0,1fr);gap:0}.cad3-tree-leaf-row{grid-column:1/-1;min-width:0}.cad3-tree-leaf-row>.cad-tree-feature{width:100%;min-height:32px;padding:5px 8px;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;font-size:11px}.cad3-cloud-stages .cad3-model-note{padding:2px 8px 5px}';
     document.head.appendChild(style);
     if(!$('.cad3-headrail')){const h=document.createElement('div');h.className='cad3-headrail';h.innerHTML=I.model;$('.topbar')?.prepend(h)}
     if(!$('.cad3-rail')){const r=document.createElement('nav');r.className='cad3-rail';r.setAttribute('aria-label','Основная навигация');r.innerHTML=`<button data-view="geometry" title="Геометрия">${I.model}</button><button data-view="files" title="Файлы">${I.files}</button><button data-view="projects" title="Проекты">${I.projects}</button><button data-view="activity" title="Активность">${I.activity}</button>`;detail.prepend(r);const syncRail=()=>{$$('[data-view]',r).forEach(b=>{const view=b.dataset.view,src=nav.querySelector(`[data-workspace-view="${view}"]`),active=view===(grid.dataset.view||'overview');b.setAttribute('aria-label',b.title);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');b.dataset.on=String(active);b.disabled=!src||src.disabled})};r.addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b||b.disabled)return;nav.querySelector(`[data-workspace-view="${b.dataset.view}"]`)?.click()});new MutationObserver(syncRail).observe(grid,{attributes:true,attributeFilter:['data-view']});new MutationObserver(syncRail).observe(nav,{subtree:true,attributes:true,attributeFilter:['disabled','aria-current']});syncRail()}
@@ -258,15 +258,15 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         for(const folder of root.folders||[]){
           if(!scanRunPattern.test(folder.name))continue;
           const previous=previousRuns.get(folder.name);
-          runs.set(folder.name,previous?{...previous,modifiedAt:folder.modified_at_ns||''}:{id:folder.name,folderName:folder.name,files:[],filesLoaded:false,folders:[],modifiedAt:folder.modified_at_ns||''});
+          runs.set(folder.name,previous?{...previous,modifiedAt:folder.modified_at_ns||''}:{id:folder.name,folderName:folder.name,files:[],rootFiles:[],filesLoaded:false,folders:[],modifiedAt:folder.modified_at_ns||''});
         }
         for(const file of root.files||[]){
           const id=scanFileRunId(file.name);if(!id)continue;
-          if(!runs.has(id)){const previous=previousRuns.get(id);runs.set(id,previous?{...previous,folderName:null}:{id,folderName:null,files:[],filesLoaded:true,folders:[],modifiedAt:''})}
-          runs.get(id).files.push(file);
+          if(!runs.has(id)){const previous=previousRuns.get(id);runs.set(id,previous?{...previous,folderName:null}:{id,folderName:null,files:[],rootFiles:[],filesLoaded:true,folders:[],modifiedAt:''})}
+          runs.get(id).files.push(file);runs.get(id).rootFiles.push(file);
         }
         if(request!==scanTreeRequest||state.project!==projectId)return;
-        scanTreeEntries=[...runs.values()].map(run=>({...run,files:[...new Map(run.files.map(file=>[file.name,file])).values()].sort((a,b)=>a.name.localeCompare(b.name))}))
+        scanTreeEntries=[...runs.values()].map(run=>({...run,files:[...new Map(run.files.map(file=>[file.name,file])).values()].sort((a,b)=>a.name.localeCompare(b.name)),rootFiles:[...new Map((run.rootFiles||[]).map(file=>[file.name,file])).values()]}))
           .sort((a,b)=>b.id.localeCompare(a.id));
         const saved=JSON.parse(localStorage.getItem(`cadyx-scan-tree:${projectId}`)||'[]');
         scanTreeExpanded.clear();
@@ -290,7 +290,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         const matchingFiles=files.filter(file=>!query||file.name.toLowerCase().includes(query));
         if(query&&!title.toLowerCase().includes(query)&&!matchingFiles.length)continue;
         const container=document.createElement('div');container.className='cad3-tree-node';
-        const row=document.createElement('div');row.className='cad3-tree-parent-row';
+        const row=document.createElement('div');row.className='cad3-tree-parent-row cad3-scan-run-row';
         const expanded=scanTreeExpanded.has(run.id)||Boolean(query&&matchingFiles.length);
         const childrenId=`scan-run-${run.id}`;
         const disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-tree-disclosure';
@@ -310,7 +310,13 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         button.setAttribute('aria-expanded',String(expanded));button.setAttribute('aria-controls',childrenId);button.onclick=()=>disclosure.click();
         button.innerHTML=`<span class="cad3-icon">${I.cloud}</span><span class="cad-tree-label"></span><small>${run.filesLoaded?`${files.length} файлов`:'Открыть серию'}</small>`;
         button.querySelector('.cad-tree-label').textContent=title;
-        row.append(disclosure,button);container.append(row);
+        const remove=document.createElement('button');remove.type='button';remove.className='cad3-scan-delete';remove.setAttribute('aria-label',`Удалить серию ${title}`);
+        const canDelete=typeof canOpenFilesView==='function'&&canOpenFilesView(state.project);
+        remove.title=canDelete?`Удалить серию «${title}»`:'Удаление доступно, когда проект свободен и состояние подтверждено';
+        remove.disabled=!canDelete;
+        remove.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-.8 13H6.8L6 7m4 3v7m4-7v7"/></svg>';
+        remove.onclick=event=>{event.stopPropagation();deleteScanRun(run)};
+        row.append(disclosure,button,remove);container.append(row);
         const children=document.createElement('div');children.id=childrenId;children.className='cad3-tree-children';children.hidden=!expanded;
         if(run.loading){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent='Загружаю файлы серии…';children.append(leaf)}
         else if(run.loadError){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=`Не удалось загрузить файлы серии (${run.loadError}).`;children.append(leaf)}
@@ -326,6 +332,32 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       }
       const empty=$('#cad-tree-empty');
       if(empty){empty.hidden=shown>0;empty.textContent=message||(!state.project?'Выберите проект, чтобы увидеть серии сканирования.':query?'Совпадений нет.':'В проекте пока нет сохранённых серий сканирования.');}
+    }
+    async function deleteScanRun(run){
+      const projectId=state.project;
+      const title=scanRunTitle(run.id);
+      if(!projectId||typeof canOpenFilesView!=='function'||!canOpenFilesView(projectId)){
+        notify('Удаление доступно, когда проект свободен и состояние подтверждено.',true);return;
+      }
+      if(run.folderName&&(run.rootFiles||[]).length){
+        notify('Серия хранится одновременно в папке и в корне проекта. Удаление остановлено, чтобы не оставить часть серии.',true);return;
+      }
+      const contents=run.folderName?'Папка серии и все файлы внутри неё будут удалены.':'Все файлы этой серии будут удалены из проекта.';
+      if(!window.confirm(`Удалить серию «${title}»?\n\n${contents}\nЭто действие нельзя отменить.`))return;
+      try{
+        if(run.folderName){
+          await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(run.folderName)}/delete`,{method:'POST',body:JSON.stringify({})});
+        }else{
+          const filenames=(run.rootFiles||run.files||[]).map(file=>file.name);
+          if(!filenames.length)throw new Error('В серии не найдено файлов.');
+          await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/files/delete`,{method:'POST',body:JSON.stringify({filenames})});
+        }
+        scanTreeEntries=scanTreeEntries.filter(item=>item.id!==run.id);
+        scanTreeExpanded.delete(run.id);
+        try{localStorage.setItem(`cadyx-scan-tree:${projectId}`,JSON.stringify([...scanTreeExpanded]))}catch{}
+        renderScanTree();
+        notify(`Серия «${title}» удалена.`);
+      }catch(error){notify(`Не удалось удалить серию «${title}»: ${error.message}`,true)}
     }
     function renderTree(){
       if(!list)return;

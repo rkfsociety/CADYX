@@ -232,8 +232,11 @@ class ProjectLifecycleService(_CoreService):
             )
             project = self.workspace.load(project_id, include_history=False)
             document = Document.from_validated_dict(project["document"])
-            if any(item.get("type") == "feature" and item.get("source", {}).get("file") in filenames
-                   for item in document.objects):
+            if any(
+                item.get("type") == "feature"
+                and any(item.get("source", {}).get(key) in filenames for key in ("file", "project_file"))
+                for item in document.objects
+            ):
                 raise ConflictError(
                     "The project file is still used by a model feature and cannot be removed.",
                     code="FILE_IN_USE",
@@ -248,8 +251,11 @@ class ProjectLifecycleService(_CoreService):
             )
             project = self.workspace.load(project_id, include_history=False)
             document = Document.from_validated_dict(project["document"])
-            if any(item.get("type") == "feature" and item.get("source", {}).get("file") in filenames
-                   for item in document.objects):
+            if any(
+                item.get("type") == "feature"
+                and any(item.get("source", {}).get(key) in filenames for key in ("file", "project_file"))
+                for item in document.objects
+            ):
                 raise ConflictError("A project file is still used by a model feature and cannot be removed.",
                                     code="FILE_IN_USE")
             return self.workspace.remove_project_files(project_id, filenames)
@@ -280,7 +286,14 @@ class ProjectLifecycleService(_CoreService):
             document = Document.from_validated_dict(project["document"])
             if any(
                 item.get("type") == "feature"
-                and item.get("source", {}).get("project_folder") == folder_name
+                and (
+                    item.get("source", {}).get("project_folder") == folder_name
+                    or any(
+                        isinstance(item.get("source", {}).get(key), str)
+                        and item.get("source", {}).get(key).replace("\\", "/").startswith(f"{folder_name}/")
+                        for key in ("file", "project_file")
+                    )
+                )
                 for item in document.objects
             ):
                 raise ConflictError(
