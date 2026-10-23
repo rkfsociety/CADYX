@@ -196,6 +196,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     let scanTreeRequest=0;
     let scanTreePreviewSelection=null;
     let scanTreePreviewRequest=0;
+    let scanTreePreviewRestoreMode=null;
+    let latestScanPreview=null;
     function saveModelTreeState(){
       const projectId=state.project;
       if(!projectId)return;
@@ -334,20 +336,39 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const empty=$('#cad-tree-empty');
       if(empty){empty.hidden=shown>0;empty.textContent=message||(!state.project?'Выберите проект, чтобы увидеть серии сканирования.':query?'Совпадений нет.':'В проекте пока нет сохранённых серий сканирования.');}
     }
-    function clearScanTreePreview(){
+    function activeScanPreviewMode(){
+      if(liveCamera?.getAttribute('aria-pressed')==='true')return 'live';
+      if(scanMesh?.getAttribute('aria-pressed')==='true')return 'mesh';
+      if(liveScan?.getAttribute('aria-pressed')==='true')return 'cloud';
+      if(latestScanPreview?.projectId===state.project)return 'capture';
+      return null;
+    }
+    function clearScanTreePreview({restorePrevious=false,preserveMode=false}={}){
+      const restoreMode=scanTreePreviewRestoreMode;
+      let restored=false;
       scanTreePreviewSelection=null;scanTreePreviewRequest++;
       document.querySelectorAll('.cad3-scan-file-button[aria-pressed="true"]').forEach(button=>button.setAttribute('aria-pressed','false'));
       if(scanViewport)delete scanViewport.dataset.scanTreePreview;
       scanView?.setOpen(false);scanView?.closeLivePreview();
       modelViewer?.load(currentModelViewportGeometry,{reset:false});
+      if(restorePrevious&&grid?.dataset.view==='scanning'){
+        if(restoreMode==='live'&&scanView){scanView.showLivePreview({open:true});restored=true}
+        else if((restoreMode==='cloud'||restoreMode==='mesh')&&scanView){scanView.setMode(restoreMode);restored=true}
+        else if(restoreMode==='capture'&&latestScanPreview?.projectId===state.project){
+          scanView?.showCapture(latestScanPreview.scan,{open:true});restored=Boolean(scanView);
+        }
+      }
+      if(!preserveMode)scanTreePreviewRestoreMode=null;
+      return restored;
     }
     async function previewScanFile(run,file,button){
       const selection=`${run.id}/${file.name}`;
       const status=$('#scanning-status');
-      if(scanTreePreviewSelection===selection){clearScanTreePreview();if(status)status.textContent='Готово к съёмке';return}
+      if(scanTreePreviewSelection===selection){const restored=clearScanTreePreview({restorePrevious:true});if(status)status.textContent=restored?'Предыдущий предпросмотр восстановлен':'Готово к съёмке';return}
       const projectId=state.project;
       if(!projectId){notify('Сначала выберите проект.',true);return}
-      clearScanTreePreview();
+      if(!scanTreePreviewSelection)scanTreePreviewRestoreMode=activeScanPreviewMode();
+      clearScanTreePreview({preserveMode:true});
       scanTreePreviewSelection=selection;
       if(scanViewport)scanViewport.dataset.scanTreePreview='true';
       button?.setAttribute('aria-pressed','true');
@@ -371,9 +392,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         if(status)status.textContent=`Предпросмотр ${scanFileLabel(file,run.id)} · ${new Intl.NumberFormat('ru-RU').format(pointCount)} точек`;
       }catch(error){
         if(request!==scanTreePreviewRequest)return;
-        scanTreePreviewSelection=null;
-        if(scanViewport)delete scanViewport.dataset.scanTreePreview;
-        button?.setAttribute('aria-pressed','false');
+        clearScanTreePreview({restorePrevious:true});
         if(status)status.textContent=error.message;
       }
     }
@@ -396,7 +415,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           if(!filenames.length)throw new Error('В серии не найдено файлов.');
           await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/files/delete`,{method:'POST',body:JSON.stringify({filenames})});
         }
-        if(scanTreePreviewSelection?.startsWith(`${run.id}/`))clearScanTreePreview();
+        if(scanTreePreviewSelection?.startsWith(`${run.id}/`))clearScanTreePreview({restorePrevious:true});
         scanTreeEntries=scanTreeEntries.filter(item=>item.id!==run.id);
         scanTreeExpanded.delete(run.id);
         try{localStorage.setItem(`cadyx-scan-tree:${projectId}`,JSON.stringify([...scanTreeExpanded]))}catch{}
@@ -729,6 +748,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
           if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось получить статус съёмки');
           const scan=payload.scan;
+          if(scan?.preview_file)latestScanPreview={projectId:id,scan};
           const captureStarted=scan.state==='running'&&!scanWasRunning;
           scanWasRunning=scan.state==='running';
           if(!scanTreePreviewSelection)scanStatus.textContent=scan.state==='idle'||scan.state==='completed'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;
