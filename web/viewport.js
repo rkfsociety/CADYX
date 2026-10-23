@@ -2,6 +2,7 @@
   const MAX_PREVIEW_POINTS = 24000;
   const INTERACTIVE_RENDER_SCALE = 0.6;
   const VIEWPORT_MESH_DEFLECTION = 0.01;
+  const formatCoordinate = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format;
   const meshEdgesCache = new WeakMap();
   function viewportUpdateForAgentActivity(projectId, selectedProjectId, activity, currentSketchId = null) {
     if (projectId !== selectedProjectId || activity?.state !== "completed"
@@ -413,6 +414,15 @@
         return [width / 2 + right * scale + cameraPanX * dpr,
           height / 2 - up * scale + cameraPanY * dpr];
       };
+      const pointCloudPreview = geometry.pointCloudVertexCount != null
+        || triangles.length === 0 && positions.length > 0 && !(geometry.lines || []).length;
+      const referenceOrigin = pointCloudPreview && Array.isArray(geometry.referenceOrigin)
+        && geometry.referenceOrigin.length === 3 && geometry.referenceOrigin.every(Number.isFinite)
+        ? geometry.referenceOrigin : [0, 0, 0];
+      if (showWorldAxes && pointCloudPreview) {
+        const extent = Math.hypot(width, height) / (2 * scale) * 1.15;
+        drawWorldGrid(project, extent, scale, dpr, referenceOrigin);
+      }
       const motionSeconds = bodyMotion
         ? Math.min((performance.now() - bodyMotion.startedAt) / 1000, bodyMotion.durationSeconds) : 0;
       if (!motionSeconds && bodyMotionAngleByVertex.length) bodyMotionAngleByVertex.fill(0);
@@ -471,7 +481,7 @@
         screenY[vertex] = height / 2 - up * scale + cameraPanY * dpr;
       }
 
-      if (showWorldAxes) drawWorldAxes(project, radius, dpr);
+      if (showWorldAxes && !pointCloudPreview) drawWorldAxes(project, radius, dpr);
       if (showRotationAxes) drawRotationAxes(geometry.rotationAxes || [], project, dpr);
       if (triangles.length) renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, bodyMotionAngleByVertex,
@@ -574,6 +584,10 @@
         }
       }
       context.globalAlpha = 1;
+      if (showWorldAxes && pointCloudPreview) {
+        const label = referenceOrigin.map(formatCoordinate).join(", ");
+        drawWorldAxes(project, radius, dpr, referenceOrigin, label);
+      }
       if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cameraOrientation);
       if (showViewCube) drawViewCube(width, dpr, cameraOrientation);
       onRender?.();
@@ -598,12 +612,20 @@
         return [width / 2 + right * scale + cameraPanX * dpr,
           height / 2 - up * scale + cameraPanY * dpr];
       };
+      drawWorldGrid(project, extent, scale, dpr, center);
+      drawWorldAxes(project, extent * 0.72, dpr);
+      if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cameraOrientation);
+      if (showViewCube) drawViewCube(width, dpr, cameraOrientation);
+    }
+
+    function drawWorldGrid(project, extent, scale, dpr, origin = [0, 0, 0]) {
       const targetSpacing = 34 / scale;
       const magnitude = 10 ** Math.floor(Math.log10(targetSpacing));
       const normalized = targetSpacing / magnitude;
       const gridStep = (normalized < 1.5 ? 1 : normalized < 3.5 ? 2 : normalized < 7.5 ? 5 : 10) * magnitude;
       const majorStep = gridStep * 5;
       const lineCount = Math.ceil(extent / gridStep);
+      const gridPoint = (x, y) => project(origin[0] + x, origin[1] + y, origin[2]);
 
       context.save();
       context.lineWidth = dpr;
@@ -612,10 +634,10 @@
         const major = index % 5 === 0;
         context.strokeStyle = major ? "rgba(117, 145, 153, 0.25)" : "rgba(117, 145, 153, 0.12)";
         context.beginPath();
-        context.moveTo(...project(coordinate, -extent, 0));
-        context.lineTo(...project(coordinate, extent, 0));
-        context.moveTo(...project(-extent, coordinate, 0));
-        context.lineTo(...project(extent, coordinate, 0));
+        context.moveTo(...gridPoint(coordinate, -extent));
+        context.lineTo(...gridPoint(coordinate, extent));
+        context.moveTo(...gridPoint(-extent, coordinate));
+        context.lineTo(...gridPoint(extent, coordinate));
         context.stroke();
       }
 
@@ -627,15 +649,12 @@
       for (let index = -labelCount; index <= labelCount; index += 1) {
         if (!index) continue;
         const coordinate = index * majorStep;
-        const xPoint = project(coordinate, 0, 0);
-        const yPoint = project(0, coordinate, 0);
-        context.fillText(String(coordinate), xPoint[0], xPoint[1] + 11 * dpr);
-        context.fillText(String(coordinate), yPoint[0] + 12 * dpr, yPoint[1]);
+        const xPoint = gridPoint(coordinate, 0);
+        const yPoint = gridPoint(0, coordinate);
+        context.fillText(formatCoordinate(origin[0] + coordinate), xPoint[0], xPoint[1] + 11 * dpr);
+        context.fillText(formatCoordinate(origin[1] + coordinate), yPoint[0] + 12 * dpr, yPoint[1]);
       }
       context.restore();
-      drawWorldAxes(project, extent * 0.72, dpr);
-      if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cameraOrientation);
-      if (showViewCube) drawViewCube(width, dpr, cameraOrientation);
     }
 
     function createSnapshotBlob() {
@@ -693,8 +712,8 @@
       }
     }
 
-    function drawWorldAxes(project, radius, dpr) {
-      const origin = project(0, 0, 0);
+    function drawWorldAxes(project, radius, dpr, center = [0, 0, 0], originLabel = "0, 0, 0") {
+      const origin = project(...center);
       const length = Math.max(radius * (1.25 / 3), 0.001);
       const axes = [
         { name: "X", color: "#ef827b", end: [length, 0, 0] },
@@ -706,8 +725,8 @@
       context.lineWidth = 1.3 * dpr;
       context.setLineDash([7 * dpr, 5 * dpr]);
       for (const axis of axes) {
-        const start = project(-axis.end[0], -axis.end[1], -axis.end[2]);
-        const end = project(...axis.end);
+        const start = project(...axis.end.map((value, index) => center[index] - value));
+        const end = project(...axis.end.map((value, index) => center[index] + value));
         context.strokeStyle = axis.color;
         context.fillStyle = axis.color;
         context.beginPath();
@@ -728,7 +747,7 @@
       context.fill();
       context.font = `600 ${11 * dpr}px "Segoe UI Variable", "Segoe UI", Arial, sans-serif`;
       context.textBaseline = "middle";
-      const label = "0, 0, 0";
+      const label = originLabel;
       const labelX = origin[0] + 7 * dpr;
       const labelY = origin[1] - 10 * dpr;
       const labelWidth = context.measureText(label).width;

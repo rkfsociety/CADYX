@@ -365,8 +365,9 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         });
         if(request!==scanTreePreviewRequest||projectId!==state.project)return;
         const pointCount=geometry.previewVertexCount??geometry.positions.length/3;
+        const referenceOrigin=geometry.bounds.min.map((value,axis)=>(value+geometry.bounds.max[axis])/2);
         modelViewer?.load({...geometry,triangles:new Uint32Array(0),lines:[],
-          pointCloudVertexCount:pointCount},{reset:true});
+          pointCloudVertexCount:pointCount,referenceOrigin},{reset:true});
         if(status)status.textContent=`Предпросмотр ${scanFileLabel(file,run.id)} · ${new Intl.NumberFormat('ru-RU').format(pointCount)} точек`;
       }catch(error){
         if(request!==scanTreePreviewRequest)return;
