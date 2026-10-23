@@ -1004,7 +1004,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const hasProject = !detail.hidden;
     fourViewsButton.disabled = locked;
     workflowToggle.disabled = locked;
-    if (copyProjectIdButton) copyProjectIdButton.disabled = locked || !hasProject || documentKind?.textContent?.trim() !== "ПРОЕКТ";
+    if (copyProjectIdButton) copyProjectIdButton.disabled = !hasProject || documentKind?.textContent?.trim() !== "ПРОЕКТ";
     if (locked && grid.dataset.fourViews === "true") setFourViews(false);
   };
 

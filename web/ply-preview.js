@@ -155,10 +155,33 @@ $("#viewport-fit").addEventListener("click", () => {
 });
 const toast = $("#toast");
 const copyProjectIdButton = $("#copy-project-id");
+async function writeClipboardText(value) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return;
+    }
+  } catch {
+    // Fall through to the synchronous copy command for embedded/restricted browsers.
+  }
+
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.opacity = "0";
+  document.body.appendChild(field);
+  field.select();
+  field.setSelectionRange(0, value.length);
+  const copied = document.execCommand("copy");
+  field.remove();
+  if (!copied) throw new Error("Clipboard copy failed");
+}
+
 copyProjectIdButton.addEventListener("click", async () => {
   if (!selectedProjectId || selectedProjectId.startsWith(FOLDER_SELECTION_PREFIX)) return;
   try {
-    await navigator.clipboard.writeText(selectedProjectId);
+    await writeClipboardText(selectedProjectId);
     notify(`UUID проекта скопирован: ${selectedProjectId}`, false, 10000);
   } catch {
     notify("Не удалось скопировать UUID проекта.", true);
