@@ -330,42 +330,7 @@ const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
 const folderInspector = $("#folder-inspector");
 const projectsPanel = $("#projects-panel");
-const scanningFrame = $("#scanning-frame");
-const scanningCaptureButton = $("#scanning-capture");
-const scanningPreviewButton = $("#scanning-live-preview");
-const scanningStatus = $("#scanning-status");
-const captureButtonSource = $("#viewport-scan-360");
 const previewButtonSource = $("#viewport-live-camera");
-const captureStatusSource = $("#viewport-scan-360-status");
-
-function activateScanningFrame() {
-  if (scanningFrame && !scanningFrame.getAttribute("src")) {
-    scanningFrame.setAttribute("src", scanningFrame.dataset.src || "/scanner?embed=1");
-  }
-}
-
-function syncScanningControls() {
-  if (scanningCaptureButton) {
-    scanningCaptureButton.disabled = !captureButtonSource || captureButtonSource.disabled;
-    if (captureButtonSource?.title) scanningCaptureButton.title = captureButtonSource.title;
-  }
-  if (scanningPreviewButton) {
-    scanningPreviewButton.disabled = !previewButtonSource || previewButtonSource.disabled;
-    scanningPreviewButton.setAttribute("aria-pressed", previewButtonSource?.getAttribute("aria-pressed") || "false");
-  }
-  if (scanningStatus) {
-    const status = captureStatusSource?.textContent?.trim();
-    scanningStatus.textContent = status || "Готово к съёмке";
-  }
-}
-
-scanningCaptureButton?.addEventListener("click", () => captureButtonSource?.click());
-scanningPreviewButton?.addEventListener("click", () => previewButtonSource?.click());
-syncScanningControls();
-const scanningControlsObserver = new MutationObserver(syncScanningControls);
-if (captureButtonSource) scanningControlsObserver.observe(captureButtonSource, { attributes: true, attributeFilter: ["disabled", "title"] });
-if (previewButtonSource) scanningControlsObserver.observe(previewButtonSource, { attributes: true, attributeFilter: ["disabled", "aria-pressed"] });
-if (captureStatusSource) scanningControlsObserver.observe(captureStatusSource, { childList: true, characterData: true, subtree: true });
 function canOpenFilesView(projectId = selectedProjectId) {
   if (!projectId || getSelectedFolder()) return false;
   const lock = agentLocksByProject.get(projectId);
@@ -464,9 +429,7 @@ $("#workspace-navigation").addEventListener("click", (event) => {
   } else if (view === "manufacturing") {
     $("#manufacturing-panel").focus({ preventScroll: true });
   } else if (view === "scanning") {
-    activateScanningFrame();
-    syncScanningControls();
-    $("#scanning-panel").focus({ preventScroll: true });
+    previewButtonSource.focus({ preventScroll: true });
   } else if (view === "activity") {
     $("#workflow-panel").focus({ preventScroll: true });
   } else if (view === "files") {
@@ -492,11 +455,6 @@ function setWorkspaceNavigation(view) {
   folderDetail.hidden = !getSelectedFolder() && activeView !== "files";
   $("#comparison-panel").hidden = activeView !== "analysis";
   $("#manufacturing-panel").hidden = activeView !== "manufacturing";
-  $("#scanning-panel").hidden = activeView !== "scanning";
-  if (activeView === "scanning") {
-    activateScanningFrame();
-    syncScanningControls();
-  }
   projectsPanel.hidden = activeView !== "projects";
   $("#object-panel").hidden = activeView !== "geometry" || !selectedProjectId || Boolean(getSelectedFolder());
   document.querySelectorAll(".nav-item[data-workspace-view]").forEach((item) => {
