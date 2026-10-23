@@ -235,7 +235,7 @@
       });
 
       async function loadCalibration() {
-        const response = await fetch(`/api/v1/scanner/calibration?ts=${Date.now()}`, { cache: "no-store" });
+        const response = await fetch("/api/v1/scanner/calibration", { cache: "no-store" });
         if (!response.ok) throw Error(`Калибровка Q.bin недоступна (HTTP ${response.status}).`);
         const calibration = await response.json();
         if (!Array.isArray(calibration.matrix) || calibration.matrix.length !== 16) throw Error("Формат Q.bin не распознан.");
