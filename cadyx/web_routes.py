@@ -616,8 +616,9 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         handler._json(200, core.observe_agent_operation(project_id, "Изучает модель", lambda: core.inspect_project(project_id)))
     elif name == "agent_scan_360_start":
         body = _require_json(handler)
-        if set(body) - {"rotation_period_seconds", "scanner_device_id", "turntable_device_id"}:
-            raise ValidationError("A 360 scan accepts only device IDs and the turntable rotation period setting.")
+        if set(body) - {"rotation_period_seconds", "scanner_device_id", "turntable_device_id",
+                        "step_degrees", "align_to_markers"}:
+            raise ValidationError("A 360 scan accepts device IDs, rotation period, step_degrees and align_to_markers.")
         rotation_period_seconds = body.get("rotation_period_seconds", 18.0)
         if (isinstance(rotation_period_seconds, bool)
                 or not isinstance(rotation_period_seconds, (int, float))
@@ -625,11 +626,18 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
             raise ValidationError("The turntable rotation period must be between 18 and 90 seconds per revolution.")
         scanner_device_id = body.get("scanner_device_id")
         turntable_device_id = body.get("turntable_device_id")
+        step_degrees = body.get("step_degrees", 30)
+        align_to_markers = body.get("align_to_markers", True)
+        if isinstance(step_degrees, bool) or not isinstance(step_degrees, int):
+            raise ValidationError("step_degrees must be an integer divisor of 360 between 1 and 30.")
+        if not isinstance(align_to_markers, bool):
+            raise ValidationError("align_to_markers must be a boolean.")
         if (scanner_device_id is not None and not isinstance(scanner_device_id, str)) or (
                 turntable_device_id is not None and not isinstance(turntable_device_id, str)):
             raise ValidationError("Scanner and turntable device IDs must be strings.")
         handler._json(202, {"scan": core.start_scan_360(
             project_id, rotation_period_seconds, scanner_device_id, turntable_device_id,
+            step_degrees, align_to_markers,
         )})
     elif name == "agent_scan_360_status":
         handler._json(200, {"scan": core.scan_360_status(project_id)})

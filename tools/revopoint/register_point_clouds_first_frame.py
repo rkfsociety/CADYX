@@ -6,6 +6,7 @@ import argparse
 import json
 import math
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -17,15 +18,22 @@ _RUN_ID = re.compile(r"^revopoint_\d{8}T\d{6}Z$")
 def source_paths(project: Path, run_id: str) -> list[Path]:
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError("run id must be revopoint_YYYYMMDDTHHMMSSZ")
+    try:
+        manifest = json.loads((project / f"{run_id}_scan_360.json").read_text(encoding="utf-8"))
+        frame_count = manifest.get("frame_count", 12)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, AttributeError):
+        frame_count = 12
+    if isinstance(frame_count, bool) or not isinstance(frame_count, int) or not 1 <= frame_count <= 360:
+        raise ValueError("scan manifest frame_count must be an integer from 1 to 360")
     paths = []
-    for index in range(12):
+    for index in range(frame_count):
         choices = (
             project / f"{run_id}_pose_{index:03d}.ply",
             project / f"{run_id}_pose_pose_{index:03d}.ply",
         )
         path = next((candidate for candidate in choices if candidate.is_file()), None)
         if path is None:
-            raise FileNotFoundError(f"Missing PLY for captured pose {index}/11.")
+            raise FileNotFoundError(f"Missing PLY for captured pose {index}/{frame_count - 1}.")
         paths.append(path)
     return paths
 
@@ -85,6 +93,7 @@ def register_sequence(project: Path, run_id: str, output: Path,
             cloud, o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 9, max_nn=100)))
 
     correspondence_distance = voxel_size * 2.5
+    rmse_limit = voxel_size * 1.5 + 1e-3
 
     def pairwise(source_id: int, target_id: int):
         global_result = registration.registration_ransac_based_on_feature_matching(
@@ -107,10 +116,11 @@ def register_sequence(project: Path, run_id: str, output: Path,
     odometry = np.eye(4)
     pose_graph.nodes.append(registration.PoseGraphNode(odometry.copy()))
     adjacent_edges = []
-    for source_id in range(11):
+    frame_count = len(clouds)
+    for source_id in range(frame_count - 1):
         target_id = source_id + 1
         result, information = pairwise(source_id, target_id)
-        if result.fitness < 0.35 or result.inlier_rmse > voxel_size * 1.5:
+        if result.fitness < 0.35 or result.inlier_rmse > rmse_limit:
             raise RuntimeError(f"weak adjacent alignment {source_id}->{target_id}: "
                                f"fitness={result.fitness:.3f}, rmse={result.inlier_rmse:.3f}")
         transform = np.asarray(result.transformation)
@@ -123,7 +133,7 @@ def register_sequence(project: Path, run_id: str, output: Path,
                                "inlier_rmse": float(result.inlier_rmse)})
 
     loop_edges = []
-    for target_id in range(2, 12):
+    for target_id in range(2, frame_count):
         result, information = pairwise(0, target_id)
         if result.fitness >= 0.35 and result.inlier_rmse <= voxel_size * 1.5:
             pose_graph.edges.append(registration.PoseGraphEdge(
@@ -168,7 +178,7 @@ def register_sequence(project: Path, run_id: str, output: Path,
     overlap = [
         _overlap_in_bounds(np.asarray(registered[index].points),
                            np.asarray(registered[index + 1].points), lower, upper)
-        for index in range(11)
+        for index in range(frame_count - 1)
     ]
     closure = _overlap_in_bounds(np.asarray(registered[-1].points),
                                  np.asarray(registered[0].points), lower, upper)

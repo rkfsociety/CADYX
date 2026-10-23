@@ -381,9 +381,11 @@ def _write_aligned_ply(path: Path, points: list[Vector], source_name: str) -> No
 
 
 def align_run(project: Path, run_id: str, marker_map: Path, calibration_file: Path,
-              depth_scale: float) -> dict:
+              depth_scale: float, frame_count: int = 12) -> dict:
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError("run id must use revopoint_YYYYMMDDTHHMMSSZ")
+    if isinstance(frame_count, bool) or not isinstance(frame_count, int) or not 1 <= frame_count <= 360:
+        raise ValueError("frame count must be an integer from 1 to 360")
     if not math.isfinite(depth_scale) or depth_scale <= 0:
         raise ValueError("depth scale must be positive and finite")
     project = project.resolve(strict=True)
@@ -404,7 +406,7 @@ def align_run(project: Path, run_id: str, marker_map: Path, calibration_file: Pa
     frames = []
     run_files = []
     try:
-        for index in range(12):
+        for index in range(frame_count):
             source_stem = f"{run_id}_pose_{index:03d}"
             raw_path = project / f"{source_stem}.raw"
             ply_path = project / f"{source_stem}.ply"
@@ -460,7 +462,7 @@ def align_run(project: Path, run_id: str, marker_map: Path, calibration_file: Pa
         for source, destination in run_files:
             source.rename(destination)
         aligned_count = len(run_files)
-        status = "aligned_provisional" if aligned_count == 12 else "partial" if aligned_count else "unavailable"
+        status = "aligned_provisional" if aligned_count == frame_count else "partial" if aligned_count else "unavailable"
         result = {"format": "cadyx-table-marker-alignment-v1", "algorithm_version": 1, "status": status,
                   "run_id": run_id, "coordinate_frame": "table_marker_map_center_xy",
                   "center_marker_map_record": table["center_index"] + 1,
@@ -469,7 +471,7 @@ def align_run(project: Path, run_id: str, marker_map: Path, calibration_file: Pa
                   "coordinate_units": "table map units; semantics and physical scale unverified",
                   "registration": "per-frame marker geometric correspondences; 2D similarity fit in detected table plane",
                   "aligned_frame_count": aligned_count,
-                  "deferred_frame_count": 12 - aligned_count,
+                  "deferred_frame_count": frame_count - aligned_count,
                   "deferred_frame_policy": "preserve the source frame; determine its object datum later from cloud or mesh axes and planes",
                   "turntable_telemetry_used_for_alignment": False,
                   "marker_map_file": marker_map.name,
@@ -497,9 +499,11 @@ def main() -> int:
     parser.add_argument("--marker-map", type=Path, required=True)
     parser.add_argument("--calibration-file", type=Path, required=True)
     parser.add_argument("--depth-scale", type=float, required=True)
+    parser.add_argument("--frame-count", type=int, default=12)
     arguments = parser.parse_args()
     print(json.dumps(align_run(arguments.project, arguments.run_id, arguments.marker_map,
-                               arguments.calibration_file, arguments.depth_scale), indent=2))
+                               arguments.calibration_file, arguments.depth_scale,
+                               arguments.frame_count), indent=2))
     return 0
 
 

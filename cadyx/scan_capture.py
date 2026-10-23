@@ -19,7 +19,7 @@ from typing import Any
 
 from .errors import ConflictError, ValidationError
 
-_FRAME_COUNT = 12
+_DEFAULT_FRAME_COUNT = 12
 
 
 @dataclass
@@ -30,6 +30,9 @@ class _Scan360Job:
     process: subprocess.Popen[bytes]
     log_path: Path
     started_at: str
+    frame_count: int
+    step_degrees: int
+    align_to_markers: bool
 
 
 @dataclass
@@ -372,11 +375,19 @@ class Scan360CaptureController:
     def start(self, project_id: str, project_directory: Path,
               rotation_period_seconds: float = 18.0,
               scanner_device_id: str | None = None,
-              turntable_device_id: str | None = None) -> dict[str, Any]:
+              turntable_device_id: str | None = None,
+              step_degrees: int = 30,
+              align_to_markers: bool = True) -> dict[str, Any]:
         if (isinstance(rotation_period_seconds, bool)
                 or not isinstance(rotation_period_seconds, (int, float))
                 or not 18.0 <= rotation_period_seconds <= 90.0):
             raise ValidationError("The turntable rotation period must be between 18 and 90 seconds per revolution.")
+        if (isinstance(step_degrees, bool) or not isinstance(step_degrees, int)
+                or not 1 <= step_degrees <= 30 or 360 % step_degrees != 0):
+            raise ValidationError("The scan step must be an integer divisor of 360 between 1 and 30 degrees.")
+        if not isinstance(align_to_markers, bool):
+            raise ValidationError("align_to_markers must be a boolean.")
+        frame_count = 360 // step_degrees
         if os.name != "nt":
             raise ValidationError("360-degree Revopoint capture is available only on the Windows scanner host.")
         project_directory = project_directory.resolve(strict=True)
@@ -404,7 +415,8 @@ class Scan360CaptureController:
         calibration_file, depth_scale = self._resolve_scanner_calibration(
             scanner_device_id, len(scanners), scanner["profile_id"],
         )
-        marker_map_file = self._turntable_marker_map_path(turntable_device_id, turntable["profile_id"])
+        marker_map_file = (self._turntable_marker_map_path(turntable_device_id, turntable["profile_id"])
+                           if align_to_markers else None)
         python_executable = Path(sys.executable)
         if python_executable.name.lower() == "pythonw.exe":
             console_python = python_executable.with_name("python.exe")
@@ -435,6 +447,7 @@ class Scan360CaptureController:
                         [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                          "-File", str(script), "-ProjectPath", str(project_directory), "-RunId", run_id,
                          "-TurntableRotationPeriodSeconds", format(rotation_period_seconds, ".15g"),
+                         "-StepDegrees", str(step_degrees),
                          "-ScannerDeviceId", scanner_device_id,
                          "-TurntableAddress", turntable_device_id,
                          "-TurntableName", turntable["expected_name"],
@@ -442,8 +455,8 @@ class Scan360CaptureController:
                          "-TurntableServiceUuid", turntable["service_uuid"],
                          "-TurntableCharacteristicUuid", turntable["characteristic_uuid"],
                          "-CalibrationFile", str(calibration_file),
-                         "-TurntableMarkerMap", str(marker_map_file),
-                         "-PythonExecutable", str(python_executable),
+                         *(["-TurntableMarkerMap", str(marker_map_file),
+                            "-PythonExecutable", str(python_executable)] if align_to_markers else ["-SkipTableMarkerAlignment"]),
                          "-DepthScale", format(depth_scale, ".15g")],
                         cwd=str(self._repository_root), stdin=subprocess.DEVNULL,
                         stdout=log_stream, stderr=subprocess.STDOUT,
@@ -460,6 +473,9 @@ class Scan360CaptureController:
                 process=process,
                 log_path=log_path,
                 started_at=datetime.now(timezone.utc).isoformat(),
+                frame_count=frame_count,
+                step_degrees=step_degrees,
+                align_to_markers=align_to_markers,
             )
             return self._snapshot_locked()
 
@@ -579,7 +595,8 @@ class Scan360CaptureController:
                 return self._latest_completed_snapshot(project_directory)
             if self._job.project_id != project_id:
                 if self._job.process.poll() is None:
-                    return {"state": "busy", "completed_frames": 0, "frame_count": _FRAME_COUNT}
+                    return {"state": "busy", "completed_frames": 0,
+                            "frame_count": self._job.frame_count, "step_degrees": self._job.step_degrees}
                 return self._latest_completed_snapshot(project_directory)
             return self._snapshot_locked()
 
@@ -600,31 +617,33 @@ class Scan360CaptureController:
         except OSError:
             log_tail = ""
         completed = 0
-        for value in re.findall(r"captured pose (\d+)/11", log_tail, flags=re.IGNORECASE):
-            completed = max(completed, int(value) + 1)
-        completed = max(completed, self._count_run_frames(self._job.project_directory, self._job.run_id))
-        capture_sweep_completed = "sweep completed: 12 steps" in log_tail.lower()
+        for value in re.findall(r"captured pose (\d+)/(\d+)", log_tail, flags=re.IGNORECASE):
+            completed = max(completed, int(value[0]) + 1)
+        completed = max(completed, self._count_run_frames(
+            self._job.project_directory, self._job.run_id, self._job.frame_count))
+        capture_sweep_completed = f"sweep completed: {self._job.frame_count} steps" in log_tail.lower()
         alignment_failed = "table-map alignment failed" in log_tail.lower()
-        metadata_warning = (state == "failed" and completed == _FRAME_COUNT
+        metadata_warning = (state == "failed" and completed == self._job.frame_count
                             and capture_sweep_completed and not alignment_failed)
         if state == "completed" or metadata_warning:
-            completed = _FRAME_COUNT
+            completed = self._job.frame_count
             state = "completed"
-        message = (f"Кадр {completed}/{_FRAME_COUNT}" if state == "running" else
-                   "12 кадров сохранены, но привязка к центру карты стола не прошла; исходные кадры сохранены." if alignment_failed else
-                   "12 кадров сохранены. Запись манифеста завершилась ошибкой; журнал поз сохранён." if metadata_warning else
+        message = (f"Кадр {completed}/{self._job.frame_count} (шаг {self._job.step_degrees}°)" if state == "running" else
+                   f"{self._job.frame_count} кадров сохранены, но привязка к центру карты стола не прошла; исходные кадры сохранены." if alignment_failed else
+                   f"{self._job.frame_count} кадров сохранены. Запись манифеста завершилась ошибкой; журнал поз сохранён." if metadata_warning else
                    "Съёмка 360° завершена; кадры сохранены в проекте." if state == "completed" else
                    f"Съёмка завершилась с ошибкой (код {return_code}); исходные кадры, если они успели сохраниться, оставлены в проекте.")
         snapshot = {
             "state": state,
             "completed_frames": completed,
-            "frame_count": _FRAME_COUNT,
+            "frame_count": self._job.frame_count,
+            "step_degrees": self._job.step_degrees,
             "started_at": self._job.started_at,
             "message": message,
         }
         snapshot.update(self._preview_payload(
             self._run_directory(self._job.project_directory, self._job.run_id),
-            self._job.run_id, completed,
+            self._job.run_id, completed, self._job.frame_count,
         ))
         snapshot["table_alignment_status"] = self._alignment_status(
             self._job.project_directory, self._job.run_id,
@@ -635,6 +654,7 @@ class Scan360CaptureController:
                 "partial": "Часть кадров привязана к центру карты стола; остальные исходники сохранены для последующей привязки.",
                 "unavailable": "Маркеры стола не удалось надёжно определить; привязку можно выполнить позднее по осям и плоскостям облака или сетки.",
                 "pending": "Кадры сохранены; отчёт о привязке к карте стола отсутствует.",
+                "not_performed": "Кадры сохранены в координатах камеры без привязки к столу; их можно сшить геометрически.",
                 "failed": "Кадры сохранены, но отчёт о привязке к карте стола повреждён или не прошёл проверку.",
             }.get(snapshot["table_alignment_status"], message)
         return snapshot
@@ -646,13 +666,30 @@ class Scan360CaptureController:
         try:
             result = json.loads(result_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return "failed" if result_path.exists() else "pending"
+            if result_path.exists():
+                return "failed"
+            manifest_path = run_directory / f"{run_id}_scan_360.json"
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                return "pending"
+            return "not_performed" if isinstance(manifest, dict) and manifest.get("table_alignment_status") == "not_performed" else "pending"
         return result.get("status", "failed") if isinstance(result, dict) else "failed"
 
     @staticmethod
-    def _count_run_frames(project_directory: Path, run_id: str) -> int:
+    def _manifest_frame_count(project_directory: Path, run_id: str) -> int:
+        manifest = Scan360CaptureController._run_directory(project_directory, run_id) / f"{run_id}_scan_360.json"
+        try:
+            count = json.loads(manifest.read_text(encoding="utf-8")).get("frame_count")
+        except (OSError, ValueError, TypeError, json.JSONDecodeError, AttributeError):
+            return _DEFAULT_FRAME_COUNT
+        return count if isinstance(count, int) and not isinstance(count, bool) and 1 <= count <= 360 else _DEFAULT_FRAME_COUNT
+
+    @staticmethod
+    def _count_run_frames(project_directory: Path, run_id: str, frame_count: int | None = None) -> int:
         run_directory = Scan360CaptureController._run_directory(project_directory, run_id)
-        return sum(1 for index in range(_FRAME_COUNT)
+        count = frame_count or Scan360CaptureController._manifest_frame_count(project_directory, run_id)
+        return sum(1 for index in range(count)
                    if (run_directory / f"{run_id}_pose_{index:03d}.raw").is_file()
                    or (run_directory / f"{run_id}_pose_pose_{index:03d}.raw").is_file())
 
@@ -675,17 +712,18 @@ class Scan360CaptureController:
                 continue
             run_id = match.group(1)
             run_directory = pose_log.parent
-            completed = cls._count_run_frames(run_directory, run_id)
+            frame_count = cls._manifest_frame_count(run_directory, run_id)
+            completed = cls._count_run_frames(run_directory, run_id, frame_count)
             stamp = run_id.removeprefix("revopoint_")
             run_directory = pose_log.parent
             scan_log = run_directory / f".cadyx-scan360-{stamp}.log"
             if not scan_log.is_file():
                 scan_log = project_directory / f".cadyx-scan360-{stamp}.log"
             try:
-                completed_turn = "sweep completed: 12 steps" in scan_log.read_bytes().decode("utf-8", errors="replace").lower()
+                completed_turn = f"sweep completed: {frame_count} steps" in scan_log.read_bytes().decode("utf-8", errors="replace").lower()
             except OSError:
                 completed_turn = False
-            if completed == _FRAME_COUNT and completed_turn:
+            if completed == frame_count and completed_turn:
                 manifest = run_directory / f"{run_id}_scan_360.json"
                 alignment_status = cls._alignment_status(run_directory, run_id)
                 try:
@@ -694,7 +732,7 @@ class Scan360CaptureController:
                     log_text = ""
                 alignment_failed = "table-map alignment failed" in log_text
                 message = (
-                    "12 кадров сохранены, но привязка к центру карты стола не прошла; исходные кадры сохранены."
+                    f"{frame_count} кадров сохранены, но привязка к центру карты стола не прошла; исходные кадры сохранены."
                     if alignment_failed else
                     "Часть кадров привязана к центру карты стола; остальные исходники сохранены для последующей привязки."
                     if alignment_status == "partial" else
@@ -702,26 +740,40 @@ class Scan360CaptureController:
                     if alignment_status == "unavailable" else
                     "Кадры сохранены; отчёт о привязке к карте стола отсутствует."
                     if alignment_status == "pending" else
+                    "Кадры сохранены в координатах камеры без привязки к столу; предусмотрена геометрическая сшивка."
+                    if alignment_status == "not_performed" else
                     "Все кадры привязаны к центру карты стола; физический масштаб остаётся предварительным."
                     if alignment_status == "aligned_provisional" else
                     "Кадры сохранены, но отчёт о привязке к карте стола повреждён или не прошёл проверку."
                     if alignment_status == "failed" else
-                    "12 кадров сохранены; журнал поз подтверждает полный оборот. JSON-манифест не записан."
+                    f"{frame_count} кадров сохранены; журнал поз подтверждает полный оборот. JSON-манифест не записан."
                     if not manifest.is_file()
-                    else "Последний 360°-захват завершён; все 12 кадров и манифест сохранены."
+                    else f"Последний 360°-захват завершён; все {frame_count} кадров и манифест сохранены."
                 )
                 return {
                     "state": "completed",
                     "completed_frames": completed,
-                    "frame_count": _FRAME_COUNT,
+                    "frame_count": frame_count,
+                    "step_degrees": cls._manifest_step_degrees(run_directory, run_id),
                     "message": message,
                     "table_alignment_status": "failed" if alignment_failed else alignment_status,
-                    **cls._preview_payload(run_directory, run_id, completed),
+                    **cls._preview_payload(run_directory, run_id, completed, frame_count),
                 }
-        return {"state": "idle", "completed_frames": 0, "frame_count": _FRAME_COUNT}
+        return {"state": "idle", "completed_frames": 0, "frame_count": _DEFAULT_FRAME_COUNT}
+
+    @staticmethod
+    def _manifest_step_degrees(project_directory: Path, run_id: str) -> int:
+        manifest = Scan360CaptureController._run_directory(project_directory, run_id) / f"{run_id}_scan_360.json"
+        try:
+            step = json.loads(manifest.read_text(encoding="utf-8")).get("step_degrees")
+        except (OSError, ValueError, TypeError, json.JSONDecodeError, AttributeError):
+            return 360 // Scan360CaptureController._manifest_frame_count(project_directory, run_id)
+        return step if isinstance(step, int) and not isinstance(step, bool) and 1 <= step <= 360 else 360 // Scan360CaptureController._manifest_frame_count(project_directory, run_id)
 
     @classmethod
-    def _preview_payload(cls, project_directory: Path, run_id: str, completed: int) -> dict[str, str | int]:
+    def _preview_payload(cls, project_directory: Path, run_id: str, completed: int,
+                         frame_count: int | None = None) -> dict[str, str | int]:
+        frame_count = frame_count or cls._manifest_frame_count(project_directory, run_id)
         project_root = project_directory.parent if project_directory.name == run_id else project_directory
         series_name = project_directory.name if project_directory.name == run_id else None
         relative_series = series_name or ""
@@ -735,7 +787,7 @@ class Scan360CaptureController:
         project_context = {"preview_project_id": project_id} if isinstance(project_id, str) else {}
         preview_folder = project_name if series_name and isinstance(project_name, str) else project_root.name
         if completed > 0:
-            index = min(completed, _FRAME_COUNT) - 1
+            index = min(completed, frame_count) - 1
             alignment = project_directory / f"{run_id}_table_alignment.json"
             try:
                 alignment_data = json.loads(alignment.read_text(encoding="utf-8"))
@@ -751,7 +803,7 @@ class Scan360CaptureController:
                             **({"preview_subfolder": relative_series} if relative_series else {}),
                             "preview_file": aligned_name,
                             "preview_kind": "table_aligned",
-                            "preview_frame_count": _FRAME_COUNT,
+                            "preview_frame_count": frame_count,
                             "preview_frame_index": aligned_index,
                             "preview_coordinate_frame": "table_marker_map_center_xy",
                             "origin_file": aligned_name,
@@ -766,11 +818,11 @@ class Scan360CaptureController:
                 **({"preview_subfolder": relative_series} if relative_series else {}),
                 "preview_file": fused_name,
                 "preview_kind": "provisional_fusion",
-                "preview_frame_count": _FRAME_COUNT,
+                "preview_frame_count": frame_count,
                 **({"origin_file": origin_name} if origin_name else {}),
             }
         if completed > 0:
-            index = min(completed, _FRAME_COUNT) - 1
+            index = min(completed, frame_count) - 1
             for name in (f"{run_id}_pose_{index:03d}.ply", f"{run_id}_pose_pose_{index:03d}.ply"):
                 if (project_directory / name).is_file():
                     return {
@@ -779,7 +831,7 @@ class Scan360CaptureController:
                         **({"preview_subfolder": relative_series} if relative_series else {}),
                         "preview_file": name,
                         "preview_kind": "single",
-                        "preview_frame_count": _FRAME_COUNT,
+                        "preview_frame_count": frame_count,
                         "origin_file": name,
                     }
         return {}

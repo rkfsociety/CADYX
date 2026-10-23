@@ -15,6 +15,11 @@ param(
     [ValidateRange(18, 90)]
     [double]$TurntableRotationPeriodSeconds = 18,
 
+    [ValidateRange(1, 30)]
+    [int]$StepDegrees = 30,
+
+    [switch]$SkipTableMarkerAlignment,
+
     [string]$ScannerDeviceId = '',
 
     [string]$TurntableAddress = '',
@@ -31,6 +36,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if (360 % $StepDegrees -ne 0) { throw 'StepDegrees must divide a full 360-degree revolution.' }
+$frameCount = [int](360 / $StepDegrees)
 $toolRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ([string]::IsNullOrWhiteSpace($CalibrationFile)) {
     $CalibrationFile = Join-Path $toolRoot 'calibration\scanners\revopoint-mini-y16\Q.bin'
@@ -38,7 +45,7 @@ if ([string]::IsNullOrWhiteSpace($CalibrationFile)) {
 if ([string]::IsNullOrWhiteSpace($TurntableMarkerMap)) {
     $TurntableMarkerMap = Join-Path $toolRoot 'calibration\tables\revopoint-dual-axis-table\framesmall.mkf'
 }
-if (-not $ManifestOnly -and [string]::IsNullOrWhiteSpace($PythonExecutable)) {
+if (-not $ManifestOnly -and -not $SkipTableMarkerAlignment -and [string]::IsNullOrWhiteSpace($PythonExecutable)) {
     $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
     if (-not $pythonCommand) { throw 'Python is required to align captured frames to the table marker map.' }
     $PythonExecutable = $pythonCommand.Source
@@ -105,19 +112,20 @@ if ($ManifestOnly) {
         }
     }
 } else {
-    foreach ($path in @($TurntableMarkerMap, $alignmentScript, $PythonExecutable)) {
+    $alignmentInputs = if ($SkipTableMarkerAlignment) { @() } else { @($TurntableMarkerMap, $alignmentScript, $PythonExecutable) }
+    foreach ($path in $alignmentInputs) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Required table-alignment input was not found: $path"
         }
     }
     if (Test-Path -LiteralPath $projectCalibration) { throw "Calibration copy already exists: $projectCalibration" }
     if (Test-Path -LiteralPath $projectDepthScale) { throw "Depth-scale copy already exists: $projectDepthScale" }
-    if (Test-Path -LiteralPath $projectMarkerMap) { throw "Table-map copy already exists: $projectMarkerMap" }
+    if (-not $SkipTableMarkerAlignment -and (Test-Path -LiteralPath $projectMarkerMap)) { throw "Table-map copy already exists: $projectMarkerMap" }
     if (-not (Test-Path -LiteralPath $runDirectory -PathType Container)) {
         New-Item -ItemType Directory -Path $runDirectory | Out-Null
     }
     [IO.File]::Copy($CalibrationFile, $projectCalibration, $false)
-    [IO.File]::Copy($TurntableMarkerMap, $projectMarkerMap, $false)
+    if (-not $SkipTableMarkerAlignment) { [IO.File]::Copy($TurntableMarkerMap, $projectMarkerMap, $false) }
     $selectedDepthScale = [ordered]@{
         depth_scale_mm_per_raw_unit = $DepthScale
         status = 'selected_device_profile'
@@ -162,11 +170,11 @@ if ($ManifestOnly) {
     }
     $rows = @(Import-Csv -LiteralPath $poseLog)
     $captures = @($rows | Where-Object { $_.event -eq 'capture_completed' } | Sort-Object { [int]$_.step_index })
-    if ($captures.Count -ne 12) {
-        throw "Manifest-only repair requires 12 completed stationary captures; found $($captures.Count)."
+    if ($captures.Count -ne $frameCount) {
+        throw "Manifest-only repair requires $frameCount completed stationary captures; found $($captures.Count)."
     }
     $baseline = $rows | Where-Object { $_.event -eq 'baseline' } | Select-Object -First 1
-    $finalPose = $rows | Where-Object { $_.event -eq 'target_reached' -and [int]$_.step_index -eq 12 } | Select-Object -Last 1
+    $finalPose = $rows | Where-Object { $_.event -eq 'target_reached' -and [int]$_.step_index -eq $frameCount } | Select-Object -Last 1
     if (-not $baseline -or -not $finalPose) {
         throw 'Pose log has no starting angle or final full-turn pose; no manifest was written.'
     }
@@ -198,7 +206,7 @@ if ($ManifestOnly) {
         $aligned = Test-Path -LiteralPath (Join-Path $runDirectory $alignedName) -PathType Leaf
         $frames += [pscustomobject]@{
             index = [int]$capture.step_index
-            commanded_angle_degrees = [int]$capture.step_index * 30
+            commanded_angle_degrees = [int]$capture.step_index * $StepDegrees
             reported_angle_degrees = [double]::Parse([string]$capture.angle_degrees, [Globalization.CultureInfo]::InvariantCulture)
             tilt_degrees = [double]::Parse([string]$capture.tilt_degrees, [Globalization.CultureInfo]::InvariantCulture)
             raw_file = "$prefixName.raw"
@@ -211,7 +219,7 @@ if ($ManifestOnly) {
     $manifest = [ordered]@{
         format = 'revopoint-y16-turntable-capture-v2'
         frame_count = $frames.Count
-        step_degrees = 30
+        step_degrees = $StepDegrees
         table_tilt_degrees = 0
         starting_position_preserved = $true
         starting_table_angle_degrees = $startAngle
@@ -247,22 +255,24 @@ try {
         $TurntableServiceUuid, $TurntableCharacteristicUuid
     ) | Out-Null
     Invoke-Turntable -Arguments @(
-        'capture-sweep', '12', '30', '0', $poseLog, $captureExe, $prefix,
+        'capture-sweep', [string]$frameCount, [string]$StepDegrees, '0', $poseLog, $captureExe, $prefix,
         $projectCalibration, $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw,
         $ScannerDeviceId, $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
         $TurntableServiceUuid, $TurntableCharacteristicUuid
     ) | Out-Null
 
-    & $PythonExecutable $alignmentScript --project $runDirectory --run-id $runPrefix `
-        --marker-map $projectMarkerMap --calibration-file $projectCalibration --depth-scale $DepthScale
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Table-map alignment failed; the original RAW and PLY capture frames were preserved.'
+    if (-not $SkipTableMarkerAlignment) {
+        & $PythonExecutable $alignmentScript --project $runDirectory --run-id $runPrefix `
+            --marker-map $projectMarkerMap --calibration-file $projectCalibration --depth-scale $DepthScale `
+            --frame-count $frameCount
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Table-map alignment failed; the original RAW and PLY capture frames were preserved.'
+        }
+        $alignmentPath = Join-Path $runDirectory "${runPrefix}_table_alignment.json"
+        $alignmentResult = Get-Content -LiteralPath $alignmentPath -Raw | ConvertFrom-Json
     }
-
-    $alignmentPath = Join-Path $runDirectory "${runPrefix}_table_alignment.json"
-    $alignmentResult = Get-Content -LiteralPath $alignmentPath -Raw | ConvertFrom-Json
     $frames = @()
-    for ($index = 0; $index -lt 12; $index++) {
+    for ($index = 0; $index -lt $frameCount; $index++) {
         $prefixName = '{0}_pose_{1:D3}' -f $runPrefix, $index
         if (-not (Test-Path -LiteralPath (Join-Path $runDirectory "$prefixName.raw") -PathType Leaf)) {
             $prefixName = '{0}_pose_pose_{1:D3}' -f $runPrefix, $index
@@ -282,7 +292,7 @@ try {
     $manifest = [ordered]@{
         format = 'revopoint-y16-turntable-capture-v2'
         frame_count = $frames.Count
-        step_degrees = 30
+        step_degrees = $StepDegrees
         turntable_rotation_period_seconds = $TurntableRotationPeriodSeconds
         table_tilt_degrees = 0
         starting_position_preserved = $true
@@ -290,21 +300,21 @@ try {
         depth_scale_mm_per_raw_unit = $DepthScale
         depth_scale_status = 'provisional_for_direct_UVC'
         coordinate_frame = 'per_frame; see frames[].coordinate_frame'
-        table_marker_map_file = [IO.Path]::GetFileName($projectMarkerMap)
-        table_alignment_file = "${runPrefix}_table_alignment.json"
-        table_alignment_status = $alignmentResult.status
+        table_marker_map_file = if ($SkipTableMarkerAlignment) { $null } else { [IO.Path]::GetFileName($projectMarkerMap) }
+        table_alignment_file = if ($alignmentResult) { "${runPrefix}_table_alignment.json" } else { $null }
+        table_alignment_status = if ($alignmentResult) { $alignmentResult.status } else { 'not_performed' }
         calibration_file = [IO.Path]::GetFileName($projectCalibration)
         depth_scale_config = [IO.Path]::GetFileName($projectDepthScale)
         poses_file = [IO.Path]::GetFileName($poseLog)
-        frame_registration = 'table markers when four or more reliable correspondences are visible; unresolved frames stay in source coordinates'
+        frame_registration = if ($SkipTableMarkerAlignment) { 'not_performed; source camera frames preserved for geometry-only registration' } else { 'table markers when four or more reliable correspondences are visible; unresolved frames stay in source coordinates' }
         frames = $frames
     }
     $manifestPath = Join-Path $runDirectory "${runPrefix}_scan_360.json"
     $manifestJson = $manifest | ConvertTo-Json -Depth 6
     [IO.File]::WriteAllText($manifestPath, $manifestJson, [Text.UTF8Encoding]::new($false))
     $complete = $true
-    Write-Host "Captured 12 Y16 frames in CADYX project $ProjectPath; original table position preserved."
-    Write-Host ("Table-marker alignment: {0} of 12 frames; physical scale remains provisional." -f $alignmentResult.aligned_frame_count)
+    Write-Host "Captured $frameCount Y16 frames at $StepDegrees-degree steps in CADYX project $ProjectPath; original table position preserved."
+    if ($alignmentResult) { Write-Host ("Table-marker alignment: {0} of {1} frames; physical scale remains provisional." -f $alignmentResult.aligned_frame_count, $frameCount) }
 }
 finally {
     if (-not $complete) {

@@ -298,7 +298,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_remove_project_files", "description": "Remove explicitly listed, unused files from a project or project subfolder after checking the project is free.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING, "filenames": {"type": "array", "items": _STRING, "minItems": 1, "maxItems": 1000}}, ["project_id", "filenames"])},
     {"name": "cadyx_remove_project_folder", "description": "Remove one existing project subfolder recursively after checking it is unused and the project is free.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING}, ["project_id", "folder_name"])},
     {"name": "cadyx_move_project_files", "description": "Move explicitly listed direct project files into a scan-series subfolder after checking the project is free and files are unused.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING, "filenames": {"type": "array", "items": _STRING, "minItems": 1, "maxItems": 1000}}, ["project_id", "folder_name", "filenames"])},
-    {"name": "cadyx_start_scan_360", "description": "Start the native direct-UVC 360-degree point capture in a free project. The physical turntable must be level; the project viewer displays each captured frame while the scan runs.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
+    {"name": "cadyx_start_scan_360", "description": "Start direct-UVC 360-degree point capture in a free project. Set step_degrees (divisor of 360, 1–30; default 30) and align_to_markers=false to preserve camera-frame points for geometry-only registration. The physical turntable must be level.", "inputSchema": _schema({"project_id": _STRING, "step_degrees": {"type": "integer", "minimum": 1, "maximum": 30}, "align_to_markers": {"type": "boolean"}, "rotation_period_seconds": {"type": "number", "minimum": 18, "maximum": 90}, "scanner_device_id": _STRING, "turntable_device_id": _STRING}, ["project_id"])},
     {"name": "cadyx_get_scan_360_status", "description": "Read native 360-degree scan progress and the latest captured point-cloud preview for a project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_upload_project_step", "description": "Copy a local STEP file into a project through the Agent API without overwriting existing files or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
     {"name": "cadyx_upload_project_scan", "description": "Copy a local PLY scan into a project through the Agent API without overwriting the source or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
@@ -552,7 +552,9 @@ class MCPApplication:
                 "filenames": args["filenames"], "folder_name": args["folder_name"],
             })
         if name == "cadyx_start_scan_360":
-            return self.api.post(self._project(args["project_id"], "/scans/360"), {})
+            body = {key: args[key] for key in ("step_degrees", "align_to_markers", "rotation_period_seconds",
+                                               "scanner_device_id", "turntable_device_id") if key in args}
+            return self.api.post(self._project(args["project_id"], "/scans/360"), body)
         if name == "cadyx_get_scan_360_status":
             return self.api.get(self._project(args["project_id"], "/scans/360"))
         if name == "cadyx_upload_project_step":
