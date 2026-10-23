@@ -102,6 +102,19 @@ class Scan360CaptureTests(unittest.TestCase):
         self.assertEqual(status["preprocessing_failed_frames"], 1)
         self.assertEqual(status["preprocessing_pending_frames"], 5)
 
+    def test_legacy_capture_without_preprocessing_report_is_not_pending(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261023T091400Z"
+            run_directory = project / run_id
+            run_directory.mkdir()
+
+            status = Scan360CaptureController._preprocessing_payload(project, run_id, 24)
+
+        self.assertEqual(status["preprocessing_status"], "not_available")
+        self.assertEqual(status["preprocessed_frames"], 0)
+        self.assertEqual(status["preprocessing_pending_frames"], 0)
+
     def test_live_preview_uses_only_the_ephemeral_frame_buffer_and_stops_cleanly(self) -> None:
         class FakeProcess:
             returncode = None

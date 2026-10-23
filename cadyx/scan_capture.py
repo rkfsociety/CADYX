@@ -625,7 +625,7 @@ class Scan360CaptureController:
         capture_sweep_completed = f"sweep completed: {self._job.frame_count} steps" in log_tail.lower()
         alignment_failed = "table-map alignment failed" in log_tail.lower()
         preprocessing = self._preprocessing_payload(
-            self._job.project_directory, self._job.run_id, self._job.frame_count)
+            self._job.project_directory, self._job.run_id, self._job.frame_count, active=True)
         metadata_warning = (state == "failed" and completed == self._job.frame_count
                             and capture_sweep_completed and not alignment_failed
                             and preprocessing["preprocessing_status"] == "completed")
@@ -667,7 +667,7 @@ class Scan360CaptureController:
 
     @staticmethod
     def _preprocessing_payload(project_directory: Path, run_id: str,
-                               frame_count: int) -> dict[str, Any]:
+                               frame_count: int, *, active: bool = False) -> dict[str, Any]:
         report_path = (Scan360CaptureController._run_directory(project_directory, run_id)
                        / f"{run_id}_preprocessing.json")
         try:
@@ -686,9 +686,9 @@ class Scan360CaptureController:
                     - report.get("failed_frame_count", len(failed))),
             }
         except FileNotFoundError:
-            return {"preprocessing_status": "not_available", "preprocessed_frames": 0,
+            return {"preprocessing_status": "starting" if active else "not_available", "preprocessed_frames": 0,
                     "preprocessing_failed_frames": 0, "preprocessing_frame_count": frame_count,
-                    "preprocessing_pending_frames": frame_count}
+                    "preprocessing_pending_frames": frame_count if active else 0}
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return {"preprocessing_status": "failed", "preprocessed_frames": 0,
                     "preprocessing_failed_frames": frame_count, "preprocessing_frame_count": frame_count,
@@ -760,6 +760,7 @@ class Scan360CaptureController:
                 completed_turn = False
             if completed == frame_count and completed_turn:
                 manifest = run_directory / f"{run_id}_scan_360.json"
+                preprocessing = cls._preprocessing_payload(run_directory, run_id, frame_count)
                 alignment_status = cls._alignment_status(run_directory, run_id)
                 try:
                     log_text = scan_log.read_bytes().decode("utf-8", errors="replace").lower()
@@ -785,6 +786,8 @@ class Scan360CaptureController:
                     if not manifest.is_file()
                     else f"Последний 360°-захват завершён; все {frame_count} кадров и манифест сохранены."
                 )
+                if preprocessing["preprocessing_status"] == "not_available":
+                    message += " Отчёта очистки исходных кадров до сшивки для этой серии нет."
                 return {
                     "state": "completed",
                     "completed_frames": completed,
@@ -792,7 +795,7 @@ class Scan360CaptureController:
                     "step_degrees": cls._manifest_step_degrees(run_directory, run_id),
                     "message": message,
                     "table_alignment_status": "failed" if alignment_failed else alignment_status,
-                    **cls._preprocessing_payload(run_directory, run_id, frame_count),
+                    **preprocessing,
                     **cls._preview_payload(run_directory, run_id, completed, frame_count),
                 }
         return {"state": "idle", "completed_frames": 0, "frame_count": _DEFAULT_FRAME_COUNT}
