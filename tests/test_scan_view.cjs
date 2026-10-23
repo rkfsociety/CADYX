@@ -141,7 +141,7 @@ assert.equal(viewport.dataset.scanPreviewMode, "live");
 assert.ok(viewerLoads.at(-1).geometry.positions.length > markerPointCount * 3, cloudButton.title);
 assert.equal(viewerLoads.at(-1).geometry.points.length, markerPointCount,
   "only the sparse table markers receive the preview highlight");
-assert.equal(viewerLoads.at(-1).geometry.pointStyle.size, 3);
+assert.equal(viewerLoads.at(-1).geometry.pointStyle.size, 3.5);
 assert.equal(viewerLoads.at(-1).geometry.pointStyle.opacity, 1);
 assert.equal(viewerLoads.at(-1).geometry.pointStyle.color, "#59d9ff");
 const markerPositions = viewerLoads.at(-1).geometry.positions;
@@ -236,13 +236,25 @@ assert.equal(viewerLoads.at(-1).geometry, serverModelGeometry, "the scan overlay
 const html = fs.readFileSync(path.join(__dirname, "../web/index.html"), "utf8");
 const scannerHtml = fs.readFileSync(path.join(__dirname, "../web/scanner.html"), "utf8");
 const appJs = fs.readFileSync(path.join(__dirname, "../web/app.js"), "utf8");
+const previewJs = fs.readFileSync(path.join(__dirname, "../web/ply-preview.js"), "utf8");
 assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/button>/);
 assert.match(html, /id="viewport-scan-mesh"[^>]*>Сетка<\/button>/);
 assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/button>/);
 assert.match(html, /id="viewport-live-camera"[^>]*>Сканер<\/button>/);
 assert.ok(html.indexOf('id="viewport-live-scan"') < html.indexOf('id="viewport-scan-360"'));
 assert.doesNotMatch(html, /live-scan-tabs|live-scan-cloud-tab|live-scan-mesh-tab/);
-assert.doesNotMatch(html, /live-scan-layer|live-scan-frame|<iframe/);
+assert.doesNotMatch(html, /live-scan-layer|live-scan-frame/);
+const navigationStart = html.indexOf('<nav id="workspace-navigation"');
+const navigationMarkup = html.slice(navigationStart, html.indexOf("</nav>", navigationStart));
+const productionTab = navigationMarkup.indexOf('data-workspace-view="manufacturing"');
+const scanningTab = navigationMarkup.indexOf('data-workspace-view="scanning"');
+const activityTab = navigationMarkup.indexOf('data-workspace-view="activity"');
+assert.ok(productionTab >= 0 && productionTab < scanningTab && scanningTab < activityTab,
+  "the Scanning workspace tab follows Manufacturing and precedes Activity");
+assert.match(html, /<section id="scanning-panel"[^>]*hidden>[\s\S]*?id="scanning-capture"[\s\S]*?id="scanning-live-preview"[\s\S]*?id="scanning-devices"[\s\S]*?id="scanning-frame"[^>]*data-src="\/scanner\?embed=1"/);
+assert.match(previewJs, /"manufacturing", "scanning", "activity"/);
+assert.match(previewJs, /scanningCaptureButton\?\.addEventListener\("click", \(\) => captureButtonSource\?\.click\(\)\)/);
+assert.match(previewJs, /scanningPreviewButton\?\.addEventListener\("click", \(\) => previewButtonSource\?\.click\(\)\)/);
 assert.match(appJs, /viewer:modelViewer/);
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);
 assert.match(appJs, /showCapturePreview\(scan,\{open:captureStarted\}\)/);

@@ -129,7 +129,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   background: #090e12;
 }
 
-/* Workspace tabs: Model / Analysis / Manufacturing. */
+/* Workspace tabs: Model / Analysis / Manufacturing / Scanning. */
 .workspace-navigation {
   grid-column: 1 / -1;
   grid-row: 1;
@@ -543,12 +543,21 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 /* Non-model workspaces still use the existing CADYX panels. */
 .primary-grid[data-view="analysis"],
 .primary-grid[data-view="manufacturing"],
+.primary-grid[data-view="scanning"],
 .primary-grid[data-view="activity"],
 .primary-grid[data-view="files"],
 .primary-grid[data-view="projects"] { grid-template-columns: minmax(0, 1fr); }
 .primary-grid[data-view="analysis"] > #comparison-panel,
 .primary-grid[data-view="manufacturing"] > #manufacturing-panel,
+.primary-grid[data-view="scanning"] > #scanning-panel,
 .primary-grid[data-view="projects"] > #projects-panel { border-radius: 8px; }
+.scanning-panel { display: grid; min-width: 0; min-height: 0; height: 100%; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+#scanning-panel[hidden] { display: none !important; }
+.scanning-panel-heading { gap: 16px; }
+.scanning-panel-heading > div:first-child { display: grid; gap: 4px; min-width: 0; }
+.scanning-panel-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 8px; }
+#scanning-status { max-width: min(42vw, 520px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#scanning-frame { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; border: 0; background: #0c1116; }
 .primary-grid[data-view="analysis"] > #comparison-panel {
   display: grid;
   height: 100%;
@@ -662,9 +671,10 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
               <button class="nav-item" type="button" data-workspace-view="geometry"><span class="nav-index">02</span><span class="nav-copy"><strong>Геометрия</strong><small>Объекты модели</small></span></button>
               <button id="analysis-nav" class="nav-item" type="button" data-workspace-view="analysis"><span class="nav-index">03</span><span class="nav-copy"><strong>Анализ</strong><small>Сравнение с оригиналом</small></span></button>
               <button class="nav-item" type="button" data-workspace-view="manufacturing"><span class="nav-index">04</span><span class="nav-copy"><strong>Производство</strong><small>Подготовка производства</small></span></button>
-              <button class="nav-item" type="button" data-workspace-view="activity"><span class="nav-index">05</span><span class="nav-copy"><strong>Активность</strong><small>Состояние агента</small></span></button>
-              <button id="files-nav" class="nav-item" type="button" data-workspace-view="files" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">06</span><span class="nav-copy"><strong>Файлы</strong><small>Файлы проекта</small></span></button>
-              <button id="projects-nav" class="nav-item" type="button" data-workspace-view="projects" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">07</span><span class="nav-copy"><strong>Проекты</strong><small>Сохранённые проекты</small></span></button>
+              <button class="nav-item" type="button" data-workspace-view="scanning"><span class="nav-index">05</span><span class="nav-copy"><strong>Сканирование</strong><small>Съёмка и просмотр скана</small></span></button>
+              <button class="nav-item" type="button" data-workspace-view="activity"><span class="nav-index">06</span><span class="nav-copy"><strong>Активность</strong><small>Состояние агента</small></span></button>
+              <button id="files-nav" class="nav-item" type="button" data-workspace-view="files" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">07</span><span class="nav-copy"><strong>Файлы</strong><small>Файлы проекта</small></span></button>
+              <button id="projects-nav" class="nav-item" type="button" data-workspace-view="projects" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">08</span><span class="nav-copy"><strong>Проекты</strong><small>Сохранённые проекты</small></span></button>
             </nav>
             <div class="sidebar-project"><span class="section-label">АКТИВНЫЙ РЕСУРС</span><strong id="sidebar-project-name">—</strong></div>
           </aside>
@@ -731,6 +741,13 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 
               <section id="comparison-panel" class="panel comparison-panel" aria-labelledby="comparison-title" tabindex="-1"><div class="panel-heading"><h2 id="comparison-title">СРАВНЕНИЕ С ОРИГИНАЛОМ</h2><span id="comparison-metrics" class="panel-note"></span></div><div class="comparison-stage"><p id="comparison-description" class="comparison-description" hidden>Оригинал показан контуром · результат — поверхностью.</p><p id="comparison-empty" class="comparison-empty">Для этого проекта пока нет данных сравнения.</p><canvas id="comparison-preview" class="comparison-preview" aria-label="Совмещённые оригинал и изменённая модель" hidden></canvas></div><section class="validation-records" aria-labelledby="validation-records-title"><div class="validation-records-heading"><h3 id="validation-records-title">СОХРАНЁННЫЕ ПРОВЕРКИ</h3><span id="validation-records-status" role="status" aria-live="polite"></span><span id="validation-records-count">0</span></div><div id="validation-records-list" class="validation-records-list" role="list" aria-label="Результаты инженерных проверок"><p id="validation-records-empty" class="validation-records-empty">Сохранённых результатов пока нет.</p></div></section></section>
               <section id="manufacturing-panel" class="panel manufacturing-panel" aria-labelledby="manufacturing-title" hidden><div class="panel-heading"><h2 id="manufacturing-title">ПОДГОТОВКА ПРОИЗВОДСТВА</h2></div><div class="manufacturing-empty"><span class="empty-cube" aria-hidden="true">⌁</span><p>Данные для производства пока не подготовлены.</p><small>Для этого проекта пока нет траекторий инструмента или плана обработки.</small></div></section>
+              <section id="scanning-panel" class="panel scanning-panel" aria-labelledby="scanning-title" tabindex="-1" hidden>
+                <div class="panel-heading scanning-panel-heading">
+                  <div><h2 id="scanning-title">СКАНИРОВАНИЕ</h2><span id="scanning-status" class="panel-note" role="status" aria-live="polite">Ожидание сканера</span></div>
+                  <div class="scanning-panel-actions"><button id="scanning-capture" class="button" type="button" disabled>Сканировать 360°</button><button id="scanning-live-preview" class="button" type="button" aria-pressed="false">Предпросмотр</button><button id="scanning-devices" class="button" type="button">Устройства</button></div>
+                </div>
+                <iframe id="scanning-frame" title="Текущий кадр сканера" loading="lazy" data-src="/scanner?embed=1"></iframe>
+              </section>
               <section id="projects-panel" class="panel projects-panel" data-layout="grid" aria-labelledby="projects-title">
                 <div class="projects-page-heading">
                   <div class="projects-title-block"><span class="projects-eyebrow">Проекты</span><h2 id="projects-title">Все проекты <span id="projects-count" class="projects-count">0</span></h2></div>
@@ -819,7 +836,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   /* Promote workspace navigation to the CAD workspace tab bar. */
   detail.prepend(navigation);
-  const workspaceLabels = { overview: "Обзор", analysis: "Анализ", manufacturing: "Производство" };
+  const workspaceLabels = { overview: "Обзор", analysis: "Анализ", manufacturing: "Производство", scanning: "Сканирование" };
   navigation.querySelectorAll(".nav-item").forEach((button) => {
     const title = workspaceLabels[button.dataset.workspaceView];
     const strong = button.querySelector("strong");
