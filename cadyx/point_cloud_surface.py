@@ -2,13 +2,110 @@
 from __future__ import annotations
 
 import math
-from itertools import product
+import heapq
 from typing import Any
 
 from .errors import ValidationError
 from .scan_reverse_alignment import _jacobi_eigenvectors
 
 MAX_SURFACE_COMPARISONS = 20_000_000
+_KD_LEAF_SIZE = 8
+
+_KDNode = tuple[
+    tuple[float, float, float], tuple[float, float, float], int,
+    list[int] | None, Any, Any,
+]
+
+
+def _build_kd_tree(points: list[tuple[float, float, float]], indices: list[int]) -> _KDNode:
+    minimum = tuple(min(points[index][axis] for index in indices) for axis in range(3))
+    maximum = tuple(max(points[index][axis] for index in indices) for axis in range(3))
+    if len(indices) <= _KD_LEAF_SIZE:
+        return minimum, maximum, -1, indices, None, None
+    axis = max(range(3), key=lambda value: maximum[value] - minimum[value])
+    indices.sort(key=lambda index: points[index][axis])
+    middle = len(indices) // 2
+    left = _build_kd_tree(points, indices[:middle])
+    right = _build_kd_tree(points, indices[middle:])
+    return minimum, maximum, axis, None, left, right
+
+
+def _box_distance_squared(node: _KDNode, point: tuple[float, float, float]) -> float:
+    minimum, maximum = node[0], node[1]
+    dx = max(minimum[0] - point[0], point[0] - maximum[0], 0.0)
+    dy = max(minimum[1] - point[1], point[1] - maximum[1], 0.0)
+    dz = max(minimum[2] - point[2], point[2] - maximum[2], 0.0)
+    return dx * dx + dy * dy + dz * dz
+
+
+def _nearest_points(points: list[tuple[float, float, float]], tree: _KDNode,
+                    point: tuple[float, float, float], radius_squared: float, limit: int,
+                    comparisons: list[int], *, budget_message: str) -> list[tuple[float, int]]:
+    nearest: list[tuple[float, int]] = []
+    pending = [(_box_distance_squared(tree, point), 0, tree)]
+    sequence = 1
+    while pending:
+        node_distance_squared, _, node = heapq.heappop(pending)
+        search_radius_squared = min(radius_squared, -nearest[0][0]) if len(nearest) == limit else radius_squared
+        if node_distance_squared > search_radius_squared:
+            break
+        _, _, _, indices, left, right = node
+        if indices is not None:
+            for index in indices:
+                comparisons[0] += 1
+                if comparisons[0] > MAX_SURFACE_COMPARISONS:
+                    raise ValidationError(
+                        budget_message,
+                        code="RESOURCE_LIMIT",
+                    )
+                candidate = points[index]
+                dx = point[0] - candidate[0]
+                dy = point[1] - candidate[1]
+                dz = point[2] - candidate[2]
+                squared_distance = dx * dx + dy * dy + dz * dz
+                if squared_distance <= radius_squared:
+                    entry = (-squared_distance, -index)
+                    if len(nearest) < limit:
+                        heapq.heappush(nearest, entry)
+                    elif squared_distance < -nearest[0][0] or (
+                            squared_distance == -nearest[0][0] and index < -nearest[0][1]):
+                        heapq.heapreplace(nearest, entry)
+            continue
+
+        if left is not None:
+            distance_squared = _box_distance_squared(left, point)
+            if distance_squared <= search_radius_squared:
+                heapq.heappush(pending, (distance_squared, sequence, left))
+                sequence += 1
+        if right is not None:
+            distance_squared = _box_distance_squared(right, point)
+            if distance_squared <= search_radius_squared:
+                heapq.heappush(pending, (distance_squared, sequence, right))
+                sequence += 1
+    return sorted((math.sqrt(-distance), -index) for distance, index in nearest)
+
+
+def _points_in_box(points: list[tuple[float, float, float]], tree: _KDNode,
+                   minimum: tuple[float, float, float],
+                   maximum: tuple[float, float, float]) -> list[int]:
+    found: list[int] = []
+    pending = [tree]
+    while pending:
+        node = pending.pop()
+        node_minimum, node_maximum, _, indices, left, right = node
+        if any(node_maximum[axis] < minimum[axis] or node_minimum[axis] > maximum[axis]
+               for axis in range(3)):
+            continue
+        if indices is not None:
+            found.extend(index for index in indices
+                         if all(minimum[axis] <= points[index][axis] <= maximum[axis]
+                                for axis in range(3)))
+            continue
+        if left is not None:
+            pending.append(left)
+        if right is not None:
+            pending.append(right)
+    return found
 
 
 def surface_points(points: list[tuple[float, float, float]], method: str,
@@ -20,33 +117,19 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
     """
     current = list(points)
     radius = parameters["radius"]
-    offsets = list(product((-1, 0, 1), repeat=3))
-    comparisons = 0
+    comparisons = [0]
     for _ in range(parameters.get("iterations", 1)):
-        buckets: dict[tuple[int, ...], list[int]] = {}
-        for i, point in enumerate(current):
-            try:
-                key = tuple(math.floor(v / radius) for v in point)
-            except (ValueError, OverflowError) as exc:
-                raise ValidationError("Surface radius is too small for these coordinates.") from exc
-            buckets.setdefault(key, []).append(i)
+        tree = _build_kd_tree(current, list(range(len(current))))
         removed: set[int] = set()
         updated = list(current)
         for i, point in enumerate(current):
             if i in removed:
                 continue
-            key = tuple(math.floor(v / radius) for v in point)
-            nearby = []
-            for offset in offsets:
-                for j in buckets.get(tuple(a + b for a, b in zip(key, offset)), ()):
-                    comparisons += 1
-                    if comparisons > MAX_SURFACE_COMPARISONS:
-                        raise ValidationError("Surface processing exceeds its 20M comparison budget; reduce radius or iterations.", code="RESOURCE_LIMIT")
-                    distance = math.dist(point, current[j])
-                    if distance <= radius:
-                        nearby.append((distance, j))
-            # Bound each covariance fit while retaining deterministic spatial support.
-            neighbors = [j for _, j in sorted(nearby)[:48]]
+            nearest = _nearest_points(
+                current, tree, point, radius * radius, 48, comparisons,
+                budget_message="Surface processing exceeds its 20M comparison budget; reduce radius or iterations.",
+            )
+            neighbors = [j for _, j in nearest]
             if len(neighbors) < 6:
                 continue
             center = [point[a] + math.fsum(current[j][a] - point[a] for j in neighbors) / len(neighbors) for a in range(3)]
@@ -64,9 +147,22 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
             else:
                 # Keep the first point. Only points coincident in the tangent plane
                 # and closer than the normal threshold can be removed by it.
-                for _, j in nearby:
+                tangent = parameters["tangential_distance"]
+                extent = tuple(abs(normal[axis]) * parameters["distance"]
+                               + math.sqrt(max(0.0, 1.0 - normal[axis] ** 2)) * tangent
+                               for axis in range(3))
+                minimum = tuple(point[axis] - extent[axis] for axis in range(3))
+                maximum = tuple(point[axis] + extent[axis] for axis in range(3))
+                candidates = _points_in_box(current, tree, minimum, maximum)
+                for j in candidates:
                     if j <= i or j in removed:
                         continue
+                    comparisons[0] += 1
+                    if comparisons[0] > MAX_SURFACE_COMPARISONS:
+                        raise ValidationError(
+                            "Surface processing exceeds its 20M comparison budget; reduce radius or iterations.",
+                            code="RESOURCE_LIMIT",
+                        )
                     delta = [current[j][a] - point[a] for a in range(3)]
                     vertical = sum(delta[a] * normal[a] for a in range(3))
                     lateral = math.hypot(*(delta[a] - vertical * normal[a] for a in range(3)))
@@ -80,47 +176,15 @@ def isolation_points(points: list[tuple[float, float, float]], rate: float,
                      component_factor: float = 3.,
                      diagnostics: dict[str, Any] | None = None) -> list[tuple[float, float, float]]:
     """Keep the largest scan component and remove sparse points within the rate cap."""
-    bounds = [max(p[a] for p in points) - min(p[a] for p in points) for a in range(3)]
-    # Captured clouds are predominantly sampled surfaces. Surface-density cells
-    # reduce candidate comparisons; shell expansion still gives exact 3-D nearest
-    # neighbors for volumetric inputs and sparse outliers.
-    cell_size = max(bounds) / max(1., len(points) ** .5)
-    if not math.isfinite(cell_size) or cell_size <= 1e-12:
-        cell_size = 1.
-    buckets: dict[tuple[int, int, int], list[int]] = {}
-    keys = []
-    for i, point in enumerate(points):
-        try:
-            key = tuple(math.floor(value / cell_size) for value in point)
-        except (ValueError, OverflowError) as exc:
-            raise ValidationError("Isolation grid is too fine for these coordinates.") from exc
-        keys.append(key)
-        buckets.setdefault(key, []).append(i)
+    tree = _build_kd_tree(points, list(range(len(points))))
     nearest = [math.inf] * len(points)
-    comparisons = 0
+    comparisons = [0]
     for i, point in enumerate(points):
-        key = keys[i]
-        best = math.inf
-        shell = 0
-        while shell * cell_size - cell_size < best:
-            offsets = ((0, 0, 0),) if shell == 0 else (
-                (x, y, z) for x in range(-shell, shell + 1)
-                for y in range(-shell, shell + 1) for z in range(-shell, shell + 1)
-                if max(abs(x), abs(y), abs(z)) == shell
-            )
-            for offset in offsets:
-                neighbor_key = tuple(key[a] + offset[a] for a in range(3))
-                for j in buckets.get(neighbor_key, ()):
-                    if i == j:
-                        continue
-                    comparisons += 1
-                    if comparisons > MAX_SURFACE_COMPARISONS:
-                        raise ValidationError("Isolation detection exceeds its 20M comparison budget; downsample first.", code="RESOURCE_LIMIT")
-                    best = min(best, math.dist(point, points[j]))
-            shell += 1
-            if shell > 10_000:
-                raise ValidationError("Isolation search exceeded its spatial range budget.", code="RESOURCE_LIMIT")
-        nearest[i] = best
+        candidates = _nearest_points(
+            points, tree, point, math.inf, 2, comparisons,
+            budget_message="Isolation detection exceeds its 20M comparison budget; downsample first.",
+        )
+        nearest[i] = next((distance for distance, index in candidates if index != i), math.inf)
     finite = sorted(distance for distance in nearest if math.isfinite(distance))
     if len(finite) < 3:
         raise ValidationError("Isolation detection requires at least four points.")
@@ -128,17 +192,6 @@ def isolation_points(points: list[tuple[float, float, float]], rate: float,
     component_radius = median * component_factor
     if not math.isfinite(component_radius) or component_radius <= 1e-12:
         raise ValidationError("The cloud has no measurable nearest-neighbor spacing for main-component detection.")
-    cell_size = component_radius
-    buckets: dict[tuple[int, int, int], list[int]] = {}
-    keys: list[tuple[int, int, int]] = []
-    for index, point in enumerate(points):
-        try:
-            key = tuple(math.floor(value / cell_size) for value in point)
-        except (ValueError, OverflowError) as exc:
-            raise ValidationError("Isolation component grid is too fine for these coordinates.") from exc
-        keys.append(key)
-        buckets.setdefault(key, []).append(index)
-
     parent = list(range(len(points)))
     sizes = [1] * len(points)
 
@@ -158,22 +211,20 @@ def isolation_points(points: list[tuple[float, float, float]], rate: float,
         parent[second_root] = first_root
         sizes[first_root] += sizes[second_root]
 
-    component_comparisons = 0
-    offsets = list(product((-1, 0, 1), repeat=3))
+    component_comparisons = [0]
     radius_squared = component_radius * component_radius
     for index, point in enumerate(points):
-        key = keys[index]
-        for offset in offsets:
-            neighbor_key = tuple(key[axis] + offset[axis] for axis in range(3))
-            for other in buckets.get(neighbor_key, ()):
-                if other <= index:
-                    continue
-                component_comparisons += 1
-                if comparisons + component_comparisons > MAX_SURFACE_COMPARISONS:
-                    raise ValidationError("Isolation detection exceeds its 20M comparison budget; downsample first.", code="RESOURCE_LIMIT")
-                delta = [point[axis] - points[other][axis] for axis in range(3)]
-                if math.fsum(value * value for value in delta) <= radius_squared:
-                    union(index, other)
+        minimum = tuple(value - component_radius for value in point)
+        maximum = tuple(value + component_radius for value in point)
+        for other in _points_in_box(points, tree, minimum, maximum):
+            if other <= index:
+                continue
+            component_comparisons[0] += 1
+            if comparisons[0] + component_comparisons[0] > MAX_SURFACE_COMPARISONS:
+                raise ValidationError("Isolation detection exceeds its 20M comparison budget; downsample first.", code="RESOURCE_LIMIT")
+            delta = [point[axis] - points[other][axis] for axis in range(3)]
+            if math.fsum(value * value for value in delta) <= radius_squared:
+                union(index, other)
 
     roots = [find(index) for index in range(len(points))]
     component_sizes: dict[int, int] = {}

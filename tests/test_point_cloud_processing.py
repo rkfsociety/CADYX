@@ -69,6 +69,16 @@ class PointCloudProcessingTests(unittest.TestCase):
         rotated = [(z, x, y) for x, y, z in base + near]
         self.assertEqual(process_points(rotated, "remove_overlaps", parameters), rotated[:len(base)])
 
+    def test_overlap_neighborhood_search_handles_dense_single_view_surface(self):
+        points = [(x * .1, y * .1, 0.) for x in range(80) for y in range(80)]
+
+        result = process_points(points, "remove_overlaps", {"distance": .56, "radius": 2.,
+                                                              "tangential_distance": .1})
+
+        self.assertGreaterEqual(len(result), 3)
+        self.assertLess(len(result), len(points))
+        self.assertEqual(len(points), 80 * 80)
+
     def test_smoothing_strength_and_passes_reduce_normal_noise(self):
         points = [(float(x), float(y), .08 * (-1)**(x+y)) for x in range(9) for y in range(9)]
         def roughness(p):

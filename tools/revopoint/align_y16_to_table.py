@@ -113,13 +113,13 @@ def _reproject_pixel(x: int, y: int, depth_value: int, q: tuple[float, ...], dep
     return point if all(math.isfinite(value) for value in point) else None
 
 
-def detect_marker_centers(raw: bytes, q: tuple[float, ...], depth_scale: float) -> list[Vector]:
-    """Mirror the live-preview connected-region detector for a saved Y16 frame."""
+def detect_marker_regions(raw: bytes) -> list[list[int]]:
+    """Return accepted connected table-marker pixel regions from a Y16 frame."""
     if len(raw) != RAW_BYTES:
         raise ValueError(f"Y16 frame must be exactly {RAW_BYTES} bytes")
     values = struct.unpack(f"<{WIDTH * HEIGHT}H", raw)
     seen = bytearray(WIDTH * HEIGHT)
-    centers: list[Vector] = []
+    regions: list[list[int]] = []
     for seed in range(WIDTH * HEIGHT):
         if seen[seed] or values[seed] == 0:
             continue
@@ -147,7 +147,17 @@ def detect_marker_centers(raw: bytes, q: tuple[float, ...], depth_scale: float) 
         if not (20 <= len(pixels) <= 1000 and 0.3 < width / height < 3
                 and len(pixels) / (width * height) > 0.45):
             continue
-        center_x, center_y = sum_x / len(pixels), sum_y / len(pixels)
+        regions.append(pixels)
+    return regions
+
+
+def detect_marker_centers(raw: bytes, q: tuple[float, ...], depth_scale: float) -> list[Vector]:
+    """Mirror the live-preview connected-region detector for a saved Y16 frame."""
+    values = struct.unpack(f"<{WIDTH * HEIGHT}H", raw)
+    centers: list[Vector] = []
+    for pixels in detect_marker_regions(raw):
+        center_x = sum(index % WIDTH for index in pixels) / len(pixels)
+        center_y = sum(index // WIDTH for index in pixels) / len(pixels)
         pixel = min((index for index in pixels if index % 2 == 0),
                     key=lambda index: (index % WIDTH - center_x) ** 2 + (index // WIDTH - center_y) ** 2,
                     default=-1)

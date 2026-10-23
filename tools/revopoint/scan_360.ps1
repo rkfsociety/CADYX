@@ -269,6 +269,7 @@ try {
         '--run-directory', $runDirectory, '--run-id', $runPrefix,
         '--expected-frame-count', [string]$frameCount,
         '--stop-signal', $workerStopPath, '--report-file', $preprocessingReportPath,
+        '--calibration-file', $projectCalibration, '--depth-scale', $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture),
         '--max-workers', '2'
     ) | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }
     $preprocessingWorker = Start-Process -FilePath $PythonExecutable -ArgumentList ($workerArguments -join ' ') `

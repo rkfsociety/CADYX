@@ -4,13 +4,18 @@ import tempfile
 import unittest
 import csv
 import json
+import struct
 import threading
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
-from tools.revopoint.preprocess_scan_frame import preprocess_points, verified_preprocessed_frame, watch_capture
+from tools.revopoint.preprocess_scan_frame import (
+    _write_aggregate_report, preprocess_frame_file, preprocess_points,
+    verified_preprocessed_frame, watch_capture,
+)
 from tools.revopoint.register_point_clouds_first_frame import source_paths
 
 
@@ -37,6 +42,60 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
         self.assertEqual(report["removed_by_method"]["isolation_filter"], 4)
         self.assertEqual(report["removed_by_method"]["remove_overlaps"], 0)
         self.assertEqual(report["passes"][-1], {"isolation_filter": 0, "remove_overlaps": 0})
+
+    def test_table_marker_pixels_are_removed_before_cloud_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            raw_path, q_path = folder / "frame.raw", folder / "Q.bin"
+            ply_path, cleaned_path, report_path = folder / "frame.ply", folder / "frame_cleaned.ply", folder / "frame_cleaned.json"
+            values = [0] * (640 * 400)
+            for start_x in (100, 120, 140):
+                for y in range(100, 105):
+                    for x in range(start_x, start_x + 5):
+                        values[y * 640 + x] = 2000
+            for y in range(160, 200):
+                for x in range(250, 290):
+                    values[y * 640 + x] = 2000
+            raw_path.write_bytes(struct.pack("<256000H", *values))
+            q = (1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0)
+            q_path.write_bytes(struct.pack("<16f", *q))
+            points = [(float(index % 640), -float(index // 640), -2.0)
+                      for index, value in enumerate(values) if value > 0]
+            ply_path.write_text(
+                f"ply\nformat ascii 1.0\nelement vertex {len(points)}\n"
+                "property float x\nproperty float y\nproperty float z\nend_header\n" +
+                "".join(f"{x} {y} {z}\n" for x, y, z in points), encoding="ascii")
+
+            report = preprocess_frame_file(ply_path, cleaned_path, report_path, 0,
+                                           raw_path=raw_path, calibration_path=q_path,
+                                           depth_scale=0.001)
+
+            self.assertEqual(report["table_marker_detection"], "completed")
+            self.assertEqual(report["detected_table_markers"], 3)
+            self.assertEqual(report["removed_table_marker_points"], 75)
+            self.assertEqual(report["source_points"], 1675)
+            self.assertEqual(report["cleaned_points"], 1600)
+            self.assertEqual(report["parameters"]["remove_overlaps"]["radius"], 0.59)
+            self.assertEqual(len(cleaned_path.read_text(encoding="ascii").splitlines()), 1600 + 8)
+
+    def test_capture_report_retries_transient_windows_replace_denial(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            report_path = Path(temporary) / "report.json"
+            original_replace = Path.replace
+            attempts = 0
+
+            def replace_with_transient_denial(source: Path, target: Path) -> Path:
+                nonlocal attempts
+                attempts += 1
+                if attempts < 3:
+                    raise PermissionError("transient report-reader lock")
+                return original_replace(source, target)
+
+            with patch.object(Path, "replace", replace_with_transient_denial):
+                _write_aggregate_report(report_path, {"state": "running"})
+
+            self.assertEqual(attempts, 3)
+            self.assertEqual(json.loads(report_path.read_text(encoding="utf-8")), {"state": "running"})
 
     def test_capture_worker_cleans_completed_source_without_modifying_it(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

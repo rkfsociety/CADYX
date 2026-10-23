@@ -632,7 +632,7 @@ class Scan360CaptureController:
         if state == "completed" or metadata_warning:
             completed = self._job.frame_count
             state = "completed"
-        message = (f"Кадр {completed}/{self._job.frame_count}; очищено {preprocessing['preprocessed_frames']}/{self._job.frame_count}; ошибок фильтра {preprocessing['preprocessing_failed_frames']}" if state == "running" else
+        message = (f"Кадр {completed}/{self._job.frame_count}; очищено {preprocessing['preprocessed_frames']}/{self._job.frame_count}; маркеров стола найдено {preprocessing['detected_table_marker_count']}, точек удалено {preprocessing['removed_table_marker_points']}; ошибок фильтра {preprocessing['preprocessing_failed_frames']}" if state == "running" else
                    f"Съёмка завершилась, но очистка кадров не прошла ({preprocessing['preprocessed_frames']}/{self._job.frame_count}); исходники сохранены." if preprocessing["preprocessing_status"] == "failed" else
                    f"{self._job.frame_count} кадров сохранены, но привязка к центру карты стола не прошла; исходные кадры сохранены." if alignment_failed else
                    f"{self._job.frame_count} кадров сохранены. Запись манифеста завершилась ошибкой; журнал поз сохранён." if metadata_warning else
@@ -655,7 +655,7 @@ class Scan360CaptureController:
             self._job.project_directory, self._job.run_id,
         )
         if state == "completed":
-            snapshot["message"] = {
+            message = {
                 "aligned_provisional": "Все кадры привязаны к центру карты стола; физический масштаб остаётся предварительным.",
                 "partial": "Часть кадров привязана к центру карты стола; остальные исходники сохранены для последующей привязки.",
                 "unavailable": "Маркеры стола не удалось надёжно определить; привязку можно выполнить позднее по осям и плоскостям облака или сетки.",
@@ -663,6 +663,10 @@ class Scan360CaptureController:
                 "not_performed": "Кадры сохранены в координатах камеры без привязки к столу; их можно сшить геометрически.",
                 "failed": "Кадры сохранены, но отчёт о привязке к карте стола повреждён или не прошёл проверку.",
             }.get(snapshot["table_alignment_status"], message)
+            if preprocessing["table_marker_detection_status"] == "completed":
+                message += (f" Обнаружено областей маркеров: {preprocessing['detected_table_marker_count']}; "
+                            f"удалено точек маркеров: {preprocessing['removed_table_marker_points']}.")
+            snapshot["message"] = message
         return snapshot
 
     @staticmethod
@@ -676,23 +680,44 @@ class Scan360CaptureController:
             failed = report.get("failed_frames", [])
             if not isinstance(frames, list) or not isinstance(failed, list):
                 raise ValueError("invalid per-frame cleanup rows")
+            cleaned_count = report.get("cleaned_frame_count", len(frames))
+            marker_detection_count = sum(
+                frame.get("table_marker_detection") == "completed" for frame in frames
+                if isinstance(frame, dict)
+            )
+            marker_status = ("completed" if report.get("state") == "completed"
+                             and cleaned_count == frame_count == marker_detection_count else
+                             "failed" if report.get("state") == "failed" else
+                             "running" if report.get("state") == "running" else "not_available")
             return {
                 "preprocessing_status": report.get("state", "failed"),
-                "preprocessed_frames": report.get("cleaned_frame_count", len(frames)),
+                "preprocessed_frames": cleaned_count,
                 "preprocessing_failed_frames": report.get("failed_frame_count", len(failed)),
                 "preprocessing_frame_count": frame_count,
                 "preprocessing_pending_frames": max(
-                    0, frame_count - report.get("cleaned_frame_count", len(frames))
+                    0, frame_count - cleaned_count
                     - report.get("failed_frame_count", len(failed))),
+                "table_marker_detection_status": marker_status,
+                "detected_table_marker_count": report.get(
+                    "detected_table_marker_count",
+                    sum(frame.get("detected_table_markers", 0) for frame in frames
+                        if isinstance(frame, dict))),
+                "removed_table_marker_points": report.get(
+                    "removed_table_marker_points",
+                    sum(frame.get("removed_table_marker_points", 0) for frame in frames
+                        if isinstance(frame, dict))),
             }
         except FileNotFoundError:
             return {"preprocessing_status": "starting" if active else "not_available", "preprocessed_frames": 0,
                     "preprocessing_failed_frames": 0, "preprocessing_frame_count": frame_count,
-                    "preprocessing_pending_frames": frame_count if active else 0}
+                    "preprocessing_pending_frames": frame_count if active else 0,
+                    "table_marker_detection_status": "starting" if active else "not_available",
+                    "detected_table_marker_count": 0, "removed_table_marker_points": 0}
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return {"preprocessing_status": "failed", "preprocessed_frames": 0,
                     "preprocessing_failed_frames": frame_count, "preprocessing_frame_count": frame_count,
-                    "preprocessing_pending_frames": 0}
+                    "preprocessing_pending_frames": 0, "table_marker_detection_status": "failed",
+                    "detected_table_marker_count": 0, "removed_table_marker_points": 0}
 
     @staticmethod
     def _alignment_status(project_directory: Path, run_id: str) -> str:

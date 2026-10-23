@@ -6,8 +6,10 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import os
 import re
+import struct
 import subprocess
 import sys
 import time
@@ -22,7 +24,10 @@ _RUN_ID = re.compile(r"^revopoint_\d{8}T\d{6}Z$")
 _METHODS = ("isolation_filter", "remove_overlaps")
 _PARAMETERS = {
     "isolation_filter": {"rate": 15.0, "component_factor": 3.0},
-    "remove_overlaps": {},
+    # Keep the search neighborhood bounded for dense scanner frames. 0.59 still
+    # contains every pair allowed by the default overlap tolerances (0.56 normal,
+    # 0.1 tangent; maximum Euclidean separation <0.569).
+    "remove_overlaps": {"radius": 0.59},
 }
 
 
@@ -90,15 +95,23 @@ def read_ascii_xyz_ply(path: Path) -> tuple[list[tuple[float, float, float]], by
     return points, data
 
 
-def preprocess_points(points: list[tuple[float, float, float]], frame_index: int
+def preprocess_points(points: list[tuple[float, float, float]], frame_index: int, *,
+                      marker_point_indices: set[int] | None = None,
+                      detected_marker_count: int = 0
                       ) -> tuple[list[tuple[float, float, float]], dict[str, Any]]:
     """Apply the same two CADYX filters, alternating until both report zero removals."""
     from cadyx.point_cloud import normalize_cloud_parameters, process_points
 
-    current = list(points)
-    source_count = len(current)
+    source_count = len(points)
+    excluded = marker_point_indices or set()
+    if any(index < 0 or index >= source_count for index in excluded):
+        raise ValueError(f"frame {frame_index} marker mask references a point outside the PLY")
+    current = [point for index, point in enumerate(points) if index not in excluded]
+    marker_removed = source_count - len(current)
     if source_count < 100:
         raise ValueError(f"frame {frame_index} contains fewer than 100 points before cleanup")
+    if len(current) < 100:
+        raise ValueError(f"frame {frame_index} has fewer than 100 points after table-marker removal")
     parameters = {method: normalize_cloud_parameters(method, _PARAMETERS[method]) for method in _METHODS}
     removed_by_method = {method: 0 for method in _METHODS}
     passes = []
@@ -125,14 +138,61 @@ def preprocess_points(points: list[tuple[float, float, float]], frame_index: int
         "source_points": source_count,
         "cleaned_points": len(current),
         "removed_points": source_count - len(current),
+        "detected_table_markers": detected_marker_count,
+        "removed_table_marker_points": marker_removed,
         "removed_by_method": removed_by_method,
         "parameters": parameters,
         "passes": passes,
     }
 
 
+def _table_marker_point_indices(raw_path: Path, calibration_path: Path, depth_scale: float,
+                                point_count: int) -> tuple[set[int], int, str]:
+    from tools.revopoint.align_y16_to_table import detect_marker_regions
+    from tools.revopoint.reproject_y16 import HEIGHT, RAW_BYTES, WIDTH
+
+    raw = raw_path.read_bytes()
+    if len(raw) != RAW_BYTES:
+        raise ValueError(f"{raw_path.name} is not a complete Y16 frame")
+    q_data = calibration_path.read_bytes()
+    if len(q_data) != 64:
+        raise ValueError("scanner Q calibration must contain 16 float32 values")
+    q = struct.unpack("<16f", q_data)
+    if not all(map(lambda value: value == value and abs(value) != float("inf"), q)):
+        raise ValueError("scanner Q calibration contains non-finite values")
+    if not (depth_scale > 0 and depth_scale < float("inf")):
+        raise ValueError("depth scale must be positive and finite")
+    marker_regions = detect_marker_regions(raw)
+    marker_pixels = {pixel for region in marker_regions for pixel in region}
+
+    values = struct.unpack(f"<{WIDTH * HEIGHT}H", raw)
+    point_index = 0
+    removed_indices: set[int] = set()
+    for pixel_index, value in enumerate(values):
+        depth = value * depth_scale
+        if not math.isfinite(depth) or depth < 1.0:
+            continue
+        x, y = pixel_index % WIDTH, pixel_index // WIDTH
+        ray_x = q[0] * x + q[1] * y + q[2] * depth + q[3]
+        ray_y = q[4] * x + q[5] * y + q[6] * depth + q[7]
+        ray_z = q[8] * x + q[9] * y + q[10] * depth + q[11]
+        if not math.isfinite(ray_z) or abs(ray_z) < 1e-12:
+            continue
+        point = (ray_x * depth / ray_z, -ray_y * depth / ray_z, -depth)
+        if not all(math.isfinite(coordinate) for coordinate in point):
+            continue
+        if pixel_index in marker_pixels:
+            removed_indices.add(point_index)
+        point_index += 1
+    if point_index != point_count:
+        raise ValueError(f"{raw_path.name} projects to {point_index} vertices but the paired PLY contains {point_count}; marker removal refused")
+    return removed_indices, len(marker_regions), _sha256(raw)
+
+
 def preprocess_frame_file(source_path: Path, cleaned_path: Path, report_path: Path,
-                          frame_index: int, *, timing: str = "during_capture") -> dict[str, Any]:
+                          frame_index: int, *, timing: str = "during_capture",
+                          raw_path: Path | None = None, calibration_path: Path | None = None,
+                          depth_scale: float | None = None) -> dict[str, Any]:
     source_path = source_path.resolve(strict=True)
     cleaned_path = cleaned_path.resolve()
     report_path = report_path.resolve()
@@ -140,7 +200,16 @@ def preprocess_frame_file(source_path: Path, cleaned_path: Path, report_path: Pa
         raise FileExistsError("refusing to overwrite a cleaned frame or its report")
     started = time.perf_counter()
     points, source_bytes = read_ascii_xyz_ply(source_path)
-    cleaned, stats = preprocess_points(points, frame_index)
+    marker_indices: set[int] = set()
+    marker_count = 0
+    raw_hash = None
+    if any(value is not None for value in (raw_path, calibration_path, depth_scale)):
+        if raw_path is None or calibration_path is None or depth_scale is None:
+            raise ValueError("table-marker removal requires RAW, Q calibration, and depth scale")
+        marker_indices, marker_count, raw_hash = _table_marker_point_indices(
+            raw_path.resolve(strict=True), calibration_path.resolve(strict=True), depth_scale, len(points))
+    cleaned, stats = preprocess_points(points, frame_index, marker_point_indices=marker_indices,
+                                      detected_marker_count=marker_count)
     header = ("ply\nformat ascii 1.0\n"
               "comment CADYX per-frame isolation and overlap cleanup\n"
               f"element vertex {len(cleaned)}\n"
@@ -154,6 +223,8 @@ def preprocess_frame_file(source_path: Path, cleaned_path: Path, report_path: Pa
         "timing": timing,
         "source_file": source_path.name,
         "source_sha256": _sha256(source_bytes),
+        "source_raw_sha256": raw_hash,
+        "table_marker_detection": "completed" if raw_hash else "not_requested",
         "cleaned_file": cleaned_path.name,
         "cleaned_sha256": _sha256(cleaned_bytes),
         "frame_index": frame_index,
@@ -211,12 +282,21 @@ def _read_completed_rows(pose_log: Path) -> list[dict[str, str]]:
 def _write_aggregate_report(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    for attempt in range(10):
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError:
+            if attempt == 9:
+                temporary.unlink(missing_ok=True)
+                raise
+            time.sleep(0.05)
 
 
 def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_frame_count: int,
                   stop_signal: Path, report_path: Path, *, max_workers: int = 4,
-                  poll_seconds: float = 0.1) -> dict[str, Any]:
+                  poll_seconds: float = 0.1, calibration_path: Path | None = None,
+                  depth_scale: float | None = None) -> dict[str, Any]:
     """Launch frame cleanup as soon as each capture-completed row is flushed."""
     run_directory = run_directory.resolve(strict=True)
     pose_log = pose_log.resolve()
@@ -228,6 +308,12 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
         raise ValueError("expected frame count or preprocessing worker limit is invalid")
     if not 0.01 <= poll_seconds <= 2.0:
         raise ValueError("pose-log polling interval must be between 0.01 and 2 seconds")
+    if (calibration_path is None) != (depth_scale is None):
+        raise ValueError("watch mode requires both calibration path and depth scale for marker removal")
+    if calibration_path is not None:
+        calibration_path = calibration_path.resolve(strict=True)
+        if calibration_path.stat().st_size != 64 or depth_scale is None or not math.isfinite(depth_scale) or depth_scale <= 0:
+            raise ValueError("watch mode received invalid marker-removal calibration")
     if report_path.exists():
         raise FileExistsError("refusing to overwrite the scan preprocessing report")
 
@@ -290,6 +376,10 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
             command = [sys.executable, str(script_path), "--input-ply", str(source_path),
                        "--cleaned-ply", str(cleaned_path), "--report-file", str(frame_report_path),
                        "--frame-index", str(index), "--timing", "during_capture"]
+            if calibration_path is not None and depth_scale is not None:
+                command.extend(("--raw-file", str(source_path.with_suffix(".raw")),
+                                "--calibration-file", str(calibration_path),
+                                "--depth-scale", format(depth_scale, ".12g")))
             try:
                 active[index] = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                                   text=True, encoding="utf-8", errors="replace",
@@ -301,6 +391,8 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
         aggregate["failed_frames"] = [{"frame_index": i, "error": errors[i]} for i in sorted(errors)]
         aggregate["cleaned_frame_count"] = len(reports)
         aggregate["failed_frame_count"] = len(errors)
+        aggregate["detected_table_marker_count"] = sum(report.get("detected_table_markers", 0) for report in reports.values())
+        aggregate["removed_table_marker_points"] = sum(report.get("removed_table_marker_points", 0) for report in reports.values())
         if stop_signal_seen and not pending and not active:
             aggregate["state"] = ("failed" if errors else "completed"
                                   if len(reports) == expected_frame_count else "partial")
@@ -324,6 +416,9 @@ def main() -> int:
     parser.add_argument("--frame-index", type=int)
     parser.add_argument("--timing", choices=("during_capture", "after_capture_before_registration"),
                         default="after_capture_before_registration")
+    parser.add_argument("--raw-file", type=Path)
+    parser.add_argument("--calibration-file", type=Path)
+    parser.add_argument("--depth-scale", type=float)
     args = parser.parse_args()
     if args.watch_pose_log is not None:
         if (args.run_directory is None or args.run_id is None or args.expected_frame_count is None
@@ -332,7 +427,8 @@ def main() -> int:
         try:
             report = watch_capture(args.watch_pose_log, args.run_directory, args.run_id,
                                    args.expected_frame_count, args.stop_signal, args.report_file,
-                                   max_workers=args.max_workers)
+                                   max_workers=args.max_workers, calibration_path=args.calibration_file,
+                                   depth_scale=args.depth_scale)
         except (OSError, ValueError, RuntimeError) as exc:
             print(f"capture preprocessing worker failed: {exc}", file=sys.stderr)
             return 2
@@ -344,7 +440,8 @@ def main() -> int:
         parser.error("per-frame mode requires --input-ply, --cleaned-ply, and --frame-index")
     try:
         report = preprocess_frame_file(args.input_ply, args.cleaned_ply, args.report_file,
-                                       args.frame_index, timing=args.timing)
+                                       args.frame_index, timing=args.timing, raw_path=args.raw_file,
+                                       calibration_path=args.calibration_file, depth_scale=args.depth_scale)
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"frame preprocessing failed: {exc}", file=sys.stderr)
         return 2

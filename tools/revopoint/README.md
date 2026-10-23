@@ -247,6 +247,8 @@ Keep each capture prefix unique. The original Y16 frame is preserved beside the 
 
 Revo Scan, Revo Assistant, or another Bluetooth client can hold the table connection. The controller does not retry a movement command after a lost response.
 
+Before geometric registration, each frame's Y16 image is segmented into connected table-marker regions. Their pixel indices map directly to the paired PLY vertex order, so only marker vertices are removed; the original RAW/PLY remain unchanged. The per-frame report records detected marker regions and removed vertices. Marker cleanup runs in the same bounded capture-time worker before `isolation_filter` and `remove_overlaps`; the scan worker uses a 0.59-unit neighborhood radius, just above the maximum separation allowed by the standard overlap tolerances, to stay within the surface-comparison budget. It does not use table angles or marker-map coordinates to register geometry.
+
 ## Capture a full turn at configurable intervals
 
 The Agent API accepts `step_degrees` from 1° to 30° when it divides 360° (default 30°), so 15° captures 24 frames. Set `align_to_markers=false` to preserve camera-frame PLY files for geometry-only registration. The PowerShell entry point exposes the same options as `-StepDegrees` and `-SkipTableMarkerAlignment`.

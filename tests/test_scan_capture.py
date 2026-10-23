@@ -92,7 +92,9 @@ class Scan360CaptureTests(unittest.TestCase):
             run_directory.mkdir()
             (run_directory / f"{run_id}_preprocessing.json").write_text(json.dumps({
                 "state": "running", "cleaned_frame_count": 2, "failed_frame_count": 1,
-                "frames": [{}, {}], "failed_frames": [{}],
+                "detected_table_marker_count": 5, "removed_table_marker_points": 91,
+                "frames": [{"table_marker_detection": "completed"},
+                           {"table_marker_detection": "completed"}], "failed_frames": [{}],
             }), encoding="utf-8")
 
             status = Scan360CaptureController._preprocessing_payload(project, run_id, 8)
@@ -101,6 +103,9 @@ class Scan360CaptureTests(unittest.TestCase):
         self.assertEqual(status["preprocessed_frames"], 2)
         self.assertEqual(status["preprocessing_failed_frames"], 1)
         self.assertEqual(status["preprocessing_pending_frames"], 5)
+        self.assertEqual(status["table_marker_detection_status"], "running")
+        self.assertEqual(status["detected_table_marker_count"], 5)
+        self.assertEqual(status["removed_table_marker_points"], 91)
 
     def test_legacy_capture_without_preprocessing_report_is_not_pending(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
