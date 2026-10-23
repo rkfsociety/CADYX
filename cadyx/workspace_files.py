@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import mimetypes
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -223,6 +224,8 @@ class WorkspaceArtifactStore:
         self, directory: Path, folder_name: str,
     ) -> dict[str, Any]:
         target = self._project_subfolder(directory, folder_name)
+        scan_match = re.fullmatch(r"revopoint_(\d{8}T\d{6}Z)", folder_name)
+        expected_scan_log = f".cadyx-scan360-{scan_match.group(1)}.log" if scan_match else None
         files: list[Path] = []
         for current, dir_names, file_names in os.walk(target, followlinks=False):
             current_path = Path(current)
@@ -231,7 +234,8 @@ class WorkspaceArtifactStore:
                     raise ValidationError("Refusing to remove a project folder containing a link or internal directory.")
             for name in file_names:
                 path = current_path / name
-                if (path.is_symlink() or name.startswith(".cadyx-")
+                scan_log = expected_scan_log is not None and current_path == target and name == expected_scan_log
+                if (path.is_symlink() or (name.startswith(".cadyx-") and not scan_log)
                         or self._is_internal_file(current_path, name)):
                     raise ValidationError("Refusing to remove a project folder containing a link or internal file.")
                 files.append(path)
