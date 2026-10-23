@@ -13,6 +13,12 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
+REPOSITORY = Path(__file__).resolve().parents[2]
+if str(REPOSITORY) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY))
+
+from tools.revopoint.preprocess_scan_frame import verified_preprocessed_frame
+
 try:
     from .reproject_y16 import HEIGHT, RAW_BYTES, WIDTH
 except ImportError:
@@ -416,7 +422,9 @@ def align_run(project: Path, run_id: str, marker_map: Path, calibration_file: Pa
                 ply_path = project / f"{legacy_stem}.ply"
             if not raw_path.is_file() or not ply_path.is_file():
                 raise FileNotFoundError(f"capture frame {index} is missing its source RAW or PLY")
-            source_points, source_count = _read_ascii_ply(ply_path)
+            preprocessed = verified_preprocessed_frame(ply_path)
+            registration_ply = preprocessed[0] if preprocessed is not None else ply_path
+            source_points, source_count = _read_ascii_ply(registration_ply)
             try:
                 markers = detect_marker_centers(raw_path.read_bytes(), q, depth_scale)
                 frame = _table_frame(markers, _center_ray(q))
@@ -424,7 +432,8 @@ def align_run(project: Path, run_id: str, marker_map: Path, calibration_file: Pa
                     frame["markers_2d"], table["points"], table["match_threshold"],
                 )
             except ValueError as error:
-                frames.append({"index": index, "source_ply": ply_path.name, "source_raw": raw_path.name,
+                frames.append({"index": index, "source_ply": registration_ply.name,
+                               "original_source_ply": ply_path.name, "source_raw": raw_path.name,
                                "status": "deferred", "alignment_error": str(error),
                                "source_point_count": source_count})
                 continue
@@ -442,9 +451,10 @@ def align_run(project: Path, run_id: str, marker_map: Path, calibration_file: Pa
                     continue
                 aligned_points.append((mapped_x, mapped_y, max(0.0, mapped_z)))
             output_name = f"{source_stem}_table_aligned.ply"
-            _write_aligned_ply(stage / output_name, aligned_points, ply_path.name)
+            _write_aligned_ply(stage / output_name, aligned_points, registration_ply.name)
             run_files.append((stage / output_name, project / output_name))
-            frames.append({"index": index, "source_ply": ply_path.name, "source_raw": raw_path.name,
+            frames.append({"index": index, "source_ply": registration_ply.name,
+                           "original_source_ply": ply_path.name, "source_raw": raw_path.name,
                            "status": "aligned",
                            "table_aligned_ply": output_name, "source_point_count": source_count,
                            "output_point_count": len(aligned_points), "clipped_below_table": clipped_below,

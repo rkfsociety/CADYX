@@ -84,6 +84,24 @@ class Scan360CaptureTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "invalid header or record count"):
             Scan360CaptureController._validate_marker_map(bytes(16))
 
+    def test_capture_status_reports_per_frame_cleanup_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261023T091200Z"
+            run_directory = project / run_id
+            run_directory.mkdir()
+            (run_directory / f"{run_id}_preprocessing.json").write_text(json.dumps({
+                "state": "running", "cleaned_frame_count": 2, "failed_frame_count": 1,
+                "frames": [{}, {}], "failed_frames": [{}],
+            }), encoding="utf-8")
+
+            status = Scan360CaptureController._preprocessing_payload(project, run_id, 8)
+
+        self.assertEqual(status["preprocessing_status"], "running")
+        self.assertEqual(status["preprocessed_frames"], 2)
+        self.assertEqual(status["preprocessing_failed_frames"], 1)
+        self.assertEqual(status["preprocessing_pending_frames"], 5)
+
     def test_live_preview_uses_only_the_ephemeral_frame_buffer_and_stops_cleanly(self) -> None:
         class FakeProcess:
             returncode = None

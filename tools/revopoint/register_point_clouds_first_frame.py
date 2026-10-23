@@ -12,7 +12,21 @@ from typing import Any
 
 import numpy as np
 
+REPOSITORY = Path(__file__).resolve().parents[2]
+if str(REPOSITORY) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY))
+
+from tools.revopoint.preprocess_scan_frame import preprocess_points, verified_preprocessed_frame
+
 _RUN_ID = re.compile(r"^revopoint_\d{8}T\d{6}Z$")
+
+
+def preprocess_frame_points(points: np.ndarray, frame_index: int) -> tuple[np.ndarray, dict[str, Any]]:
+    """In-memory fallback for legacy series without during-capture cleanup artifacts."""
+    cleaned, report = preprocess_points(
+        [tuple(float(value) for value in point) for point in points], frame_index)
+    report["timing"] = "after_capture_before_registration"
+    return np.asarray(cleaned, dtype=np.float64), report
 
 
 def source_paths(project: Path, run_id: str) -> list[Path]:
@@ -81,9 +95,29 @@ def register_sequence(project: Path, run_id: str, output: Path,
 
     o3d.utility.random.seed(20261020)
     paths = source_paths(project, run_id)
-    clouds = [o3d.io.read_point_cloud(str(path)) for path in paths]
-    if any(len(cloud.points) == 0 for cloud in clouds):
-        raise ValueError("a source cloud contains no finite points")
+    prepared = [verified_preprocessed_frame(path) for path in paths]
+    if any(item is not None for item in prepared) and not all(item is not None for item in prepared):
+        raise ValueError("only some source frames have verified preprocessed artifacts; refusing to mix inputs")
+    clouds = []
+    source_point_counts = []
+    frame_cleanup = []
+    for index, path in enumerate(paths):
+        source_cloud = o3d.io.read_point_cloud(str(path))
+        if len(source_cloud.points) == 0:
+            raise ValueError(f"source cloud {path.name} contains no finite points")
+        source_point_counts.append(len(source_cloud.points))
+        if prepared[index] is not None:
+            cleaned_path, cleanup = prepared[index]
+            cleaned_cloud = o3d.io.read_point_cloud(str(cleaned_path))
+            if len(cleaned_cloud.points) != cleanup["cleaned_points"]:
+                raise ValueError(f"preprocessed frame {index} point count does not match its report")
+            cleanup = {**cleanup, "frame_index": index}
+        else:
+            cleaned_points, cleanup = preprocess_frame_points(
+                np.asarray(source_cloud.points, dtype=np.float64), index)
+            cleaned_cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(cleaned_points))
+        frame_cleanup.append(cleanup)
+        clouds.append(cleaned_cloud)
     registration = o3d.pipelines.registration
     downsampled = [cloud.voxel_down_sample(voxel_size) for cloud in clouds]
     features = []
@@ -256,9 +290,20 @@ def register_sequence(project: Path, run_id: str, output: Path,
         "coordinate_frame": "first captured point cloud",
         "registration": "adjacent FPFH/RANSAC seeding, incremental merge-to-accumulated robust ICP, pose-graph loop optimization",
         "table_encoder_or_axis_used": False,
+        "preprocessing": {
+            "order": ["isolation_filter", "remove_overlaps"],
+            "applied_per_source_frame_before_registration": True,
+            "until_both_report_zero_removals": True,
+            "source_frame_timing": ("during_capture" if prepared and prepared[0] is not None
+                                     else "after_capture_before_registration_legacy_fallback"),
+            "frames": frame_cleanup,
+        },
         "source_files": [path.name for path in paths],
+        "registration_input_files": [
+            (item[0].name if item is not None else path.name) for path, item in zip(paths, prepared)],
         "source_cloud_count": len(clouds),
-        "source_point_counts": [len(cloud.points) for cloud in clouds],
+        "source_point_counts": source_point_counts,
+        "preprocessed_point_counts": [len(cloud.points) for cloud in clouds],
         "voxel_size_q": fused_voxel_size,
         "output_points": len(fused.points),
         "discarded_isolated_points": int(len(sampled.points) - len(fused.points)),

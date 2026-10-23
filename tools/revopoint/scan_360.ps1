@@ -45,9 +45,9 @@ if ([string]::IsNullOrWhiteSpace($CalibrationFile)) {
 if ([string]::IsNullOrWhiteSpace($TurntableMarkerMap)) {
     $TurntableMarkerMap = Join-Path $toolRoot 'calibration\tables\revopoint-dual-axis-table\framesmall.mkf'
 }
-if (-not $ManifestOnly -and -not $SkipTableMarkerAlignment -and [string]::IsNullOrWhiteSpace($PythonExecutable)) {
+if (-not $ManifestOnly -and [string]::IsNullOrWhiteSpace($PythonExecutable)) {
     $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $pythonCommand) { throw 'Python is required to align captured frames to the table marker map.' }
+    if (-not $pythonCommand) { throw 'Python is required to clean captured frames and optionally align them to the table marker map.' }
     $PythonExecutable = $pythonCommand.Source
 }
 $repoRoot = (Resolve-Path (Join-Path $toolRoot '..\..')).Path
@@ -65,6 +65,7 @@ if ($projectRecord.format -ne 'cadyx-project' -or -not [guid]::TryParse([string]
 }
 $captureExe = Join-Path $toolRoot 'build\CaptureY16.exe'
 $turntableExe = Join-Path $toolRoot 'build\TurntableController.exe'
+$framePreprocessor = Join-Path $toolRoot 'preprocess_scan_frame.py'
 $alignmentScript = Join-Path $toolRoot 'align_y16_to_table.py'
 $depthScaleConfig = Join-Path $toolRoot 'calibration\scanners\revopoint-mini-y16\depth_scale.json'
 if (-not $PSBoundParameters.ContainsKey('DepthScale')) {
@@ -74,7 +75,7 @@ if ([double]::IsNaN($DepthScale) -or [double]::IsInfinity($DepthScale) -or $Dept
     throw 'DepthScale must be a positive finite value in millimeters per uint16 unit.'
 }
 
-foreach ($path in @($captureExe, $turntableExe, $CalibrationFile, $depthScaleConfig)) {
+foreach ($path in @($captureExe, $turntableExe, $framePreprocessor, $CalibrationFile, $depthScaleConfig)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required input was not found: $path"
     }
@@ -254,13 +255,53 @@ try {
         $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
         $TurntableServiceUuid, $TurntableCharacteristicUuid
     ) | Out-Null
-    Invoke-Turntable -Arguments @(
-        'capture-sweep', [string]$frameCount, [string]$StepDegrees, '0', $poseLog, $captureExe, $prefix,
-        $projectCalibration, $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw,
-        $ScannerDeviceId, $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
-        $TurntableServiceUuid, $TurntableCharacteristicUuid
-    ) | Out-Null
-
+    $preprocessingReportPath = Join-Path $runDirectory "${runPrefix}_preprocessing.json"
+    $workerControlDirectory = Join-Path $repoRoot '.runtime\scan-reconstruction'
+    New-Item -ItemType Directory -Force -Path $workerControlDirectory | Out-Null
+    $workerStopPath = Join-Path $workerControlDirectory "${runPrefix}_preprocessing.stop"
+    $workerStdout = Join-Path $workerControlDirectory "${runPrefix}_preprocessing.stdout.log"
+    $workerStderr = Join-Path $workerControlDirectory "${runPrefix}_preprocessing.stderr.log"
+    foreach ($path in @($preprocessingReportPath, $workerStopPath, $workerStdout, $workerStderr)) {
+        if (Test-Path -LiteralPath $path) { throw "Per-frame processing output already exists; refusing to overwrite: $path" }
+    }
+    $workerArguments = @(
+        $framePreprocessor, '--watch-pose-log', $poseLog,
+        '--run-directory', $runDirectory, '--run-id', $runPrefix,
+        '--expected-frame-count', [string]$frameCount,
+        '--stop-signal', $workerStopPath, '--report-file', $preprocessingReportPath,
+        '--max-workers', '2'
+    ) | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }
+    $preprocessingWorker = Start-Process -FilePath $PythonExecutable -ArgumentList ($workerArguments -join ' ') `
+        -WorkingDirectory $repoRoot -PassThru -WindowStyle Hidden `
+        -RedirectStandardOutput $workerStdout -RedirectStandardError $workerStderr
+    try {
+        Invoke-Turntable -Arguments @(
+            'capture-sweep', [string]$frameCount, [string]$StepDegrees, '0', $poseLog, $captureExe, $prefix,
+            $projectCalibration, $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw,
+            $ScannerDeviceId, $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
+            $TurntableServiceUuid, $TurntableCharacteristicUuid
+        ) | Out-Null
+    }
+    finally {
+        [IO.File]::WriteAllText($workerStopPath, 'stop', [Text.UTF8Encoding]::new($false))
+        $preprocessingWorker.WaitForExit()
+        Remove-Item -LiteralPath $workerStopPath -Force -ErrorAction SilentlyContinue
+    }
+    if ($preprocessingWorker.ExitCode -ne 0) {
+        $workerError = if (Test-Path -LiteralPath $workerStderr) { Get-Content -LiteralPath $workerStderr -Raw } else { '' }
+        if (Test-Path -LiteralPath $preprocessingReportPath) {
+            try {
+                $failedFrames = (Get-Content -LiteralPath $preprocessingReportPath -Raw | ConvertFrom-Json).failed_frames
+                $failureDetails = @($failedFrames | ForEach-Object { "frame $($_.frame_index): $($_.error)" }) -join '; '
+                if (-not [string]::IsNullOrWhiteSpace($failureDetails)) { $workerError = $failureDetails }
+            } catch { $workerError = "Could not read per-frame cleanup details: $($_.Exception.Message)" }
+        }
+        throw "Per-frame cleanup failed; original captured RAW/PLY files are preserved. $workerError"
+    }
+    $preprocessingResult = Get-Content -LiteralPath $preprocessingReportPath -Raw | ConvertFrom-Json
+    if ($preprocessingResult.state -ne 'completed' -or $preprocessingResult.cleaned_frame_count -ne $frameCount) {
+        throw "Per-frame cleanup completed for $($preprocessingResult.cleaned_frame_count) of $frameCount frames; no stitched result was produced."
+    }
     if (-not $SkipTableMarkerAlignment) {
         & $PythonExecutable $alignmentScript --project $runDirectory --run-id $runPrefix `
             --marker-map $projectMarkerMap --calibration-file $projectCalibration --depth-scale $DepthScale `
@@ -284,6 +325,8 @@ try {
             index = $index
             raw_file = "$prefixName.raw"
             ply_file = "$prefixName.ply"
+            preprocessed_ply_file = "${prefixName}_cleaned.ply"
+            preprocessing_report_file = "${prefixName}_cleaned.json"
             coordinate_frame = if ($isAligned) { 'table_marker_map_center_xy' } else { 'source_camera' }
             table_aligned_ply_file = if ($isAligned) { $alignedName } else { $null }
             metadata_file = "$prefixName.json"
@@ -307,13 +350,15 @@ try {
         depth_scale_config = [IO.Path]::GetFileName($projectDepthScale)
         poses_file = [IO.Path]::GetFileName($poseLog)
         frame_registration = if ($SkipTableMarkerAlignment) { 'not_performed; source camera frames preserved for geometry-only registration' } else { 'table markers when four or more reliable correspondences are visible; unresolved frames stay in source coordinates' }
+        preprocessing_report = [IO.Path]::GetFileName($preprocessingReportPath)
+        preprocessing_status = $preprocessingResult.state
         frames = $frames
     }
     $manifestPath = Join-Path $runDirectory "${runPrefix}_scan_360.json"
     $manifestJson = $manifest | ConvertTo-Json -Depth 6
     [IO.File]::WriteAllText($manifestPath, $manifestJson, [Text.UTF8Encoding]::new($false))
     $complete = $true
-    Write-Host "Captured $frameCount Y16 frames at $StepDegrees-degree steps in CADYX project $ProjectPath; original table position preserved."
+    Write-Host "Captured and preprocessed $frameCount Y16 frames at $StepDegrees-degree steps in CADYX project $ProjectPath; original table position and source PLYs preserved."
     if ($alignmentResult) { Write-Host ("Table-marker alignment: {0} of {1} frames; physical scale remains provisional." -f $alignmentResult.aligned_frame_count, $frameCount) }
 }
 finally {

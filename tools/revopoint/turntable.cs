@@ -861,7 +861,7 @@ internal static class Program
 
     private static async Task PauseAfterCaptureAsync()
     {
-        Console.WriteLine("scanner processing pause after frame: 3 seconds");
+        Console.WriteLine("camera release and table-settle pause after frame: 3 seconds");
         await Task.Delay(TimeSpan.FromSeconds(3));
     }
 

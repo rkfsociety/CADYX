@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import struct
 import tempfile
 import unittest
@@ -29,8 +30,8 @@ class TableMarkerAlignmentTests(unittest.TestCase):
     @staticmethod
     def _write_ply(path: Path) -> None:
         path.write_text(
-            "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nend_header\n"
-            "170 -180 -10\n170 -180 -5\n120 -130 -10\n",
+            "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nend_header\n"
+            "170 -180 -10\n170 -180 -5\n120 -130 -10\n121 -131 -11\n",
             encoding="ascii",
         )
 
@@ -69,12 +70,31 @@ class TableMarkerAlignmentTests(unittest.TestCase):
                 self._write_ply(ply_path)
                 original_hashes[raw_path.name] = hashlib.sha256(raw_path.read_bytes()).hexdigest()
                 original_hashes[ply_path.name] = hashlib.sha256(ply_path.read_bytes()).hexdigest()
+                if index == 0:
+                    cleaned_path = project / f"{stem}_cleaned.ply"
+                    cleaned_bytes = ("ply\nformat ascii 1.0\nelement vertex 3\n"
+                                     "property float x\nproperty float y\nproperty float z\nend_header\n"
+                                     "170 -180 -10\n170 -180 -5\n120 -130 -10\n").encode("ascii")
+                    cleaned_path.write_bytes(cleaned_bytes)
+                    (project / f"{stem}_cleaned.json").write_text(json.dumps({
+                        "format": "cadyx-preprocessed-scan-frame-v1",
+                        "state": "completed",
+                        "source_file": ply_path.name,
+                        "source_sha256": hashlib.sha256(ply_path.read_bytes()).hexdigest(),
+                        "cleaned_file": cleaned_path.name,
+                        "cleaned_sha256": hashlib.sha256(cleaned_bytes).hexdigest(),
+                        "source_points": 4,
+                        "cleaned_points": 3,
+                    }), encoding="utf-8")
 
             result = align_run(project, run_id, map_path, q_path, 0.005)
 
             self.assertEqual(result["status"], "partial")
             self.assertEqual(result["aligned_frame_count"], 11)
             self.assertEqual(result["deferred_frame_count"], 1)
+            self.assertEqual(result["frames"][0]["source_ply"], f"{run_id}_pose_000_cleaned.ply")
+            self.assertEqual(result["frames"][0]["original_source_ply"], f"{run_id}_pose_000.ply")
+            self.assertEqual(result["frames"][0]["source_point_count"], 3)
             self.assertEqual(result["frames"][-1]["status"], "deferred")
             self.assertTrue((project / f"{run_id}_pose_000_table_aligned.ply").is_file())
             self.assertFalse((project / f"{run_id}_pose_011_table_aligned.ply").exists())

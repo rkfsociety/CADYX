@@ -455,8 +455,9 @@ class Scan360CaptureController:
                          "-TurntableServiceUuid", turntable["service_uuid"],
                          "-TurntableCharacteristicUuid", turntable["characteristic_uuid"],
                          "-CalibrationFile", str(calibration_file),
-                         *(["-TurntableMarkerMap", str(marker_map_file),
-                            "-PythonExecutable", str(python_executable)] if align_to_markers else ["-SkipTableMarkerAlignment"]),
+                         "-PythonExecutable", str(python_executable),
+                         *(["-TurntableMarkerMap", str(marker_map_file)]
+                           if align_to_markers else ["-SkipTableMarkerAlignment"]),
                          "-DepthScale", format(depth_scale, ".15g")],
                         cwd=str(self._repository_root), stdin=subprocess.DEVNULL,
                         stdout=log_stream, stderr=subprocess.STDOUT,
@@ -623,12 +624,16 @@ class Scan360CaptureController:
             self._job.project_directory, self._job.run_id, self._job.frame_count))
         capture_sweep_completed = f"sweep completed: {self._job.frame_count} steps" in log_tail.lower()
         alignment_failed = "table-map alignment failed" in log_tail.lower()
+        preprocessing = self._preprocessing_payload(
+            self._job.project_directory, self._job.run_id, self._job.frame_count)
         metadata_warning = (state == "failed" and completed == self._job.frame_count
-                            and capture_sweep_completed and not alignment_failed)
+                            and capture_sweep_completed and not alignment_failed
+                            and preprocessing["preprocessing_status"] == "completed")
         if state == "completed" or metadata_warning:
             completed = self._job.frame_count
             state = "completed"
-        message = (f"Кадр {completed}/{self._job.frame_count} (шаг {self._job.step_degrees}°)" if state == "running" else
+        message = (f"Кадр {completed}/{self._job.frame_count}; очищено {preprocessing['preprocessed_frames']}/{self._job.frame_count}; ошибок фильтра {preprocessing['preprocessing_failed_frames']}" if state == "running" else
+                   f"Съёмка завершилась, но очистка кадров не прошла ({preprocessing['preprocessed_frames']}/{self._job.frame_count}); исходники сохранены." if preprocessing["preprocessing_status"] == "failed" else
                    f"{self._job.frame_count} кадров сохранены, но привязка к центру карты стола не прошла; исходные кадры сохранены." if alignment_failed else
                    f"{self._job.frame_count} кадров сохранены. Запись манифеста завершилась ошибкой; журнал поз сохранён." if metadata_warning else
                    "Съёмка 360° завершена; кадры сохранены в проекте." if state == "completed" else
@@ -640,6 +645,7 @@ class Scan360CaptureController:
             "step_degrees": self._job.step_degrees,
             "started_at": self._job.started_at,
             "message": message,
+            **preprocessing,
         }
         snapshot.update(self._preview_payload(
             self._run_directory(self._job.project_directory, self._job.run_id),
@@ -658,6 +664,35 @@ class Scan360CaptureController:
                 "failed": "Кадры сохранены, но отчёт о привязке к карте стола повреждён или не прошёл проверку.",
             }.get(snapshot["table_alignment_status"], message)
         return snapshot
+
+    @staticmethod
+    def _preprocessing_payload(project_directory: Path, run_id: str,
+                               frame_count: int) -> dict[str, Any]:
+        report_path = (Scan360CaptureController._run_directory(project_directory, run_id)
+                       / f"{run_id}_preprocessing.json")
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            frames = report.get("frames", [])
+            failed = report.get("failed_frames", [])
+            if not isinstance(frames, list) or not isinstance(failed, list):
+                raise ValueError("invalid per-frame cleanup rows")
+            return {
+                "preprocessing_status": report.get("state", "failed"),
+                "preprocessed_frames": report.get("cleaned_frame_count", len(frames)),
+                "preprocessing_failed_frames": report.get("failed_frame_count", len(failed)),
+                "preprocessing_frame_count": frame_count,
+                "preprocessing_pending_frames": max(
+                    0, frame_count - report.get("cleaned_frame_count", len(frames))
+                    - report.get("failed_frame_count", len(failed))),
+            }
+        except FileNotFoundError:
+            return {"preprocessing_status": "not_available", "preprocessed_frames": 0,
+                    "preprocessing_failed_frames": 0, "preprocessing_frame_count": frame_count,
+                    "preprocessing_pending_frames": frame_count}
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return {"preprocessing_status": "failed", "preprocessed_frames": 0,
+                    "preprocessing_failed_frames": frame_count, "preprocessing_frame_count": frame_count,
+                    "preprocessing_pending_frames": 0}
 
     @staticmethod
     def _alignment_status(project_directory: Path, run_id: str) -> str:
@@ -757,6 +792,7 @@ class Scan360CaptureController:
                     "step_degrees": cls._manifest_step_degrees(run_directory, run_id),
                     "message": message,
                     "table_alignment_status": "failed" if alignment_failed else alignment_status,
+                    **cls._preprocessing_payload(run_directory, run_id, frame_count),
                     **cls._preview_payload(run_directory, run_id, completed, frame_count),
                 }
         return {"state": "idle", "completed_frames": 0, "frame_count": _DEFAULT_FRAME_COUNT}
