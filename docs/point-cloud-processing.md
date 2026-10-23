@@ -30,13 +30,13 @@ it does not expose a catalog or controls for unused processing tools.
 | `crop` | `{min: [x,y,z], max: [x,y,z]}` | Retain points inside the inclusive axis-aligned bounds. |
 | `voxel_downsample` | `{voxel_size}` | Replace each occupied world-origin-aligned voxel with its XYZ centroid. |
 | `simplify` | `{strategy: "uniform", ratio: 40}` | Uniform keeps evenly spaced source samples; geometric uses adaptive voxel centroids. `ratio` is the target percentage removed. Geometric voxel occupancy can produce a nearby count; exact output count is returned in analysis. Strategies: `uniform` or `geometric`. |
-| `isolation_filter` | `{rate: 15}` | Remove unusually sparse points whose nearest-neighbor distance exceeds 1.5 times the cloud median, capped at `rate` percent of the cloud. `rate` must be in `(0,50]`. |
+| `isolation_filter` | `{rate: 15, component_factor: 5}` | Detect the largest connected main-scan component at `component_factor × median nearest-neighbor spacing`. Points outside it and unusually sparse points (`nearest distance > 1.5 × median`) are removal candidates, capped at `rate` percent. `rate` is `(0,50]`; `component_factor` is `2..12`. |
 | `remove_overlaps` | `{distance: 0.56, radius: 2, tangential_distance: 0.1}` (defaults; any subset allowed) | Keep the first representative; remove later samples whose absolute normal separation is **less than** `distance` and tangential separation is at most `tangential_distance`. |
 | `smooth` | `{strength: 10, iterations: 10, radius: 1}` (defaults; any subset allowed) | Move each supported point toward its fitted local plane, along the plane normal, by `strength` percent per synchronous pass. Strength is in `(0,100]`; iterations is an integer in `1..100`. Point count stays unchanged. |
 
 ### Local-surface tools and detection
 
-`isolation_filter` uses an exact spatial-grid nearest-neighbor search and applies the selected rate as a removal cap. It removes only points whose nearest-neighbor distance exceeds 1.5 times the cloud median; the 20-million candidate-comparison budget applies. The two surface tools use radius neighborhoods and a local PCA plane fitted to
+`isolation_filter` uses exact spatial-grid nearest-neighbor and connected-component searches. The component radius is `component_factor` times the cloud's median nearest-neighbor spacing; the largest component is the main scan. Points in detached components and points whose nearest-neighbor distance exceeds 1.5 times the median are removal candidates, subject to the selected rate cap. Analysis reports the main-component size, detached point count, radius and total candidate count. The 20-million candidate-comparison budget covers both searches. The two surface tools use radius neighborhoods and a local PCA plane fitted to
 the nearest 48 samples. At least six samples and a two-dimensional neighborhood
 are required. Collinear regions and patches whose smallest covariance eigenvalue
 exceeds one quarter of the middle eigenvalue remain unchanged. Radius must be

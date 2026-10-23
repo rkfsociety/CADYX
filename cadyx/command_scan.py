@@ -165,14 +165,17 @@ class ScanCommands:
             raise ValidationError("Point-cloud source changed; no processing was saved.")
         if progress:
             progress({"phase": "filter_point_cloud"})
-        result = process_points(points, method, parameters)
+        processing_details: dict[str, Any] = {}
+        result = process_points(points, method, parameters, diagnostics=processing_details)
+        processing_stats = {"input_points": len(points), "output_points": len(result),
+                            "removed_points": len(points) - len(result),
+                            "moved_points": sum(a != b for a, b in zip(points, result)) if method == "smooth" else 0,
+                            "coordinate_units": "source_unverified", "scale_status": "unverified",
+                            **processing_details}
         if analysis_only:
             return {"body_id": body["id"], "method": method, "parameters": parameters,
                     "source": {"project_file": filename, "sha256": digest},
-                    "stats": {"input_points": len(points), "output_points": len(result),
-                              "removed_points": len(points) - len(result),
-                              "moved_points": sum(a != b for a, b in zip(points, result)) if method == "smooth" else 0,
-                              "coordinate_units": "source_unverified", "scale_status": "unverified"}}
+                    "stats": processing_stats}
         # The artifact contains every output point; only the document/view uses a sample.
         full_geometry = self.kernel.create_point_cloud(result)
         sample = result[::max(1, (len(result) + 124999) // 125000)]
@@ -184,6 +187,7 @@ class ScanCommands:
         stats = {"input_points": len(points), "output_points": len(result),
                  "moved_points": sum(a != b for a, b in zip(points, result)) if method == "smooth" else 0,
                  "removed_points": len(points) - len(result), "display_sample_count": len(sample),
+                 **processing_details,
                  "bounds": {"min": [min(v[a] for v in result) for a in range(3)],
                             "max": [max(v[a] for v in result) for a in range(3)]},
                  "coordinate_units": "source_unverified", "scale_status": "unverified"}

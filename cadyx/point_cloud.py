@@ -20,12 +20,16 @@ def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
             raise ValidationError("Simplification ratio must be in (0,95].")
         return p
     if method == "isolation_filter":
-        if not isinstance(parameters, dict) or set(parameters) - {"rate"}:
-            raise ValidationError("Isolation filtering accepts only rate in percent.")
+        if not isinstance(parameters, dict) or set(parameters) - {"rate", "component_factor"}:
+            raise ValidationError("Isolation filtering accepts only rate and component_factor.")
         rate = parameters.get("rate", 15.)
         if type(rate) not in (int, float) or not math.isfinite(rate) or not 0 < rate <= 50:
             raise ValidationError("Isolation rate must be a positive percentage at most 50.")
-        return {"rate": rate}
+        component_factor = parameters.get("component_factor", 5.)
+        if (type(component_factor) not in (int, float) or not math.isfinite(component_factor)
+                or not 2 <= component_factor <= 12):
+            raise ValidationError("Isolation component_factor must be between 2 and 12 median neighbor spacings.")
+        return {"rate": rate, "component_factor": component_factor}
     if isinstance(method, str) and method in {"remove_overlaps", "smooth"}:
         defaults = ({"distance": .56, "radius": 2., "tangential_distance": .1}
                     if method == "remove_overlaps" else {"strength": 10., "iterations": 10, "radius": 1.})
@@ -60,7 +64,8 @@ def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
     return p
 
 
-def process_points(points: list[tuple[float, float, float]], method: str, parameters: dict[str, Any]) -> list[tuple[float, float, float]]:
+def process_points(points: list[tuple[float, float, float]], method: str, parameters: dict[str, Any],
+                   *, diagnostics: dict[str, Any] | None = None) -> list[tuple[float, float, float]]:
     p = normalize_cloud_parameters(method, parameters)
     if method == "simplify":
         target = max(3, math.floor(len(points) * (100 - p["ratio"]) / 100))
@@ -91,7 +96,8 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
             result = best
     elif method in {"remove_overlaps", "smooth", "isolation_filter"}:
         from .point_cloud_surface import isolation_points, surface_points
-        result = isolation_points(points, p["rate"]) if method == "isolation_filter" else surface_points(points, method, p)
+        result = (isolation_points(points, p["rate"], p["component_factor"], diagnostics)
+                  if method == "isolation_filter" else surface_points(points, method, p))
     elif method == "deduplicate":
         result = list(dict.fromkeys(points))
     elif method == "crop":

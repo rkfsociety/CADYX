@@ -76,8 +76,10 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
     return current
 
 
-def isolation_points(points: list[tuple[float, float, float]], rate: float) -> list[tuple[float, float, float]]:
-    """Remove at most ``rate`` percent of points with unusually large nearest spacing."""
+def isolation_points(points: list[tuple[float, float, float]], rate: float,
+                     component_factor: float = 5.,
+                     diagnostics: dict[str, Any] | None = None) -> list[tuple[float, float, float]]:
+    """Keep the largest scan component and remove sparse points within the rate cap."""
     bounds = [max(p[a] for p in points) - min(p[a] for p in points) for a in range(3)]
     # Captured clouds are predominantly sampled surfaces. Surface-density cells
     # reduce candidate comparisons; shell expansion still gives exact 3-D nearest
@@ -123,7 +125,85 @@ def isolation_points(points: list[tuple[float, float, float]], rate: float) -> l
     if len(finite) < 3:
         raise ValidationError("Isolation detection requires at least four points.")
     median = finite[len(finite) // 2]
-    candidates = [i for i, distance in enumerate(nearest) if distance > median * 1.5]
-    count = min(len(candidates), math.floor(len(points) * rate / 100))
-    removed = set(sorted(candidates, key=lambda i: (nearest[i], i), reverse=True)[:count])
+    component_radius = median * component_factor
+    if not math.isfinite(component_radius) or component_radius <= 1e-12:
+        raise ValidationError("The cloud has no measurable nearest-neighbor spacing for main-component detection.")
+    cell_size = component_radius
+    buckets: dict[tuple[int, int, int], list[int]] = {}
+    keys: list[tuple[int, int, int]] = []
+    for index, point in enumerate(points):
+        try:
+            key = tuple(math.floor(value / cell_size) for value in point)
+        except (ValueError, OverflowError) as exc:
+            raise ValidationError("Isolation component grid is too fine for these coordinates.") from exc
+        keys.append(key)
+        buckets.setdefault(key, []).append(index)
+
+    parent = list(range(len(points)))
+    sizes = [1] * len(points)
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(first: int, second: int) -> None:
+        first_root, second_root = find(first), find(second)
+        if first_root == second_root:
+            return
+        if sizes[first_root] < sizes[second_root] or (
+                sizes[first_root] == sizes[second_root] and first_root > second_root):
+            first_root, second_root = second_root, first_root
+        parent[second_root] = first_root
+        sizes[first_root] += sizes[second_root]
+
+    component_comparisons = 0
+    offsets = list(product((-1, 0, 1), repeat=3))
+    radius_squared = component_radius * component_radius
+    for index, point in enumerate(points):
+        key = keys[index]
+        for offset in offsets:
+            neighbor_key = tuple(key[axis] + offset[axis] for axis in range(3))
+            for other in buckets.get(neighbor_key, ()):
+                if other <= index:
+                    continue
+                component_comparisons += 1
+                if comparisons + component_comparisons > MAX_SURFACE_COMPARISONS:
+                    raise ValidationError("Isolation detection exceeds its 20M comparison budget; downsample first.", code="RESOURCE_LIMIT")
+                delta = [point[axis] - points[other][axis] for axis in range(3)]
+                if math.fsum(value * value for value in delta) <= radius_squared:
+                    union(index, other)
+
+    roots = [find(index) for index in range(len(points))]
+    component_sizes: dict[int, int] = {}
+    for root in roots:
+        component_sizes[root] = component_sizes.get(root, 0) + 1
+    main_root = min(component_sizes, key=lambda root: (-component_sizes[root], root))
+    spacing_candidates = {index for index, distance in enumerate(nearest) if distance > median * 1.5}
+    component_candidates = {index for index, root in enumerate(roots) if root != main_root}
+    candidates = spacing_candidates | component_candidates
+    cap = math.floor(len(points) * rate / 100)
+    ordered_candidates = sorted(
+        candidates,
+        key=lambda index: (
+            roots[index] != main_root,
+            -component_sizes[roots[index]] if roots[index] != main_root else 0,
+            nearest[index],
+            -index,
+        ),
+        reverse=True,
+    )
+    removed = set(ordered_candidates[:cap])
+    if diagnostics is not None:
+        diagnostics.update({
+            "nearest_spacing_median": median,
+            "component_radius": component_radius,
+            "component_count": len(component_sizes),
+            "main_component_points": component_sizes[main_root],
+            "outside_main_points": len(points) - component_sizes[main_root],
+            "spacing_candidate_points": len(spacing_candidates),
+            "removal_candidate_points": len(candidates),
+            "removal_cap_points": cap,
+        })
     return [point for i, point in enumerate(points) if i not in removed]
