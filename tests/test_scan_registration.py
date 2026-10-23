@@ -150,7 +150,7 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
                 try:
                     result.append(watch_capture(
                         pose_log, run_directory, run_id, 2, stop_signal,
-                        run_directory / f"{run_id}_preprocessing.json", max_workers=2,
+                        run_directory / f"{run_id}_preprocessing.json", max_workers=1,
                         poll_seconds=0.02))
                 except BaseException as exc:
                     failure.append(exc)
@@ -184,7 +184,18 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
             self.assertTrue(first_was_cleaned_while_scanning)
             self.assertEqual(result[0]["state"], "completed")
             self.assertEqual(result[0]["cleaned_frame_count"], 2)
+            self.assertEqual(result[0]["worker_limit"], 1)
+            self.assertEqual([frame["frame_index"] for frame in result[0]["frames"]], [0, 1])
             self.assertFalse(first_source.with_name(first_source.stem + "_cleaned.ply").exists())
+
+    def test_capture_worker_rejects_parallel_processing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            with self.assertRaisesRegex(ValueError, "exactly one worker"):
+                watch_capture(
+                    run_directory / "poses.csv", run_directory, "revopoint_20261023T091400Z", 2,
+                    run_directory / "stop.signal", run_directory / "report.json", max_workers=2,
+                )
 
     def test_resolves_all_twelve_legacy_pose_clouds(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -330,7 +330,7 @@ def _write_aggregate_report(path: Path, payload: dict[str, Any]) -> None:
 
 
 def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_frame_count: int,
-                  stop_signal: Path, report_path: Path, *, max_workers: int = 4,
+                  stop_signal: Path, report_path: Path, *, max_workers: int = 1,
                   poll_seconds: float = 0.1, calibration_path: Path | None = None,
                   depth_scale: float | None = None, in_place: bool = True) -> dict[str, Any]:
     """Launch frame cleanup as soon as each capture-completed row is flushed."""
@@ -340,8 +340,10 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
     report_path = report_path.resolve()
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError("run id must use revopoint_YYYYMMDDTHHMMSSZ")
-    if not 1 <= expected_frame_count <= 360 or not 1 <= max_workers <= 16:
-        raise ValueError("expected frame count or preprocessing worker limit is invalid")
+    if not 1 <= expected_frame_count <= 360:
+        raise ValueError("expected frame count is invalid")
+    if max_workers != 1:
+        raise ValueError("capture preprocessing must use exactly one worker")
     if not 0.01 <= poll_seconds <= 2.0:
         raise ValueError("pose-log polling interval must be between 0.01 and 2 seconds")
     if (calibration_path is None) != (depth_scale is None):
@@ -447,7 +449,7 @@ def main() -> int:
     parser.add_argument("--run-id")
     parser.add_argument("--expected-frame-count", type=int)
     parser.add_argument("--stop-signal", type=Path)
-    parser.add_argument("--max-workers", type=int, default=4)
+    parser.add_argument("--max-workers", type=int, default=1)
     parser.add_argument("--in-place", action="store_true")
     parser.add_argument("--input-ply", type=Path)
     parser.add_argument("--cleaned-ply", type=Path)
