@@ -861,7 +861,7 @@ window.addEventListener("DOMContentLoaded", () => {
   tree.className = "cad-model-tree";
   tree.innerHTML = `
     <div class="cad-tree-heading">
-      <strong>Дерево модели</strong>
+      <strong id="cad-tree-title">Дерево модели</strong>
       <button class="cad-tree-collapse" type="button" title="Свернуть дерево модели" aria-label="Свернуть дерево модели">‹</button>
     </div>
     <div class="cad-tree-search"><input type="search" placeholder="Поиск по элементам…" aria-label="Поиск по дереву модели"></div>
@@ -937,7 +937,9 @@ window.addEventListener("DOMContentLoaded", () => {
     sidebar.dataset.collapsed = String(collapsed);
     detail.dataset.treeCollapsed = String(collapsed);
     collapseTree.textContent = collapsed ? "›" : "‹";
-    collapseTree.title = collapsed ? "Развернуть дерево модели" : "Свернуть дерево модели";
+    const treeKind = document.querySelector("#primary-grid")?.dataset.view === "scanning" ? "дерево сканирования" : "дерево модели";
+    collapseTree.title = `${collapsed ? "Развернуть" : "Свернуть"} ${treeKind}`;
+    collapseTree.setAttribute("aria-label", collapseTree.title);
     requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
   });
 

@@ -172,7 +172,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
  .model-toolbar .cad3-tool,.model-toolbar>.button{font:600 12px/1.2 var(--ui-font)}
  @media(max-width:680px){:root{--cadyx-rail-width:48px;--cadyx-tree-width:52px}.project-detail{grid-template-columns:48px 52px minmax(0,1fr)!important}.project-detail[data-tree-collapsed=true]{grid-template-columns:48px 48px minmax(0,1fr)!important}.cad3-rail{gap:4px;padding:8px 4px}.cad3-rail button{width:36px;height:36px}}
 `;
-    style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}.cad3-cloud-root-row{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:2px}.cad3-cloud-disclosure{display:grid;place-items:center;width:22px;height:32px;padding:0;border:1px solid transparent;border-radius:4px;background:transparent;color:#b6c0c6;font:500 18px/1 var(--ui-font);cursor:pointer}.cad3-cloud-disclosure:hover{border-color:#51331f;background:#ffffff08;color:#ff9653}.cad3-cloud-root{min-height:34px;grid-template-columns:18px minmax(0,1fr)!important;font-weight:650;color:#e8eef1}.cad3-cloud-stages{display:grid;gap:2px;margin:2px 0 3px 24px;padding-left:6px;border-left:1px solid #32404a}.cad3-cloud-stages[hidden]{display:none!important}.cad3-cloud-stages .cad3-tree-node{grid-template-columns:minmax(0,1fr);gap:0}.cad3-tree-leaf-row{grid-column:1/-1;min-width:0}.cad3-tree-leaf-row>.cad-tree-feature{width:100%;min-height:32px;padding:5px 8px;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;font-size:11px}.cad3-cloud-stages .cad3-model-note{padding:2px 8px 5px}';
+    style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}.cad3-scan-file{overflow-wrap:anywhere;padding-left:32px!important}.cad3-cloud-root-row{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:2px}.cad3-cloud-disclosure{display:grid;place-items:center;width:22px;height:32px;padding:0;border:1px solid transparent;border-radius:4px;background:transparent;color:#b6c0c6;font:500 18px/1 var(--ui-font);cursor:pointer}.cad3-cloud-disclosure:hover{border-color:#51331f;background:#ffffff08;color:#ff9653}.cad3-cloud-root{min-height:34px;grid-template-columns:18px minmax(0,1fr)!important;font-weight:650;color:#e8eef1}.cad3-cloud-stages{display:grid;gap:2px;margin:2px 0 3px 24px;padding-left:6px;border-left:1px solid #32404a}.cad3-cloud-stages[hidden]{display:none!important}.cad3-cloud-stages .cad3-tree-node{grid-template-columns:minmax(0,1fr);gap:0}.cad3-tree-leaf-row{grid-column:1/-1;min-width:0}.cad3-tree-leaf-row>.cad-tree-feature{width:100%;min-height:32px;padding:5px 8px;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;font-size:11px}.cad3-cloud-stages .cad3-model-note{padding:2px 8px 5px}';
     document.head.appendChild(style);
     if(!$('.cad3-headrail')){const h=document.createElement('div');h.className='cad3-headrail';h.innerHTML=I.model;$('.topbar')?.prepend(h)}
     if(!$('.cad3-rail')){const r=document.createElement('nav');r.className='cad3-rail';r.setAttribute('aria-label','Основная навигация');r.innerHTML=`<button data-view="geometry" title="Геометрия">${I.model}</button><button data-view="files" title="Файлы">${I.files}</button><button data-view="projects" title="Проекты">${I.projects}</button><button data-view="activity" title="Активность">${I.activity}</button>`;detail.prepend(r);const syncRail=()=>{$$('[data-view]',r).forEach(b=>{const view=b.dataset.view,src=nav.querySelector(`[data-workspace-view="${view}"]`),active=view===(grid.dataset.view||'overview');b.setAttribute('aria-label',b.title);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');b.dataset.on=String(active);b.disabled=!src||src.disabled})};r.addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b||b.disabled)return;nav.querySelector(`[data-workspace-view="${b.dataset.view}"]`)?.click()});new MutationObserver(syncRail).observe(grid,{attributes:true,attributeFilter:['data-view']});new MutationObserver(syncRail).observe(nav,{subtree:true,attributes:true,attributeFilter:['disabled','aria-current']});syncRail()}
@@ -190,6 +190,10 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     function deps(o){if(!o)return[];const d=[];const add=(id,role)=>{if(id&&state.byId.has(id))d.push({id,role})};add(o.source_sketch_id,'Профиль');(o.source_sketch_ids||[]).forEach(id=>add(id,'Сечение'));add(o.source_body_id,'Исходное тело');add(o.base_body_id,'Основное тело');add(o.tool_body_id,'Инструментальное тело');for(const x of state.objects){if(x===o||x.type!=='feature')continue;if(x.source_sketch_id===o.id||(x.source_sketch_ids||[]).includes(o.id)||x.source_body_id===o.body_id||x.base_body_id===o.body_id||x.tool_body_id===o.body_id)add(x.id,'Используется в')}return d}
     const expandedFeatures=new Set();
     const collapsedClouds=new Set();
+    const scanTreeExpanded=new Set();
+    let scanTreeEntries=[];
+    let scanTreeLoadedProject=null;
+    let scanTreeRequest=0;
     function saveModelTreeState(){
       const projectId=state.project;
       if(!projectId)return;
@@ -212,8 +216,127 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const roots=state.objects.filter(body=>body.type==='body'&&!consumed.has(body.id)&&byBody.has(body.id));
       return roots.map(body=>{const included=new Set();const visit=id=>{if(!id||included.has(id))return;included.add(id);for(const feature of byBody.get(id)||[]){visit(feature.source_body_id);visit(feature.base_body_id);visit(feature.tool_body_id)}};visit(body.id);return{body,features:features.filter(feature=>included.has(feature.body_id))}});
     }
+    const scanRunPattern=/^revopoint_\d{8}T\d{6}Z$/i;
+    const scanFileRunId=name=>/^(revopoint_\d{8}T\d{6}Z)_/i.exec(name)?.[1]||null;
+    function scanRunTitle(runId){
+      const match=/^revopoint_(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/i.exec(runId);
+      if(!match)return runId;
+      const [,year,month,day,hour,minute,second]=match;
+      const date=new Date(Date.UTC(+year,+month-1,+day,+hour,+minute,+second));
+      return `Сканирование · ${new Intl.DateTimeFormat('ru-RU',{dateStyle:'short',timeStyle:'medium'}).format(date)}`;
+    }
+    function scanFileSize(size){
+      if(size<1024)return `${size} Б`;
+      if(size<1024*1024)return `${new Intl.NumberFormat('ru-RU',{maximumFractionDigits:1}).format(size/1024)} КБ`;
+      return `${new Intl.NumberFormat('ru-RU',{maximumFractionDigits:1}).format(size/(1024*1024))} МБ`;
+    }
+    function scanFileLabel(file,runId){
+      return `${file.name.startsWith(`${runId}_`)?file.name.slice(runId.length+1):file.name} · ${scanFileSize(file.size)}`;
+    }
+    async function loadScanRunFiles(run,projectId){
+      run.loading=!(run.files||[]).length;run.loadError=null;
+      if(run.loading)renderScanTree();
+      try{
+        const payload=await semanticJson(`/api/v1/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(run.folderName)}/files`);
+        if(state.project!==projectId)return;
+        run.files=[...new Map([...run.files,...(payload.files||[]).filter(file=>!file.name.toLowerCase().endsWith('.json'))].map(file=>[file.name,file])).values()];
+        run.folders=payload.folders||[];run.filesLoaded=true;
+      }catch(error){run.loadError=error.message}
+      finally{run.loading=false;if(state.project===projectId)renderScanTree()}
+    }
+    async function loadScanTree(projectId,force=false){
+      const request=++scanTreeRequest;
+      if(!projectId){scanTreeEntries=[];scanTreeLoadedProject=null;renderScanTree();return}
+      const sameProject=scanTreeLoadedProject===projectId;
+      if(sameProject&&!force)return;
+      scanTreeLoadedProject=projectId;
+      const previousRuns=new Map(sameProject?scanTreeEntries.map(run=>[run.id,run]):[]);
+      if(!force){scanTreeEntries=[];renderScanTree('Загружаю серии сканирования…')}
+      try{
+        const root=await semanticJson(`/api/v1/projects/${encodeURIComponent(projectId)}/files`);
+        const runs=new Map();
+        for(const folder of root.folders||[]){
+          if(!scanRunPattern.test(folder.name))continue;
+          const previous=previousRuns.get(folder.name);
+          runs.set(folder.name,previous?{...previous,modifiedAt:folder.modified_at_ns||''}:{id:folder.name,folderName:folder.name,files:[],filesLoaded:false,folders:[],modifiedAt:folder.modified_at_ns||''});
+        }
+        for(const file of root.files||[]){
+          const id=scanFileRunId(file.name);if(!id)continue;
+          if(!runs.has(id)){const previous=previousRuns.get(id);runs.set(id,previous?{...previous,folderName:null}:{id,folderName:null,files:[],filesLoaded:true,folders:[],modifiedAt:''})}
+          runs.get(id).files.push(file);
+        }
+        if(request!==scanTreeRequest||state.project!==projectId)return;
+        scanTreeEntries=[...runs.values()].map(run=>({...run,files:[...new Map(run.files.map(file=>[file.name,file])).values()].sort((a,b)=>a.name.localeCompare(b.name))}))
+          .sort((a,b)=>b.id.localeCompare(a.id));
+        const saved=JSON.parse(localStorage.getItem(`cadyx-scan-tree:${projectId}`)||'[]');
+        scanTreeExpanded.clear();
+        if(Array.isArray(saved))for(const id of saved)if(scanTreeEntries.some(run=>run.id===id))scanTreeExpanded.add(id);
+        renderScanTree();
+        await Promise.all(scanTreeEntries.filter(run=>scanTreeExpanded.has(run.id)&&run.folderName).map(run=>loadScanRunFiles(run,projectId)));
+      }catch(error){
+        if(request!==scanTreeRequest||state.project!==projectId)return;
+        scanTreeLoadedProject=null;
+        renderScanTree(`Не удалось загрузить дерево сканирования (${error.message}).`);
+      }
+    }
+    function renderScanTree(message=null){
+      if(!list)return;
+      list.replaceChildren();
+      const query=(search?.value||'').toLowerCase().trim();
+      let shown=0;
+      for(const run of scanTreeEntries){
+        const title=scanRunTitle(run.id);
+        const files=(run.files||[]).filter(file=>!file.name.toLowerCase().endsWith('.json'));
+        const matchingFiles=files.filter(file=>!query||file.name.toLowerCase().includes(query));
+        if(query&&!title.toLowerCase().includes(query)&&!matchingFiles.length)continue;
+        const container=document.createElement('div');container.className='cad3-tree-node';
+        const row=document.createElement('div');row.className='cad3-tree-parent-row';
+        const expanded=scanTreeExpanded.has(run.id)||Boolean(query&&matchingFiles.length);
+        const childrenId=`scan-run-${run.id}`;
+        const disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-tree-disclosure';
+        disclosure.setAttribute('aria-label',expanded?'Свернуть серию сканирования':'Показать файлы серии сканирования');
+        disclosure.setAttribute('aria-expanded',String(expanded));disclosure.setAttribute('aria-controls',childrenId);disclosure.innerHTML=`<span class="cad-tree-chevron">${expanded?'−':'+'}</span>`;
+        disclosure.onclick=async()=>{
+          const projectId=state.project;
+          if(scanTreeExpanded.has(run.id)){scanTreeExpanded.delete(run.id);renderScanTree()}
+          else{
+            scanTreeExpanded.add(run.id);renderScanTree();
+            if(run.folderName)await loadScanRunFiles(run,projectId);
+          }
+          try{localStorage.setItem(`cadyx-scan-tree:${state.project}`,JSON.stringify([...scanTreeExpanded]))}catch{}
+          renderScanTree();
+        };
+        const button=document.createElement('button');button.className='cad-tree-feature';button.type='button';button.title=title;
+        button.setAttribute('aria-expanded',String(expanded));button.setAttribute('aria-controls',childrenId);button.onclick=()=>disclosure.click();
+        button.innerHTML=`<span class="cad3-icon">${I.cloud}</span><span class="cad-tree-label"></span><small>${run.filesLoaded?`${files.length} файлов`:'Открыть серию'}</small>`;
+        button.querySelector('.cad-tree-label').textContent=title;
+        row.append(disclosure,button);container.append(row);
+        const children=document.createElement('div');children.id=childrenId;children.className='cad3-tree-children';children.hidden=!expanded;
+        if(run.loading){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent='Загружаю файлы серии…';children.append(leaf)}
+        else if(run.loadError){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=`Не удалось загрузить файлы серии (${run.loadError}).`;children.append(leaf)}
+        for(const file of matchingFiles){
+          const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';
+          leaf.textContent=scanFileLabel(file,run.id);leaf.title=file.name;children.append(leaf);
+        }
+        for(const folder of run.folders||[]){
+          const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=`▰ ${folder.name}`;children.append(leaf);
+        }
+        if(expanded&&!run.loading&&!run.loadError&&!files.length&&!run.folders?.length){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=run.folderName?'В этой серии пока нет файлов сканирования.':'Файлы серии не найдены.';children.append(leaf)}
+        container.append(children);list.append(container);shown++;
+      }
+      const empty=$('#cad-tree-empty');
+      if(empty){empty.hidden=shown>0;empty.textContent=message||(!state.project?'Выберите проект, чтобы увидеть серии сканирования.':query?'Совпадений нет.':'В проекте пока нет сохранённых серий сканирования.');}
+    }
     function renderTree(){
       if(!list)return;
+      const scanning=grid?.dataset.view==='scanning';
+      const treeTitle=$('#cad-tree-title');
+      if(treeTitle)treeTitle.textContent=scanning?'Дерево сканирования':'Дерево модели';
+      const treeCollapse=$('.cad-tree-collapse');
+      if(treeCollapse){const verb=$('.section-sidebar')?.dataset.collapsed==='true'?'Развернуть':'Свернуть';const label=`${verb} дерево ${scanning?'сканирования':'модели'}`;treeCollapse.title=label;treeCollapse.setAttribute('aria-label',label)}
+      if(search){search.placeholder=scanning?'Поиск по сериям и файлам…':'Поиск по элементам…';search.setAttribute('aria-label',scanning?'Поиск по дереву сканирования':'Поиск по дереву модели')}
+      if(scanning){modelTabs?.setAttribute('hidden','');if(scanTreeLoadedProject!==state.project)loadScanTree(state.project);else renderScanTree();return}
+      modelTabs?.removeAttribute('hidden');
       const query=(search?.value||'').toLowerCase().trim(),groups=modelGroups();
       if(!groups.some(group=>group.body.id===state.activeModelBodyId))state.activeModelBodyId=groups[0]?.body.id||null;
       const modelSelectorVisible=hasAssemblyStructure()&&groups.length>1;
@@ -271,6 +394,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const empty=$('#cad-tree-empty');if(empty)empty.hidden=visibleGroups.some(group=>group.features.length>0);
     }
     search?.addEventListener('input',renderTree);
+    setInterval(()=>{if(grid?.dataset.view==='scanning'&&state.project)loadScanTree(state.project,true)},5000);
+    new MutationObserver(()=>{scanTreeLoadedProject=null;renderTree()}).observe(grid,{attributes:true,attributeFilter:['data-view']});
     function parameterHtml(o){const entries=Object.entries(o.parameters||{}).filter(([k])=>k!=='section_sketch_ids'&&k!=='section_sketch_groups');if(!entries.length)return'<dt>Параметры</dt><dd>Нет</dd>';return entries.map(([k,v])=>{const edit=(editable[o.operation]||[]).includes(k)&&typeof v==='number';const unit=k.includes('angle')?'°':typeof v==='number'?'мм':'';return`<dt>${esc(pLabel[k]||k)}</dt><dd>${edit?`<input data-p="${k}" data-original="${v}" value="${v}"> ${unit}`:esc(Array.isArray(v)?v.join(', '):v)}</dd>`}).join('')}
     function modelParameterSection(){const entries=Object.entries(state.parameters||{});if(!entries.length)return'';const rows=entries.map(([name,record])=>{const expression=state.bindings.find(item=>(item.expression.match(/[A-Za-z_][A-Za-z0-9_]*/g)||[]).includes(name));return`<dt title="${esc(expression?.expression||'')} ">${esc(name)}</dt><dd><input data-model-parameter="true" data-parameter="${esc(name)}" data-original-value="${Number(record.value)}" value="${Number(record.value)}"> ${esc(record.unit||'мм')}</dd>`}).join('');return`<section class="cad3-sec cad3-model-parameters"><h3>Параметры модели</h3><dl class="cad3-grid">${rows}</dl><button class="cad3-apply-model">ПЕРЕСТРОИТЬ МОДЕЛЬ</button></section>`}
     function applyModelParameterEdits(){const vals=[...props.querySelectorAll('input[data-model-parameter]')].filter(i=>Number.isFinite(Number(i.value))&&Number(i.value)!==Number(i.dataset.originalValue));if(!vals.length)return;const fields=document.createElement('div');for(const input of vals){const copy=document.createElement('input');copy.dataset.modelParameter='true';copy.dataset.parameter=input.dataset.parameter;copy.dataset.originalValue=input.dataset.originalValue;copy.value=input.value;fields.append(copy)}fields.append(document.createElement('button'));return applyGeometryDimensions(null,fields)}
