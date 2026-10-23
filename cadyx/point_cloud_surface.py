@@ -77,7 +77,7 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
 
 
 def isolation_points(points: list[tuple[float, float, float]], rate: float,
-                     component_factor: float = 5.,
+                     component_factor: float = 3.,
                      diagnostics: dict[str, Any] | None = None) -> list[tuple[float, float, float]]:
     """Keep the largest scan component and remove sparse points within the rate cap."""
     bounds = [max(p[a] for p in points) - min(p[a] for p in points) for a in range(3)]

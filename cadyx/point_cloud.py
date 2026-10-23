@@ -25,7 +25,7 @@ def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
         rate = parameters.get("rate", 15.)
         if type(rate) not in (int, float) or not math.isfinite(rate) or not 0 < rate <= 50:
             raise ValidationError("Isolation rate must be a positive percentage at most 50.")
-        component_factor = parameters.get("component_factor", 5.)
+        component_factor = parameters.get("component_factor", 3.)
         if (type(component_factor) not in (int, float) or not math.isfinite(component_factor)
                 or not 2 <= component_factor <= 12):
             raise ValidationError("Isolation component_factor must be between 2 and 12 median neighbor spacings.")
