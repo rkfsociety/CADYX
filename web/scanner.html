@@ -460,7 +460,7 @@
           if (!qMatrix) await loadCalibration();
           const response = await fetch(`/api/v1/scanner/live-frame?ts=${Date.now()}`, { cache: "no-store" });
           if (!response.ok) throw Error(response.status === 404
-            ? "Нет кадра. Запустите CaptureY16 с --live-raw <workspace>\\.revopoint-live.raw."
+            ? "Кадра нет. Нажмите «Предпросмотр», чтобы включить камеру."
             : `HTTP ${response.status}`);
           const mtime = response.headers.get("X-CADYX-Frame-Mtime");
           const frameAgeMs = mtime ? Date.now() - Number(mtime) / 1e6 : Infinity;
