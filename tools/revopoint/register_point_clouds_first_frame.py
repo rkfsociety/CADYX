@@ -142,22 +142,56 @@ def register_sequence(project: Path, run_id: str, output: Path,
                                "fitness": float(result.fitness),
                                "inlier_rmse": float(result.inlier_rmse)})
 
-    registration.global_optimization(
-        pose_graph,
-        registration.GlobalOptimizationLevenbergMarquardt(),
-        registration.GlobalOptimizationConvergenceCriteria(),
-        registration.GlobalOptimizationOption(
-            max_correspondence_distance=correspondence_distance,
-            edge_prune_threshold=0.25,
-            reference_node=0,
-        ),
+    optimization_option = registration.GlobalOptimizationOption(
+        max_correspondence_distance=correspondence_distance,
+        edge_prune_threshold=0.25,
+        reference_node=0,
     )
 
-    registered = []
-    for cloud, node in zip(clouds, pose_graph.nodes):
-        aligned = o3d.geometry.PointCloud(cloud)
-        aligned.transform(node.pose)
-        registered.append(aligned)
+    def optimize_pose_graph() -> None:
+        registration.global_optimization(
+            pose_graph,
+            registration.GlobalOptimizationLevenbergMarquardt(),
+            registration.GlobalOptimizationConvergenceCriteria(),
+            optimization_option,
+        )
+
+    def transform_clouds() -> list:
+        aligned_clouds = []
+        for source_cloud, node in zip(clouds, pose_graph.nodes):
+            aligned = o3d.geometry.PointCloud(source_cloud)
+            aligned.transform(node.pose)
+            aligned_clouds.append(aligned)
+        return aligned_clouds
+
+    optimize_pose_graph()
+    registered = transform_clouds()
+    endpoint_closure = registration.registration_icp(
+        registered[-1], registered[0], correspondence_distance, np.eye(4),
+        registration.TransformationEstimationPointToPoint(False))
+    closure_refinement: dict[str, Any] = {
+        "status": "rejected",
+        "fitness": float(endpoint_closure.fitness),
+        "inlier_rmse_q": float(endpoint_closure.inlier_rmse),
+        "table_encoder_or_axis_used": False,
+    }
+    if (endpoint_closure.fitness >= 0.7
+            and endpoint_closure.inlier_rmse <= voxel_size * 0.75):
+        current_first_pose = np.asarray(pose_graph.nodes[0].pose)
+        current_last_pose = np.asarray(pose_graph.nodes[-1].pose)
+        end_to_start_world = np.asarray(endpoint_closure.transformation)
+        first_to_last = (np.linalg.inv(current_last_pose)
+                         @ np.linalg.inv(end_to_start_world)
+                         @ current_first_pose)
+        closure_information = registration.get_information_matrix_from_point_clouds(
+            downsampled[0], downsampled[-1], correspondence_distance, first_to_last)
+        pose_graph.edges.append(registration.PoseGraphEdge(
+            0, frame_count - 1, first_to_last, closure_information, uncertain=False))
+        optimize_pose_graph()
+        registered = transform_clouds()
+        closure_refinement["status"] = "applied"
+        closure_refinement["edge"] = [0, frame_count - 1]
+
     merged = o3d.geometry.PointCloud()
     for cloud in registered:
         merged += cloud
@@ -213,6 +247,7 @@ def register_sequence(project: Path, run_id: str, output: Path,
             "rotation_degrees": correction_rotation,
             "translation_q": correction[:3, 3].tolist(),
         },
+        "endpoint_closure_refinement": closure_refinement,
         "scale_status": "Q-derived scale is provisional and has not been calibrated against a reference dimension",
         "limitations": "point-only result; no mesh; inspect closure residual and surface coverage before treating the cloud as final",
     }
