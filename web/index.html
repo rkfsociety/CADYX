@@ -557,14 +557,18 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .primary-grid[data-view="scanning"] > #comparison-panel,
 .primary-grid[data-view="scanning"] > #manufacturing-panel { display: none; }
 .primary-grid[data-view="scanning"] > #scanning-panel { grid-column: 2; grid-row: 1; min-height: 0; }
-.primary-grid[data-view="scanning"] .viewport-scan-mode-button,
-.primary-grid[data-view="scanning"] #viewport-scan-360,
-.primary-grid[data-view="scanning"] #viewport-scan-360-status { display: none !important; }
-.scanning-panel { display: grid; min-width: 0; min-height: 0; height: 100%; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+.model-toolbar #viewport-live-scan,
+.model-toolbar #viewport-scan-mesh,
+.model-toolbar #viewport-scan-360,
+.model-toolbar #viewport-live-camera,
+.model-toolbar #viewport-scan-360-status { display: none !important; }
+.scanning-panel { display: grid; min-width: 0; min-height: 0; height: 100%; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
 #scanning-panel[hidden] { display: none !important; }
-.scanning-panel-heading { gap: 16px; }
-.scanning-panel-heading > div:first-child { display: grid; gap: 4px; min-width: 0; }
-.scanning-panel-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 8px; }
+.scanning-panel-heading { display: grid; align-items: stretch; gap: 8px; padding: 10px 12px; }
+.scanning-panel-heading > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.scanning-panel-actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 6px; }
+.scanning-panel-actions .button { flex: 1 1 118px; min-width: 0; }
+.scanning-panel-actions .button[aria-pressed="true"] { border-color: #9b6038; background: #26190f; color: #ffad73; }
 #scanning-status { max-width: min(42vw, 520px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #scanning-frame { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; border: 0; background: #0c1116; }
 .primary-grid[data-view="analysis"] > #comparison-panel {
@@ -752,7 +756,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
               <section id="scanning-panel" class="panel scanning-panel" aria-labelledby="scanning-title" tabindex="-1" hidden>
                 <div class="panel-heading scanning-panel-heading">
                   <div><h2 id="scanning-title">СКАНИРОВАНИЕ</h2><span id="scanning-status" class="panel-note" role="status" aria-live="polite">Ожидание сканера</span></div>
-                  <div class="scanning-panel-actions"><button id="scanning-capture" class="button" type="button" disabled>Сканировать 360°</button><button id="scanning-live-preview" class="button" type="button" aria-pressed="false">Предпросмотр</button><button id="scanning-devices" class="button" type="button">Устройства</button></div>
+                  <div class="scanning-panel-actions"><button id="scanning-capture" class="button" type="button" disabled>Сканировать 360°</button><button id="scanning-cloud" class="button" type="button" aria-label="Облако точек" aria-pressed="false">Облако точек</button><button id="scanning-mesh" class="button" type="button" aria-label="Сетка скана" aria-pressed="false">Сетка</button><button id="scanning-live-preview" class="button" type="button" aria-pressed="false">Предпросмотр</button><button id="scanning-devices" class="button" type="button">Устройства</button></div>
                 </div>
                 <iframe id="scanning-frame" title="Текущий кадр сканера" loading="lazy" data-src="/scanner?embed=1"></iframe>
               </section>

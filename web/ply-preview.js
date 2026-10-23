@@ -332,9 +332,13 @@ const folderInspector = $("#folder-inspector");
 const projectsPanel = $("#projects-panel");
 const scanningFrame = $("#scanning-frame");
 const scanningCaptureButton = $("#scanning-capture");
+const scanningCloudButton = $("#scanning-cloud");
+const scanningMeshButton = $("#scanning-mesh");
 const scanningPreviewButton = $("#scanning-live-preview");
 const scanningStatus = $("#scanning-status");
 const captureButtonSource = $("#viewport-scan-360");
+const cloudButtonSource = $("#viewport-live-scan");
+const meshButtonSource = $("#viewport-scan-mesh");
 const previewButtonSource = $("#viewport-live-camera");
 const captureStatusSource = $("#viewport-scan-360-status");
 
@@ -349,6 +353,12 @@ function syncScanningControls() {
     scanningCaptureButton.disabled = !captureButtonSource || captureButtonSource.disabled;
     if (captureButtonSource?.title) scanningCaptureButton.title = captureButtonSource.title;
   }
+  for (const [button, source] of [[scanningCloudButton, cloudButtonSource], [scanningMeshButton, meshButtonSource]]) {
+    if (!button) continue;
+    button.disabled = !source || source.disabled;
+    if (source?.title) button.title = source.title;
+    button.setAttribute("aria-pressed", source?.getAttribute("aria-pressed") || "false");
+  }
   if (scanningPreviewButton) {
     scanningPreviewButton.disabled = !previewButtonSource || previewButtonSource.disabled;
     scanningPreviewButton.setAttribute("aria-pressed", previewButtonSource?.getAttribute("aria-pressed") || "false");
@@ -360,10 +370,14 @@ function syncScanningControls() {
 }
 
 scanningCaptureButton?.addEventListener("click", () => captureButtonSource?.click());
+scanningCloudButton?.addEventListener("click", () => cloudButtonSource?.click());
+scanningMeshButton?.addEventListener("click", () => meshButtonSource?.click());
 scanningPreviewButton?.addEventListener("click", () => previewButtonSource?.click());
 syncScanningControls();
 const scanningControlsObserver = new MutationObserver(syncScanningControls);
 if (captureButtonSource) scanningControlsObserver.observe(captureButtonSource, { attributes: true, attributeFilter: ["disabled", "title"] });
+if (cloudButtonSource) scanningControlsObserver.observe(cloudButtonSource, { attributes: true, attributeFilter: ["disabled", "title", "aria-pressed"] });
+if (meshButtonSource) scanningControlsObserver.observe(meshButtonSource, { attributes: true, attributeFilter: ["disabled", "title", "aria-pressed"] });
 if (previewButtonSource) scanningControlsObserver.observe(previewButtonSource, { attributes: true, attributeFilter: ["disabled", "aria-pressed"] });
 if (captureStatusSource) scanningControlsObserver.observe(captureStatusSource, { childList: true, characterData: true, subtree: true });
 function canOpenFilesView(projectId = selectedProjectId) {
