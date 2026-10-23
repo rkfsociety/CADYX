@@ -113,24 +113,51 @@ def register_sequence(project: Path, run_id: str, output: Path,
         return result, information
 
     pose_graph = registration.PoseGraph()
-    odometry = np.eye(4)
-    pose_graph.nodes.append(registration.PoseGraphNode(odometry.copy()))
+    accumulated_pose = np.eye(4)
+    pose_graph.nodes.append(registration.PoseGraphNode(accumulated_pose.copy()))
+    accumulated_cloud = o3d.geometry.PointCloud(clouds[0])
+    accumulated_cloud = accumulated_cloud.voxel_down_sample(voxel_size)
+    accumulated_cloud.estimate_normals(
+        o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 4, max_nn=40))
     adjacent_edges = []
+    incremental_edges = []
     frame_count = len(clouds)
-    for source_id in range(frame_count - 1):
-        target_id = source_id + 1
-        result, information = pairwise(source_id, target_id)
-        if result.fitness < 0.35 or result.inlier_rmse > rmse_limit:
+    for target_id in range(1, frame_count):
+        source_id = target_id - 1
+        adjacent_result, _ = pairwise(source_id, target_id)
+        if adjacent_result.fitness < 0.35 or adjacent_result.inlier_rmse > rmse_limit:
             raise RuntimeError(f"weak adjacent alignment {source_id}->{target_id}: "
-                               f"fitness={result.fitness:.3f}, rmse={result.inlier_rmse:.3f}")
-        transform = np.asarray(result.transformation)
-        odometry = transform @ odometry
-        pose_graph.nodes.append(registration.PoseGraphNode(np.linalg.inv(odometry)))
+                               f"fitness={adjacent_result.fitness:.3f}, rmse={adjacent_result.inlier_rmse:.3f}")
+        adjacent_transform = np.asarray(adjacent_result.transformation)
+        initial_transform = accumulated_pose @ np.linalg.inv(adjacent_transform)
+        incremental_result = registration.registration_icp(
+            downsampled[target_id], accumulated_cloud, correspondence_distance,
+            initial_transform,
+            registration.TransformationEstimationPointToPlane(registration.TukeyLoss(1.0)))
+        if incremental_result.fitness < 0.35 or incremental_result.inlier_rmse > rmse_limit:
+            raise RuntimeError(f"weak incremental alignment {target_id} to accumulated frames: "
+                               f"fitness={incremental_result.fitness:.3f}, "
+                               f"rmse={incremental_result.inlier_rmse:.3f}")
+        current_pose = np.asarray(incremental_result.transformation)
+        transform = np.linalg.inv(current_pose) @ accumulated_pose
+        information = registration.get_information_matrix_from_point_clouds(
+            downsampled[source_id], downsampled[target_id], correspondence_distance, transform)
+        pose_graph.nodes.append(registration.PoseGraphNode(current_pose.copy()))
         pose_graph.edges.append(registration.PoseGraphEdge(
             source_id, target_id, transform, information, uncertain=False))
+        aligned_source = o3d.geometry.PointCloud(clouds[target_id])
+        aligned_source.transform(current_pose)
+        accumulated_cloud += aligned_source
+        accumulated_cloud = accumulated_cloud.voxel_down_sample(voxel_size)
+        accumulated_cloud.estimate_normals(
+            o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 4, max_nn=40))
         adjacent_edges.append({"source": source_id, "target": target_id,
-                               "fitness": float(result.fitness),
-                               "inlier_rmse": float(result.inlier_rmse)})
+                               "fitness": float(adjacent_result.fitness),
+                               "inlier_rmse": float(adjacent_result.inlier_rmse)})
+        incremental_edges.append({"source": target_id, "target": "accumulated",
+                                  "fitness": float(incremental_result.fitness),
+                                  "inlier_rmse": float(incremental_result.inlier_rmse)})
+        accumulated_pose = current_pose
 
     loop_edges = []
     for target_id in range(2, frame_count):
@@ -227,7 +254,7 @@ def register_sequence(project: Path, run_id: str, output: Path,
         "status": "provisional",
         "run_id": run_id,
         "coordinate_frame": "first captured point cloud",
-        "registration": "FPFH/RANSAC, robust point-to-plane ICP, pose-graph loop optimization",
+        "registration": "adjacent FPFH/RANSAC seeding, incremental merge-to-accumulated robust ICP, pose-graph loop optimization",
         "table_encoder_or_axis_used": False,
         "source_files": [path.name for path in paths],
         "source_cloud_count": len(clouds),
@@ -238,6 +265,7 @@ def register_sequence(project: Path, run_id: str, output: Path,
         "dominant_component_fraction": float(len(fused.points) / max(1, len(sampled.points))),
         "dimensions_q": (upper - lower).tolist(),
         "adjacent_edges": adjacent_edges,
+        "incremental_edges": incremental_edges,
         "loop_edges_to_first_frame": loop_edges,
         "adjacent_direct_overlap": overlap,
         "last_to_first_direct_overlap": closure,
