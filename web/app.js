@@ -739,6 +739,12 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     if(scan360&&scanStatus){
       let pollTimer=null,scanWasRunning=false;
       const projectId=()=>window.cadyxSelectedProjectId?.();
+      const syncCaptureButton=()=>{
+        const disabled=scan360.dataset.scanCaptureBusy==='true'||scan360.dataset.scanCapturePending==='true'||scan360.dataset.livePreviewLock==='true';
+        if(scan360.disabled!==disabled)scan360.disabled=disabled;
+      };
+      const setCaptureBusy=busy=>{scan360.dataset.scanCaptureBusy=String(busy);syncCaptureButton()};
+      scan360.dataset.scanCaptureBusy='false';syncCaptureButton();
       const showCapturePreview=(scan,options)=>scanTreePreviewSelection?null:scanView?.showCapture(scan,options);
       const pollScan=async id=>{
         if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
@@ -752,23 +758,21 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           const captureStarted=scan.state==='running'&&!scanWasRunning;
           scanWasRunning=scan.state==='running';
           if(!scanTreePreviewSelection)scanStatus.textContent=scan.state==='idle'||scan.state==='completed'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;
-          scan360.disabled=scan.state==='running'||scan.state==='busy'||scan360.dataset.livePreviewLock==='true';
+          setCaptureBusy(scan.state==='running'||scan.state==='busy');
           if(scan.state==='running'){
             showCapturePreview(scan,{open:captureStarted});
             pollTimer=setTimeout(()=>pollScan(id),1200);
           }else if(scan.state==='completed'){
             showCapturePreview(scan);
-            scan360.disabled=scan360.dataset.livePreviewLock==='true';
             pollTimer=setTimeout(()=>pollScan(id),4000);
           }else if(scan.state==='failed'){
             if(scan.completed_frames>0)showCapturePreview(scan);
-            scan360.disabled=scan360.dataset.livePreviewLock==='true';
             pollTimer=setTimeout(()=>pollScan(id),4000);
           }else{
             pollTimer=setTimeout(()=>pollScan(id),2500);
           }
         }catch(error){
-          scan360.disabled=scan360.dataset.livePreviewLock==='true';
+          syncCaptureButton();
           if(!scanTreePreviewSelection)scanStatus.textContent=error.message;
           pollTimer=setTimeout(()=>pollScan(id),4000);
         }
@@ -778,7 +782,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         const id=projectId();
         if(!id){scanStatus.textContent='Сначала выберите проект.';return}
         if(scanTreePreviewSelection)clearScanTreePreview();
-        scan360.disabled=true;scanStatus.textContent='Запускаю съёмку…';
+        scan360.dataset.scanCapturePending='true';syncCaptureButton();scanStatus.textContent='Запускаю съёмку…';
         try{
           const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation_period_seconds:window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.()??18,scanner_device_id:window.CadyxDeviceSettings?.scannerDeviceId?.(),turntable_device_id:window.CadyxDeviceSettings?.turntableDeviceId?.()})});
           const payload=await response.json();
@@ -786,11 +790,14 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось запустить сканирование');
           showCapturePreview(payload.scan,{open:true});
           scanWasRunning=payload.scan.state==='running';
+          setCaptureBusy(payload.scan.state==='running'||payload.scan.state==='busy');
           scanStatus.textContent='Кадр 0/12';
           clearTimeout(pollTimer);pollScan(id);
         }catch(error){
-          scan360.disabled=scan360.dataset.livePreviewLock==='true';
+          setCaptureBusy(false);
           scanStatus.textContent=error.message;
+        }finally{
+          scan360.dataset.scanCapturePending='false';syncCaptureButton();
         }
       });
       waitForProjectId();

@@ -222,6 +222,14 @@
     let liveFitRadius = null;
     let liveViewportInitialized = false;
     let modelGeometry = null;
+    const liveFrameScratch = {
+      positions: new Float32Array(640 * 400 * 3 / 2),
+      markerFlags: new Uint8Array(640 * 400 / 2),
+      markerPixels: new Uint8Array(640 * 400),
+      markerCenterPixels: new Uint8Array(640 * 400),
+      seen: new Uint8Array(640 * 400),
+      queue: new Int32Array(640 * 400),
+    };
     const setAttribute = (element, name, value) => {
       const current = element.getAttribute(name);
       if (current !== value) element.setAttribute(name, value);
@@ -511,20 +519,26 @@
       const markerIndices = [];
       let accepted = 0;
       for (let index = 0; index < positions.length; index += 3) {
-        const relative = [positions[index] - frame.origin[0], positions[index + 1] - frame.origin[1], positions[index + 2] - frame.origin[2]];
-        const point = [frame.xAxis, frame.yAxis, frame.zAxis].map(axis => axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]);
-        const mapPoint = applyMapTransform(point, mapTransform);
-        point[0] = mapPoint[0];
-        point[1] = mapPoint[1];
-        point[2] *= mapTransform.scale;
-        if (point[2] < -2.5) continue;
-        if (point[2] < 0) point[2] = 0;
-        for (let axis = 0; axis < 3; axis += 1) {
-          positions[accepted * 3 + axis] = point[axis];
-          bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
-          bounds.max[axis] = Math.max(bounds.max[axis], point[axis]);
-        }
-        if (markerFlags[index / 3] && point[2] <= 2.5) markerIndices.push(accepted);
+        const relativeX = positions[index] - frame.origin[0];
+        const relativeY = positions[index + 1] - frame.origin[1];
+        const relativeZ = positions[index + 2] - frame.origin[2];
+        const tableX = frame.xAxis[0] * relativeX + frame.xAxis[1] * relativeY + frame.xAxis[2] * relativeZ;
+        const tableY = frame.yAxis[0] * relativeX + frame.yAxis[1] * relativeY + frame.yAxis[2] * relativeZ;
+        let tableZ = (frame.zAxis[0] * relativeX + frame.zAxis[1] * relativeY + frame.zAxis[2] * relativeZ) * mapTransform.scale;
+        if (tableZ < -2.5) continue;
+        if (tableZ < 0) tableZ = 0;
+        const x = mapTransform.a * tableX + mapTransform.b * tableY + mapTransform.tx;
+        const y = mapTransform.c * tableX + mapTransform.d * tableY + mapTransform.ty;
+        positions[accepted * 3] = x;
+        positions[accepted * 3 + 1] = y;
+        positions[accepted * 3 + 2] = tableZ;
+        bounds.min[0] = Math.min(bounds.min[0], x);
+        bounds.min[1] = Math.min(bounds.min[1], y);
+        bounds.min[2] = Math.min(bounds.min[2], tableZ);
+        bounds.max[0] = Math.max(bounds.max[0], x);
+        bounds.max[1] = Math.max(bounds.max[1], y);
+        bounds.max[2] = Math.max(bounds.max[2], tableZ);
+        if (markerFlags[index / 3] && tableZ <= 2.5) markerIndices.push(accepted);
         accepted += 1;
       }
       return { bounds, markerIndices, count: accepted };
@@ -678,41 +692,47 @@
               const raw = new Uint8Array(await response.arrayBuffer());
               if (raw.length !== 640 * 400 * 2) throw new Error('Размер кадра Y16 не совпадает.');
               const { matrix, depth_scale_mm_per_raw_unit: scale } = liveCalibration;
-              const positions = new Float32Array(640 * 400 * 3 / 2);
-              const markerFlags = new Uint8Array(640 * 400 / 2);
-              const markerPixels = new Set();
-              const markerCenterPixels = new Set();
-              const seen = new Uint8Array(640 * 400);
+              const { positions, markerFlags, markerPixels, markerCenterPixels, seen, queue } = liveFrameScratch;
+              markerPixels.fill(0);
+              markerCenterPixels.fill(0);
+              seen.fill(0);
               const valid = i => (raw[i * 2] | raw[i * 2 + 1] << 8) !== 0;
               let regions = 0;
               for (let seed = 0; seed < seen.length; seed += 1) {
                 if (seen[seed] || !valid(seed)) continue;
-                const pixels = [seed]; seen[seed] = 1;
+                queue[0] = seed;
+                seen[seed] = 1;
+                let tail = 1, sumX = 0, sumY = 0;
                 let minX = 640, maxX = 0, minY = 400, maxY = 0;
-                for (let cursor = 0; cursor < pixels.length; cursor += 1) {
-                  const i = pixels[cursor], x = i % 640, y = Math.floor(i / 640);
+                for (let cursor = 0; cursor < tail; cursor += 1) {
+                  const i = queue[cursor], x = i % 640, y = Math.floor(i / 640);
+                  sumX += x; sumY += y;
                   minX = Math.min(minX, x); maxX = Math.max(maxX, x);
                   minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-                  for (const n of [x > 0 ? i - 1 : -1, x < 639 ? i + 1 : -1,
-                    y > 0 ? i - 640 : -1, y < 399 ? i + 640 : -1]) {
-                    if (n >= 0 && !seen[n] && valid(n)) { seen[n] = 1; pixels.push(n); }
-                  }
+                  let next = x > 0 ? i - 1 : -1;
+                  if (next >= 0 && !seen[next] && valid(next)) { seen[next] = 1; queue[tail++] = next; }
+                  next = x < 639 ? i + 1 : -1;
+                  if (next >= 0 && !seen[next] && valid(next)) { seen[next] = 1; queue[tail++] = next; }
+                  next = y > 0 ? i - 640 : -1;
+                  if (next >= 0 && !seen[next] && valid(next)) { seen[next] = 1; queue[tail++] = next; }
+                  next = y < 399 ? i + 640 : -1;
+                  if (next >= 0 && !seen[next] && valid(next)) { seen[next] = 1; queue[tail++] = next; }
                 }
                 const width = maxX - minX + 1, height = maxY - minY + 1;
-                if (pixels.length >= 20 && pixels.length <= 1000 && width / height > 0.3
-                    && width / height < 3 && pixels.length / (width * height) > 0.45) {
+                if (tail >= 20 && tail <= 1000 && width / height > 0.3
+                    && width / height < 3 && tail / (width * height) > 0.45) {
                   regions += 1;
-                  for (const i of pixels) markerPixels.add(i);
-                  const centerX = pixels.reduce((sum, i) => sum + i % 640, 0) / pixels.length;
-                  const centerY = pixels.reduce((sum, i) => sum + Math.floor(i / 640), 0) / pixels.length;
+                  const centerX = sumX / tail, centerY = sumY / tail;
                   let nearest = -1, nearestDistance = Infinity;
-                  for (const i of pixels) {
+                  for (let cursor = 0; cursor < tail; cursor += 1) {
+                    const i = queue[cursor];
+                    markerPixels[i] = 1;
                     if (i % 2) continue;
                     const dx = i % 640 - centerX, dy = Math.floor(i / 640) - centerY;
                     const distance = dx * dx + dy * dy;
                     if (distance < nearestDistance) { nearest = i; nearestDistance = distance; }
                   }
-                  if (nearest >= 0) markerCenterPixels.add(nearest);
+                  if (nearest >= 0) markerCenterPixels[nearest] = 1;
                 }
               }
               if (!liveTableFrame && regions < 4) {
@@ -732,14 +752,15 @@
                 const py = matrix[4] * x + matrix[5] * y + matrix[6] * depth + matrix[7];
                 const pz = matrix[8] * x + matrix[9] * y + matrix[10] * depth + matrix[11];
                 if (!Number.isFinite(pz) || Math.abs(pz) < 1e-12) continue;
-                const point = [px * depth / pz, -py * depth / pz, -depth];
-                if (!point.every(Number.isFinite)) continue;
-                if (markerPixels.has(pixel)) markerPositions.push(...point);
-                if (markerCenterPixels.has(pixel)) markerCenterPositions.push(...point);
-                markerFlags[count] = markerPixels.has(pixel) ? 1 : 0;
-                positions[count * 3] = point[0];
-                positions[count * 3 + 1] = point[1];
-                positions[count * 3 + 2] = point[2];
+                const pointX = px * depth / pz, pointY = -py * depth / pz, pointZ = -depth;
+                if (!Number.isFinite(pointX) || !Number.isFinite(pointY) || !Number.isFinite(pointZ)) continue;
+                const isMarker = markerPixels[pixel] === 1;
+                if (isMarker) markerPositions.push(pointX, pointY, pointZ);
+                if (markerCenterPixels[pixel]) markerCenterPositions.push(pointX, pointY, pointZ);
+                markerFlags[count] = isMarker ? 1 : 0;
+                positions[count * 3] = pointX;
+                positions[count * 3 + 1] = pointY;
+                positions[count * 3 + 2] = pointZ;
                 count += 1;
               }
               if (count >= 3 && request === liveRequest && livePreviewOwned) {
@@ -759,16 +780,39 @@
                 count = transformed.count;
                 if (count < 3) throw new Error('В кадре нет точек над плоскостью стола.');
                 liveFitRadius ||= Math.max(liveTableOverlay.maxRadius, 0.001) * 1.05;
-                const cloudPointCount = count;
-                const combinedPositions = new Float32Array(cloudPointCount * 3 + liveTableOverlay.positions.length);
-                combinedPositions.set(positions.subarray(0, cloudPointCount * 3));
-                combinedPositions.set(liveTableOverlay.positions, cloudPointCount * 3);
+                const pointLimit = Number.isInteger(viewer.pointPreviewLimit) && viewer.pointPreviewLimit > 0
+                  ? viewer.pointPreviewLimit : 24_000;
+                const pointStep = Math.max(1, Math.ceil(count / pointLimit));
+                const cloudPointCount = Math.ceil(count / pointStep);
+                let extraMarkerCount = 0;
+                for (const index of transformed.markerIndices) if (index % pointStep !== 0) extraMarkerCount += 1;
+                const tableOffset = cloudPointCount + extraMarkerCount;
+                const combinedPositions = new Float32Array(tableOffset * 3 + liveTableOverlay.positions.length);
+                let output = 0;
+                for (let index = 0; index < count; index += pointStep) {
+                  combinedPositions[output++] = positions[index * 3];
+                  combinedPositions[output++] = positions[index * 3 + 1];
+                  combinedPositions[output++] = positions[index * 3 + 2];
+                }
+                const markerPoints = new Uint32Array(transformed.markerIndices.length);
+                let extraMarkerIndex = cloudPointCount;
+                for (let markerIndex = 0; markerIndex < transformed.markerIndices.length; markerIndex += 1) {
+                  const index = transformed.markerIndices[markerIndex];
+                  if (index % pointStep === 0) markerPoints[markerIndex] = index / pointStep;
+                  else {
+                    combinedPositions[extraMarkerIndex * 3] = positions[index * 3];
+                    combinedPositions[extraMarkerIndex * 3 + 1] = positions[index * 3 + 1];
+                    combinedPositions[extraMarkerIndex * 3 + 2] = positions[index * 3 + 2];
+                    markerPoints[markerIndex] = extraMarkerIndex++;
+                  }
+                }
+                combinedPositions.set(liveTableOverlay.positions, tableOffset * 3);
                 const mapMarkerPoints = Uint32Array.from(liveTableOverlay.markerPoints,
-                  index => index + cloudPointCount);
+                  index => index + tableOffset);
                 const trajectoryLines = Uint32Array.from(liveTableOverlay.lines,
-                  index => index + cloudPointCount);
+                  index => index + tableOffset);
                 const bounds = { min: [...transformed.bounds.min], max: [...transformed.bounds.max] };
-                for (let index = cloudPointCount * 3; index < combinedPositions.length; index += 3) {
+                for (let index = tableOffset * 3; index < combinedPositions.length; index += 3) {
                   for (let axis = 0; axis < 3; axis += 1) {
                     bounds.min[axis] = Math.min(bounds.min[axis], combinedPositions[index + axis]);
                     bounds.max[axis] = Math.max(bounds.max[axis], combinedPositions[index + axis]);
@@ -776,7 +820,7 @@
                 }
                 viewer.load({ positions: combinedPositions, triangles: new Uint32Array(0), lines: trajectoryLines,
                   pointCloudVertexCount: cloudPointCount,
-                  bounds, points: transformed.markerIndices, pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' },
+                  bounds, points: markerPoints, pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' },
                   pointLayers: [{ points: mapMarkerPoints, style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } }],
                   lineStyle: { color: '#5aaac6', opacity: 0.42, width: 1, dash: [5, 5] },
                   orbitCenter: [0, 0, 0], fitRadius: liveFitRadius },
@@ -872,6 +916,13 @@
     let pollTimer = null;
     let previouslyActive = false;
     const active = () => state === 'starting' || state === 'running';
+    const syncCaptureButton = () => {
+      if (!captureButton) return;
+      captureButton.dataset.livePreviewLock = String(active());
+      const disabled = active() || captureButton.dataset.scanCaptureBusy === 'true'
+        || captureButton.dataset.scanCapturePending === 'true';
+      if (captureButton.disabled !== disabled) captureButton.disabled = disabled;
+    };
     const updateButton = preview => {
       state = preview?.state || 'idle';
       const nowActive = active();
@@ -886,13 +937,7 @@
       button.title = active() ? 'Остановить предпросмотр сканера'
         : state === 'failed' ? preview.message || 'Сканер остановил поток'
           : 'Показать сканер в реальном времени';
-      if (captureButton && active() && !captureButton.disabled) {
-        captureButton.disabled = true;
-        captureButton.dataset.livePreviewLock = 'true';
-      } else if (captureButton && !active() && captureButton.dataset.livePreviewLock === 'true') {
-        captureButton.disabled = false;
-        delete captureButton.dataset.livePreviewLock;
-      }
+      syncCaptureButton();
       if (state === 'failed') view.closeLivePreview();
     };
     const poll = async () => {
@@ -902,7 +947,10 @@
         if (!response.ok) throw new Error(payload.error?.message || payload.message || 'Не удалось получить состояние сканера');
         updateButton(payload.preview);
       } catch (error) {
-        updateButton({ state: 'failed', message: error.message });
+        if (active()) {
+          button.title = `Предпросмотр работает, статус временно недоступен: ${error.message}`;
+          syncCaptureButton();
+        } else updateButton({ state: 'failed', message: error.message });
       }
       clearTimeout(pollTimer);
       pollTimer = setTimeout(poll, active() ? 900 : 3500);

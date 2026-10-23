@@ -4,6 +4,13 @@
   const VIEWPORT_MESH_DEFLECTION = 0.01;
   const formatCoordinate = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format;
   const meshEdgesCache = new WeakMap();
+  const emptyMeshEdges = {
+    featureEdges: new Uint32Array(0),
+    featureEdgeFaces: new Int32Array(0),
+    silhouetteCandidates: new Uint32Array(0),
+    smoothVertexPairs: new Uint32Array(0),
+  };
+  const emptyFloat32 = new Float32Array(0);
   function viewportUpdateForAgentActivity(projectId, selectedProjectId, activity, currentSketchId = null) {
     if (projectId !== selectedProjectId || activity?.state !== "completed"
         || typeof activity.command !== "string") return null;
@@ -1407,6 +1414,7 @@
     }
 
     return {
+      pointPreviewLimit: MAX_PREVIEW_POINTS,
       fit() { resetView(); render(); },
       createSnapshotBlob,
       setSelectedBody(bodyId) {
@@ -1510,8 +1518,9 @@
         const fitRadius = Number.isFinite(value.fitRadius) && value.fitRadius > 0
           ? value.fitRadius : fitRadiusFromPositions(value.positions, fitCenter);
         const sourceTriangles = value.triangles || [];
-        let meshEdges = meshEdgesCache.get(sourceTriangles);
-        if (!meshEdges) {
+        const pointCloudGeometry = sourceTriangles.length === 0 && value.pointCloudVertexCount != null;
+        let meshEdges = sourceTriangles.length ? meshEdgesCache.get(sourceTriangles) : emptyMeshEdges;
+        if (!meshEdges && sourceTriangles.length) {
           meshEdges = buildFeatureEdges(value.positions, sourceTriangles);
           meshEdgesCache.set(sourceTriangles, meshEdges);
         }
@@ -1561,7 +1570,8 @@
             : null,
           faceNormals: smoothShading ? null : buildFaceNormals(value.positions, value.triangles || []),
         };
-        const bodyMotionIndexByVertex = new Int32Array(value.positions.length / 3).fill(-1);
+        const bodyMotionIndexByVertex = pointCloudGeometry
+          ? null : new Int32Array(value.positions.length / 3).fill(-1);
         const bodyMotionIndexById = new Map();
         for (const range of value.bodyTriangleRanges || []) {
           if (typeof range.objectId !== "string" || !Number.isInteger(range.start) || !Number.isInteger(range.end)) continue;
@@ -1573,7 +1583,8 @@
           for (let triangle = range.start; triangle < range.end; triangle += 1) {
             for (let corner = 0; corner < 3; corner += 1) {
               const vertex = value.triangles[triangle * 3 + corner];
-              if (Number.isInteger(vertex) && vertex >= 0 && vertex < bodyMotionIndexByVertex.length) {
+              if (bodyMotionIndexByVertex && Number.isInteger(vertex) && vertex >= 0
+                  && vertex < bodyMotionIndexByVertex.length) {
                 bodyMotionIndexByVertex[vertex] = bodyIndex;
               }
             }
@@ -1584,16 +1595,18 @@
           for (let line = range.start; line < range.end; line += 2) {
             for (let endpoint = 0; endpoint < 2; endpoint += 1) {
               const vertex = value.lines[line + endpoint];
-              const bodyIndex = bodyMotionIndexByVertex[vertex];
-              if (bodyIndex >= 0) bodyMotionIndexByVertex[vertex] = bodyIndex;
+              const bodyIndex = bodyMotionIndexByVertex?.[vertex] ?? -1;
+              if (bodyMotionIndexByVertex && bodyIndex >= 0) bodyMotionIndexByVertex[vertex] = bodyIndex;
             }
           }
         }
         geometry.bodyMotionIndexByVertex = bodyMotionIndexByVertex;
         geometry.bodyMotionIndexById = bodyMotionIndexById;
         geometry.bodyMotions = new Array(bodyMotionIndexById.size).fill(null);
-        bodyMotionAngleByVertex = new Float32Array(value.positions.length / 3);
-        vertexLight = geometry.vertexNormals ? new Float32Array(geometry.vertexNormals.length / 3) : new Float32Array(0);
+        bodyMotionAngleByVertex = pointCloudGeometry
+          ? emptyFloat32 : new Float32Array(value.positions.length / 3);
+        vertexLight = geometry.vertexNormals
+          ? new Float32Array(geometry.vertexNormals.length / 3) : emptyFloat32;
         transition = animatedTransition ? {
           ...animatedTransition,
           startedAt: performance.now(),
@@ -1606,11 +1619,11 @@
         loftProgress = transition?.type === "loft" && transition.sectionOffsets?.length >= 2
           ? buildLoftProgress(value.positions, transition.vertexRange, transition.sectionOffsets)
           : null;
-        camera = new Float64Array(value.positions.length);
-        screenX = new Float64Array(value.positions.length / 3);
-        screenY = new Float64Array(value.positions.length / 3);
-        faceRecords = new Float64Array((value.triangles.length / 3) * 8);
-        faceOrder = new Uint32Array(value.triangles.length / 3);
+        if (camera.length !== value.positions.length) camera = new Float64Array(value.positions.length);
+        if (screenX.length !== value.positions.length / 3) screenX = new Float64Array(value.positions.length / 3);
+        if (screenY.length !== value.positions.length / 3) screenY = new Float64Array(value.positions.length / 3);
+        if (faceRecords.length !== sourceTriangles.length / 3 * 8) faceRecords = new Float64Array(sourceTriangles.length / 3 * 8);
+        if (faceOrder.length !== sourceTriangles.length / 3) faceOrder = new Uint32Array(sourceTriangles.length / 3);
         if (reset) resetView();
         render();
       },
