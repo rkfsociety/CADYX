@@ -224,7 +224,7 @@ let previewRequest = 0;
 function queueViewportSnapshot() {
   window.dispatchEvent(new Event("cadyx:viewport-rendered"));
   if (!selectedProjectId || selectedProjectId.startsWith(FOLDER_SELECTION_PREFIX)
-      || $("#viewport")?.dataset.scanPreviewMode
+      || $("#viewport")?.dataset.scanPreviewMode || $("#viewport")?.dataset.scanTreePreview === "true"
       || renderedSceneProjectId !== selectedProjectId
       || !Number.isInteger(renderedSceneRevision)) return;
   viewportSnapshotDirty = true;
@@ -238,7 +238,10 @@ function queueViewportSnapshot() {
 
 async function publishViewportSnapshot() {
   if (viewportSnapshotInFlight || !viewportSnapshotDirty) return;
-  if ($("#viewport")?.dataset.scanPreviewMode) { viewportSnapshotDirty = false; return; }
+  if ($("#viewport")?.dataset.scanPreviewMode || $("#viewport")?.dataset.scanTreePreview === "true") {
+    viewportSnapshotDirty = false;
+    return;
+  }
   const projectId = selectedProjectId;
   const revision = renderedSceneRevision;
   viewportSnapshotDirty = false;
@@ -246,7 +249,8 @@ async function publishViewportSnapshot() {
   try {
     const image = await modelViewer.createSnapshotBlob();
     if (projectId !== selectedProjectId || projectId !== renderedSceneProjectId
-        || revision !== renderedSceneRevision || $("#viewport")?.dataset.scanPreviewMode) {
+        || revision !== renderedSceneRevision || $("#viewport")?.dataset.scanPreviewMode
+        || $("#viewport")?.dataset.scanTreePreview === "true") {
       viewportSnapshotDirty = true;
       return;
     }
@@ -2245,8 +2249,10 @@ async function refreshDetail() {
       bodyLineRanges, bodyTriangleRanges, featureTriangleRanges, overlayTriangleRanges, surfaceTriangleRanges,
       ...(hasPointCloud ? { pointStyle: { size: 1.5, opacity: 0.94, color: "#ff7417" } } : {}) };
     currentModelViewportGeometry = viewportGeometry;
-    const livePreviewActive = $("#viewport")?.dataset.scanPreviewMode === "live";
-    if (!livePreviewActive) {
+    const viewport = $("#viewport");
+    const livePreviewActive = viewport?.dataset.scanPreviewMode === "live";
+    const scanTreePreviewActive = viewport?.dataset.scanTreePreview === "true";
+    if (!livePreviewActive && !scanTreePreviewActive) {
       modelViewer.load(viewportGeometry, {
         reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition, smoothShading: true,
       });

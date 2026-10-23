@@ -172,7 +172,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
  .model-toolbar .cad3-tool,.model-toolbar>.button{font:600 12px/1.2 var(--ui-font)}
  @media(max-width:680px){:root{--cadyx-rail-width:48px;--cadyx-tree-width:52px}.project-detail{grid-template-columns:48px 52px minmax(0,1fr)!important}.project-detail[data-tree-collapsed=true]{grid-template-columns:48px 48px minmax(0,1fr)!important}.cad3-rail{gap:4px;padding:8px 4px}.cad3-rail button{width:36px;height:36px}}
 `;
-    style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}.cad3-scan-file{overflow-wrap:anywhere;padding-left:32px!important}.cad3-scan-run-row{grid-template-columns:20px minmax(0,1fr) 28px}.cad3-scan-delete{display:grid;place-items:center;width:26px;height:30px;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:#f07171;cursor:pointer}.cad3-scan-delete:hover:not(:disabled){border-color:#713131;background:#351919;color:#ff8888}.cad3-scan-delete:disabled{color:#805454;cursor:not-allowed;opacity:.65}.cad3-scan-delete svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.cad3-cloud-root-row{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:2px}.cad3-cloud-disclosure{display:grid;place-items:center;width:22px;height:32px;padding:0;border:1px solid transparent;border-radius:4px;background:transparent;color:#b6c0c6;font:500 18px/1 var(--ui-font);cursor:pointer}.cad3-cloud-disclosure:hover{border-color:#51331f;background:#ffffff08;color:#ff9653}.cad3-cloud-root{min-height:34px;grid-template-columns:18px minmax(0,1fr)!important;font-weight:650;color:#e8eef1}.cad3-cloud-stages{display:grid;gap:2px;margin:2px 0 3px 24px;padding-left:6px;border-left:1px solid #32404a}.cad3-cloud-stages[hidden]{display:none!important}.cad3-cloud-stages .cad3-tree-node{grid-template-columns:minmax(0,1fr);gap:0}.cad3-tree-leaf-row{grid-column:1/-1;min-width:0}.cad3-tree-leaf-row>.cad-tree-feature{width:100%;min-height:32px;padding:5px 8px;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;font-size:11px}.cad3-cloud-stages .cad3-model-note{padding:2px 8px 5px}';
+    style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}.cad3-scan-file{overflow-wrap:anywhere;padding-left:32px!important}.cad3-scan-file-button{width:100%;border:0;border-radius:4px;background:transparent;color:var(--muted);font:11px/1.4 var(--ui-font);text-align:left;cursor:pointer}.cad3-scan-file-button:hover{background:#ffffff08;color:var(--text)}.cad3-scan-file-button:focus-visible{outline:1px solid #ff8740;outline-offset:1px}.cad3-scan-file-button[aria-pressed="true"]{background:#ffffff0c;color:#ffe7d6;box-shadow:inset 2px 0 #ff8740}.cad3-scan-run-row{grid-template-columns:20px minmax(0,1fr) 28px}.cad3-scan-delete{display:grid;place-items:center;width:26px;height:30px;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:#f07171;cursor:pointer}.cad3-scan-delete:hover:not(:disabled){border-color:#713131;background:#351919;color:#ff8888}.cad3-scan-delete:disabled{color:#805454;cursor:not-allowed;opacity:.65}.cad3-scan-delete svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.cad3-cloud-root-row{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:2px}.cad3-cloud-disclosure{display:grid;place-items:center;width:22px;height:32px;padding:0;border:1px solid transparent;border-radius:4px;background:transparent;color:#b6c0c6;font:500 18px/1 var(--ui-font);cursor:pointer}.cad3-cloud-disclosure:hover{border-color:#51331f;background:#ffffff08;color:#ff9653}.cad3-cloud-root{min-height:34px;grid-template-columns:18px minmax(0,1fr)!important;font-weight:650;color:#e8eef1}.cad3-cloud-stages{display:grid;gap:2px;margin:2px 0 3px 24px;padding-left:6px;border-left:1px solid #32404a}.cad3-cloud-stages[hidden]{display:none!important}.cad3-cloud-stages .cad3-tree-node{grid-template-columns:minmax(0,1fr);gap:0}.cad3-tree-leaf-row{grid-column:1/-1;min-width:0}.cad3-tree-leaf-row>.cad-tree-feature{width:100%;min-height:32px;padding:5px 8px;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;font-size:11px}.cad3-cloud-stages .cad3-model-note{padding:2px 8px 5px}';
     document.head.appendChild(style);
     if(!$('.cad3-headrail')){const h=document.createElement('div');h.className='cad3-headrail';h.innerHTML=I.model;$('.topbar')?.prepend(h)}
     if(!$('.cad3-rail')){const r=document.createElement('nav');r.className='cad3-rail';r.setAttribute('aria-label','Основная навигация');r.innerHTML=`<button data-view="geometry" title="Геометрия">${I.model}</button><button data-view="files" title="Файлы">${I.files}</button><button data-view="projects" title="Проекты">${I.projects}</button><button data-view="activity" title="Активность">${I.activity}</button>`;detail.prepend(r);const syncRail=()=>{$$('[data-view]',r).forEach(b=>{const view=b.dataset.view,src=nav.querySelector(`[data-workspace-view="${view}"]`),active=view===(grid.dataset.view||'overview');b.setAttribute('aria-label',b.title);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');b.dataset.on=String(active);b.disabled=!src||src.disabled})};r.addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b||b.disabled)return;nav.querySelector(`[data-workspace-view="${b.dataset.view}"]`)?.click()});new MutationObserver(syncRail).observe(grid,{attributes:true,attributeFilter:['data-view']});new MutationObserver(syncRail).observe(nav,{subtree:true,attributes:true,attributeFilter:['disabled','aria-current']});syncRail()}
@@ -194,6 +194,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     let scanTreeEntries=[];
     let scanTreeLoadedProject=null;
     let scanTreeRequest=0;
+    let scanTreePreviewSelection=null;
+    let scanTreePreviewRequest=0;
     function saveModelTreeState(){
       const projectId=state.project;
       if(!projectId)return;
@@ -321,14 +323,58 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         if(run.loading){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent='Загружаю файлы серии…';children.append(leaf)}
         else if(run.loadError){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=`Не удалось загрузить файлы серии (${run.loadError}).`;children.append(leaf)}
         for(const file of matchingFiles){
-          const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';
-          leaf.textContent=scanFileLabel(file,run.id);children.append(leaf);
+          const leaf=document.createElement('button');leaf.type='button';leaf.className='cad3-model-note cad3-scan-file cad3-scan-file-button';
+          leaf.setAttribute('aria-pressed',String(scanTreePreviewSelection===`${run.id}/${file.name}`));
+          leaf.textContent=scanFileLabel(file,run.id);leaf.title=`Показать облако точек · ${file.name}`;leaf.setAttribute('aria-label',leaf.title);
+          leaf.onclick=()=>previewScanFile(run,file,leaf);children.append(leaf);
         }
         if(expanded&&!run.loading&&!run.loadError&&!files.length){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=run.folderName?'В серии нет облаков точек для предпросмотра.':'В серии нет облаков точек для предпросмотра.';children.append(leaf)}
         container.append(children);list.append(container);shown++;
       }
       const empty=$('#cad-tree-empty');
       if(empty){empty.hidden=shown>0;empty.textContent=message||(!state.project?'Выберите проект, чтобы увидеть серии сканирования.':query?'Совпадений нет.':'В проекте пока нет сохранённых серий сканирования.');}
+    }
+    function clearScanTreePreview(){
+      scanTreePreviewSelection=null;scanTreePreviewRequest++;
+      document.querySelectorAll('.cad3-scan-file-button[aria-pressed="true"]').forEach(button=>button.setAttribute('aria-pressed','false'));
+      if(scanViewport)delete scanViewport.dataset.scanTreePreview;
+      scanView?.setOpen(false);scanView?.closeLivePreview();
+      modelViewer?.load(currentModelViewportGeometry,{reset:false});
+    }
+    async function previewScanFile(run,file,button){
+      const selection=`${run.id}/${file.name}`;
+      const status=$('#scanning-status');
+      if(scanTreePreviewSelection===selection){clearScanTreePreview();if(status)status.textContent='Готово к съёмке';return}
+      const projectId=state.project;
+      if(!projectId){notify('Сначала выберите проект.',true);return}
+      clearScanTreePreview();
+      scanTreePreviewSelection=selection;
+      if(scanViewport)scanViewport.dataset.scanTreePreview='true';
+      button?.setAttribute('aria-pressed','true');
+      const request=++scanTreePreviewRequest;
+      const filesPath=run.folderName
+        ?`/api/v1/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(run.folderName)}/files`
+        :`/api/v1/projects/${encodeURIComponent(projectId)}/files`;
+      if(status)status.textContent=`Загружаю ${scanFileLabel(file,run.id)}…`;
+      try{
+        const response=await fetch(`${filesPath}/${encodeURIComponent(file.name)}`,{cache:'no-store'});
+        if(!response.ok)throw new Error(`Не удалось открыть облако (HTTP ${response.status}).`);
+        if(!window.CadyxPlyPreview?.parseStream)throw new Error('Предпросмотр PLY недоступен.');
+        const geometry=await window.CadyxPlyPreview.parseStream(response.body,{
+          maxPreviewPoints:125_000,totalBytes:Number(file.size)||undefined,
+        });
+        if(request!==scanTreePreviewRequest||projectId!==state.project)return;
+        const pointCount=geometry.previewVertexCount??geometry.positions.length/3;
+        modelViewer?.load({...geometry,triangles:new Uint32Array(0),lines:[],
+          pointCloudVertexCount:pointCount},{reset:true});
+        if(status)status.textContent=`Предпросмотр ${scanFileLabel(file,run.id)} · ${new Intl.NumberFormat('ru-RU').format(pointCount)} точек`;
+      }catch(error){
+        if(request!==scanTreePreviewRequest)return;
+        scanTreePreviewSelection=null;
+        if(scanViewport)delete scanViewport.dataset.scanTreePreview;
+        button?.setAttribute('aria-pressed','false');
+        if(status)status.textContent=error.message;
+      }
     }
     async function deleteScanRun(run){
       const projectId=state.project;
@@ -349,6 +395,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           if(!filenames.length)throw new Error('В серии не найдено файлов.');
           await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/files/delete`,{method:'POST',body:JSON.stringify({filenames})});
         }
+        if(scanTreePreviewSelection?.startsWith(`${run.id}/`))clearScanTreePreview();
         scanTreeEntries=scanTreeEntries.filter(item=>item.id!==run.id);
         scanTreeExpanded.delete(run.id);
         try{localStorage.setItem(`cadyx-scan-tree:${projectId}`,JSON.stringify([...scanTreeExpanded]))}catch{}
@@ -666,11 +713,13 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const toolbar=$('.model-toolbar'),presets=$('#viewport-camera-presets'),fit=$('#viewport-fit'),four=$('#viewport-four-views'),divider=$('.viewport-toolbar-divider'),liveScan=$('#viewport-live-scan'),scanMesh=$('#viewport-scan-mesh'),liveCamera=$('#viewport-live-camera'),scanViewport=$('#viewport'),scan360=$('#viewport-scan-360'),scanStatus=$('#viewport-scan-360-status');if(toolbar&&presets&&fit&&four&&divider){detail.dataset.cadTool='orbit';fit.innerHTML=`${I.fit}<span class="toolbar-label">Вписать</span>`;fit.classList.add('cad3-tool');four.classList.add('cad3-tool');liveScan?.classList.add('cad3-tool');scanMesh?.classList.add('cad3-tool');liveCamera?.classList.add('cad3-tool');toolbar.replaceChildren(fit,four,divider,presets,...(liveScan?[liveScan]:[]),...(scanMesh?[scanMesh]:[]),...(scan360?[scan360]:[]),...(liveCamera?[liveCamera]:[]),...(scanStatus?[scanStatus]:[]))}
     const scanParams=new URLSearchParams(location.search),scanMeshReady=scanParams.get('scan_mesh_ready')==='1'&&scanParams.get('scan_kind')!=='provisional_fusion';
     const scanView=liveScan&&scanMesh&&scanViewport?window.CadyxScanView?.initialize({cloudButton:liveScan,meshButton:scanMesh,viewport:scanViewport,viewer:modelViewer,getModelGeometry:()=>currentModelViewportGeometry,getProjectId:()=>window.cadyxSelectedProjectId?.(),hasPersistentPointCloud:file=>state.objects.some(o=>o.type==='feature'&&o.operation==='import_point_cloud'&&o.source?.project_file===file),meshReady:scanMeshReady}):null;
+    new MutationObserver(()=>{if(grid?.dataset.view!=='scanning'&&scanTreePreviewSelection)clearScanTreePreview()}).observe(grid,{attributes:true,attributeFilter:['data-view']});
+    liveCamera?.addEventListener('click',()=>{if(scanTreePreviewSelection)clearScanTreePreview()},{capture:true});
     if(liveCamera&&scanView)window.CadyxScanView?.initializeLivePreview({button:liveCamera,view:scanView,captureButton:scan360});
     if(scan360&&scanStatus){
       let pollTimer=null,scanWasRunning=false;
       const projectId=()=>window.cadyxSelectedProjectId?.();
-      const showCapturePreview=(scan,options)=>scanView?.showCapture(scan,options);
+      const showCapturePreview=(scan,options)=>scanTreePreviewSelection?null:scanView?.showCapture(scan,options);
       const pollScan=async id=>{
         if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
         try{
@@ -681,7 +730,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           const scan=payload.scan;
           const captureStarted=scan.state==='running'&&!scanWasRunning;
           scanWasRunning=scan.state==='running';
-          scanStatus.textContent=scan.state==='idle'||scan.state==='completed'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;
+          if(!scanTreePreviewSelection)scanStatus.textContent=scan.state==='idle'||scan.state==='completed'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;
           scan360.disabled=scan.state==='running'||scan.state==='busy'||scan360.dataset.livePreviewLock==='true';
           if(scan.state==='running'){
             showCapturePreview(scan,{open:captureStarted});
@@ -699,7 +748,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           }
         }catch(error){
           scan360.disabled=scan360.dataset.livePreviewLock==='true';
-          scanStatus.textContent=error.message;
+          if(!scanTreePreviewSelection)scanStatus.textContent=error.message;
           pollTimer=setTimeout(()=>pollScan(id),4000);
         }
       };
@@ -707,6 +756,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       scan360.addEventListener('click',async()=>{
         const id=projectId();
         if(!id){scanStatus.textContent='Сначала выберите проект.';return}
+        if(scanTreePreviewSelection)clearScanTreePreview();
         scan360.disabled=true;scanStatus.textContent='Запускаю съёмку…';
         try{
           const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation_period_seconds:window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.()??18,scanner_device_id:window.CadyxDeviceSettings?.scannerDeviceId?.(),turntable_device_id:window.CadyxDeviceSettings?.turntableDeviceId?.()})});
