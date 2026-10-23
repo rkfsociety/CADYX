@@ -734,7 +734,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const scanParams=new URLSearchParams(location.search),scanMeshReady=scanParams.get('scan_mesh_ready')==='1'&&scanParams.get('scan_kind')!=='provisional_fusion';
     const scanView=liveScan&&scanMesh&&scanViewport?window.CadyxScanView?.initialize({cloudButton:liveScan,meshButton:scanMesh,viewport:scanViewport,viewer:modelViewer,getModelGeometry:()=>currentModelViewportGeometry,getProjectId:()=>window.cadyxSelectedProjectId?.(),hasPersistentPointCloud:file=>state.objects.some(o=>o.type==='feature'&&o.operation==='import_point_cloud'&&o.source?.project_file===file),meshReady:scanMeshReady}):null;
     new MutationObserver(()=>{if(grid?.dataset.view!=='scanning'&&scanTreePreviewSelection)clearScanTreePreview()}).observe(grid,{attributes:true,attributeFilter:['data-view']});
-    for(const scanButton of [liveCamera,liveScan,scanMesh])scanButton?.addEventListener('click',()=>{if(scanTreePreviewSelection)clearScanTreePreview()},{capture:true});
+    liveCamera?.addEventListener('click',()=>{if(scanTreePreviewSelection)clearScanTreePreview()},{capture:true});
     if(liveCamera&&scanView)window.CadyxScanView?.initializeLivePreview({button:liveCamera,view:scanView,captureButton:scan360});
     if(scan360&&scanStatus){
       let pollTimer=null,scanWasRunning=false;
