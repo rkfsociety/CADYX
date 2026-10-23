@@ -286,7 +286,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       let shown=0;
       for(const run of scanTreeEntries){
         const title=scanRunTitle(run.id);
-        const files=(run.files||[]).filter(file=>!file.name.toLowerCase().endsWith('.json'));
+        const files=(run.files||[]).filter(file=>/\.ply$/i.test(file.name));
         const matchingFiles=files.filter(file=>!query||file.name.toLowerCase().includes(query));
         if(query&&!title.toLowerCase().includes(query)&&!matchingFiles.length)continue;
         const container=document.createElement('div');container.className='cad3-tree-node';
@@ -308,7 +308,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         };
         const button=document.createElement('button');button.className='cad-tree-feature';button.type='button';button.title=title;
         button.setAttribute('aria-expanded',String(expanded));button.setAttribute('aria-controls',childrenId);button.onclick=()=>disclosure.click();
-        button.innerHTML=`<span class="cad3-icon">${I.cloud}</span><span class="cad-tree-label"></span><small>${run.filesLoaded?`${files.length} файлов`:'Открыть серию'}</small>`;
+        button.innerHTML=`<span class="cad3-icon">${I.cloud}</span><span class="cad-tree-label"></span><small>${run.filesLoaded?`${files.length} облаков`:'Открыть серию'}</small>`;
         button.querySelector('.cad-tree-label').textContent=title;
         const remove=document.createElement('button');remove.type='button';remove.className='cad3-scan-delete';remove.setAttribute('aria-label',`Удалить серию ${title}`);
         const canDelete=typeof canOpenFilesView==='function'&&canOpenFilesView(state.project);
@@ -322,12 +322,9 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         else if(run.loadError){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=`Не удалось загрузить файлы серии (${run.loadError}).`;children.append(leaf)}
         for(const file of matchingFiles){
           const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';
-          leaf.textContent=scanFileLabel(file,run.id);leaf.title=file.name;children.append(leaf);
+          leaf.textContent=scanFileLabel(file,run.id);children.append(leaf);
         }
-        for(const folder of run.folders||[]){
-          const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=`▰ ${folder.name}`;children.append(leaf);
-        }
-        if(expanded&&!run.loading&&!run.loadError&&!files.length&&!run.folders?.length){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=run.folderName?'В этой серии пока нет файлов сканирования.':'Файлы серии не найдены.';children.append(leaf)}
+        if(expanded&&!run.loading&&!run.loadError&&!files.length){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=run.folderName?'В серии нет облаков точек для предпросмотра.':'В серии нет облаков точек для предпросмотра.';children.append(leaf)}
         container.append(children);list.append(container);shown++;
       }
       const empty=$('#cad-tree-empty');
