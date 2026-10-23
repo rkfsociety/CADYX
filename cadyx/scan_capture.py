@@ -39,6 +39,7 @@ class _Scan360Job:
 class _LivePreviewJob:
     process: subprocess.Popen[bytes]
     raw_path: Path
+    frames_path: Path
     stop_path: Path
     ready_path: Path
     log_path: Path
@@ -495,6 +496,7 @@ class Scan360CaptureController:
         self._resolve_scanner_calibration(scanner_device_id, len(scanners), scanner["profile_id"])
 
         raw_path = self._workspace_root / ".revopoint-live.raw"
+        frames_path = self._workspace_root / ".revopoint-live.raw.frames"
         stop_path = self._workspace_root / ".revopoint-live-preview.stop"
         ready_path = self._workspace_root / ".revopoint-live-preview.ready"
         log_path = self._workspace_root / ".revopoint-live-preview.log"
@@ -511,6 +513,7 @@ class Scan360CaptureController:
                     pass
                 except OSError as exc:
                     raise ValidationError(f"The previous live-preview buffer could not be cleared: {exc}.") from exc
+            self._clear_live_frame_queue(frames_path)
 
             startup_info = subprocess.STARTUPINFO()
             startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -519,7 +522,8 @@ class Scan360CaptureController:
                 with log_path.open("wb") as log_stream:
                     process = subprocess.Popen(
                         [str(capture_executable), "--live-only", "--live-raw", str(raw_path),
-                         "--stop-file", str(stop_path), "--ready-file", str(ready_path), "--fps", "15",
+                         "--live-frames-dir", str(frames_path), "--stop-file", str(stop_path),
+                         "--ready-file", str(ready_path), "--fps", "15",
                          "--device-id", scanner_device_id],
                         cwd=str(self._repository_root), stdin=subprocess.DEVNULL,
                         stdout=log_stream, stderr=subprocess.STDOUT,
@@ -527,7 +531,7 @@ class Scan360CaptureController:
                     )
             except OSError as exc:
                 raise ValidationError(f"The live scanner preview could not be started: {exc}.") from exc
-            self._live_preview = _LivePreviewJob(process, raw_path, stop_path, ready_path, log_path)
+            self._live_preview = _LivePreviewJob(process, raw_path, frames_path, stop_path, ready_path, log_path)
             return self._live_preview_snapshot_locked()
 
     def live_preview_status(self) -> dict[str, Any]:
@@ -562,6 +566,7 @@ class Scan360CaptureController:
                     pass
                 except OSError as exc:
                     raise ValidationError(f"A temporary live-preview file could not be removed: {exc}.") from exc
+            self._clear_live_frame_queue(job.frames_path)
             return {"state": "idle"}
 
     def _live_preview_snapshot_locked(self) -> dict[str, Any]:
@@ -581,6 +586,10 @@ class Scan360CaptureController:
                     pass
                 except OSError as exc:
                     message = f"{message}\nTemporary frame cleanup failed: {exc}.".strip()
+            try:
+                self._clear_live_frame_queue(job.frames_path)
+            except ValidationError as exc:
+                message = f"{message}\nTemporary frame queue cleanup failed: {exc}.".strip()
             return {"state": "failed", "return_code": return_code, "message": message}
         if not job.ready_path.is_file():
             return {"state": "starting"}
@@ -589,6 +598,25 @@ class Scan360CaptureController:
         except OSError:
             return {"state": "starting"}
         return {"state": "running", "frame_mtime_ns": mtime_ns}
+
+    @staticmethod
+    def _clear_live_frame_queue(frames_path: Path) -> None:
+        try:
+            if frames_path.exists() and not frames_path.is_dir():
+                raise ValidationError("The live-preview frame queue path is not a directory.")
+            frames_path.mkdir(parents=True, exist_ok=True)
+            for pattern in ("frame-*.y16", "frame-*.y16.tmp"):
+                for frame_path in frames_path.glob(pattern):
+                    try:
+                        frame_path.unlink()
+                    except FileNotFoundError:
+                        continue
+            if not any(frames_path.iterdir()):
+                frames_path.rmdir()
+        except ValidationError:
+            raise
+        except OSError as exc:
+            raise ValidationError(f"The temporary live-preview frame queue could not be cleared: {exc}.") from exc
 
     def status(self, project_id: str, project_directory: Path) -> dict[str, Any]:
         with self._guard:

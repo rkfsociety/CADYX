@@ -439,7 +439,39 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
         handler._json(200, {"preview": core.stop_scanner_live_preview()})
         return
     if route.spec.name == "scanner_live_frame":
-        frame_path = core.workspace.root / ".revopoint-live.raw"
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if set(query) - {"after", "ts"} or len(query.get("after", [])) > 1 or len(query.get("ts", [])) > 1:
+            raise ValidationError("Live scanner frames accept at most one after and ts query parameter.")
+        after_values = query.get("after", [])
+        frame_sequence: int | None = None
+        if after_values:
+            after_text = after_values[0]
+            if not after_text.isdecimal():
+                raise ValidationError("The live-frame after value must be a non-negative integer.")
+            after_sequence = int(after_text)
+            frames_path = core.workspace.root / ".revopoint-live.raw.frames"
+            candidates: list[tuple[int, Path]] = []
+            try:
+                for candidate in frames_path.glob("frame-*.y16"):
+                    sequence_text = candidate.stem.removeprefix("frame-")
+                    if not sequence_text.isdecimal():
+                        continue
+                    sequence = int(sequence_text)
+                    if sequence <= after_sequence:
+                        try:
+                            candidate.unlink()
+                        except FileNotFoundError:
+                            pass
+                    else:
+                        candidates.append((sequence, candidate))
+            except OSError as exc:
+                raise ValidationError(f"The live scanner frame queue could not be read: {exc}.") from exc
+            if candidates:
+                frame_sequence, frame_path = min(candidates, key=lambda item: item[0])
+            else:
+                frame_path = frames_path / "no-pending-frame.y16"
+        else:
+            frame_path = core.workspace.root / ".revopoint-live.raw"
         try:
             with frame_path.open("rb") as stream:
                 frame_stat = os.fstat(stream.fileno())
@@ -457,6 +489,8 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
         handler.send_header("X-CADYX-Frame-Width", "640")
         handler.send_header("X-CADYX-Frame-Height", "400")
         handler.send_header("X-CADYX-Frame-Mtime", str(frame_stat.st_mtime_ns))
+        if frame_sequence is not None:
+            handler.send_header("X-CADYX-Frame-Sequence", str(frame_sequence))
         handler.end_headers()
         handler.wfile.write(payload)
         return

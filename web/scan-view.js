@@ -213,7 +213,7 @@
     let cloudRequest = 0;
     let liveRequest = 0;
     let liveTimer = null;
-    let liveMtime = null;
+    let liveFrameSequence = 0;
     let liveCalibration = null;
     let liveTableFrame = null;
     let liveTableMap = null;
@@ -224,6 +224,7 @@
     let modelGeometry = null;
     const liveFrameScratch = {
       positions: new Float32Array(640 * 400 * 3 / 2),
+      tablePositions: new Float32Array(640 * 400 * 3 / 2),
       markerFlags: new Uint8Array(640 * 400 / 2),
       markerPixels: new Uint8Array(640 * 400),
       markerCenterPixels: new Uint8Array(640 * 400),
@@ -543,6 +544,58 @@
       }
       return { bounds, markerIndices, count: accepted };
     };
+    const renderLiveFrame = ({ positions, count, bounds, markerIndices, aligned, reset = false }) => {
+      const pointLimit = Number.isInteger(viewer.pointPreviewLimit) && viewer.pointPreviewLimit > 0
+        ? viewer.pointPreviewLimit : 24_000;
+      const pointStep = Math.max(1, Math.ceil(count / pointLimit));
+      const cloudPointCount = Math.ceil(count / pointStep);
+      let extraMarkerCount = 0;
+      for (const index of markerIndices) if (index % pointStep !== 0) extraMarkerCount += 1;
+      const tableOffset = cloudPointCount + extraMarkerCount;
+      const overlay = aligned ? liveTableOverlay : null;
+      const combinedPositions = new Float32Array(tableOffset * 3 + (overlay?.positions.length || 0));
+      let output = 0;
+      for (let index = 0; index < count; index += pointStep) {
+        combinedPositions[output++] = positions[index * 3];
+        combinedPositions[output++] = positions[index * 3 + 1];
+        combinedPositions[output++] = positions[index * 3 + 2];
+      }
+      const previewMarkerPoints = new Uint32Array(markerIndices.length);
+      let extraMarkerIndex = cloudPointCount;
+      for (let markerIndex = 0; markerIndex < markerIndices.length; markerIndex += 1) {
+        const index = markerIndices[markerIndex];
+        if (index % pointStep === 0) previewMarkerPoints[markerIndex] = index / pointStep;
+        else {
+          combinedPositions[extraMarkerIndex * 3] = positions[index * 3];
+          combinedPositions[extraMarkerIndex * 3 + 1] = positions[index * 3 + 1];
+          combinedPositions[extraMarkerIndex * 3 + 2] = positions[index * 3 + 2];
+          previewMarkerPoints[markerIndex] = extraMarkerIndex++;
+        }
+      }
+      const mapMarkerPoints = overlay
+        ? Uint32Array.from(overlay.markerPoints, index => index + tableOffset) : new Uint32Array(0);
+      const trajectoryLines = overlay
+        ? Uint32Array.from(overlay.lines, index => index + tableOffset) : null;
+      const finalBounds = { min: [...bounds.min], max: [...bounds.max] };
+      if (overlay) {
+        combinedPositions.set(overlay.positions, tableOffset * 3);
+        for (let index = tableOffset * 3; index < combinedPositions.length; index += 3) {
+          for (let axis = 0; axis < 3; axis += 1) {
+            finalBounds.min[axis] = Math.min(finalBounds.min[axis], combinedPositions[index + axis]);
+            finalBounds.max[axis] = Math.max(finalBounds.max[axis], combinedPositions[index + axis]);
+          }
+        }
+      }
+      viewer.load({ positions: combinedPositions, triangles: new Uint32Array(0), lines: trajectoryLines,
+        pointCloudVertexCount: cloudPointCount, bounds: finalBounds, points: previewMarkerPoints,
+        pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' },
+        pointLayers: overlay ? [{ points: mapMarkerPoints, style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } }] : [],
+        lineStyle: overlay ? { color: '#5aaac6', opacity: 0.42, width: 1, dash: [5, 5] } : undefined,
+        orbitCenter: aligned ? [0, 0, 0] : undefined,
+        fitRadius: aligned ? liveFitRadius : undefined },
+      { reset: reset || !liveViewportInitialized });
+      liveViewportInitialized = true;
+    };
     cloudSource = pointCloudUrl(null);
     cloudOriginSource = originUrl(null);
     const loadCloud = async ({ reset = true } = {}) => {
@@ -621,7 +674,7 @@
     const showLivePreview = ({ open = false } = {}) => {
       if (!open) return;
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
-      liveMtime = null;
+      liveFrameSequence = 0;
       liveCalibration = null;
       liveTableFrame = null;
       liveTableMap = null;
@@ -637,6 +690,8 @@
       updateButton();
       const pollFrame = async () => {
         if (request !== liveRequest || !livePreviewOwned) return;
+        let receivedFrame = false;
+        let renderedFrame = false;
         try {
           if (!liveTableMap) {
             const tableId = window.CadyxDeviceSettings?.turntableDeviceId?.();
@@ -685,12 +740,19 @@
                 || calibration.depth_scale_mm_per_raw_unit <= 0) throw new Error('Калибровка глубины сканера некорректна.');
             liveCalibration = calibration;
           }
-          const response = await fetcher(`/api/v1/scanner/live-frame?ts=${Date.now()}`, { cache: 'no-store' });
+          const response = await fetcher(`/api/v1/scanner/live-frame?after=${liveFrameSequence}`, { cache: 'no-store' });
           if (response.ok) {
-            const mtime = response.headers.get('X-CADYX-Frame-Mtime');
-            if (mtime && mtime !== liveMtime) {
-              const raw = new Uint8Array(await response.arrayBuffer());
-              if (raw.length !== 640 * 400 * 2) throw new Error('Размер кадра Y16 не совпадает.');
+            receivedFrame = true;
+            const frameSequence = Number(response.headers.get('X-CADYX-Frame-Sequence'));
+            if (!Number.isSafeInteger(frameSequence) || frameSequence <= liveFrameSequence) {
+              throw new Error('Нарушена последовательность кадров предпросмотра.');
+            }
+            const raw = new Uint8Array(await response.arrayBuffer());
+            if (raw.length !== 640 * 400 * 2) {
+              liveFrameSequence = frameSequence;
+              renderedFrame = true;
+              throw new Error('Размер кадра Y16 не совпадает.');
+            }
               const { matrix, depth_scale_mm_per_raw_unit: scale } = liveCalibration;
               const { positions, markerFlags, markerPixels, markerCenterPixels, seen, queue } = liveFrameScratch;
               markerPixels.fill(0);
@@ -735,14 +797,10 @@
                   if (nearest >= 0) markerCenterPixels[nearest] = 1;
                 }
               }
-              if (!liveTableFrame && regions < 4) {
-                const error = new Error('Для привязки к карте стола нужны минимум четыре видимых маркера.');
-                error.code = 'TABLE_MARKERS_PENDING';
-                throw error;
-              }
               const markerPositions = [];
               const markerCenterPositions = [];
               let count = 0;
+              const rawBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
               for (let pixel = 0; pixel < 640 * 400; pixel += 2) {
                 const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
                 const depth = value * scale;
@@ -761,79 +819,81 @@
                 positions[count * 3] = pointX;
                 positions[count * 3 + 1] = pointY;
                 positions[count * 3 + 2] = pointZ;
+                rawBounds.min[0] = Math.min(rawBounds.min[0], pointX);
+                rawBounds.min[1] = Math.min(rawBounds.min[1], pointY);
+                rawBounds.min[2] = Math.min(rawBounds.min[2], pointZ);
+                rawBounds.max[0] = Math.max(rawBounds.max[0], pointX);
+                rawBounds.max[1] = Math.max(rawBounds.max[1], pointY);
+                rawBounds.max[2] = Math.max(rawBounds.max[2], pointZ);
                 count += 1;
               }
-              if (count >= 3 && request === liveRequest && livePreviewOwned) {
-                const tableFrame = liveTableFrame || fitTableFrame(markerPositions, centerRay(liveCalibration));
-                const markerCoordinates = [];
-                for (let index = 0; index < markerCenterPositions.length; index += 3) {
-                  const relative = [markerCenterPositions[index] - tableFrame.origin[0],
-                    markerCenterPositions[index + 1] - tableFrame.origin[1], markerCenterPositions[index + 2] - tableFrame.origin[2]];
-                  markerCoordinates.push([tableFrame.xAxis, tableFrame.yAxis].map(axis =>
-                    axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]));
-                }
-                const mapTransform = liveMapTransform || registerTableMarkers(markerCoordinates, liveTableMap);
-                liveTableFrame ||= tableFrame;
-                liveMapTransform ||= mapTransform;
-                const transformed = transformLiveToTableFrame(positions.subarray(0, count * 3), tableFrame,
-                  liveMapTransform, markerFlags);
-                count = transformed.count;
-                if (count < 3) throw new Error('В кадре нет точек над плоскостью стола.');
-                liveFitRadius ||= Math.max(liveTableOverlay.maxRadius, 0.001) * 1.05;
-                const pointLimit = Number.isInteger(viewer.pointPreviewLimit) && viewer.pointPreviewLimit > 0
-                  ? viewer.pointPreviewLimit : 24_000;
-                const pointStep = Math.max(1, Math.ceil(count / pointLimit));
-                const cloudPointCount = Math.ceil(count / pointStep);
-                let extraMarkerCount = 0;
-                for (const index of transformed.markerIndices) if (index % pointStep !== 0) extraMarkerCount += 1;
-                const tableOffset = cloudPointCount + extraMarkerCount;
-                const combinedPositions = new Float32Array(tableOffset * 3 + liveTableOverlay.positions.length);
-                let output = 0;
-                for (let index = 0; index < count; index += pointStep) {
-                  combinedPositions[output++] = positions[index * 3];
-                  combinedPositions[output++] = positions[index * 3 + 1];
-                  combinedPositions[output++] = positions[index * 3 + 2];
-                }
-                const markerPoints = new Uint32Array(transformed.markerIndices.length);
-                let extraMarkerIndex = cloudPointCount;
-                for (let markerIndex = 0; markerIndex < transformed.markerIndices.length; markerIndex += 1) {
-                  const index = transformed.markerIndices[markerIndex];
-                  if (index % pointStep === 0) markerPoints[markerIndex] = index / pointStep;
-                  else {
-                    combinedPositions[extraMarkerIndex * 3] = positions[index * 3];
-                    combinedPositions[extraMarkerIndex * 3 + 1] = positions[index * 3 + 1];
-                    combinedPositions[extraMarkerIndex * 3 + 2] = positions[index * 3 + 2];
-                    markerPoints[markerIndex] = extraMarkerIndex++;
+              if (request !== liveRequest || !livePreviewOwned) return;
+              if (count >= 3) {
+                let tableAligned = Boolean(liveTableFrame && liveMapTransform);
+                let resetAfterAlignment = false;
+                if (!tableAligned && regions >= 4) {
+                  try {
+                    const tableFrame = fitTableFrame(markerPositions, centerRay(liveCalibration));
+                    const markerCoordinates = [];
+                    for (let index = 0; index < markerCenterPositions.length; index += 3) {
+                      const relative = [markerCenterPositions[index] - tableFrame.origin[0],
+                        markerCenterPositions[index + 1] - tableFrame.origin[1], markerCenterPositions[index + 2] - tableFrame.origin[2]];
+                      markerCoordinates.push([tableFrame.xAxis, tableFrame.yAxis].map(axis =>
+                        axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]));
+                    }
+                    const mapTransform = registerTableMarkers(markerCoordinates, liveTableMap);
+                    liveTableFrame = tableFrame;
+                    liveMapTransform = mapTransform;
+                    tableAligned = true;
+                    resetAfterAlignment = liveViewportInitialized;
+                  } catch (error) {
+                    cloudButton.title = `Ожидание привязки к карте стола: ${error.message}`;
                   }
                 }
-                combinedPositions.set(liveTableOverlay.positions, tableOffset * 3);
-                const mapMarkerPoints = Uint32Array.from(liveTableOverlay.markerPoints,
-                  index => index + tableOffset);
-                const trajectoryLines = Uint32Array.from(liveTableOverlay.lines,
-                  index => index + tableOffset);
-                const bounds = { min: [...transformed.bounds.min], max: [...transformed.bounds.max] };
-                for (let index = tableOffset * 3; index < combinedPositions.length; index += 3) {
-                  for (let axis = 0; axis < 3; axis += 1) {
-                    bounds.min[axis] = Math.min(bounds.min[axis], combinedPositions[index + axis]);
-                    bounds.max[axis] = Math.max(bounds.max[axis], combinedPositions[index + axis]);
+                let bounds = rawBounds;
+                let markerIndices = [];
+                let displayPositions = positions;
+                if (tableAligned) {
+                  const tablePositions = liveFrameScratch.tablePositions;
+                  tablePositions.set(positions.subarray(0, count * 3));
+                  const transformed = transformLiveToTableFrame(tablePositions.subarray(0, count * 3), liveTableFrame,
+                    liveMapTransform, markerFlags);
+                  if (transformed.count >= 3) {
+                    count = transformed.count;
+                    bounds = transformed.bounds;
+                    markerIndices = transformed.markerIndices;
+                    displayPositions = tablePositions;
+                    liveFitRadius ||= Math.max(liveTableOverlay.maxRadius, 0.001) * 1.05;
+                  } else {
+                    tableAligned = false;
+                    liveTableFrame = null;
+                    liveMapTransform = null;
+                    liveFitRadius = null;
+                    resetAfterAlignment = liveViewportInitialized;
                   }
                 }
-                viewer.load({ positions: combinedPositions, triangles: new Uint32Array(0), lines: trajectoryLines,
-                  pointCloudVertexCount: cloudPointCount,
-                  bounds, points: markerPoints, pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' },
-                  pointLayers: [{ points: mapMarkerPoints, style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } }],
-                  lineStyle: { color: '#5aaac6', opacity: 0.42, width: 1, dash: [5, 5] },
-                  orbitCenter: [0, 0, 0], fitRadius: liveFitRadius },
-                  { reset: !liveViewportInitialized });
-                liveViewportInitialized = true;
-                liveMtime = mtime;
+                if (!tableAligned) {
+                  for (let index = 0; index < count; index += 1) {
+                    if (markerFlags[index]) markerIndices.push(index);
+                  }
+                }
+                renderLiveFrame({ positions: displayPositions, count, bounds, markerIndices, aligned: tableAligned,
+                  reset: resetAfterAlignment });
+                liveFrameSequence = frameSequence;
+                renderedFrame = true;
+              } else {
+                renderLiveFrame({ positions, count: 0,
+                  bounds: { min: [-1, -1, -1], max: [1, 1, 1] }, markerIndices: [], aligned: false });
+                liveFrameSequence = frameSequence;
+                renderedFrame = true;
               }
-            }
           } else if (response.status !== 404) throw new Error(`Кадр сканера недоступен (HTTP ${response.status}).`);
         } catch (error) {
-          if (error.code !== 'TABLE_MARKERS_PENDING') cloudButton.title = error.message;
+          cloudButton.title = error.message;
         } finally {
-          if (request === liveRequest && livePreviewOwned) liveTimer = setTimeout(pollFrame, 350);
+          if (request === liveRequest && livePreviewOwned) {
+            liveTimer = setTimeout(pollFrame, renderedFrame ? 0 : receivedFrame ? 100 : 25);
+          }
         }
       };
       void pollFrame();
@@ -842,7 +902,7 @@
       if (livePreviewOwned) {
         livePreviewOwned = false;
         restoreModel();
-        liveMtime = null;
+        liveFrameSequence = 0;
         liveTableFrame = null;
         liveTableMap = null;
         liveTableOverlay = null;

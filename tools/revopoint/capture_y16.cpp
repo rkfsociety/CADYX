@@ -34,6 +34,7 @@ struct Options {
     UINT32 width = 640;
     UINT32 height = 400;
     std::filesystem::path live_raw_path;
+    std::filesystem::path live_frames_dir;
     std::filesystem::path ready_file;
     std::filesystem::path stop_file;
     std::wstring device_id;
@@ -89,7 +90,7 @@ void PrintUsage() {
               << "Usage: CaptureY16.exe --out-prefix PATH --q-file PATH --depth-scale NUMBER [--frames N]\n"
               << "       [--fps 5|10|15] [--width 640|1280] [--height 400|800]\n"
               << "       CaptureY16.exe --out-prefix PATH --frames N --fps 5|10|15 --width W --height H --measure-only\n"
-              << "       CaptureY16.exe --live-only --live-raw PATH --stop-file PATH [--ready-file PATH] [--fps 5|10|15]\n"
+              << "       CaptureY16.exe --live-only --live-raw PATH --live-frames-dir DIR --stop-file PATH [--ready-file PATH] [--fps 5|10|15]\n"
               << "       Optional --ready-file PATH is created after the first valid frame is received.\n"
               << "       Optional --stop-file PATH ends a burst after the next valid frame.\n"
               << "       CaptureY16.exe --list-modes\n"
@@ -138,6 +139,8 @@ Options ParseOptions(int argc, wchar_t** argv) {
             catch (...) { throw std::runtime_error("--height must be 400 or 800."); }
         } else if (argument == L"--live-raw") {
             options.live_raw_path = value;
+        } else if (argument == L"--live-frames-dir") {
+            options.live_frames_dir = value;
         } else if (argument == L"--ready-file") {
             options.ready_file = value;
         } else if (argument == L"--stop-file") {
@@ -150,10 +153,10 @@ Options ParseOptions(int argc, wchar_t** argv) {
     }
     if (options.list_modes || options.list_devices) return options;
     if (options.live_only) {
-        if (options.live_raw_path.empty() || options.stop_file.empty() || options.measure_only ||
+        if (options.live_raw_path.empty() || options.live_frames_dir.empty() || options.stop_file.empty() || options.measure_only ||
             options.width != 640 || options.height != 400 ||
             (options.requested_fps != 5 && options.requested_fps != 10 && options.requested_fps != 15)) {
-            throw std::runtime_error("Live-only preview requires --live-raw, --stop-file, 640x400 Y16, and fps 5, 10, or 15.");
+            throw std::runtime_error("Live-only preview requires --live-raw, --live-frames-dir, --stop-file, 640x400 Y16, and fps 5, 10, or 15.");
         }
         return options;
     }
@@ -336,6 +339,29 @@ ComPtr<IMFActivate> FindDepthCamera(const std::wstring& device_id) {
     return selected;
 }
 
+void PublishLiveFrame(const std::filesystem::path& destination,
+                     const std::vector<std::uint8_t>& frame) {
+    auto temporary = destination;
+    temporary += L".tmp";
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        output.write(reinterpret_cast<const char*>(frame.data()), static_cast<std::streamsize>(frame.size()));
+        if (!output) throw std::runtime_error("Could not write a temporary live frame.");
+    }
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        if (MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            return;
+        }
+        const DWORD error = GetLastError();
+        if (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION && error != ERROR_ACCESS_DENIED) {
+            throw std::runtime_error("Could not atomically publish live frame file (Win32 "
+                + std::to_string(error) + ").");
+        }
+        Sleep(10);
+    }
+    throw std::runtime_error("Could not atomically publish live frame file after repeated sharing violations.");
+}
+
 std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int requested_fps,
                                                         UINT32 requested_width, UINT32 requested_height,
                                                         std::vector<LONGLONG>& timestamps,
@@ -344,6 +370,7 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
                                                         std::vector<DWORD>& empty_sample_flags,
                                                         std::size_t& null_sample_count,
                                                         const std::filesystem::path& live_raw_path,
+                                                        const std::filesystem::path& live_frames_dir,
                                                         const std::filesystem::path& ready_file,
                                                         const std::filesystem::path& stop_file,
                                                         const std::wstring& device_id,
@@ -388,6 +415,10 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
             "Select native Y16 media type");
 
     const std::size_t raw_bytes = static_cast<std::size_t>(requested_width) * requested_height * sizeof(std::uint16_t);
+    if (!live_raw_path.empty() && !live_raw_path.parent_path().empty()) {
+        std::filesystem::create_directories(live_raw_path.parent_path());
+    }
+    if (!live_frames_dir.empty()) std::filesystem::create_directories(live_frames_dir);
     std::vector<std::vector<std::uint8_t>> frames;
     captured_frame_count = 0;
     while ((live_only || static_cast<int>(captured_frame_count) < frame_count) &&
@@ -429,25 +460,11 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
         ++captured_frame_count;
         const std::vector<std::uint8_t>& current_frame = live_only ? result : frames.back();
         if (!live_raw_path.empty()) {
-            if (!live_raw_path.parent_path().empty()) std::filesystem::create_directories(live_raw_path.parent_path());
-            auto temporary = live_raw_path; temporary += L".tmp";
-            { std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-              out.write(reinterpret_cast<const char*>(current_frame.data()), static_cast<std::streamsize>(current_frame.size()));
-              if (!out) throw std::runtime_error("Could not update live frame file."); }
-            bool published = false;
-            DWORD publish_error = ERROR_SUCCESS;
-            for (int attempt = 0; attempt < 20; ++attempt) {
-                if (MoveFileExW(temporary.c_str(), live_raw_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-                    published = true;
-                    break;
-                }
-                publish_error = GetLastError();
-                if (publish_error != ERROR_SHARING_VIOLATION && publish_error != ERROR_LOCK_VIOLATION
-                    && publish_error != ERROR_ACCESS_DENIED) break;
-                Sleep(10);
-            }
-            if (!published) throw std::runtime_error("Could not atomically publish live frame file (Win32 "
-                + std::to_string(publish_error) + ").");
+            PublishLiveFrame(live_raw_path, current_frame);
+        }
+        if (!live_frames_dir.empty()) {
+            const auto frame_path = live_frames_dir / ("frame-" + std::to_string(captured_frame_count) + ".y16");
+            PublishLiveFrame(frame_path, current_frame);
         }
         if (captured_frame_count == 1 && !ready_file.empty()) {
             if (!ready_file.parent_path().empty()) std::filesystem::create_directories(ready_file.parent_path());
@@ -656,7 +673,8 @@ int wmain(int argc, wchar_t** argv) {
         const auto frames = CaptureY16Frames(options.frame_count, options.requested_fps,
                                              options.width, options.height, timestamps, utc_epoch_us,
                                              sample_flags, empty_sample_flags, null_sample_count,
-                                             options.live_raw_path, options.ready_file, options.stop_file,
+                                             options.live_raw_path, options.live_frames_dir,
+                                             options.ready_file, options.stop_file,
                                              options.device_id, options.live_only, captured_frame_count);
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         if (options.live_only) {
