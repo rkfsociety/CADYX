@@ -220,19 +220,32 @@ events.pointerup();
 animationFrames.shift()(animationTime);
 assert.ok(viewer.getCamera().orientation.every((value, index) => Math.abs(value - initial.orientation[index]) < 1e-12),
   "Reverse drag restores the full camera orientation");
+const dragOrbit = (startX, startY) => {
+  viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
+  events.pointerdown({ button: 0, clientX: startX, clientY: startY, pointerId: 1 });
+  events.pointermove({ clientX: startX + 45, clientY: startY + 25 });
+  events.pointerup();
+  while (animationFrames.length) animationFrames.shift()(animationTime);
+  return viewer.getCamera().orientation;
+};
+const orbitFromUpperLeft = dragOrbit(60, 60);
+const orbitFromLowerRight = dragOrbit(540, 340);
+assert.ok(orbitFromUpperLeft.every((value, index) => Math.abs(value - orbitFromLowerRight[index]) < 1e-12),
+  "Equal pointer deltas orbit around the model center regardless of where dragging starts");
 viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
-events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 1 });
-for (let y = 210; y <= 400; y += 10) events.pointermove({ clientX: 300, clientY: y });
+const halfTurnDrag = Math.PI / 0.01;
+events.pointerdown({ button: 0, clientX: 300, clientY: 210, pointerId: 1 });
+events.pointermove({ clientX: 300, clientY: 210 + halfTurnDrag });
 events.pointerup();
 animationFrames.shift()(animationTime);
 assert.ok(viewer.getCamera().orientation[8] < -0.999,
-  "Trackball drag passes through the former pitch limit and turns the camera upside down");
-events.pointerdown({ button: 0, clientX: 300, clientY: 400, pointerId: 1 });
-for (let y = 410; y <= 600; y += 10) events.pointermove({ clientX: 300, clientY: y });
+  "A vertical orbit can turn the camera upside down without a pitch clamp");
+events.pointerdown({ button: 0, clientX: 300, clientY: 210 + halfTurnDrag, pointerId: 1 });
+events.pointermove({ clientX: 300, clientY: 210 + halfTurnDrag * 2 });
 events.pointerup();
 animationFrames.shift()(animationTime);
 assert.ok(viewer.getCamera().orientation.every((value, index) => Math.abs(value - [1, 0, 0, 0, 1, 0, 0, 0, 1][index]) < 1e-10),
-  "A continued drag can complete a full camera revolution");
+  "Two half-turn orbit drags can complete a full camera revolution");
 events.wheel({ deltaY: -100, preventDefault() {} });
 animationFrames.shift()(animationTime);
 const zoomed = viewer.getCamera();
