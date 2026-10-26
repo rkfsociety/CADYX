@@ -278,7 +278,7 @@ their respective human/agent edit leases. Results below appear inside
 - `add_sketch_constraint`: `sketch_id`, `kind`, ordered `references`, and `value`
   for distance/radius. Returns `constraint_id`.
 - `update_sketch_elements`: non-empty `updates` list of
-  `{object_id, changes}`. Points accept x/y, circles accept radius. One update per
+  `{object_id, changes}`. Points accept x/y, full circles accept radius, and circular arcs accept radius or sweep_radians. Arc updates must leave center, endpoints, radius and signed sweep consistent. One update per
   id; changes cannot modify ownership or references. The complete batch is checked
   together so constrained points can move in one atomic command.
   Returns `object_ids`.

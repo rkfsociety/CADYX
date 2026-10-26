@@ -541,8 +541,11 @@ def _handle_update_sketch_elements(
         fields = {"point": {"x", "y"}, "circle": {"radius"}}
         if item is None or item["type"] not in fields:
             raise NotFoundError("Editable sketch element was not found.")
+        allowed_changes = fields[item["type"]]
+        if item["type"] == "circle" and "sweep_radians" in item:
+            allowed_changes = allowed_changes | {"sweep_radians"}
         changes = update.get("changes")
-        if not isinstance(changes, dict) or not changes or not changes.keys() <= fields[item["type"]]:
+        if not isinstance(changes, dict) or not changes or not changes.keys() <= allowed_changes:
             raise ValidationError("Unsupported sketch element changes.")
         item.update({key: _finite_number(value, f"Sketch {key}") for key, value in changes.items()})
     changed_sketches = {

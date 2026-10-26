@@ -28,7 +28,7 @@ collections; project identity, objects, history and revision are preserved.
 records. Supported metadata units are `mm`, `deg`, and `unitless`; expressions
 operate on the stored numeric values. Bindings are `{object_id, path,
 expression}` records that point to a numeric feature parameter, sketch offset,
-or supported numeric sketch-element property. A target may have one binding.
+or supported numeric sketch-element property. Circular-arc elements also support a `sweep_radians` binding; the saved sweep must remain consistent with the arc endpoints. A target may have one binding.
 
 Expressions accept named parameters, numeric literals, parentheses, unary
 signs, `+`, `-`, `*`, `/`, and `min()` with 2 to 8 numeric arguments. Evaluation

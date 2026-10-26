@@ -34,6 +34,7 @@ from .self_evolving import SelfEvolvingCapabilityEngine
 from .source_extension import SourceExtensionEngine
 from .workspace import ProjectWorkspace
 from .profile_segments import sketch_segment_profiles, sketch_segments
+from .sketch_workplanes import kernel_plane, place_geometry
 from .sketches import (closed_profile, closed_profiles, closed_spline_profile,
                        generated_gear_curve_profiles, open_path)
 
@@ -1204,41 +1205,68 @@ class CadyxCore:
                         and feature_geometry.get("centered", False) == parameters.get("centered", False)
                         and isinstance(feature_geometry.get("profile"), list))
 
+            def profile_geometry_matches(expected: dict[str, Any]) -> bool:
+                if expected == feature_geometry:
+                    return True
+                if (expected.get("kind") != "imported_brep"
+                        or feature_geometry.get("kind") != "imported_brep"):
+                    return False
+                comparison = self.kernel.compare_preserved_volume(expected, feature_geometry)
+                lost = comparison.get("lost_volume")
+                added = comparison.get("added_volume")
+                resolution = comparison.get("estimated_volume_resolution")
+                if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+                       for value in (lost, added, resolution)):
+                    raise ValidationError("OCCT returned invalid profile-geometry comparison metrics.")
+                return lost <= resolution and added <= resolution
+
             spline_profile = closed_spline_profile(document.objects, source_id)
             if spline_profile is not None:
                 plane, profile, curve_points = spline_profile
                 if operation == "extrude_sketch":
+                    sketch = by_id.get(source_id)
+                    if sketch is None:
+                        raise ValidationError("Extrusion source sketch is missing.")
                     spline_expected = self.kernel.create_extruded_profile(
-                        profile, plane=plane, depth=parameters["depth"],
+                        profile, plane=kernel_plane(sketch, plane), depth=parameters["depth"],
                         centered=parameters.get("centered", False), curve_points=curve_points,
                     )
+                    spline_expected = place_geometry(sketch, spline_expected, self.kernel)
+                    if profile_geometry_matches(spline_expected):
+                        continue
                 else:
                     spline_expected = self.kernel.create_revolved_profile(
                         profile, angle_degrees=parameters["angle_degrees"], curve_points=curve_points,
                     )
-                if spline_expected != feature_geometry:
-                    if accepts_legacy_gear_geometry(plane):
+                    if profile_geometry_matches(spline_expected):
                         continue
-                    raise ValidationError("Spline profile feature geometry is out of date with its source sketch or parameters.")
-                continue
+                if accepts_legacy_gear_geometry(plane):
+                    continue
+                raise ValidationError("Spline profile feature geometry is out of date with its source sketch or parameters.")
             if operation == "extrude_sketch":
                 plane, profiles = closed_profiles(document.objects, source_id)
+                sketch = by_id.get(source_id)
+                if sketch is None:
+                    raise ValidationError("Extrusion source sketch is missing.")
+                native_plane = kernel_plane(sketch, plane)
                 if len(profiles) > 1:
                     curve_profiles = generated_gear_curve_profiles(document.objects, source_id, profiles)
                     segment_profiles = sketch_segment_profiles(document.objects, source_id)
                     profiles_expected = self.kernel.create_extruded_profile_with_holes(
-                        profiles, plane=plane, depth=parameters["depth"],
+                        profiles, plane=native_plane, depth=parameters["depth"],
                         centered=parameters.get("centered", False),
                         curve_profiles=curve_profiles,
                         segment_profiles=segment_profiles,
                     )
-                    if profiles_expected != feature_geometry and segment_profiles is not None:
+                    profiles_expected = place_geometry(sketch, profiles_expected, self.kernel)
+                    if not profile_geometry_matches(profiles_expected) and segment_profiles is not None:
                         profiles_expected = self.kernel.create_extruded_profile_with_holes(
-                            profiles, plane=plane, depth=parameters["depth"],
+                            profiles, plane=native_plane, depth=parameters["depth"],
                             centered=parameters.get("centered", False),
                             curve_profiles=curve_profiles,
                         )
-                    if profiles_expected != feature_geometry:
+                        profiles_expected = place_geometry(sketch, profiles_expected, self.kernel)
+                    if not profile_geometry_matches(profiles_expected):
                         if accepts_legacy_gear_geometry(plane):
                             continue
                         raise ValidationError(
@@ -1247,6 +1275,17 @@ class CadyxCore:
                         )
                     continue
                 profile = profiles[0]
+                expected = self.kernel.create_extruded_profile(
+                    profile, plane=native_plane, depth=parameters["depth"],
+                    centered=parameters.get("centered", False),
+                    segments=sketch_segments(document.objects, source_id),
+                )
+                expected = place_geometry(sketch, expected, self.kernel)
+                if expected == feature_geometry:
+                    continue
+                if accepts_legacy_gear_geometry(plane):
+                    continue
+                raise ValidationError("Profile feature geometry is out of date with its source sketch or parameters.")
             else:
                 plane, profile = closed_profile(document.objects, source_id)
             expected_kind = "extruded_profile" if operation == "extrude_sketch" else "revolved_profile"

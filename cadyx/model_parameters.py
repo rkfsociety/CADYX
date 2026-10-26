@@ -101,8 +101,11 @@ def property_location(target: dict[str, Any], path: str) -> tuple[Any, str | int
         if parts not in (["x"], ["y"]):
             raise ValidationError("Point bindings can target only x or y.")
     elif kind == "circle":
-        if parts not in (["x"], ["y"], ["radius"]):
-            raise ValidationError("Circle bindings can target only x, y, or radius.")
+        allowed = {"x", "y", "radius"}
+        if "sweep_radians" in target:
+            allowed.add("sweep_radians")
+        if len(parts) != 1 or parts[0] not in allowed:
+            raise ValidationError("Circle bindings can target x, y, radius, or a circular arc sweep.")
     elif kind == "ellipse":
         if len(parts) != 1 or parts[0] not in {
             "center_x", "center_y", "major_radius", "minor_radius", "rotation_radians",
