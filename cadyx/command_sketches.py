@@ -579,18 +579,36 @@ def _handle_remove_sketch_object(
 ) -> dict[str, Any]:
     object_id = command.get("object_id")
     item = next((item for item in document.objects if item["id"] == object_id), None)
-    if item is None or item["type"] not in {"sketch", "point", "line", "circle", "spline", "constraint"}:
+    if item is None or item["type"] not in {"sketch", "point", "line", "circle", "ellipse", "spline", "constraint"}:
         raise NotFoundError("Sketch object was not found.")
-    if item["type"] == "sketch" and any(
-        feature.get("type") == "feature"
-        and (feature.get("source_sketch_id") == object_id
-             or object_id in feature.get("source_sketch_ids", []))
-        for feature in document.objects
-    ):
-        raise ValidationError("A sketch used by a solid feature cannot be removed.")
+    cascade = command.get("cascade", False)
+    if type(cascade) is not bool:
+        raise ValidationError("cascade must be a boolean.")
+    if item["type"] == "sketch":
+        if any(
+            feature.get("type") == "feature"
+            and (feature.get("source_sketch_id") == object_id
+                 or object_id in feature.get("source_sketch_ids", []))
+            for feature in document.objects
+        ):
+            raise ValidationError("A sketch used by a solid feature cannot be removed.")
+        owned_ids = {owned["id"] for owned in document.objects if owned.get("sketch_id") == object_id}
+        if owned_ids and not cascade:
+            raise ValidationError("Sketch contains elements; pass cascade=true to remove it with its geometry.")
+        removed_ids = owned_ids | {object_id}
+        document.objects[:] = [owned for owned in document.objects if owned["id"] not in removed_ids]
+        document.parameter_bindings[:] = [
+            binding for binding in document.parameter_bindings
+            if binding.get("object_id") not in removed_ids
+        ]
+        return {"object_id": object_id, "removed_count": len(removed_ids)}
+    if cascade:
+        raise ValidationError("cascade is only supported when removing a sketch.")
     document.objects.remove(item)
+    document.parameter_bindings[:] = [
+        binding for binding in document.parameter_bindings if binding.get("object_id") != object_id
+    ]
     return {"object_id": object_id}
-
 
 def _handle_set_sketch_workplane(
     self: Any, document: Document, command: dict[str, Any], *,
