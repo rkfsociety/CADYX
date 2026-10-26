@@ -37,6 +37,7 @@ from .profile_segments import sketch_segment_profiles, sketch_segments
 from .sketch_workplanes import kernel_plane, place_geometry
 from .sketches import (closed_profile, closed_profiles, closed_spline_profile,
                        generated_gear_curve_profiles, open_path)
+from .manufacturing_features import grouped_profile_feature_geometry
 
 
 class CadyxCore:
@@ -937,6 +938,15 @@ class CadyxCore:
                         or feature_geometry != body.get("geometry") or not isinstance(parameters, dict)):
                     raise ValidationError("Sketch manufacturing feature geometry or source references are invalid.")
                 plane, profiles = closed_profiles(document.objects, sketch_id)
+                if "profile_groups" in parameters:
+                    expected = grouped_profile_feature_geometry(
+                        self.kernel, source["geometry"], sketch, document.objects, profiles,
+                        parameters["profile_groups"], plane=plane, depth=parameters["depth"],
+                        centered=parameters["centered"], operation=item.get("operation"),
+                    )
+                    if expected != feature_geometry:
+                        raise ValidationError("Sketch manufacturing feature geometry is out of date with its grouped profiles.")
+                    continue
                 if len(profiles) == 1:
                     segments = sketch_segments(document.objects, sketch_id)
                     candidates = [segments, None] if segments is not None else [None]

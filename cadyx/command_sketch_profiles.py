@@ -326,6 +326,44 @@ def _handle_add_sketch_rectangle(
     return self._add_sketch_rectangle(document, command, progress=progress)
 
 
+def _handle_add_sketch_geometry_batch(
+    self: Any, document: Document, command: dict[str, Any], *,
+    progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
+) -> dict[str, Any]:
+    """Add common analytic profiles to one sketch in a single atomic command."""
+    sketch_id = command.get("sketch_id")
+    self._find_sketch(document, sketch_id)
+    elements = command.get("elements")
+    if not isinstance(elements, list) or not elements or len(elements) > 128:
+        raise ValidationError("elements must contain between 1 and 128 sketch profiles.")
+    results = []
+    for index, element in enumerate(elements):
+        if not isinstance(element, dict) or not isinstance(element.get("type"), str):
+            raise ValidationError(f"Sketch batch element {index} must have a type.")
+        kind = element["type"]
+        payload = {**element, "sketch_id": sketch_id}
+        if kind == "rectangle" and set(element) == {"type", "x", "y", "width", "height"}:
+            result = self._add_sketch_rectangle(document, payload, progress=progress)
+        elif kind == "circle" and set(element) == {"type", "x", "y", "radius"}:
+            result = self._add_sketch_circle(document, payload, progress=progress)
+        elif kind == "regular_polygon" and set(element) <= {
+                "type", "center_x", "center_y", "side_count", "radius", "rotation_degrees"} and {
+                "type", "center_x", "center_y", "side_count", "radius"} <= set(element):
+            result = self._add_sketch_polygon_tool(
+                document, {**payload, "radius_mode": "circumscribed"},
+                "add_sketch_regular_polygon", progress=progress,
+            )
+        elif kind == "polyline" and set(element) == {"type", "points", "closed"} and element["closed"] is True:
+            result = self._add_sketch_polyline(
+                document, {"sketch_id": sketch_id, "points": element["points"], "closed": True},
+                operation="add_sketch_geometry_batch", progress=progress,
+            )
+        else:
+            raise ValidationError(f"Unsupported or malformed sketch batch element at index {index}.")
+        results.append(result)
+    return {"sketch_id": sketch_id, "element_count": len(results), "elements": results}
+
+
 def _handle_add_sketch_rounded_rectangle(
     self: Any, document: Document, command: dict[str, Any], *,
     progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
@@ -377,6 +415,7 @@ def _handle_circle_tool(
 
 
 COMMAND_HANDLERS = {
+    "add_sketch_geometry_batch": _handle_add_sketch_geometry_batch,
     "add_sketch_involute_gear": _handle_add_sketch_involute_gear,
     "add_sketch_internal_involute_gear": _handle_add_sketch_internal_involute_gear,
     "add_sketch_rectangle": _handle_add_sketch_rectangle,

@@ -58,6 +58,34 @@ class ProfileFeatureTests(unittest.TestCase):
                           "end_id": point_ids[(index + 1) % len(point_ids)]})
         return sketch_id, point_ids
 
+    def test_grouped_pocket_applies_disjoint_contours_in_one_editable_feature(self) -> None:
+        base = self.command({"type": "create_box", "name": "Test block",
+                             "width": 10, "height": 10, "depth": 2})
+        sketch = self.command({"type": "create_sketch", "name": "Two bores", "plane": "XY",
+                               "section_normal_axis": "Z", "section_offset": 0})
+        self.command({"type": "add_sketch_geometry_batch", "sketch_id": sketch["sketch_id"], "elements": [
+            {"type": "circle", "x": 3, "y": 5, "radius": 1},
+            {"type": "circle", "x": 7, "y": 5, "radius": 1},
+        ]})
+        groups = [{"outer_index": 0, "inner_indices": []},
+                  {"outer_index": 1, "inner_indices": []}]
+        pocket = self.command({"type": "pocket_sketch", "body_id": base["body_id"],
+                               "sketch_id": sketch["sketch_id"], "depth": 2,
+                               "profile_groups": groups, "name": "Two through bores"})
+        self.assertAlmostEqual(pocket["geometry"]["volume"], 200 - 4 * math.pi, delta=1e-6)
+        document = self.core.inspect_project(self.project_id)["document"]
+        feature = next(item for item in document["objects"] if item.get("id") == pocket["feature_id"])
+        self.assertEqual(feature["parameters"]["profile_groups"], groups)
+        self.assertEqual(feature["operation"], "pocket_sketch")
+
+        self.command({"type": "set_parameter", "feature_id": pocket["feature_id"],
+                      "name": "depth", "value": 1})
+        rebuilt = self.core.inspect_project(self.project_id)["document"]
+        body = next(item for item in rebuilt["objects"] if item.get("id") == pocket["body_id"])
+        self.assertAlmostEqual(body["geometry"]["volume"], 200 - 2 * math.pi, delta=1e-6)
+        self.assertEqual(body["geometry"], next(
+            item["geometry"] for item in rebuilt["objects"] if item.get("id") == pocket["feature_id"]))
+
     def test_revolution_and_extrusion_make_editable_valid_breps(self) -> None:
         bowl_sketch, bowl_points = self.closed_sketch(
             "Сечение чаши", [(0, 0), (32, 0), (32, 80), (28, 80), (28, 5), (0, 5)],

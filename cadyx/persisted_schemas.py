@@ -36,13 +36,30 @@ def _validate_pad(item: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> Non
     parameters = item.get("parameters")
     if (source_body_id == item["body_id"] or by_id.get(source_body_id, {}).get("type") != "body"
             or not isinstance(parameters, dict)
-            or set(parameters) != {"sketch_id", "depth", "centered"}
+            or set(parameters) not in ({"sketch_id", "depth", "centered"},
+                                       {"sketch_id", "depth", "centered", "profile_groups"})
             or parameters.get("sketch_id") != source_sketch_id
             or isinstance(parameters.get("depth"), bool)
             or not isinstance(parameters.get("depth"), (int, float))
             or not math.isfinite(parameters["depth"]) or parameters["depth"] <= 0
             or type(parameters.get("centered")) is not bool):
         raise ValidationError("Pad feature source references or parameters are invalid.")
+    if "profile_groups" in parameters:
+        groups = parameters["profile_groups"]
+        if not isinstance(groups, list) or not groups:
+            raise ValidationError("Pad feature profile_groups are invalid.")
+        assigned = []
+        for group in groups:
+            if (not isinstance(group, dict) or set(group) != {"outer_index", "inner_indices"}
+                    or type(group.get("outer_index")) is not int or group["outer_index"] < 0
+                    or not isinstance(group.get("inner_indices"), list)
+                    or any(type(index) is not int or index < 0 for index in group["inner_indices"])
+                    or len(set(group["inner_indices"])) != len(group["inner_indices"])
+                    or group["outer_index"] in group["inner_indices"]):
+                raise ValidationError("Pad feature profile_groups are invalid.")
+            assigned.extend([group["outer_index"], *group["inner_indices"]])
+        if len(set(assigned)) != len(assigned):
+            raise ValidationError("Pad feature profile_groups must assign each contour once.")
 
 
 def _validate_sweep(item: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> None:

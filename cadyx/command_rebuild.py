@@ -13,6 +13,7 @@ from .sketch_workplanes import kernel_plane, place_geometry, refresh_face
 from .profile_segments import sketch_segment_profiles, sketch_segments
 from .sketches import (closed_profile, closed_profiles, closed_spline_profile,
                        generated_gear_curve_profiles, open_path)
+from .manufacturing_features import grouped_profile_feature_geometry
 
 
 class RebuildCommands:
@@ -35,6 +36,15 @@ class RebuildCommands:
             plane, profiles = closed_profiles(document.objects, source_sketch_id)
             depth = parameters["depth"]
             centered = parameters.get("centered", False)
+            if "profile_groups" in parameters:
+                source_body = document.find_object(feature.get("source_body_id"), "body")
+                if source_body is None:
+                    raise ValidationError("Manufacturing feature source body is missing.")
+                return grouped_profile_feature_geometry(
+                    self.kernel, source_body["geometry"], sketch, document.objects, profiles,
+                    parameters["profile_groups"], plane=plane, depth=depth,
+                    centered=centered, operation=operation,
+                )
             segment_profiles = sketch_segment_profiles(document.objects, source_sketch_id) if len(profiles) > 1 else None
             native_plane = kernel_plane(sketch, plane)
             tool = (self.kernel.create_extruded_profile(profiles[0], plane=native_plane, depth=depth, centered=centered,

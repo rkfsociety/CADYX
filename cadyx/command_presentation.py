@@ -13,6 +13,7 @@ _BUILTIN_ACTIVITY_ACTIONS = {
     "set_sketch_workplane": "Изменяет рабочую плоскость эскиза",
     "add_sketch_element": "Рисует элемент эскиза",
     "add_sketch_polyline": "Рисует ломаную",
+    "add_sketch_geometry_batch": "Строит набор профилей эскиза",
     "add_sketch_involute_gear": "Строит эвольвентный профиль",
     "add_sketch_internal_involute_gear": "Строит внутренний эвольвентный профиль",
     "add_sketch_rectangle": "Рисует прямоугольник",

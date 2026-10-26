@@ -18,7 +18,7 @@ from cadyx.errors import NotFoundError, ValidationError
 from cadyx.extensions import ExtensionRegistry
 from cadyx.kernel import PrimitiveKernelAdapter
 from cadyx.models import Document
-from cadyx.sketches import closed_profile
+from cadyx.sketches import closed_profile, closed_profiles
 
 
 class ProfileContext(command_sketch_profiles.SketchProfileCommands, command_sketches.SketchCommands):
@@ -94,6 +94,24 @@ class CommandFamilyTests(unittest.TestCase):
         context._rebuild_changed_features.assert_called_once_with(document, {sketch}, progress=progress)
         self.assertTrue(progress.called)
         self.assertEqual(progress.call_args.args[0]["phase"], "add_sketch_rectangle")
+        document.validate()
+
+    def test_sketch_geometry_batch_adds_common_profiles_to_one_sketch(self):
+        context = ProfileContext()
+        context._rebuild_changed_features = Mock()
+        document, sketch = sketch_document(context)
+        result = call(command_sketch_profiles, context, document, {
+            "type": "add_sketch_geometry_batch", "sketch_id": sketch, "elements": [
+                {"type": "rectangle", "x": 0, "y": 0, "width": 10, "height": 8},
+                {"type": "circle", "x": 3, "y": 4, "radius": 1},
+                {"type": "regular_polygon", "center_x": 7, "center_y": 4,
+                 "side_count": 6, "radius": 2},
+            ],
+        })
+        self.assertEqual(result["element_count"], 3)
+        self.assertEqual(len(closed_profiles(document.objects, sketch)[1]), 3)
+        self.assertEqual(document.find_object(sketch, "sketch")["id"], sketch)
+        context._rebuild_changed_features.assert_called()
         document.validate()
 
     def test_curve_alias_keeps_bspline_mode_and_inputs(self):

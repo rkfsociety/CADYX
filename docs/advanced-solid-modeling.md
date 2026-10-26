@@ -47,6 +47,8 @@ This makes dimensions such as hole diameter, coaxiality cues, face orientation, 
 
 ## Constructive features
 
+`add_sketch_geometry_batch` adds 1–128 rectangles, circles, circumscribed regular polygons, or closed polylines to one editable sketch in one atomic command. A regular-polygon `radius` is its inradius (apothem); `rotation_degrees` defaults to zero. The command is useful for keeping a design's construction in one sketch without issuing a command for each contour.
+
 - `hole` / `boss`: arbitrary-axis cylindrical subtractive/additive features.
 - `through_hole`: arbitrary-axis cylindrical hole with a cutter automatically extended across the current body bounds.
 - `counterbore_hole`: a through or blind main bore plus a larger coaxial cylindrical recess.
@@ -59,6 +61,8 @@ This makes dimensions such as hole diameter, coaxiality cues, face orientation, 
 - `linear_pattern_body` / `circular_pattern_body`: transform and fuse repeated instances; the result must remain one valid solid.
 
 The specialized hole commands keep the existing simple `hole` command backward compatible. Through cutters are resolved from the inspected body bounds at execution time and the resolved cutter origin/depth are retained in feature parameters for auditability. Counterbore/countersink commands reject no-op cuts and require the result to remain one closed solid.
+
+`pad_sketch_to_body` and `pocket_sketch` also accept optional `profile_groups` for sketches with several disjoint regions. Each group has the form `{"outer_index": 0, "inner_indices": [1, 2]}`; indices refer to the sketch's closed-profile order. Every contour must occur exactly once. The outer contour defines one additive or cutting region, and its inner contours remain holes in that region. Separate groups are applied by the same feature, and the rebuilt result must remain one connected solid. Omitting `profile_groups` preserves the legacy single-outer-profile behavior.
 
 ## Arbitrary work-plane authoring
 
