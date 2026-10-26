@@ -49,8 +49,25 @@ async function main() {
   vm.runInContext(`${groupsSource}\nglobalThis.groups = modelGroups;`, sandbox);
   assert.equal(sandbox.groups()[0].body.id, 'stl', 'imported STL must appear in the model tree');
   assert.match(treeSource, /disclosure\.innerHTML=`<span class="cad-tree-chevron">\$\{expanded\?'−':'\+'\}<\/span>`/, 'expanded sketch rows must show minus and collapsed rows plus');
-  assert.match(selectionSource, /\['fillet_edges','variable_fillet_edges','chamfer_edges','hole'\]\.includes\(selected\.operation\)/,
-    'Selecting a hole feature must highlight its feature faces, not the whole body');
-  console.log('Panel state: slug selection, stale responses, HTTP failures and STL visibility passed.');
+  const feature = { id: 'last-feature', type: 'feature', body_id: 'result-body', operation: 'fillet_edges' };
+  const selectionCalls = [];
+  const selectionSandbox = {
+    state: { byId: new Map([[feature.id, feature]]), objects: [feature] },
+    modelGroups: () => [{ body: { id: 'result-body' }, features: [feature] }],
+    modelViewer: {
+      setSelectedFeature: id => selectionCalls.push(['feature', id]),
+      setSelectedBody: id => selectionCalls.push(['body', id]),
+    },
+    bodyFor: () => ({ id: 'result-body' }), renderTree() {}, renderProps() {}, syncOverlay() {},
+    detail: { dataset: {} }, list: null, CSS: { escape: value => value },
+  };
+  vm.createContext(selectionSandbox);
+  vm.runInContext(`${selectionSource}\nglobalThis.select = select;`, selectionSandbox);
+  selectionSandbox.select(feature.id);
+  assert.deepEqual(selectionCalls, [['feature', feature.id]],
+    'Selecting the last feature must highlight its own feature ranges instead of the whole result body');
+  assert.match(selectionSource, /if\(selected\.type==='feature'\)modelViewer\?\.setSelectedFeature\?\.\(selected\.id\)/,
+    'Every feature selection must be routed through feature-level viewport highlighting');
+  console.log('Panel state: project switching, STL visibility and feature-level selection passed.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
