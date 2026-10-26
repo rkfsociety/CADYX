@@ -220,6 +220,8 @@ let selectedProjectFileFolderName = null;
 let projectFileFolders = [];
 let selectedFolderFileGeometry = null;
 let projectModelFileImportInFlight = false;
+let projectFileRenamePending = null;
+let projectFileRenameInFlight = false;
 let folderListRequest = 0;
 let previewRequest = 0;
 
@@ -2779,7 +2781,7 @@ folderFileList.addEventListener("click", (event) => {
   const renameButton = event.target.closest("button[data-rename-file-name]");
   if (renameButton) {
     const file = folderFiles.find((item) => item.name === renameButton.dataset.renameFileName);
-    if (file && !renameButton.disabled) renameProjectFile(file);
+    if (file && !renameButton.disabled) openProjectFileRenameDialog(file);
     return;
   }
   const button = event.target.closest("button[data-file-name]");
@@ -2811,12 +2813,20 @@ folderImportModelFileButton.addEventListener("click", () => {
 });
 
 async function renameProjectFile(file) {
-  const projectId = selectedProjectId;
-  if (!file || !canOpenFilesView(projectId)) return;
-  const newName = window.prompt("Новое имя файла", file.name);
-  if (newName === null || newName === file.name) return;
-  const renameButtons = [...folderFileList.querySelectorAll("button.folder-file-rename")];
-  renameButtons.forEach((button) => { button.disabled = true; });
+  const pending = projectFileRenamePending;
+  const projectId = pending?.projectId;
+  const folderName = pending?.folderName;
+  const newName = $("#rename-project-file-name").value;
+  if (!file || !pending || projectId !== selectedProjectId || !canOpenFilesView(projectId)) return;
+  if (newName === file.name) {
+    projectFileRenamePending = null;
+    $("#rename-project-file-dialog").close();
+    return;
+  }
+  projectFileRenameInFlight = true;
+  setProjectFileRenameDialogBusy(true);
+  const errorMessage = $("#rename-project-file-error");
+  errorMessage.hidden = true;
   let renamed = false;
   try {
     await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/files/rename`, {
@@ -2824,22 +2834,78 @@ async function renameProjectFile(file) {
       body: JSON.stringify({
         filename: file.name,
         new_name: newName,
-        ...(selectedProjectFileFolderName ? { folder_name: selectedProjectFileFolderName } : {}),
+        ...(folderName ? { folder_name: folderName } : {}),
       }),
     });
     renamed = true;
+    projectFileRenamePending = null;
+    $("#rename-project-file-dialog").close();
     selectedFolderFileName = newName;
     selectedProjectScanRunId = null;
-    await loadProjectFiles(projectId, selectedProjectFileFolderName);
+    await loadProjectFiles(projectId, folderName);
     notify(`Файл переименован: ${newName}.`);
   } catch (error) {
-    notify(renamed
-      ? `Файл переименован, но список не удалось обновить: ${error.message}`
-      : `Не удалось переименовать файл: ${error.message}`, true);
+    if (renamed) {
+      notify(`Файл переименован, но список не удалось обновить: ${error.message}`, true);
+    } else {
+      errorMessage.textContent = error.message;
+      errorMessage.hidden = false;
+    }
   } finally {
+    projectFileRenameInFlight = false;
+    setProjectFileRenameDialogBusy(false);
     updateProjectFileRenameButtons();
   }
 }
+
+function openProjectFileRenameDialog(file) {
+  const projectId = selectedProjectId;
+  if (!file || !projectId || !canOpenFilesView(projectId)) return;
+  projectFileRenamePending = {
+    projectId,
+    filename: file.name,
+    folderName: selectedProjectFileFolderName,
+  };
+  const input = $("#rename-project-file-name");
+  input.value = file.name;
+  const error = $("#rename-project-file-error");
+  error.textContent = "";
+  error.hidden = true;
+  $("#rename-project-file-dialog").showModal();
+  input.focus();
+  input.select();
+}
+
+function setProjectFileRenameDialogBusy(busy) {
+  $("#rename-project-file-name").disabled = busy;
+  $("#cancel-rename-project-file").disabled = busy;
+  $("#submit-rename-project-file").disabled = busy;
+  folderFileList.querySelectorAll("button.folder-file-rename").forEach((button) => {
+    button.disabled = busy || !canOpenFilesView(selectedProjectId);
+  });
+}
+
+$("#cancel-rename-project-file").addEventListener("click", () => {
+  if (projectFileRenameInFlight) return;
+  projectFileRenamePending = null;
+  $("#rename-project-file-dialog").close();
+});
+$("#rename-project-file-dialog").addEventListener("cancel", (event) => {
+  if (projectFileRenameInFlight) {
+    event.preventDefault();
+    return;
+  }
+  projectFileRenamePending = null;
+});
+$("#rename-project-file-dialog").addEventListener("close", () => {
+  if (!projectFileRenameInFlight) projectFileRenamePending = null;
+});
+$("#rename-project-file-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const pending = projectFileRenamePending;
+  const file = folderFiles.find((item) => item.name === pending?.filename);
+  if (file) renameProjectFile(file);
+});
 
 const stream = new EventSource("/api/v1/events");
 // A gap means the bounded replay was incomplete; fetch authoritative state.

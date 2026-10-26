@@ -189,6 +189,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .project-group-dialog h2 { margin: 0; font: 12px var(--mono); letter-spacing: .05em; }
 .project-group-dialog label { color: var(--muted); font: 10px var(--mono); }
 .project-group-dialog input { min-width: 0; min-height: 34px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 3px; background: #0b1114; color: var(--text); font: 12px var(--mono); }
+.project-group-dialog [role="alert"] { margin: 0; color: var(--danger); font-size: 10px; }
 .project-group-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .projects-empty { align-self: center; justify-self: center; margin: 0; padding: 24px; color: var(--muted); font: 11px var(--mono); text-align: center; }
 .project-detail[data-controls-locked="true"] .project-main { pointer-events: none; }

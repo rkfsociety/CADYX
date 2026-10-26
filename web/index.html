@@ -775,6 +775,16 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
       </main>
     </div>
 
+    <dialog id="rename-project-file-dialog" class="project-group-dialog" aria-labelledby="rename-project-file-title">
+      <form id="rename-project-file-form">
+        <h2 id="rename-project-file-title">ПЕРЕИМЕНОВАТЬ ФАЙЛ</h2>
+        <label for="rename-project-file-name">Новое имя файла</label>
+        <input id="rename-project-file-name" name="new_name" type="text" maxlength="255" required autocomplete="off">
+        <p id="rename-project-file-error" role="alert" hidden></p>
+        <div class="project-group-dialog-actions"><button id="cancel-rename-project-file" class="button" type="button">ОТМЕНА</button><button id="submit-rename-project-file" class="button" type="submit">ПЕРЕИМЕНОВАТЬ</button></div>
+      </form>
+    </dialog>
+
     <dialog id="project-group-dialog" class="project-group-dialog" aria-labelledby="project-group-dialog-title"><form id="project-group-form"><h2 id="project-group-dialog-title">НОВАЯ ПАПКА ПРОЕКТОВ</h2><label for="project-group-name">Название папки</label><input id="project-group-name" name="name" type="text" maxlength="80" required autocomplete="off"><div class="project-group-dialog-actions"><button id="cancel-project-group" class="button" type="button">ОТМЕНА</button><button class="button" type="submit">СОЗДАТЬ</button></div></form></dialog>
 
     <dialog id="create-project-dialog" class="project-group-dialog" aria-labelledby="create-project-title">
