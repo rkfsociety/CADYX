@@ -273,6 +273,42 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status, 201)
         self.assertEqual(uploaded["file"]["name"], "notes.txt")
 
+    def test_project_file_rename_preserves_data_and_refuses_collisions(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Rename project files"})
+        project_id = created["project"]["id"]
+        status, _ = self.upload(f"/api/v1/agent/projects/{project_id}/files", "old name.txt", b"keep these bytes")
+        self.assertEqual(status, 201)
+        status, result = self.request(f"/api/v1/agent/projects/{project_id}/files/rename", {
+            "filename": "old name.txt", "new_name": "new name.txt",
+        })
+        self.assertEqual((status, result["renamed"], result["name"]), (200, True, "new name.txt"))
+        self.assertEqual(self.core.workspace.resolve_project_file(project_id, "new name.txt").read_bytes(), b"keep these bytes")
+        self.assertFalse((self.core.workspace._project_dir(project_id) / "old name.txt").exists())
+
+        status, _ = self.upload(f"/api/v1/agent/projects/{project_id}/files", "taken.txt", b"keep target")
+        self.assertEqual(status, 201)
+        status, error = self.request(f"/api/v1/agent/projects/{project_id}/files/rename", {
+            "filename": "new name.txt", "new_name": "taken.txt",
+        })
+        self.assertEqual((status, error["error"]), (409, "ARTIFACT_CONFLICT"))
+        self.assertEqual(self.core.workspace.resolve_project_file(project_id, "taken.txt").read_bytes(), b"keep target")
+
+        folder = self.core.workspace._project_dir(project_id) / "references"
+        folder.mkdir()
+        (folder / "old.stp").write_bytes(b"nested reference")
+        status, nested = self.request(f"/api/v1/agent/projects/{project_id}/files/rename", {
+            "filename": "old.stp", "new_name": "new.stp", "folder_name": "references",
+        })
+        self.assertEqual((status, nested["name"]), (200, "new.stp"))
+        self.assertEqual((folder / "new.stp").read_bytes(), b"nested reference")
+
+        lease = self.core.acquire_lease(project_id, "agent", "rename-test")
+        status, error = self.request(f"/api/v1/agent/projects/{project_id}/files/rename", {
+            "filename": "new.stp", "new_name": "busy.stp", "folder_name": "references",
+        })
+        self.assertEqual((status, error["error"]), (409, "PROJECT_BUSY"))
+        self.core.release_lease(project_id, lease["lease_id"])
+
     def test_agent_scan_360_routes_require_free_project_and_report_capture_state(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "360 capture"})
         project_id = created["project"]["id"]

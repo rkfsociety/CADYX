@@ -62,6 +62,7 @@ const projectFileUploadButton = $("#project-file-upload");
 const folderPreviewCanvas = $("#ply-preview-canvas");
 const folderPreviewPlaceholder = $("#folder-preview-placeholder");
 const folderImportModelFileButton = $("#folder-import-model-file");
+const folderRenameFileButton = $("#folder-rename-file");
 const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
 const modelViewer = window.CadyxViewport.createViewer($("#model-preview"), {
   showViewCube: true, wireframe: true, onRender: queueViewportSnapshot,
@@ -410,6 +411,7 @@ function updateWorkspaceControls() {
   });
   projectFileUploadButton.disabled = !canOpenFilesView() || primaryGrid.dataset.view !== "files"
     || Boolean(selectedProjectFileFolderName || selectedProjectScanRunId);
+  updateProjectFileRenameButton();
   restorePendingWorkspaceView();
   if (!available && primaryGrid.dataset.view === "files") {
     setWorkspaceNavigation("overview");
@@ -1624,6 +1626,7 @@ function renderFolderFiles() {
       .find((button) => button.dataset.fileName === focusedFileName)
       ?.focus({ preventScroll: true });
   }
+  updateProjectFileRenameButton();
 }
 
 function updateFolderInspector(file = folderFiles.find((item) => item.name === selectedFolderFileName) || null) {
@@ -1668,6 +1671,13 @@ function updateProjectModelFileImportButton() {
       : !canOpenFilesView(selectedProjectId) ? "Дождитесь освобождения проекта."
       : "Исходный файл сохранится; импорт появится в дереве модели и истории.";
   }
+}
+
+function updateProjectFileRenameButton() {
+  const file = folderFiles.find((item) => item.name === selectedFolderFileName) || null;
+  const available = Boolean(file && selectedProjectId && primaryGrid.dataset.view === "files" && !getSelectedFolder());
+  folderRenameFileButton.hidden = !available;
+  folderRenameFileButton.disabled = !available || !canOpenFilesView(selectedProjectId);
 }
 
 async function importSelectedProjectModelFile() {
@@ -2767,6 +2777,37 @@ folderFileList.addEventListener("keydown", (event) => {
 
 folderImportModelFileButton.addEventListener("click", () => {
   importSelectedProjectModelFile();
+});
+
+folderRenameFileButton.addEventListener("click", async () => {
+  const projectId = selectedProjectId;
+  const file = folderFiles.find((item) => item.name === selectedFolderFileName) || null;
+  if (!file || folderRenameFileButton.disabled || !projectId) return;
+  const newName = window.prompt("Новое имя файла", file.name);
+  if (newName === null || newName === file.name) return;
+  folderRenameFileButton.disabled = true;
+  let renamed = false;
+  try {
+    await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/files/rename`, {
+      method: "POST",
+      body: JSON.stringify({
+        filename: file.name,
+        new_name: newName,
+        ...(selectedProjectFileFolderName ? { folder_name: selectedProjectFileFolderName } : {}),
+      }),
+    });
+    renamed = true;
+    selectedFolderFileName = newName;
+    selectedProjectScanRunId = null;
+    await loadProjectFiles(projectId, selectedProjectFileFolderName);
+    notify(`Файл переименован: ${newName}.`);
+  } catch (error) {
+    notify(renamed
+      ? `Файл переименован, но список не удалось обновить: ${error.message}`
+      : `Не удалось переименовать файл: ${error.message}`, true);
+  } finally {
+    updateProjectFileRenameButton();
+  }
 });
 
 const stream = new EventSource("/api/v1/events");

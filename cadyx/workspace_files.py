@@ -205,6 +205,52 @@ class WorkspaceArtifactStore:
             "removed_bytes": sum(sizes),
         }
 
+    def rename_project_file(
+        self, directory: Path, file_name: str, new_name: str, folder_name: str | None = None,
+    ) -> dict[str, Any]:
+        if (not isinstance(new_name, str) or not _is_single_path_segment(new_name)
+                or new_name in {"project.json", ".cadyx-project-id"}
+                or new_name.startswith((".cadyx-", ".cadyx-tmp-"))):
+            raise ValidationError("A safe direct project filename is required.")
+        target_directory = self._project_subfolder(directory, folder_name) if folder_name is not None else directory
+        source = (self.resolve_project_subfolder_file(directory, folder_name, file_name)
+                  if folder_name is not None else self.resolve_project_file(directory, file_name))
+        size = source.stat().st_size
+        if new_name == file_name:
+            return {"old_name": file_name, "name": new_name, "size": size, "renamed": False}
+
+        destination = target_directory / new_name
+        if destination.exists() or destination.is_symlink():
+            same_file = False
+            if new_name.casefold() == file_name.casefold() and not destination.is_symlink():
+                try:
+                    same_file = os.path.samefile(source, destination)
+                except OSError:
+                    same_file = False
+            if not same_file:
+                raise ConflictError(
+                    "A file with this name already exists in the project; renaming never overwrites files.",
+                    code="ARTIFACT_CONFLICT",
+                )
+        try:
+            if new_name.casefold() == file_name.casefold():
+                source.rename(destination)
+            else:
+                os.link(source, destination)
+                try:
+                    source.unlink()
+                except OSError:
+                    destination.unlink(missing_ok=True)
+                    raise
+        except FileExistsError as exc:
+            raise ConflictError(
+                "A file with this name already exists in the project; renaming never overwrites files.",
+                code="ARTIFACT_CONFLICT",
+            ) from exc
+        except OSError as exc:
+            raise ValidationError(f"Project file could not be renamed safely: {exc}.") from exc
+        return {"old_name": file_name, "name": new_name, "size": size, "renamed": True}
+
     def remove_project_files(self, directory: Path, file_names: list[str]) -> dict[str, Any]:
         if not isinstance(file_names, list) or not file_names or len(file_names) > 1000:
             raise ValidationError("Provide between 1 and 1000 project files to remove.")

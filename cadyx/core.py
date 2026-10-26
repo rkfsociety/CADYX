@@ -201,6 +201,11 @@ class CadyxCore:
     def remove_project_files(self, project_id: str, filenames: list[str]) -> dict[str, Any]:
         return self._lifecycle.remove_project_files(project_id, filenames)
 
+    def rename_project_file(
+        self, project_id: str, filename: str, new_name: str, folder_name: str | None = None,
+    ) -> dict[str, Any]:
+        return self._lifecycle.rename_project_file(project_id, filename, new_name, folder_name)
+
     def move_project_files_to_subfolder(
         self, project_id: str, filenames: list[str], folder_name: str,
     ) -> dict[str, Any]:

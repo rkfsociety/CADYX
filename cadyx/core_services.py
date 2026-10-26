@@ -270,6 +270,38 @@ class ProjectLifecycleService(_CoreService):
                                     code="FILE_IN_USE")
             return self.workspace.remove_project_files(project_id, filenames)
 
+    def rename_project_file(
+        self, project_id: str, filename: str, new_name: str, folder_name: str | None = None,
+    ) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            self._require_project_policy(
+                project_id, "file_management",
+                "Project files can only be renamed in a free project with no running operation.",
+            )
+            project = self.workspace.load(project_id, include_history=False)
+            document = Document.from_validated_dict(project["document"])
+            for item in document.objects:
+                if item.get("type") != "feature":
+                    continue
+                source = item.get("source")
+                if not isinstance(source, dict):
+                    continue
+                references = [source.get(key) for key in ("file", "project_file")]
+                if folder_name is None:
+                    in_use = (source.get("project_folder") is None and source.get("folder") is None
+                              and filename in references)
+                else:
+                    in_use = any(
+                        isinstance(value, str) and Path(value.replace("\\", "/")).name == filename
+                        for value in references
+                    ) and (source.get("project_folder") == folder_name or source.get("folder") == folder_name)
+                if in_use:
+                    raise ConflictError(
+                        "A project file is still used by a model feature and cannot be renamed.",
+                        code="FILE_IN_USE",
+                    )
+            return self.workspace.rename_project_file(project_id, filename, new_name, folder_name)
+
     def move_project_files_to_subfolder(
         self, project_id: str, filenames: list[str], folder_name: str,
     ) -> dict[str, Any]:

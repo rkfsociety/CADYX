@@ -343,6 +343,13 @@ class ProjectWorkspace:
             self._project_dir(project_id), folder_name, file_names,
         )
 
+    def rename_project_file(
+        self, project_id: str, file_name: str, new_name: str, folder_name: str | None = None,
+    ) -> dict[str, Any]:
+        return self._artifacts.rename_project_file(
+            self._project_dir(project_id), file_name, new_name, folder_name,
+        )
+
     def move_project_files_to_subfolder(
         self, project_id: str, file_names: builtins.list[str], folder_name: str,
     ) -> dict[str, Any]:
