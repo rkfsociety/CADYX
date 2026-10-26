@@ -45,7 +45,12 @@ class RenderingTests(unittest.TestCase):
 
     def test_hole_feature_exposes_its_cylindrical_face_for_selection(self):
         base = self.command({"type": "create_box", "width": 20, "height": 20, "depth": 10})["body_id"]
-        first_hole = self.command({"type": "hole", "body_id": base, "origin": [5, 5, 10],
+        document = self.core.workspace.load(self.project)["document"]
+        base_body = next(item for item in document["objects"] if item["id"] == base)
+        edge_index = self.core.kernel.topology(base_body["geometry"])["edges"][0]["index"]
+        fillet = self.command({"type": "fillet_edges", "body_id": base,
+                               "edge_indices": [edge_index], "radius": 1})
+        first_hole = self.command({"type": "hole", "body_id": fillet["body_id"], "origin": [5, 5, 10],
                                    "axis": [0, 0, -1], "diameter": 4, "depth": 6})
         second_hole = self.command({"type": "hole", "body_id": first_hole["body_id"], "origin": [15, 15, 10],
                                     "axis": [0, 0, -1], "diameter": 4, "depth": 6})

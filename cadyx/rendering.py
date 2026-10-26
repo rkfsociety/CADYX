@@ -125,14 +125,15 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
             if source and source.get("geometry"):
                 if feature["operation"] == "fillet_edges":
                     derived = kernel.create_fillet(source["geometry"],
-                        edge_indices=parameters.get("edge_indices", []), radius=parameters.get("radius"))
+                        edge_indices=feature.get("edge_indices", parameters.get("edge_indices", [])),
+                        radius=parameters.get("radius"))
                 else:
                     from .advanced_features import _advanced_native
                     operation, values = (4, [parameters.get("start_radius"), parameters.get("end_radius")]) \
                         if feature["operation"] == "variable_fillet_edges" \
                         else (2, [parameters.get("distance")])
                     derived = _advanced_native(source["geometry"], operation, values,
-                                               parameters.get("edge_indices", []))
+                                               feature.get("edge_indices", parameters.get("edge_indices", [])))
                 face_ids = kernel.tessellate(derived).get("selected_face_indices", [])
         result = {index for index in face_ids or [] if type(index) is int and index >= 0}
         if feature_id:
