@@ -610,6 +610,48 @@ def _handle_remove_sketch_object(
     ]
     return {"object_id": object_id}
 
+
+def _handle_remove_sketches(
+    self: Any, document: Document, command: dict[str, Any], *,
+    progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
+) -> dict[str, Any]:
+    sketch_ids = command.get("sketch_ids")
+    if (not isinstance(sketch_ids, list) or not sketch_ids
+            or any(not isinstance(value, str) or not value for value in sketch_ids)
+            or len(set(sketch_ids)) != len(sketch_ids)):
+        raise ValidationError("sketch_ids must be a non-empty list of unique sketch IDs.")
+    by_id = {item["id"]: item for item in document.objects}
+    missing = [value for value in sketch_ids if value not in by_id]
+    if missing:
+        raise NotFoundError(f"Sketches to remove were not found: {', '.join(missing)}")
+    invalid = [value for value in sketch_ids if by_id[value].get("type") != "sketch"]
+    if invalid:
+        raise ValidationError("remove_sketches accepts sketch IDs only.")
+    selected = set(sketch_ids)
+    referenced = [
+        feature["id"] for feature in document.objects
+        if feature.get("type") == "feature"
+        and any(feature.get("source_sketch_id") == sketch_id
+                or sketch_id in feature.get("source_sketch_ids", [])
+                for sketch_id in selected)
+    ]
+    if referenced:
+        raise ValidationError("A sketch used by a solid feature cannot be removed.")
+    removed_ids = selected | {
+        item["id"] for item in document.objects if item.get("sketch_id") in selected
+    }
+    document.objects[:] = [item for item in document.objects if item["id"] not in removed_ids]
+    document.parameter_bindings[:] = [
+        binding for binding in document.parameter_bindings
+        if binding.get("object_id") not in removed_ids
+    ]
+    return {
+        "removed_sketch_ids": sorted(selected),
+        "removed_sketch_count": len(selected),
+        "removed_object_count": len(removed_ids),
+    }
+
+
 def _handle_set_sketch_workplane(
     self: Any, document: Document, command: dict[str, Any], *,
     progress: Callable[[dict[str, Any]], None] | None = None, project_id: str | None = None,
@@ -643,4 +685,5 @@ COMMAND_HANDLERS = {
     "replace_sketch_profile": _handle_replace_sketch_profile,
     "replace_sketch_path": _handle_replace_sketch_path,
     "remove_sketch_object": _handle_remove_sketch_object,
+    "remove_sketches": _handle_remove_sketches,
 }

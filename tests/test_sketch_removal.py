@@ -3,7 +3,9 @@ from __future__ import annotations
 import unittest
 from uuid import uuid4
 
-from cadyx.command_sketches import _handle_remove_sketch_object
+from cadyx.command_sketches import _handle_remove_sketch_object, _handle_remove_sketches
+from cadyx.base_commands import base_command_handlers
+from cadyx.capabilities import COMMAND_REGISTRY
 from cadyx.errors import ValidationError
 from cadyx.models import Document
 
@@ -68,6 +70,45 @@ class SketchRemovalTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             _handle_remove_sketch_object(None, document, {
                 "type": "remove_sketch_object", "object_id": sketch_id, "cascade": True,
+            })
+
+        self.assertEqual(document.objects, before)
+
+    def test_batch_command_is_discovered_and_registered(self):
+        self.assertIn("remove_sketches", base_command_handlers())
+        self.assertIn("remove_sketches", COMMAND_REGISTRY.handlers)
+
+    def test_batch_removes_multiple_unreferenced_sketches(self):
+        document, first_id = self._document()
+        second, second_id = self._document()
+        document.objects.extend(second.objects)
+        document.parameter_bindings.extend(second.parameter_bindings)
+        document.validate()
+
+        result = _handle_remove_sketches(None, document, {
+            "type": "remove_sketches", "sketch_ids": [first_id, second_id],
+        })
+
+        self.assertEqual(result["removed_sketch_count"], 2)
+        self.assertEqual(result["removed_object_count"], 12)
+        self.assertEqual(document.objects, [])
+        self.assertEqual(document.parameter_bindings, [])
+        document.validate()
+
+    def test_batch_rejects_all_sketches_if_any_is_feature_referenced(self):
+        document, first_id = self._document()
+        second, second_id = self._document()
+        document.objects.extend(second.objects)
+        document.parameter_bindings.extend(second.parameter_bindings)
+        document.objects.append({
+            "id": f"feature:{uuid4()}", "type": "feature",
+            "source_sketch_id": second_id,
+        })
+        before = list(document.objects)
+
+        with self.assertRaises(ValidationError):
+            _handle_remove_sketches(None, document, {
+                "type": "remove_sketches", "sketch_ids": [first_id, second_id],
             })
 
         self.assertEqual(document.objects, before)
