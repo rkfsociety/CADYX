@@ -1938,6 +1938,7 @@ async function refreshWorkspacePass() {
   if (selectionChanged) {
     workspaceAvailabilityConnected = false;
     filesAvailabilityConnected = false;
+    automaticUpdateSnapshot = null;
   }
   if (selectionChanged && selectedProjectId && !getSelectedFolder()) {
     const selected = getProject(selectedProjectId);
@@ -1945,7 +1946,10 @@ async function refreshWorkspacePass() {
     activitiesByProject.delete(selectedProjectId);
     activityRevisionsByProject.delete(selectedProjectId);
   }
-  if (selectionChanged) updateWorkspaceControls();
+  if (selectionChanged) {
+    updateWorkspaceControls();
+    checkAutomaticUpdates();
+  }
 
   const selectedFolder = getSelectedFolder();
   if (selectedFolder) showFolderDetail(selectedFolder);
@@ -1999,7 +2003,8 @@ function scheduleWorkspaceRefresh(delayMs = 60) {
 }
 
 async function checkAutomaticUpdates() {
-  if (document.visibilityState === "hidden" || automaticUpdateInFlight) return;
+  if (document.visibilityState === "hidden" || automaticUpdateInFlight
+      || (projectAddressPinned && !selectedProjectId)) return;
   automaticUpdateInFlight = true;
   let retryForCurrentSelection = false;
   try {
