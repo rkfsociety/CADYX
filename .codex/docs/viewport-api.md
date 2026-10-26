@@ -267,10 +267,11 @@ action names cannot be mistaken for work that is still running.
   highlight tint is depth-tested, so hidden faces are not drawn through the model.
   Pass `null` to clear the highlight.
 - `setSelectedFeature(featureId)` highlights only OCCT-generated faces associated
-  with the selected fillet or chamfer feature. `featureTriangleRanges` maps feature
-  IDs to triangle-index ranges. Consumed edge-feature faces can be supplied through
-  `overlayTriangleRanges`; the renderer depth-tests them against the visible mesh
-  and keeps them out of the normal shaded pass.
+  with the selected fillet, chamfer, or hole feature. Hole selection targets its
+  cylindrical wall face. `featureTriangleRanges` maps feature IDs to triangle-index
+  ranges. Consumed feature faces can be supplied through `overlayTriangleRanges`;
+  the renderer depth-tests them against the visible mesh and keeps them out of the
+  normal shaded pass.
 - `render()` redraws after resize/visibility changes.
 - `fit()` resets orientation and zoom to fit all scene bounds.
 - `getCamera()` returns `{orientation, zoom, projection: "orthographic"}`;

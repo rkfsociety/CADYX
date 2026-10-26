@@ -69,7 +69,47 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         if feature_id in feature_face_cache:
             return feature_face_cache[feature_id]
         face_ids = mesh.get("selected_face_indices")
-        if not face_ids and feature and feature.get("operation") in {
+        if not face_ids and feature and feature.get("operation") == "hole":
+            parameters = feature.get("parameters", {})
+            origin, axis, diameter = (parameters.get("origin"), parameters.get("axis"),
+                                      parameters.get("diameter"))
+            if (isinstance(origin, list) and len(origin) == 3
+                    and isinstance(axis, list) and len(axis) == 3
+                    and isinstance(diameter, (int, float)) and not isinstance(diameter, bool)
+                    and math.isfinite(float(diameter)) and diameter > 0
+                    and all(isinstance(value, (int, float)) and not isinstance(value, bool)
+                            and math.isfinite(float(value)) for value in (*origin, *axis))):
+                axis_length = math.sqrt(sum(float(value) ** 2 for value in axis))
+                if axis_length > 1e-12:
+                    unit_axis = [float(value) / axis_length for value in axis]
+                    radius = float(diameter) / 2.0
+                    tolerance = max(1e-7, radius * 1e-7)
+                    topology = kernel.topology(body["geometry"])
+                    face_ids = []
+                    for face in topology.get("faces", []):
+                        face_axis, face_origin = face.get("axis_direction"), face.get("axis_origin")
+                        face_radius = face.get("radius")
+                        if (face.get("surface") != "cylinder" or not isinstance(face_axis, list)
+                                or len(face_axis) != 3 or not isinstance(face_origin, list)
+                                or len(face_origin) != 3 or not isinstance(face_radius, (int, float))
+                                or not math.isclose(float(face_radius), radius, rel_tol=1e-7, abs_tol=tolerance)):
+                            continue
+                        face_axis_length = math.sqrt(sum(float(value) ** 2 for value in face_axis))
+                        if face_axis_length <= 1e-12:
+                            continue
+                        face_unit_axis = [float(value) / face_axis_length for value in face_axis]
+                        alignment = abs(sum(a * b for a, b in zip(unit_axis, face_unit_axis, strict=True)))
+                        if alignment < 1.0 - 1e-8:
+                            continue
+                        delta = [float(a) - float(b) for a, b in zip(origin, face_origin, strict=True)]
+                        along = sum(value * direction for value, direction in zip(delta, face_unit_axis, strict=True))
+                        perpendicular = [value - along * direction
+                                         for value, direction in zip(delta, face_unit_axis, strict=True)]
+                        if math.sqrt(sum(value * value for value in perpendicular)) <= tolerance:
+                            face_index = face.get("index")
+                            if type(face_index) is int and face_index >= 0:
+                                face_ids.append(face_index)
+        elif not face_ids and feature and feature.get("operation") in {
             "fillet_edges", "variable_fillet_edges", "chamfer_edges",
         }:
             source = by_id.get(feature.get("source_body_id"))

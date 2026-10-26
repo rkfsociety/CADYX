@@ -43,6 +43,19 @@ class RenderingTests(unittest.TestCase):
             volume += (a[0]*(b[1]*c[2]-b[2]*c[1]) + a[1]*(b[2]*c[0]-b[0]*c[2]) + a[2]*(b[0]*c[1]-b[1]*c[0])) / 6
         self.assertAlmostEqual(volume, 30)
 
+    def test_hole_feature_exposes_its_cylindrical_face_for_selection(self):
+        base = self.command({"type": "create_box", "width": 20, "height": 20, "depth": 10})["body_id"]
+        hole = self.command({"type": "hole", "body_id": base, "origin": [10, 10, 10],
+                             "axis": [0, 0, -1], "diameter": 4, "depth": 6})
+
+        scene = self.core.render_project(self.project)
+
+        body = next(item for item in scene["objects"] if item["object_id"] == hole["body_id"])
+        ranges = [item for item in body.get("feature_face_ranges", [])
+                  if item["feature_id"] == hole["feature_id"]]
+        self.assertTrue(ranges, "The hole operation must expose its generated cylindrical face range.")
+        self.assertTrue(all(item["end"] > item["start"] for item in ranges))
+
     def test_project_point_cloud_is_present_in_server_scene_and_png(self):
         project_directory = self.core.workspace._project_dir(self.project)
         source = project_directory / "merged.ply"

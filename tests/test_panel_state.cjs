@@ -6,6 +6,7 @@ const source = fs.readFileSync(path.join(__dirname, '../web/app.js'), 'utf8');
 const refreshSource = source.slice(source.indexOf('    let semanticRequest ='), source.indexOf('    let timer;const schedule='));
 const groupsSource = source.slice(source.indexOf('    function modelGroups(){'), source.indexOf('    function renderTree(){'));
 const treeSource = source.slice(source.indexOf('    function renderTree(){'), source.indexOf('    function renderProps('));
+const selectionSource = source.slice(source.indexOf('    function select(id,reveal=false){'), source.indexOf('    function clearSelection(){'));
 
 async function main() {
   let project = 'old';
@@ -48,6 +49,8 @@ async function main() {
   vm.runInContext(`${groupsSource}\nglobalThis.groups = modelGroups;`, sandbox);
   assert.equal(sandbox.groups()[0].body.id, 'stl', 'imported STL must appear in the model tree');
   assert.match(treeSource, /disclosure\.innerHTML=`<span class="cad-tree-chevron">\$\{expanded\?'−':'\+'\}<\/span>`/, 'expanded sketch rows must show minus and collapsed rows plus');
+  assert.match(selectionSource, /\['fillet_edges','variable_fillet_edges','chamfer_edges','hole'\]\.includes\(selected\.operation\)/,
+    'Selecting a hole feature must highlight its feature faces, not the whole body');
   console.log('Panel state: slug selection, stale responses, HTTP failures and STL visibility passed.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
