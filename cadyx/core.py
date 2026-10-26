@@ -924,18 +924,18 @@ class CadyxCore:
                     raise
             if item.get("type") != "feature":
                 continue
-            if item.get("operation") == "pad_sketch_to_body":
+            if item.get("operation") in {"pad_sketch_to_body", "rib_from_sketch", "pocket_sketch"}:
                 body = by_id.get(item.get("body_id"))
                 source = by_id.get(item.get("source_body_id"))
                 feature_geometry = item.get("geometry")
                 sketch_id = item.get("source_sketch_id")
                 if not isinstance(sketch_id, str):
-                    raise ValidationError("Pad feature source sketch id is invalid.")
+                    raise ValidationError("Sketch manufacturing feature source sketch id is invalid.")
                 sketch = by_id.get(sketch_id)
                 parameters = item.get("parameters")
                 if (body is None or source is None or sketch is None or sketch.get("type") != "sketch"
                         or feature_geometry != body.get("geometry") or not isinstance(parameters, dict)):
-                    raise ValidationError("Pad feature geometry or source references are invalid.")
+                    raise ValidationError("Sketch manufacturing feature geometry or source references are invalid.")
                 plane, profiles = closed_profiles(document.objects, sketch_id)
                 if len(profiles) == 1:
                     segments = sketch_segments(document.objects, sketch_id)
@@ -944,31 +944,30 @@ class CadyxCore:
                     segments = None
                     segment_profiles = sketch_segment_profiles(document.objects, sketch_id)
                     candidates = [segment_profiles, None] if segment_profiles is not None else [None]
+                native_plane = kernel_plane(sketch, plane)
                 # Older documents without per-contour arc descriptors remain readable.
                 for candidate in candidates:
                     pad_tool: GeometryDescriptor
                     if len(profiles) == 1:
                         options = {"segments": candidate} if candidate is not None else {}
                         pad_tool = cast(GeometryDescriptor, self.kernel.create_extruded_profile(
-                            profiles[0], plane=plane, depth=parameters["depth"],
+                            profiles[0], plane=native_plane, depth=parameters["depth"],
                             centered=parameters["centered"], **options,
                         ))
                     else:
                         options = {"segment_profiles": candidate} if candidate is not None else {}
                         pad_tool = cast(GeometryDescriptor, self.kernel.create_extruded_profile_with_holes(
-                            profiles, plane=plane, depth=parameters["depth"],
+                            profiles, plane=native_plane, depth=parameters["depth"],
                             centered=parameters["centered"], **options,
                         ))
-                    offset = sketch.get("section_offset", 0.0)
-                    if offset:
-                        shift = [0.0, 0.0, 0.0]
-                        shift[2 if plane == "XY" and sketch.get("section_normal_axis") == "Z" else 1] = offset
-                        pad_tool = cast(GeometryDescriptor, self.kernel.translate_solid(pad_tool, shift))
-                    pad_expected = self.kernel.fuse_profiles(source["geometry"], pad_tool)
+                    pad_tool = place_geometry(sketch, pad_tool, self.kernel)
+                    pad_expected = (self.kernel.cut_solids(source["geometry"], pad_tool)
+                                    if item.get("operation") == "pocket_sketch"
+                                    else self.kernel.fuse_profiles(source["geometry"], pad_tool))
                     if pad_expected == feature_geometry:
                         break
                 else:
-                    raise ValidationError("Pad feature geometry is out of date with its source sketch or body.")
+                    raise ValidationError("Sketch manufacturing feature geometry is out of date with its source sketch or body.")
                 continue
             if item.get("operation") in {"fuse_bodies", "cut_bodies"}:
                 feature_geometry = item.get("geometry")

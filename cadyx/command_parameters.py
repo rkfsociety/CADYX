@@ -49,9 +49,9 @@ class ParameterCommands:
                 feature["parameters"], feature["geometry"], body["geometry"] = parameters, geometry, geometry
                 return {"feature_id": feature_id, "parameter": parameter_name,
                         "value": value, "geometry": geometry}
-            if feature.get("operation") in {"extrude_sketch", "revolve_sketch", "pad_sketch_to_body"}:
+            if feature.get("operation") in {"extrude_sketch", "revolve_sketch", "pad_sketch_to_body", "rib_from_sketch", "pocket_sketch"}:
                 expected = "angle_degrees" if feature["operation"] == "revolve_sketch" else "depth"
-                if parameter_name == "centered" and feature["operation"] in {"extrude_sketch", "pad_sketch_to_body"}:
+                if parameter_name == "centered" and feature["operation"] in {"extrude_sketch", "pad_sketch_to_body", "rib_from_sketch", "pocket_sketch"}:
                     value = command.get("value")
                     if type(value) is not bool:
                         raise ValidationError("centered must be a boolean.")
@@ -567,7 +567,7 @@ class ParameterCommands:
             raise ValidationError("Bound feature is missing its result body or parameters.")
         if operation == "create_box":
             geometry = self.kernel.create_box(**parameters)
-        elif operation in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "pad_sketch_to_body"}:
+        elif operation in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "pad_sketch_to_body", "rib_from_sketch", "pocket_sketch"}:
             if operation == "sweep_sketch":
                 sketch = document.find_object(feature.get("source_sketch_id"), "sketch")
                 if sketch is None:

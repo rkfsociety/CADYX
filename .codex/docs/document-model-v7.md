@@ -388,15 +388,15 @@ Profile line loops support at least 3 edges. `extrude_sketch` also accepts one
 outer contour with one or more fully enclosed inner contours; the inner contours
 are cut from the extrusion inside the same sketch-driven feature and the result
 must remain one solid. `pad_sketch_to_body` uses the same contour rule before
-fusing its extruded profile into the source body. Parallel XY/XZ sketch planes
-can be authored with `create_sketch` using the matching normal axis and a finite
-`section_offset`; sketch-driven pads honor that plane offset. Revolve and other
+fusing its extruded profile into the source body. Named XY/XZ/YZ planes, CUSTOM frames and FACE-attached sketch planes are placed
+in their saved work plane when building sketch-driven pads, ribs and pockets.
+Named plane `section_offset` values are honored by those features. Revolve and other
 profile operations retain their existing single-contour contracts.
 
 The command stores an OCCT B-rep descriptor plus a feature that references its
 source sketch and operation parameter. Editing source points rebuilds the linked
-body in the same atomic command. `set_parameter` can change extrusion or fused
-pad depth, revolution angle, sweep radius, chamfer distance, or fillet radius.
+body in the same atomic command. `set_parameter` can change extrusion, fused pad, rib or pocket depth, revolution
+angle, sweep radius, chamfer distance, or fillet radius.
 Changes to an upstream profile or pad rebuild dependent chamfers and fillets in
 document order. Revolve features also store
 their profile's overall `outer_diameter` and `height`; `set_parameter` scales
