@@ -300,12 +300,16 @@ button.object-row.selected { border-color: #9b6038; background: #ff874012; }
 .folder-files-left { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
 .folder-files-left > .panel-heading { min-height: 42px; }
 .folder-file-list { display: grid; align-content: start; gap: 4px; min-height: 0; max-height: 650px; overflow-y: auto; padding: 8px; border-right: 1px solid var(--line-soft); }
-.folder-file-row { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) 28px; align-items: center; gap: 3px; }
+.folder-file-row { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) 28px 28px; align-items: center; gap: 3px; }
 .folder-file-row .folder-file-item { width: 100%; min-width: 0; }
-.folder-file-rename { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.folder-file-copy, .folder-file-rename { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.folder-file-copy:hover:not(:disabled),
 .folder-file-rename:hover:not(:disabled) { border-color: #51331f; background: #ffffff08; color: var(--accent); }
+.folder-file-copy:focus-visible,
 .folder-file-rename:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.folder-file-copy:disabled,
 .folder-file-rename:disabled { color: #5e6870; cursor: not-allowed; }
+.folder-file-copy svg,
 .folder-file-rename svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
 .folder-file-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 42px; padding: 7px 9px; border: 1px solid transparent; border-radius: 4px; background: transparent; text-align: left; cursor: pointer; }
 .folder-scan-run { grid-template-columns: 18px minmax(0, 1fr) auto; }

@@ -412,7 +412,7 @@ function updateWorkspaceControls() {
   });
   projectFileUploadButton.disabled = !canOpenFilesView() || primaryGrid.dataset.view !== "files"
     || Boolean(selectedProjectFileFolderName || selectedProjectScanRunId);
-  updateProjectFileRenameButtons();
+  updateProjectFileRowActions();
   restorePendingWorkspaceView();
   if (!available && primaryGrid.dataset.view === "files") {
     setWorkspaceNavigation("overview");
@@ -1624,6 +1624,15 @@ function renderFolderFiles() {
     button.append(name, size);
     row.append(button);
     if (isProjectFileList && selectedProjectId) {
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "folder-file-copy";
+      copy.dataset.copyFileName = file.name;
+      copy.setAttribute("aria-label", `Скопировать имя файла ${file.name}`);
+      copy.title = "Копировать имя файла с расширением";
+      copy.disabled = !canOpenFilesView(selectedProjectId);
+      copy.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>';
+      row.append(copy);
       const rename = document.createElement("button");
       rename.type = "button";
       rename.className = "folder-file-rename";
@@ -1641,7 +1650,7 @@ function renderFolderFiles() {
       .find((button) => button.dataset.fileName === focusedFileName)
       ?.focus({ preventScroll: true });
   }
-  updateProjectFileRenameButtons();
+  updateProjectFileRowActions();
 }
 
 function updateFolderInspector(file = folderFiles.find((item) => item.name === selectedFolderFileName) || null) {
@@ -1688,10 +1697,10 @@ function updateProjectModelFileImportButton() {
   }
 }
 
-function updateProjectFileRenameButtons() {
+function updateProjectFileRowActions() {
   const available = Boolean(selectedProjectId && primaryGrid.dataset.view === "files" && !getSelectedFolder()
     && canOpenFilesView(selectedProjectId));
-  document.querySelectorAll(".folder-file-rename").forEach((button) => {
+  document.querySelectorAll(".folder-file-copy, .folder-file-rename").forEach((button) => {
     button.disabled = !available;
   });
 }
@@ -2778,6 +2787,12 @@ folderFileList.addEventListener("click", (event) => {
     loadProjectFiles(selectedProjectId).catch((error) => showProjectFilesLoadError(selectedProjectId, error));
     return;
   }
+  const copyButton = event.target.closest("button[data-copy-file-name]");
+  if (copyButton) {
+    const file = folderFiles.find((item) => item.name === copyButton.dataset.copyFileName);
+    if (file && !copyButton.disabled) copyProjectFileName(file);
+    return;
+  }
   const renameButton = event.target.closest("button[data-rename-file-name]");
   if (renameButton) {
     const file = folderFiles.find((item) => item.name === renameButton.dataset.renameFileName);
@@ -2854,7 +2869,16 @@ async function renameProjectFile(file) {
   } finally {
     projectFileRenameInFlight = false;
     setProjectFileRenameDialogBusy(false);
-    updateProjectFileRenameButtons();
+    updateProjectFileRowActions();
+  }
+}
+
+async function copyProjectFileName(file) {
+  try {
+    await writeClipboardText(file.name);
+    notify("Имя файла скопировано.", false, 2500);
+  } catch {
+    notify("Не удалось скопировать имя файла.", true);
   }
 }
 
@@ -2880,7 +2904,7 @@ function setProjectFileRenameDialogBusy(busy) {
   $("#rename-project-file-name").disabled = busy;
   $("#cancel-rename-project-file").disabled = busy;
   $("#submit-rename-project-file").disabled = busy;
-  folderFileList.querySelectorAll("button.folder-file-rename").forEach((button) => {
+  folderFileList.querySelectorAll("button.folder-file-copy, button.folder-file-rename").forEach((button) => {
     button.disabled = busy || !canOpenFilesView(selectedProjectId);
   });
 }
