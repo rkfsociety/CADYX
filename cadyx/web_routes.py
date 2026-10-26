@@ -567,13 +567,18 @@ def _dispatch_files(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         folder_name = unquote(route.params["folder_name"])
         handler._json(200, core.remove_project_subfolder(project_id, folder_name))
     elif name in {"project_file", "agent_project_file"}:
-        handler._binary_file(core.workspace.resolve_project_file(project_id, filename))
+        handler._binary_file(
+            core.workspace.resolve_project_file(project_id, filename),
+            attachment=Path(filename).suffix.casefold() not in {".ply", ".stl", ".step", ".stp"},
+        )
     elif name == "agent_project_file_upload":
         content = handler._read_project_source_upload()
         if Path(filename).suffix.casefold() == ".ply":
             result = core.upload_project_scan(project_id, filename, content)
-        else:
+        elif Path(filename).suffix.casefold() in {".step", ".stp"}:
             result = core.upload_project_step(project_id, filename, content)
+        else:
+            result = core.upload_project_file(project_id, filename, content)
         handler._json(201, {"project_id": project_id, "file": result})
     elif name == "agent_project_file_delete":
         handler._json(200, core.remove_staged_project_step(project_id, filename))

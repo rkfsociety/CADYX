@@ -385,6 +385,11 @@ class ProjectWorkspace:
             self._project_dir(project_id), filename, content
         )
 
+    def publish_project_file(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
+        return self._artifacts.publish_project_file(
+            self._project_dir(project_id), filename, content
+        )
+
     def publish_project_scan_output(
         self, project_id: str, source_filename: str, content: bytes
     ) -> dict[str, Any]:

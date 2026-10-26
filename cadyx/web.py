@@ -350,7 +350,7 @@ def make_request_handler(
             self.end_headers()
             self.wfile.write(data)
 
-        def _binary_file(self, path: Path) -> None:
+        def _binary_file(self, path: Path, *, attachment: bool = False) -> None:
             try:
                 stream = path.open("rb")
             except OSError as exc:
@@ -362,7 +362,7 @@ def make_request_handler(
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(size))
                 self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Disposition", "inline")
+                self.send_header("Content-Disposition", "attachment" if attachment else "inline")
                 self.end_headers()
                 try:
                     while chunk := stream.read(64 * 1024):

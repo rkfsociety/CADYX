@@ -171,6 +171,15 @@ class ProjectLifecycleService(_CoreService):
             )
             return self.workspace.publish_project_scan(project_id, filename, content)
 
+    def upload_project_file(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            self._require_project_policy(
+                project_id,
+                "file_management",
+                "Project files can only be uploaded to a free project with no running operation.",
+            )
+            return self.workspace.publish_project_file(project_id, filename, content)
+
     def start_scan_360(self, project_id: str, rotation_period_seconds: float = 18.0,
                        scanner_device_id: str | None = None, turntable_device_id: str | None = None,
                        step_degrees: int = 30, align_to_markers: bool = True) -> dict[str, Any]:

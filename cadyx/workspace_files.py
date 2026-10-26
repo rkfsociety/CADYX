@@ -487,6 +487,15 @@ class WorkspaceArtifactStore:
         )
 
     @staticmethod
+    def publish_project_file(directory: Path, filename: str, content: bytes) -> dict[str, Any]:
+        if (filename.startswith(".cadyx-")
+                or Path(filename).suffix.casefold() in {".step", ".stp", ".ply"}):
+            raise ValidationError("This file must use its dedicated upload path or its name is reserved by CADYX.")
+        return WorkspaceArtifactStore._publish_project_source(
+            directory, filename, content, suffixes={Path(filename).suffix.casefold()}, kind="Project file",
+        )
+
+    @staticmethod
     def remove_project_step(path: Path, filename: str) -> dict[str, Any]:
         if (
             not _is_single_path_segment(filename)

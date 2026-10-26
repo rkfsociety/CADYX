@@ -230,10 +230,20 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual((status, conflict["error"]), (409, "ARTIFACT_CONFLICT"))
         self.assertEqual(source.read_bytes(), payload)
 
-    def test_agent_step_upload_rejects_invalid_filename_or_locked_project(self) -> None:
+    def test_agent_project_file_upload_accepts_user_files_but_requires_free_project(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "Upload constraints"})
         project_id = created["project"]["id"]
-        status, error = self.upload(f"/api/v1/agent/projects/{project_id}/files", "source.txt", b"x")
+        status, uploaded = self.upload(f"/api/v1/agent/projects/{project_id}/files", "notes.txt", b"project notes")
+        self.assertEqual(status, 201)
+        self.assertEqual(uploaded["file"]["size"], len(b"project notes"))
+        self.assertEqual(self.core.workspace.resolve_project_file(project_id, "notes.txt").read_bytes(), b"project notes")
+        status, headers, body = self.get_binary(f"/api/v1/projects/{project_id}/files/notes.txt")
+        self.assertEqual((status, body), (200, b"project notes"))
+        self.assertEqual(headers["Content-Disposition"], "attachment")
+        status, conflict = self.upload(f"/api/v1/agent/projects/{project_id}/files", "notes.txt", b"replacement")
+        self.assertEqual((status, conflict["error"]), (409, "ARTIFACT_CONFLICT"))
+        self.assertEqual(self.core.workspace.resolve_project_file(project_id, "notes.txt").read_bytes(), b"project notes")
+        status, error = self.upload(f"/api/v1/agent/projects/{project_id}/files", "../escape.txt", b"x")
         self.assertEqual((status, error["error"]), (400, "VALIDATION_ERROR"))
         self.core.acquire_lease(project_id, "agent", "upload-test")
         status, error = self.upload(f"/api/v1/agent/projects/{project_id}/files", "source.stp", b"x")
@@ -257,10 +267,11 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual((status, conflict["error"]), (409, "ARTIFACT_CONFLICT"))
         self.assertEqual(staged.read_bytes(), source)
 
-        status, error = self.upload(
-            f"/api/v1/agent/projects/{project_id}/files", "unsupported.txt", b"x",
+        status, uploaded = self.upload(
+            f"/api/v1/agent/projects/{project_id}/files", "notes.txt", b"project notes",
         )
-        self.assertEqual((status, error["error"]), (400, "VALIDATION_ERROR"))
+        self.assertEqual(status, 201)
+        self.assertEqual(uploaded["file"]["name"], "notes.txt")
 
     def test_agent_scan_360_routes_require_free_project_and_report_capture_state(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "360 capture"})

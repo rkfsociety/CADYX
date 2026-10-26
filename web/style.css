@@ -319,6 +319,9 @@ button.object-row.selected { border-color: #9b6038; background: #ff874012; }
 .folder-preview-placeholder { max-width: 360px; margin: 0; padding: 22px; color: var(--muted); font-size: 11px; text-align: center; }
 .folder-preview-hint { margin: 0; padding: 9px 13px; border-top: 1px solid var(--line-soft); color: var(--dim); font-size: 9px; }
 .folder-files-panel > .panel-heading { min-height: 42px; }
+.folder-files-actions { display: flex; align-items: center; gap: 12px; }
+.folder-files-actions .button { min-height: 30px; padding: 5px 10px; font-size: 9px; }
+.folder-file-download { display: inline-block; margin-top: 10px; color: var(--accent); text-decoration: underline; }
 .panel-index { color: var(--dim); font: 9px var(--mono); }
 .subtle-count { color: var(--dim); font: 9px var(--mono); }
 .folder-inspector { display: grid; grid-template-rows: 38px minmax(0, 1fr); overflow: hidden; }

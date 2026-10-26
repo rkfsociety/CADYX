@@ -722,7 +722,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 
               <section id="folder-detail" class="folder-detail" hidden>
                 <section class="panel folder-files-panel" aria-labelledby="folder-files-title">
-                  <div class="panel-heading"><div><span class="panel-index">01</span><h2 id="folder-files-title">Содержимое папки</h2></div><span id="folder-file-count" class="subtle-count">0</span></div>
+                  <div class="panel-heading"><div><span class="panel-index">01</span><h2 id="folder-files-title">Содержимое папки</h2></div><div class="folder-files-actions"><span id="folder-file-count" class="subtle-count">0</span><input id="project-file-input" type="file" multiple hidden><button id="project-file-upload" class="button" type="button" disabled title="До 64 МиБ на файл; загрузка доступна в корень свободного проекта">Добавить файлы</button></div></div>
                   <div class="folder-files-layout">
                     <nav id="folder-file-list" class="folder-file-list" aria-label="Список файлов"></nav>
                     <div class="folder-preview-area">

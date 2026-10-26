@@ -57,6 +57,8 @@ const projectDetail = $("#project-detail");
 const noSelection = $("#no-selection");
 const folderFileList = $("#folder-file-list");
 folderFileList.tabIndex = -1;
+const projectFileInput = $("#project-file-input");
+const projectFileUploadButton = $("#project-file-upload");
 const folderPreviewCanvas = $("#ply-preview-canvas");
 const folderPreviewPlaceholder = $("#folder-preview-placeholder");
 const folderImportModelFileButton = $("#folder-import-model-file");
@@ -406,6 +408,8 @@ function updateWorkspaceControls() {
         ? "Доступно, когда агент освободит панель и завершит текущую работу" : "");
     }
   });
+  projectFileUploadButton.disabled = !canOpenFilesView() || primaryGrid.dataset.view !== "files"
+    || Boolean(selectedProjectFileFolderName || selectedProjectScanRunId);
   restorePendingWorkspaceView();
   if (!available && primaryGrid.dataset.view === "files") {
     setWorkspaceNavigation("overview");
@@ -1436,12 +1440,45 @@ function openProjectFilesView() {
   const projectId = selectedProjectId;
   selectedProjectScanRunId = null;
   selectedProjectFileFolderName = null;
+  projectFileUploadButton.disabled = !canOpenFilesView(projectId);
   projectFileFolders = [];
   $("#folder-files-title").textContent = "Файлы проекта";
   folderInspector.hidden = true;
   folderFileList.focus({ preventScroll: true });
   loadProjectFiles(projectId).catch((error) => showProjectFilesLoadError(projectId, error));
 }
+
+projectFileUploadButton.addEventListener("click", () => {
+  if (!projectFileUploadButton.disabled) projectFileInput.click();
+});
+
+projectFileInput.addEventListener("change", async () => {
+  const projectId = selectedProjectId;
+  const files = [...(projectFileInput.files || [])];
+  projectFileInput.value = "";
+  if (!projectId || !files.length || !canOpenFilesView()) return;
+  projectFileUploadButton.disabled = true;
+  projectFileUploadButton.textContent = "Загрузка…";
+  let uploaded = 0;
+  try {
+    for (const file of files) {
+      await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(file.name)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: await file.arrayBuffer(),
+      });
+      uploaded += 1;
+    }
+    await loadProjectFiles(projectId, null);
+    notify(`Добавлено файлов: ${uploaded}.`);
+  } catch (error) {
+    if (uploaded) await loadProjectFiles(projectId, null).catch(() => {});
+    notify(`Загружено ${uploaded} из ${files.length}. ${error.message}`, true);
+  } finally {
+    projectFileUploadButton.textContent = "Добавить файлы";
+    updateWorkspaceControls();
+  }
+});
 
 async function loadFiles(context) {
   const contextKey = context.type === "folder" ? `folder:${context.name}`
@@ -1450,7 +1487,7 @@ async function loadFiles(context) {
   const request = ++folderListRequest;
   const response = await api(fileContextPath(context));
   if (request !== folderListRequest || !isCurrentFileContext(context)) return;
-  const modelFiles = response.files.filter(is3dModelFile);
+  const modelFiles = context.type === "project" ? response.files : response.files.filter(is3dModelFile);
   const childFolders = context.type === "project" ? response.folders || [] : [];
   const previousSelection = folderFiles.find((file) => file.name === selectedFolderFileName);
   const signature = JSON.stringify({
@@ -1476,7 +1513,8 @@ async function loadFiles(context) {
     ? context.scanRunId ? filesForProjectScanRun(folderFiles, context.scanRunId)
       : folderFiles.filter((file) => !scanRunIdForFile(file.name))
     : folderFiles;
-  const firstPreview = visibleFiles.find((file) => file.name.toLowerCase().endsWith(".ply")) || visibleFiles[0];
+  const firstPreview = visibleFiles.find((file) => file.name.toLowerCase().endsWith(".ply"))
+    || visibleFiles.find(is3dModelFile) || visibleFiles[0];
   if (firstPreview) previewResourceFile(context, firstPreview);
   else {
     selectedFolderFileName = null;
@@ -1589,8 +1627,8 @@ function renderFolderFiles() {
 }
 
 function updateFolderInspector(file = folderFiles.find((item) => item.name === selectedFolderFileName) || null) {
-  $("#folder-inspector-count").textContent = `3D-ФАЙЛОВ: ${folderFiles.length}`;
-  $("#folder-model-file-count").textContent = String(folderFiles.length);
+  $("#folder-inspector-count").textContent = `ФАЙЛОВ: ${folderFiles.length}`;
+  $("#folder-model-file-count").textContent = String(folderFiles.filter(is3dModelFile).length);
   $("#folder-inspector-file-name").textContent = file?.name || "Не выбран";
   $("#folder-inspector-file-size").textContent = file ? formatFileSize(file.size) : "—";
   const extension = file?.name.match(/\.([^.]+)$/)?.[1];
@@ -1724,7 +1762,15 @@ async function previewResourceFile(context, file) {
   folderPreviewPlaceholder.hidden = false;
 
   if (!file.name.toLowerCase().endsWith(".ply")) {
-    folderPreviewPlaceholder.textContent = "Предпросмотр этого формата пока не поддерживается.";
+    folderPreviewPlaceholder.textContent = "Предпросмотр этого формата пока не поддерживается. ";
+    if (context.type === "project") {
+      const link = document.createElement("a");
+      link.href = `${fileContextPath(context)}/${encodeURIComponent(file.name)}`;
+      link.textContent = "Скачать файл";
+      link.className = "folder-file-download";
+      link.download = file.name;
+      folderPreviewPlaceholder.append(link);
+    }
     return;
   }
 

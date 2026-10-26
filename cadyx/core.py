@@ -137,6 +137,9 @@ class CadyxCore:
     def upload_project_scan(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
         return self._lifecycle.upload_project_scan(project_id, filename, content)
 
+    def upload_project_file(self, project_id: str, filename: str, content: bytes) -> dict[str, Any]:
+        return self._lifecycle.upload_project_file(project_id, filename, content)
+
     def start_scan_360(self, project_id: str, rotation_period_seconds: float = 18.0,
                        scanner_device_id: str | None = None, turntable_device_id: str | None = None,
                        step_degrees: int = 30, align_to_markers: bool = True) -> dict[str, Any]:
