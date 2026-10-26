@@ -298,7 +298,8 @@ their respective human/agent edit leases. Results below appear inside
   sketch, or sketch-element IDs. Removes the supplied group in one atomic
   command only when no retained object refers to any member. Include dependent
   features and sketch elements in the same group when removing a complete old
-  feature chain. Project files and command history are preserved.
+  feature chain. Parameter bindings owned by removed objects are deleted in the
+  same transaction. Project files and command history are preserved.
 - `clear_model`: removes every document model object in one atomic command,
   preserving the document identity, project directory, command history, and
   staged project files. Use when the user explicitly requests a clean model;

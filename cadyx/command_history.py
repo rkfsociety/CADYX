@@ -121,6 +121,10 @@ class HistoryCommands:
         if any(part["body_id"] in removed for part in document.assembly["parts"]):
             raise ValidationError("Assembly parts reference bodies in the removal group.")
         document.objects[:] = [item for item in document.objects if item["id"] not in removed]
+        document.parameter_bindings[:] = [
+            binding for binding in document.parameter_bindings
+            if binding.get("object_id") not in removed
+        ]
         return {"removed_object_ids": object_ids, "removed_count": len(object_ids)}
 
     def _repair_profile_chain(
