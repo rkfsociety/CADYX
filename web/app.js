@@ -473,7 +473,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           const row=document.createElement('div');row.className=sketchObjects.length?'cad3-tree-parent-row':'cad3-tree-leaf-row';
           const expanded=expandedFeatures.has(feature.id)||(!matchesFeature&&matchingSketches.length>0);
           let disclosure=null;
-          if(sketchObjects.length){disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-tree-disclosure';disclosure.setAttribute('aria-label',expanded?'Свернуть исходные эскизы':'Показать исходные эскизы');disclosure.setAttribute('aria-expanded',String(expanded));disclosure.innerHTML='<span class="cad-tree-chevron">+</span>';
+          if(sketchObjects.length){disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-tree-disclosure';disclosure.setAttribute('aria-label',expanded?'Свернуть исходные эскизы':'Показать исходные эскизы');disclosure.setAttribute('aria-expanded',String(expanded));disclosure.innerHTML=`<span class="cad-tree-chevron">${expanded?'−':'+'}</span>`;
             disclosure.onclick=()=>{if(expandedFeatures.has(feature.id))expandedFeatures.delete(feature.id);else expandedFeatures.add(feature.id);saveModelTreeState();renderTree()};}
           const button=document.createElement('button');button.className='cad-tree-feature';button.type='button';button.title=featureName;button.dataset.id=feature.id;button.dataset.selected=String(feature.id===state.selected);button.innerHTML=`<span class="cad3-icon">${opIcon(feature)}</span><span class="cad-tree-label">${esc(featureName)}</span>`;button.onclick=()=>select(feature.id);
           if(disclosure)row.append(disclosure);row.append(button);node.append(row);
