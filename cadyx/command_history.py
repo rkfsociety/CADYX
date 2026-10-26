@@ -562,6 +562,8 @@ def _handle_clear_model(
     removed_body_count = sum(item.get("type") == "body" for item in document.objects)
     removed_sketch_count = sum(item.get("type") == "sketch" for item in document.objects)
     document.objects.clear()
+    document.model_parameters.clear()
+    document.parameter_bindings.clear()
     from .assemblies import empty_assembly
     document.assembly = empty_assembly()
     return {
