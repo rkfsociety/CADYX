@@ -123,6 +123,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/scans/360", "agent_scan_360_start", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/scans/360", "agent_scan_360_status", "agent"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/rename", "agent_rename", "agent", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/type", "agent_project_type", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/copy-files", "agent_copy_files", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/prune-files", "agent_prune_files", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/stop", "agent_stop", "agent", "json"),
@@ -836,6 +837,11 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         if not body.keys() <= {"name", "url_slug"} or "name" not in body:
             raise ValidationError("Project rename requires name and accepts optional url_slug.")
         handler._json(200, core.rename_project(project_id, body["name"], url_slug=body.get("url_slug")))
+    elif name == "agent_project_type":
+        body = _require_json(handler)
+        if set(body) != {"project_type"}:
+            raise ValidationError("Project type change requires only project_type.")
+        handler._json(200, core.set_project_type(project_id, body["project_type"]))
     elif name == "agent_copy_files":
         body = _require_json(handler)
         if set(body) != {"source_project_id"}:

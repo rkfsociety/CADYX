@@ -370,6 +370,19 @@ class ProjectLifecycleService(_CoreService):
             self.events.publish("project.renamed", project_id, summary)
             return {"project": summary, "lock": self.leases.snapshot(project_id)}
 
+    def set_project_type(self, project_id: str, project_type: str) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id):
+            self._require_project_policy(
+                project_id,
+                "destructive",
+                "Project must be unlocked before its type can be changed.",
+                code="PROJECT_LOCKED",
+            )
+            project = self.workspace.set_project_type(project_id, project_type)
+            summary = self._summary(project)
+            self.events.publish("project.type.changed", project_id, summary)
+            return {"project": summary, "lock": self.leases.snapshot(project_id)}
+
     def delete_project(self, project_id: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id):
             with self._project_guard(project_id):

@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
-from cadyx.errors import NotFoundError, ValidationError
+from cadyx.errors import ConflictError, NotFoundError, ValidationError
 from cadyx.workspace import ProjectWorkspace
 from cadyx.workspace_projects import ProjectRecordStore
 
@@ -62,6 +62,24 @@ class ProjectWorkspaceTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             self.workspace.create("Invalid project type", project_type="group")
+
+    def test_project_type_change_persists_and_rejects_nonempty_assembly_graph(self) -> None:
+        project = self.workspace.create("HBOT", project_type="assembly")
+        changed = self.workspace.set_project_type(project["id"], "single_model")
+        self.assertEqual(changed["project_type"], "single_model")
+        self.assertEqual(self.workspace.load(project["id"])["project_type"], "single_model")
+        self.assertEqual(self.workspace.load(project["id"])["document"], project["document"])
+
+        blocked = self.workspace.create("Assembly with parts", project_type="assembly")
+        record_path = self.workspace._project_dir(blocked["id"]) / "project.json"
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        record["document"]["assembly"]["subassemblies"].append({
+            "id": "subassembly:test", "name": "Fixture",
+        })
+        ProjectRecordStore.write_atomic(record_path, record)
+        with self.assertRaisesRegex(ConflictError, "assembly components"):
+            self.workspace.set_project_type(blocked["id"], "single_model")
+        self.assertEqual(self.workspace.load(blocked["id"])["project_type"], "assembly")
 
     def test_legacy_project_gets_ascii_url_slug(self) -> None:
         project = self.workspace.create("Гипсовая фигурка — 5 ракурсов")

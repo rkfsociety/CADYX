@@ -66,6 +66,16 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(renamed["project"]["name"], "Фигурка из гипса")
         self.assertEqual(renamed["project"]["url_slug"], "plaster-figurine")
 
+    def test_set_project_type_uses_agent_api_and_persists_single_model(self) -> None:
+        project_id = self._tool_value("cadyx_create_project", {
+            "name": "Платформа HBOT", "project_type": "assembly",
+        })["project"]["id"]
+        updated = self._tool_value("cadyx_set_project_type", {
+            "project_id": project_id, "project_type": "single_model",
+        })
+        self.assertEqual(updated["project"]["project_type"], "single_model")
+        self.assertEqual(self.core.workspace.load(project_id)["project_type"], "single_model")
+
     def test_native_360_scan_tools_start_and_report_the_current_capture(self) -> None:
         project_id = self._create_project("Live scan MCP")
         scan = {

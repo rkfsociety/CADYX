@@ -220,6 +220,9 @@ class CadyxCore:
     def rename_project(self, project_id: str, name: str, *, url_slug: str | None = None) -> dict[str, Any]:
         return self._lifecycle.rename_project(project_id, name, url_slug=url_slug)
 
+    def set_project_type(self, project_id: str, project_type: str) -> dict[str, Any]:
+        return self._lifecycle.set_project_type(project_id, project_type)
+
     def delete_project(self, project_id: str) -> dict[str, Any]:
         return self._lifecycle.delete_project(project_id)
 

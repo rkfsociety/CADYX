@@ -199,6 +199,31 @@ class ProjectWorkspace:
         return project
 
     @staticmethod
+    def _validate_project_type_transition(project: dict[str, Any], normalized: str) -> None:
+        assembly = project["document"].get("assembly", {})
+        if normalized == "single_model" and any(
+            assembly.get(key) for key in ("parts", "subassemblies", "instances", "mates")
+        ):
+            raise ConflictError(
+                "A project with assembly components cannot be changed to a single-model project.",
+                code="PROJECT_TYPE_CONFLICT",
+            )
+
+    def set_project_type(self, project_id: str, project_type: str) -> dict[str, Any]:
+        normalized = self._projects.normalize_project_type(project_type)
+        project = self.load(project_id)
+        self._validate_project_type_transition(project, normalized)
+        if project["project_type"] == normalized:
+            return project
+        project["project_type"] = normalized
+        project["modified_at"] = utc_now()
+        self._projects.save(
+            self._project_dir(project_id), project,
+            validated_history_prefix=len(project["history"]),
+        )
+        return project
+
+    @staticmethod
     def _new_project_record(
         project_id: str, name: str, *, url_slug: str | None = None,
         project_type: str = "single_model",
