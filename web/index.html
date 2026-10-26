@@ -422,7 +422,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   min-width: 0;
   min-height: 0;
   align-items: center;
-  gap: 18px;
+  gap: 10px;
   margin: 0;
   padding: 0 18px;
   overflow: hidden;
@@ -437,15 +437,16 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 #workflow-panel .workflow-current {
   order: 1;
   display: flex;
-  min-width: min(330px, 31vw);
-  max-width: 420px;
+  min-width: 0;
+  max-width: none;
+  flex: 0 1 auto;
   align-items: center;
   gap: 10px;
   padding: 0;
   border: 0;
   background: transparent;
 }
-#workflow-panel .workflow-agent-state { display: flex; align-items: center; gap: 7px; }
+#workflow-panel .workflow-agent-state { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; }
 #workflow-panel .agent-state {
   padding: 5px 8px;
   border: 1px solid #79401d;
@@ -459,11 +460,13 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 #workflow-panel .agent-state[data-state="completed"] { border-color: #347c66; color: var(--success); background: #10241f; }
 #workflow-panel .workflow-current-label { display: none; }
 #workflow-panel .workflow-action {
-  overflow: hidden;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: visible;
   color: #dfe6e9;
   font: 600 12px/1.35 var(--ui-font);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 #workflow-panel .workflow-task { display: none !important; }
 #workflow-panel .workflow-summary {
@@ -471,7 +474,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   display: grid;
   min-width: 0;
   flex: 1 1 auto;
-  grid-template-columns: minmax(120px, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 14px;
   padding: 0;
@@ -608,7 +611,6 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   :root { --cadyx-tree-width: 220px; --cadyx-inspector-width: 300px; }
   .workspace-navigation { padding-left: 32px; }
   .nav-item { min-width: 96px; padding: 0 14px; }
-  #workflow-panel .workflow-current { min-width: 220px; }
 }
 @media (max-width: 900px) {
   :root { --cadyx-tree-width: 190px; --cadyx-inspector-width: 260px; }
@@ -631,10 +633,10 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
   .nav-item { min-width: 76px; padding: 0 8px; }
   .brand { font-size: 21px; }
   #workflow-panel { gap: 9px; padding: 0 10px; }
-  #workflow-panel .workflow-current { min-width: 120px; max-width: 38vw; }
+  #workflow-panel .workflow-current { min-width: 0; max-width: none; }
   #workflow-panel .agent-state { display: none; }
   #workflow-panel .workflow-eta { display: none; }
-  #workflow-panel .workflow-summary { grid-template-columns: minmax(80px, 1fr) auto; gap: 8px; }
+  #workflow-panel .workflow-summary { grid-template-columns: minmax(72px, 1fr) auto; gap: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .project-detail[data-ai-state="running"] .model-panel::before { animation: none; width: 100%; opacity: .65; }
