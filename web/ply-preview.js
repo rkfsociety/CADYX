@@ -2001,6 +2001,7 @@ function scheduleWorkspaceRefresh(delayMs = 60) {
 async function checkAutomaticUpdates() {
   if (document.visibilityState === "hidden" || automaticUpdateInFlight) return;
   automaticUpdateInFlight = true;
+  let retryForCurrentSelection = false;
   try {
     const selectionAtRequest = selectedProjectId;
     const query = new URLSearchParams();
@@ -2010,7 +2011,11 @@ async function checkAutomaticUpdates() {
     else if (selectionAtRequest) query.set("project_id", selectionAtRequest);
     const current = await api(`/api/v1/updates?${query.toString()}`, { cache: "no-store" });
     setApiConnectionStatus(true);
-    if (selectionAtRequest !== selectedProjectId) return;
+    if (selectionAtRequest !== selectedProjectId) {
+      automaticUpdateSnapshot = null;
+      retryForCurrentSelection = true;
+      return;
+    }
     workspaceAvailabilityConnected = true;
     const previous = automaticUpdateSnapshot;
     automaticUpdateSnapshot = current;
@@ -2090,6 +2095,7 @@ async function checkAutomaticUpdates() {
     automaticUpdatesUnavailable = true;
   } finally {
     automaticUpdateInFlight = false;
+    if (retryForCurrentSelection) queueMicrotask(() => checkAutomaticUpdates());
   }
 }
 
