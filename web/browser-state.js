@@ -14,6 +14,22 @@
     )) || (dashboard?.tasks || []).some((task) => task.state !== "completed");
   }
 
+  function currentProgressWork(dashboard, value, lock = null) {
+    const activities = Array.isArray(value) ? value : value ? [value] : [];
+    const runningActivity = activities.slice().reverse().find((item) => item.state === "running") || null;
+    const activity = runningActivity || activities[activities.length - 1] || null;
+    const agentLeaseActive = lock?.state === "AI_LOCKED" && lock.lease?.owner_type === "agent"
+      && !lock.recovery_required;
+    const runningTask = (dashboard?.tasks || []).find((task) => task.state === "running") || null;
+    const activePhase = (dashboard?.workflow?.phases || []).find((phase) => phase.state === "in_progress") || null;
+    const dashboardWork = runningTask || activePhase;
+    return {
+      activities, runningActivity, activity, agentLeaseActive,
+      runningTask, activePhase, dashboardWork,
+      isWorking: Boolean(runningActivity || agentLeaseActive || dashboardWork),
+    };
+  }
+
   function lockAvailabilityKey(lock) {
     return JSON.stringify([lock?.state || null, Boolean(lock?.recovery_required)]);
   }
@@ -132,6 +148,7 @@
   window.CadyxBrowserState = Object.freeze({
     selectedResourceFromSearch,
     dashboardHasUnfinishedWork,
+    currentProgressWork,
     lockAvailabilityKey,
     reduceAgentWorkLock,
     createViewportSnapshotSynchronizer,

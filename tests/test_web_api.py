@@ -1326,6 +1326,7 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             index = response.read()
             self.assertIn(b"CADYX", index)
+            self.assertLess(index.index(b'/assets/browser-state.js'), index.index(b'/assets/ply-preview.js'))
             version_match = re.search(rb'<meta name="cadyx-ui-version" content="([a-f0-9]{64})">', index)
             self.assertIsNotNone(version_match)
         status, updates = self.request("/api/v1/updates")
@@ -1341,6 +1342,9 @@ class WebApiTests(unittest.TestCase):
         with urlopen(self.base_url + "/assets/ply-parser.js", timeout=3) as response:
             self.assertEqual(response.status, 200)
             self.assertIn(b"window.CadyxPlyPreview", response.read())
+        with urlopen(self.base_url + "/assets/browser-state.js", timeout=3) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn(b"currentProgressWork", response.read())
 
     def test_automatic_update_snapshot_tracks_project_activity_and_folder_files(self) -> None:
         status, initial = self.request("/api/v1/updates")

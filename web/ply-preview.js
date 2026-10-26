@@ -648,16 +648,13 @@ function formatElapsed(dashboard, confirmedActive = false) {
 
 function updateWorkflowElapsed() {
   const output = $("#workflow-eta");
-  if (output) output.textContent = formatElapsed(
-    dashboardsByProject.get(selectedProjectId), hasConfirmedAgentWork(selectedProjectId),
+  if (!output) return;
+  const dashboard = dashboardsByProject.get(selectedProjectId);
+  const activities = activitiesByProject.get(selectedProjectId) || [];
+  const work = window.CadyxBrowserState.currentProgressWork(
+    dashboard, activities, agentLocksByProject.get(selectedProjectId),
   );
-}
-
-function hasConfirmedAgentWork(projectId) {
-  const lock = agentLocksByProject.get(projectId);
-  const runningActivity = (activitiesByProject.get(projectId) || []).some((item) => item.state === "running");
-  return runningActivity || (lock?.state === "AI_LOCKED" && lock.lease?.owner_type === "agent"
-    && !lock.recovery_required);
+  output.textContent = formatElapsed(dashboard, work.isWorking);
 }
 
 const phaseStateLabel = (state) => ({
@@ -693,7 +690,7 @@ function renderAgentDashboard(dashboard) {
     $("#workflow-progress").setAttribute("aria-valuenow", "0");
     $("#workflow-progress-bar").style.width = "0%";
   }
-  $("#workflow-eta").textContent = formatElapsed(dashboard, hasConfirmedAgentWork(selectedProjectId));
+  updateWorkflowElapsed();
 
   renderCurrentProgress(
     dashboard,
@@ -704,16 +701,14 @@ function renderAgentDashboard(dashboard) {
 }
 
 function renderCurrentProgress(dashboard, value, lock = null) {
-  const activities = Array.isArray(value) ? value : value ? [value] : [];
-  const runningActivity = activities.slice().reverse().find((item) => item.state === "running") || null;
-  const activity = runningActivity || activities[activities.length - 1] || null;
-  const agentLeaseActive = lock?.state === "AI_LOCKED" && lock.lease?.owner_type === "agent"
-    && !lock.recovery_required;
+  const currentWork = window.CadyxBrowserState.currentProgressWork(dashboard, value, lock);
+  const {
+    runningActivity, activity, agentLeaseActive,
+    runningTask, activePhase, dashboardWork, isWorking,
+  } = currentWork;
   const tasks = dashboard?.tasks || [];
-  const runningTask = tasks.find((task) => task.state === "running") || null;
   const workflow = dashboard?.workflow || null;
   const phases = workflow?.phases || [];
-  const activePhase = phases.find((phase) => phase.state === "in_progress") || null;
   const completedWorkflowWithoutJournal = Boolean(
     !activity && workflow && Number(workflow.progress_percent) === 100
       && phases.length > 0 && phases.every((phase) => phase.state === "completed")
@@ -730,13 +725,12 @@ function renderCurrentProgress(dashboard, value, lock = null) {
   const progressTask = Number.isFinite(progressPercent) && progressPhaseLabels[runningActivity?.phase]
     ? { title: progressPhaseLabels[runningActivity.phase], state: "in_progress" }
     : null;
-  const isWorking = Boolean(runningActivity || agentLeaseActive);
   const state = isWorking ? "running"
     : activity?.state === "failed" ? "failed"
       : activity?.state === "completed" || completedWorkflowWithoutJournal ? "completed" : "idle";
-  const action = runningActivity?.action || (agentLeaseActive ? "Выполняет команду" : activity?.action)
+  const action = runningActivity?.action || (agentLeaseActive ? "Выполняет команду" : dashboardWork?.title || activity?.action)
     || (completedWorkflowWithoutJournal ? workflow.title : "Действий пока нет");
-  const actionText = !runningActivity && !agentLeaseActive && activity?.state === "completed" && action
+  const actionText = !runningActivity && !agentLeaseActive && !dashboardWork && activity?.state === "completed" && action
     ? `${action} · завершено`
     : action;
   const shownTask = isWorking ? runningTask || activePhase || progressTask : null;
@@ -747,8 +741,9 @@ function renderCurrentProgress(dashboard, value, lock = null) {
   agentState.textContent = state === "running" ? "В РАБОТЕ"
     : state === "failed" ? "ОШИБКА" : state === "completed" ? "ЗАВЕРШЕНО" : "ОЖИДАЕТ";
   $("#workflow-action-label").textContent = runningActivity || agentLeaseActive ? "ДЕЙСТВИЕ СЕЙЧАС"
-    : activity?.state === "failed" ? "ПОСЛЕДНЕЕ ДЕЙСТВИЕ · ОШИБКА"
-      : completedWorkflowWithoutJournal ? "ЗАВЕРШЁННЫЙ ОТЧЁТ" : "ПОСЛЕДНЕЕ ДЕЙСТВИЕ";
+    : dashboardWork ? runningTask ? "ТЕКУЩАЯ ЗАДАЧА" : "ТЕКУЩИЙ ЭТАП"
+      : activity?.state === "failed" ? "ПОСЛЕДНЕЕ ДЕЙСТВИЕ · ОШИБКА"
+        : completedWorkflowWithoutJournal ? "ЗАВЕРШЁННЫЙ ОТЧЁТ" : "ПОСЛЕДНЕЕ ДЕЙСТВИЕ";
   const actionElement = $("#activity-title");
   actionElement.textContent = actionText;
   actionElement.title = actionText;

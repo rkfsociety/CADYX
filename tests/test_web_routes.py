@@ -69,6 +69,7 @@ class WebRouteTableTests(unittest.TestCase):
             ("DELETE", "/api/v1/agent/projects/p-2/files/input%20part.step", "agent_project_file_delete",
              {"project_id": "p-2", "filename": "input%20part.step"}),
             ("GET", "/assets/viewport.js", "asset_viewport", {}),
+            ("GET", "/assets/browser-state.js", "asset_browser_state", {}),
             ("GET", "/assets/scan-view.js", "asset_scan_view", {}),
         )
         for method, path, name, params in cases:

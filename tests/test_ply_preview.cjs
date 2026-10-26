@@ -69,6 +69,14 @@ assert.equal(raster.maxY, 5);
 
 const state = browserSandbox.window.CadyxBrowserState;
 assert.equal(state.selectedResourceFromSearch("?folder=archive"), "folder:archive");
+const progressWork = state.currentProgressWork({
+  workflow: { phases: [{ id: "base", title: "Строит корпус", state: "in_progress" }] },
+  tasks: [{ id: "profile", title: "Исправляет профиль", state: "running" }],
+}, [{ state: "completed", action: "Получает изображение модели" }], { state: "FREE" });
+assert.equal(progressWork.isWorking, true,
+  "A reported running task remains visible after the last command finishes or the host restarts");
+assert.equal(progressWork.dashboardWork.title, "Исправляет профиль");
+assert.equal(progressWork.activity.action, "Получает изображение модели");
 const lock = state.reduceAgentWorkLock({ active: false, revision: 2, projectIds: [] }, true, 3, ["project-1"]);
 assert.equal(JSON.stringify(lock), JSON.stringify({ active: true, revision: 3, projectIds: ["project-1"] }));
 
