@@ -722,9 +722,11 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 
               <section id="folder-detail" class="folder-detail" hidden>
                 <section class="panel folder-files-panel" aria-labelledby="folder-files-title">
-                  <div class="panel-heading"><div><span class="panel-index">01</span><h2 id="folder-files-title">Содержимое папки</h2></div><div class="folder-files-actions"><span id="folder-file-count" class="subtle-count">0</span><input id="project-file-input" type="file" multiple hidden><button id="project-file-upload" class="button" type="button" disabled title="До 64 МиБ на файл; загрузка доступна в корень свободного проекта">Добавить файлы</button></div></div>
                   <div class="folder-files-layout">
-                    <nav id="folder-file-list" class="folder-file-list" aria-label="Список файлов"></nav>
+                    <div class="folder-files-left">
+                      <div class="panel-heading"><div><span class="panel-index">01</span><h2 id="folder-files-title">Содержимое папки</h2></div><div class="folder-files-actions"><span id="folder-file-count" class="subtle-count">0</span><input id="project-file-input" type="file" multiple hidden><button id="project-file-upload" class="button" type="button" disabled title="До 64 МиБ на файл; загрузка доступна в корень свободного проекта">Добавить файлы</button></div></div>
+                      <nav id="folder-file-list" class="folder-file-list" aria-label="Список файлов"></nav>
+                    </div>
                     <div class="folder-preview-area">
                       <div class="folder-preview-heading"><div class="folder-preview-heading-copy"><strong id="folder-preview-title">Предпросмотр</strong><small id="folder-preview-info">Выберите файл проекта</small></div><button id="folder-import-model-file" class="button folder-import-model-file" type="button" hidden disabled>Добавить в дерево</button></div>
                       <div class="folder-preview-stage"><canvas id="ply-preview-canvas" class="ply-preview-canvas" aria-label="3D-предпросмотр файла PLY" hidden></canvas><p id="folder-preview-placeholder" class="folder-preview-placeholder">Здесь появится предпросмотр файла</p></div>
