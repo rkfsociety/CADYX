@@ -45,16 +45,19 @@ class RenderingTests(unittest.TestCase):
 
     def test_hole_feature_exposes_its_cylindrical_face_for_selection(self):
         base = self.command({"type": "create_box", "width": 20, "height": 20, "depth": 10})["body_id"]
-        hole = self.command({"type": "hole", "body_id": base, "origin": [10, 10, 10],
-                             "axis": [0, 0, -1], "diameter": 4, "depth": 6})
+        first_hole = self.command({"type": "hole", "body_id": base, "origin": [5, 5, 10],
+                                   "axis": [0, 0, -1], "diameter": 4, "depth": 6})
+        second_hole = self.command({"type": "hole", "body_id": first_hole["body_id"], "origin": [15, 15, 10],
+                                    "axis": [0, 0, -1], "diameter": 4, "depth": 6})
 
         scene = self.core.render_project(self.project)
 
-        body = next(item for item in scene["objects"] if item["object_id"] == hole["body_id"])
-        ranges = [item for item in body.get("feature_face_ranges", [])
-                  if item["feature_id"] == hole["feature_id"]]
-        self.assertTrue(ranges, "The hole operation must expose its generated cylindrical face range.")
-        self.assertTrue(all(item["end"] > item["start"] for item in ranges))
+        body = next(item for item in scene["objects"] if item["object_id"] == second_hole["body_id"])
+        ranges = body.get("feature_face_ranges", [])
+        for feature_id in (first_hole["feature_id"], second_hole["feature_id"]):
+            feature_ranges = [item for item in ranges if item["feature_id"] == feature_id]
+            self.assertTrue(feature_ranges, "Each hole ancestor must expose its cylindrical face range.")
+            self.assertTrue(all(item["end"] > item["start"] for item in feature_ranges))
 
     def test_project_point_cloud_is_present_in_server_scene_and_png(self):
         project_directory = self.core.workspace._project_dir(self.project)

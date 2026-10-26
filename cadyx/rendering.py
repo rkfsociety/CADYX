@@ -62,13 +62,21 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
     feature_by_body = {item.get("body_id"): item for item in document.objects
                        if item.get("type") == "feature" and item.get("body_id")}
     feature_face_cache = {}
+    topology_cache = {}
 
-    def selected_feature_faces(body: dict, mesh: dict) -> set[int]:
-        feature = feature_by_body.get(body["id"])
+    def body_topology(body: dict) -> dict:
+        if body["id"] not in topology_cache:
+            topology_cache[body["id"]] = kernel.topology(body["geometry"])
+        return topology_cache[body["id"]]
+
+    def selected_feature_faces(body: dict, mesh: dict, feature: dict | None = None) -> set[int]:
+        producer = feature_by_body.get(body["id"])
+        feature = feature or producer
         feature_id = feature.get("id") if feature else None
-        if feature_id in feature_face_cache:
-            return feature_face_cache[feature_id]
-        face_ids = mesh.get("selected_face_indices")
+        cache_key = (body["id"], feature_id)
+        if cache_key in feature_face_cache:
+            return feature_face_cache[cache_key]
+        face_ids = mesh.get("selected_face_indices") if producer is feature else None
         if not face_ids and feature and feature.get("operation") == "hole":
             parameters = feature.get("parameters", {})
             origin, axis, diameter = (parameters.get("origin"), parameters.get("axis"),
@@ -84,7 +92,7 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
                     unit_axis = [float(value) / axis_length for value in axis]
                     radius = float(diameter) / 2.0
                     tolerance = max(1e-7, radius * 1e-7)
-                    topology = kernel.topology(body["geometry"])
+                    topology = body_topology(body)
                     face_ids = []
                     for face in topology.get("faces", []):
                         face_axis, face_origin = face.get("axis_direction"), face.get("axis_origin")
@@ -128,7 +136,7 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
                 face_ids = kernel.tessellate(derived).get("selected_face_indices", [])
         result = {index for index in face_ids or [] if type(index) is int and index >= 0}
         if feature_id:
-            feature_face_cache[feature_id] = result
+            feature_face_cache[cache_key] = result
         return result
     bounds_min = [math.inf, math.inf, math.inf]
     bounds_max = [-math.inf, -math.inf, -math.inf]
@@ -179,13 +187,17 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
             mesh = kernel.tessellate(item["geometry"])
             positions, triangles = mesh["positions"], mesh["triangles"]
             points = mesh.get("points", [])
-            selected_faces = selected_feature_faces(item, mesh)
-            feature_id = next(iter(item.get("feature_ids", [])), None)
-            feature_face_ranges = [
-                {"feature_id": feature_id, "start": face_range["start"], "end": face_range["end"]}
-                for face_range in mesh.get("face_triangle_ranges", [])
-                if feature_id and face_range["face_index"] in selected_faces
-            ]
+            feature_face_ranges = []
+            feature, lineage = feature_by_body.get(item["id"]), set()
+            while feature and feature["id"] not in lineage:
+                lineage.add(feature["id"])
+                selected_faces = selected_feature_faces(item, mesh, feature)
+                feature_face_ranges.extend(
+                    {"feature_id": feature["id"], "start": face_range["start"], "end": face_range["end"]}
+                    for face_range in mesh.get("face_triangle_ranges", [])
+                    if face_range["face_index"] in selected_faces
+                )
+                feature = feature_by_body.get(feature.get("source_body_id"))
             edge_vertex_offset = len(positions) // 3
             positions.extend(mesh.get("edge_positions", []))
             lines = [edge_vertex_offset + index for index in mesh.get("edge_lines", [])]
