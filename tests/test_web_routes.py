@@ -49,6 +49,8 @@ class WebRouteTableTests(unittest.TestCase):
             ("GET", "/api/v1/workspace/folders/source%20files/files/a.step", "folder_file",
              {"folder": "source%20files", "filename": "a.step"}),
             ("GET", "/api/v1/projects/p-1/files", "project_files", {"project_id": "p-1"}),
+            ("GET", "/api/v1/projects/p-1/files/part%20model.stp/preview", "project_file_preview",
+             {"project_id": "p-1", "filename": "part%20model.stp"}),
             ("GET", "/api/v1/projects/p-1/folders/revopoint_run/files", "project_subfolder_files",
              {"project_id": "p-1", "folder_name": "revopoint_run"}),
             ("GET", "/api/v1/projects/p-1/folders/revopoint_run%2Fdepth_frames/files/frame_00000.raw",

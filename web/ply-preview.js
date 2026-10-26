@@ -1761,6 +1761,36 @@ async function previewResourceFile(context, file) {
   folderPreviewCanvas.hidden = true;
   folderPreviewPlaceholder.hidden = false;
 
+  const isProjectRoot = context.type === "project" && !context.folderName && !context.scanRunId;
+  if (isProjectRoot && /\.(step|stp)$/i.test(file.name)) {
+    folderPreviewPlaceholder.textContent = "Импортирую STEP для предпросмотра…";
+    try {
+      const url = `/api/v1/projects/${encodeURIComponent(context.id)}/files/${encodeURIComponent(file.name)}/preview`;
+      const response = await fetch(url, { cache: "no-store" });
+      const scene = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(apiErrorMessage(scene, response.status));
+      if (request !== previewRequest || !isCurrentFileContext(context)) return;
+      const body = scene.objects?.find((item) => item.type === "body" && item.triangles?.length);
+      if (!body) throw new Error("В STEP-файле не найдено тело для предпросмотра.");
+      plyViewer.load({
+        positions: body.positions,
+        triangles: body.triangles,
+        lines: body.lines || [],
+        points: body.points || [],
+        bounds: scene.bounds,
+      }, { reset: true });
+      folderPreviewCanvas.hidden = false;
+      folderPreviewPlaceholder.hidden = true;
+      $("#folder-preview-info").textContent = `${formatNumber(body.positions.length / 3)} вершин · ${formatNumber(body.triangles.length / 3)} граней`;
+      return;
+    } catch (error) {
+      if (request !== previewRequest || !isCurrentFileContext(context)) return;
+      folderPreviewPlaceholder.textContent = error.message;
+      $("#folder-preview-info").textContent = "";
+      return;
+    }
+  }
+
   if (!file.name.toLowerCase().endsWith(".ply")) {
     folderPreviewPlaceholder.textContent = "Предпросмотр этого формата пока не поддерживается. ";
     if (context.type === "project") {

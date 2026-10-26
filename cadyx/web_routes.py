@@ -72,6 +72,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/projects/{project_id}/viewport.png", "project_viewport_png", "viewport"),
     RouteSpec("POST", "/api/v1/projects/{project_id}/viewport/snapshot", "project_viewport_snapshot", "viewport", "png"),
     RouteSpec("GET", "/api/v1/projects/{project_id}/files", "project_files", "files"),
+    RouteSpec("GET", "/api/v1/projects/{project_id}/files/{filename}/preview", "project_file_preview", "files"),
     RouteSpec("GET", "/api/v1/projects/{project_id}/files/{filename}", "project_file", "files"),
     RouteSpec("GET", "/api/v1/projects/{project_id}/folders/{folder_name}/files", "project_subfolder_files", "files"),
     RouteSpec("GET", "/api/v1/projects/{project_id}/folders/{folder_name}/files/{filename}", "project_subfolder_file", "files"),
@@ -527,6 +528,8 @@ def _dispatch_files(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
     elif name == "project_files":
         handler._json(200, {"files": core.workspace.list_project_files(project_id),
                             "folders": core.workspace.list_project_folders(project_id)})
+    elif name == "project_file_preview":
+        handler._json(200, core.render_project_step_preview(project_id, filename))
     elif name == "project_subfolder_files":
         folder_name = unquote(route.params["folder_name"])
         handler._json(200, {"files": core.workspace.list_project_subfolder_files(project_id, folder_name),

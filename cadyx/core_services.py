@@ -8,6 +8,7 @@ from collections import OrderedDict
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 from uuid import uuid4
 
@@ -1070,6 +1071,21 @@ class RenderingCacheService(_CoreService):
         with self._project_lifecycle_lock(project_id):
             _, scene = self._scene_for_project(project_id)
             return self._clone_scene(scene)
+
+    def render_project_step_preview(self, project_id: str, filename: str) -> dict[str, Any]:
+        if not isinstance(filename, str) or Path(filename).suffix.casefold() not in {".step", ".stp"}:
+            raise ValidationError("STEP preview requires a direct .step or .stp project file.")
+        with self._project_lifecycle_lock(project_id):
+            self._require_project_policy(project_id, "read", "Project is not available for preview.")
+            document = Document.create()
+            self.commands.execute(
+                document,
+                {"type": "import_step", "file": filename, "name": Path(filename).stem},
+                project_id=project_id,
+            )
+            document.validate()
+            self._validate_geometry(document)
+            return render_scene(document, self.kernel)
 
     def _scene_for_project(self, project_id: str) -> tuple[tuple[str, str], dict[str, Any]]:
         # Check the stat-only revision token before loading and validating the full document.

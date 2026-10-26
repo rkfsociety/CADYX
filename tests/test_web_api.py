@@ -862,6 +862,36 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(response.read(), b"STEP fixture")
 
+    def test_step_preview_builds_scene_from_a_transient_document(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "STEP preview"})
+        project_id = created["project"]["id"]
+        upload_status, _ = self.upload(
+            f"/api/v1/agent/projects/{project_id}/files", "sample part.stp", b"fixture",
+        )
+        self.assertEqual(upload_status, 201)
+        scene = {"version": 1, "revision": 0, "objects": [], "bounds": None}
+        with (patch.object(self.core.commands, "execute") as execute,
+              patch.object(self.core, "_validate_geometry"),
+              patch("cadyx.core_services.render_scene", return_value=scene) as render_scene):
+            result = self.core.render_project_step_preview(project_id, "sample part.stp")
+        self.assertEqual(result, scene)
+        execute.assert_called_once()
+        self.assertEqual(execute.call_args.args[1], {
+            "type": "import_step", "file": "sample part.stp", "name": "sample part",
+        })
+        render_scene.assert_called_once()
+        _, project = self.request(f"/api/v1/projects/{project_id}")
+        self.assertEqual((project["document"]["revision"], project["history"]), (0, []))
+
+    def test_project_step_preview_route_delegates_with_decoded_filename(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "STEP preview route"})
+        project_id = created["project"]["id"]
+        scene = {"version": 1, "revision": 0, "objects": [], "bounds": None}
+        with patch.object(self.core, "render_project_step_preview", return_value=scene) as render_preview:
+            status, result = self.request(f"/api/v1/projects/{project_id}/files/sample%20part.stp/preview")
+        self.assertEqual((status, result), (200, scene))
+        render_preview.assert_called_once_with(project_id, "sample part.stp")
+
     def test_project_listing_and_saved_snapshot_reads_do_not_wait_for_an_edit_lock(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Reload persistence"})
         project_id = created["project"]["id"]

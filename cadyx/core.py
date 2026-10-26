@@ -425,6 +425,9 @@ class CadyxCore:
     def render_project(self, project_id: str) -> dict[str, Any]:
         return self._rendering.render_project(project_id)
 
+    def render_project_step_preview(self, project_id: str, filename: str) -> dict[str, Any]:
+        return self._rendering.render_project_step_preview(project_id, filename)
+
     def _scene_for_project(self, project_id: str) -> tuple[tuple[str, str], dict[str, Any]]:
         return self._rendering._scene_for_project(project_id)
 
