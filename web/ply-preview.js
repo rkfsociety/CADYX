@@ -62,7 +62,6 @@ const projectFileUploadButton = $("#project-file-upload");
 const folderPreviewCanvas = $("#ply-preview-canvas");
 const folderPreviewPlaceholder = $("#folder-preview-placeholder");
 const folderImportModelFileButton = $("#folder-import-model-file");
-const folderRenameFileButton = $("#folder-rename-file");
 const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
 const modelViewer = window.CadyxViewport.createViewer($("#model-preview"), {
   showViewCube: true, wireframe: true, onRender: queueViewportSnapshot,
@@ -411,7 +410,7 @@ function updateWorkspaceControls() {
   });
   projectFileUploadButton.disabled = !canOpenFilesView() || primaryGrid.dataset.view !== "files"
     || Boolean(selectedProjectFileFolderName || selectedProjectScanRunId);
-  updateProjectFileRenameButton();
+  updateProjectFileRenameButtons();
   restorePendingWorkspaceView();
   if (!available && primaryGrid.dataset.view === "files") {
     setWorkspaceNavigation("overview");
@@ -1608,6 +1607,8 @@ function renderFolderFiles() {
   }
   $("#folder-file-count").textContent = String(visibleFiles.length + folderCount);
   for (const file of visibleFiles) {
+    const row = document.createElement("div");
+    row.className = "folder-file-row";
     const button = document.createElement("button");
     button.type = "button";
     button.className = "folder-file-item";
@@ -1619,14 +1620,26 @@ function renderFolderFiles() {
     const size = document.createElement("small");
     size.textContent = formatFileSize(file.size);
     button.append(name, size);
-    folderFileList.append(button);
+    row.append(button);
+    if (isProjectFileList && selectedProjectId) {
+      const rename = document.createElement("button");
+      rename.type = "button";
+      rename.className = "folder-file-rename";
+      rename.dataset.renameFileName = file.name;
+      rename.setAttribute("aria-label", `Переименовать ${file.name}`);
+      rename.title = "Переименовать файл";
+      rename.disabled = !canOpenFilesView(selectedProjectId);
+      rename.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="m16.5 3.5 4 4L8 20l-5 1 1-5Z"/></svg>';
+      row.append(rename);
+    }
+    folderFileList.append(row);
   }
   if (focusedFileName) {
     [...folderFileList.querySelectorAll("button[data-file-name]")]
       .find((button) => button.dataset.fileName === focusedFileName)
       ?.focus({ preventScroll: true });
   }
-  updateProjectFileRenameButton();
+  updateProjectFileRenameButtons();
 }
 
 function updateFolderInspector(file = folderFiles.find((item) => item.name === selectedFolderFileName) || null) {
@@ -1673,11 +1686,12 @@ function updateProjectModelFileImportButton() {
   }
 }
 
-function updateProjectFileRenameButton() {
-  const file = folderFiles.find((item) => item.name === selectedFolderFileName) || null;
-  const available = Boolean(file && selectedProjectId && primaryGrid.dataset.view === "files" && !getSelectedFolder());
-  folderRenameFileButton.hidden = !available;
-  folderRenameFileButton.disabled = !available || !canOpenFilesView(selectedProjectId);
+function updateProjectFileRenameButtons() {
+  const available = Boolean(selectedProjectId && primaryGrid.dataset.view === "files" && !getSelectedFolder()
+    && canOpenFilesView(selectedProjectId));
+  document.querySelectorAll(".folder-file-rename").forEach((button) => {
+    button.disabled = !available;
+  });
 }
 
 async function importSelectedProjectModelFile() {
@@ -2751,6 +2765,12 @@ folderFileList.addEventListener("click", (event) => {
     loadProjectFiles(selectedProjectId).catch((error) => showProjectFilesLoadError(selectedProjectId, error));
     return;
   }
+  const renameButton = event.target.closest("button[data-rename-file-name]");
+  if (renameButton) {
+    const file = folderFiles.find((item) => item.name === renameButton.dataset.renameFileName);
+    if (file && !renameButton.disabled) renameProjectFile(file);
+    return;
+  }
   const button = event.target.closest("button[data-file-name]");
   const file = folderFiles.find((item) => item.name === button?.dataset.fileName);
   if (!button || !file) return;
@@ -2779,13 +2799,13 @@ folderImportModelFileButton.addEventListener("click", () => {
   importSelectedProjectModelFile();
 });
 
-folderRenameFileButton.addEventListener("click", async () => {
+async function renameProjectFile(file) {
   const projectId = selectedProjectId;
-  const file = folderFiles.find((item) => item.name === selectedFolderFileName) || null;
-  if (!file || folderRenameFileButton.disabled || !projectId) return;
+  if (!file || !canOpenFilesView(projectId)) return;
   const newName = window.prompt("Новое имя файла", file.name);
   if (newName === null || newName === file.name) return;
-  folderRenameFileButton.disabled = true;
+  const renameButtons = [...folderFileList.querySelectorAll("button.folder-file-rename")];
+  renameButtons.forEach((button) => { button.disabled = true; });
   let renamed = false;
   try {
     await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/files/rename`, {
@@ -2806,9 +2826,9 @@ folderRenameFileButton.addEventListener("click", async () => {
       ? `Файл переименован, но список не удалось обновить: ${error.message}`
       : `Не удалось переименовать файл: ${error.message}`, true);
   } finally {
-    updateProjectFileRenameButton();
+    updateProjectFileRenameButtons();
   }
-});
+}
 
 const stream = new EventSource("/api/v1/events");
 // A gap means the bounded replay was incomplete; fetch authoritative state.
