@@ -717,6 +717,16 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                 <div class="viewport" id="viewport">
                   <canvas id="model-preview" class="model-preview ply-preview-canvas" aria-label="Координатная сетка, оси и 3D-модель"></canvas>
                   <output id="scanner-preview-fps" class="scanner-preview-fps" aria-label="Частота кадров сенсора" hidden>FPS —</output>
+                  <aside id="turntable-control-panel" class="turntable-control-panel" aria-labelledby="turntable-control-title">
+                    <header class="turntable-control-heading"><h2 id="turntable-control-title">ПОВОРОТНЫЙ СТОЛ</h2><button id="turntable-control-refresh" class="turntable-icon-button" type="button" aria-label="Обновить положение стола" title="Обновить положение">↻</button></header>
+                    <div class="turntable-control-position"><span>ПОВОРОТ <strong id="turntable-angle">—</strong></span><span>НАКЛОН <strong id="turntable-tilt">—</strong></span></div>
+                    <div class="turntable-control-row"><label for="turntable-step">ШАГ</label><select id="turntable-step" aria-label="Угол поворота"><option value="5">5°</option><option value="15" selected>15°</option><option value="30">30°</option></select><button id="turntable-rotate-left" class="button turntable-motion-button" type="button" aria-label="Повернуть против часовой стрелки">−</button><button id="turntable-rotate-right" class="button turntable-motion-button" type="button" aria-label="Повернуть по часовой стрелке">+</button></div>
+                    <div class="turntable-control-row"><label for="turntable-speed">ОБОРОТ</label><select id="turntable-speed" aria-label="Скорость вращения"><option value="18">18 с · быстро</option><option value="30">30 с</option><option value="45">45 с</option><option value="60">60 с</option><option value="90">90 с · медленно</option></select></div>
+                    <div class="turntable-control-tilt"><label for="turntable-tilt-target">НАКЛОН <output id="turntable-tilt-target-value">0°</output></label><input id="turntable-tilt-target" type="range" min="-10" max="10" step="1" value="0" aria-label="Целевой наклон стола"><button id="turntable-tilt-apply" class="button" type="button">ЗАДАТЬ</button></div>
+                    <div class="turntable-control-actions"><button id="turntable-zero" class="button" type="button">В НОЛЬ</button><button id="turntable-stop" class="button turntable-stop-button" type="button">СТОП</button></div>
+                    <button id="turntable-spin" class="button turntable-spin-button" type="button" aria-pressed="false">▶ ПОСТОЯННОЕ ВРАЩЕНИЕ</button>
+                    <output id="turntable-control-status" class="turntable-control-status" role="status" aria-live="polite">Проверка стола…</output>
+                  </aside>
                 </div>
                 <footer class="viewport-footer" aria-label="Сводка модели">
                   <span>МОДЕЛЬ <strong id="viewport-model-name">—</strong></span><span>ОБЪЕКТЫ <strong id="viewport-object-count">0</strong></span><span>ВЕРШИНЫ <strong id="viewport-vertex-count">0</strong></span><span>ГРАНИ <strong id="viewport-face-count">0</strong></span><span>РЕВ. <strong id="viewport-revision">—</strong></span>
@@ -838,6 +848,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
     <script src="/assets/ply-preview.js" defer></script>
     <script src="/assets/scan-view.js" defer></script>
     <script src="/assets/device-settings.js" defer></script>
+    <script src="/assets/turntable-controls.js" defer></script>
     <script src="/assets/app.js" defer></script>
     <script id="cadyx-cad-reference-script">
 window.addEventListener("DOMContentLoaded", () => {

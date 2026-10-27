@@ -59,6 +59,8 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/scanner/calibration", "scanner_calibration_save", "scanner", "json"),
     RouteSpec("GET", "/api/v1/scanner/turntable/settings", "turntable_settings", "scanner"),
     RouteSpec("POST", "/api/v1/scanner/turntable/settings", "turntable_settings_save", "scanner", "json"),
+    RouteSpec("GET", "/api/v1/scanner/turntable/control", "turntable_control_status", "scanner"),
+    RouteSpec("POST", "/api/v1/scanner/turntable/control", "turntable_control", "scanner", "json"),
     RouteSpec("GET", "/api/v1/scanner/turntable/map", "turntable_marker_map", "scanner"),
     RouteSpec("GET", "/api/v1/scanner/live-preview", "scanner_live_preview_status", "scanner"),
     RouteSpec("POST", "/api/v1/scanner/live-preview", "scanner_live_preview_start", "scanner", "json"),
@@ -162,6 +164,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/assets/ply-preview.js", "asset_ply_preview", "static"),
     RouteSpec("GET", "/assets/scan-view.js", "asset_scan_view", "static"),
     RouteSpec("GET", "/assets/device-settings.js", "asset_device_settings", "static"),
+    RouteSpec("GET", "/assets/turntable-controls.js", "asset_turntable_controls", "static"),
     RouteSpec("GET", "/assets/style.css", "asset_style", "static"),
 )
 
@@ -397,6 +400,39 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
                 or not math.isfinite(period) or not 18.0 <= period <= 90.0):
             raise ValidationError("The turntable rotation period must be between 18 and 90 seconds.")
         handler._json(200, core.save_turntable_settings(device_id, period, profile_id))
+        return
+    if route.spec.name == "turntable_control_status":
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if (set(query) - {"device_id", "profile_id"}
+                or any(len(query.get(key, [])) > 1 for key in ("device_id", "profile_id"))):
+            raise ValidationError("Turntable control status accepts one device_id and profile_id at most.")
+        device_id = query.get("device_id", [None])[0]
+        profile_id = query.get("profile_id", [None])[0]
+        spin = core.turntable_control("spin-status")
+        result = {"spin": spin}
+        if spin["state"] == "idle" and not spin.get("scan_active"):
+            result["position"] = core.turntable_control("query", device_id or None, profile_id or None)
+        handler._json(200, {"control": result})
+        return
+    if route.spec.name == "turntable_control":
+        body = _require_json(handler)
+        if set(body) not in ({"command"}, {"command", "device_id"},
+                             {"command", "device_id", "profile_id"},
+                             {"command", "device_id", "profile_id", "value"}):
+            raise ValidationError("Turntable control accepts command, device_id, profile_id and optional value.")
+        command = body["command"]
+        device_id = body.get("device_id")
+        profile_id = body.get("profile_id")
+        value = body.get("value")
+        if not isinstance(command, str):
+            raise ValidationError("The turntable command must be a string.")
+        if device_id is not None and not isinstance(device_id, str):
+            raise ValidationError("The turntable device ID must be a string.")
+        if profile_id is not None and not isinstance(profile_id, str):
+            raise ValidationError("The turntable profile ID must be a string.")
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+            raise ValidationError("The turntable command value must be numeric.")
+        handler._json(200, {"result": core.turntable_control(command, device_id, profile_id, value)})
         return
     if route.spec.name == "turntable_marker_map":
         query = parse_qs(parsed.query, keep_blank_values=True)
@@ -1114,6 +1150,7 @@ def _dispatch_static(handler: Any, core: CadyxCore, route: RouteMatch, parsed: S
         "asset_ply_preview": ("ply-preview.js", "text/javascript; charset=utf-8"),
         "asset_scan_view": ("scan-view.js", "text/javascript; charset=utf-8"),
         "asset_device_settings": ("device-settings.js", "text/javascript; charset=utf-8"),
+        "asset_turntable_controls": ("turntable-controls.js", "text/javascript; charset=utf-8"),
         "asset_style": ("style.css", "text/css; charset=utf-8"),
     }
     filename, content_type = assets[route.spec.name]

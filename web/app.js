@@ -746,13 +746,14 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     }).observe(grid,{attributes:true,attributeFilter:['data-view']});
     liveCamera?.addEventListener('click',()=>{if(scanTreePreviewSelection)clearScanTreePreview()},{capture:true});
     if(liveCamera&&scanView)window.CadyxScanView?.initializeLivePreview({button:liveCamera,view:scanView,captureButton:scan360});
+    window.CadyxTurntableControls?.initialize();
     if(scan360&&scanStatus){
       let pollTimer=null,scanWasRunning=false;
       const projectId=()=>window.cadyxSelectedProjectId?.();
       const syncCaptureButton=()=>{
         const current=document.querySelector('#viewport-scan-360');
         if(!current)return;
-        const disabled=current.dataset.scanCaptureBusy==='true'||current.dataset.scanCapturePending==='true'||current.dataset.livePreviewLock==='true';
+        const disabled=current.dataset.scanCaptureBusy==='true'||current.dataset.scanCapturePending==='true'||current.dataset.livePreviewLock==='true'||current.dataset.turntableBusy==='true';
         current.dataset.captureLocked=String(disabled);
         current.setAttribute('aria-disabled',String(disabled));
       };

@@ -220,6 +220,36 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .viewport { position: relative; display: grid; min-height: 0; place-items: center; overflow: hidden; background: radial-gradient(ellipse at 52% 44%, #17212a 0%, #10171d 58%, #0b1114 100%); }
 .scanner-preview-fps { position: absolute; z-index: 5; right: 12px; bottom: 12px; min-width: 76px; padding: 6px 9px; border: 1px solid #52616b99; border-radius: 5px; color: #e6f2f7; background: #0b1114d9; box-shadow: 0 3px 12px #0005; font: 600 12px/1 var(--mono); text-align: center; pointer-events: none; }
 .scanner-preview-fps[hidden] { display: none; }
+.turntable-control-panel { position: absolute; z-index: 6; top: 12px; right: 12px; display: grid; width: 286px; aspect-ratio: 1; grid-template-rows: 22px 30px 30px 30px 44px 27px 30px 23px; gap: 4px; padding: 10px; border: 1px solid #52616bcc; border-radius: 6px; color: #e6f2f7; background: #0b1114ed; box-shadow: 0 5px 22px #0008; font: 9px var(--mono); }
+.primary-grid:not([data-view="scanning"]) .turntable-control-panel { display: none; }
+.turntable-control-heading,.turntable-control-position,.turntable-control-row,.turntable-control-tilt label,.turntable-control-actions { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.turntable-control-heading { border-bottom: 1px solid #52616b66; }
+.turntable-control-heading h2 { margin: 0; color: #a9c0cd; font: 600 9px var(--mono); letter-spacing: .08em; }
+.turntable-icon-button { width: 24px; height: 22px; border: 1px solid #52616b88; border-radius: 4px; color: #cfdee5; background: #152027; font: 16px/1 var(--mono); cursor: pointer; }
+.turntable-control-position { padding: 0 6px; border-radius: 4px; background: #121d23; color: #8fa5b0; }
+.turntable-control-position strong { margin-left: 4px; color: #e7f2f6; font-size: 11px; }
+.turntable-control-row { min-width: 0; }
+.turntable-control-row label,.turntable-control-tilt label { color: #8fa5b0; font-weight: 600; letter-spacing: .04em; }
+.turntable-control-row select { min-width: 0; height: 28px; padding: 0 5px; border: 1px solid #384850; border-radius: 4px; color: #dce8ed; background: #121a1f; font: 10px var(--mono); }
+#turntable-step { width: 72px; margin-left: auto; }
+#turntable-speed { width: 164px; margin-left: auto; }
+.turntable-control-panel .button { min-height: 25px; padding: 0 7px; border-color: #43545d; color: #d9e7ed; background: #172229; font: 600 9px var(--mono); }
+.turntable-control-panel .button:hover:not(:disabled) { border-color: #61c8e5; background: #1d3039; }
+.turntable-motion-button { width: 33px; font-size: 16px !important; }
+.turntable-control-tilt { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 3px 8px; }
+.turntable-control-tilt input { width: 100%; min-width: 0; accent-color: #56c6df; }
+.turntable-control-tilt .button { min-width: 64px; grid-column: 2; grid-row: 1 / span 2; }
+#turntable-tilt-target-value { min-width: 26px; color: #e7f2f6; text-align: right; }
+.turntable-control-actions { justify-content: stretch; }
+.turntable-control-actions .button { flex: 1; }
+.turntable-control-panel .turntable-stop-button { border-color: #743d40; color: #ffd4d4; background: #3b2024; }
+.turntable-control-panel .turntable-spin-button { border-color: #266b78; color: #c1f6ff; background: #12333a; }
+.turntable-control-panel .turntable-spin-button[aria-pressed="true"] { border-color: #bd4b4b; color: #ffe2e2; background: #4b2327; }
+.turntable-control-panel [disabled] { opacity: .45; cursor: not-allowed; }
+.turntable-control-status { align-self: center; overflow: hidden; color: #9fb2bc; font: 9px/1.2 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.turntable-control-status[data-state="error"] { color: #ff9d9d; }
+.turntable-control-status[data-state="running"] { color: #78dbb7; }
+.turntable-control-panel[hidden] { display: none; }
 .viewport::after { position: absolute; inset: 0; border-bottom: 1px solid #30383e44; content: ""; pointer-events: none; }
 .model-preview { width: 100%; height: 100%; min-height: 0; overflow: visible; }
 .model-toolbar { display: flex; align-items: center; gap: 7px; }

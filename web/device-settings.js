@@ -267,5 +267,13 @@
     turntableDeviceId: () => read().turntableDeviceId || null,
     turntableProfileId: () => turntableProfileId || read().turntableProfileId || null,
     turntableRotationPeriodSeconds: () => turntableRotationPeriodSeconds,
+    rememberTurntableRotationPeriodSeconds: value => {
+      if (!allowedPeriods.has(Number(value))) return;
+      turntableRotationPeriodSeconds = Number(value);
+      if (period) period.value = String(value);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ ...read(), turntableRotationPeriodSeconds: Number(value) }));
+      } catch { /* The hardware setting still applies when browser storage is unavailable. */ }
+    },
   });
 })();

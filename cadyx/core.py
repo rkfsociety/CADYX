@@ -170,6 +170,10 @@ class CadyxCore:
             turntable_device_id, rotation_period_seconds, profile_id,
         )
 
+    def turntable_control(self, command: str, turntable_device_id: str | None = None,
+                          profile_id: str | None = None, value: float | None = None) -> dict[str, Any]:
+        return self._scan_capture.turntable_control(command, turntable_device_id, profile_id, value)
+
     def turntable_marker_map(self, turntable_device_id: str | None = None,
                              profile_id: str | None = None) -> tuple[bytes, int]:
         return self._scan_capture.turntable_marker_map(turntable_device_id, profile_id)

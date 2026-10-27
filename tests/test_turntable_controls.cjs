@@ -1,0 +1,97 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+
+const html = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
+const style = fs.readFileSync(path.join(__dirname, '../web/style.css'), 'utf8');
+assert.match(html, /id="turntable-control-panel"[^>]*aria-labelledby="turntable-control-title"/);
+assert.match(style, /\.turntable-control-panel\s*\{[^}]*top:\s*12px;[^}]*right:\s*12px;[^}]*aspect-ratio:\s*1;/,
+  'the square turntable controls are overlaid in the viewport upper-right corner');
+
+const handlers = new Map();
+const calls = [];
+const makeElement = () => ({
+  dataset: {}, value: '', textContent: '', disabled: false, attributes: {},
+  addEventListener(name, handler) { handlers.set(`${this.id || ''}:${name}`, handler); },
+  setAttribute(name, value) { this.attributes[name] = value; },
+});
+const ids = [
+  'turntable-control-panel', 'turntable-angle', 'turntable-tilt', 'turntable-step', 'turntable-speed',
+  'turntable-tilt-target', 'turntable-tilt-target-value', 'turntable-control-status', 'turntable-spin',
+  'viewport-scan-360', 'primary-grid', 'turntable-control-refresh', 'turntable-rotate-left', 'turntable-rotate-right',
+  'turntable-tilt-apply', 'turntable-zero', 'turntable-stop',
+];
+const elements = Object.fromEntries(ids.map(id => [id, Object.assign(makeElement(), { id })]));
+elements['turntable-step'].value = '15';
+elements['turntable-tilt-target'].value = '0';
+elements['primary-grid'].dataset.view = 'scanning';
+const panelSelectors = {
+  '#turntable-control-refresh': 'turntable-control-refresh', '#turntable-step': 'turntable-step',
+  '#turntable-speed': 'turntable-speed', '#turntable-rotate-left': 'turntable-rotate-left',
+  '#turntable-rotate-right': 'turntable-rotate-right', '#turntable-tilt-target': 'turntable-tilt-target',
+  '#turntable-tilt-apply': 'turntable-tilt-apply', '#turntable-zero': 'turntable-zero',
+  '#turntable-spin': 'turntable-spin', '#turntable-stop': 'turntable-stop',
+};
+elements['turntable-control-panel'].querySelector = selector => elements[panelSelectors[selector]];
+const document = { querySelector: selector => selector === '.primary-grid' ? elements['primary-grid'] : elements[selector.slice(1)] };
+const window = {
+  CadyxDeviceSettings: {
+    turntableDeviceId: () => '0123456789AB', turntableProfileId: () => 'revopoint-dual-axis-table',
+    turntableRotationPeriodSeconds: () => 30, rememberTurntableRotationPeriodSeconds(value) { this.savedSpeed = value; },
+  },
+  cadyxSyncCaptureButton() {},
+};
+const fetch = async (url, options = {}) => {
+  calls.push({ url, options });
+  if (!options.method) return { ok: true, async json() { return { control: {
+    spin: { state: 'idle', scan_active: false },
+    position: { command: 'query', angle_degrees: 12, tilt_degrees: 0, rotation_period_seconds: 17.5 },
+  } }; } };
+  const body = JSON.parse(options.body);
+  let result = { state: 'completed', command: body.command, output: `${body.command} completed`,
+    turntable_device_id: body.device_id, profile_id: body.profile_id };
+  if (body.command === 'spin-start') result.state = 'running';
+  if (body.command === 'spin-stop') result.state = 'stopping';
+  return { ok: true, async json() { return { result }; } };
+};
+const context = { window, document, fetch, URLSearchParams, setTimeout: () => 0, clearTimeout() {} };
+vm.runInNewContext(fs.readFileSync(require('node:path').join(__dirname, '../web/turntable-controls.js'), 'utf8'), context);
+window.CadyxTurntableControls.initialize();
+const wait = () => new Promise(resolve => setImmediate(resolve));
+const waitUntil = async predicate => {
+  for (let attempt = 0; attempt < 20 && !predicate(); attempt += 1) await wait();
+  assert.ok(predicate(), 'the asynchronous turntable control request completed');
+};
+
+(async () => {
+  await wait();
+  assert.equal(elements['turntable-angle'].textContent, '12.0°');
+  assert.equal(elements['turntable-speed'].value, '18', 'the closest safe speed preset remains selected');
+  await handlers.get('turntable-rotate-right:click')();
+  await waitUntil(() => calls.some(call => call.options.method === 'POST'));
+  let controlCall = calls.find(call => call.options.method === 'POST');
+  assert.equal(JSON.parse(controlCall.options.body).value, 15);
+  assert.equal(JSON.parse(controlCall.options.body).command, 'rotate');
+  await waitUntil(() => !elements['turntable-control-refresh'].disabled);
+
+  elements['turntable-speed'].value = '45';
+  await handlers.get('turntable-speed:change')();
+  await waitUntil(() => window.CadyxDeviceSettings.savedSpeed === 45);
+  await waitUntil(() => !elements['turntable-control-refresh'].disabled);
+  assert.equal(window.CadyxDeviceSettings.savedSpeed, 45);
+  assert.ok(calls.some(call => call.url === '/api/v1/scanner/turntable/settings'));
+
+  await handlers.get('turntable-spin:click')();
+  await waitUntil(() => calls.filter(call => call.options.method === 'POST').some(call =>
+    JSON.parse(call.options.body).command === 'spin-start'));
+  await waitUntil(() => elements['turntable-spin'].attributes['aria-pressed'] === 'true');
+  assert.equal(elements['turntable-spin'].attributes['aria-pressed'], 'true');
+  assert.equal(elements['viewport-scan-360'].dataset.turntableBusy, 'true');
+  await handlers.get('turntable-stop:click')();
+  await waitUntil(() => calls.filter(call => call.options.method === 'POST').some(call =>
+    JSON.parse(call.options.body).command === 'spin-stop'));
+  assert.equal(JSON.parse(calls.filter(call => call.options.method === 'POST').at(-1).options.body).command, 'spin-stop');
+  assert.ok(calls.some(call => call.url.startsWith('/api/v1/scanner/turntable/control')));
+  console.log('turntable controls passed');
+})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -15,6 +15,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from cadyx.errors import ValidationError
 from cadyx.core import CadyxCore
 from cadyx.api_contracts import VALIDATION_OPERATIONS
 from cadyx.models import Document
@@ -210,6 +211,33 @@ class WebApiTests(unittest.TestCase):
         normalized_headers = {name.casefold(): value for name, value in headers.items()}
         self.assertEqual(normalized_headers["x-cadyx-table-map-count"], "34")
         read_map.assert_called_once_with("table-1", "revopoint-dual-axis-table")
+
+    def test_turntable_control_routes_expose_status_and_validate_command_shape(self) -> None:
+        with patch.object(self.core, "turntable_control", side_effect=[
+                {"state": "idle", "scan_active": False},
+                {"state": "completed", "command": "query", "angle_degrees": 12.5},
+        ]) as control:
+            status, result = self.request(
+                "/api/v1/scanner/turntable/control?device_id=0123456789AB&profile_id=revopoint-dual-axis-table",
+            )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["control"]["position"]["angle_degrees"], 12.5)
+        self.assertEqual(control.call_args_list[0].args, ("spin-status",))
+        self.assertEqual(control.call_args_list[1].args,
+                         ("query", "0123456789AB", "revopoint-dual-axis-table"))
+
+        with patch.object(self.core, "turntable_control", return_value={"state": "completed"}) as control:
+            status, result = self.request("/api/v1/scanner/turntable/control", {
+                "command": "rotate", "device_id": "0123456789AB", "profile_id": "revopoint-dual-axis-table",
+                "value": -15,
+            })
+        self.assertEqual((status, result["result"]["state"]), (200, "completed"))
+        control.assert_called_once_with("rotate", "0123456789AB", "revopoint-dual-axis-table", -15)
+
+        with patch.object(self.core, "turntable_control", side_effect=ValidationError("Unsupported turntable control command.")):
+            status, error = self.request("/api/v1/scanner/turntable/control", {"command": "exec"})
+        self.assertEqual(status, 400)
+        self.assertIn("unsupported", error["message"].lower())
 
     def test_agent_project_can_be_created_without_changing_selection_and_receive_step(self) -> None:
         _, current = self.request("/api/v1/agent/projects", {"name": "Current project"})
@@ -1432,6 +1460,7 @@ class WebApiTests(unittest.TestCase):
             index = response.read()
             self.assertIn(b"CADYX", index)
             self.assertLess(index.index(b'/assets/browser-state.js'), index.index(b'/assets/ply-preview.js'))
+            self.assertIn(b'/assets/turntable-controls.js?v=', index)
             version_match = re.search(rb'<meta name="cadyx-ui-version" content="([a-f0-9]{64})">', index)
             self.assertIsNotNone(version_match)
         status, updates = self.request("/api/v1/updates")
@@ -1450,6 +1479,9 @@ class WebApiTests(unittest.TestCase):
         with urlopen(self.base_url + "/assets/browser-state.js", timeout=3) as response:
             self.assertEqual(response.status, 200)
             self.assertIn(b"currentProgressWork", response.read())
+        with urlopen(self.base_url + "/assets/turntable-controls.js", timeout=3) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn(b"CadyxTurntableControls", response.read())
 
     def test_automatic_update_snapshot_tracks_project_activity_and_folder_files(self) -> None:
         status, initial = self.request("/api/v1/updates")

@@ -82,11 +82,16 @@ internal static class Program
             ScanCaptureOptions scanCapture = null;
             if (operation == "rotate")
             {
-                if (args.Length != 2 || !double.TryParse(args[1], NumberStyles.Float,
+                if ((args.Length != 2 && args.Length != 7) || !double.TryParse(args[1], NumberStyles.Float,
                         CultureInfo.InvariantCulture, out degrees) || !IsFinite(degrees) ||
                     Math.Abs(degrees) < 0.1 || Math.Abs(degrees) > MaxDegreesPerCommand)
                 {
                     throw new ArgumentException("rotate requires a number from -30 to 30 degrees, excluding zero.");
+                }
+                if (args.Length == 7)
+                {
+                    turntableAddress = args[2]; turntableName = args[3];
+                    advertisementUuid = args[4]; serviceUuid = args[5]; characteristicUuid = args[6];
                 }
             }
             else if (operation == "speed")
@@ -105,9 +110,14 @@ internal static class Program
             }
             else if (operation == "tilt")
             {
-                if (args.Length != 2 || !double.TryParse(args[1], NumberStyles.Float,
+                if ((args.Length != 2 && args.Length != 7) || !double.TryParse(args[1], NumberStyles.Float,
                     CultureInfo.InvariantCulture, out degrees) || !IsFinite(degrees) || Math.Abs(degrees) > MaxSafeTiltDegrees)
                     throw new ArgumentException("tilt requires a target angle within the safe range of -10 to 10 degrees.");
+                if (args.Length == 7)
+                {
+                    turntableAddress = args[2]; turntableName = args[3];
+                    advertisementUuid = args[4]; serviceUuid = args[5]; characteristicUuid = args[6];
+                }
             }
             else if (operation == "monitor")
             {
@@ -134,6 +144,17 @@ internal static class Program
                 if ((args.Length != 2 && args.Length != 7) || String.IsNullOrWhiteSpace(args[1]))
                     throw new ArgumentException("continuous-turn requires a telemetry CSV path and optional turntable profile parameters.");
                 degrees = 360.0;
+                monitorPath = args[1];
+                if (args.Length == 7)
+                {
+                    turntableAddress = args[2]; turntableName = args[3];
+                    advertisementUuid = args[4]; serviceUuid = args[5]; characteristicUuid = args[6];
+                }
+            }
+            else if (operation == "continuous-spin")
+            {
+                if ((args.Length != 2 && args.Length != 7) || String.IsNullOrWhiteSpace(args[1]))
+                    throw new ArgumentException("continuous-spin requires a stop-signal path and optional turntable profile parameters.");
                 monitorPath = args[1];
                 if (args.Length == 7)
                 {
@@ -171,11 +192,17 @@ internal static class Program
                 if (!File.Exists(scanCapture.CaptureExecutable) || !File.Exists(scanCapture.CalibrationFile))
                     throw new ArgumentException("CaptureY16.exe and Q.bin must exist before capture-sweep starts.");
             }
-            else if ((operation == "query" || operation == "zero" || operation == "stop") && args.Length != 1)
+            else if ((operation == "query" || operation == "zero" || operation == "stop")
+                     && args.Length != 1 && args.Length != 6)
             {
-                throw new ArgumentException("query, zero and stop do not accept extra arguments.");
+                throw new ArgumentException("query, zero and stop accept optional turntable profile parameters.");
             }
-            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed" && operation != "tilt" && operation != "monitor" && operation != "sweep" && operation != "continuous-turn" && operation != "capture-sweep")
+            else if ((operation == "query" || operation == "zero" || operation == "stop") && args.Length == 6)
+            {
+                turntableAddress = args[1]; turntableName = args[2];
+                advertisementUuid = args[3]; serviceUuid = args[4]; characteristicUuid = args[5];
+            }
+            else if (operation != "query" && operation != "zero" && operation != "stop" && operation != "speed" && operation != "tilt" && operation != "monitor" && operation != "sweep" && operation != "continuous-turn" && operation != "continuous-spin" && operation != "capture-sweep")
             {
                 throw new ArgumentException("Operation must be query, zero, stop, speed, tilt, monitor, sweep, capture-sweep, or rotate.");
             }
@@ -200,6 +227,7 @@ internal static class Program
         Console.WriteLine("TurntableController.exe tilt <degrees>   (safe operating limit: -10–10 degrees)");
         Console.WriteLine("TurntableController.exe rotate <degrees>   (one bounded relative move, max 30 degrees)");
         Console.WriteLine("TurntableController.exe stop");
+        Console.WriteLine("TurntableController.exe continuous-spin <stop-signal-path> [address name advertisement-uuid service-uuid characteristic-uuid]   (repeats full turns until stopped)");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv>");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv> <rotate-delay-seconds> <degrees>");
         Console.WriteLine("TurntableController.exe sweep <steps> <degrees-per-step> <output.csv>   (one BLE connection; each step is verified before the next)");
@@ -207,24 +235,6 @@ internal static class Program
         Console.WriteLine("TurntableController.exe capture-sweep <steps> <degrees-per-step> <tilt> <poses.csv> <CaptureY16.exe> <output-prefix> <Q.bin> <depth-scale> <live.raw> <scanner-id> <table-address> <table-name> <advertisement-uuid> <service-uuid> <characteristic-uuid>");
         Console.WriteLine("The app does not pair the turntable. It discovers the BLE device by its advertised FFE1 service,\n" +
                           "then confirms the GATT device name before sending any command.");
-    }
-
-    private static void EnsureScannerDisconnected()
-    {
-        string[] scannerProcesses = { "CaptureY16", "CaptureRgb", "RevoScan", "RevoScan5", "RevoAssistant" };
-        Process[] running = Process.GetProcesses();
-        string[] active;
-        try
-        {
-            active = running.Where(process => scannerProcesses.Contains(process.ProcessName, StringComparer.OrdinalIgnoreCase))
-                .Select(process => process.ProcessName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        }
-        finally
-        {
-            foreach (Process process in running) process.Dispose();
-        }
-        if (active.Length > 0)
-            throw new InvalidOperationException("Turntable motion is blocked while scanner processes are active: " + String.Join(", ", active) + ". Stop and disconnect the scanner before moving the table.");
     }
 
     private static void EnsureContinuousCaptureActive()
@@ -249,16 +259,137 @@ internal static class Program
             throw new InvalidOperationException("Continuous table motion requires active CaptureY16 live preview and CaptureRgb acquisition.");
     }
 
+    private static async Task<int> RunContinuousSpinAsync(Connection connection, string stopPath)
+    {
+        if (File.Exists(stopPath))
+            throw new InvalidOperationException("A stale continuous-spin stop signal exists; refusing to start.");
+        string heartbeatPath = stopPath + ".heartbeat";
+        string initialAngleText = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
+        string initialTiltText = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
+        double angle, tilt;
+        if (!TryAngle(initialAngleText, out angle) || !TryAngle(initialTiltText, out tilt))
+            throw new InvalidOperationException("Could not read table position; continuous rotation was not started.");
+        if (Math.Abs(tilt) > 0.5)
+            throw new InvalidOperationException("Continuous rotation requires the table tilt to be zero.");
+        if (!IsSpinHeartbeatFresh(heartbeatPath))
+        {
+            Console.WriteLine("continuous spin was not started because its control heartbeat is missing");
+            return 0;
+        }
+
+        Console.WriteLine("continuous spin started: angle=" + angle.ToString("F1", CultureInfo.InvariantCulture));
+        Console.WriteLine("CADYX_SPIN\t" + angle.ToString("F2", CultureInfo.InvariantCulture)
+            + "\t" + tilt.ToString("F2", CultureInfo.InvariantCulture));
+        while (true)
+        {
+            if (File.Exists(stopPath))
+            {
+                await SendAndReadAsync(connection, "+CT,STOP;");
+                await SendAndReadAsync(connection, "+CR,STOP;");
+                Console.WriteLine("continuous spin stopped by request");
+                return 0;
+            }
+            if (!IsSpinHeartbeatFresh(heartbeatPath))
+            {
+                await SendAndReadAsync(connection, "+CT,STOP;");
+                await SendAndReadAsync(connection, "+CR,STOP;");
+                Console.WriteLine("continuous spin stopped because the control connection was lost");
+                return 0;
+            }
+
+            string commandReply = await SendAndReadAsync(connection, "+CT,TURNANGLE=360;");
+            if (commandReply.IndexOf("ERR", StringComparison.OrdinalIgnoreCase) >= 0
+                || commandReply.IndexOf("FAIL", StringComparison.OrdinalIgnoreCase) >= 0)
+                throw new InvalidOperationException("Turntable rejected the continuous-rotation command: " + commandReply);
+
+            double previousAngle = angle;
+            double unwrapped = 0;
+            int stableAfterFullTurn = 0;
+            int sample = 0;
+            DateTime deadline = DateTime.UtcNow.AddSeconds(120);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (File.Exists(stopPath))
+                {
+                    await SendAndReadAsync(connection, "+CT,STOP;");
+                    await SendAndReadAsync(connection, "+CR,STOP;");
+                    Console.WriteLine("continuous spin stopped by request");
+                    return 0;
+                }
+                if (!IsSpinHeartbeatFresh(heartbeatPath))
+                {
+                    await SendAndReadAsync(connection, "+CT,STOP;");
+                    await SendAndReadAsync(connection, "+CR,STOP;");
+                    Console.WriteLine("continuous spin stopped because the control connection was lost");
+                    return 0;
+                }
+
+                string angleText = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
+                string tiltText = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
+                double currentAngle, currentTilt;
+                if (!TryAngle(angleText, out currentAngle) || !TryAngle(tiltText, out currentTilt))
+                {
+                    await Task.Delay(100);
+                    continue;
+                }
+                double delta = currentAngle - previousAngle;
+                if (delta > 180.0) delta -= 360.0;
+                else if (delta < -180.0) delta += 360.0;
+                unwrapped += delta;
+                previousAngle = currentAngle;
+                if (Math.Abs(currentTilt - tilt) > 0.5)
+                {
+                    await SendAndReadAsync(connection, "+CT,STOP;");
+                    await SendAndReadAsync(connection, "+CR,STOP;");
+                    throw new InvalidOperationException("Turntable tilt changed during continuous rotation; both axes were stopped.");
+                }
+                bool nearFullTurn = Math.Abs(Math.Abs(unwrapped) - 360.0) <= 5.0;
+                stableAfterFullTurn = nearFullTurn && Math.Abs(delta) <= 0.2 ? stableAfterFullTurn + 1 : 0;
+                if (++sample % 3 == 0)
+                    Console.WriteLine("CADYX_SPIN\t" + currentAngle.ToString("F2", CultureInfo.InvariantCulture)
+                        + "\t" + currentTilt.ToString("F2", CultureInfo.InvariantCulture));
+                if (stableAfterFullTurn >= 2)
+                {
+                    angle = currentAngle;
+                    tilt = currentTilt;
+                    Console.WriteLine("continuous revolution completed: angle=" + angle.ToString("F1", CultureInfo.InvariantCulture));
+                    break;
+                }
+                await Task.Delay(100);
+            }
+            if (DateTime.UtcNow >= deadline)
+            {
+                await SendAndReadAsync(connection, "+CT,STOP;");
+                await SendAndReadAsync(connection, "+CR,STOP;");
+                throw new InvalidOperationException("Continuous-rotation telemetry timed out; both axes were stopped.");
+            }
+        }
+    }
+
+    private static bool IsSpinHeartbeatFresh(string path)
+    {
+        try
+        {
+            TimeSpan age = DateTime.UtcNow - File.GetLastWriteTimeUtc(path);
+            return File.Exists(path) && age >= TimeSpan.Zero && age < TimeSpan.FromSeconds(6);
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     private static async Task<int> RunAsync(string operation, double degrees, double rotationPeriod,
                                             int monitorSeconds, string monitorPath, int rotateAfterSeconds,
                                             int sweepSteps, ScanCaptureOptions scanCapture,
                                             string turntableAddress, string turntableName,
                                             string advertisementUuid, string serviceUuid, string characteristicUuid)
     {
-        bool motionRequested = operation == "rotate" || operation == "sweep" || operation == "capture-sweep" || operation == "continuous-turn" ||
-            operation == "tilt" || operation == "zero" || (operation == "monitor" && rotateAfterSeconds >= 0);
         if (operation == "continuous-turn") EnsureContinuousCaptureActive();
-        else if (motionRequested) EnsureScannerDisconnected();
         using (Connection connection = await ConnectAsync(
             scanCapture != null ? scanCapture.TurntableAddress : turntableAddress,
             scanCapture != null ? scanCapture.TurntableName : turntableName,
@@ -269,12 +400,26 @@ internal static class Program
             await EnableNotificationsAsync(connection);
             if (operation == "query")
             {
-                foreach (string command in new[] { "+QT,CHANGEANGLE;", "+QR,TILTVALUE;", "+QT,TURNSPEED;", "+QR,TILTSPEED;" })
+                var responses = new string[4];
+                string[] commands = { "+QT,CHANGEANGLE;", "+QR,TILTVALUE;", "+QT,TURNSPEED;", "+QR,TILTSPEED;" };
+                for (int index = 0; index < commands.Length; index++)
                 {
-                    Console.WriteLine(command + " => " + await SendAndReadAsync(connection, command));
+                    responses[index] = await SendAndReadAsync(connection, commands[index]);
+                    Console.WriteLine(commands[index] + " => " + responses[index]);
                 }
+                double angle, tilt, speed, tiltSpeed;
+                if (TryAngle(responses[0], out angle) && TryAngle(responses[1], out tilt)
+                    && TryAngle(responses[2], out speed) && TryAngle(responses[3], out tiltSpeed))
+                    Console.WriteLine("CADYX_STATUS\t" + angle.ToString("F2", CultureInfo.InvariantCulture) + "\t"
+                        + tilt.ToString("F2", CultureInfo.InvariantCulture) + "\t"
+                        + speed.ToString("F2", CultureInfo.InvariantCulture) + "\t"
+                        + tiltSpeed.ToString("F2", CultureInfo.InvariantCulture));
+                else throw new InvalidOperationException("Turntable status could not be parsed.");
                 return 0;
             }
+
+            if (operation == "continuous-spin")
+                return await RunContinuousSpinAsync(connection, monitorPath);
 
             if (operation == "monitor")
             {
@@ -290,7 +435,6 @@ internal static class Program
                     {
                         if (!moveSent && rotateAfterSeconds >= 0 && monitorTimer.Elapsed.TotalSeconds >= rotateAfterSeconds)
                         {
-                            EnsureScannerDisconnected();
                             string monitorMove = "+CT,TURNANGLE=" + degrees.ToString("F1", CultureInfo.InvariantCulture) + ";";
                             Console.WriteLine("issuing " + monitorMove);
                             string reply = await SendAndReadAsync(connection, monitorMove);
@@ -463,7 +607,6 @@ internal static class Program
 
                     for (int step = 1; step <= sweepSteps; ++step)
                     {
-                        EnsureScannerDisconnected();
                         double sweepBefore = currentAngle;
                         string command = "+CT,TURNANGLE=" + degrees.ToString("F1", CultureInfo.InvariantCulture) + ";";
                         string commandReply = await SendAndReadAsync(connection, command);
@@ -548,13 +691,11 @@ internal static class Program
 
             if (operation == "tilt")
             {
-                EnsureScannerDisconnected();
                 string tiltBeforeText = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
                 double tiltBefore;
                 if (!TryAngle(tiltBeforeText, out tiltBefore))
                     throw new InvalidOperationException("Could not read current tilt angle; no tilt command was sent.");
                 Console.WriteLine("tilt before: " + tiltBefore.ToString("F1", CultureInfo.InvariantCulture) + " deg");
-                EnsureScannerDisconnected();
                 string command = "+CR,TILTVALUE=" + degrees.ToString("F1", CultureInfo.InvariantCulture) + ";";
                 Console.WriteLine(command + " => " + await SendAndReadAsync(connection, command));
                 DateTime tiltDeadline = DateTime.UtcNow.AddSeconds(30);
@@ -575,7 +716,6 @@ internal static class Program
 
             if (operation == "zero")
             {
-                EnsureScannerDisconnected();
                 string zeroBaselineText = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
                 double zeroBaseline;
                 if (!TryAngle(zeroBaselineText, out zeroBaseline))
@@ -590,10 +730,8 @@ internal static class Program
                 }
                 Console.WriteLine("angle before zero: " + zeroBaseline.ToString("F1", CultureInfo.InvariantCulture) + " deg");
                 Console.WriteLine("tilt before zero: " + tiltBaseline.ToString("F1", CultureInfo.InvariantCulture) + " deg");
-                EnsureScannerDisconnected();
                 string reply = await SendAndReadAsync(connection, "+CT,TOZERO;");
                 Console.WriteLine("+CT,TOZERO; => " + reply);
-                EnsureScannerDisconnected();
                 string tiltReply = await SendAndReadAsync(connection, "+CR,TOZERO;");
                 Console.WriteLine("+CR,TOZERO; => " + tiltReply);
                 for (int attempt = 0; attempt < 30; ++attempt)
@@ -625,7 +763,6 @@ internal static class Program
             }
             Console.WriteLine("angle before: " + before.ToString("F1", CultureInfo.InvariantCulture) + " deg");
 
-            EnsureScannerDisconnected();
             string move = "+CT,TURNANGLE=" + degrees.ToString("F1", CultureInfo.InvariantCulture) + ";";
             var timer = Stopwatch.StartNew();
             string moveReply = await SendAndReadAsync(connection, move);
