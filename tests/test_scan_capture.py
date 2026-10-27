@@ -186,6 +186,8 @@ class Scan360CaptureTests(unittest.TestCase):
                     "process_avg_ms": 18.0, "process_max_ms": 24.0,
                     "render_avg_ms": 8.0, "render_max_ms": 11.0,
                     "total_avg_ms": 246.0, "total_max_ms": 285.0, "points_avg": 6100.0,
+                    "animation_frames": 25, "animation_avg_ms": 2.0,
+                    "animation_max_ms": 5.0, "display_fps": 29.8,
                 }
                 self.assertEqual(controller.record_live_preview_client_metrics(client_metrics), {"recorded": True})
                 status = controller.live_preview_status()

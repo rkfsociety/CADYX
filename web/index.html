@@ -716,7 +716,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                 </div>
                 <div class="viewport" id="viewport">
                   <canvas id="model-preview" class="model-preview ply-preview-canvas" aria-label="Координатная сетка, оси и 3D-модель"></canvas>
-                  <output id="scanner-preview-fps" class="scanner-preview-fps" aria-label="Частота обновления облака" hidden>FPS —</output>
+                  <output id="scanner-preview-fps" class="scanner-preview-fps" aria-label="Частота визуализации и кадров сканера" hidden><span data-display-fps>FPS —</span><small data-source-fps>Облако —/с</small></output>
                 </div>
                 <footer class="viewport-footer" aria-label="Сводка модели">
                   <span>МОДЕЛЬ <strong id="viewport-model-name">—</strong></span><span>ОБЪЕКТЫ <strong id="viewport-object-count">0</strong></span><span>ВЕРШИНЫ <strong id="viewport-vertex-count">0</strong></span><span>ГРАНИ <strong id="viewport-face-count">0</strong></span><span>РЕВ. <strong id="viewport-revision">—</strong></span>

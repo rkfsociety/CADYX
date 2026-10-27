@@ -1,5 +1,9 @@
 (() => {
   const LIVE_PREVIEW_POINT_LIMIT = 8_000;
+  const LIVE_PREVIEW_TARGET_FPS = 30;
+  const LIVE_PREVIEW_MIN_OUTPUT_FPS = 25;
+  const LIVE_PREVIEW_MAX_OUTPUT_FPS = 35;
+  const LIVE_PREVIEW_FRAME_CACHE_LIMIT = 35;
   const MIN_SCAN_DEPTH_MM = 100;
   const MAX_SCAN_DEPTH_MM = 250;
   const LIVE_PREVIEW_STATIC_FRAME_OVERLAP_RATIO = 0.65;
@@ -222,6 +226,8 @@
     getProjectId = () => null,
     hasPersistentPointCloud = () => false, meshReady = false }, location = window.location, fetcher = fetch) => {
     const liveFpsIndicator = typeof document !== 'undefined' ? document.getElementById('scanner-preview-fps') : null;
+    const liveDisplayFps = liveFpsIndicator?.querySelector('[data-display-fps]') || liveFpsIndicator;
+    const liveSourceFps = liveFpsIndicator?.querySelector('[data-source-fps]') || null;
     let livePreviewOwned = false;
     let serverPointCloudVisible = false;
     let cloudPreviewOpen = false;
@@ -235,10 +241,19 @@
     let liveTimer = null;
     let liveFrameSequence = 0;
     let liveFpsSmoothed = 0;
+    let liveDisplayFpsSmoothed = 0;
+    let liveCloudQueue = [];
+    let liveDisplayedCloud = null;
+    let liveCloudTransitionActive = false;
+    let liveCloudTransitionToken = 0;
+    let liveCloudTransitionHandle = 0;
     let liveClientWindowStartedAt = 0;
     let liveClientWindowFrames = 0;
     let liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
     let liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
+    let liveClientWindowAnimationFrames = 0;
+    let liveClientWindowAnimationTimeMs = 0;
+    let liveClientWindowAnimationMaxMs = 0;
     let liveCalibration = null;
     let liveTableFrame = null;
     let liveTableMap = null;
@@ -251,6 +266,7 @@
     let emptyFramePollDelay = 25;
     let lastLiveFrameMtimeNs = 0;
     let liveFrameIntervalMs = 0;
+    let liveFrameJitterMs = 0;
     let liveDepthTemporalCoherent = false;
     let modelGeometry = null;
     const liveDepthHistory = new Float32Array(640 * 400);
@@ -579,13 +595,73 @@
       }
       return { bounds, markerIndices, count: accepted };
     };
-    const renderLiveFrame = ({ positions, count, bounds, markerIndices, aligned, orbitCenter, fitRadius, reset = false }) => {
+    const stopLiveCloudTransition = () => {
+      liveCloudTransitionToken += 1;
+      liveCloudTransitionActive = false;
+      if (liveCloudTransitionHandle && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(liveCloudTransitionHandle);
+      } else if (liveCloudTransitionHandle && typeof clearTimeout === 'function') {
+        clearTimeout(liveCloudTransitionHandle);
+      }
+      liveCloudTransitionHandle = 0;
+    };
+    const startLiveCloudTransition = durationMs => {
+      const token = ++liveCloudTransitionToken;
+      const nowClock = () => globalThis.performance?.now?.() ?? Date.now();
+      const scheduleFrame = typeof requestAnimationFrame === 'function'
+        ? callback => requestAnimationFrame(callback)
+        : callback => setTimeout(() => callback(nowClock()), 1000 / LIVE_PREVIEW_TARGET_FPS);
+      const startedAt = nowClock();
+      const tickIntervalMs = Math.max(1000 / LIVE_PREVIEW_MAX_OUTPUT_FPS,
+        Math.min(1000 / LIVE_PREVIEW_MIN_OUTPUT_FPS, 1000 / LIVE_PREVIEW_TARGET_FPS));
+      let lastTickAt = startedAt;
+      let firstTickAt = startedAt;
+      let tickCount = 0;
+      liveCloudTransitionActive = true;
+      const tick = now => {
+        if (token !== liveCloudTransitionToken || !livePreviewOwned) return;
+        const progress = Math.min(1, Math.max(0, (now - startedAt) / durationMs));
+        if (now - lastTickAt >= tickIntervalMs || progress >= 1) {
+          const animationStartedAt = nowClock();
+          if (viewer?.setPointLayerOpacities?.([progress, 1 - progress])) {
+            const animationMs = Math.max(0, nowClock() - animationStartedAt);
+            liveClientWindowAnimationFrames += 1;
+            liveClientWindowAnimationTimeMs += animationMs;
+            liveClientWindowAnimationMaxMs = Math.max(liveClientWindowAnimationMaxMs, animationMs);
+            if (tickCount === 0) firstTickAt = now;
+            tickCount += 1;
+            lastTickAt = now;
+          }
+        }
+        if (progress < 1) {
+          liveCloudTransitionHandle = scheduleFrame(tick);
+          return;
+        }
+        liveCloudTransitionHandle = 0;
+        liveCloudTransitionActive = false;
+        const span = lastTickAt - firstTickAt;
+        if (tickCount > 1 && span > 0) {
+          const transitionFps = (tickCount - 1) * 1000 / span;
+          liveDisplayFpsSmoothed = liveDisplayFpsSmoothed > 0
+            ? liveDisplayFpsSmoothed * 0.75 + transitionFps * 0.25 : transitionFps;
+          if (liveDisplayFps) liveDisplayFps.textContent = `FPS ${liveDisplayFpsSmoothed.toFixed(0)}`;
+        }
+        playNextLiveCloudFrame();
+      };
+      liveCloudTransitionHandle = scheduleFrame(tick);
+    };
+    const renderLiveFrame = ({ positions, count, bounds, markerIndices, aligned, orbitCenter, fitRadius,
+      previousCloud = null, blendProgress = 1, reset = false }) => {
       const pointLimit = LIVE_PREVIEW_POINT_LIMIT;
       const pointStep = Math.max(1, Math.ceil(count / pointLimit));
       const cloudPointCount = Math.ceil(count / pointStep);
       let extraMarkerCount = 0;
       for (const index of markerIndices) if (index % pointStep !== 0) extraMarkerCount += 1;
-      const tableOffset = cloudPointCount + extraMarkerCount;
+      const currentPointCount = cloudPointCount + extraMarkerCount;
+      const previousPointStep = previousCloud ? Math.max(1, Math.ceil(previousCloud.count / pointLimit)) : 1;
+      const previousPointCount = previousCloud ? Math.ceil(previousCloud.count / previousPointStep) : 0;
+      const previousOffset = currentPointCount;
+      const tableOffset = currentPointCount + previousPointCount;
       const overlay = aligned ? liveTableOverlay : null;
       const combinedPositions = new Float32Array(tableOffset * 3 + (overlay?.positions.length || 0));
       let output = 0;
@@ -606,11 +682,26 @@
           previewMarkerPoints[markerIndex] = extraMarkerIndex++;
         }
       }
+      if (previousCloud) {
+        for (let index = 0; index < previousCloud.count; index += previousPointStep) {
+          const destination = (previousOffset + Math.floor(index / previousPointStep)) * 3;
+          const source = index * 3;
+          combinedPositions[destination] = previousCloud.positions[source];
+          combinedPositions[destination + 1] = previousCloud.positions[source + 1];
+          combinedPositions[destination + 2] = previousCloud.positions[source + 2];
+        }
+      }
       const mapMarkerPoints = overlay
         ? Uint32Array.from(overlay.markerPoints, index => index + tableOffset) : new Uint32Array(0);
       const trajectoryLines = overlay
         ? Uint32Array.from(overlay.lines, index => index + tableOffset) : null;
       const finalBounds = { min: [...bounds.min], max: [...bounds.max] };
+      if (previousCloud) {
+        for (let axis = 0; axis < 3; axis += 1) {
+          finalBounds.min[axis] = Math.min(finalBounds.min[axis], previousCloud.bounds.min[axis]);
+          finalBounds.max[axis] = Math.max(finalBounds.max[axis], previousCloud.bounds.max[axis]);
+        }
+      }
       if (overlay) {
         combinedPositions.set(overlay.positions, tableOffset * 3);
         for (let index = tableOffset * 3; index < combinedPositions.length; index += 3) {
@@ -620,16 +711,50 @@
           }
         }
       }
+      const pointLayers = previousCloud
+        ? [
+          { points: Uint32Array.from({ length: cloudPointCount }, (_, index) => index),
+            style: { size: 2.4, opacity: blendProgress, color: '#ff9d54' } },
+          { points: Uint32Array.from({ length: previousPointCount }, (_, index) => previousOffset + index),
+            style: { size: 2.4, opacity: 1 - blendProgress, color: '#ff9d54' } },
+        ]
+        : [{ points: Uint32Array.from({ length: cloudPointCount }, (_, index) => index),
+          style: { size: 2.4, opacity: 1, color: '#ff9d54' } }];
+      if (overlay) pointLayers.push({ points: mapMarkerPoints,
+        style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } });
       viewer.load({ positions: combinedPositions, triangles: new Uint32Array(0), lines: trajectoryLines,
-        pointCloudVertexCount: cloudPointCount, pointPreviewLimit: pointLimit,
+        pointCloudVertexCount: 0, pointPreviewLimit: pointLimit,
         pointColor: '#ff9d54', bounds: finalBounds, points: previewMarkerPoints,
         pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' },
-        pointLayers: overlay ? [{ points: mapMarkerPoints, style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } }] : [],
+        pointLayers,
         lineStyle: overlay ? { color: '#5aaac6', opacity: 0.42, width: 1, dash: [5, 5] } : undefined,
         orbitCenter: aligned ? [0, 0, 0] : orbitCenter,
         fitRadius: aligned ? liveFitRadius : fitRadius },
       { reset: reset || !liveViewportInitialized });
       liveViewportInitialized = true;
+    };
+    const liveCloudCacheLimit = () => Math.max(25, Math.min(LIVE_PREVIEW_FRAME_CACHE_LIMIT,
+      Math.ceil((liveFrameIntervalMs + liveFrameJitterMs * 2) * LIVE_PREVIEW_TARGET_FPS / 1000) + 20));
+    const playNextLiveCloudFrame = () => {
+      if (liveCloudTransitionActive || !liveCloudQueue.length || !livePreviewOwned) return;
+      const frame = liveCloudQueue.shift();
+      const previous = liveDisplayedCloud;
+      const sameCoordinateFrame = previous && previous.aligned === frame.aligned;
+      const intervalMs = sameCoordinateFrame
+        ? Math.max(1, frame.capturedAtMs - previous.capturedAtMs) : 0;
+      const durationMs = sameCoordinateFrame
+        ? Math.max(100, Math.min(800, intervalMs + liveFrameJitterMs * 0.25)) : 0;
+      const animate = typeof viewer?.setPointLayerOpacities === 'function';
+      liveDisplayedCloud = frame;
+      renderLiveFrame({ ...frame, previousCloud: sameCoordinateFrame && animate ? previous : null,
+        blendProgress: sameCoordinateFrame && animate ? 0 : 1, reset: frame.reset });
+      if (sameCoordinateFrame && animate && durationMs > 0) startLiveCloudTransition(durationMs);
+    };
+    const enqueueLiveCloudFrame = frame => {
+      liveCloudQueue.push(frame);
+      const cacheLimit = liveCloudCacheLimit();
+      while (liveCloudQueue.length > cacheLimit) liveCloudQueue.shift();
+      playNextLiveCloudFrame();
     };
     cloudSource = pointCloudUrl(null);
     cloudOriginSource = originUrl(null);
@@ -709,9 +834,22 @@
     const showLivePreview = ({ open = false } = {}) => {
       if (!open) return;
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
+      stopLiveCloudTransition();
+      liveCloudQueue = [];
+      liveDisplayedCloud = null;
+      liveFrameJitterMs = 0;
       liveFpsSmoothed = 0;
+      liveDisplayFpsSmoothed = 0;
+      liveClientWindowStartedAt = 0;
+      liveClientWindowFrames = 0;
+      liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
+      liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
+      liveClientWindowAnimationFrames = 0;
+      liveClientWindowAnimationTimeMs = 0;
+      liveClientWindowAnimationMaxMs = 0;
       if (liveFpsIndicator) {
-        liveFpsIndicator.textContent = 'FPS —';
+        if (liveDisplayFps) liveDisplayFps.textContent = 'FPS —';
+        if (liveSourceFps) liveSourceFps.textContent = 'Облако —/с';
         liveFpsIndicator.hidden = false;
       }
       liveFrameSequence = 0;
@@ -804,6 +942,11 @@
                 const sequenceDelta = Math.max(1, frameSequence - liveFrameSequence);
                 const interval = (frameMtimeNs - lastLiveFrameMtimeNs) / sequenceDelta / 1e6;
                 if (interval >= 1 && interval <= 5000) {
+                  if (liveFrameIntervalMs > 0) {
+                    liveFrameJitterMs = liveFrameJitterMs > 0
+                      ? liveFrameJitterMs * 0.75 + Math.abs(interval - liveFrameIntervalMs) * 0.25
+                      : Math.abs(interval - liveFrameIntervalMs);
+                  }
                   liveFrameIntervalMs = liveFrameIntervalMs > 0
                     ? liveFrameIntervalMs * 0.75 + interval * 0.25 : interval;
                   emptyFramePollDelay = Math.max(25, Math.min(100, Math.round(liveFrameIntervalMs * 0.5)));
@@ -1032,8 +1175,14 @@
                 }
                 const processMs = Math.max(0, clock() - processStartedAt);
                 const renderStartedAt = clock();
-                renderLiveFrame({ positions: displayPositions, count, bounds, markerIndices, aligned: tableAligned,
-                  orbitCenter, fitRadius, reset: resetAfterAlignment });
+                enqueueLiveCloudFrame({
+                  positions: displayPositions.slice(0, count * 3), count,
+                  bounds: { min: [...bounds.min], max: [...bounds.max] },
+                  markerIndices: Uint32Array.from(markerIndices), aligned: tableAligned,
+                  orbitCenter: orbitCenter ? [...orbitCenter] : null, fitRadius,
+                  capturedAtMs: frameMtimeNs > 0 ? frameMtimeNs / 1e6 : Date.now(),
+                  reset: resetAfterAlignment,
+                });
                 const renderMs = Math.max(0, clock() - renderStartedAt);
                 const now = clock();
                 if (!liveClientWindowStartedAt) liveClientWindowStartedAt = now;
@@ -1052,14 +1201,21 @@
                   const frames = liveClientWindowFrames;
                   const averages = liveClientWindowSums;
                   const maxima = liveClientWindowMax;
+                  const animationFrames = liveClientWindowAnimationFrames;
+                  const animationTimeMs = liveClientWindowAnimationTimeMs;
+                  const animationMaxMs = liveClientWindowAnimationMaxMs;
                   liveClientWindowStartedAt = now;
                   liveClientWindowFrames = 0;
                   liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
                   liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
+                  liveClientWindowAnimationFrames = 0;
+                  liveClientWindowAnimationTimeMs = 0;
+                  liveClientWindowAnimationMaxMs = 0;
                   const windowFps = frames / windowSeconds;
                   liveFpsSmoothed = liveFpsSmoothed > 0
                     ? liveFpsSmoothed * 0.75 + windowFps * 0.25 : windowFps;
-                  if (liveFpsIndicator) liveFpsIndicator.textContent = `FPS ${liveFpsSmoothed.toFixed(1)}`;
+                  if (liveSourceFps) liveSourceFps.textContent = `Облако ${liveFpsSmoothed.toFixed(1)}/с`;
+                  if (liveSourceFps) liveSourceFps.textContent = `Облако ${liveFpsSmoothed.toFixed(1)}/с`;
                   void fetcher('/api/v1/scanner/live-preview/client-metrics', { method: 'POST',
                     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metrics: {
                       window_seconds: windowSeconds, frames,
@@ -1068,6 +1224,10 @@
                       render_avg_ms: averages.render / frames, render_max_ms: maxima.render,
                       total_avg_ms: averages.total / frames, total_max_ms: maxima.total,
                       points_avg: averages.points / frames,
+                      animation_frames: animationFrames,
+                      animation_avg_ms: animationFrames > 0 ? animationTimeMs / animationFrames : 0,
+                      animation_max_ms: animationMaxMs,
+                      display_fps: liveDisplayFpsSmoothed,
                     } }) }).catch(() => {});
                 }
                 liveFrameSequence = frameSequence;
@@ -1100,9 +1260,14 @@
     const closeLivePreview = () => {
       if (livePreviewOwned) {
         livePreviewOwned = false;
+        stopLiveCloudTransition();
+        liveCloudQueue = [];
+        liveDisplayedCloud = null;
         liveFpsSmoothed = 0;
+        liveDisplayFpsSmoothed = 0;
         if (liveFpsIndicator) {
-          liveFpsIndicator.textContent = 'FPS —';
+          if (liveDisplayFps) liveDisplayFps.textContent = 'FPS —';
+          if (liveSourceFps) liveSourceFps.textContent = 'Облако —/с';
           liveFpsIndicator.hidden = true;
         }
         restoreModel();

@@ -167,7 +167,7 @@ await waitUntil(() => viewerLoads.length >= livePreviewLoadStart + 3
   && viewerLoads.at(-1)?.geometry.points?.length === markerPointCount);
 assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "live");
-assert.ok(viewerLoads.at(-1).geometry.pointCloudVertexCount > 0, cloudButton.title);
+assert.ok(viewerLoads.at(-1).geometry.pointLayers?.[0]?.points?.length > 0, cloudButton.title);
 assert.equal(viewerLoads.at(-1).geometry.pointPreviewLimit, 8_000);
 assert.equal(viewerLoads.at(-1).geometry.points.length, markerPointCount,
   "only the sparse table markers receive the preview highlight");
@@ -237,6 +237,8 @@ const countValidFramePoints = frame => {
   }
   return count;
 };
+const displayedLiveCloudCount = geometry => geometry.pointLayers?.[0]?.points?.length
+  ?? geometry.pointCloudVertexCount;
 const unalignedExpectedPointCount = countValidFramePoints(liveRawFrameSource[0]);
 const secondUnalignedExpectedPointCount = countValidFramePoints(liveRawFrameSource[1]);
 liveFrameSequence = 0;
@@ -255,7 +257,7 @@ await waitUntil(() => viewerLoads.length >= unalignedStart + 4);
 const firstUnaligned = viewerLoads[unalignedStart + 1].geometry;
 const secondUnaligned = viewerLoads[unalignedStart + 2].geometry;
 const singleDropoutGeometry = viewerLoads[unalignedStart + 3].geometry;
-assert.equal(firstUnaligned.pointCloudVertexCount, unalignedExpectedPointCount,
+assert.equal(displayedLiveCloudCount(firstUnaligned), unalignedExpectedPointCount,
   "sparse depth frames render every valid return, including pixels outside the old preview lattice");
 assert.deepEqual([...secondUnaligned.orbitCenter], [...firstUnaligned.orbitCenter],
   "unregistered live frames retain the first valid frame camera center");
@@ -263,7 +265,7 @@ assert.equal(secondUnaligned.fitRadius, firstUnaligned.fitRadius,
   "unregistered live frames retain the first valid frame camera scale");
 assert.notDeepEqual([...secondUnaligned.bounds.min], [...firstUnaligned.bounds.min],
   "the stability assertion covers frames whose cloud bounds actually move");
-assert.equal(singleDropoutGeometry.pointCloudVertexCount, secondUnalignedExpectedPointCount,
+assert.equal(displayedLiveCloudCount(singleDropoutGeometry), secondUnalignedExpectedPointCount,
   "one missing sensor frame holds the last valid pixel cloud for one frame interval");
 await waitUntil(() => liveFrameSequence >= 4);
 await new Promise(resolve => setTimeout(resolve, 20));
@@ -284,7 +286,7 @@ const movingStart = viewerLoads.length;
 movingView.showLivePreview({ open: true });
 await waitUntil(() => viewerLoads.length >= movingStart + 3);
 const movingSecondGeometry = viewerLoads[movingStart + 2].geometry;
-assert.equal(movingSecondGeometry.pointCloudVertexCount, countValidFramePoints(liveRawFrameSource[1]),
+assert.equal(displayedLiveCloudCount(movingSecondGeometry), countValidFramePoints(liveRawFrameSource[1]),
   "low-overlap moving frames disable temporal point hold to avoid rotational trails");
 movingView.closeLivePreview();
 
@@ -301,10 +303,10 @@ const denseView = sandbox.window.CadyxScanView.initialize({
 const denseStart = viewerLoads.length;
 denseView.showLivePreview({ open: true });
 await waitUntil(() => viewerLoads.length >= denseStart + 3
-  && viewerLoads.at(-1)?.geometry.pointCloudVertexCount > 0);
+  && displayedLiveCloudCount(viewerLoads.at(-1)?.geometry || {}) > 0);
 const firstDenseGeometry = viewerLoads[denseStart + 1].geometry;
 const secondDenseGeometry = viewerLoads[denseStart + 2].geometry;
-const denseDisplayedCount = secondDenseGeometry.pointCloudVertexCount;
+const denseDisplayedCount = displayedLiveCloudCount(secondDenseGeometry);
 assert.ok(denseDisplayedCount <= 8_000, "dense scanner frames respect the preview point ceiling");
 assert.ok(denseDisplayedCount >= 7_000,
   `stable density sampling uses nearly the full point budget: ${denseDisplayedCount}`);
@@ -378,8 +380,8 @@ assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/butto
 assert.match(html, /id="viewport-scan-mesh"[^>]*>Сетка<\/button>/);
 assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/button>/);
 assert.match(html, /id="viewport-live-camera"[^>]*>Предпросмотр<\/button>/);
-assert.match(html, /id="scanner-preview-fps"[^>]*>FPS —<\/output>/,
-  "the scanner preview exposes the actual cloud update rate in the viewport");
+assert.match(html, /id="scanner-preview-fps"[^>]*>[\s\S]*data-display-fps>FPS —[\s\S]*data-source-fps>Облако —\/с[\s\S]*<\/output>/,
+  "the scanner preview reports display cadence separately from new sensor frames");
 assert.match(projectUiJs, /function projectPath\(projectId\)/);
 assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
 assert.match(projectUiJs, /let suffix = 2/);
@@ -409,6 +411,10 @@ assert.match(scanViewSource, /const windowFps = frames \/ windowSeconds/,
 assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
   /viewport-frame-crossfade|startFrameCrossfade/,
   "the scanner preview does not add a second blinking canvas layer");
+assert.match(scanViewSource, /const liveCloudCacheLimit = \(\) => Math\.max\(25,[\s\S]*LIVE_PREVIEW_FRAME_CACHE_LIMIT/,
+  "the processed-frame cache adapts within a bounded 25–35 frame range");
+assert.match(scanViewSource, /viewer\?\.setPointLayerOpacities\?\.\(\[progress, 1 - progress\]\)/,
+  "cached clouds interpolate at the configured output cadence without toggling the viewport layer");
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);

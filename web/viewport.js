@@ -536,7 +536,7 @@
         const style = layer.style || {};
         const size = Number.isFinite(style.size) ? Math.max(0.75, Math.min(8, style.size)) : 3;
         context.fillStyle = style.color || "#c3ecff";
-        context.globalAlpha = Number.isFinite(style.opacity) ? Math.max(0.1, Math.min(1, style.opacity)) : 1;
+        context.globalAlpha = Number.isFinite(style.opacity) ? Math.max(0, Math.min(1, style.opacity)) : 1;
         for (const point of layer.points || []) {
           if (point < 0 || point >= screenX.length) continue;
           if (geometry.construction) {
@@ -1448,6 +1448,17 @@
         bodyMotionFrame += 1;
         bodyMotion = null;
         render();
+      },
+      setPointLayerOpacities(opacities) {
+        if (!Array.isArray(opacities) || !geometry?.pointLayers
+            || opacities.length > geometry.pointLayers.length
+            || !opacities.every(Number.isFinite)) return false;
+        for (let index = 0; index < opacities.length; index += 1) {
+          geometry.pointLayers[index].style ||= {};
+          geometry.pointLayers[index].style.opacity = Math.max(0, Math.min(1, opacities[index]));
+        }
+        render();
+        return true;
       },
       getCamera() {
         return { orientation: cameraOrientation.slice(), zoom, panX: cameraPanX, panY: cameraPanY, projection: "orthographic" };
