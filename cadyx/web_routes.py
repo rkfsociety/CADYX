@@ -436,12 +436,15 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
         return
     if route.spec.name == "scanner_live_preview_start":
         body = _require_json(handler)
-        if set(body) - {"scanner_device_id"}:
-            raise ValidationError("Live scanner preview accepts only a scanner device ID.")
+        if set(body) - {"scanner_device_id", "fps"}:
+            raise ValidationError("Live scanner preview accepts only a scanner device ID and FPS.")
         scanner_device_id = body.get("scanner_device_id")
         if scanner_device_id is not None and not isinstance(scanner_device_id, str):
             raise ValidationError("The scanner device ID must be a string.")
-        handler._json(202, {"preview": core.start_scanner_live_preview(scanner_device_id)})
+        fps = body.get("fps", 10)
+        if isinstance(fps, bool) or not isinstance(fps, int) or fps not in {5, 10, 15}:
+            raise ValidationError("Live scanner preview FPS must be 5, 10, or 15.")
+        handler._json(202, {"preview": core.start_scanner_live_preview(scanner_device_id, fps)})
         return
     if route.spec.name == "scanner_live_preview_stop":
         handler._json(200, {"preview": core.stop_scanner_live_preview()})

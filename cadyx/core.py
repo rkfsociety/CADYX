@@ -180,8 +180,9 @@ class CadyxCore:
             scanner_device_id, q_matrix, depth_scale_mm_per_raw_unit,
         )
 
-    def start_scanner_live_preview(self, scanner_device_id: str | None = None) -> dict[str, Any]:
-        return self._scan_capture.start_live_preview(scanner_device_id)
+    def start_scanner_live_preview(self, scanner_device_id: str | None = None,
+                                   fps: int = 10) -> dict[str, Any]:
+        return self._scan_capture.start_live_preview(scanner_device_id, fps)
 
     def scanner_live_preview_status(self) -> dict[str, Any]:
         return self._scan_capture.live_preview_status()

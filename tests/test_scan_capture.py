@@ -148,12 +148,12 @@ class Scan360CaptureTests(unittest.TestCase):
             with patch.object(controller, "list_connected_devices", return_value=devices), \
                     patch.object(controller, "_resolve_scanner_calibration", return_value=(root / "Q.bin", 0.005)), \
                     patch("cadyx.scan_capture.subprocess.Popen", return_value=process) as popen:
-                self.assertEqual(controller.start_live_preview()["state"], "starting")
+                self.assertEqual(controller.start_live_preview(fps=15)["state"], "starting")
                 command = popen.call_args.args[0]
                 self.assertIn("--live-only", command)
                 self.assertIn("--live-frames-dir", command)
                 self.assertNotIn("--live-raw", command)
-                self.assertEqual(command[command.index("--fps") + 1], "10")
+                self.assertEqual(command[command.index("--fps") + 1], "15")
                 self.assertNotIn("--out-prefix", command)
                 self.assertNotIn("--frames", command)
                 self.assertNotIn("--q-file", command)

@@ -334,7 +334,13 @@ class WebApiTests(unittest.TestCase):
         with patch.object(self.core, "start_scanner_live_preview", return_value=expected) as start:
             status, response = self.request("/api/v1/scanner/live-preview", {})
         self.assertEqual((status, response["preview"]), (202, expected))
-        start.assert_called_once_with(None)
+        start.assert_called_once_with(None, 10)
+        with patch.object(self.core, "start_scanner_live_preview", return_value=expected) as start:
+            status, response = self.request("/api/v1/scanner/live-preview", {"fps": 15})
+        self.assertEqual((status, response["preview"]), (202, expected))
+        start.assert_called_once_with(None, 15)
+        status, response = self.request("/api/v1/scanner/live-preview", {"fps": 30})
+        self.assertEqual(status, 400)
         with patch.object(self.core, "scanner_live_preview_status", return_value={"state": "running"}) as current:
             status, response = self.request("/api/v1/scanner/live-preview")
         self.assertEqual((status, response["preview"]["state"]), (200, "running"))

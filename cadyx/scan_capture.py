@@ -514,9 +514,11 @@ class Scan360CaptureController:
             )
             return self._snapshot_locked()
 
-    def start_live_preview(self, scanner_device_id: str | None = None) -> dict[str, Any]:
+    def start_live_preview(self, scanner_device_id: str | None = None, fps: int = 10) -> dict[str, Any]:
         if os.name != "nt":
             raise ValidationError("Live Revopoint preview is available only on the Windows scanner host.")
+        if isinstance(fps, bool) or not isinstance(fps, int) or fps not in {5, 10, 15}:
+            raise ValidationError("Live scanner preview FPS must be 5, 10, or 15.")
         capture_executable = self._repository_root / "tools" / "revopoint" / "build" / "CaptureY16.exe"
         if not capture_executable.is_file():
             raise ValidationError("The CaptureY16 live-preview executable is unavailable; build the Revopoint tools first.")
@@ -555,8 +557,7 @@ class Scan360CaptureController:
                 with log_path.open("wb") as log_stream:
                     process = subprocess.Popen(
                         [str(capture_executable), "--live-only", "--live-frames-dir", str(frames_path),
-                         "--stop-file", str(stop_path),
-                         "--ready-file", str(ready_path), "--fps", "10",
+                         "--stop-file", str(stop_path), "--ready-file", str(ready_path), "--fps", str(fps),
                          "--device-id", scanner_device_id],
                         cwd=str(self._repository_root), stdin=subprocess.DEVNULL,
                         stdout=log_stream, stderr=subprocess.STDOUT,
