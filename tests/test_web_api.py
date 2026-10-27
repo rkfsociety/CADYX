@@ -459,6 +459,51 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(all(not path.exists() for path in paths),
                         "a latest-frame read removes skipped source files so the queue stays bounded")
 
+    def test_live_scanner_delivers_latest_frame_while_capture_still_holds_file_open(self) -> None:
+        frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"
+        frame_directory.mkdir(parents=True)
+        frame_bytes = 640 * 400 * 2
+        stale_path = frame_directory / "frame-1.y16"
+        open_path = frame_directory / "frame-2.y16"
+        stale_path.write_bytes(bytes([1]) * frame_bytes)
+        open_frame = bytes([2]) * frame_bytes
+        open_path.write_bytes(open_frame)
+        original_unlink = Path.unlink
+
+        def deny_latest_delete(path: Path, *args, **kwargs):
+            if path == open_path:
+                raise PermissionError(5, "Access is denied", str(path))
+            return original_unlink(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", new=deny_latest_delete):
+            connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+            try:
+                connection.request("GET", "/api/v1/scanner/live-frame?latest=1&consume=1")
+                response = connection.getresponse()
+                payload = response.read()
+            finally:
+                connection.close()
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("X-CADYX-Frame-Sequence"), "2")
+        self.assertEqual(payload, open_frame)
+        self.assertFalse(stale_path.exists())
+        self.assertTrue(open_path.exists(), "a frame held by the native writer is retried after delivery")
+
+        next_path = frame_directory / "frame-3.y16"
+        next_path.write_bytes(bytes([3]) * frame_bytes)
+        connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        try:
+            connection.request("GET", "/api/v1/scanner/live-frame?latest=1&consume=1")
+            response = connection.getresponse()
+            payload = response.read()
+        finally:
+            connection.close()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("X-CADYX-Frame-Sequence"), "3")
+        self.assertEqual(payload, bytes([3]) * frame_bytes)
+        self.assertFalse(open_path.exists(), "the previously locked frame is cleaned up on a later poll")
+
     def test_live_scanner_diagnostic_prefers_active_capture_snapshot_when_present(self) -> None:
         raw_path = self.core.workspace.root / ".revopoint-live.raw"
         frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"

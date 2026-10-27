@@ -570,6 +570,9 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
                     stale_path.unlink()
                 except FileNotFoundError:
                     pass
+                except PermissionError:
+                    # CaptureY16 can still hold a published file open; retry its cleanup on the next poll.
+                    continue
                 except OSError as exc:
                     raise ValidationError(f"The consumed live scanner frame could not be removed: {exc}.") from exc
         handler.send_response(200)

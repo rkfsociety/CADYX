@@ -24,7 +24,12 @@ const scheduleTestTimeout = (callback, delay, ...args) => {
   if (delay === 0 || delay >= 25) livePollDelays.push(delay);
   return setTimeout(callback, delay, ...args);
 };
-const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply&scan_origin_file=origin.ply") }, URL, URLSearchParams, setTimeout: scheduleTestTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
+const mapAlignmentOutput = { hidden: true, textContent: "", dataset: {} };
+const testDocument = {
+  getElementById: id => id === "scanner-map-alignment" ? mapAlignmentOutput : null,
+  querySelector: () => null,
+};
+const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply&scan_origin_file=origin.ply") }, document: testDocument, URL, URLSearchParams, setTimeout: scheduleTestTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"), sandbox);
 let sampledLivePixels = 0;
 const liveSampleSlots = new Set();
@@ -77,6 +82,9 @@ for (let index = 0; index < centers.length; index += 1) {
   for (let axis = 0; axis < 3; axis += 1) mapView.setFloat64(offset + 16 + axis * 8, x * xAxis[axis] + y * yAxis[axis], true);
   for (let axis = 0; axis < 3; axis += 1) mapView.setFloat64(offset + 40 + axis * 8, zAxis[axis], true);
 }
+assert.throws(() => sandbox.window.CadyxScanView.registerTableMarkers(
+  [[0, 0], [10, 0], [20, 0], [30, 0]], { points: [[0, 0], [10, 0], [20, 0], [30, 0]] }, 2,
+), /почти на одной линии/, "collinear map detections cannot define a reliable table frame");
 let markerPointCount = 0;
 for (const frame of liveRawFrames) {
   markerPointCount = 0;
@@ -208,6 +216,64 @@ assert.equal(viewport.dataset.scanPreview, "true", "360 status polling does not 
 view.closeLivePreview();
 assert.equal(viewport.dataset.scanPreview, "false", "stopping the live preview restores the CAD geometry");
 assert.equal(viewport.dataset.scanPreviewMode, "");
+
+const makeMapAlignedFrame = () => {
+  const frame = new Uint8Array(640 * 400 * 2);
+  for (const [centerX, centerY] of centers) {
+    for (let y = centerY - 7; y <= centerY + 7; y += 1) for (let x = centerX - 7; x <= centerX + 7; x += 1) {
+      if ((x - centerX) ** 2 + (y - centerY) ** 2 > 49) continue;
+      const pixel = y * 640 + x;
+      const depth = Math.round(135 + 0.12 * (x - 320) - 0.08 * (y - 200));
+      frame[pixel * 2] = depth & 0xff;
+      frame[pixel * 2 + 1] = depth >> 8;
+    }
+  }
+  for (let y = 275; y < 287; y += 1) for (let x = 300; x < 312; x += 1) frame[(y * 640 + x) * 2] = 110;
+  return frame;
+};
+const unshiftedMapFrame = makeMapAlignedFrame();
+const translatedMapFrame = new Uint8Array(640 * 400 * 2);
+for (let y = 0; y < 400; y += 1) for (let x = 0; x < 640; x += 1) {
+  const depthOffset = (y * 640 + x) * 2;
+  if (unshiftedMapFrame[depthOffset] === 0 && unshiftedMapFrame[depthOffset + 1] === 0) continue;
+  const translatedX = x + 20, translatedY = y + 12;
+  const translatedOffset = (translatedY * 640 + translatedX) * 2;
+  translatedMapFrame[translatedOffset] = unshiftedMapFrame[depthOffset];
+  translatedMapFrame[translatedOffset + 1] = unshiftedMapFrame[depthOffset + 1];
+}
+liveRawFrameSource = [unshiftedMapFrame, translatedMapFrame, new Uint8Array(640 * 400 * 2)];
+liveFrameSequence = 0;
+const mapAlignedView = sandbox.window.CadyxScanView.initialize({
+  cloudButton: element(), meshButton: element(), viewport: element(), viewer, getModelGeometry, meshReady: true,
+}, undefined, fetchPreview);
+const mapAlignedStart = viewerLoads.length;
+mapAlignedView.showLivePreview({ open: true });
+await waitUntil(() => viewerLoads.length >= mapAlignedStart + 3
+  && liveFrameSequence >= 2);
+const mapAlignedGeometries = [viewerLoads[mapAlignedStart + 1].geometry, viewerLoads[mapAlignedStart + 2].geometry];
+const nonMarkerCentroid = geometry => {
+  const markers = new Set(geometry.points);
+  const centroid = [0, 0, 0];
+  let pointCount = 0;
+  for (let point = 0; point < geometry.pointCloudVertexCount; point += 1) {
+    if (markers.has(point)) continue;
+    for (let axis = 0; axis < 3; axis += 1) centroid[axis] += geometry.positions[point * 3 + axis];
+    pointCount += 1;
+  }
+  return centroid.map(value => value / pointCount);
+};
+const alignedObjectCentroids = mapAlignedGeometries.map(nonMarkerCentroid);
+assert.ok(Math.hypot(...alignedObjectCentroids[0].map((value, axis) => value - alignedObjectCentroids[1][axis])) < 1,
+  "re-registering each frame against the table map keeps points fixed in table coordinates as image-space markers move");
+assert.match(mapAlignmentOutput.textContent, /Карта \d+\/5/,
+  "the live preview reports its current table-map correspondence quality");
+await waitUntil(() => liveFrameSequence >= 3);
+await new Promise(resolve => setTimeout(resolve, 30));
+assert.equal(viewerLoads.length, mapAlignedStart + 3,
+  "a frame without enough table markers does not replace the last map-aligned cloud with unaligned points");
+assert.match(mapAlignmentOutput.textContent, /последний кадр/,
+  "the map status explains when the preview is retaining its last aligned frame");
+mapAlignedView.closeLivePreview();
 
 const makeUnalignedFrame = (markerCenters, extraDepth = 0) => {
   const frame = new Uint8Array(640 * 400 * 2);
@@ -378,6 +444,8 @@ assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/b
 assert.match(html, /id="viewport-live-camera"[^>]*>Предпросмотр<\/button>/);
 assert.match(html, /id="scanner-preview-fps"[^>]*>FPS —<\/output>/,
   "the scanner preview shows only the sensor FPS indicator");
+assert.match(html, /id="scanner-map-alignment"[^>]*aria-label="Сопоставление точек с картой стола"/,
+  "the scanner viewport exposes the active table-map alignment status");
 assert.match(projectUiJs, /function projectPath\(projectId\)/);
 assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
 assert.match(projectUiJs, /let suffix = 2/);
@@ -401,6 +469,8 @@ assert.match(appJs, /if\(scan360\.dataset\.captureLocked==='true'\)return/);
 assert.match(styleCss, /#viewport-scan-360\[data-capture-locked="true"\]\s*\{\s*opacity:\s*\.43;\s*pointer-events:\s*none;/);
 assert.match(styleCss, /\.scanner-preview-fps\s*\{[^}]*right:\s*12px;[^}]*bottom:\s*12px;/,
   "the FPS badge sits at the bottom-right of the viewport");
+assert.match(styleCss, /\.scanner-map-alignment\s*\{[^}]*left:\s*82px;[^}]*bottom:\s*12px;/,
+  "the marker-map alignment status is visible at the bottom-left of the viewport");
 const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
 assert.match(scanViewSource, /const captureFps = preview\?\.metrics\?\.capture_fps/,
   "the badge uses the native measured sensor rate");

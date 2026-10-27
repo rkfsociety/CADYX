@@ -162,32 +162,49 @@
     return best?.transform || null;
   };
 
-  const registerTableMarkers = (livePoints, tableMap, threshold = 5) => {
+  const registerTableMarkers = (livePoints, tableMap, threshold = 5, priorPairs = null, allowRansac = true) => {
     if (!Array.isArray(livePoints) || livePoints.length < 4 || tableMap?.points?.length < 4) {
       throw new Error('Для привязки к карте стола нужны минимум четыре маркера.');
     }
-    let seed = 0x51f15e5d;
-    const randomIndex = length => {
-      seed = (Math.imul(seed ^ seed >>> 15, 1 | seed) + 0x6d2b79f5) | 0;
-      let value = Math.imul(seed ^ seed >>> 7, 61 | seed) ^ seed;
-      return ((value ^ value >>> 14) >>> 0) % length;
-    };
     let best = null;
-    for (let iteration = 0; iteration < 512; iteration += 1) {
-      const sourceA = randomIndex(livePoints.length), sourceB = randomIndex(livePoints.length);
-      const targetA = randomIndex(tableMap.points.length), targetB = randomIndex(tableMap.points.length);
-      if (sourceA === sourceB || targetA === targetB) continue;
-      for (const reflection of [1, -1]) {
-        const transform = transformFromPair(livePoints[sourceA], livePoints[sourceB],
-          tableMap.points[targetA], tableMap.points[targetB], reflection);
-        if (!transform) continue;
+    if (Array.isArray(priorPairs) && priorPairs.length >= 4) {
+      const transform = fitMarkerSimilarity(livePoints, tableMap.points, priorPairs);
+      if (transform) {
+        const anchorResiduals = priorPairs.map(pair => {
+          const projected = applyMapTransform(livePoints[pair.sourceIndex], transform);
+          const target = tableMap.points[pair.targetIndex];
+          return Math.hypot(projected[0] - target[0], projected[1] - target[1]);
+        });
         const pairs = mutualMarkerMatches(livePoints, tableMap.points, transform, threshold);
         const error = pairs.length ? pairs.reduce((sum, pair) => sum + pair.distance, 0) / pairs.length : Infinity;
-        if (pairs.length >= 4 && (!best || pairs.length > best.pairs.length
-            || pairs.length === best.pairs.length && error < best.error)) best = { pairs, transform, error };
+        if (anchorResiduals.every(residual => residual <= threshold) && pairs.length >= 4) {
+          best = { pairs, transform, error };
+        }
       }
     }
-    if (!best) throw new Error('Карта стола не сопоставилась: нужно минимум четыре надёжных соответствия маркеров.');
+    if (!best && allowRansac && livePoints.length >= 4) {
+      let seed = 0x51f15e5d;
+      const randomIndex = length => {
+        seed = (Math.imul(seed ^ seed >>> 15, 1 | seed) + 0x6d2b79f5) | 0;
+        let value = Math.imul(seed ^ seed >>> 7, 61 | seed) ^ seed;
+        return ((value ^ value >>> 14) >>> 0) % length;
+      };
+      for (let iteration = 0; iteration < 512; iteration += 1) {
+        const sourceA = randomIndex(livePoints.length), sourceB = randomIndex(livePoints.length);
+        const targetA = randomIndex(tableMap.points.length), targetB = randomIndex(tableMap.points.length);
+        if (sourceA === sourceB || targetA === targetB) continue;
+        for (const reflection of [1, -1]) {
+          const transform = transformFromPair(livePoints[sourceA], livePoints[sourceB],
+            tableMap.points[targetA], tableMap.points[targetB], reflection);
+          if (!transform) continue;
+          const pairs = mutualMarkerMatches(livePoints, tableMap.points, transform, threshold);
+          const error = pairs.length ? pairs.reduce((sum, pair) => sum + pair.distance, 0) / pairs.length : Infinity;
+          if (pairs.length >= 4 && (!best || pairs.length > best.pairs.length
+              || pairs.length === best.pairs.length && error < best.error)) best = { pairs, transform, error };
+        }
+      }
+    }
+    if (!best) throw new Error('Карта стола не сопоставилась: нужны устойчивые соответствия минимум трёх маркеров.');
     let pairs = best.pairs, transform = best.transform;
     for (let iteration = 0; iteration < 5; iteration += 1) {
       const refined = fitMarkerSimilarity(livePoints, tableMap.points, pairs);
@@ -211,6 +228,27 @@
     if (!Number.isFinite(medianResidual) || medianResidual > threshold) {
       throw new Error('Соответствие карте стола неоднозначно; предпросмотр оставлен без смещения.');
     }
+    const matchedTarget = pairs.map(pair => tableMap.points[pair.targetIndex]);
+    const centerX = matchedTarget.reduce((sum, point) => sum + point[0] / matchedTarget.length, 0);
+    const centerY = matchedTarget.reduce((sum, point) => sum + point[1] / matchedTarget.length, 0);
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    let covarianceXX = 0, covarianceXY = 0, covarianceYY = 0;
+    for (const point of matchedTarget) {
+      const x = point[0] - centerX, y = point[1] - centerY;
+      minX = Math.min(minX, point[0]); maxX = Math.max(maxX, point[0]);
+      minY = Math.min(minY, point[1]); maxY = Math.max(maxY, point[1]);
+      covarianceXX += x * x;
+      covarianceXY += x * y;
+      covarianceYY += y * y;
+    }
+    const targetSpread = Math.max(maxX - minX, maxY - minY);
+    const eigenvalueDelta = Math.hypot(covarianceXX - covarianceYY, 2 * covarianceXY);
+    const largestVariance = (covarianceXX + covarianceYY + eigenvalueDelta) / 2;
+    const smallestVariance = (covarianceXX + covarianceYY - eigenvalueDelta) / 2;
+    if (targetSpread < threshold * 2 || largestVariance < 1e-12
+        || smallestVariance < largestVariance * 0.02) {
+      throw new Error('Маркеры карты расположены слишком близко или почти на одной линии для устойчивой привязки.');
+    }
     return { ...transform, matches: pairs, medianResidual };
   };
 
@@ -218,6 +256,14 @@
     getProjectId = () => null,
     hasPersistentPointCloud = () => false, meshReady = false }, location = window.location, fetcher = fetch) => {
     const liveFpsIndicator = typeof document !== 'undefined' ? document.getElementById('scanner-preview-fps') : null;
+    const liveMapAlignmentIndicator = typeof document !== 'undefined'
+      ? document.getElementById('scanner-map-alignment') : null;
+    let liveMapAlignmentSummary = null;
+    const setMapAlignmentStatus = (message, state = 'waiting') => {
+      if (!liveMapAlignmentIndicator) return;
+      liveMapAlignmentIndicator.textContent = message;
+      liveMapAlignmentIndicator.dataset.state = state;
+    };
     let livePreviewOwned = false;
     let serverPointCloudVisible = false;
     let cloudPreviewOpen = false;
@@ -239,6 +285,9 @@
     let liveTableMap = null;
     let liveTableOverlay = null;
     let liveMapTransform = null;
+    let liveMarkerTracks = [];
+    let liveMarkerTrackSequence = 0;
+    let lastMapRansacSequence = 0;
     let liveFitRadius = null;
     let liveRawCameraCenter = null;
     let liveRawFitRadius = null;
@@ -571,6 +620,34 @@
       }
       return { bounds, markerIndices, count: accepted };
     };
+    const trackTableMarkerMatches = (currentPixels, frameSequence) => {
+    if (liveMarkerTracks.length < 4 || currentPixels.length < 4) return [];
+      const frameGap = Math.max(1, frameSequence - liveMarkerTrackSequence);
+      const maximumPixelDistance = Math.min(120, 35 * frameGap);
+      const nearestCurrent = liveMarkerTracks.map(track => {
+        let index = -1, distance = Infinity;
+        for (let current = 0; current < currentPixels.length; current += 1) {
+          const candidate = Math.hypot(track.pixel[0] - currentPixels[current][0],
+            track.pixel[1] - currentPixels[current][1]);
+          if (candidate < distance) { index = current; distance = candidate; }
+        }
+        return { index, distance };
+      });
+      const nearestTrack = currentPixels.map(pixel => {
+        let index = -1, distance = Infinity;
+        for (let previous = 0; previous < liveMarkerTracks.length; previous += 1) {
+          const candidate = Math.hypot(liveMarkerTracks[previous].pixel[0] - pixel[0],
+            liveMarkerTracks[previous].pixel[1] - pixel[1]);
+          if (candidate < distance) { index = previous; distance = candidate; }
+        }
+        return { index, distance };
+      });
+      return nearestCurrent.flatMap((match, previous) =>
+        match.index >= 0 && match.distance <= maximumPixelDistance
+          && nearestTrack[match.index]?.index === previous
+          ? [{ sourceIndex: match.index, targetIndex: liveMarkerTracks[previous].mapIndex }]
+          : []);
+    };
     const renderLiveFrame = ({ positions, count, bounds, markerIndices, aligned, orbitCenter, fitRadius,
       reset = false }) => {
       const pointStep = Math.max(1, Math.ceil(count / LIVE_PREVIEW_POINT_LIMIT));
@@ -706,9 +783,14 @@
       liveClientWindowFrames = 0;
       liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
       liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
+      liveMapAlignmentSummary = null;
       if (liveFpsIndicator) {
         liveFpsIndicator.textContent = 'FPS —';
         liveFpsIndicator.hidden = false;
+      }
+      if (liveMapAlignmentIndicator) {
+        liveMapAlignmentIndicator.hidden = false;
+        setMapAlignmentStatus('Карта: поиск маркеров');
       }
       liveFrameSequence = 0;
       liveCalibration = null;
@@ -716,6 +798,9 @@
       liveTableMap = null;
       liveTableOverlay = null;
       liveMapTransform = null;
+      liveMarkerTracks = [];
+      liveMarkerTrackSequence = 0;
+      lastMapRansacSequence = 0;
       liveFitRadius = null;
       liveRawCameraCenter = null;
       liveRawFitRadius = null;
@@ -870,6 +955,7 @@
               const displayDepthCount = currentValidPixels;
               const markerPositions = [];
               const markerCenterPositions = [];
+              const markerCenterPixelPositions = [];
               let count = 0;
               const rawBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
               const projectedPoint = [0, 0, 0];
@@ -896,7 +982,10 @@
                 const pixel = markerPixelIndices[markerIndex];
                 if (!projectPixel(pixel % 640, Math.floor(pixel / 640), depths[pixel])) continue;
                 markerPositions.push(projectedPoint[0], projectedPoint[1], projectedPoint[2]);
-                if (markerCenterPixels[pixel]) markerCenterPositions.push(projectedPoint[0], projectedPoint[1], projectedPoint[2]);
+                if (markerCenterPixels[pixel]) {
+                  markerCenterPositions.push(projectedPoint[0], projectedPoint[1], projectedPoint[2]);
+                  markerCenterPixelPositions.push([pixel % 640, Math.floor(pixel / 640)]);
+                }
               }
               for (let pixel = 0; pixel < depths.length && count < LIVE_PREVIEW_POINT_LIMIT; pixel += 1) {
                 const depthValue = depths[pixel];
@@ -922,9 +1011,13 @@
               }
               if (request !== liveRequest || !livePreviewOwned) return;
               if (count >= 3) {
-                let tableAligned = Boolean(liveTableFrame && liveMapTransform);
+                const hadTableAlignment = Boolean(liveTableFrame && liveMapTransform);
+                let tableAligned = false;
                 let resetAfterAlignment = false;
-                if (!tableAligned && regions >= 4) {
+                const priorMarkerMatches = trackTableMarkerMatches(markerCenterPixelPositions, frameSequence);
+                const canRegisterFromTracks = hadTableAlignment && priorMarkerMatches.length >= 4;
+                const canInitializeMap = regions >= 4;
+                if (canRegisterFromTracks || canInitializeMap) {
                   try {
                     const tableFrame = fitTableFrame(markerPositions, centerRay(liveCalibration));
                     const markerCoordinates = [];
@@ -934,14 +1027,39 @@
                       markerCoordinates.push([tableFrame.xAxis, tableFrame.yAxis].map(axis =>
                         axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]));
                     }
-                    const mapTransform = registerTableMarkers(markerCoordinates, liveTableMap);
+                    const allowRansac = priorMarkerMatches.length < 3
+                      && (lastMapRansacSequence === 0 || frameSequence - lastMapRansacSequence >= 8);
+                    if (allowRansac) lastMapRansacSequence = frameSequence;
+                    const mapTransform = registerTableMarkers(markerCoordinates, liveTableMap, 5,
+                      priorMarkerMatches, allowRansac);
                     liveTableFrame = tableFrame;
                     liveMapTransform = mapTransform;
+                    liveMarkerTracks = mapTransform.matches.map(match => ({
+                      pixel: markerCenterPixelPositions[match.sourceIndex], mapIndex: match.targetIndex,
+                    }));
+                    liveMarkerTrackSequence = frameSequence;
                     tableAligned = true;
-                    resetAfterAlignment = liveViewportInitialized;
+                    resetAfterAlignment = !hadTableAlignment && liveViewportInitialized;
+                    liveMapAlignmentSummary = `Карта ${mapTransform.matches.length}/${liveTableMap.points.length}`
+                      + ` · остаток ${mapTransform.medianResidual.toFixed(1)} ед.`;
+                    setMapAlignmentStatus(liveMapAlignmentSummary, 'aligned');
                   } catch (error) {
                     cloudButton.title = `Ожидание привязки к карте стола: ${error.message}`;
+                    setMapAlignmentStatus(hadTableAlignment && liveMapAlignmentSummary
+                      ? `${liveMapAlignmentSummary} · нужна повторная привязка`
+                      : 'Карта: соответствие неоднозначно', hadTableAlignment ? 'stale' : 'waiting');
                   }
+                }
+                if (!tableAligned && hadTableAlignment) {
+                  liveFrameSequence = frameSequence;
+                  cloudButton.title = 'Недостаточно совпавших маркеров; сохраняется последний кадр в координатах карты стола.';
+                  setMapAlignmentStatus(liveMapAlignmentSummary
+                    ? `${liveMapAlignmentSummary} · последний кадр`
+                    : 'Карта: мало маркеров · последний кадр', 'stale');
+                  return;
+                }
+                if (!tableAligned && liveTableMap) {
+                  setMapAlignmentStatus(`Карта: ${regions}/${liveTableMap.points.length} маркеров; нужно 4`, 'waiting');
                 }
                 let bounds = rawBounds;
                 let markerIndices = [];
@@ -962,13 +1080,12 @@
                     orbitCenter = [0, 0, 0];
                     fitRadius = liveFitRadius;
                   } else {
-                    tableAligned = false;
-                    liveTableFrame = null;
-                    liveMapTransform = null;
-                    liveFitRadius = null;
-                    liveRawCameraCenter = null;
-                    liveRawFitRadius = null;
-                    resetAfterAlignment = liveViewportInitialized;
+                    liveFrameSequence = frameSequence;
+                    cloudButton.title = 'В текущем кадре нет надёжных точек над плоскостью стола; сохраняется последний выровненный кадр.';
+                    setMapAlignmentStatus(liveMapAlignmentSummary
+                      ? `${liveMapAlignmentSummary} · последний кадр`
+                      : 'Карта: мало точек · последний кадр', 'stale');
+                    return;
                   }
                 }
                 if (!tableAligned && !liveRawCameraCenter) {
@@ -1030,6 +1147,9 @@
               } else {
                 liveFrameSequence = frameSequence;
                 renderedFrame = true;
+                if (liveMapTransform) setMapAlignmentStatus(liveMapAlignmentSummary
+                  ? `${liveMapAlignmentSummary} · пустой кадр, последний кадр сохранён`
+                  : 'Карта: пустой кадр · последний', 'stale');
                 if (!liveViewportInitialized) cloudButton.title = 'Ожидание валидных точек глубины.';
               }
           } else if (response.status === 404) {
@@ -1059,12 +1179,19 @@
           liveFpsIndicator.textContent = 'FPS —';
           liveFpsIndicator.hidden = true;
         }
+        if (liveMapAlignmentIndicator) {
+          liveMapAlignmentIndicator.textContent = 'Карта: —';
+          liveMapAlignmentIndicator.hidden = true;
+        }
         restoreModel();
         liveFrameSequence = 0;
         liveTableFrame = null;
         liveTableMap = null;
         liveTableOverlay = null;
         liveMapTransform = null;
+        liveMarkerTracks = [];
+        liveMarkerTrackSequence = 0;
+        lastMapRansacSequence = 0;
         liveFitRadius = null;
         liveRawCameraCenter = null;
         liveRawFitRadius = null;

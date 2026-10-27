@@ -220,6 +220,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .viewport { position: relative; display: grid; min-height: 0; place-items: center; overflow: hidden; background: radial-gradient(ellipse at 52% 44%, #17212a 0%, #10171d 58%, #0b1114 100%); }
 .scanner-preview-fps { position: absolute; z-index: 5; right: 12px; bottom: 12px; min-width: 76px; padding: 6px 9px; border: 1px solid #52616b99; border-radius: 5px; color: #e6f2f7; background: #0b1114d9; box-shadow: 0 3px 12px #0005; font: 600 12px/1 var(--mono); text-align: center; pointer-events: none; }
 .scanner-preview-fps[hidden] { display: none; }
+.scanner-map-alignment { position: absolute; z-index: 5; left: 82px; bottom: 12px; max-width: min(340px, calc(100% - 190px)); overflow: hidden; padding: 6px 9px; border: 1px solid #52616b99; border-radius: 5px; color: #c4d2d9; background: #0b1114d9; box-shadow: 0 3px 12px #0005; font: 10px/1 var(--mono); text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.scanner-map-alignment[data-state="aligned"] { color: #91e2bc; }
+.scanner-map-alignment[data-state="stale"],.scanner-map-alignment[data-state="waiting"] { color: #edc27a; }
+.scanner-map-alignment[hidden] { display: none; }
 .turntable-control-panel { position: absolute; z-index: 6; top: 12px; right: 12px; display: grid; width: 286px; aspect-ratio: 1; grid-template-rows: 22px 30px 30px 30px 44px 27px 30px 23px; gap: 4px; padding: 10px; border: 1px solid #52616bcc; border-radius: 6px; color: #e6f2f7; background: #0b1114ed; box-shadow: 0 5px 22px #0008; font: 9px var(--mono); }
 .primary-grid:not([data-view="scanning"]) .turntable-control-panel { display: none; }
 .turntable-control-heading,.turntable-control-position,.turntable-control-row,.turntable-control-tilt label,.turntable-control-actions { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
