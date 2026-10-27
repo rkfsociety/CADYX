@@ -242,6 +242,7 @@
     let liveTimer = null;
     let liveFrameSequence = 0;
     let liveDisplayFpsSmoothed = 0;
+    let liveTransitionTickIntervalMs = 1000 / LIVE_PREVIEW_MAX_OUTPUT_FPS;
     let liveCloudQueue = [];
     let liveDisplayedCloud = null;
     let liveCachedCloudPair = false;
@@ -606,7 +607,7 @@
       const token = ++liveCloudTransitionToken;
       const nowClock = () => globalThis.performance?.now?.() ?? Date.now();
       const startedAt = nowClock();
-      const tickIntervalMs = 1000 / LIVE_PREVIEW_MAX_OUTPUT_FPS;
+      const tickIntervalMs = liveTransitionTickIntervalMs;
       let lastTickAt = startedAt;
       let firstTickAt = startedAt;
       let tickCount = 0;
@@ -638,6 +639,12 @@
           const transitionFps = (tickCount - 1) * 1000 / span;
           liveDisplayFpsSmoothed = liveDisplayFpsSmoothed > 0
             ? liveDisplayFpsSmoothed * 0.75 + transitionFps * 0.25 : transitionFps;
+          if (liveDisplayFpsSmoothed < 27) {
+            liveTransitionTickIntervalMs = Math.max(1000 / 60, liveTransitionTickIntervalMs - 1.5);
+          } else if (liveDisplayFpsSmoothed > 33) {
+            liveTransitionTickIntervalMs = Math.min(1000 / LIVE_PREVIEW_MIN_OUTPUT_FPS,
+              liveTransitionTickIntervalMs + 1.5);
+          }
           if (liveDisplayFps) liveDisplayFps.textContent = `FPS ${liveDisplayFpsSmoothed.toFixed(0)}`;
         }
         playNextLiveCloudFrame();
@@ -840,6 +847,7 @@
       liveCachedCloudPair = false;
       liveFrameJitterMs = 0;
       liveDisplayFpsSmoothed = 0;
+      liveTransitionTickIntervalMs = 1000 / LIVE_PREVIEW_MAX_OUTPUT_FPS;
       liveClientWindowStartedAt = 0;
       liveClientWindowFrames = 0;
       liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
