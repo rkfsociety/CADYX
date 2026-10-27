@@ -19,7 +19,12 @@ const element = () => {
     click() { if (!this.disabled) listeners.click?.(); },
   };
 };
-const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply&scan_origin_file=origin.ply") }, URL, URLSearchParams, setTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
+const livePollDelays = [];
+const scheduleTestTimeout = (callback, delay, ...args) => {
+  if (delay === 0 || delay >= 25) livePollDelays.push(delay);
+  return setTimeout(callback, delay, ...args);
+};
+const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply&scan_origin_file=origin.ply") }, URL, URLSearchParams, setTimeout: scheduleTestTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"), sandbox);
 let sampledLivePixels = 0;
 const liveSampleSlots = new Set();
@@ -29,8 +34,8 @@ for (let y = 0; y < 400; y += 1) {
     if (slot >= 0) { sampledLivePixels += 1; liveSampleSlots.add(slot); }
   }
 }
-assert.equal(sampledLivePixels, 48_000, "live preview uses a fixed 48,000-pixel lattice");
-assert.equal(liveSampleSlots.size, 48_000, "each sampled pixel maps to a unique stable slot");
+assert.equal(sampledLivePixels, 640 * 400, "live preview can address every pixel in the depth frame");
+assert.equal(liveSampleSlots.size, 640 * 400, "each depth pixel maps to a unique stable history slot");
 assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(99.995), false);
 assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(100), true);
 assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(250), true);
@@ -48,6 +53,7 @@ const baseGeometry = { positions: new Float64Array([0, 0, 0]), triangles: new Ui
 const getModelGeometry = () => baseGeometry;
 const fetchCloud = async url => ({ ok: true, async text() { assert.match(url, /point-cloud\?/); return pointCloud; } });
 const liveRawFrames = [new Uint8Array(640 * 400 * 2), new Uint8Array(640 * 400 * 2)];
+let liveRawFrameSource = liveRawFrames;
 const centers = [[220, 180], [420, 180], [220, 220], [420, 220], [320, 200]];
 const zAxis = [0.12, 0.08, 1].map(value => value / Math.hypot(0.12, 0.08, 1));
 let xAxis = [1 - zAxis[0] * zAxis[0], -zAxis[0] * zAxis[1], -zAxis[0] * zAxis[2]];
@@ -83,8 +89,7 @@ for (const frame of liveRawFrames) {
       const depth = Math.round(130 + 0.12 * (x - 320) - 0.08 * (y - 200));
       frame[pixel * 2] = depth & 0xff;
       frame[pixel * 2 + 1] = depth >> 8;
-      if (sandbox.window.CadyxScanView.livePreviewSampleIndex(x, y) >= 0
-          && sandbox.window.CadyxScanView.isScanDepthValid(depth)) markerPointCount += 1;
+      if (sandbox.window.CadyxScanView.isScanDepthValid(depth)) markerPointCount += 1;
     }
   }
   for (let y = 280; y < 340; y += 1) for (let x = 280; x < 360; x += 1) {
@@ -103,7 +108,11 @@ const fetchPreview = async url => {
   if (url.includes("/calibration")) return { ok: true, async json() { return { width: 640, height: 400, matrix: [1, 0, 0, -320, 0, 1, 0, -200, 0, 0, 1, 0, 0, 0, 0, 0], depth_scale_mm_per_raw_unit: 1 }; } };
   if (url.includes("/live-frame")) {
     const index = liveFrameSequence++;
-    return { ok: true, headers: { get() { return String(1000 + index); } }, async arrayBuffer() { return liveRawFrames[Math.min(index, 1)].buffer; } };
+    if (index >= liveRawFrameSource.length) return { ok: false, status: 404 };
+    return { ok: true, headers: { get(name) {
+      return name === "X-CADYX-Frame-Mtime"
+        ? String(1_800_000_000_000_000_000 + index * 250_000_000) : String(1000 + index);
+    } }, async arrayBuffer() { return liveRawFrameSource[index].buffer; } };
   }
   throw new Error(`Unexpected preview request: ${url}`);
 };
@@ -151,12 +160,15 @@ assert.equal(viewerLoads.at(-1).geometry, baseGeometry, "the grid view uses the 
 const loadCount = viewerLoads.length;
 view.showCapture({ preview_folder: "scan folder", preview_file: "fused.ply", origin_file: "origin.ply", preview_kind: "provisional_fusion", preview_frame_count: 12 });
 assert.equal(viewerLoads.length, loadCount, "repeated status polls do not reload the mesh or reset the camera");
+liveFrameSequence = 0;
+const livePreviewLoadStart = viewerLoads.length;
 view.showLivePreview({ open: true });
-await waitUntil(() => viewerLoads.at(-1)?.geometry.points?.length === markerPointCount);
+await waitUntil(() => viewerLoads.length >= livePreviewLoadStart + 3
+  && viewerLoads.at(-1)?.geometry.points?.length === markerPointCount);
 assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "live");
 assert.ok(viewerLoads.at(-1).geometry.pointCloudVertexCount > 0, cloudButton.title);
-assert.equal(viewerLoads.at(-1).geometry.pointPreviewLimit, 48_000);
+assert.equal(viewerLoads.at(-1).geometry.pointPreviewLimit, 8_000);
 assert.equal(viewerLoads.at(-1).geometry.points.length, markerPointCount,
   "only the sparse table markers receive the preview highlight");
 assert.equal(viewerLoads.at(-1).geometry.pointStyle.size, 3.5);
@@ -192,11 +204,93 @@ assert.equal(viewerLoads.at(-1).options.reset, false, "new live frames never res
 const secondTurntableCloud = viewerLoads.at(-1).geometry.positions.slice(0, 3);
 assert.deepEqual([...secondTurntableCloud], [...firstTurntableCloud],
 "identical scanner frames are not rotated a second time using the table angle");
+assert.ok(livePollDelays.includes(100), "idle frame polling adapts to the measured 250 ms camera cadence");
 view.showCapture({ preview_folder: "scan folder", preview_file: "new-saved-capture.ply", preview_kind: "single" });
 assert.equal(viewport.dataset.scanPreview, "true", "360 status polling does not replace the live canvas preview");
 view.closeLivePreview();
 assert.equal(viewport.dataset.scanPreview, "false", "stopping the live preview restores the CAD geometry");
 assert.equal(viewport.dataset.scanPreviewMode, "");
+
+const makeUnalignedFrame = (markerCenters, extraDepth = 0) => {
+  const frame = new Uint8Array(640 * 400 * 2);
+  for (const [centerX, centerY] of markerCenters) {
+    for (let y = centerY - 16; y <= centerY + 16; y += 1) for (let x = centerX - 16; x <= centerX + 16; x += 1) {
+      if ((x - centerX) ** 2 + (y - centerY) ** 2 > 16 ** 2) continue;
+      const pixel = y * 640 + x, depth = 135 + extraDepth;
+      frame[pixel * 2] = depth & 0xff;
+      frame[pixel * 2 + 1] = depth >> 8;
+    }
+  }
+  return frame;
+};
+liveRawFrameSource = [
+  makeUnalignedFrame(centers.slice(0, 3)),
+  makeUnalignedFrame(centers.slice(0, 3).map(([x, y]) => [x + 12, y + 8]), 12),
+  new Uint8Array(640 * 400 * 2),
+];
+const unalignedExpectedPointCount = (() => {
+  const view = new DataView(liveRawFrameSource[0].buffer);
+  let count = 0;
+  for (let pixel = 0; pixel < 640 * 400; pixel += 1) {
+    if (sandbox.window.CadyxScanView.isScanDepthValid(view.getUint16(pixel * 2, true))) count += 1;
+  }
+  return count;
+})();
+liveFrameSequence = 0;
+const unalignedButton = element();
+const unalignedView = sandbox.window.CadyxScanView.initialize({
+  cloudButton: unalignedButton,
+  meshButton: element(),
+  viewport: element(),
+  viewer,
+  getModelGeometry,
+  meshReady: true,
+}, undefined, fetchPreview);
+const unalignedStart = viewerLoads.length;
+unalignedView.showLivePreview({ open: true });
+await waitUntil(() => viewerLoads.length >= unalignedStart + 3);
+const firstUnaligned = viewerLoads[unalignedStart + 1].geometry;
+const secondUnaligned = viewerLoads[unalignedStart + 2].geometry;
+assert.equal(firstUnaligned.pointCloudVertexCount, unalignedExpectedPointCount,
+  "sparse depth frames render every valid return, including pixels outside the old preview lattice");
+assert.deepEqual([...secondUnaligned.orbitCenter], [...firstUnaligned.orbitCenter],
+  "unregistered live frames retain the first valid frame camera center");
+assert.equal(secondUnaligned.fitRadius, firstUnaligned.fitRadius,
+  "unregistered live frames retain the first valid frame camera scale");
+assert.notDeepEqual([...secondUnaligned.bounds.min], [...firstUnaligned.bounds.min],
+  "the stability assertion covers frames whose cloud bounds actually move");
+await waitUntil(() => liveFrameSequence >= 3);
+await new Promise(resolve => setTimeout(resolve, 20));
+assert.equal(viewerLoads.length, unalignedStart + 3,
+  "an empty depth frame keeps the last valid cloud instead of clearing the viewport");
+unalignedView.closeLivePreview();
+const denseFrame = new Uint8Array(640 * 400 * 2);
+for (let y = 50; y < 350; y += 1) for (let x = 100; x < 300; x += 1) {
+  const pixel = y * 640 + x;
+  denseFrame[pixel * 2] = 150;
+}
+liveRawFrameSource = [denseFrame, denseFrame];
+liveFrameSequence = 0;
+const denseView = sandbox.window.CadyxScanView.initialize({
+  cloudButton: element(), meshButton: element(), viewport: element(), viewer, getModelGeometry, meshReady: true,
+}, undefined, fetchPreview);
+const denseStart = viewerLoads.length;
+denseView.showLivePreview({ open: true });
+await waitUntil(() => viewerLoads.length >= denseStart + 3
+  && viewerLoads.at(-1)?.geometry.pointCloudVertexCount > 0);
+const firstDenseGeometry = viewerLoads[denseStart + 1].geometry;
+const secondDenseGeometry = viewerLoads[denseStart + 2].geometry;
+const denseDisplayedCount = secondDenseGeometry.pointCloudVertexCount;
+assert.ok(denseDisplayedCount <= 8_000, "dense scanner frames respect the preview point ceiling");
+assert.ok(denseDisplayedCount >= 7_000,
+  `stable density sampling uses nearly the full point budget: ${denseDisplayedCount}`);
+assert.deepEqual(
+  [...secondDenseGeometry.positions.slice(0, denseDisplayedCount * 3)],
+  [...firstDenseGeometry.positions.slice(0, denseDisplayedCount * 3)],
+  "dense-frame sampling keeps the same pixels selected across identical frames",
+);
+denseView.closeLivePreview();
+liveRawFrameSource = liveRawFrames;
 
 const blockedCloudButton = element();
 const blockedMeshButton = element();

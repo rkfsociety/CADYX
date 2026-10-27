@@ -1,32 +1,19 @@
 (() => {
-  const LIVE_PREVIEW_POINT_LIMIT = 48_000;
+  const LIVE_PREVIEW_POINT_LIMIT = 8_000;
   const MIN_SCAN_DEPTH_MM = 100;
   const MAX_SCAN_DEPTH_MM = 250;
   const isScanDepthValid = depth => Number.isFinite(depth)
     && depth >= MIN_SCAN_DEPTH_MM && depth <= MAX_SCAN_DEPTH_MM;
   const livePreviewSampleIndex = (x, y) => {
-    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || x >= 640 || y < 0 || y >= 400
-        || (x & 1) !== 0 || (y & 1) !== 0 || ((x & 3) === 0 && (y & 3) === 0)) return -1;
-    const localIndex = (y & 3) === 0 ? 0 : (x & 3) === 0 ? 1 : 2;
-    return ((y >> 2) * 160 + (x >> 2)) * 3 + localIndex;
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || x >= 640 || y < 0 || y >= 400) return -1;
+    return y * 640 + x;
   };
-  const livePreviewSamplePixels = new Uint32Array(LIVE_PREVIEW_POINT_LIMIT);
-  const livePreviewSampleX = new Uint16Array(LIVE_PREVIEW_POINT_LIMIT);
-  const livePreviewSampleY = new Uint16Array(LIVE_PREVIEW_POINT_LIMIT);
-  for (let blockY = 0; blockY < 100; blockY += 1) {
-    for (let blockX = 0; blockX < 160; blockX += 1) {
-      const x = blockX * 4, y = blockY * 4, start = (blockY * 160 + blockX) * 3;
-      livePreviewSampleX[start] = x + 2;
-      livePreviewSampleY[start] = y;
-      livePreviewSamplePixels[start] = y * 640 + x + 2;
-      livePreviewSampleX[start + 1] = x;
-      livePreviewSampleY[start + 1] = y + 2;
-      livePreviewSamplePixels[start + 1] = (y + 2) * 640 + x;
-      livePreviewSampleX[start + 2] = x + 2;
-      livePreviewSampleY[start + 2] = y + 2;
-      livePreviewSamplePixels[start + 2] = (y + 2) * 640 + x + 2;
-    }
-  }
+  const hashLivePreviewPixel = pixel => {
+    let value = pixel ^ 0x9e3779b9;
+    value = Math.imul(value ^ value >>> 16, 0x7feb352d);
+    value = Math.imul(value ^ value >>> 15, 0x846ca68b);
+    return (value ^ value >>> 16) >>> 0;
+  };
   const smoothLivePreviewDepth = (previous, current) => previous > 0
     ? previous * 0.25 + current * 0.75 : current;
 
@@ -251,10 +238,14 @@
     let liveTableOverlay = null;
     let liveMapTransform = null;
     let liveFitRadius = null;
+    let liveRawCameraCenter = null;
+    let liveRawFitRadius = null;
     let liveViewportInitialized = false;
     let emptyFramePollDelay = 25;
+    let lastLiveFrameMtimeNs = 0;
+    let liveFrameIntervalMs = 0;
     let modelGeometry = null;
-    const liveDepthHistory = new Float32Array(LIVE_PREVIEW_POINT_LIMIT);
+    const liveDepthHistory = new Float32Array(640 * 400);
     const liveFrameScratch = {
       depths: new Float32Array(640 * 400),
       positions: new Float32Array(LIVE_PREVIEW_POINT_LIMIT * 3),
@@ -579,7 +570,7 @@
       }
       return { bounds, markerIndices, count: accepted };
     };
-    const renderLiveFrame = ({ positions, count, bounds, markerIndices, aligned, reset = false }) => {
+    const renderLiveFrame = ({ positions, count, bounds, markerIndices, aligned, orbitCenter, fitRadius, reset = false }) => {
       const pointLimit = LIVE_PREVIEW_POINT_LIMIT;
       const pointStep = Math.max(1, Math.ceil(count / pointLimit));
       const cloudPointCount = Math.ceil(count / pointStep);
@@ -626,8 +617,8 @@
         pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' },
         pointLayers: overlay ? [{ points: mapMarkerPoints, style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } }] : [],
         lineStyle: overlay ? { color: '#5aaac6', opacity: 0.42, width: 1, dash: [5, 5] } : undefined,
-        orbitCenter: aligned ? [0, 0, 0] : undefined,
-        fitRadius: aligned ? liveFitRadius : undefined },
+        orbitCenter: aligned ? [0, 0, 0] : orbitCenter,
+        fitRadius: aligned ? liveFitRadius : fitRadius },
       { reset: reset || !liveViewportInitialized });
       liveViewportInitialized = true;
     };
@@ -716,8 +707,12 @@
       liveTableOverlay = null;
       liveMapTransform = null;
       liveFitRadius = null;
+      liveRawCameraCenter = null;
+      liveRawFitRadius = null;
       liveViewportInitialized = false;
       emptyFramePollDelay = 25;
+      lastLiveFrameMtimeNs = 0;
+      liveFrameIntervalMs = 0;
       liveDepthHistory.fill(0);
       cloudRequest += 1;
       cloudPreviewOpen = false;
@@ -785,6 +780,19 @@
             if (!Number.isSafeInteger(frameSequence) || frameSequence <= liveFrameSequence) {
               throw new Error('Нарушена последовательность кадров предпросмотра.');
             }
+            const frameMtimeNs = Number(response.headers.get('X-CADYX-Frame-Mtime'));
+            if (Number.isFinite(frameMtimeNs) && frameMtimeNs > 0) {
+              if (lastLiveFrameMtimeNs > 0 && frameMtimeNs > lastLiveFrameMtimeNs) {
+                const sequenceDelta = Math.max(1, frameSequence - liveFrameSequence);
+                const interval = (frameMtimeNs - lastLiveFrameMtimeNs) / sequenceDelta / 1e6;
+                if (interval >= 1 && interval <= 5000) {
+                  liveFrameIntervalMs = liveFrameIntervalMs > 0
+                    ? liveFrameIntervalMs * 0.75 + interval * 0.25 : interval;
+                  emptyFramePollDelay = Math.max(25, Math.min(100, Math.round(liveFrameIntervalMs * 0.5)));
+                }
+              }
+              lastLiveFrameMtimeNs = frameMtimeNs;
+            }
             const raw = new Uint8Array(await response.arrayBuffer());
             if (raw.length !== 640 * 400 * 2) {
               liveFrameSequence = frameSequence;
@@ -796,9 +804,11 @@
               markerPixels.fill(0);
               markerCenterPixels.fill(0);
               seen.fill(0);
+              let validDepthCount = 0;
               for (let pixel = 0; pixel < depths.length; pixel += 1) {
                 const depth = (raw[pixel * 2] | raw[pixel * 2 + 1] << 8) * scale;
                 depths[pixel] = isScanDepthValid(depth) ? depth : 0;
+                if (depths[pixel] > 0) validDepthCount += 1;
               }
               const valid = i => depths[i] > 0;
               let regions = 0;
@@ -849,6 +859,13 @@
               let count = 0;
               const rawBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
               const projectedPoint = [0, 0, 0];
+              const sampleBudget = LIVE_PREVIEW_POINT_LIMIT - 512;
+              const selectedMarkerBudget = Math.min(markerPixelCount, sampleBudget);
+              const markerSelectionThreshold = markerPixelCount > selectedMarkerBudget
+                ? selectedMarkerBudget / markerPixelCount : 1;
+              const regularPixelCount = Math.max(1, validDepthCount - markerPixelCount);
+              const regularSelectionThreshold = validDepthCount > LIVE_PREVIEW_POINT_LIMIT
+                ? Math.min(1, Math.max(0, sampleBudget - selectedMarkerBudget) / regularPixelCount) : 1;
               const projectPixel = (x, y, depth) => {
                 const px = matrix[0] * x + matrix[1] * y + matrix[2] * depth + matrix[3];
                 const py = matrix[4] * x + matrix[5] * y + matrix[6] * depth + matrix[7];
@@ -867,14 +884,17 @@
                 markerPositions.push(projectedPoint[0], projectedPoint[1], projectedPoint[2]);
                 if (markerCenterPixels[pixel]) markerCenterPositions.push(projectedPoint[0], projectedPoint[1], projectedPoint[2]);
               }
-              for (let sampleIndex = 0; sampleIndex < LIVE_PREVIEW_POINT_LIMIT; sampleIndex += 1) {
-                const pixel = livePreviewSamplePixels[sampleIndex];
+              for (let pixel = 0; pixel < depths.length && count < LIVE_PREVIEW_POINT_LIMIT; pixel += 1) {
                 const depthValue = depths[pixel];
                 if (depthValue <= 0) continue;
-                const depth = smoothLivePreviewDepth(liveDepthHistory[sampleIndex], depthValue);
-                liveDepthHistory[sampleIndex] = depth;
-                if (!projectPixel(livePreviewSampleX[sampleIndex], livePreviewSampleY[sampleIndex], depth)) continue;
                 const isMarker = markerPixels[pixel] === 1;
+                if (validDepthCount > LIVE_PREVIEW_POINT_LIMIT) {
+                  const threshold = isMarker ? markerSelectionThreshold : regularSelectionThreshold;
+                  if (hashLivePreviewPixel(pixel) / 0x1_0000_0000 >= threshold) continue;
+                }
+                const depth = smoothLivePreviewDepth(liveDepthHistory[pixel], depthValue);
+                liveDepthHistory[pixel] = depth;
+                if (!projectPixel(pixel % 640, Math.floor(pixel / 640), depth)) continue;
                 markerFlags[count] = isMarker ? 1 : 0;
                 positions[count * 3] = projectedPoint[0];
                 positions[count * 3 + 1] = projectedPoint[1];
@@ -913,6 +933,8 @@
                 let bounds = rawBounds;
                 let markerIndices = [];
                 let displayPositions = positions;
+                let orbitCenter = null;
+                let fitRadius = null;
                 if (tableAligned) {
                   const tablePositions = liveFrameScratch.tablePositions;
                   tablePositions.set(positions.subarray(0, count * 3));
@@ -924,13 +946,30 @@
                     markerIndices = transformed.markerIndices;
                     displayPositions = tablePositions;
                     liveFitRadius ||= Math.max(liveTableOverlay.maxRadius, 0.001) * 1.05;
+                    orbitCenter = [0, 0, 0];
+                    fitRadius = liveFitRadius;
                   } else {
                     tableAligned = false;
                     liveTableFrame = null;
                     liveMapTransform = null;
                     liveFitRadius = null;
+                    liveRawCameraCenter = null;
+                    liveRawFitRadius = null;
                     resetAfterAlignment = liveViewportInitialized;
                   }
+                }
+                if (!tableAligned && !liveRawCameraCenter) {
+                  liveRawCameraCenter = bounds.min.map((minimum, axis) =>
+                    minimum / 2 + bounds.max[axis] / 2);
+                  liveRawFitRadius = Math.max(Math.hypot(
+                    bounds.max[0] - bounds.min[0],
+                    bounds.max[1] - bounds.min[1],
+                    bounds.max[2] - bounds.min[2],
+                  ) / 2, 0.001);
+                }
+                if (!tableAligned) {
+                  orbitCenter = liveRawCameraCenter;
+                  fitRadius = liveRawFitRadius;
                 }
                 if (!tableAligned) {
                   for (let index = 0; index < count; index += 1) {
@@ -938,17 +977,16 @@
                   }
                 }
                 renderLiveFrame({ positions: displayPositions, count, bounds, markerIndices, aligned: tableAligned,
-                  reset: resetAfterAlignment });
+                  orbitCenter, fitRadius, reset: resetAfterAlignment });
                 liveFrameSequence = frameSequence;
                 renderedFrame = true;
               } else {
-                renderLiveFrame({ positions, count: 0,
-                  bounds: { min: [-1, -1, -1], max: [1, 1, 1] }, markerIndices: [], aligned: false });
                 liveFrameSequence = frameSequence;
                 renderedFrame = true;
+                if (!liveViewportInitialized) cloudButton.title = 'Ожидание валидных точек глубины.';
               }
           } else if (response.status === 404) {
-            emptyFramePollDelay = Math.min(50, emptyFramePollDelay + 25);
+            // Keep the measured capture cadence as the next idle poll delay.
           } else {
             let message = `Кадр сканера недоступен (HTTP ${response.status}).`;
             try {
@@ -977,6 +1015,10 @@
         liveTableOverlay = null;
         liveMapTransform = null;
         liveFitRadius = null;
+        liveRawCameraCenter = null;
+        liveRawFitRadius = null;
+        lastLiveFrameMtimeNs = 0;
+        liveFrameIntervalMs = 0;
         liveViewportInitialized = false;
         liveDepthHistory.fill(0);
         updateButton();
