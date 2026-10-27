@@ -24,8 +24,6 @@ _LIVE_PREVIEW_METRICS_PREFIX = "preview_metrics "
 _LIVE_PREVIEW_CLIENT_METRIC_FIELDS = frozenset({
     "window_seconds", "frames", "request_avg_ms", "request_max_ms", "process_avg_ms",
     "process_max_ms", "render_avg_ms", "render_max_ms", "total_avg_ms", "total_max_ms", "points_avg",
-    "animation_frames", "animation_avg_ms", "animation_max_ms", "display_fps",
-    "frame_cache_frames", "frame_cache_limit",
 })
 
 
@@ -67,24 +65,13 @@ def _validate_live_preview_client_metrics(value: Any) -> dict[str, Any]:
     frames = value["frames"]
     if isinstance(frames, bool) or not isinstance(frames, int) or not 1 <= frames <= 300:
         raise ValidationError("Live-preview client metrics require 1–300 frames per window.")
-    animation_frames = value["animation_frames"]
-    if (isinstance(animation_frames, bool) or not isinstance(animation_frames, int)
-            or not 0 <= animation_frames <= 300):
-        raise ValidationError("Live-preview animation metrics require 0–300 frames per window.")
-    for field, minimum, maximum in (("frame_cache_frames", 0, 35), ("frame_cache_limit", 25, 35)):
-        measurement = value[field]
-        if (isinstance(measurement, bool) or not isinstance(measurement, int)
-                or not minimum <= measurement <= maximum):
-            raise ValidationError(f"Invalid live-preview client metric: {field}.")
     window_seconds = value["window_seconds"]
     if (isinstance(window_seconds, bool) or not isinstance(window_seconds, (int, float))
             or not math.isfinite(window_seconds) or not 0.5 <= window_seconds <= 10):
         raise ValidationError("Live-preview client metric windows must span 0.5–10 seconds.")
     for field in _LIVE_PREVIEW_CLIENT_METRIC_FIELDS - {"frames", "window_seconds"}:
         measurement = value[field]
-        maximum = 8000 if field == "points_avg" else 60 if field == "display_fps" else 10000
-        if field in {"animation_frames", "frame_cache_frames", "frame_cache_limit"}:
-            continue
+        maximum = 8000 if field == "points_avg" else 10000
         if (isinstance(measurement, bool) or not isinstance(measurement, (int, float))
                 or not math.isfinite(measurement) or not 0 <= measurement <= maximum):
             raise ValidationError(f"Invalid live-preview client metric: {field}.")

@@ -458,10 +458,22 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
         return
     if route.spec.name == "scanner_live_frame":
         query = parse_qs(parsed.query, keep_blank_values=True)
-        if set(query) - {"after", "ts"} or len(query.get("after", [])) > 1 or len(query.get("ts", [])) > 1:
-            raise ValidationError("Live scanner frames accept at most one after and ts query parameter.")
+        if (set(query) - {"after", "ts", "latest", "consume"}
+                or any(len(query.get(key, [])) > 1 for key in ("after", "ts", "latest", "consume"))):
+            raise ValidationError("Live scanner frames accept at most one after, ts, latest and consume query parameter.")
         after_values = query.get("after", [])
+        latest_values = query.get("latest", [])
+        consume_values = query.get("consume", [])
+        latest_mode = bool(latest_values)
+        consume_latest = bool(consume_values)
+        if latest_values and latest_values[0] != "1" or consume_values and consume_values[0] != "1":
+            raise ValidationError("Live scanner latest and consume query values must be 1 when present.")
+        if consume_latest and not latest_mode:
+            raise ValidationError("The live-frame consume option requires latest=1.")
+        if after_values and latest_mode:
+            raise ValidationError("The live-frame after and latest options cannot be combined.")
         frame_sequence: int | None = None
+        latest_queue_candidates: list[tuple[int, Path]] = []
         with _SCANNER_LIVE_FRAME_READ_LOCK:
             after_sequence: int | None = None
             if after_values:
@@ -471,7 +483,7 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
                 after_sequence = int(after_text)
             frames_path = core.workspace.root / ".revopoint-live.raw.frames"
             raw_path = core.workspace.root / ".revopoint-live.raw"
-            if after_sequence is None and raw_path.is_file():
+            if after_sequence is None and not latest_mode and raw_path.is_file():
                 frame_path = raw_path
             else:
                 candidates: list[tuple[int, Path]] = []
@@ -494,6 +506,8 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
                     frame_sequence, frame_path = (min(candidates, key=lambda item: item[0])
                                                   if after_sequence is not None
                                                   else max(candidates, key=lambda item: item[0]))
+                    if latest_mode:
+                        latest_queue_candidates = candidates
                 else:
                     frame_path = frames_path / "no-pending-frame.y16"
             try:
@@ -504,8 +518,24 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
                 handler._json(404, {"error": "NO_LIVE_FRAME", "message": "Live scanner frame is not available."})
                 return
         if len(payload) != 640 * 400 * 2:
+            if consume_latest and frame_sequence is not None:
+                for _, stale_path in latest_queue_candidates:
+                    try:
+                        stale_path.unlink()
+                    except FileNotFoundError:
+                        pass
             handler._json(404, {"error": "NO_LIVE_FRAME", "message": "Live scanner frame is not available."})
             return
+        if consume_latest and frame_sequence is not None:
+            for sequence, stale_path in latest_queue_candidates:
+                if sequence > frame_sequence:
+                    continue
+                try:
+                    stale_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    raise ValidationError(f"The consumed live scanner frame could not be removed: {exc}.") from exc
         handler.send_response(200)
         handler.send_header("Content-Type", "application/octet-stream")
         handler.send_header("Content-Length", str(len(payload)))

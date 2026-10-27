@@ -181,13 +181,6 @@ const firstLiveProjection = drawnPoints.map(point => point.slice());
 viewer.load({ ...fixedLiveGeometry, bounds: { min: [-100, -40, -10], max: [80, 60, 5] } }, { reset: false });
 assert.deepEqual(drawnPoints, firstLiveProjection,
   "Live frame bounds cannot move or rescale the viewport when its orbit center and fit radius are fixed");
-const fadingCurrent = { points: new Uint32Array([0]), style: { opacity: 0 } };
-const fadingPrevious = { points: new Uint32Array([1]), style: { opacity: 1 } };
-viewer.load({ ...fixedLiveGeometry, pointCloudVertexCount: 0, pointLayers: [fadingCurrent, fadingPrevious] });
-assert.equal(viewer.setPointLayerOpacities([0.4, 0.6]), true,
-  "cached live clouds can update their blend without rebuilding the viewport geometry");
-assert.equal(fadingCurrent.style.opacity, 0.4);
-assert.equal(fadingPrevious.style.opacity, 0.6);
 viewer.load(geometry);
 assert.equal(segments, 4, "Sketch lines and the three coordinate axes render in the shared viewport");
 assert.deepEqual(drawnLabels.filter((label) => ["X", "Y", "Z"].includes(label)).sort(), ["X", "Y", "Z"]);

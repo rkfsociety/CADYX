@@ -186,9 +186,6 @@ class Scan360CaptureTests(unittest.TestCase):
                     "process_avg_ms": 18.0, "process_max_ms": 24.0,
                     "render_avg_ms": 8.0, "render_max_ms": 11.0,
                     "total_avg_ms": 246.0, "total_max_ms": 285.0, "points_avg": 6100.0,
-                    "animation_frames": 25, "animation_avg_ms": 2.0,
-                    "animation_max_ms": 5.0, "display_fps": 29.8,
-                    "frame_cache_frames": 2, "frame_cache_limit": 30,
                 }
                 self.assertEqual(controller.record_live_preview_client_metrics(client_metrics), {"recorded": True})
                 status = controller.live_preview_status()
@@ -196,10 +193,6 @@ class Scan360CaptureTests(unittest.TestCase):
                 self.assertGreaterEqual(status["client_metrics_age_ms"], 0)
                 with self.assertRaises(ValidationError):
                     controller.record_live_preview_client_metrics({**client_metrics, "render_max_ms": float("inf")})
-                with self.assertRaises(ValidationError):
-                    controller.record_live_preview_client_metrics({**client_metrics, "frame_cache_limit": 36})
-                with self.assertRaises(ValidationError):
-                    controller.record_live_preview_client_metrics({**client_metrics, "frame_cache_frames": 36})
                 self.assertEqual(controller.stop_live_preview(), {"state": "idle"})
                 self.assertFalse(raw_path.exists(), "stopping the preview removes any legacy current-frame cache")
                 self.assertFalse(frames_path.exists(), "stopping the preview removes its temporary frame queue")

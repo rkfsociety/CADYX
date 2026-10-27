@@ -1,12 +1,7 @@
 (() => {
   const LIVE_PREVIEW_POINT_LIMIT = 8_000;
-  const LIVE_PREVIEW_TARGET_FPS = 30;
-  const LIVE_PREVIEW_MIN_OUTPUT_FPS = 25;
-  const LIVE_PREVIEW_MAX_OUTPUT_FPS = 35;
-  const LIVE_PREVIEW_FRAME_CACHE_LIMIT = 35;
   const MIN_SCAN_DEPTH_MM = 100;
   const MAX_SCAN_DEPTH_MM = 250;
-  const LIVE_PREVIEW_STATIC_FRAME_OVERLAP_RATIO = 0.65;
   const isScanDepthValid = depth => Number.isFinite(depth)
     && depth >= MIN_SCAN_DEPTH_MM && depth <= MAX_SCAN_DEPTH_MM;
   const livePreviewSampleIndex = (x, y) => {
@@ -19,9 +14,6 @@
     value = Math.imul(value ^ value >>> 15, 0x846ca68b);
     return (value ^ value >>> 16) >>> 0;
   };
-  const smoothLivePreviewDepth = (previous, current) => previous > 0
-    ? previous * 0.25 + current * 0.75 : current;
-
   const parseTableMarkerMap = buffer => {
     const view = new DataView(buffer);
     if (view.byteLength < 16) throw new Error('Карта стола короче заголовка MKF.');
@@ -226,9 +218,6 @@
     getProjectId = () => null,
     hasPersistentPointCloud = () => false, meshReady = false }, location = window.location, fetcher = fetch) => {
     const liveFpsIndicator = typeof document !== 'undefined' ? document.getElementById('scanner-preview-fps') : null;
-    const liveDisplayFps = liveFpsIndicator?.querySelector('[data-display-fps]') || liveFpsIndicator;
-    const liveSourceFps = liveFpsIndicator?.querySelector('[data-source-fps]') || null;
-    const liveCacheFrames = liveFpsIndicator?.querySelector('[data-cache-frames]') || null;
     let livePreviewOwned = false;
     let serverPointCloudVisible = false;
     let cloudPreviewOpen = false;
@@ -241,21 +230,10 @@
     let liveRequest = 0;
     let liveTimer = null;
     let liveFrameSequence = 0;
-    let liveDisplayFpsSmoothed = 0;
-    let liveTransitionTickIntervalMs = 1000 / LIVE_PREVIEW_MAX_OUTPUT_FPS;
-    let liveCloudQueue = [];
-    let liveDisplayedCloud = null;
-    let liveCachedCloudPair = false;
-    let liveCloudTransitionActive = false;
-    let liveCloudTransitionToken = 0;
-    let liveCloudTransitionHandle = 0;
     let liveClientWindowStartedAt = 0;
     let liveClientWindowFrames = 0;
     let liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
     let liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
-    let liveClientWindowAnimationFrames = 0;
-    let liveClientWindowAnimationTimeMs = 0;
-    let liveClientWindowAnimationMaxMs = 0;
     let liveCalibration = null;
     let liveTableFrame = null;
     let liveTableMap = null;
@@ -268,11 +246,7 @@
     let emptyFramePollDelay = 25;
     let lastLiveFrameMtimeNs = 0;
     let liveFrameIntervalMs = 0;
-    let liveFrameJitterMs = 0;
-    let liveDepthTemporalCoherent = false;
     let modelGeometry = null;
-    const liveDepthHistory = new Float32Array(640 * 400);
-    const liveDepthHistorySequence = new Uint32Array(640 * 400);
     const liveFrameScratch = {
       depths: new Float32Array(640 * 400),
       positions: new Float32Array(LIVE_PREVIEW_POINT_LIMIT * 3),
@@ -597,72 +571,13 @@
       }
       return { bounds, markerIndices, count: accepted };
     };
-    const stopLiveCloudTransition = () => {
-      liveCloudTransitionToken += 1;
-      liveCloudTransitionActive = false;
-      if (liveCloudTransitionHandle && typeof clearTimeout === 'function') clearTimeout(liveCloudTransitionHandle);
-      liveCloudTransitionHandle = 0;
-    };
-    const startLiveCloudTransition = durationMs => {
-      const token = ++liveCloudTransitionToken;
-      const nowClock = () => globalThis.performance?.now?.() ?? Date.now();
-      const startedAt = nowClock();
-      const tickIntervalMs = liveTransitionTickIntervalMs;
-      let lastTickAt = startedAt;
-      let firstTickAt = startedAt;
-      let tickCount = 0;
-      liveCloudTransitionActive = true;
-      trimLiveCloudQueue();
-      const tick = now => {
-        if (token !== liveCloudTransitionToken || !livePreviewOwned) return;
-        const progress = Math.min(1, Math.max(0, (now - startedAt) / durationMs));
-        if (now - lastTickAt >= tickIntervalMs || progress >= 1) {
-          const animationStartedAt = nowClock();
-          if (viewer?.setPointLayerOpacities?.([progress, 1 - progress])) {
-            const animationMs = Math.max(0, nowClock() - animationStartedAt);
-            liveClientWindowAnimationFrames += 1;
-            liveClientWindowAnimationTimeMs += animationMs;
-            liveClientWindowAnimationMaxMs = Math.max(liveClientWindowAnimationMaxMs, animationMs);
-            if (tickCount === 0) firstTickAt = now;
-            tickCount += 1;
-            lastTickAt = now;
-          }
-        }
-        if (progress < 1) {
-          liveCloudTransitionHandle = setTimeout(() => tick(nowClock()), tickIntervalMs);
-          return;
-        }
-        liveCloudTransitionHandle = 0;
-        liveCloudTransitionActive = false;
-        const span = lastTickAt - firstTickAt;
-        if (tickCount > 1 && span > 0) {
-          const transitionFps = (tickCount - 1) * 1000 / span;
-          liveDisplayFpsSmoothed = liveDisplayFpsSmoothed > 0
-            ? liveDisplayFpsSmoothed * 0.75 + transitionFps * 0.25 : transitionFps;
-          if (liveDisplayFpsSmoothed < 27) {
-            liveTransitionTickIntervalMs = Math.max(1000 / 60, liveTransitionTickIntervalMs - 1.5);
-          } else if (liveDisplayFpsSmoothed > 33) {
-            liveTransitionTickIntervalMs = Math.min(1000 / LIVE_PREVIEW_MIN_OUTPUT_FPS,
-              liveTransitionTickIntervalMs + 1.5);
-          }
-          if (liveDisplayFps) liveDisplayFps.textContent = `FPS ${liveDisplayFpsSmoothed.toFixed(0)}`;
-        }
-        playNextLiveCloudFrame();
-      };
-      liveCloudTransitionHandle = setTimeout(() => tick(nowClock()), tickIntervalMs);
-    };
     const renderLiveFrame = ({ positions, count, bounds, markerIndices, aligned, orbitCenter, fitRadius,
-      previousCloud = null, blendProgress = 1, reset = false }) => {
-      const pointLimit = LIVE_PREVIEW_POINT_LIMIT;
-      const pointStep = Math.max(1, Math.ceil(count / pointLimit));
+      reset = false }) => {
+      const pointStep = Math.max(1, Math.ceil(count / LIVE_PREVIEW_POINT_LIMIT));
       const cloudPointCount = Math.ceil(count / pointStep);
       let extraMarkerCount = 0;
       for (const index of markerIndices) if (index % pointStep !== 0) extraMarkerCount += 1;
-      const currentPointCount = cloudPointCount + extraMarkerCount;
-      const previousPointStep = previousCloud ? Math.max(1, Math.ceil(previousCloud.count / pointLimit)) : 1;
-      const previousPointCount = previousCloud ? Math.ceil(previousCloud.count / previousPointStep) : 0;
-      const previousOffset = currentPointCount;
-      const tableOffset = currentPointCount + previousPointCount;
+      const tableOffset = cloudPointCount + extraMarkerCount;
       const overlay = aligned ? liveTableOverlay : null;
       const combinedPositions = new Float32Array(tableOffset * 3 + (overlay?.positions.length || 0));
       let output = 0;
@@ -683,26 +598,11 @@
           previewMarkerPoints[markerIndex] = extraMarkerIndex++;
         }
       }
-      if (previousCloud) {
-        for (let index = 0; index < previousCloud.count; index += previousPointStep) {
-          const destination = (previousOffset + Math.floor(index / previousPointStep)) * 3;
-          const source = index * 3;
-          combinedPositions[destination] = previousCloud.positions[source];
-          combinedPositions[destination + 1] = previousCloud.positions[source + 1];
-          combinedPositions[destination + 2] = previousCloud.positions[source + 2];
-        }
-      }
       const mapMarkerPoints = overlay
         ? Uint32Array.from(overlay.markerPoints, index => index + tableOffset) : new Uint32Array(0);
       const trajectoryLines = overlay
         ? Uint32Array.from(overlay.lines, index => index + tableOffset) : null;
       const finalBounds = { min: [...bounds.min], max: [...bounds.max] };
-      if (previousCloud) {
-        for (let axis = 0; axis < 3; axis += 1) {
-          finalBounds.min[axis] = Math.min(finalBounds.min[axis], previousCloud.bounds.min[axis]);
-          finalBounds.max[axis] = Math.max(finalBounds.max[axis], previousCloud.bounds.max[axis]);
-        }
-      }
       if (overlay) {
         combinedPositions.set(overlay.positions, tableOffset * 3);
         for (let index = tableOffset * 3; index < combinedPositions.length; index += 3) {
@@ -712,56 +612,17 @@
           }
         }
       }
-      const pointLayers = previousCloud
-        ? [
-          { points: Uint32Array.from({ length: cloudPointCount }, (_, index) => index),
-            style: { size: 2.4, opacity: blendProgress, color: '#ff9d54' } },
-          { points: Uint32Array.from({ length: previousPointCount }, (_, index) => previousOffset + index),
-            style: { size: 2.4, opacity: 1 - blendProgress, color: '#ff9d54' } },
-        ]
-        : [{ points: Uint32Array.from({ length: cloudPointCount }, (_, index) => index),
-          style: { size: 2.4, opacity: 1, color: '#ff9d54' } }];
-      if (overlay) pointLayers.push({ points: mapMarkerPoints,
-        style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } });
       viewer.load({ positions: combinedPositions, triangles: new Uint32Array(0), lines: trajectoryLines,
-        pointCloudVertexCount: 0, pointPreviewLimit: pointLimit,
-        animatedPointLayerCount: previousCloud ? 2 : 1,
+        pointCloudVertexCount: cloudPointCount, pointPreviewLimit: LIVE_PREVIEW_POINT_LIMIT,
         pointColor: '#ff9d54', bounds: finalBounds, points: previewMarkerPoints,
         pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' },
-        pointLayers,
+        pointLayers: overlay ? [{ points: mapMarkerPoints,
+          style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } }] : [],
         lineStyle: overlay ? { color: '#5aaac6', opacity: 0.42, width: 1, dash: [5, 5] } : undefined,
         orbitCenter: aligned ? [0, 0, 0] : orbitCenter,
         fitRadius: aligned ? liveFitRadius : fitRadius },
       { reset: reset || !liveViewportInitialized });
-      liveCachedCloudPair = Boolean(previousCloud);
       liveViewportInitialized = true;
-    };
-    const liveCloudCacheLimit = () => Math.max(25, Math.min(LIVE_PREVIEW_FRAME_CACHE_LIMIT,
-      Math.ceil((liveFrameIntervalMs + liveFrameJitterMs * 2) * LIVE_PREVIEW_TARGET_FPS / 1000) + 20));
-    const trimLiveCloudQueue = () => {
-      const reservedFrames = liveDisplayedCloud ? (liveCachedCloudPair ? 2 : 1) : 0;
-      const pendingLimit = Math.max(0, liveCloudCacheLimit() - reservedFrames);
-      while (liveCloudQueue.length > pendingLimit) liveCloudQueue.shift();
-    };
-    const playNextLiveCloudFrame = () => {
-      if (liveCloudTransitionActive || !liveCloudQueue.length || !livePreviewOwned) return;
-      const frame = liveCloudQueue.shift();
-      const previous = liveDisplayedCloud;
-      const sameCoordinateFrame = previous && previous.aligned === frame.aligned;
-      const intervalMs = sameCoordinateFrame
-        ? Math.max(1, frame.capturedAtMs - previous.capturedAtMs) : 0;
-      const durationMs = sameCoordinateFrame
-        ? Math.max(100, Math.min(800, intervalMs + liveFrameJitterMs * 0.25)) : 0;
-      const animate = typeof viewer?.setPointLayerOpacities === 'function';
-      liveDisplayedCloud = frame;
-      renderLiveFrame({ ...frame, previousCloud: sameCoordinateFrame && animate ? previous : null,
-        blendProgress: sameCoordinateFrame && animate ? 0 : 1, reset: frame.reset });
-      if (sameCoordinateFrame && animate && durationMs > 0) startLiveCloudTransition(durationMs);
-    };
-    const enqueueLiveCloudFrame = frame => {
-      liveCloudQueue.push(frame);
-      trimLiveCloudQueue();
-      playNextLiveCloudFrame();
     };
     cloudSource = pointCloudUrl(null);
     cloudOriginSource = originUrl(null);
@@ -841,24 +702,12 @@
     const showLivePreview = ({ open = false } = {}) => {
       if (!open) return;
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
-      stopLiveCloudTransition();
-      liveCloudQueue = [];
-      liveDisplayedCloud = null;
-      liveCachedCloudPair = false;
-      liveFrameJitterMs = 0;
-      liveDisplayFpsSmoothed = 0;
-      liveTransitionTickIntervalMs = 1000 / LIVE_PREVIEW_MAX_OUTPUT_FPS;
       liveClientWindowStartedAt = 0;
       liveClientWindowFrames = 0;
       liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
       liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
-      liveClientWindowAnimationFrames = 0;
-      liveClientWindowAnimationTimeMs = 0;
-      liveClientWindowAnimationMaxMs = 0;
       if (liveFpsIndicator) {
-        if (liveDisplayFps) liveDisplayFps.textContent = 'FPS —';
-        if (liveSourceFps) liveSourceFps.textContent = 'Сенсор —/с';
-        if (liveCacheFrames) liveCacheFrames.textContent = 'Кэш —/—';
+        liveFpsIndicator.textContent = 'FPS —';
         liveFpsIndicator.hidden = false;
       }
       liveFrameSequence = 0;
@@ -874,9 +723,6 @@
       emptyFramePollDelay = 25;
       lastLiveFrameMtimeNs = 0;
       liveFrameIntervalMs = 0;
-      liveDepthTemporalCoherent = false;
-      liveDepthHistory.fill(0);
-      liveDepthHistorySequence.fill(0);
       cloudRequest += 1;
       cloudPreviewOpen = false;
       meshPreviewOpen = false;
@@ -937,7 +783,7 @@
             liveCalibration = calibration;
           }
           const frameRequestStartedAt = clock();
-          const response = await fetcher(`/api/v1/scanner/live-frame?after=${liveFrameSequence}`, { cache: 'no-store' });
+          const response = await fetcher(`/api/v1/scanner/live-frame?latest=1&consume=1&ts=${Date.now()}`, { cache: 'no-store' });
           if (response.ok) {
             receivedFrame = true;
             emptyFramePollDelay = 25;
@@ -951,11 +797,6 @@
                 const sequenceDelta = Math.max(1, frameSequence - liveFrameSequence);
                 const interval = (frameMtimeNs - lastLiveFrameMtimeNs) / sequenceDelta / 1e6;
                 if (interval >= 1 && interval <= 5000) {
-                  if (liveFrameIntervalMs > 0) {
-                    liveFrameJitterMs = liveFrameJitterMs > 0
-                      ? liveFrameJitterMs * 0.75 + Math.abs(interval - liveFrameIntervalMs) * 0.25
-                      : Math.abs(interval - liveFrameIntervalMs);
-                  }
                   liveFrameIntervalMs = liveFrameIntervalMs > 0
                     ? liveFrameIntervalMs * 0.75 + interval * 0.25 : interval;
                   emptyFramePollDelay = Math.max(25, Math.min(100, Math.round(liveFrameIntervalMs * 0.5)));
@@ -976,27 +817,11 @@
               markerPixels.fill(0);
               markerCenterPixels.fill(0);
               seen.fill(0);
-              const previousFrameSequence = liveFrameSequence;
-              let previousValidPixels = 0, currentValidPixels = 0, sharedValidPixels = 0;
+              let currentValidPixels = 0;
               for (let pixel = 0; pixel < depths.length; pixel += 1) {
-                const wasValidInPreviousFrame = previousFrameSequence > 0
-                  && liveDepthHistorySequence[pixel] === previousFrameSequence;
-                if (wasValidInPreviousFrame) previousValidPixels += 1;
                 const depth = (raw[pixel * 2] | raw[pixel * 2 + 1] << 8) * scale;
                 depths[pixel] = isScanDepthValid(depth) ? depth : 0;
-                if (depths[pixel] > 0) {
-                  currentValidPixels += 1;
-                  if (wasValidInPreviousFrame) sharedValidPixels += 1;
-                }
-              }
-              let allowTemporalSmoothing = liveDepthTemporalCoherent;
-              if (currentValidPixels >= 100) {
-                allowTemporalSmoothing = previousValidPixels >= 100
-                  && sharedValidPixels / previousValidPixels >= LIVE_PREVIEW_STATIC_FRAME_OVERLAP_RATIO;
-                liveDepthTemporalCoherent = allowTemporalSmoothing;
-              } else if (currentValidPixels > 0) {
-                allowTemporalSmoothing = false;
-                liveDepthTemporalCoherent = false;
+                if (depths[pixel] > 0) currentValidPixels += 1;
               }
               const valid = i => depths[i] > 0;
               let regions = 0;
@@ -1042,25 +867,7 @@
                   if (nearest >= 0) markerCenterPixels[nearest] = 1;
                 }
               }
-              let displayDepthCount = 0;
-              for (let pixel = 0; pixel < depths.length; pixel += 1) {
-                const depth = depths[pixel];
-                const previousSequence = liveDepthHistorySequence[pixel];
-                if (depth > 0) {
-                  const smoothedDepth = allowTemporalSmoothing && previousSequence > 0
-                    && frameSequence - previousSequence <= 2
-                    ? smoothLivePreviewDepth(liveDepthHistory[pixel], depth) : depth;
-                  liveDepthHistory[pixel] = smoothedDepth;
-                  liveDepthHistorySequence[pixel] = frameSequence;
-                  depths[pixel] = smoothedDepth;
-                  displayDepthCount += 1;
-                } else if (allowTemporalSmoothing && previousSequence === previousFrameSequence
-                           && frameSequence - previousSequence === 1) {
-                  depths[pixel] = liveDepthHistory[pixel];
-                  displayDepthCount += 1;
-                }
-              }
-              if (currentValidPixels === 0) liveDepthTemporalCoherent = false;
+              const displayDepthCount = currentValidPixels;
               const markerPositions = [];
               const markerCenterPositions = [];
               let count = 0;
@@ -1184,14 +991,8 @@
                 }
                 const processMs = Math.max(0, clock() - processStartedAt);
                 const renderStartedAt = clock();
-                enqueueLiveCloudFrame({
-                  positions: displayPositions.slice(0, count * 3), count,
-                  bounds: { min: [...bounds.min], max: [...bounds.max] },
-                  markerIndices: Uint32Array.from(markerIndices), aligned: tableAligned,
-                  orbitCenter: orbitCenter ? [...orbitCenter] : null, fitRadius,
-                  capturedAtMs: frameMtimeNs > 0 ? frameMtimeNs / 1e6 : Date.now(),
-                  reset: resetAfterAlignment,
-                });
+                renderLiveFrame({ positions: displayPositions, count, bounds, markerIndices, aligned: tableAligned,
+                  orbitCenter, fitRadius, reset: resetAfterAlignment });
                 const renderMs = Math.max(0, clock() - renderStartedAt);
                 const now = clock();
                 if (!liveClientWindowStartedAt) liveClientWindowStartedAt = now;
@@ -1210,16 +1011,10 @@
                   const frames = liveClientWindowFrames;
                   const averages = liveClientWindowSums;
                   const maxima = liveClientWindowMax;
-                  const animationFrames = liveClientWindowAnimationFrames;
-                  const animationTimeMs = liveClientWindowAnimationTimeMs;
-                  const animationMaxMs = liveClientWindowAnimationMaxMs;
                   liveClientWindowStartedAt = now;
                   liveClientWindowFrames = 0;
                   liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
                   liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
-                  liveClientWindowAnimationFrames = 0;
-                  liveClientWindowAnimationTimeMs = 0;
-                  liveClientWindowAnimationMaxMs = 0;
                   void fetcher('/api/v1/scanner/live-preview/client-metrics', { method: 'POST',
                     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metrics: {
                       window_seconds: windowSeconds, frames,
@@ -1228,13 +1023,6 @@
                       render_avg_ms: averages.render / frames, render_max_ms: maxima.render,
                       total_avg_ms: averages.total / frames, total_max_ms: maxima.total,
                       points_avg: averages.points / frames,
-                      animation_frames: animationFrames,
-                      animation_avg_ms: animationFrames > 0 ? animationTimeMs / animationFrames : 0,
-                      animation_max_ms: animationMaxMs,
-                      display_fps: liveDisplayFpsSmoothed,
-                      frame_cache_frames: Math.min(liveCloudCacheLimit(),
-                        liveCloudQueue.length + (liveDisplayedCloud ? (liveCachedCloudPair ? 2 : 1) : 0)),
-                      frame_cache_limit: liveCloudCacheLimit(),
                     } }) }).catch(() => {});
                 }
                 liveFrameSequence = frameSequence;
@@ -1267,15 +1055,8 @@
     const closeLivePreview = () => {
       if (livePreviewOwned) {
         livePreviewOwned = false;
-        stopLiveCloudTransition();
-        liveCloudQueue = [];
-        liveDisplayedCloud = null;
-        liveCachedCloudPair = false;
-        liveDisplayFpsSmoothed = 0;
         if (liveFpsIndicator) {
-          if (liveDisplayFps) liveDisplayFps.textContent = 'FPS —';
-          if (liveSourceFps) liveSourceFps.textContent = 'Сенсор —/с';
-          if (liveCacheFrames) liveCacheFrames.textContent = 'Кэш —/—';
+          liveFpsIndicator.textContent = 'FPS —';
           liveFpsIndicator.hidden = true;
         }
         restoreModel();
@@ -1289,10 +1070,7 @@
         liveRawFitRadius = null;
         lastLiveFrameMtimeNs = 0;
         liveFrameIntervalMs = 0;
-        liveDepthTemporalCoherent = false;
         liveViewportInitialized = false;
-        liveDepthHistory.fill(0);
-        liveDepthHistorySequence.fill(0);
         updateButton();
       }
     };
@@ -1341,12 +1119,8 @@
     };
     const updateLivePreviewStatus = preview => {
       const captureFps = preview?.metrics?.capture_fps;
-      if (liveSourceFps) liveSourceFps.textContent = Number.isFinite(captureFps)
-        ? `Сенсор ${captureFps.toFixed(1)}/с` : 'Сенсор —/с';
-      const cacheDepth = preview?.client_metrics?.frame_cache_frames;
-      const cacheLimit = preview?.client_metrics?.frame_cache_limit;
-      if (liveCacheFrames) liveCacheFrames.textContent = Number.isInteger(cacheDepth) && Number.isInteger(cacheLimit)
-        ? `Кэш ${cacheDepth}/${cacheLimit}` : 'Кэш —/—';
+      if (liveFpsIndicator) liveFpsIndicator.textContent = Number.isFinite(captureFps)
+        ? `FPS ${captureFps.toFixed(1)}` : 'FPS —';
     };
     cloudButton.addEventListener('click', () => {
       if (serverPointCloudVisible) return;
@@ -1447,5 +1221,5 @@
   };
 
   window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers,
-    livePreviewSampleIndex, smoothLivePreviewDepth, isScanDepthValid };
+    livePreviewSampleIndex, isScanDepthValid };
 })();

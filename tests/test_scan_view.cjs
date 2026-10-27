@@ -40,8 +40,6 @@ assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(99.995), false);
 assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(100), true);
 assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(250), true);
 assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(250.005), false);
-assert.equal(sandbox.window.CadyxScanView.smoothLivePreviewDepth(0, 100), 100);
-assert.equal(sandbox.window.CadyxScanView.smoothLivePreviewDepth(100, 120), 115);
 
 const pointCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n0 0 -120\n1 0 -119.8\n0 1 -120.1\n";
 const originPoints = [];
@@ -237,8 +235,9 @@ const countValidFramePoints = frame => {
   }
   return count;
 };
-const displayedLiveCloudCount = geometry => geometry.pointLayers?.[0]?.points?.length
-  ?? geometry.pointCloudVertexCount;
+const displayedLiveCloudCount = geometry => Number.isInteger(geometry.pointCloudVertexCount)
+  && geometry.pointCloudVertexCount > 0 ? geometry.pointCloudVertexCount
+  : geometry.pointLayers?.[0]?.points?.length ?? geometry.pointCloudVertexCount;
 const unalignedExpectedPointCount = countValidFramePoints(liveRawFrameSource[0]);
 const secondUnalignedExpectedPointCount = countValidFramePoints(liveRawFrameSource[1]);
 liveFrameSequence = 0;
@@ -253,10 +252,9 @@ const unalignedView = sandbox.window.CadyxScanView.initialize({
 }, undefined, fetchPreview);
 const unalignedStart = viewerLoads.length;
 unalignedView.showLivePreview({ open: true });
-await waitUntil(() => viewerLoads.length >= unalignedStart + 4);
+await waitUntil(() => viewerLoads.length >= unalignedStart + 3);
 const firstUnaligned = viewerLoads[unalignedStart + 1].geometry;
 const secondUnaligned = viewerLoads[unalignedStart + 2].geometry;
-const singleDropoutGeometry = viewerLoads[unalignedStart + 3].geometry;
 assert.equal(displayedLiveCloudCount(firstUnaligned), unalignedExpectedPointCount,
   "sparse depth frames render every valid return, including pixels outside the old preview lattice");
 assert.deepEqual([...secondUnaligned.orbitCenter], [...firstUnaligned.orbitCenter],
@@ -265,12 +263,10 @@ assert.equal(secondUnaligned.fitRadius, firstUnaligned.fitRadius,
   "unregistered live frames retain the first valid frame camera scale");
 assert.notDeepEqual([...secondUnaligned.bounds.min], [...firstUnaligned.bounds.min],
   "the stability assertion covers frames whose cloud bounds actually move");
-assert.equal(displayedLiveCloudCount(singleDropoutGeometry), secondUnalignedExpectedPointCount,
-  "one missing sensor frame holds the last valid pixel cloud for one frame interval");
 await waitUntil(() => liveFrameSequence >= 4);
 await new Promise(resolve => setTimeout(resolve, 20));
-assert.equal(viewerLoads.length, unalignedStart + 4,
-  "a second consecutive empty frame does not keep extending stale points or clear the viewport");
+assert.equal(viewerLoads.length, unalignedStart + 3,
+  "empty sensor frames do not create synthetic or blended point clouds");
 unalignedView.closeLivePreview();
 
 liveRawFrameSource = [
@@ -287,7 +283,7 @@ movingView.showLivePreview({ open: true });
 await waitUntil(() => viewerLoads.length >= movingStart + 3);
 const movingSecondGeometry = viewerLoads[movingStart + 2].geometry;
 assert.equal(displayedLiveCloudCount(movingSecondGeometry), countValidFramePoints(liveRawFrameSource[1]),
-  "low-overlap moving frames disable temporal point hold to avoid rotational trails");
+  "the latest valid moving frame replaces the previous point cloud without temporal blending");
 movingView.closeLivePreview();
 
 const denseFrame = new Uint8Array(640 * 400 * 2);
@@ -380,8 +376,8 @@ assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/butto
 assert.match(html, /id="viewport-scan-mesh"[^>]*>Сетка<\/button>/);
 assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/button>/);
 assert.match(html, /id="viewport-live-camera"[^>]*>Предпросмотр<\/button>/);
-assert.match(html, /id="scanner-preview-fps"[^>]*>[\s\S]*data-display-fps>FPS —[\s\S]*data-source-fps>Сенсор —\/с[\s\S]*data-cache-frames>Кэш —\/—[\s\S]*<\/output>/,
-  "the scanner preview reports display cadence, source FPS and cache occupancy separately");
+assert.match(html, /id="scanner-preview-fps"[^>]*>FPS —<\/output>/,
+  "the scanner preview shows only the sensor FPS indicator");
 assert.match(projectUiJs, /function projectPath\(projectId\)/);
 assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
 assert.match(projectUiJs, /let suffix = 2/);
@@ -405,20 +401,16 @@ assert.match(appJs, /if\(scan360\.dataset\.captureLocked==='true'\)return/);
 assert.match(styleCss, /#viewport-scan-360\[data-capture-locked="true"\]\s*\{\s*opacity:\s*\.43;\s*pointer-events:\s*none;/);
 assert.match(styleCss, /\.scanner-preview-fps\s*\{[^}]*right:\s*12px;[^}]*bottom:\s*12px;/,
   "the FPS badge sits at the bottom-right of the viewport");
-assert.match(styleCss, /\.viewport-live-points\s*\{[^}]*pointer-events:\s*none;/,
-  "interpolated points render on a transparent, non-interactive viewport layer");
 const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
 assert.match(scanViewSource, /const captureFps = preview\?\.metrics\?\.capture_fps/,
-  "the badge uses the native measured sensor rate separately from display FPS");
+  "the badge uses the native measured sensor rate");
 assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
-  /viewport-frame-crossfade|startFrameCrossfade/,
-  "the scanner preview does not add a second blinking canvas layer");
-assert.match(scanViewSource, /const liveCloudCacheLimit = \(\) => Math\.max\(25,[\s\S]*LIVE_PREVIEW_FRAME_CACHE_LIMIT/,
-  "the processed-frame cache adapts within a bounded 25–35 frame range");
-assert.match(scanViewSource, /viewer\?\.setPointLayerOpacities\?\.\(\[progress, 1 - progress\]\)/,
-  "cached clouds interpolate at the configured output cadence without toggling the viewport layer");
-assert.match(scanViewSource, /animatedPointLayerCount: previousCloud \? 2 : 1/,
-  "the viewport knows which cloud point layers animate independently of the grid");
+  /livePointCanvases|setPointLayerOpacities|setPointInterpolationProgress/,
+  "the latest-frame preview does not animate between clouds");
+assert.match(scanViewSource, /live-frame\?latest=1&consume=1/,
+  "the preview requests only the newest captured frame and consumes stale queued frames");
+assert.doesNotMatch(scanViewSource, /liveCloudQueue|smoothLivePreviewDepth/,
+  "the preview does not cache or blend previous point clouds");
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);

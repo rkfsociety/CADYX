@@ -189,14 +189,6 @@
     const context = canvas.getContext("2d", { alpha: true });
     const meshLayer = document.createElement("canvas");
     const meshLayerContext = meshLayer.getContext("2d", { alpha: true });
-    const livePointCanvases = [0, 1].map(() => {
-      const pointCanvas = document.createElement("canvas");
-      pointCanvas.className = "viewport-live-points";
-      pointCanvas.style ||= {};
-      pointCanvas.style.opacity = "0";
-      if (canvas.parentElement) canvas.parentElement.append(pointCanvas);
-      return { canvas: pointCanvas, context: pointCanvas.getContext("2d", { alpha: true }) };
-    });
     let meshImage = null;
     let meshDepth = new Float32Array(0);
     let meshDepthFace = new Int32Array(0);
@@ -224,36 +216,6 @@
     let bodyMotionAngleByVertex = new Float32Array(0);
     let sweepProgress = null;
     let loftProgress = null;
-
-    function renderAnimatedPointLayers() {
-      if (!canvas.parentElement) return;
-      const animatedCount = Number.isInteger(geometry?.animatedPointLayerCount)
-        ? Math.min(geometry.animatedPointLayerCount, geometry.pointLayers?.length || 0) : 0;
-      for (let layerIndex = 0; layerIndex < livePointCanvases.length; layerIndex += 1) {
-        const { canvas: pointCanvas, context: pointContext } = livePointCanvases[layerIndex];
-        if (pointCanvas.width !== canvas.width || pointCanvas.height !== canvas.height) {
-          pointCanvas.width = canvas.width;
-          pointCanvas.height = canvas.height;
-        }
-        pointContext.clearRect(0, 0, pointCanvas.width, pointCanvas.height);
-        if (layerIndex >= animatedCount) {
-          pointCanvas.style.opacity = "0";
-          continue;
-        }
-        const layer = geometry.pointLayers[layerIndex];
-        const style = layer.style || {};
-        const points = layer.points || [];
-        const size = Number.isFinite(style.size) ? Math.max(0.75, Math.min(8, style.size)) : 3;
-        pointContext.fillStyle = style.color || "#c3ecff";
-        pointContext.globalAlpha = 1;
-        for (const point of points) {
-          if (point < 0 || point >= screenX.length) continue;
-          pointContext.fillRect(screenX[point] - size / 2, screenY[point] - size / 2, size, size);
-        }
-        pointCanvas.style.opacity = String(Number.isFinite(style.opacity)
-          ? Math.max(0, Math.min(1, style.opacity)) : 1);
-      }
-    }
 
     function scheduleCameraRender() {
       if (cameraFrame) return;
@@ -382,17 +344,10 @@
         canvas.width = width;
         canvas.height = height;
       }
-      for (const { canvas: pointCanvas } of livePointCanvases) {
-        if (pointCanvas.width !== width || pointCanvas.height !== height) {
-          pointCanvas.width = width;
-          pointCanvas.height = height;
-        }
-      }
       context.clearRect(0, 0, width, height);
       if (!geometry || (!geometry.positions.length
           && !(geometry.lines || []).length && !(geometry.points || []).length)) {
         drawEmptyScene(width, height, dpr);
-        renderAnimatedPointLayers();
         onRender?.();
         return;
       }
@@ -577,11 +532,7 @@
           context.fillRect(screenX[point] - size / 2, screenY[point] - size / 2, size, size);
         }
       }
-      const animatedLayerCount = Number.isInteger(geometry.animatedPointLayerCount)
-        ? Math.min(geometry.animatedPointLayerCount, geometry.pointLayers?.length || 0) : 0;
-      for (let layerIndex = 0; layerIndex < (geometry.pointLayers || []).length; layerIndex += 1) {
-        if (layerIndex < animatedLayerCount) continue;
-        const layer = geometry.pointLayers[layerIndex];
+      for (const layer of geometry.pointLayers || []) {
         const style = layer.style || {};
         const size = Number.isFinite(style.size) ? Math.max(0.75, Math.min(8, style.size)) : 3;
         context.fillStyle = style.color || "#c3ecff";
@@ -606,7 +557,6 @@
       }
       if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cameraOrientation);
       if (showViewCube) drawViewCube(width, dpr, cameraOrientation);
-      renderAnimatedPointLayers();
       onRender?.();
     }
 
@@ -1498,23 +1448,6 @@
         bodyMotionFrame += 1;
         bodyMotion = null;
         render();
-      },
-      setPointLayerOpacities(opacities) {
-        if (!Array.isArray(opacities) || !geometry?.pointLayers
-            || opacities.length > geometry.pointLayers.length
-            || !opacities.every(Number.isFinite)) return false;
-        for (let index = 0; index < opacities.length; index += 1) {
-          geometry.pointLayers[index].style ||= {};
-          geometry.pointLayers[index].style.opacity = Math.max(0, Math.min(1, opacities[index]));
-        }
-        const animatedCount = Number.isInteger(geometry.animatedPointLayerCount)
-          ? geometry.animatedPointLayerCount : 0;
-        if (canvas.parentElement && opacities.length <= animatedCount) {
-          for (let index = 0; index < opacities.length; index += 1) {
-            livePointCanvases[index].canvas.style.opacity = String(geometry.pointLayers[index].style.opacity);
-          }
-        } else render();
-        return true;
       },
       getCamera() {
         return { orientation: cameraOrientation.slice(), zoom, panX: cameraPanX, panY: cameraPanY, projection: "orthographic" };

@@ -409,6 +409,28 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(first_path.is_file(), "latest-frame reads must not consume the queue")
         self.assertTrue(latest_path.is_file(), "the workspace reader owns queue consumption")
 
+    def test_live_scanner_latest_consuming_read_returns_newest_and_discards_stale_frames(self) -> None:
+        frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"
+        frame_directory.mkdir(parents=True)
+        frame_bytes = 640 * 400 * 2
+        paths = [frame_directory / f"frame-{sequence}.y16" for sequence in range(1, 4)]
+        for sequence, path in enumerate(paths, start=1):
+            path.write_bytes(bytes([sequence]) * frame_bytes)
+
+        connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        try:
+            connection.request("GET", "/api/v1/scanner/live-frame?latest=1&consume=1")
+            response = connection.getresponse()
+            payload = response.read()
+        finally:
+            connection.close()
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("X-CADYX-Frame-Sequence"), "3")
+        self.assertEqual(payload, bytes([3]) * frame_bytes)
+        self.assertTrue(all(not path.exists() for path in paths),
+                        "a latest-frame read removes skipped source files so the queue stays bounded")
+
     def test_live_scanner_diagnostic_prefers_active_capture_snapshot_when_present(self) -> None:
         raw_path = self.core.workspace.root / ".revopoint-live.raw"
         frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"
