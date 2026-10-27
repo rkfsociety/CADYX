@@ -404,8 +404,8 @@ assert.match(styleCss, /#viewport-scan-360\[data-capture-locked="true"\]\s*\{\s*
 assert.match(styleCss, /\.scanner-preview-fps\s*\{[^}]*right:\s*12px;[^}]*bottom:\s*12px;/,
   "the FPS badge sits at the bottom-right of the viewport");
 assert.match(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"),
-  /liveFpsSmoothed\s*=\s*liveFpsSmoothed\s*>\s*0[\s\S]*?instantaneousFps/,
-  "the displayed FPS is smoothed from rendered frame cadence");
+  /const windowFps = frames \/ windowSeconds;[\s\S]*?liveFpsSmoothed\s*=\s*liveFpsSmoothed\s*>\s*0/,
+  "the displayed FPS is smoothed from rendered-frame counts over a measured window");
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);

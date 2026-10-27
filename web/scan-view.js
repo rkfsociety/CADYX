@@ -234,7 +234,6 @@
     let liveRequest = 0;
     let liveTimer = null;
     let liveFrameSequence = 0;
-    let liveFpsLastFrameAt = 0;
     let liveFpsSmoothed = 0;
     let liveClientWindowStartedAt = 0;
     let liveClientWindowFrames = 0;
@@ -710,7 +709,6 @@
     const showLivePreview = ({ open = false } = {}) => {
       if (!open) return;
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
-      liveFpsLastFrameAt = 0;
       liveFpsSmoothed = 0;
       if (liveFpsIndicator) { liveFpsIndicator.textContent = 'FPS —'; liveFpsIndicator.hidden = false; }
       liveFrameSequence = 0;
@@ -1035,13 +1033,6 @@
                   orbitCenter, fitRadius, reset: resetAfterAlignment });
                 const renderMs = Math.max(0, clock() - renderStartedAt);
                 const now = clock();
-                if (liveFpsLastFrameAt > 0) {
-                  const instantaneousFps = 1000 / Math.max(1, now - liveFpsLastFrameAt);
-                  liveFpsSmoothed = liveFpsSmoothed > 0
-                    ? liveFpsSmoothed * 0.75 + instantaneousFps * 0.25 : instantaneousFps;
-                  if (liveFpsIndicator) liveFpsIndicator.textContent = `FPS ${liveFpsSmoothed.toFixed(1)}`;
-                }
-                liveFpsLastFrameAt = now;
                 if (!liveClientWindowStartedAt) liveClientWindowStartedAt = now;
                 liveClientWindowFrames += 1;
                 liveClientWindowSums.request += requestMs;
@@ -1062,6 +1053,10 @@
                   liveClientWindowFrames = 0;
                   liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
                   liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
+                  const windowFps = frames / windowSeconds;
+                  liveFpsSmoothed = liveFpsSmoothed > 0
+                    ? liveFpsSmoothed * 0.75 + windowFps * 0.25 : windowFps;
+                  if (liveFpsIndicator) liveFpsIndicator.textContent = `FPS ${liveFpsSmoothed.toFixed(1)}`;
                   void fetcher('/api/v1/scanner/live-preview/client-metrics', { method: 'POST',
                     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metrics: {
                       window_seconds: windowSeconds, frames,
@@ -1102,7 +1097,6 @@
     const closeLivePreview = () => {
       if (livePreviewOwned) {
         livePreviewOwned = false;
-        liveFpsLastFrameAt = 0;
         liveFpsSmoothed = 0;
         if (liveFpsIndicator) { liveFpsIndicator.textContent = 'FPS —'; liveFpsIndicator.hidden = true; }
         restoreModel();
