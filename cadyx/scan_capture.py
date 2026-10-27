@@ -20,6 +20,39 @@ from typing import Any
 from .errors import ConflictError, ValidationError
 
 _DEFAULT_FRAME_COUNT = 12
+_LIVE_PREVIEW_METRICS_PREFIX = "preview_metrics "
+
+
+def _read_live_preview_metrics(log_path: Path) -> dict[str, Any] | None:
+    try:
+        with log_path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(0, size - 8192))
+            lines = stream.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if not line.startswith(_LIVE_PREVIEW_METRICS_PREFIX):
+            continue
+        try:
+            metrics = json.loads(line[len(_LIVE_PREVIEW_METRICS_PREFIX):])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(metrics, dict):
+            continue
+        required = ("window_seconds", "frames", "read_calls", "null_samples", "capture_fps",
+                    "read_avg_ms", "read_max_ms", "copy_avg_ms", "copy_max_ms",
+                    "publish_avg_ms", "publish_max_ms")
+        if any(isinstance(metrics.get(key), bool) or not isinstance(metrics.get(key), (int, float))
+               or not math.isfinite(metrics[key]) for key in required):
+            continue
+        optional_values = (metrics.get("camera_fps"), metrics.get("process_cpu_percent"))
+        if any(value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                                      or not math.isfinite(value)) for value in optional_values):
+            continue
+        return metrics
+    return None
 
 
 @dataclass
@@ -521,8 +554,8 @@ class Scan360CaptureController:
             try:
                 with log_path.open("wb") as log_stream:
                     process = subprocess.Popen(
-                        [str(capture_executable), "--live-only", "--live-raw", str(raw_path),
-                         "--live-frames-dir", str(frames_path), "--stop-file", str(stop_path),
+                        [str(capture_executable), "--live-only", "--live-frames-dir", str(frames_path),
+                         "--stop-file", str(stop_path),
                          "--ready-file", str(ready_path), "--fps", "10",
                          "--device-id", scanner_device_id],
                         cwd=str(self._repository_root), stdin=subprocess.DEVNULL,
@@ -594,10 +627,14 @@ class Scan360CaptureController:
         if not job.ready_path.is_file():
             return {"state": "starting"}
         try:
-            mtime_ns = job.raw_path.stat().st_mtime_ns
+            mtime_ns = job.frames_path.stat().st_mtime_ns
         except OSError:
             return {"state": "starting"}
-        return {"state": "running", "frame_mtime_ns": mtime_ns}
+        snapshot: dict[str, Any] = {"state": "running", "frame_mtime_ns": mtime_ns}
+        metrics = _read_live_preview_metrics(job.log_path)
+        if metrics is not None:
+            snapshot["metrics"] = metrics
+        return snapshot
 
     @staticmethod
     def _clear_live_frame_queue(frames_path: Path) -> None:

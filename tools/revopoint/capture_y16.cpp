@@ -5,6 +5,7 @@
 #include <mferror.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <cmath>
 #include <array>
 #include <chrono>
@@ -93,7 +94,7 @@ void PrintUsage() {
               << "Usage: CaptureY16.exe --out-prefix PATH --q-file PATH --depth-scale NUMBER [--frames N]\n"
               << "       [--fps 5|10|15] [--width 640|1280] [--height 400|800]\n"
               << "       CaptureY16.exe --out-prefix PATH --frames N --fps 5|10|15 --width W --height H --measure-only\n"
-              << "       CaptureY16.exe --live-only --live-raw PATH --live-frames-dir DIR --stop-file PATH [--ready-file PATH] [--fps 5|10|15]\n"
+              << "       CaptureY16.exe --live-only --live-frames-dir DIR --stop-file PATH [--ready-file PATH] [--fps 5|10|15]\n"
               << "       Optional --ready-file PATH is created after the first valid frame is received.\n"
               << "       Optional --stop-file PATH ends a burst after the next valid frame.\n"
               << "       CaptureY16.exe --list-modes\n"
@@ -156,10 +157,10 @@ Options ParseOptions(int argc, wchar_t** argv) {
     }
     if (options.list_modes || options.list_devices) return options;
     if (options.live_only) {
-        if (options.live_raw_path.empty() || options.live_frames_dir.empty() || options.stop_file.empty() || options.measure_only ||
+        if (options.live_frames_dir.empty() || options.stop_file.empty() || options.measure_only ||
             options.width != 640 || options.height != 400 ||
             (options.requested_fps != 5 && options.requested_fps != 10 && options.requested_fps != 15)) {
-            throw std::runtime_error("Live-only preview requires --live-raw, --live-frames-dir, --stop-file, 640x400 Y16, and fps 5, 10, or 15.");
+            throw std::runtime_error("Live-only preview requires --live-frames-dir, --stop-file, 640x400 Y16, and fps 5, 10, or 15.");
         }
         return options;
     }
@@ -352,7 +353,8 @@ void PublishLiveFrame(const std::filesystem::path& destination,
         if (!output) throw std::runtime_error("Could not write a temporary live frame.");
     }
     for (int attempt = 0; attempt < 20; ++attempt) {
-        if (MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        // Preview buffers are transient; an on-disk durability flush would stall the capture loop.
+        if (MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING)) {
             return;
         }
         const DWORD error = GetLastError();
@@ -363,6 +365,35 @@ void PublishLiveFrame(const std::filesystem::path& destination,
         Sleep(10);
     }
     throw std::runtime_error("Could not atomically publish live frame file after repeated sharing violations.");
+}
+
+bool PublishLatestFrameAlias(const std::filesystem::path& source,
+                             const std::filesystem::path& destination) {
+    // The diagnostic snapshot shares the queued frame's data instead of writing another 512 KB copy.
+    auto temporary = destination;
+    temporary += L".tmp";
+    DeleteFileW(temporary.c_str());
+    if (!CreateHardLinkW(temporary.c_str(), source.c_str(), nullptr)) return false;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        if (MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING)) return true;
+        const DWORD error = GetLastError();
+        if (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION && error != ERROR_ACCESS_DENIED) break;
+        Sleep(10);
+    }
+    DeleteFileW(temporary.c_str());
+    return false;
+}
+
+bool CurrentProcessCpuSeconds(double& seconds) {
+    FILETIME creation_time{}, exit_time{}, kernel_time{}, user_time{};
+    if (!GetProcessTimes(GetCurrentProcess(), &creation_time, &exit_time, &kernel_time, &user_time)) return false;
+    ULARGE_INTEGER kernel_ticks{}, user_ticks{};
+    kernel_ticks.LowPart = kernel_time.dwLowDateTime;
+    kernel_ticks.HighPart = kernel_time.dwHighDateTime;
+    user_ticks.LowPart = user_time.dwLowDateTime;
+    user_ticks.HighPart = user_time.dwHighDateTime;
+    seconds = static_cast<double>(kernel_ticks.QuadPart + user_ticks.QuadPart) / 10000000.0;
+    return true;
 }
 
 std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int requested_fps,
@@ -424,21 +455,88 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
     if (!live_frames_dir.empty()) std::filesystem::create_directories(live_frames_dir);
     std::vector<std::vector<std::uint8_t>> frames;
     captured_frame_count = 0;
+    using MetricsClock = std::chrono::steady_clock;
+    auto metrics_window_started = MetricsClock::now();
+    std::size_t metrics_frames = 0, metrics_read_calls = 0, metrics_null_samples = 0;
+    std::size_t metrics_raw_link_fallbacks = 0;
+    double read_total_ms = 0, read_max_ms = 0, copy_total_ms = 0, copy_max_ms = 0;
+    double publish_total_ms = 0, publish_max_ms = 0, metrics_cpu_start_seconds = 0;
+    LONGLONG metrics_first_timestamp = 0, metrics_last_timestamp = 0;
+    DWORD last_no_frame_flags = 0;
+    bool metrics_has_timestamp = false;
+    bool metrics_cpu_available = live_only && CurrentProcessCpuSeconds(metrics_cpu_start_seconds);
+    const auto write_preview_metrics = [&](MetricsClock::time_point now) {
+        if (!live_only) return;
+        const double window_seconds = std::chrono::duration<double>(now - metrics_window_started).count();
+        if (window_seconds < 1.0) return;
+        double cpu_end_seconds = 0;
+        const bool cpu_available = metrics_cpu_available && CurrentProcessCpuSeconds(cpu_end_seconds);
+        std::ostringstream metrics;
+        metrics << std::fixed << std::setprecision(2)
+                << "{\"window_seconds\":" << window_seconds
+                << ",\"frames\":" << metrics_frames
+                << ",\"read_calls\":" << metrics_read_calls
+                << ",\"null_samples\":" << metrics_null_samples
+                << ",\"raw_link_fallbacks\":" << metrics_raw_link_fallbacks
+                << ",\"last_no_frame_flags\":" << last_no_frame_flags
+                << ",\"capture_fps\":" << metrics_frames / window_seconds
+                << ",\"camera_fps\":";
+        if (metrics_has_timestamp && metrics_frames > 1 && metrics_last_timestamp > metrics_first_timestamp) {
+            const double timestamp_seconds = static_cast<double>(metrics_last_timestamp - metrics_first_timestamp)
+                / 10000000.0;
+            metrics << (metrics_frames - 1) / timestamp_seconds;
+        } else {
+            metrics << "null";
+        }
+        metrics << ",\"read_avg_ms\":" << (metrics_read_calls ? read_total_ms / metrics_read_calls : 0)
+                << ",\"read_max_ms\":" << read_max_ms
+                << ",\"copy_avg_ms\":" << (metrics_frames ? copy_total_ms / metrics_frames : 0)
+                << ",\"copy_max_ms\":" << copy_max_ms
+                << ",\"publish_avg_ms\":" << (metrics_frames ? publish_total_ms / metrics_frames : 0)
+                << ",\"publish_max_ms\":" << publish_max_ms
+                << ",\"process_cpu_percent\":";
+        if (cpu_available) metrics << (cpu_end_seconds - metrics_cpu_start_seconds) / window_seconds * 100.0;
+        else metrics << "null";
+        metrics << '}';
+        std::cout << "preview_metrics " << metrics.str() << std::endl;
+        metrics_window_started = now;
+        metrics_frames = metrics_read_calls = metrics_null_samples = metrics_raw_link_fallbacks = 0;
+        read_total_ms = read_max_ms = copy_total_ms = copy_max_ms = publish_total_ms = publish_max_ms = 0;
+        metrics_first_timestamp = metrics_last_timestamp = 0;
+        last_no_frame_flags = 0;
+        metrics_has_timestamp = false;
+        metrics_cpu_available = cpu_available;
+        if (cpu_available) metrics_cpu_start_seconds = cpu_end_seconds;
+    };
     while ((live_only || static_cast<int>(captured_frame_count) < frame_count) &&
            (stop_file.empty() || !std::filesystem::exists(stop_file))) {
         DWORD stream_index = 0;
         DWORD flags = 0;
         LONGLONG timestamp = 0;
         ComPtr<IMFSample> sample;
+        const auto read_started = MetricsClock::now();
         CheckHr(reader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &stream_index, &flags,
                                    &timestamp, &sample),
                 "Read Y16 frame");
+        const double read_elapsed_ms = std::chrono::duration<double, std::milli>(
+            MetricsClock::now() - read_started).count();
+        if (live_only) {
+            ++metrics_read_calls;
+            read_total_ms += read_elapsed_ms;
+            read_max_ms = (std::max)(read_max_ms, read_elapsed_ms);
+        }
         if (!sample) {
             ++null_sample_count;
             if (!live_only) empty_sample_flags.push_back(flags);
+            else {
+                ++metrics_null_samples;
+                last_no_frame_flags = flags;
+                write_preview_metrics(MetricsClock::now());
+            }
             continue;
         }
 
+        const auto copy_started = MetricsClock::now();
         ComPtr<IMFMediaBuffer> buffer;
         CheckHr(sample->ConvertToContiguousBuffer(&buffer), "Create contiguous Y16 buffer");
         BYTE* data = nullptr;
@@ -453,22 +551,35 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
         if (result.empty()) {
             throw std::runtime_error("Y16 buffer size did not match the selected dimensions; refusing to guess row stride.");
         }
+        const double copy_elapsed_ms = std::chrono::duration<double, std::milli>(
+            MetricsClock::now() - copy_started).count();
         if (!live_only) {
             timestamps.push_back(timestamp);
             sample_flags.push_back(flags);
             utc_epoch_us.push_back(std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count());
             frames.push_back(std::move(result));
+        } else {
+            if (!metrics_has_timestamp) metrics_first_timestamp = timestamp;
+            metrics_last_timestamp = timestamp;
+            metrics_has_timestamp = true;
         }
         ++captured_frame_count;
         const std::vector<std::uint8_t>& current_frame = live_only ? result : frames.back();
-        if (!live_raw_path.empty()) {
-            PublishLiveFrame(live_raw_path, current_frame);
-        }
+        const auto publish_started = MetricsClock::now();
+        std::filesystem::path frame_path;
         if (!live_frames_dir.empty()) {
-            const auto frame_path = live_frames_dir / ("frame-" + std::to_string(captured_frame_count) + ".y16");
+            frame_path = live_frames_dir / ("frame-" + std::to_string(captured_frame_count) + ".y16");
             PublishLiveFrame(frame_path, current_frame);
         }
+        if (!live_raw_path.empty()) {
+            if (!live_only || frame_path.empty() || !PublishLatestFrameAlias(frame_path, live_raw_path)) {
+                if (live_only) ++metrics_raw_link_fallbacks;
+                PublishLiveFrame(live_raw_path, current_frame);
+            }
+        }
+        const double publish_elapsed_ms = std::chrono::duration<double, std::milli>(
+            MetricsClock::now() - publish_started).count();
         if (captured_frame_count == 1 && !ready_file.empty()) {
             if (!ready_file.parent_path().empty()) std::filesystem::create_directories(ready_file.parent_path());
             HANDLE file = CreateFileW(ready_file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
@@ -483,6 +594,14 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
                 DeleteFileW(ready_file.c_str());
                 throw std::runtime_error("Could not write the first-frame ready signal.");
             }
+        }
+        if (live_only) {
+            ++metrics_frames;
+            copy_total_ms += copy_elapsed_ms;
+            copy_max_ms = (std::max)(copy_max_ms, copy_elapsed_ms);
+            publish_total_ms += publish_elapsed_ms;
+            publish_max_ms = (std::max)(publish_max_ms, publish_elapsed_ms);
+            write_preview_metrics(MetricsClock::now());
         }
     }
     return frames;

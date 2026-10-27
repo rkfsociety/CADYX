@@ -378,6 +378,52 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(all(status == 200 and sequence in {"1", "2"} and size == len(frame_bytes)
                             for status, sequence, size in results), results)
 
+    def test_live_scanner_latest_frame_reads_newest_queue_entry_without_consuming_it(self) -> None:
+        frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"
+        frame_directory.mkdir(parents=True)
+        frame_bytes = 640 * 400 * 2
+        first_frame = bytes([1]) * frame_bytes
+        latest_frame = bytes([2]) * frame_bytes
+        first_path = frame_directory / "frame-1.y16"
+        latest_path = frame_directory / "frame-2.y16"
+        first_path.write_bytes(first_frame)
+        latest_path.write_bytes(latest_frame)
+
+        connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        try:
+            connection.request("GET", "/api/v1/scanner/live-frame?ts=1")
+            response = connection.getresponse()
+            payload = response.read()
+        finally:
+            connection.close()
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.getheader("X-CADYX-Frame-Sequence"), "2")
+        self.assertEqual(payload, latest_frame)
+        self.assertTrue(first_path.is_file(), "latest-frame reads must not consume the queue")
+        self.assertTrue(latest_path.is_file(), "the workspace reader owns queue consumption")
+
+    def test_live_scanner_diagnostic_prefers_active_capture_snapshot_when_present(self) -> None:
+        raw_path = self.core.workspace.root / ".revopoint-live.raw"
+        frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"
+        frame_directory.mkdir(parents=True)
+        raw_frame = bytes([3]) * (640 * 400 * 2)
+        queued_frame = bytes([4]) * (640 * 400 * 2)
+        raw_path.write_bytes(raw_frame)
+        (frame_directory / "frame-1.y16").write_bytes(queued_frame)
+
+        connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+        try:
+            connection.request("GET", "/api/v1/scanner/live-frame?ts=1")
+            response = connection.getresponse()
+            payload = response.read()
+        finally:
+            connection.close()
+
+        self.assertEqual(response.status, 200)
+        self.assertIsNone(response.getheader("X-CADYX-Frame-Sequence"))
+        self.assertEqual(payload, raw_frame)
+
     def test_project_files_expose_scan_series_folders_and_nested_raw_frames(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Scan files"})
         project_id = created["project"]["id"]

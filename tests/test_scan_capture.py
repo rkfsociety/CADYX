@@ -151,18 +151,38 @@ class Scan360CaptureTests(unittest.TestCase):
                 self.assertEqual(controller.start_live_preview()["state"], "starting")
                 command = popen.call_args.args[0]
                 self.assertIn("--live-only", command)
-                self.assertIn("--live-raw", command)
+                self.assertIn("--live-frames-dir", command)
+                self.assertNotIn("--live-raw", command)
                 self.assertEqual(command[command.index("--fps") + 1], "10")
                 self.assertNotIn("--out-prefix", command)
                 self.assertNotIn("--frames", command)
                 self.assertNotIn("--q-file", command)
                 raw_path = workspace / ".revopoint-live.raw"
+                frames_path = workspace / ".revopoint-live.raw.frames"
                 stop_path = workspace / ".revopoint-live-preview.stop"
                 controller._live_preview.ready_path.touch()
-                raw_path.write_bytes(b"current frame")
-                self.assertEqual(controller.live_preview_status()["state"], "running")
+                frames_path.mkdir()
+                (frames_path / "frame-1.y16").write_bytes(b"current frame")
+                self.assertFalse(raw_path.exists(), "live preview no longer writes a second current-frame file")
+                metrics = {
+                    "window_seconds": 1.0, "frames": 4, "read_calls": 4, "null_samples": 0,
+                    "last_no_frame_flags": 0, "raw_link_fallbacks": 0,
+                    "capture_fps": 4.0, "camera_fps": 4.0,
+                    "read_avg_ms": 240.0, "read_max_ms": 251.0,
+                    "copy_avg_ms": 1.0, "copy_max_ms": 1.4,
+                    "publish_avg_ms": 7.0, "publish_max_ms": 10.0,
+                    "process_cpu_percent": 1.2,
+                }
+                controller._live_preview.log_path.write_text(
+                    "preview_metrics " + json.dumps(metrics) + "\n", encoding="utf-8",
+                )
+                status = controller.live_preview_status()
+                self.assertEqual(status["state"], "running")
+                self.assertEqual(status["frame_mtime_ns"], frames_path.stat().st_mtime_ns)
+                self.assertEqual(status["metrics"], metrics)
                 self.assertEqual(controller.stop_live_preview(), {"state": "idle"})
-                self.assertFalse(raw_path.exists(), "stopping the preview removes its one-frame cache")
+                self.assertFalse(raw_path.exists(), "stopping the preview removes any legacy current-frame cache")
+                self.assertFalse(frames_path.exists(), "stopping the preview removes its temporary frame queue")
                 self.assertFalse(stop_path.exists())
 
     def test_live_preview_and_360_capture_share_one_scanner_lease(self) -> None:
