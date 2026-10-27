@@ -10,6 +10,23 @@
     const localIndex = (y & 3) === 0 ? 0 : (x & 3) === 0 ? 1 : 2;
     return ((y >> 2) * 160 + (x >> 2)) * 3 + localIndex;
   };
+  const livePreviewSamplePixels = new Uint32Array(LIVE_PREVIEW_POINT_LIMIT);
+  const livePreviewSampleX = new Uint16Array(LIVE_PREVIEW_POINT_LIMIT);
+  const livePreviewSampleY = new Uint16Array(LIVE_PREVIEW_POINT_LIMIT);
+  for (let blockY = 0; blockY < 100; blockY += 1) {
+    for (let blockX = 0; blockX < 160; blockX += 1) {
+      const x = blockX * 4, y = blockY * 4, start = (blockY * 160 + blockX) * 3;
+      livePreviewSampleX[start] = x + 2;
+      livePreviewSampleY[start] = y;
+      livePreviewSamplePixels[start] = y * 640 + x + 2;
+      livePreviewSampleX[start + 1] = x;
+      livePreviewSampleY[start + 1] = y + 2;
+      livePreviewSamplePixels[start + 1] = (y + 2) * 640 + x;
+      livePreviewSampleX[start + 2] = x + 2;
+      livePreviewSampleY[start + 2] = y + 2;
+      livePreviewSamplePixels[start + 2] = (y + 2) * 640 + x + 2;
+    }
+  }
   const smoothLivePreviewDepth = (previous, current) => previous > 0
     ? previous * 0.25 + current * 0.75 : current;
 
@@ -239,9 +256,11 @@
     let modelGeometry = null;
     const liveDepthHistory = new Float32Array(LIVE_PREVIEW_POINT_LIMIT);
     const liveFrameScratch = {
+      depths: new Float32Array(640 * 400),
       positions: new Float32Array(LIVE_PREVIEW_POINT_LIMIT * 3),
       tablePositions: new Float32Array(LIVE_PREVIEW_POINT_LIMIT * 3),
       markerFlags: new Uint8Array(LIVE_PREVIEW_POINT_LIMIT),
+      markerPixelIndices: new Int32Array(640 * 400),
       markerPixels: new Uint8Array(640 * 400),
       markerCenterPixels: new Uint8Array(640 * 400),
       seen: new Uint8Array(640 * 400),
@@ -773,12 +792,17 @@
               throw new Error('Размер кадра Y16 не совпадает.');
             }
               const { matrix, depth_scale_mm_per_raw_unit: scale } = liveCalibration;
-              const { positions, markerFlags, markerPixels, markerCenterPixels, seen, queue } = liveFrameScratch;
+              const { depths, markerPixelIndices, positions, markerFlags, markerPixels, markerCenterPixels, seen, queue } = liveFrameScratch;
               markerPixels.fill(0);
               markerCenterPixels.fill(0);
               seen.fill(0);
-              const valid = i => isScanDepthValid((raw[i * 2] | raw[i * 2 + 1] << 8) * scale);
+              for (let pixel = 0; pixel < depths.length; pixel += 1) {
+                const depth = (raw[pixel * 2] | raw[pixel * 2 + 1] << 8) * scale;
+                depths[pixel] = isScanDepthValid(depth) ? depth : 0;
+              }
+              const valid = i => depths[i] > 0;
               let regions = 0;
+              let markerPixelCount = 0;
               for (let seed = 0; seed < seen.length; seed += 1) {
                 if (seen[seed] || !valid(seed)) continue;
                 queue[0] = seed;
@@ -803,11 +827,15 @@
                 if (tail >= 20 && tail <= 1000 && width / height > 0.3
                     && width / height < 3 && tail / (width * height) > 0.45) {
                   regions += 1;
+                  for (let cursor = 0; cursor < tail; cursor += 1) {
+                    const i = queue[cursor];
+                    markerPixels[i] = 1;
+                    markerPixelIndices[markerPixelCount++] = i;
+                  }
                   const centerX = sumX / tail, centerY = sumY / tail;
                   let nearest = -1, nearestDistance = Infinity;
                   for (let cursor = 0; cursor < tail; cursor += 1) {
                     const i = queue[cursor];
-                    markerPixels[i] = 1;
                     if (i % 2) continue;
                     const dx = i % 640 - centerX, dy = Math.floor(i / 640) - centerY;
                     const distance = dx * dx + dy * dy;
@@ -820,38 +848,43 @@
               const markerCenterPositions = [];
               let count = 0;
               const rawBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
-              for (let pixel = 0; pixel < 640 * 400; pixel += 1) {
-                const x = pixel % 640, y = Math.floor(pixel / 640);
-                const sampleIndex = livePreviewSampleIndex(x, y);
-                const samplePoint = sampleIndex >= 0;
-                if (!samplePoint && markerPixels[pixel] !== 1) continue;
-                const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
-                let depth = value * scale;
-                if (!value || !isScanDepthValid(depth)) continue;
-                if (samplePoint) {
-                  depth = smoothLivePreviewDepth(liveDepthHistory[sampleIndex], depth);
-                  liveDepthHistory[sampleIndex] = depth;
-                }
+              const projectedPoint = [0, 0, 0];
+              const projectPixel = (x, y, depth) => {
                 const px = matrix[0] * x + matrix[1] * y + matrix[2] * depth + matrix[3];
                 const py = matrix[4] * x + matrix[5] * y + matrix[6] * depth + matrix[7];
                 const pz = matrix[8] * x + matrix[9] * y + matrix[10] * depth + matrix[11];
-                if (!Number.isFinite(pz) || Math.abs(pz) < 1e-12) continue;
+                if (!Number.isFinite(pz) || Math.abs(pz) < 1e-12) return false;
                 const pointX = px * depth / pz, pointY = -py * depth / pz, pointZ = -depth;
-                if (!Number.isFinite(pointX) || !Number.isFinite(pointY) || !Number.isFinite(pointZ)) continue;
+                if (!Number.isFinite(pointX) || !Number.isFinite(pointY) || !Number.isFinite(pointZ)) return false;
+                projectedPoint[0] = pointX;
+                projectedPoint[1] = pointY;
+                projectedPoint[2] = pointZ;
+                return true;
+              };
+              for (let markerIndex = 0; markerIndex < markerPixelCount; markerIndex += 1) {
+                const pixel = markerPixelIndices[markerIndex];
+                if (!projectPixel(pixel % 640, Math.floor(pixel / 640), depths[pixel])) continue;
+                markerPositions.push(projectedPoint[0], projectedPoint[1], projectedPoint[2]);
+                if (markerCenterPixels[pixel]) markerCenterPositions.push(projectedPoint[0], projectedPoint[1], projectedPoint[2]);
+              }
+              for (let sampleIndex = 0; sampleIndex < LIVE_PREVIEW_POINT_LIMIT; sampleIndex += 1) {
+                const pixel = livePreviewSamplePixels[sampleIndex];
+                const depthValue = depths[pixel];
+                if (depthValue <= 0) continue;
+                const depth = smoothLivePreviewDepth(liveDepthHistory[sampleIndex], depthValue);
+                liveDepthHistory[sampleIndex] = depth;
+                if (!projectPixel(livePreviewSampleX[sampleIndex], livePreviewSampleY[sampleIndex], depth)) continue;
                 const isMarker = markerPixels[pixel] === 1;
-                if (isMarker) markerPositions.push(pointX, pointY, pointZ);
-                if (markerCenterPixels[pixel]) markerCenterPositions.push(pointX, pointY, pointZ);
-                if (!samplePoint) continue;
                 markerFlags[count] = isMarker ? 1 : 0;
-                positions[count * 3] = pointX;
-                positions[count * 3 + 1] = pointY;
-                positions[count * 3 + 2] = pointZ;
-                rawBounds.min[0] = Math.min(rawBounds.min[0], pointX);
-                rawBounds.min[1] = Math.min(rawBounds.min[1], pointY);
-                rawBounds.min[2] = Math.min(rawBounds.min[2], pointZ);
-                rawBounds.max[0] = Math.max(rawBounds.max[0], pointX);
-                rawBounds.max[1] = Math.max(rawBounds.max[1], pointY);
-                rawBounds.max[2] = Math.max(rawBounds.max[2], pointZ);
+                positions[count * 3] = projectedPoint[0];
+                positions[count * 3 + 1] = projectedPoint[1];
+                positions[count * 3 + 2] = projectedPoint[2];
+                rawBounds.min[0] = Math.min(rawBounds.min[0], projectedPoint[0]);
+                rawBounds.min[1] = Math.min(rawBounds.min[1], projectedPoint[1]);
+                rawBounds.min[2] = Math.min(rawBounds.min[2], projectedPoint[2]);
+                rawBounds.max[0] = Math.max(rawBounds.max[0], projectedPoint[0]);
+                rawBounds.max[1] = Math.max(rawBounds.max[1], projectedPoint[1]);
+                rawBounds.max[2] = Math.max(rawBounds.max[2], projectedPoint[2]);
                 count += 1;
               }
               if (request !== liveRequest || !livePreviewOwned) return;
