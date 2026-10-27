@@ -716,6 +716,7 @@
         style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } });
       viewer.load({ positions: combinedPositions, triangles: new Uint32Array(0), lines: trajectoryLines,
         pointCloudVertexCount: 0, pointPreviewLimit: pointLimit,
+        animatedPointLayerCount: previousCloud ? 2 : 1,
         pointColor: '#ff9d54', bounds: finalBounds, points: previewMarkerPoints,
         pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' },
         pointLayers,

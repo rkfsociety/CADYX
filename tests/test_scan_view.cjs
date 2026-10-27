@@ -405,6 +405,8 @@ assert.match(appJs, /if\(scan360\.dataset\.captureLocked==='true'\)return/);
 assert.match(styleCss, /#viewport-scan-360\[data-capture-locked="true"\]\s*\{\s*opacity:\s*\.43;\s*pointer-events:\s*none;/);
 assert.match(styleCss, /\.scanner-preview-fps\s*\{[^}]*right:\s*12px;[^}]*bottom:\s*12px;/,
   "the FPS badge sits at the bottom-right of the viewport");
+assert.match(styleCss, /\.viewport-live-points\s*\{[^}]*pointer-events:\s*none;/,
+  "interpolated points render on a transparent, non-interactive viewport layer");
 const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
 assert.match(scanViewSource, /const captureFps = preview\?\.metrics\?\.capture_fps/,
   "the badge uses the native measured sensor rate separately from display FPS");
@@ -415,6 +417,8 @@ assert.match(scanViewSource, /const liveCloudCacheLimit = \(\) => Math\.max\(25,
   "the processed-frame cache adapts within a bounded 25–35 frame range");
 assert.match(scanViewSource, /viewer\?\.setPointLayerOpacities\?\.\(\[progress, 1 - progress\]\)/,
   "cached clouds interpolate at the configured output cadence without toggling the viewport layer");
+assert.match(scanViewSource, /animatedPointLayerCount: previousCloud \? 2 : 1/,
+  "the viewport knows which cloud point layers animate independently of the grid");
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);

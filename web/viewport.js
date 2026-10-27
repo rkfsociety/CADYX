@@ -189,6 +189,10 @@
     const context = canvas.getContext("2d", { alpha: true });
     const meshLayer = document.createElement("canvas");
     const meshLayerContext = meshLayer.getContext("2d", { alpha: true });
+    const livePointCanvas = document.createElement("canvas");
+    livePointCanvas.className = "viewport-live-points";
+    const livePointContext = livePointCanvas.getContext("2d", { alpha: true });
+    if (canvas.parentElement) canvas.parentElement.append(livePointCanvas);
     let meshImage = null;
     let meshDepth = new Float32Array(0);
     let meshDepthFace = new Int32Array(0);
@@ -216,6 +220,31 @@
     let bodyMotionAngleByVertex = new Float32Array(0);
     let sweepProgress = null;
     let loftProgress = null;
+
+    function renderAnimatedPointLayers() {
+      if (!livePointContext || !canvas.parentElement) return;
+      if (livePointCanvas.width !== canvas.width || livePointCanvas.height !== canvas.height) {
+        livePointCanvas.width = canvas.width;
+        livePointCanvas.height = canvas.height;
+      }
+      livePointContext.clearRect(0, 0, livePointCanvas.width, livePointCanvas.height);
+      const animatedCount = Number.isInteger(geometry?.animatedPointLayerCount)
+        ? Math.min(geometry.animatedPointLayerCount, geometry.pointLayers?.length || 0) : 0;
+      for (let layerIndex = 0; layerIndex < animatedCount; layerIndex += 1) {
+        const layer = geometry.pointLayers[layerIndex];
+        const style = layer.style || {};
+        const points = layer.points || [];
+        const size = Number.isFinite(style.size) ? Math.max(0.75, Math.min(8, style.size)) : 3;
+        livePointContext.fillStyle = style.color || "#c3ecff";
+        livePointContext.globalAlpha = Number.isFinite(style.opacity)
+          ? Math.max(0, Math.min(1, style.opacity)) : 1;
+        for (const point of points) {
+          if (point < 0 || point >= screenX.length) continue;
+          livePointContext.fillRect(screenX[point] - size / 2, screenY[point] - size / 2, size, size);
+        }
+      }
+      livePointContext.globalAlpha = 1;
+    }
 
     function scheduleCameraRender() {
       if (cameraFrame) return;
@@ -344,10 +373,15 @@
         canvas.width = width;
         canvas.height = height;
       }
+      if (livePointCanvas.width !== width || livePointCanvas.height !== height) {
+        livePointCanvas.width = width;
+        livePointCanvas.height = height;
+      }
       context.clearRect(0, 0, width, height);
       if (!geometry || (!geometry.positions.length
           && !(geometry.lines || []).length && !(geometry.points || []).length)) {
         drawEmptyScene(width, height, dpr);
+        renderAnimatedPointLayers();
         onRender?.();
         return;
       }
@@ -532,7 +566,11 @@
           context.fillRect(screenX[point] - size / 2, screenY[point] - size / 2, size, size);
         }
       }
-      for (const layer of geometry.pointLayers || []) {
+      const animatedLayerCount = Number.isInteger(geometry.animatedPointLayerCount)
+        ? Math.min(geometry.animatedPointLayerCount, geometry.pointLayers?.length || 0) : 0;
+      for (let layerIndex = 0; layerIndex < (geometry.pointLayers || []).length; layerIndex += 1) {
+        if (layerIndex < animatedLayerCount) continue;
+        const layer = geometry.pointLayers[layerIndex];
         const style = layer.style || {};
         const size = Number.isFinite(style.size) ? Math.max(0.75, Math.min(8, style.size)) : 3;
         context.fillStyle = style.color || "#c3ecff";
@@ -557,6 +595,7 @@
       }
       if (showCoordinateGizmo) drawCoordinateGizmo(width, height, dpr, cameraOrientation);
       if (showViewCube) drawViewCube(width, dpr, cameraOrientation);
+      renderAnimatedPointLayers();
       onRender?.();
     }
 
@@ -1457,7 +1496,10 @@
           geometry.pointLayers[index].style ||= {};
           geometry.pointLayers[index].style.opacity = Math.max(0, Math.min(1, opacities[index]));
         }
-        render();
+        const animatedCount = Number.isInteger(geometry.animatedPointLayerCount)
+          ? geometry.animatedPointLayerCount : 0;
+        if (livePointCanvas.parentElement && opacities.length <= animatedCount) renderAnimatedPointLayers();
+        else render();
         return true;
       },
       getCamera() {
