@@ -227,15 +227,18 @@ liveRawFrameSource = [
   makeUnalignedFrame(centers.slice(0, 3)),
   makeUnalignedFrame(centers.slice(0, 3).map(([x, y]) => [x + 12, y + 8]), 12),
   new Uint8Array(640 * 400 * 2),
+  new Uint8Array(640 * 400 * 2),
 ];
-const unalignedExpectedPointCount = (() => {
-  const view = new DataView(liveRawFrameSource[0].buffer);
+const countValidFramePoints = frame => {
+  const view = new DataView(frame.buffer);
   let count = 0;
   for (let pixel = 0; pixel < 640 * 400; pixel += 1) {
     if (sandbox.window.CadyxScanView.isScanDepthValid(view.getUint16(pixel * 2, true))) count += 1;
   }
   return count;
-})();
+};
+const unalignedExpectedPointCount = countValidFramePoints(liveRawFrameSource[0]);
+const secondUnalignedExpectedPointCount = countValidFramePoints(liveRawFrameSource[1]);
 liveFrameSequence = 0;
 const unalignedButton = element();
 const unalignedView = sandbox.window.CadyxScanView.initialize({
@@ -248,9 +251,10 @@ const unalignedView = sandbox.window.CadyxScanView.initialize({
 }, undefined, fetchPreview);
 const unalignedStart = viewerLoads.length;
 unalignedView.showLivePreview({ open: true });
-await waitUntil(() => viewerLoads.length >= unalignedStart + 3);
+await waitUntil(() => viewerLoads.length >= unalignedStart + 4);
 const firstUnaligned = viewerLoads[unalignedStart + 1].geometry;
 const secondUnaligned = viewerLoads[unalignedStart + 2].geometry;
+const singleDropoutGeometry = viewerLoads[unalignedStart + 3].geometry;
 assert.equal(firstUnaligned.pointCloudVertexCount, unalignedExpectedPointCount,
   "sparse depth frames render every valid return, including pixels outside the old preview lattice");
 assert.deepEqual([...secondUnaligned.orbitCenter], [...firstUnaligned.orbitCenter],
@@ -259,10 +263,12 @@ assert.equal(secondUnaligned.fitRadius, firstUnaligned.fitRadius,
   "unregistered live frames retain the first valid frame camera scale");
 assert.notDeepEqual([...secondUnaligned.bounds.min], [...firstUnaligned.bounds.min],
   "the stability assertion covers frames whose cloud bounds actually move");
-await waitUntil(() => liveFrameSequence >= 3);
+assert.equal(singleDropoutGeometry.pointCloudVertexCount, secondUnalignedExpectedPointCount,
+  "one missing sensor frame holds the last valid pixel cloud for one frame interval");
+await waitUntil(() => liveFrameSequence >= 4);
 await new Promise(resolve => setTimeout(resolve, 20));
-assert.equal(viewerLoads.length, unalignedStart + 3,
-  "an empty depth frame keeps the last valid cloud instead of clearing the viewport");
+assert.equal(viewerLoads.length, unalignedStart + 4,
+  "a second consecutive empty frame does not keep extending stale points or clear the viewport");
 unalignedView.closeLivePreview();
 const denseFrame = new Uint8Array(640 * 400 * 2);
 for (let y = 50; y < 350; y += 1) for (let x = 100; x < 300; x += 1) {

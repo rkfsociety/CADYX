@@ -246,6 +246,7 @@
     let liveFrameIntervalMs = 0;
     let modelGeometry = null;
     const liveDepthHistory = new Float32Array(640 * 400);
+    const liveDepthHistorySequence = new Uint32Array(640 * 400);
     const liveFrameScratch = {
       depths: new Float32Array(640 * 400),
       positions: new Float32Array(LIVE_PREVIEW_POINT_LIMIT * 3),
@@ -714,6 +715,7 @@
       lastLiveFrameMtimeNs = 0;
       liveFrameIntervalMs = 0;
       liveDepthHistory.fill(0);
+      liveDepthHistorySequence.fill(0);
       cloudRequest += 1;
       cloudPreviewOpen = false;
       meshPreviewOpen = false;
@@ -804,11 +806,9 @@
               markerPixels.fill(0);
               markerCenterPixels.fill(0);
               seen.fill(0);
-              let validDepthCount = 0;
               for (let pixel = 0; pixel < depths.length; pixel += 1) {
                 const depth = (raw[pixel * 2] | raw[pixel * 2 + 1] << 8) * scale;
                 depths[pixel] = isScanDepthValid(depth) ? depth : 0;
-                if (depths[pixel] > 0) validDepthCount += 1;
               }
               const valid = i => depths[i] > 0;
               let regions = 0;
@@ -854,6 +854,22 @@
                   if (nearest >= 0) markerCenterPixels[nearest] = 1;
                 }
               }
+              let displayDepthCount = 0;
+              for (let pixel = 0; pixel < depths.length; pixel += 1) {
+                const depth = depths[pixel];
+                const previousSequence = liveDepthHistorySequence[pixel];
+                if (depth > 0) {
+                  const smoothedDepth = previousSequence > 0 && frameSequence - previousSequence <= 2
+                    ? smoothLivePreviewDepth(liveDepthHistory[pixel], depth) : depth;
+                  liveDepthHistory[pixel] = smoothedDepth;
+                  liveDepthHistorySequence[pixel] = frameSequence;
+                  depths[pixel] = smoothedDepth;
+                  displayDepthCount += 1;
+                } else if (previousSequence > 0 && frameSequence - previousSequence <= 1) {
+                  depths[pixel] = liveDepthHistory[pixel];
+                  displayDepthCount += 1;
+                }
+              }
               const markerPositions = [];
               const markerCenterPositions = [];
               let count = 0;
@@ -863,8 +879,8 @@
               const selectedMarkerBudget = Math.min(markerPixelCount, sampleBudget);
               const markerSelectionThreshold = markerPixelCount > selectedMarkerBudget
                 ? selectedMarkerBudget / markerPixelCount : 1;
-              const regularPixelCount = Math.max(1, validDepthCount - markerPixelCount);
-              const regularSelectionThreshold = validDepthCount > LIVE_PREVIEW_POINT_LIMIT
+              const regularPixelCount = Math.max(1, displayDepthCount - markerPixelCount);
+              const regularSelectionThreshold = displayDepthCount > LIVE_PREVIEW_POINT_LIMIT
                 ? Math.min(1, Math.max(0, sampleBudget - selectedMarkerBudget) / regularPixelCount) : 1;
               const projectPixel = (x, y, depth) => {
                 const px = matrix[0] * x + matrix[1] * y + matrix[2] * depth + matrix[3];
@@ -888,12 +904,11 @@
                 const depthValue = depths[pixel];
                 if (depthValue <= 0) continue;
                 const isMarker = markerPixels[pixel] === 1;
-                if (validDepthCount > LIVE_PREVIEW_POINT_LIMIT) {
+                if (displayDepthCount > LIVE_PREVIEW_POINT_LIMIT) {
                   const threshold = isMarker ? markerSelectionThreshold : regularSelectionThreshold;
                   if (hashLivePreviewPixel(pixel) / 0x1_0000_0000 >= threshold) continue;
                 }
-                const depth = smoothLivePreviewDepth(liveDepthHistory[pixel], depthValue);
-                liveDepthHistory[pixel] = depth;
+                const depth = depthValue;
                 if (!projectPixel(pixel % 640, Math.floor(pixel / 640), depth)) continue;
                 markerFlags[count] = isMarker ? 1 : 0;
                 positions[count * 3] = projectedPoint[0];
@@ -1021,6 +1036,7 @@
         liveFrameIntervalMs = 0;
         liveViewportInitialized = false;
         liveDepthHistory.fill(0);
+        liveDepthHistorySequence.fill(0);
         updateButton();
       }
     };
