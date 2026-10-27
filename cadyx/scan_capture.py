@@ -21,6 +21,10 @@ from .errors import ConflictError, ValidationError
 
 _DEFAULT_FRAME_COUNT = 12
 _LIVE_PREVIEW_METRICS_PREFIX = "preview_metrics "
+_LIVE_PREVIEW_CLIENT_METRIC_FIELDS = frozenset({
+    "window_seconds", "frames", "request_avg_ms", "request_max_ms", "process_avg_ms",
+    "process_max_ms", "render_avg_ms", "render_max_ms", "total_avg_ms", "total_max_ms", "points_avg",
+})
 
 
 def _read_live_preview_metrics(log_path: Path) -> dict[str, Any] | None:
@@ -55,6 +59,25 @@ def _read_live_preview_metrics(log_path: Path) -> dict[str, Any] | None:
     return None
 
 
+def _validate_live_preview_client_metrics(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != _LIVE_PREVIEW_CLIENT_METRIC_FIELDS:
+        raise ValidationError("Live-preview client metrics have an invalid field set.")
+    frames = value["frames"]
+    if isinstance(frames, bool) or not isinstance(frames, int) or not 1 <= frames <= 300:
+        raise ValidationError("Live-preview client metrics require 1–300 frames per window.")
+    window_seconds = value["window_seconds"]
+    if (isinstance(window_seconds, bool) or not isinstance(window_seconds, (int, float))
+            or not math.isfinite(window_seconds) or not 0.5 <= window_seconds <= 10):
+        raise ValidationError("Live-preview client metric windows must span 0.5–10 seconds.")
+    for field in _LIVE_PREVIEW_CLIENT_METRIC_FIELDS - {"frames", "window_seconds"}:
+        measurement = value[field]
+        maximum = 8000 if field == "points_avg" else 10000
+        if (isinstance(measurement, bool) or not isinstance(measurement, (int, float))
+                or not math.isfinite(measurement) or not 0 <= measurement <= maximum):
+            raise ValidationError(f"Invalid live-preview client metric: {field}.")
+    return dict(value)
+
+
 @dataclass
 class _Scan360Job:
     project_id: str
@@ -76,6 +99,8 @@ class _LivePreviewJob:
     stop_path: Path
     ready_path: Path
     log_path: Path
+    client_metrics: dict[str, Any] | None = None
+    client_metrics_at: datetime | None = None
 
 
 class Scan360CaptureController:
@@ -574,6 +599,16 @@ class Scan360CaptureController:
                 return {"state": "idle"}
             return self._live_preview_snapshot_locked()
 
+    def record_live_preview_client_metrics(self, value: Any) -> dict[str, Any]:
+        metrics = _validate_live_preview_client_metrics(value)
+        with self._guard:
+            job = self._live_preview
+            if job is None or job.process.poll() is not None:
+                raise ConflictError("The live scanner preview is not running.", code="SCANNER_NOT_RUNNING")
+            job.client_metrics = metrics
+            job.client_metrics_at = datetime.now(timezone.utc)
+            return {"recorded": True}
+
     def stop_live_preview(self) -> dict[str, Any]:
         with self._guard:
             job = self._live_preview
@@ -635,6 +670,11 @@ class Scan360CaptureController:
         metrics = _read_live_preview_metrics(job.log_path)
         if metrics is not None:
             snapshot["metrics"] = metrics
+        if job.client_metrics is not None and job.client_metrics_at is not None:
+            snapshot["client_metrics"] = job.client_metrics
+            snapshot["client_metrics_age_ms"] = max(
+                0, int((datetime.now(timezone.utc) - job.client_metrics_at).total_seconds() * 1000),
+            )
         return snapshot
 
     @staticmethod

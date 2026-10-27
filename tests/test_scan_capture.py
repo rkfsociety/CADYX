@@ -180,6 +180,19 @@ class Scan360CaptureTests(unittest.TestCase):
                 self.assertEqual(status["state"], "running")
                 self.assertEqual(status["frame_mtime_ns"], frames_path.stat().st_mtime_ns)
                 self.assertEqual(status["metrics"], metrics)
+                client_metrics = {
+                    "window_seconds": 1.2, "frames": 5,
+                    "request_avg_ms": 220.0, "request_max_ms": 250.0,
+                    "process_avg_ms": 18.0, "process_max_ms": 24.0,
+                    "render_avg_ms": 8.0, "render_max_ms": 11.0,
+                    "total_avg_ms": 246.0, "total_max_ms": 285.0, "points_avg": 6100.0,
+                }
+                self.assertEqual(controller.record_live_preview_client_metrics(client_metrics), {"recorded": True})
+                status = controller.live_preview_status()
+                self.assertEqual(status["client_metrics"], client_metrics)
+                self.assertGreaterEqual(status["client_metrics_age_ms"], 0)
+                with self.assertRaises(ValidationError):
+                    controller.record_live_preview_client_metrics({**client_metrics, "render_max_ms": float("inf")})
                 self.assertEqual(controller.stop_live_preview(), {"state": "idle"})
                 self.assertFalse(raw_path.exists(), "stopping the preview removes any legacy current-frame cache")
                 self.assertFalse(frames_path.exists(), "stopping the preview removes its temporary frame queue")

@@ -187,6 +187,9 @@ class CadyxCore:
     def scanner_live_preview_status(self) -> dict[str, Any]:
         return self._scan_capture.live_preview_status()
 
+    def record_scanner_live_preview_client_metrics(self, metrics: Any) -> dict[str, Any]:
+        return self._scan_capture.record_live_preview_client_metrics(metrics)
+
     def stop_scanner_live_preview(self) -> dict[str, Any]:
         return self._scan_capture.stop_live_preview()
 

@@ -42,6 +42,7 @@ class WebRouteTableTests(unittest.TestCase):
             ("GET", "/api/v1/health", "health", {}),
             ("GET", "/api/v1/scanner/live-preview", "scanner_live_preview_status", {}),
             ("POST", "/api/v1/scanner/live-preview", "scanner_live_preview_start", {}),
+            ("POST", "/api/v1/scanner/live-preview/client-metrics", "scanner_live_preview_client_metrics", {}),
             ("DELETE", "/api/v1/scanner/live-preview", "scanner_live_preview_stop", {}),
             ("GET", "/api/v1/scanner/turntable/settings", "turntable_settings", {}),
             ("POST", "/api/v1/scanner/turntable/settings", "turntable_settings_save", {}),

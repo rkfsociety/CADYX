@@ -62,6 +62,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/scanner/turntable/map", "turntable_marker_map", "scanner"),
     RouteSpec("GET", "/api/v1/scanner/live-preview", "scanner_live_preview_status", "scanner"),
     RouteSpec("POST", "/api/v1/scanner/live-preview", "scanner_live_preview_start", "scanner", "json"),
+    RouteSpec("POST", "/api/v1/scanner/live-preview/client-metrics", "scanner_live_preview_client_metrics", "scanner", "json"),
     RouteSpec("DELETE", "/api/v1/scanner/live-preview", "scanner_live_preview_stop", "scanner"),
     RouteSpec("GET", "/api/v1/scanner/point-cloud", "scanner_point_cloud", "scanner"),
     RouteSpec("GET", "/api/v1/scanner/calibration", "scanner_calibration", "scanner"),
@@ -445,6 +446,12 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
         if isinstance(fps, bool) or not isinstance(fps, int) or fps not in {5, 10, 15}:
             raise ValidationError("Live scanner preview FPS must be 5, 10, or 15.")
         handler._json(202, {"preview": core.start_scanner_live_preview(scanner_device_id, fps)})
+        return
+    if route.spec.name == "scanner_live_preview_client_metrics":
+        body = _require_json(handler)
+        if set(body) != {"metrics"}:
+            raise ValidationError("Live-preview client telemetry accepts only a metrics object.")
+        handler._json(202, core.record_scanner_live_preview_client_metrics(body["metrics"]))
         return
     if route.spec.name == "scanner_live_preview_stop":
         handler._json(200, {"preview": core.stop_scanner_live_preview()})

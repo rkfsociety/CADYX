@@ -318,6 +318,8 @@ While a preview is running, `GET /api/v1/scanner/live-preview` includes a rollin
 
 `POST /api/v1/scanner/live-preview` accepts an optional `fps` value of 5, 10 or 15; the default is 10. Use the stage metrics to compare actual wall-clock delivery before changing that requested mode.
 
+The browser sends one aggregated `client_metrics` window per second to `POST /api/v1/scanner/live-preview/client-metrics`. The status endpoint exposes the latest window and `client_metrics_age_ms`: `request_*` covers frame fetch and body read, `process_*` covers Y16 filtering, marker detection, projection and table registration, and `render_*` covers the synchronous viewport update. `points_avg` is the average number of displayed points. These timings exclude GPU compositing and monitor presentation.
+
 On 2026-10-27, 63 rolling windows at requested 10 fps after removing durable frame-move flushes and before hard-linking the diagnostic snapshot recorded median `camera_fps` 5.33 (Media Foundation timestamps), `capture_fps` 4.50 (wall-clock published frames), `read_avg_ms` 217.22, `copy_avg_ms` 0.07, `publish_avg_ms` 5.01, and `process_cpu_percent` 1.17; no null samples occurred. Keep Media Foundation and wall-clock rates distinct; this is the pre-alias baseline.
 
 After adding the snapshot hard-link alias, a new 151-window run recorded median `camera_fps` 5.32, published `capture_fps` 4.50, `read_avg_ms` 215.56, `copy_avg_ms` 0.09, `publish_avg_ms` 6.41, and process CPU 1.18%; `raw_link_fallbacks` stayed at zero. The queue now writes one frame payload and the diagnostic name aliases it, but this change did not raise the delivered frame rate. The remaining rate is limited before/around the blocking Media Foundation read, not by CPU use.

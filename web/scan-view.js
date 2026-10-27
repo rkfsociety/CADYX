@@ -233,6 +233,10 @@
     let liveRequest = 0;
     let liveTimer = null;
     let liveFrameSequence = 0;
+    let liveClientWindowStartedAt = 0;
+    let liveClientWindowFrames = 0;
+    let liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
+    let liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
     let liveCalibration = null;
     let liveTableFrame = null;
     let liveTableMap = null;
@@ -727,6 +731,7 @@
       updateButton();
       const pollFrame = async () => {
         if (request !== liveRequest || !livePreviewOwned) return;
+        const clock = () => globalThis.performance?.now?.() ?? Date.now();
         let receivedFrame = false;
         let renderedFrame = false;
         try {
@@ -777,6 +782,7 @@
                 || calibration.depth_scale_mm_per_raw_unit <= 0) throw new Error('Калибровка глубины сканера некорректна.');
             liveCalibration = calibration;
           }
+          const frameRequestStartedAt = clock();
           const response = await fetcher(`/api/v1/scanner/live-frame?after=${liveFrameSequence}`, { cache: 'no-store' });
           if (response.ok) {
             receivedFrame = true;
@@ -799,6 +805,8 @@
               lastLiveFrameMtimeNs = frameMtimeNs;
             }
             const raw = new Uint8Array(await response.arrayBuffer());
+            const requestMs = Math.max(0, clock() - frameRequestStartedAt);
+            const processStartedAt = clock();
             if (raw.length !== 640 * 400 * 2) {
               liveFrameSequence = frameSequence;
               renderedFrame = true;
@@ -1015,8 +1023,42 @@
                     if (markerFlags[index]) markerIndices.push(index);
                   }
                 }
+                const processMs = Math.max(0, clock() - processStartedAt);
+                const renderStartedAt = clock();
                 renderLiveFrame({ positions: displayPositions, count, bounds, markerIndices, aligned: tableAligned,
                   orbitCenter, fitRadius, reset: resetAfterAlignment });
+                const renderMs = Math.max(0, clock() - renderStartedAt);
+                const now = clock();
+                if (!liveClientWindowStartedAt) liveClientWindowStartedAt = now;
+                liveClientWindowFrames += 1;
+                liveClientWindowSums.request += requestMs;
+                liveClientWindowSums.process += processMs;
+                liveClientWindowSums.render += renderMs;
+                liveClientWindowSums.total += requestMs + processMs + renderMs;
+                liveClientWindowSums.points += count;
+                liveClientWindowMax.request = Math.max(liveClientWindowMax.request, requestMs);
+                liveClientWindowMax.process = Math.max(liveClientWindowMax.process, processMs);
+                liveClientWindowMax.render = Math.max(liveClientWindowMax.render, renderMs);
+                liveClientWindowMax.total = Math.max(liveClientWindowMax.total, requestMs + processMs + renderMs);
+                const windowSeconds = (now - liveClientWindowStartedAt) / 1000;
+                if (windowSeconds >= 1 && liveClientWindowFrames > 0) {
+                  const frames = liveClientWindowFrames;
+                  const averages = liveClientWindowSums;
+                  const maxima = liveClientWindowMax;
+                  liveClientWindowStartedAt = now;
+                  liveClientWindowFrames = 0;
+                  liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
+                  liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
+                  void fetcher('/api/v1/scanner/live-preview/client-metrics', { method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metrics: {
+                      window_seconds: windowSeconds, frames,
+                      request_avg_ms: averages.request / frames, request_max_ms: maxima.request,
+                      process_avg_ms: averages.process / frames, process_max_ms: maxima.process,
+                      render_avg_ms: averages.render / frames, render_max_ms: maxima.render,
+                      total_avg_ms: averages.total / frames, total_max_ms: maxima.total,
+                      points_avg: averages.points / frames,
+                    } }) }).catch(() => {});
+                }
                 liveFrameSequence = frameSequence;
                 renderedFrame = true;
               } else {
