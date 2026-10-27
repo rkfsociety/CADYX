@@ -1345,7 +1345,7 @@
       const deltaX = event.clientX - drag.clientX, deltaY = event.clientY - drag.clientY;
       cameraOrientation = multiplyMatrices(
         rotationX(-deltaY * ORBIT_RADIANS_PER_PIXEL),
-        multiplyMatrices(cameraOrientation, rotationZ(deltaX * ORBIT_RADIANS_PER_PIXEL)),
+        multiplyMatrices(cameraOrientation, rotationZ(-deltaX * ORBIT_RADIANS_PER_PIXEL)),
       );
       drag = { type: "orbit", clientX: event.clientX, clientY: event.clientY };
       scheduleCameraRender();

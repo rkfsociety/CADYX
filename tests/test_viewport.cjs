@@ -232,6 +232,18 @@ const orbitFromUpperLeft = dragOrbit(60, 60);
 const orbitFromLowerRight = dragOrbit(540, 340);
 assert.ok(orbitFromUpperLeft.every((value, index) => Math.abs(value - orbitFromLowerRight[index]) < 1e-12),
   "Equal pointer deltas orbit around the model center regardless of where dragging starts");
+const horizontalDrag = deltaX => {
+  viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
+  events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 1 });
+  events.pointermove({ clientX: 300 + deltaX, clientY: 200 });
+  events.pointerup();
+  while (animationFrames.length) animationFrames.shift()(animationTime);
+  return viewer.getCamera().orientation;
+};
+const positiveHorizontalDrag = horizontalDrag(45);
+viewer.setCamera({ yaw: -45 * 0.01, pitch: 0, zoom: 1, projection: "orthographic" });
+assert.ok(positiveHorizontalDrag.every((value, index) => Math.abs(value - viewer.getCamera().orientation[index]) < 1e-12),
+  "Dragging right rotates horizontally in the corrected direction");
 viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
 const halfTurnDrag = Math.PI / 0.01;
 events.pointerdown({ button: 0, clientX: 300, clientY: 210, pointerId: 1 });
