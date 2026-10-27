@@ -25,9 +25,10 @@ const scheduleTestTimeout = (callback, delay, ...args) => {
   return setTimeout(callback, delay, ...args);
 };
 const mapAlignmentOutput = { hidden: true, textContent: "", dataset: {} };
+const workspaceGrid = { dataset: { view: "scanning" } };
 const testDocument = {
   getElementById: id => id === "scanner-map-alignment" ? mapAlignmentOutput : null,
-  querySelector: () => null,
+  querySelector: selector => selector === "#primary-grid" ? workspaceGrid : null,
 };
 const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply&scan_origin_file=origin.ply") }, document: testDocument, URL, URLSearchParams, setTimeout: scheduleTestTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"), sandbox);
@@ -471,6 +472,8 @@ assert.match(styleCss, /\.scanner-preview-fps\s*\{[^}]*right:\s*12px;[^}]*bottom
   "the FPS badge sits at the bottom-right of the viewport");
 assert.match(styleCss, /\.scanner-map-alignment\s*\{[^}]*left:\s*82px;[^}]*bottom:\s*12px;/,
   "the marker-map alignment status is visible at the bottom-left of the viewport");
+assert.match(styleCss, /\.primary-grid:not\(\[data-view="scanning"\]\) #viewport-live-camera,[\s\S]*?#scanner-map-alignment \{ display: none !important; \}/,
+  "scanner controls and overlays are hidden outside the Scanning tab");
 const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
 assert.match(scanViewSource, /const captureFps = preview\?\.metrics\?\.capture_fps/,
   "the badge uses the native measured sensor rate");
@@ -483,6 +486,8 @@ assert.doesNotMatch(scanViewSource, /liveCloudQueue|smoothLivePreviewDepth/,
   "the preview does not cache or blend previous point clouds");
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
+assert.match(appJs, /if\(grid\?\.dataset\.view!=='scanning'\)livePreviewController\?\.stop\(\)/,
+  "leaving the Scanning tab explicitly stops the camera preview through its controller");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);
 assert.match(appJs, /showCapturePreview\(scan,\{open:captureStarted\}\)/);
 assert.match(appJs, /import_point_cloud:\['Облако точек','cloud'\]/);
@@ -512,7 +517,7 @@ verifyScanView().catch(error => {
     button: cameraButton,
     captureButton,
     view: {
-      showLivePreview(options) { liveViewCalls.push(["show", options]); },
+      showLivePreview(options) { liveViewCalls.push(["show", options, workspaceGrid.dataset.view]); },
       closeLivePreview() { liveViewCalls.push(["close"]); },
     },
   }, undefined, async (url, options = {}) => {
@@ -541,6 +546,16 @@ verifyScanView().catch(error => {
   assert.deepEqual(previewCalls.map(call => call.method), ["GET", "POST", "DELETE"]);
   assert.equal(cameraButton.attributes["aria-pressed"], "false");
   await liveController.poll();
+  apiState = { state: "running" };
+  workspaceGrid.dataset.view = "overview";
+  await liveController.poll();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(previewCalls.at(-1).method, "DELETE",
+    "leaving Scanning stops the live camera through the API, without toggling its button");
+  assert.equal(liveViewCalls.at(-1)[0], "close",
+    "an active live scan is removed from the viewport when Overview becomes active");
+  assert.equal(liveViewCalls.some(call => call[0] === "show" && call[2] !== "scanning"), false,
+    "live scan points are never displayed outside the Scanning tab");
   liveController.dispose();
 })().catch(error => {
   console.error(error);

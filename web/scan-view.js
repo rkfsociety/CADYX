@@ -1269,8 +1269,12 @@
     let state = 'idle';
     let pending = false;
     let pollTimer = null;
-    let previouslyActive = false;
+    let previouslyVisible = false;
     const active = () => state === 'starting' || state === 'running';
+    const canShowPreview = () => {
+      const grid = typeof document !== 'undefined' ? document.querySelector('#primary-grid') : null;
+      return !grid || grid.dataset.view === 'scanning';
+    };
     const syncCaptureButton = () => {
       if (!captureButton) return;
       const target = typeof document !== 'undefined'
@@ -1286,19 +1290,37 @@
       state = preview?.state || 'idle';
       view.updateLivePreviewStatus?.(preview);
       const nowActive = active();
-      if (nowActive && !previouslyActive) view.showLivePreview({ open: true });
-      else if (!nowActive && previouslyActive) view.closeLivePreview();
+      const nowVisible = nowActive && canShowPreview();
+      if (nowVisible && !previouslyVisible) view.showLivePreview({ open: true });
+      else if (!nowVisible && previouslyVisible) view.closeLivePreview();
       if (!nowActive && window.cadyxUiReloadCameraAppliedToModel) {
         window.cadyxUiReloadCamera = null;
         window.cadyxUiReloadCameraAppliedToModel = false;
       }
-      previouslyActive = nowActive;
+      previouslyVisible = nowVisible;
       button.setAttribute('aria-pressed', String(active()));
       button.title = active() ? 'Остановить предпросмотр сканера'
         : state === 'failed' ? preview.message || 'Сканер остановил поток'
           : 'Показать сканер в реальном времени';
       syncCaptureButton();
       if (state === 'failed') view.closeLivePreview();
+      if (nowActive && !canShowPreview()) void stop();
+    };
+    const stop = async () => {
+      view.closeLivePreview();
+      if (!active() || pending) return;
+      pending = true;
+      try {
+        const response = await fetcher('/api/v1/scanner/live-preview', { method: 'DELETE' });
+        const payload = await response.json();
+        if (response.ok) updateButton(payload.preview);
+      } catch (error) {
+        button.title = `Предпросмотр скрыт вне вкладки сканирования; остановка не подтверждена: ${error.message}`;
+      } finally {
+        pending = false;
+        clearTimeout(pollTimer);
+        pollTimer = setTimeout(poll, active() ? 900 : 3500);
+      }
     };
     const poll = async () => {
       try {
@@ -1337,7 +1359,7 @@
       }
     });
     poll();
-    const controller = { poll, dispose: () => {
+    const controller = { poll, stop, dispose: () => {
       clearTimeout(pollTimer);
       if (button?.__cadyxLivePreviewController === controller) {
         delete button.__cadyxLivePreviewController;

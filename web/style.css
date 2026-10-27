@@ -226,6 +226,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .scanner-map-alignment[hidden] { display: none; }
 .turntable-control-panel { position: absolute; z-index: 6; top: 12px; right: 12px; display: grid; width: 286px; aspect-ratio: 1; grid-template-rows: 22px 30px 30px 30px 44px 27px 30px 23px; gap: 4px; padding: 10px; border: 1px solid #52616bcc; border-radius: 6px; color: #e6f2f7; background: #0b1114ed; box-shadow: 0 5px 22px #0008; font: 9px var(--mono); }
 .primary-grid:not([data-view="scanning"]) .turntable-control-panel { display: none; }
+.primary-grid:not([data-view="scanning"]) #viewport-live-scan,
+.primary-grid:not([data-view="scanning"]) #viewport-scan-mesh,
+.primary-grid:not([data-view="scanning"]) #viewport-scan-360,
+.primary-grid:not([data-view="scanning"]) #viewport-scan-360-status,
+.primary-grid:not([data-view="scanning"]) #viewport-live-camera,
+.primary-grid:not([data-view="scanning"]) #scanner-preview-fps,
+.primary-grid:not([data-view="scanning"]) #scanner-map-alignment { display: none !important; }
 .turntable-control-heading,.turntable-control-position,.turntable-control-row,.turntable-control-tilt label,.turntable-control-actions { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .turntable-control-heading { border-bottom: 1px solid #52616b66; }
 .turntable-control-heading h2 { margin: 0; color: #a9c0cd; font: 600 9px var(--mono); letter-spacing: .08em; }
