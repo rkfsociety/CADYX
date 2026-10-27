@@ -225,7 +225,7 @@ const makeUnalignedFrame = (markerCenters, extraDepth = 0) => {
 };
 liveRawFrameSource = [
   makeUnalignedFrame(centers.slice(0, 3)),
-  makeUnalignedFrame(centers.slice(0, 3).map(([x, y]) => [x + 12, y + 8]), 12),
+  makeUnalignedFrame(centers.slice(0, 3).map(([x, y]) => [x + 2, y + 1]), 12),
   new Uint8Array(640 * 400 * 2),
   new Uint8Array(640 * 400 * 2),
 ];
@@ -270,6 +270,24 @@ await new Promise(resolve => setTimeout(resolve, 20));
 assert.equal(viewerLoads.length, unalignedStart + 4,
   "a second consecutive empty frame does not keep extending stale points or clear the viewport");
 unalignedView.closeLivePreview();
+
+liveRawFrameSource = [
+  makeUnalignedFrame(centers.slice(0, 3)),
+  makeUnalignedFrame(centers.slice(0, 3).map(([x, y]) => [x + 150, y]), 12),
+  new Uint8Array(640 * 400 * 2),
+];
+liveFrameSequence = 0;
+const movingView = sandbox.window.CadyxScanView.initialize({
+  cloudButton: element(), meshButton: element(), viewport: element(), viewer, getModelGeometry, meshReady: true,
+}, undefined, fetchPreview);
+const movingStart = viewerLoads.length;
+movingView.showLivePreview({ open: true });
+await waitUntil(() => viewerLoads.length >= movingStart + 3);
+const movingSecondGeometry = viewerLoads[movingStart + 2].geometry;
+assert.equal(movingSecondGeometry.pointCloudVertexCount, countValidFramePoints(liveRawFrameSource[1]),
+  "low-overlap moving frames disable temporal point hold to avoid rotational trails");
+movingView.closeLivePreview();
+
 const denseFrame = new Uint8Array(640 * 400 * 2);
 for (let y = 50; y < 350; y += 1) for (let x = 100; x < 300; x += 1) {
   const pixel = y * 640 + x;

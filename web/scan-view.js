@@ -2,6 +2,7 @@
   const LIVE_PREVIEW_POINT_LIMIT = 8_000;
   const MIN_SCAN_DEPTH_MM = 100;
   const MAX_SCAN_DEPTH_MM = 250;
+  const LIVE_PREVIEW_STATIC_FRAME_OVERLAP_RATIO = 0.65;
   const isScanDepthValid = depth => Number.isFinite(depth)
     && depth >= MIN_SCAN_DEPTH_MM && depth <= MAX_SCAN_DEPTH_MM;
   const livePreviewSampleIndex = (x, y) => {
@@ -244,6 +245,7 @@
     let emptyFramePollDelay = 25;
     let lastLiveFrameMtimeNs = 0;
     let liveFrameIntervalMs = 0;
+    let liveDepthTemporalCoherent = false;
     let modelGeometry = null;
     const liveDepthHistory = new Float32Array(640 * 400);
     const liveDepthHistorySequence = new Uint32Array(640 * 400);
@@ -714,6 +716,7 @@
       emptyFramePollDelay = 25;
       lastLiveFrameMtimeNs = 0;
       liveFrameIntervalMs = 0;
+      liveDepthTemporalCoherent = false;
       liveDepthHistory.fill(0);
       liveDepthHistorySequence.fill(0);
       cloudRequest += 1;
@@ -806,9 +809,27 @@
               markerPixels.fill(0);
               markerCenterPixels.fill(0);
               seen.fill(0);
+              const previousFrameSequence = liveFrameSequence;
+              let previousValidPixels = 0, currentValidPixels = 0, sharedValidPixels = 0;
               for (let pixel = 0; pixel < depths.length; pixel += 1) {
+                const wasValidInPreviousFrame = previousFrameSequence > 0
+                  && liveDepthHistorySequence[pixel] === previousFrameSequence;
+                if (wasValidInPreviousFrame) previousValidPixels += 1;
                 const depth = (raw[pixel * 2] | raw[pixel * 2 + 1] << 8) * scale;
                 depths[pixel] = isScanDepthValid(depth) ? depth : 0;
+                if (depths[pixel] > 0) {
+                  currentValidPixels += 1;
+                  if (wasValidInPreviousFrame) sharedValidPixels += 1;
+                }
+              }
+              let allowTemporalSmoothing = liveDepthTemporalCoherent;
+              if (currentValidPixels >= 100) {
+                allowTemporalSmoothing = previousValidPixels >= 100
+                  && sharedValidPixels / previousValidPixels >= LIVE_PREVIEW_STATIC_FRAME_OVERLAP_RATIO;
+                liveDepthTemporalCoherent = allowTemporalSmoothing;
+              } else if (currentValidPixels > 0) {
+                allowTemporalSmoothing = false;
+                liveDepthTemporalCoherent = false;
               }
               const valid = i => depths[i] > 0;
               let regions = 0;
@@ -859,17 +880,20 @@
                 const depth = depths[pixel];
                 const previousSequence = liveDepthHistorySequence[pixel];
                 if (depth > 0) {
-                  const smoothedDepth = previousSequence > 0 && frameSequence - previousSequence <= 2
+                  const smoothedDepth = allowTemporalSmoothing && previousSequence > 0
+                    && frameSequence - previousSequence <= 2
                     ? smoothLivePreviewDepth(liveDepthHistory[pixel], depth) : depth;
                   liveDepthHistory[pixel] = smoothedDepth;
                   liveDepthHistorySequence[pixel] = frameSequence;
                   depths[pixel] = smoothedDepth;
                   displayDepthCount += 1;
-                } else if (previousSequence > 0 && frameSequence - previousSequence <= 1) {
+                } else if (allowTemporalSmoothing && previousSequence === previousFrameSequence
+                           && frameSequence - previousSequence === 1) {
                   depths[pixel] = liveDepthHistory[pixel];
                   displayDepthCount += 1;
                 }
               }
+              if (currentValidPixels === 0) liveDepthTemporalCoherent = false;
               const markerPositions = [];
               const markerCenterPositions = [];
               let count = 0;
@@ -1034,6 +1058,7 @@
         liveRawFitRadius = null;
         lastLiveFrameMtimeNs = 0;
         liveFrameIntervalMs = 0;
+        liveDepthTemporalCoherent = false;
         liveViewportInitialized = false;
         liveDepthHistory.fill(0);
         liveDepthHistorySequence.fill(0);
