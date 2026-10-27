@@ -378,7 +378,7 @@ assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/butto
 assert.match(html, /id="viewport-scan-mesh"[^>]*>Сетка<\/button>/);
 assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/button>/);
 assert.match(html, /id="viewport-live-camera"[^>]*>Предпросмотр<\/button>/);
-assert.match(html, /id="scanner-preview-fps"[^>]*>FPS —<\/output>/,
+assert.match(html, /id="scanner-preview-fps"[^>]*>[\s\S]*data-display-fps>30 FPS[\s\S]*data-source-fps>Облако —\/с[\s\S]*<\/output>/,
   "the scanner preview exposes a live FPS badge in the viewport");
 assert.match(projectUiJs, /function projectPath\(projectId\)/);
 assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
@@ -404,8 +404,14 @@ assert.match(styleCss, /#viewport-scan-360\[data-capture-locked="true"\]\s*\{\s*
 assert.match(styleCss, /\.scanner-preview-fps\s*\{[^}]*right:\s*12px;[^}]*bottom:\s*12px;/,
   "the FPS badge sits at the bottom-right of the viewport");
 assert.match(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"),
-  /const windowFps = frames \/ windowSeconds;[\s\S]*?liveFpsSmoothed\s*=\s*liveFpsSmoothed\s*>\s*0/,
-  "the displayed FPS is smoothed from rendered-frame counts over a measured window");
+  /crossfadeDurationMs:\s*liveViewportInitialized && !reset \? 200 : 0/,
+  "consecutive live point clouds crossfade over a bounded display buffer");
+assert.match(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
+  /startFrameCrossfade\(Math\.min\(1000, crossfadeDurationMs\), onCrossfadeFps\)/,
+  "the viewport animates a cached frame crossfade independently of scanner delivery");
+assert.match(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
+  /opacity \$\{durationMs\}ms steps\(6, end\)/,
+  "cached-frame animation is composited in six 30 FPS steps instead of a main-thread loop");
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);

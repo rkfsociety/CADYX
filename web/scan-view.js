@@ -222,6 +222,8 @@
     getProjectId = () => null,
     hasPersistentPointCloud = () => false, meshReady = false }, location = window.location, fetcher = fetch) => {
     const liveFpsIndicator = typeof document !== 'undefined' ? document.getElementById('scanner-preview-fps') : null;
+    const liveDisplayFps = liveFpsIndicator?.querySelector('[data-display-fps]') || liveFpsIndicator;
+    const liveSourceFps = liveFpsIndicator?.querySelector('[data-source-fps]') || null;
     let livePreviewOwned = false;
     let serverPointCloudVisible = false;
     let cloudPreviewOpen = false;
@@ -628,7 +630,11 @@
         lineStyle: overlay ? { color: '#5aaac6', opacity: 0.42, width: 1, dash: [5, 5] } : undefined,
         orbitCenter: aligned ? [0, 0, 0] : orbitCenter,
         fitRadius: aligned ? liveFitRadius : fitRadius },
-      { reset: reset || !liveViewportInitialized });
+      { reset: reset || !liveViewportInitialized,
+        crossfadeDurationMs: liveViewportInitialized && !reset ? 200 : 0,
+        onCrossfadeFps: fps => {
+          if (liveDisplayFps) liveDisplayFps.textContent = `${fps.toFixed(0)} FPS`;
+        } });
       liveViewportInitialized = true;
     };
     cloudSource = pointCloudUrl(null);
@@ -710,7 +716,11 @@
       if (!open) return;
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
       liveFpsSmoothed = 0;
-      if (liveFpsIndicator) { liveFpsIndicator.textContent = 'FPS —'; liveFpsIndicator.hidden = false; }
+      if (liveFpsIndicator) {
+        if (liveDisplayFps) liveDisplayFps.textContent = '30 FPS';
+        if (liveSourceFps) liveSourceFps.textContent = 'Облако —/с';
+        liveFpsIndicator.hidden = false;
+      }
       liveFrameSequence = 0;
       liveCalibration = null;
       liveTableFrame = null;
@@ -1056,7 +1066,7 @@
                   const windowFps = frames / windowSeconds;
                   liveFpsSmoothed = liveFpsSmoothed > 0
                     ? liveFpsSmoothed * 0.75 + windowFps * 0.25 : windowFps;
-                  if (liveFpsIndicator) liveFpsIndicator.textContent = `FPS ${liveFpsSmoothed.toFixed(1)}`;
+                  if (liveSourceFps) liveSourceFps.textContent = `Облако ${liveFpsSmoothed.toFixed(1)}/с`;
                   void fetcher('/api/v1/scanner/live-preview/client-metrics', { method: 'POST',
                     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metrics: {
                       window_seconds: windowSeconds, frames,
@@ -1098,7 +1108,11 @@
       if (livePreviewOwned) {
         livePreviewOwned = false;
         liveFpsSmoothed = 0;
-        if (liveFpsIndicator) { liveFpsIndicator.textContent = 'FPS —'; liveFpsIndicator.hidden = true; }
+        if (liveFpsIndicator) {
+          if (liveDisplayFps) liveDisplayFps.textContent = '30 FPS';
+          if (liveSourceFps) liveSourceFps.textContent = 'Облако —/с';
+          liveFpsIndicator.hidden = true;
+        }
         restoreModel();
         liveFrameSequence = 0;
         liveTableFrame = null;
