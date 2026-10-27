@@ -378,8 +378,8 @@ assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/butto
 assert.match(html, /id="viewport-scan-mesh"[^>]*>Сетка<\/button>/);
 assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/button>/);
 assert.match(html, /id="viewport-live-camera"[^>]*>Предпросмотр<\/button>/);
-assert.match(html, /id="scanner-preview-fps"[^>]*>[\s\S]*data-display-fps>30 FPS[\s\S]*data-source-fps>Облако —\/с[\s\S]*<\/output>/,
-  "the scanner preview exposes a live FPS badge in the viewport");
+assert.match(html, /id="scanner-preview-fps"[^>]*>FPS —<\/output>/,
+  "the scanner preview exposes the actual cloud update rate in the viewport");
 assert.match(projectUiJs, /function projectPath\(projectId\)/);
 assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
 assert.match(projectUiJs, /let suffix = 2/);
@@ -403,18 +403,12 @@ assert.match(appJs, /if\(scan360\.dataset\.captureLocked==='true'\)return/);
 assert.match(styleCss, /#viewport-scan-360\[data-capture-locked="true"\]\s*\{\s*opacity:\s*\.43;\s*pointer-events:\s*none;/);
 assert.match(styleCss, /\.scanner-preview-fps\s*\{[^}]*right:\s*12px;[^}]*bottom:\s*12px;/,
   "the FPS badge sits at the bottom-right of the viewport");
-assert.match(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"),
-  /crossfadeDurationMs:\s*liveViewportInitialized && !reset \? 200 : 0/,
-  "consecutive live point clouds crossfade over a bounded display buffer");
-assert.match(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
-  /startFrameCrossfade\(Math\.min\(1000, crossfadeDurationMs\), onCrossfadeFps\)/,
-  "the viewport animates a cached frame crossfade independently of scanner delivery");
-assert.match(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
-  /opacity \$\{durationMs\}ms steps\(6, end\)/,
-  "cached-frame animation is composited in six 30 FPS steps instead of a main-thread loop");
-assert.match(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
-  /const preserveFrameCrossfade = canCrossfade && frameCrossfadeActive;[\s\S]*?render\(\{ preserveFrameCrossfade \}\)/,
-  "a new sensor frame does not restart an in-progress crossfade");
+const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
+assert.match(scanViewSource, /const windowFps = frames \/ windowSeconds/,
+  "the displayed FPS is calculated from newly rendered sensor frames");
+assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
+  /viewport-frame-crossfade|startFrameCrossfade/,
+  "the scanner preview does not add a second blinking canvas layer");
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);

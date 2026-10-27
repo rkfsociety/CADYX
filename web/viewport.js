@@ -189,12 +189,6 @@
     const context = canvas.getContext("2d", { alpha: true });
     const meshLayer = document.createElement("canvas");
     const meshLayerContext = meshLayer.getContext("2d", { alpha: true });
-    const frameCrossfadeCanvas = document.createElement("canvas");
-    frameCrossfadeCanvas.className = "viewport-frame-crossfade";
-    frameCrossfadeCanvas.setAttribute?.("aria-hidden", "true");
-    frameCrossfadeCanvas.style ||= {};
-    const frameCrossfadeContext = frameCrossfadeCanvas.getContext("2d", { alpha: true });
-    if (canvas.parentElement) canvas.parentElement.append(frameCrossfadeCanvas);
     let meshImage = null;
     let meshDepth = new Float32Array(0);
     let meshDepthFace = new Int32Array(0);
@@ -219,67 +213,9 @@
     let cameraFrame = 0;
     let bodyMotion = null;
     let bodyMotionFrame = 0;
-    let frameCrossfadeToken = 0;
-    let frameCrossfadeCallback = null;
-    let frameCrossfadeTimer = null;
-    let frameCrossfadeActive = false;
     let bodyMotionAngleByVertex = new Float32Array(0);
     let sweepProgress = null;
     let loftProgress = null;
-
-    function cancelFrameCrossfade() {
-      frameCrossfadeToken += 1;
-      frameCrossfadeCallback = null;
-      frameCrossfadeActive = false;
-      if (frameCrossfadeTimer !== null && typeof clearTimeout === "function") clearTimeout(frameCrossfadeTimer);
-      frameCrossfadeTimer = null;
-      frameCrossfadeCanvas.style.transition = "none";
-      frameCrossfadeCanvas.style.opacity = "0";
-      frameCrossfadeCanvas.style.display = "none";
-    }
-
-    function cachePreviousFrame() {
-      if (!canvas.parentElement) return false;
-      if (frameCrossfadeCanvas.width !== canvas.width || frameCrossfadeCanvas.height !== canvas.height) {
-        frameCrossfadeCanvas.width = canvas.width;
-        frameCrossfadeCanvas.height = canvas.height;
-      }
-      frameCrossfadeContext.drawImage(canvas, 0, 0);
-      return true;
-    }
-
-    function finishFrameCrossfade(token) {
-      if (token !== frameCrossfadeToken) return;
-      if (frameCrossfadeTimer !== null && typeof clearTimeout === "function") clearTimeout(frameCrossfadeTimer);
-      frameCrossfadeTimer = null;
-      frameCrossfadeActive = false;
-      frameCrossfadeCanvas.style.display = "none";
-      const callback = frameCrossfadeCallback;
-      frameCrossfadeCallback = null;
-      if (callback) callback(30);
-    }
-
-    function startFrameCrossfade(durationMs, onFrameRate) {
-      if (!durationMs || !canvas.parentElement || frameCrossfadeActive) return;
-      const token = ++frameCrossfadeToken;
-      frameCrossfadeActive = true;
-      frameCrossfadeCallback = onFrameRate;
-      frameCrossfadeCanvas.style.display = "block";
-      frameCrossfadeCanvas.style.transition = "none";
-      frameCrossfadeCanvas.style.opacity = "1";
-      void frameCrossfadeCanvas.offsetWidth;
-      frameCrossfadeTimer = setTimeout(() => finishFrameCrossfade(token), durationMs + 50);
-      requestAnimationFrame(() => {
-        if (token !== frameCrossfadeToken) return;
-        frameCrossfadeCanvas.style.transition = `opacity ${durationMs}ms steps(6, end)`;
-        frameCrossfadeCanvas.style.opacity = "0";
-      });
-    }
-
-    frameCrossfadeCanvas.addEventListener?.("transitionend", (event) => {
-      if (event.propertyName !== "opacity") return;
-      finishFrameCrossfade(frameCrossfadeToken);
-    });
 
     function scheduleCameraRender() {
       if (cameraFrame) return;
@@ -398,8 +334,7 @@
       };
     }
 
-    function render({ preserveFrameCrossfade = false } = {}) {
-      if (!preserveFrameCrossfade) cancelFrameCrossfade();
+    function render() {
       const rect = canvas.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2) * (drag ? INTERACTIVE_RENDER_SCALE : 1);
@@ -1547,14 +1482,7 @@
         zoom = Math.max(0.25, Math.min(5, zoom * zoomFactor));
         render();
       },
-      load(value, { reset = true, transition: nextTransition = null, smoothShading = false,
-        crossfadeDurationMs = 0, onCrossfadeFps = null } = {}) {
-        const canCrossfade = Number.isFinite(crossfadeDurationMs) && crossfadeDurationMs > 0
-          && geometry?.pointCloudVertexCount != null && value.pointCloudVertexCount != null
-          && canvas.width > 0 && canvas.height > 0 && Boolean(canvas.parentElement);
-        const preserveFrameCrossfade = canCrossfade && frameCrossfadeActive;
-        const shouldCrossfade = canCrossfade && !preserveFrameCrossfade;
-        if (shouldCrossfade) cachePreviousFrame();
+      load(value, { reset = true, transition: nextTransition = null, smoothShading = false } = {}) {
         bodyMotionFrame += 1;
         bodyMotion = null;
         const orbitCenter = Array.isArray(value.orbitCenter) && value.orbitCenter.length === 3
@@ -1670,10 +1598,7 @@
         if (faceRecords.length !== sourceTriangles.length / 3 * 8) faceRecords = new Float64Array(sourceTriangles.length / 3 * 8);
         if (faceOrder.length !== sourceTriangles.length / 3) faceOrder = new Uint32Array(sourceTriangles.length / 3);
         if (reset) resetView();
-        render({ preserveFrameCrossfade });
-        if (shouldCrossfade) {
-          startFrameCrossfade(Math.min(1000, crossfadeDurationMs), onCrossfadeFps);
-        }
+        render();
       },
       render,
     };
