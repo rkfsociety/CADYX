@@ -378,6 +378,8 @@ assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/butto
 assert.match(html, /id="viewport-scan-mesh"[^>]*>Сетка<\/button>/);
 assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/button>/);
 assert.match(html, /id="viewport-live-camera"[^>]*>Предпросмотр<\/button>/);
+assert.match(html, /id="scanner-preview-fps"[^>]*>FPS —<\/output>/,
+  "the scanner preview exposes a live FPS badge in the viewport");
 assert.match(projectUiJs, /function projectPath\(projectId\)/);
 assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
 assert.match(projectUiJs, /let suffix = 2/);
@@ -399,6 +401,11 @@ assert.match(appJs, /viewer:modelViewer/);
 assert.match(appJs, /window\.cadyxSyncCaptureButton=syncCaptureButton/);
 assert.match(appJs, /if\(scan360\.dataset\.captureLocked==='true'\)return/);
 assert.match(styleCss, /#viewport-scan-360\[data-capture-locked="true"\]\s*\{\s*opacity:\s*\.43;\s*pointer-events:\s*none;/);
+assert.match(styleCss, /\.scanner-preview-fps\s*\{[^}]*right:\s*12px;[^}]*bottom:\s*12px;/,
+  "the FPS badge sits at the bottom-right of the viewport");
+assert.match(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"),
+  /liveFpsSmoothed\s*=\s*liveFpsSmoothed\s*>\s*0[\s\S]*?instantaneousFps/,
+  "the displayed FPS is smoothed from rendered frame cadence");
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);

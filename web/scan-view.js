@@ -221,6 +221,7 @@
   const initialize = ({ cloudButton, meshButton, viewport, viewer, getModelGeometry = () => null,
     getProjectId = () => null,
     hasPersistentPointCloud = () => false, meshReady = false }, location = window.location, fetcher = fetch) => {
+    const liveFpsIndicator = typeof document !== 'undefined' ? document.getElementById('scanner-preview-fps') : null;
     let livePreviewOwned = false;
     let serverPointCloudVisible = false;
     let cloudPreviewOpen = false;
@@ -233,6 +234,8 @@
     let liveRequest = 0;
     let liveTimer = null;
     let liveFrameSequence = 0;
+    let liveFpsLastFrameAt = 0;
+    let liveFpsSmoothed = 0;
     let liveClientWindowStartedAt = 0;
     let liveClientWindowFrames = 0;
     let liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
@@ -707,6 +710,9 @@
     const showLivePreview = ({ open = false } = {}) => {
       if (!open) return;
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
+      liveFpsLastFrameAt = 0;
+      liveFpsSmoothed = 0;
+      if (liveFpsIndicator) { liveFpsIndicator.textContent = 'FPS —'; liveFpsIndicator.hidden = false; }
       liveFrameSequence = 0;
       liveCalibration = null;
       liveTableFrame = null;
@@ -1029,6 +1035,13 @@
                   orbitCenter, fitRadius, reset: resetAfterAlignment });
                 const renderMs = Math.max(0, clock() - renderStartedAt);
                 const now = clock();
+                if (liveFpsLastFrameAt > 0) {
+                  const instantaneousFps = 1000 / Math.max(1, now - liveFpsLastFrameAt);
+                  liveFpsSmoothed = liveFpsSmoothed > 0
+                    ? liveFpsSmoothed * 0.75 + instantaneousFps * 0.25 : instantaneousFps;
+                  if (liveFpsIndicator) liveFpsIndicator.textContent = `FPS ${liveFpsSmoothed.toFixed(1)}`;
+                }
+                liveFpsLastFrameAt = now;
                 if (!liveClientWindowStartedAt) liveClientWindowStartedAt = now;
                 liveClientWindowFrames += 1;
                 liveClientWindowSums.request += requestMs;
@@ -1089,6 +1102,9 @@
     const closeLivePreview = () => {
       if (livePreviewOwned) {
         livePreviewOwned = false;
+        liveFpsLastFrameAt = 0;
+        liveFpsSmoothed = 0;
+        if (liveFpsIndicator) { liveFpsIndicator.textContent = 'FPS —'; liveFpsIndicator.hidden = true; }
         restoreModel();
         liveFrameSequence = 0;
         liveTableFrame = null;
