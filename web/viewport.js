@@ -463,7 +463,8 @@
         geometry.overlayTriangleRanges || [],
       );
       else if (geometry.pointCloudVertexCount != null || !geometry.lines) {
-        renderPoints(geometry.pointCloudVertexCount ?? positions.length / 3, camera, screenX, screenY, scale, geometry.colors);
+        renderPoints(geometry.pointCloudVertexCount ?? positions.length / 3, camera, screenX, screenY, scale,
+          geometry.colors, geometry.pointPreviewLimit);
       }
       const directLineCount = geometry.type === "body" ? 0 : (geometry.lines || []).length;
       const lineStyle = geometry.lineStyle || {};
@@ -1292,8 +1293,10 @@
       }
     }
 
-    function renderPoints(pointCount, camera, screenX, screenY, scale, colors = null) {
-      const step = Math.max(1, Math.ceil(pointCount / MAX_PREVIEW_POINTS));
+    function renderPoints(pointCount, camera, screenX, screenY, scale, colors = null, previewLimit = MAX_PREVIEW_POINTS) {
+      const pointLimit = Number.isInteger(previewLimit) && previewLimit > 0
+        ? previewLimit : MAX_PREVIEW_POINTS;
+      const step = Math.max(1, Math.ceil(pointCount / pointLimit));
       const pointSize = Math.max(1.2, Math.min(2.4, scale * 0.003));
       let near = -Infinity, far = Infinity;
       for (let point = 0; point < pointCount; point += step) {

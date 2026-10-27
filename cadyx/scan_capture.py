@@ -523,7 +523,7 @@ class Scan360CaptureController:
                     process = subprocess.Popen(
                         [str(capture_executable), "--live-only", "--live-raw", str(raw_path),
                          "--live-frames-dir", str(frames_path), "--stop-file", str(stop_path),
-                         "--ready-file", str(ready_path), "--fps", "15",
+                         "--ready-file", str(ready_path), "--fps", "10",
                          "--device-id", scanner_device_id],
                         cwd=str(self._repository_root), stdin=subprocess.DEVNULL,
                         stdout=log_stream, stderr=subprocess.STDOUT,

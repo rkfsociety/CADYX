@@ -1,4 +1,14 @@
 (() => {
+  const LIVE_PREVIEW_POINT_LIMIT = 48_000;
+  const livePreviewSampleIndex = (x, y) => {
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || x >= 640 || y < 0 || y >= 400
+        || (x & 1) !== 0 || (y & 1) !== 0 || ((x & 3) === 0 && (y & 3) === 0)) return -1;
+    const localIndex = (y & 3) === 0 ? 0 : (x & 3) === 0 ? 1 : 2;
+    return ((y >> 2) * 160 + (x >> 2)) * 3 + localIndex;
+  };
+  const smoothLivePreviewDepth = (previous, current) => previous > 0
+    ? previous * 0.25 + current * 0.75 : current;
+
   const parseTableMarkerMap = buffer => {
     const view = new DataView(buffer);
     if (view.byteLength < 16) throw new Error('Карта стола короче заголовка MKF.');
@@ -221,11 +231,13 @@
     let liveMapTransform = null;
     let liveFitRadius = null;
     let liveViewportInitialized = false;
+    let emptyFramePollDelay = 25;
     let modelGeometry = null;
+    const liveDepthHistory = new Float32Array(LIVE_PREVIEW_POINT_LIMIT);
     const liveFrameScratch = {
-      positions: new Float32Array(640 * 400 * 3 / 2),
-      tablePositions: new Float32Array(640 * 400 * 3 / 2),
-      markerFlags: new Uint8Array(640 * 400 / 2),
+      positions: new Float32Array(LIVE_PREVIEW_POINT_LIMIT * 3),
+      tablePositions: new Float32Array(LIVE_PREVIEW_POINT_LIMIT * 3),
+      markerFlags: new Uint8Array(LIVE_PREVIEW_POINT_LIMIT),
       markerPixels: new Uint8Array(640 * 400),
       markerCenterPixels: new Uint8Array(640 * 400),
       seen: new Uint8Array(640 * 400),
@@ -545,8 +557,7 @@
       return { bounds, markerIndices, count: accepted };
     };
     const renderLiveFrame = ({ positions, count, bounds, markerIndices, aligned, reset = false }) => {
-      const pointLimit = Number.isInteger(viewer.pointPreviewLimit) && viewer.pointPreviewLimit > 0
-        ? viewer.pointPreviewLimit : 24_000;
+      const pointLimit = LIVE_PREVIEW_POINT_LIMIT;
       const pointStep = Math.max(1, Math.ceil(count / pointLimit));
       const cloudPointCount = Math.ceil(count / pointStep);
       let extraMarkerCount = 0;
@@ -587,7 +598,8 @@
         }
       }
       viewer.load({ positions: combinedPositions, triangles: new Uint32Array(0), lines: trajectoryLines,
-        pointCloudVertexCount: cloudPointCount, bounds: finalBounds, points: previewMarkerPoints,
+        pointCloudVertexCount: cloudPointCount, pointPreviewLimit: pointLimit,
+        bounds: finalBounds, points: previewMarkerPoints,
         pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' },
         pointLayers: overlay ? [{ points: mapMarkerPoints, style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } }] : [],
         lineStyle: overlay ? { color: '#5aaac6', opacity: 0.42, width: 1, dash: [5, 5] } : undefined,
@@ -682,6 +694,8 @@
       liveMapTransform = null;
       liveFitRadius = null;
       liveViewportInitialized = false;
+      emptyFramePollDelay = 25;
+      liveDepthHistory.fill(0);
       cloudRequest += 1;
       cloudPreviewOpen = false;
       meshPreviewOpen = false;
@@ -743,6 +757,7 @@
           const response = await fetcher(`/api/v1/scanner/live-frame?after=${liveFrameSequence}`, { cache: 'no-store' });
           if (response.ok) {
             receivedFrame = true;
+            emptyFramePollDelay = 25;
             const frameSequence = Number(response.headers.get('X-CADYX-Frame-Sequence'));
             if (!Number.isSafeInteger(frameSequence) || frameSequence <= liveFrameSequence) {
               throw new Error('Нарушена последовательность кадров предпросмотра.');
@@ -801,11 +816,18 @@
               const markerCenterPositions = [];
               let count = 0;
               const rawBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
-              for (let pixel = 0; pixel < 640 * 400; pixel += 2) {
-                const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
-                const depth = value * scale;
-                if (!value || !Number.isFinite(depth) || depth < 1) continue;
+              for (let pixel = 0; pixel < 640 * 400; pixel += 1) {
                 const x = pixel % 640, y = Math.floor(pixel / 640);
+                const sampleIndex = livePreviewSampleIndex(x, y);
+                const samplePoint = sampleIndex >= 0;
+                if (!samplePoint && markerPixels[pixel] !== 1) continue;
+                const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
+                let depth = value * scale;
+                if (!value || !Number.isFinite(depth) || depth < 1) continue;
+                if (samplePoint) {
+                  depth = smoothLivePreviewDepth(liveDepthHistory[sampleIndex], depth);
+                  liveDepthHistory[sampleIndex] = depth;
+                }
                 const px = matrix[0] * x + matrix[1] * y + matrix[2] * depth + matrix[3];
                 const py = matrix[4] * x + matrix[5] * y + matrix[6] * depth + matrix[7];
                 const pz = matrix[8] * x + matrix[9] * y + matrix[10] * depth + matrix[11];
@@ -815,6 +837,7 @@
                 const isMarker = markerPixels[pixel] === 1;
                 if (isMarker) markerPositions.push(pointX, pointY, pointZ);
                 if (markerCenterPixels[pixel]) markerCenterPositions.push(pointX, pointY, pointZ);
+                if (!samplePoint) continue;
                 markerFlags[count] = isMarker ? 1 : 0;
                 positions[count * 3] = pointX;
                 positions[count * 3 + 1] = pointY;
@@ -887,12 +910,14 @@
                 liveFrameSequence = frameSequence;
                 renderedFrame = true;
               }
-          } else if (response.status !== 404) throw new Error(`Кадр сканера недоступен (HTTP ${response.status}).`);
+          } else if (response.status === 404) {
+            emptyFramePollDelay = Math.min(50, emptyFramePollDelay + 25);
+          } else throw new Error(`Кадр сканера недоступен (HTTP ${response.status}).`);
         } catch (error) {
           cloudButton.title = error.message;
         } finally {
           if (request === liveRequest && livePreviewOwned) {
-            liveTimer = setTimeout(pollFrame, renderedFrame ? 0 : receivedFrame ? 100 : 25);
+            liveTimer = setTimeout(pollFrame, renderedFrame ? 0 : receivedFrame ? 100 : emptyFramePollDelay);
           }
         }
       };
@@ -909,6 +934,7 @@
         liveMapTransform = null;
         liveFitRadius = null;
         liveViewportInitialized = false;
+        liveDepthHistory.fill(0);
         updateButton();
       }
     };
@@ -971,6 +997,7 @@
   };
 
   const initializeLivePreview = ({ button, view, captureButton }, location = window.location, fetcher = fetch) => {
+    if (button?.__cadyxLivePreviewController) return button.__cadyxLivePreviewController;
     let state = 'idle';
     let pending = false;
     let pollTimer = null;
@@ -1037,8 +1064,16 @@
       }
     });
     poll();
-    return { poll, dispose: () => clearTimeout(pollTimer) };
+    const controller = { poll, dispose: () => {
+      clearTimeout(pollTimer);
+      if (button?.__cadyxLivePreviewController === controller) {
+        delete button.__cadyxLivePreviewController;
+      }
+    } };
+    if (button) button.__cadyxLivePreviewController = controller;
+    return controller;
   };
 
-  window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers };
+  window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers,
+    livePreviewSampleIndex, smoothLivePreviewDepth };
 })();

@@ -152,6 +152,7 @@ class Scan360CaptureTests(unittest.TestCase):
                 command = popen.call_args.args[0]
                 self.assertIn("--live-only", command)
                 self.assertIn("--live-raw", command)
+                self.assertEqual(command[command.index("--fps") + 1], "10")
                 self.assertNotIn("--out-prefix", command)
                 self.assertNotIn("--frames", command)
                 self.assertNotIn("--q-file", command)

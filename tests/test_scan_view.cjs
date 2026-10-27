@@ -21,6 +21,18 @@ const element = () => {
 };
 const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply&scan_origin_file=origin.ply") }, URL, URLSearchParams, setTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"), sandbox);
+let sampledLivePixels = 0;
+const liveSampleSlots = new Set();
+for (let y = 0; y < 400; y += 1) {
+  for (let x = 0; x < 640; x += 1) {
+    const slot = sandbox.window.CadyxScanView.livePreviewSampleIndex(x, y);
+    if (slot >= 0) { sampledLivePixels += 1; liveSampleSlots.add(slot); }
+  }
+}
+assert.equal(sampledLivePixels, 48_000, "live preview uses a fixed 48,000-pixel lattice");
+assert.equal(liveSampleSlots.size, 48_000, "each sampled pixel maps to a unique stable slot");
+assert.equal(sandbox.window.CadyxScanView.smoothLivePreviewDepth(0, 100), 100);
+assert.equal(sandbox.window.CadyxScanView.smoothLivePreviewDepth(100, 120), 115);
 
 const pointCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n0 0 -120\n1 0 -119.8\n0 1 -120.1\n";
 const originPoints = [];
@@ -67,7 +79,7 @@ for (const frame of liveRawFrames) {
       const depth = Math.round(100 + 0.12 * (x - 320) - 0.08 * (y - 200));
       frame[pixel * 2] = depth & 0xff;
       frame[pixel * 2 + 1] = depth >> 8;
-      if (pixel % 2 === 0) markerPointCount += 1;
+      if (sandbox.window.CadyxScanView.livePreviewSampleIndex(x, y) >= 0) markerPointCount += 1;
     }
   }
   for (let y = 280; y < 340; y += 1) for (let x = 280; x < 360; x += 1) {
@@ -138,7 +150,8 @@ view.showLivePreview({ open: true });
 await waitUntil(() => viewerLoads.at(-1)?.geometry.points?.length === markerPointCount);
 assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "live");
-assert.ok(viewerLoads.at(-1).geometry.positions.length > markerPointCount * 3, cloudButton.title);
+assert.ok(viewerLoads.at(-1).geometry.pointCloudVertexCount > 0, cloudButton.title);
+assert.equal(viewerLoads.at(-1).geometry.pointPreviewLimit, 48_000);
 assert.equal(viewerLoads.at(-1).geometry.points.length, markerPointCount,
   "only the sparse table markers receive the preview highlight");
 assert.equal(viewerLoads.at(-1).geometry.pointStyle.size, 3.5);
@@ -236,11 +249,10 @@ assert.equal(viewerLoads.at(-1).geometry, serverModelGeometry, "the scan overlay
 const html = fs.readFileSync(path.join(__dirname, "../web/index.html"), "utf8");
 const scannerHtml = fs.readFileSync(path.join(__dirname, "../web/scanner.html"), "utf8");
 const appJs = fs.readFileSync(path.join(__dirname, "../web/app.js"), "utf8");
-const previewJs = fs.readFileSync(path.join(__dirname, "../web/ply-preview.js"), "utf8");
 assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/button>/);
 assert.match(html, /id="viewport-scan-mesh"[^>]*>Сетка<\/button>/);
 assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/button>/);
-assert.match(html, /id="viewport-live-camera"[^>]*>Сканер<\/button>/);
+assert.match(html, /id="viewport-live-camera"[^>]*>Предпросмотр<\/button>/);
 assert.ok(html.indexOf('id="viewport-live-scan"') < html.indexOf('id="viewport-scan-360"'));
 assert.doesNotMatch(html, /live-scan-tabs|live-scan-cloud-tab|live-scan-mesh-tab/);
 assert.doesNotMatch(html, /live-scan-layer|live-scan-frame/);
@@ -251,10 +263,7 @@ const scanningTab = navigationMarkup.indexOf('data-workspace-view="scanning"');
 const activityTab = navigationMarkup.indexOf('data-workspace-view="activity"');
 assert.ok(productionTab >= 0 && productionTab < scanningTab && scanningTab < activityTab,
   "the Scanning workspace tab follows Manufacturing and precedes Activity");
-assert.match(html, /<section id="scanning-panel"[^>]*hidden>[\s\S]*?id="scanning-capture"[\s\S]*?id="scanning-live-preview"[\s\S]*?id="scanning-devices"[\s\S]*?id="scanning-frame"[^>]*data-src="\/scanner\?embed=1"/);
-assert.match(previewJs, /"manufacturing", "scanning", "activity"/);
-assert.match(previewJs, /scanningCaptureButton\?\.addEventListener\("click", \(\) => captureButtonSource\?\.click\(\)\)/);
-assert.match(previewJs, /scanningPreviewButton\?\.addEventListener\("click", \(\) => previewButtonSource\?\.click\(\)\)/);
+assert.doesNotMatch(html, /id="scanning-frame"/, "live scanner preview uses the main viewport without a second iframe");
 assert.match(appJs, /viewer:modelViewer/);
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
@@ -289,6 +298,15 @@ verifyScanView().catch(error => {
     if (options.method === "DELETE") apiState = { state: "idle" };
     return { ok: true, async json() { return { preview: apiState }; } };
   });
+  const duplicateLiveController = sandbox.window.CadyxScanView.initializeLivePreview({
+    button: cameraButton,
+    captureButton,
+    view: {
+      showLivePreview() { liveViewCalls.push(["duplicate-show"]); },
+      closeLivePreview() { liveViewCalls.push(["duplicate-close"]); },
+    },
+  });
+  assert.equal(duplicateLiveController, liveController, "one camera button owns only one preview poller");
   await new Promise(resolve => setImmediate(resolve));
   await cameraButton.listeners.click();
   assert.equal(captureButton.disabled, true, "live preview prevents a concurrent saved 360 capture");

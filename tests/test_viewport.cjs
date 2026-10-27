@@ -602,5 +602,22 @@ const scanDrawingViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
 scanDrawingViewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: 'orthographic' });
 scanDrawingViewer.load({ ...scanSurfaceGeometry, surfaceTriangleRanges: [{ start: 0, end: 2 }] });
 assert.ok(segments > 0, 'Orthographic wireframe scans remain visible');
+const livePointPositions = new Float32Array(48_000 * 3);
+for (let index = 0; index < 48_000; index += 1) {
+  livePointPositions[index * 3] = index % 240;
+  livePointPositions[index * 3 + 1] = Math.floor(index / 240) % 200;
+  livePointPositions[index * 3 + 2] = index % 17;
+}
+const livePointGeometry = {
+  positions: livePointPositions, triangles: [], lines: [], points: [], pointCloudVertexCount: 48_000,
+  bounds: { min: [0, 0, 0], max: [239, 199, 16] },
+};
+const livePointViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false,
+});
+livePointViewer.load({ ...livePointGeometry, pointPreviewLimit: 48_000 });
+assert.equal(drawnPoints.length, 48_000, 'live point previews can render their full stable sample');
+livePointViewer.load(livePointGeometry);
+assert.equal(drawnPoints.length, 24_000, 'ordinary point clouds retain the existing render budget');
 console.log("Viewport: camera, geometry, transitions, depth-tested edges and scan surface styling passed.");
 
