@@ -598,19 +598,12 @@
     const stopLiveCloudTransition = () => {
       liveCloudTransitionToken += 1;
       liveCloudTransitionActive = false;
-      if (liveCloudTransitionHandle && typeof cancelAnimationFrame === 'function') {
-        cancelAnimationFrame(liveCloudTransitionHandle);
-      } else if (liveCloudTransitionHandle && typeof clearTimeout === 'function') {
-        clearTimeout(liveCloudTransitionHandle);
-      }
+      if (liveCloudTransitionHandle && typeof clearTimeout === 'function') clearTimeout(liveCloudTransitionHandle);
       liveCloudTransitionHandle = 0;
     };
     const startLiveCloudTransition = durationMs => {
       const token = ++liveCloudTransitionToken;
       const nowClock = () => globalThis.performance?.now?.() ?? Date.now();
-      const scheduleFrame = typeof requestAnimationFrame === 'function'
-        ? callback => requestAnimationFrame(callback)
-        : callback => setTimeout(() => callback(nowClock()), 1000 / LIVE_PREVIEW_TARGET_FPS);
       const startedAt = nowClock();
       const tickIntervalMs = 1000 / LIVE_PREVIEW_MAX_OUTPUT_FPS;
       let lastTickAt = startedAt;
@@ -633,7 +626,7 @@
           }
         }
         if (progress < 1) {
-          liveCloudTransitionHandle = scheduleFrame(tick);
+          liveCloudTransitionHandle = setTimeout(() => tick(nowClock()), tickIntervalMs);
           return;
         }
         liveCloudTransitionHandle = 0;
@@ -647,7 +640,7 @@
         }
         playNextLiveCloudFrame();
       };
-      liveCloudTransitionHandle = scheduleFrame(tick);
+      liveCloudTransitionHandle = setTimeout(() => tick(nowClock()), tickIntervalMs);
     };
     const renderLiveFrame = ({ positions, count, bounds, markerIndices, aligned, orbitCenter, fitRadius,
       previousCloud = null, blendProgress = 1, reset = false }) => {
