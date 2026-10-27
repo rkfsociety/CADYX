@@ -1304,23 +1304,6 @@
           : 'Показать сканер в реальном времени';
       syncCaptureButton();
       if (state === 'failed') view.closeLivePreview();
-      if (nowActive && !canShowPreview()) void stop();
-    };
-    const stop = async () => {
-      view.closeLivePreview();
-      if (!active() || pending) return;
-      pending = true;
-      try {
-        const response = await fetcher('/api/v1/scanner/live-preview', { method: 'DELETE' });
-        const payload = await response.json();
-        if (response.ok) updateButton(payload.preview);
-      } catch (error) {
-        button.title = `Предпросмотр скрыт вне вкладки сканирования; остановка не подтверждена: ${error.message}`;
-      } finally {
-        pending = false;
-        clearTimeout(pollTimer);
-        pollTimer = setTimeout(poll, active() ? 900 : 3500);
-      }
     };
     const poll = async () => {
       try {
@@ -1359,7 +1342,7 @@
       }
     });
     poll();
-    const controller = { poll, stop, dispose: () => {
+    const controller = { poll, dispose: () => {
       clearTimeout(pollTimer);
       if (button?.__cadyxLivePreviewController === controller) {
         delete button.__cadyxLivePreviewController;

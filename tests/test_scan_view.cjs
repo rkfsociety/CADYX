@@ -486,8 +486,8 @@ assert.doesNotMatch(scanViewSource, /liveCloudQueue|smoothLivePreviewDepth/,
   "the preview does not cache or blend previous point clouds");
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
-assert.match(appJs, /if\(grid\?\.dataset\.view!=='scanning'\)livePreviewController\?\.stop\(\)/,
-  "leaving the Scanning tab explicitly stops the camera preview through its controller");
+assert.doesNotMatch(appJs, /livePreviewController\?\.stop\(\)|stopPreviewOutsideScanning/,
+  "workspace-tab changes do not stop the live camera preview");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);
 assert.match(appJs, /showCapturePreview\(scan,\{open:captureStarted\}\)/);
 assert.match(appJs, /import_point_cloud:\['Облако точек','cloud'\]/);
@@ -549,13 +549,19 @@ verifyScanView().catch(error => {
   apiState = { state: "running" };
   workspaceGrid.dataset.view = "overview";
   await liveController.poll();
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(previewCalls.at(-1).method, "DELETE",
-    "leaving Scanning stops the live camera through the API, without toggling its button");
+  assert.equal(previewCalls.at(-1).method, "GET",
+    "changing workspace tabs never sends a camera-stop request");
   assert.equal(liveViewCalls.at(-1)[0], "close",
-    "an active live scan is removed from the viewport when Overview becomes active");
+    "an active live scan is hidden from the viewport when Overview becomes active");
   assert.equal(liveViewCalls.some(call => call[0] === "show" && call[2] !== "scanning"), false,
     "live scan points are never displayed outside the Scanning tab");
+  workspaceGrid.dataset.view = "scanning";
+  await liveController.poll();
+  assert.equal(liveViewCalls.at(-1)[0], "show",
+    "returning to Scanning resumes displaying the still-running camera stream");
+  await cameraButton.listeners.click();
+  assert.equal(previewCalls.at(-1).method, "DELETE",
+    "the Preview button remains the control that stops the live camera");
   liveController.dispose();
 })().catch(error => {
   console.error(error);
