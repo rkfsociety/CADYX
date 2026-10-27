@@ -44,12 +44,23 @@ class AuthenticationConfigTests(unittest.TestCase):
             token_file = Path(directory) / "token.txt"
             token_file.write_text(_TOKEN + "\n", encoding="utf-8")
             self.assertEqual(load_auth_token(None, str(token_file)), _TOKEN)
+            token_file.write_bytes((_TOKEN + "\r\n").encode("utf-8"))
+            self.assertEqual(load_auth_token(None, str(token_file)), _TOKEN)
             with self.assertRaises(AuthenticationConfigError):
                 load_auth_token(_TOKEN, str(token_file))
         with self.assertRaises(AuthenticationConfigError):
             load_auth_token("too-short", None)
         with self.assertRaises(AuthenticationConfigError):
             load_auth_token("x" * 31 + " ", None)
+
+    def test_token_file_rejects_invalid_encoding_and_extra_newlines(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            token_file = Path(directory) / "token.txt"
+            for suffix in (b"\n\n", b"\r\n\r\n", b"\xff"):
+                with self.subTest(suffix=suffix):
+                    token_file.write_bytes(_TOKEN.encode("ascii") + suffix)
+                    with self.assertRaises(AuthenticationConfigError):
+                        load_auth_token(None, str(token_file))
 
     def test_bearer_and_basic_credentials(self) -> None:
         basic = base64.b64encode(f"cadyx:{_TOKEN}".encode()).decode()
