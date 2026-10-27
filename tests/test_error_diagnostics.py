@@ -5,7 +5,7 @@ import unittest
 from urllib.error import URLError
 from unittest.mock import patch
 
-from cadyx.errors import ConflictError, ValidationError, public_text
+from cadyx.errors import ConflictError, ValidationError, public_data, public_text
 from cadyx.mcp_server import CadyxAPI, MCPApplication
 
 
@@ -43,6 +43,22 @@ class ErrorDiagnosticsTests(unittest.TestCase):
         self.assertNotIn("C:\\Users", value)
         self.assertNotIn("abc123", value)
         self.assertNotIn("xyz789", value)
+
+    def test_public_data_redacts_secrets_and_paths_in_mapping_keys(self) -> None:
+        diagnostics = {
+            "token=abc123": {r"C:\\Users\\private\\part.step": "Bearer xyz789"},
+            "revision": 4,
+        }
+        sanitized = public_data(diagnostics)
+        encoded = json.dumps(sanitized)
+        for secret in ("abc123", "xyz789", r"C:\\Users\\private"):
+            self.assertNotIn(secret, encoded)
+        self.assertEqual(sanitized["revision"], 4)
+
+        error = ValidationError("Invalid input", diagnostics=diagnostics)
+        encoded_error = json.dumps(error.as_dict())
+        for secret in ("abc123", "xyz789", r"C:\\Users\\private"):
+            self.assertNotIn(secret, encoded_error)
 
     def test_unexpected_mcp_failure_does_not_disclose_exception_details(self) -> None:
         app = MCPApplication()
