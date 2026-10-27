@@ -329,7 +329,6 @@ const restorableProjectViews = new Set(["geometry", "analysis", "manufacturing",
 let pendingInitialWorkspaceView = projectAddressPinned && !initialAddress.has("folder")
   && restorableProjectViews.has(initialAddress.get("view")) ? initialAddress.get("view") : null;
 let projectCreationPending = false;
-let workspaceSelectionRestoreAttempted = !projectAddressPinned || initialAddress.get("view") === "projects";
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
 const folderInspector = $("#folder-inspector");
@@ -499,18 +498,18 @@ window.addEventListener("popstate", () => {
 
 function readSelectedProject() {
   const address = new URLSearchParams(window.location.search);
+  const projectPathMatch = /^\/p\/([^/]+)\/?$/.exec(window.location.pathname);
+  if (projectPathMatch) {
+    try {
+      const requestedSlug = decodeURIComponent(projectPathMatch[1]);
+      const projectId = projectIdForPathSlug(requestedSlug);
+      if (projectId) return projectId;
+    } catch { /* Malformed path escapes do not resolve to a project. */ }
+    return null;
+  }
   const projectId = address.get("project_id");
   const folderName = address.get("folder");
-  if (projectId || folderName) return projectId || `folder:${folderName}`;
-  const projectPathMatch = /^\/p\/([^/]+)\/?$/.exec(window.location.pathname);
-  if (!projectPathMatch) return null;
-  try {
-    const requestedSlug = decodeURIComponent(projectPathMatch[1]);
-    for (const [id, slug] of projectRouteSlugs()) {
-      if (slug === requestedSlug) return id;
-    }
-  } catch { /* Malformed path escapes do not resolve to a project. */ }
-  return null;
+  return projectId || (folderName ? `folder:${folderName}` : null);
 }
 
 function notify(message, isError = false, durationMs = 3000) {
@@ -875,15 +874,16 @@ function projectSlugBase(name) {
 
 function projectRouteSlugs() {
   if (projectRouteSlugSource === projects) return projectRouteSlugCache;
-  const entries = projects.map(({ project }) => ({ project, base: project.url_slug || projectSlugBase(project.name) }));
+  const entries = projects.map(({ project }) => ({ project, base: project.url_slug || projectSlugBase(project.name) }))
+    .sort((first, second) => String(first.project.created_at || "").localeCompare(String(second.project.created_at || ""))
+      || String(first.project.id).localeCompare(String(second.project.id)));
   const baseCounts = new Map();
   entries.forEach(({ base }) => baseCounts.set(base, (baseCounts.get(base) || 0) + 1));
   const used = new Set();
   projectRouteSlugCache = new Map(entries.map(({ project, base }) => {
-    const shortId = project.id.replace(/[^a-z0-9]/gi, "").slice(0, 8).toLowerCase();
-    let slug = baseCounts.get(base) > 1 ? `${base}-${shortId}` : base;
-    if (used.has(slug) || (slug !== base && baseCounts.has(slug))) slug = `${base}-${project.id.toLowerCase()}`;
-    while (used.has(slug) || (slug !== base && baseCounts.has(slug))) slug = `${slug}-${shortId}`;
+    let slug = base;
+    let suffix = 2;
+    while (used.has(slug) || (slug !== base && baseCounts.has(slug))) slug = `${base}-${suffix++}`;
     used.add(slug);
     return [project.id, slug];
   }));
@@ -896,6 +896,19 @@ function projectPath(projectId) {
   return slug ? `/p/${encodeURIComponent(slug)}` : null;
 }
 
+function projectIdForPathSlug(requestedSlug) {
+  for (const [projectId, slug] of projectRouteSlugs()) {
+    if (slug === requestedSlug) return projectId;
+  }
+  for (const { project } of projects) {
+    const base = project.url_slug || projectSlugBase(project.name);
+    const shortId = project.id.replace(/[^a-z0-9]/gi, "").slice(0, 8).toLowerCase();
+    if (requestedSlug === `${base}-${shortId}`
+        || requestedSlug === `${base}-${project.id.toLowerCase()}`) return project.id;
+  }
+  return null;
+}
+
 function canSelectProject(id) {
   const lock = agentLocksByProject.get(id) || getProject(id)?.lock;
   const agentIsActive = (activitiesByProject.get(id) || []).some((item) => item.state === "running");
@@ -904,8 +917,17 @@ function canSelectProject(id) {
 
 async function navigateToWorkspaceProject(projectId, projectName) {
   pendingInitialWorkspaceView = null;
+  if (!projectPath(projectId)) {
+    const response = await api("/api/v1/projects");
+    projects = response.projects || [];
+    projectGroups = response.groups || [];
+    folders = response.folders || [];
+    projectRouteSlugSource = null;
+  }
+  const path = projectPath(projectId);
+  if (!path) throw new Error(`Не удалось сформировать адрес проекта «${projectName}».`);
   const address = new URL(window.location.href);
-  address.pathname = projectPath(projectId) || "/";
+  address.pathname = path;
   address.searchParams.delete("project_id");
   address.searchParams.delete("folder");
   address.searchParams.delete("view");
@@ -943,7 +965,7 @@ $("#create-project-form").addEventListener("submit", async (event) => {
     const result = await api("/api/v1/projects", {
       method: "POST", body: JSON.stringify({ name, project_type: projectType }),
     });
-    window.location.assign(`/?project_id=${encodeURIComponent(result.project.id)}`);
+    await navigateToWorkspaceProject(result.project.id, result.project.name);
   } catch (error) {
     $("#create-project-error").textContent = `Не удалось создать проект: ${error.message}`;
     $("#create-project-error").hidden = false;
@@ -1106,7 +1128,7 @@ function renderProjectCard(entry) {
 
   const open = document.createElement("a");
   open.className = "button workspace-project-open workspace-project-open-new-tab";
-  open.href = projectPath(project.id) || `/?project_id=${encodeURIComponent(project.id)}`;
+  open.href = projectPath(project.id) || "/";
   open.target = "_blank";
   open.rel = "noopener";
   open.setAttribute("aria-label", `Открыть проект «${project.name}» в новой вкладке`);
@@ -1268,40 +1290,6 @@ function workspaceSelectionExists(id) {
   if (projects.some((item) => item.project.id === id)) return true;
   return id?.startsWith(FOLDER_SELECTION_PREFIX)
     && folders.includes(id.slice(FOLDER_SELECTION_PREFIX.length));
-}
-
-async function restoreCurrentWorkspaceSelection() {
-  if (workspaceSelectionRestoreAttempted) return;
-  workspaceSelectionRestoreAttempted = true;
-
-  let selection;
-  try {
-    ({ selection } = await api("/api/v1/agent/workspace/selection"));
-  } catch (error) {
-    workspaceSelectionRestoreAttempted = false;
-    console.warn("Unable to restore the active CADYX workspace selection.", error);
-    return;
-  }
-
-  let selectedResource = null;
-  if (selection?.type === "project" && typeof selection.project_id === "string") {
-    selectedResource = selection.project_id;
-  } else if (selection?.type === "folder" && typeof selection.folder_name === "string") {
-    selectedResource = `${FOLDER_SELECTION_PREFIX}${selection.folder_name}`;
-  }
-  if (!selectedResource || !workspaceSelectionExists(selectedResource)) return;
-
-  const address = new URL(window.location.href);
-  if (selectedResource.startsWith(FOLDER_SELECTION_PREFIX)) {
-    address.searchParams.delete("project_id");
-    address.searchParams.set("folder", selectedResource.slice(FOLDER_SELECTION_PREFIX.length));
-  } else {
-    address.searchParams.set("project_id", selectedResource);
-    address.searchParams.delete("folder");
-  }
-  address.searchParams.delete("view");
-  window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
-  projectAddressPinned = true;
 }
 
 function getSelectedFolder() {
@@ -1911,23 +1899,30 @@ async function refreshWorkspacePass() {
   projectGroups = response.groups || [];
   folders = response.folders || [];
 
-  await restoreCurrentWorkspaceSelection();
-
   const previousSelection = selectedProjectId;
   const requestedSelection = projectAddressPinned
     ? [readSelectedProject(), selectedProjectId].find((id) => id && workspaceSelectionExists(id)) : null;
   selectedProjectId = requestedSelection || null;
   if (selectedProjectId && !getSelectedFolder()) {
     const canonicalPath = projectPath(selectedProjectId);
-    if (canonicalPath && window.location.pathname !== canonicalPath) {
-      const address = new URL(window.location.href);
+    const address = new URL(window.location.href);
+    let addressChanged = false;
+    if (canonicalPath && address.pathname !== canonicalPath) {
       address.pathname = canonicalPath;
-      address.searchParams.delete("project_id");
-      address.searchParams.delete("folder");
-      address.searchParams.delete("view");
-      window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
-      projectAddressPinned = true;
+      addressChanged = true;
     }
+    if (address.searchParams.has("project_id")) {
+      address.searchParams.delete("project_id");
+      addressChanged = true;
+    }
+    if (address.searchParams.has("folder")) {
+      address.searchParams.delete("folder");
+      addressChanged = true;
+    }
+    if (addressChanged) {
+      window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
+    }
+    projectAddressPinned = true;
   }
   if (new URLSearchParams(window.location.search).get("view") === "projects") {
     projectDetail.hidden = false;
@@ -2655,24 +2650,15 @@ function handleStreamEvent(type, event) {
   if (type === "project.created" && projectCreationPending) return;
   if (type === "workspace.selection.changed" && (projectAddressPinned || projectsChooserPinned)) return;
   const projectId = event.project_id;
-  if (type === "workspace.selection.changed" || type === "project.created") {
-    const selection = type === "project.created"
-      ? { type: "project", project_id: projectId }
-      : event.data || {};
-    const address = new URL(window.location.href);
-    if (selection.type === "project" && typeof selection.project_id === "string") {
-      address.searchParams.set("project_id", selection.project_id);
-      address.searchParams.delete("folder");
-    } else if (selection.type === "folder" && typeof selection.folder_name === "string") {
-      address.searchParams.delete("project_id");
-      address.searchParams.set("folder", selection.folder_name);
-    } else {
-      return;
-    }
-    address.searchParams.delete("view");
-    window.location.assign(`${address.pathname}${address.search}${address.hash}`);
+  if (type === "project.created") {
+    if (typeof projectId !== "string") return;
+    const projectName = event.data?.name || getProject(projectId)?.project.name || "Проект";
+    void navigateToWorkspaceProject(projectId, projectName).catch((error) => {
+      notify(`Не удалось открыть проект «${projectName}»: ${error.message}`, true);
+    });
     return;
   }
+  if (type === "workspace.selection.changed") return;
   if (type === "viewport.body-motion") {
     if (projectId === selectedProjectId) {
       modelViewer.animateBodyMotion(event.data?.tracks, event.data?.duration_ms);
