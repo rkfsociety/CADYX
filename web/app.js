@@ -744,7 +744,6 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         stopPreviewOutsideScanning();
       }
     }).observe(grid,{attributes:true,attributeFilter:['data-view']});
-    if(liveCamera)new MutationObserver(stopPreviewOutsideScanning).observe(liveCamera,{attributes:true,attributeFilter:['aria-pressed']});
     liveCamera?.addEventListener('click',()=>{if(scanTreePreviewSelection)clearScanTreePreview()},{capture:true});
     if(liveCamera&&scanView)window.CadyxScanView?.initializeLivePreview({button:liveCamera,view:scanView,captureButton:scan360});
     if(scan360&&scanStatus){

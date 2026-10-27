@@ -256,6 +256,8 @@ assert.match(previewJs, /"manufacturing", "scanning", "activity"/);
 assert.match(previewJs, /scanningCaptureButton\?\.addEventListener\("click", \(\) => captureButtonSource\?\.click\(\)\)/);
 assert.match(previewJs, /scanningPreviewButton\?\.addEventListener\("click", \(\) => previewButtonSource\?\.click\(\)\)/);
 assert.match(appJs, /viewer:modelViewer/);
+assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
+  "changing the live-preview button state must not synthesize a second toggle click");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);
 assert.match(appJs, /showCapturePreview\(scan,\{open:captureStarted\}\)/);
 assert.match(appJs, /import_point_cloud:\['Облако точек','cloud'\]/);
