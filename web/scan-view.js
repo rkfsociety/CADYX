@@ -244,6 +244,7 @@
     let liveDisplayFpsSmoothed = 0;
     let liveCloudQueue = [];
     let liveDisplayedCloud = null;
+    let liveCachedCloudPair = false;
     let liveCloudTransitionActive = false;
     let liveCloudTransitionToken = 0;
     let liveCloudTransitionHandle = 0;
@@ -610,6 +611,7 @@
       let firstTickAt = startedAt;
       let tickCount = 0;
       liveCloudTransitionActive = true;
+      trimLiveCloudQueue();
       const tick = now => {
         if (token !== liveCloudTransitionToken || !livePreviewOwned) return;
         const progress = Math.min(1, Math.max(0, (now - startedAt) / durationMs));
@@ -724,10 +726,16 @@
         orbitCenter: aligned ? [0, 0, 0] : orbitCenter,
         fitRadius: aligned ? liveFitRadius : fitRadius },
       { reset: reset || !liveViewportInitialized });
+      liveCachedCloudPair = Boolean(previousCloud);
       liveViewportInitialized = true;
     };
     const liveCloudCacheLimit = () => Math.max(25, Math.min(LIVE_PREVIEW_FRAME_CACHE_LIMIT,
       Math.ceil((liveFrameIntervalMs + liveFrameJitterMs * 2) * LIVE_PREVIEW_TARGET_FPS / 1000) + 20));
+    const trimLiveCloudQueue = () => {
+      const reservedFrames = liveDisplayedCloud ? (liveCachedCloudPair ? 2 : 1) : 0;
+      const pendingLimit = Math.max(0, liveCloudCacheLimit() - reservedFrames);
+      while (liveCloudQueue.length > pendingLimit) liveCloudQueue.shift();
+    };
     const playNextLiveCloudFrame = () => {
       if (liveCloudTransitionActive || !liveCloudQueue.length || !livePreviewOwned) return;
       const frame = liveCloudQueue.shift();
@@ -745,8 +753,7 @@
     };
     const enqueueLiveCloudFrame = frame => {
       liveCloudQueue.push(frame);
-      const cacheLimit = liveCloudCacheLimit();
-      while (liveCloudQueue.length > cacheLimit) liveCloudQueue.shift();
+      trimLiveCloudQueue();
       playNextLiveCloudFrame();
     };
     cloudSource = pointCloudUrl(null);
@@ -830,6 +837,7 @@
       stopLiveCloudTransition();
       liveCloudQueue = [];
       liveDisplayedCloud = null;
+      liveCachedCloudPair = false;
       liveFrameJitterMs = 0;
       liveDisplayFpsSmoothed = 0;
       liveClientWindowStartedAt = 0;
@@ -1216,8 +1224,8 @@
                       animation_avg_ms: animationFrames > 0 ? animationTimeMs / animationFrames : 0,
                       animation_max_ms: animationMaxMs,
                       display_fps: liveDisplayFpsSmoothed,
-                      frame_cache_frames: Math.min(LIVE_PREVIEW_FRAME_CACHE_LIMIT,
-                        liveCloudQueue.length + (liveDisplayedCloud ? 1 : 0) + (liveCloudTransitionActive ? 1 : 0)),
+                      frame_cache_frames: Math.min(liveCloudCacheLimit(),
+                        liveCloudQueue.length + (liveDisplayedCloud ? (liveCachedCloudPair ? 2 : 1) : 0)),
                       frame_cache_limit: liveCloudCacheLimit(),
                     } }) }).catch(() => {});
                 }
@@ -1254,6 +1262,7 @@
         stopLiveCloudTransition();
         liveCloudQueue = [];
         liveDisplayedCloud = null;
+        liveCachedCloudPair = false;
         liveDisplayFpsSmoothed = 0;
         if (liveFpsIndicator) {
           if (liveDisplayFps) liveDisplayFps.textContent = 'FPS —';
