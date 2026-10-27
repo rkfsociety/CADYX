@@ -228,6 +228,7 @@
     const liveFpsIndicator = typeof document !== 'undefined' ? document.getElementById('scanner-preview-fps') : null;
     const liveDisplayFps = liveFpsIndicator?.querySelector('[data-display-fps]') || liveFpsIndicator;
     const liveSourceFps = liveFpsIndicator?.querySelector('[data-source-fps]') || null;
+    const liveCacheFrames = liveFpsIndicator?.querySelector('[data-cache-frames]') || null;
     let livePreviewOwned = false;
     let serverPointCloudVisible = false;
     let cloudPreviewOpen = false;
@@ -240,7 +241,6 @@
     let liveRequest = 0;
     let liveTimer = null;
     let liveFrameSequence = 0;
-    let liveFpsSmoothed = 0;
     let liveDisplayFpsSmoothed = 0;
     let liveCloudQueue = [];
     let liveDisplayedCloud = null;
@@ -837,7 +837,6 @@
       liveCloudQueue = [];
       liveDisplayedCloud = null;
       liveFrameJitterMs = 0;
-      liveFpsSmoothed = 0;
       liveDisplayFpsSmoothed = 0;
       liveClientWindowStartedAt = 0;
       liveClientWindowFrames = 0;
@@ -848,7 +847,8 @@
       liveClientWindowAnimationMaxMs = 0;
       if (liveFpsIndicator) {
         if (liveDisplayFps) liveDisplayFps.textContent = 'FPS —';
-        if (liveSourceFps) liveSourceFps.textContent = 'Облако —/с';
+        if (liveSourceFps) liveSourceFps.textContent = 'Сенсор —/с';
+        if (liveCacheFrames) liveCacheFrames.textContent = 'Кэш —/—';
         liveFpsIndicator.hidden = false;
       }
       liveFrameSequence = 0;
@@ -1210,11 +1210,6 @@
                   liveClientWindowAnimationFrames = 0;
                   liveClientWindowAnimationTimeMs = 0;
                   liveClientWindowAnimationMaxMs = 0;
-                  const windowFps = frames / windowSeconds;
-                  liveFpsSmoothed = liveFpsSmoothed > 0
-                    ? liveFpsSmoothed * 0.75 + windowFps * 0.25 : windowFps;
-                  if (liveSourceFps) liveSourceFps.textContent = `Облако ${liveFpsSmoothed.toFixed(1)}/с`;
-                  if (liveSourceFps) liveSourceFps.textContent = `Облако ${liveFpsSmoothed.toFixed(1)}/с`;
                   void fetcher('/api/v1/scanner/live-preview/client-metrics', { method: 'POST',
                     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metrics: {
                       window_seconds: windowSeconds, frames,
@@ -1265,11 +1260,11 @@
         stopLiveCloudTransition();
         liveCloudQueue = [];
         liveDisplayedCloud = null;
-        liveFpsSmoothed = 0;
         liveDisplayFpsSmoothed = 0;
         if (liveFpsIndicator) {
           if (liveDisplayFps) liveDisplayFps.textContent = 'FPS —';
-          if (liveSourceFps) liveSourceFps.textContent = 'Облако —/с';
+          if (liveSourceFps) liveSourceFps.textContent = 'Сенсор —/с';
+          if (liveCacheFrames) liveCacheFrames.textContent = 'Кэш —/—';
           liveFpsIndicator.hidden = true;
         }
         restoreModel();
@@ -1333,6 +1328,15 @@
       }
       if (open) { void showCloud(true); return; }
     };
+    const updateLivePreviewStatus = preview => {
+      const captureFps = preview?.metrics?.capture_fps;
+      if (liveSourceFps) liveSourceFps.textContent = Number.isFinite(captureFps)
+        ? `Сенсор ${captureFps.toFixed(1)}/с` : 'Сенсор —/с';
+      const cacheDepth = preview?.client_metrics?.frame_cache_frames;
+      const cacheLimit = preview?.client_metrics?.frame_cache_limit;
+      if (liveCacheFrames) liveCacheFrames.textContent = Number.isInteger(cacheDepth) && Number.isInteger(cacheLimit)
+        ? `Кэш ${cacheDepth}/${cacheLimit}` : 'Кэш —/—';
+    };
     cloudButton.addEventListener('click', () => {
       if (serverPointCloudVisible) return;
       if (cloudPreviewOpen) void showCloud(false);
@@ -1345,7 +1349,7 @@
     });
     updateButton();
     if (new URLSearchParams(location.search).get('live_scan') === '1') setOpen(true);
-    return { setOpen, setMode, showCapture, showLivePreview, closeLivePreview };
+    return { setOpen, setMode, showCapture, showLivePreview, closeLivePreview, updateLivePreviewStatus };
   };
 
   const initializeLivePreview = ({ button, view, captureButton }, location = window.location, fetcher = fetch) => {
@@ -1368,6 +1372,7 @@
     };
     const updateButton = preview => {
       state = preview?.state || 'idle';
+      view.updateLivePreviewStatus?.(preview);
       const nowActive = active();
       if (nowActive && !previouslyActive) view.showLivePreview({ open: true });
       else if (!nowActive && previouslyActive) view.closeLivePreview();

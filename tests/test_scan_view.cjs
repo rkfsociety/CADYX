@@ -380,8 +380,8 @@ assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/butto
 assert.match(html, /id="viewport-scan-mesh"[^>]*>Сетка<\/button>/);
 assert.match(html, /id="viewport-scan-360"[^>]*>Сканировать 360°<\/button>/);
 assert.match(html, /id="viewport-live-camera"[^>]*>Предпросмотр<\/button>/);
-assert.match(html, /id="scanner-preview-fps"[^>]*>[\s\S]*data-display-fps>FPS —[\s\S]*data-source-fps>Облако —\/с[\s\S]*<\/output>/,
-  "the scanner preview reports display cadence separately from new sensor frames");
+assert.match(html, /id="scanner-preview-fps"[^>]*>[\s\S]*data-display-fps>FPS —[\s\S]*data-source-fps>Сенсор —\/с[\s\S]*data-cache-frames>Кэш —\/—[\s\S]*<\/output>/,
+  "the scanner preview reports display cadence, source FPS and cache occupancy separately");
 assert.match(projectUiJs, /function projectPath\(projectId\)/);
 assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
 assert.match(projectUiJs, /let suffix = 2/);
@@ -406,8 +406,8 @@ assert.match(styleCss, /#viewport-scan-360\[data-capture-locked="true"\]\s*\{\s*
 assert.match(styleCss, /\.scanner-preview-fps\s*\{[^}]*right:\s*12px;[^}]*bottom:\s*12px;/,
   "the FPS badge sits at the bottom-right of the viewport");
 const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
-assert.match(scanViewSource, /const windowFps = frames \/ windowSeconds/,
-  "the displayed FPS is calculated from newly rendered sensor frames");
+assert.match(scanViewSource, /const captureFps = preview\?\.metrics\?\.capture_fps/,
+  "the badge uses the native measured sensor rate separately from display FPS");
 assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
   /viewport-frame-crossfade|startFrameCrossfade/,
   "the scanner preview does not add a second blinking canvas layer");
