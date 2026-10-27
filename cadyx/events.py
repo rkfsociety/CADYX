@@ -459,12 +459,13 @@ class EventBroker:
             data=data,
             occurred_at=occurred_at or datetime.now(timezone.utc).isoformat(),
         )
-        self._next_id += 1
-        # Encoded snapshots are immutable even if publisher/subscriber data changes.
+        # Do not consume an event ID until the payload is serializable.
+        # A rejected event must not create a gap in SSE cursors.
         encoded = json.dumps(
             item.as_dict(), ensure_ascii=False, allow_nan=False,
             separators=(",", ":"),
         ).encode("utf-8")
+        self._next_id += 1
         size = len(encoded)
         if size > self._replay_max_bytes:
             # This event cannot be replayed; older cursors must resynchronize.
@@ -505,10 +506,9 @@ class EventBroker:
         with self._lock:
             if event == "agent.activity" and project_id is not None:
                 revision = self._activity_revisions.get(project_id, 0) + 1
-                self._activity_revisions[project_id] = revision
                 data = {**data, "revision": revision}
-                activities = self._activities.setdefault(project_id, [])
                 record = _ActivityRecord.capture(data)
+                activities = self._activities.get(project_id, [])
                 existing = next(
                     (
                         index
@@ -517,11 +517,17 @@ class EventBroker:
                     ),
                     None,
                 )
+                # Commit the activity snapshot only after the event was
+                # successfully encoded and accepted for delivery.
+                published = self._emit_locked(event, project_id, data)
+                self._activity_revisions[project_id] = revision
                 if existing is None:
+                    activities = self._activities.setdefault(project_id, [])
                     activities.append(record)
                 else:
                     activities[existing] = record
                 del activities[:-128]
+                return published
             return self._emit_locked(event, project_id, data)
 
     def activity_snapshot(self, project_id: str) -> list[dict[str, Any]]:

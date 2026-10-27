@@ -187,6 +187,32 @@ class EventBrokerTests(unittest.TestCase):
             finally:
                 broker.unsubscribe(subscriber_id)
 
+    def test_failed_event_encoding_does_not_consume_ids_or_activity_revisions(self):
+        broker = EventBroker()
+        subscriber_id, events = broker.subscribe()
+        try:
+            with self.assertRaises(TypeError):
+                broker.publish("agent.activity", "project-a", {
+                    "operation_id": "invalid", "payload": object(),
+                })
+            self.assertEqual(broker.activity_state_snapshot("project-a"), ([], 0))
+            self.assertTrue(events.empty())
+
+            with self.assertRaises(TypeError):
+                broker.publish("probe", "project-a", {"payload": object()})
+            self.assertTrue(events.empty())
+
+            published = broker.publish("agent.activity", "project-a", {
+                "operation_id": "valid", "state": "running",
+            })
+            self.assertEqual((published.id, published.data["revision"]), (1, 1))
+            self.assertEqual(broker.activity_revision("project-a"), 1)
+            self.assertEqual(broker.activity_snapshot("project-a")[0]["operation_id"], "valid")
+            self.assertEqual(events.get_nowait().id, 1)
+            self.assertTrue(events.empty())
+        finally:
+            broker.unsubscribe(subscriber_id)
+
     def test_replay_filters_project_and_keeps_order_without_duplicates(self):
         broker = EventBroker()
         first = broker.publish("probe", "a", {"n": 1})
