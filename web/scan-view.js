@@ -1,5 +1,9 @@
 (() => {
   const LIVE_PREVIEW_POINT_LIMIT = 48_000;
+  const MIN_SCAN_DEPTH_MM = 100;
+  const MAX_SCAN_DEPTH_MM = 250;
+  const isScanDepthValid = depth => Number.isFinite(depth)
+    && depth >= MIN_SCAN_DEPTH_MM && depth <= MAX_SCAN_DEPTH_MM;
   const livePreviewSampleIndex = (x, y) => {
     if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || x >= 640 || y < 0 || y >= 400
         || (x & 1) !== 0 || (y & 1) !== 0 || ((x & 3) === 0 && (y & 3) === 0)) return -1;
@@ -599,7 +603,7 @@
       }
       viewer.load({ positions: combinedPositions, triangles: new Uint32Array(0), lines: trajectoryLines,
         pointCloudVertexCount: cloudPointCount, pointPreviewLimit: pointLimit,
-        bounds: finalBounds, points: previewMarkerPoints,
+        pointColor: '#ff9d54', bounds: finalBounds, points: previewMarkerPoints,
         pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' },
         pointLayers: overlay ? [{ points: mapMarkerPoints, style: { size: 2.6, opacity: 0.9, color: '#a5e9ff' } }] : [],
         lineStyle: overlay ? { color: '#5aaac6', opacity: 0.42, width: 1, dash: [5, 5] } : undefined,
@@ -773,7 +777,7 @@
               markerPixels.fill(0);
               markerCenterPixels.fill(0);
               seen.fill(0);
-              const valid = i => (raw[i * 2] | raw[i * 2 + 1] << 8) !== 0;
+              const valid = i => isScanDepthValid((raw[i * 2] | raw[i * 2 + 1] << 8) * scale);
               let regions = 0;
               for (let seed = 0; seed < seen.length; seed += 1) {
                 if (seen[seed] || !valid(seed)) continue;
@@ -823,7 +827,7 @@
                 if (!samplePoint && markerPixels[pixel] !== 1) continue;
                 const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
                 let depth = value * scale;
-                if (!value || !Number.isFinite(depth) || depth < 1) continue;
+                if (!value || !isScanDepthValid(depth)) continue;
                 if (samplePoint) {
                   depth = smoothLivePreviewDepth(liveDepthHistory[sampleIndex], depth);
                   liveDepthHistory[sampleIndex] = depth;
@@ -912,7 +916,14 @@
               }
           } else if (response.status === 404) {
             emptyFramePollDelay = Math.min(50, emptyFramePollDelay + 25);
-          } else throw new Error(`Кадр сканера недоступен (HTTP ${response.status}).`);
+          } else {
+            let message = `Кадр сканера недоступен (HTTP ${response.status}).`;
+            try {
+              const error = await response.json();
+              message = error.error?.message || error.message || message;
+            } catch { /* Keep the HTTP fallback for non-JSON failures. */ }
+            throw new Error(message);
+          }
         } catch (error) {
           cloudButton.title = error.message;
         } finally {
@@ -1079,5 +1090,5 @@
   };
 
   window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers,
-    livePreviewSampleIndex, smoothLivePreviewDepth };
+    livePreviewSampleIndex, smoothLivePreviewDepth, isScanDepthValid };
 })();

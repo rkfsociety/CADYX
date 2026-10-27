@@ -144,7 +144,7 @@ def preprocess_points(points: list[tuple[float, float, float]], frame_index: int
 def _table_marker_point_indices(raw_path: Path, calibration_path: Path, depth_scale: float,
                                 point_count: int) -> tuple[set[int], int, str]:
     from tools.revopoint.align_y16_to_table import detect_marker_regions
-    from tools.revopoint.reproject_y16 import HEIGHT, RAW_BYTES, WIDTH
+    from tools.revopoint.reproject_y16 import HEIGHT, MAX_DEPTH_MM, MIN_DEPTH_MM, RAW_BYTES, WIDTH
 
     raw = raw_path.read_bytes()
     if len(raw) != RAW_BYTES:
@@ -157,7 +157,7 @@ def _table_marker_point_indices(raw_path: Path, calibration_path: Path, depth_sc
         raise ValueError("scanner Q calibration contains non-finite values")
     if not (depth_scale > 0 and depth_scale < float("inf")):
         raise ValueError("depth scale must be positive and finite")
-    marker_regions = detect_marker_regions(raw)
+    marker_regions = detect_marker_regions(raw, depth_scale)
     marker_pixels = {pixel for region in marker_regions for pixel in region}
 
     values = struct.unpack(f"<{WIDTH * HEIGHT}H", raw)
@@ -165,7 +165,7 @@ def _table_marker_point_indices(raw_path: Path, calibration_path: Path, depth_sc
     removed_indices: set[int] = set()
     for pixel_index, value in enumerate(values):
         depth = value * depth_scale
-        if not math.isfinite(depth) or depth < 1.0:
+        if not math.isfinite(depth) or not MIN_DEPTH_MM <= depth <= MAX_DEPTH_MM:
             continue
         x, y = pixel_index % WIDTH, pixel_index // WIDTH
         ray_x = q[0] * x + q[1] * y + q[2] * depth + q[3]

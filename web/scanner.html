@@ -474,35 +474,33 @@
           if (mtime !== lastMtime) {
             const raw = new Uint8Array(await response.arrayBuffer());
             if (raw.length !== 640 * 400 * 2) throw Error("Размер кадра Y16 не совпадает.");
-            let min = 65535, max = 0, left = 640, top = 400, right = -1, bottom = -1;
+            let left = 640, top = 400, right = -1, bottom = -1;
             const points = [];
             for (let i = 0; i < raw.length; i += 2) {
               const value = raw[i] | raw[i + 1] << 8;
-              if (value > 0) {
+              if (window.scannerDepthInRange(value, depthScale)) {
                 const pixel = i >> 1, x = pixel % 640, y = Math.floor(pixel / 640);
-                if (value < min) min = value;
-                if (value > max) max = value;
                 if (x < left) left = x;
                 if (x > right) right = x;
                 if (y < top) top = y;
                 if (y > bottom) bottom = y;
               }
             }
-            if (right < left || bottom < top) throw Error("В кадре нет валидной глубины.");
-            const span = Math.max(1, max - min);
+            if (right < left || bottom < top) throw Error("В кадре нет глубины в диапазоне 100–250 мм.");
             for (let pixel = 0; pixel < 640 * 400; pixel++) {
               const value = raw[pixel * 2] | raw[pixel * 2 + 1] << 8;
-              if (value && (pixel % 2 === 0)) {
+              const inRange = window.scannerDepthInRange(value, depthScale);
+              if (inRange && (pixel % 2 === 0)) {
                 const x = pixel % 640, y = Math.floor(pixel / 640);
                 const point = window.scannerReprojectDepthPixel(x, y, value, qMatrix, depthScale);
                 if (point) points.push(point);
               }
-              const gray = value ? Math.max(0, Math.min(255, Math.round((value - min) * 255 / span))) : 0;
+              const gray = inRange ? Math.round(((value * depthScale - 100) / 150) * 255) : 0;
               const offset = pixel * 4;
               image.data[offset] = gray;
               image.data[offset + 1] = Math.round(gray * .96);
               image.data[offset + 2] = Math.min(255, gray + 12);
-              image.data[offset + 3] = value ? 255 : 0;
+              image.data[offset + 3] = inRange ? 255 : 0;
             }
             frameContext.putImageData(image, 0, 0);
             const sourceWidth = right - left + 1, sourceHeight = bottom - top + 1;

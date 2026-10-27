@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tools.revopoint.align_y16_to_table import detect_marker_regions
 from tools.revopoint.reproject_y16 import RAW_BYTES, reproject_files, reproject_y16
 
 
@@ -35,6 +36,26 @@ class Y16ReprojectionTests(unittest.TestCase):
         struct.pack_into("<H", raw, 0, 12)
 
         self.assertEqual(reproject_y16(bytes(raw), Q, 0.005), [])
+
+    def test_enforces_100_to_250_mm_camera_ray_range(self) -> None:
+        raw = bytearray(RAW_BYTES)
+        for pixel, value in enumerate((19_999, 20_000, 50_000, 50_001)):
+            struct.pack_into("<H", raw, pixel * 2, value)
+
+        points = reproject_y16(bytes(raw), Q, 0.005)
+
+        self.assertEqual([point[2] for point in points], [-100.0, -250.0])
+
+    def test_marker_regions_ignore_depth_outside_camera_ray_range(self) -> None:
+        raw = bytearray(RAW_BYTES)
+        for top, left, value in ((20, 20, 20_000), (20, 40, 19_999)):
+            for y in range(top, top + 7):
+                for x in range(left, left + 7):
+                    struct.pack_into("<H", raw, (y * 640 + x) * 2, value)
+
+        regions = detect_marker_regions(bytes(raw), 0.005)
+
+        self.assertEqual([len(region) for region in regions], [49])
 
     def test_file_reprojection_records_provenance_and_refuses_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

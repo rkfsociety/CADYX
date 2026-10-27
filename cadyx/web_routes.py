@@ -6,6 +6,7 @@ import base64
 import math
 import os
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -17,6 +18,9 @@ from .models import OwnerType
 
 if TYPE_CHECKING:
     from .core import CadyxCore
+
+
+_SCANNER_LIVE_FRAME_READ_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -448,41 +452,42 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
             raise ValidationError("Live scanner frames accept at most one after and ts query parameter.")
         after_values = query.get("after", [])
         frame_sequence: int | None = None
-        if after_values:
-            after_text = after_values[0]
-            if not after_text.isdecimal():
-                raise ValidationError("The live-frame after value must be a non-negative integer.")
-            after_sequence = int(after_text)
-            frames_path = core.workspace.root / ".revopoint-live.raw.frames"
-            candidates: list[tuple[int, Path]] = []
-            try:
-                for candidate in frames_path.glob("frame-*.y16"):
-                    sequence_text = candidate.stem.removeprefix("frame-")
-                    if not sequence_text.isdecimal():
-                        continue
-                    sequence = int(sequence_text)
-                    if sequence <= after_sequence:
-                        try:
-                            candidate.unlink()
-                        except FileNotFoundError:
-                            pass
-                    else:
-                        candidates.append((sequence, candidate))
-            except OSError as exc:
-                raise ValidationError(f"The live scanner frame queue could not be read: {exc}.") from exc
-            if candidates:
-                frame_sequence, frame_path = min(candidates, key=lambda item: item[0])
+        with _SCANNER_LIVE_FRAME_READ_LOCK:
+            if after_values:
+                after_text = after_values[0]
+                if not after_text.isdecimal():
+                    raise ValidationError("The live-frame after value must be a non-negative integer.")
+                after_sequence = int(after_text)
+                frames_path = core.workspace.root / ".revopoint-live.raw.frames"
+                candidates: list[tuple[int, Path]] = []
+                try:
+                    for candidate in frames_path.glob("frame-*.y16"):
+                        sequence_text = candidate.stem.removeprefix("frame-")
+                        if not sequence_text.isdecimal():
+                            continue
+                        sequence = int(sequence_text)
+                        if sequence <= after_sequence:
+                            try:
+                                candidate.unlink()
+                            except FileNotFoundError:
+                                pass
+                        else:
+                            candidates.append((sequence, candidate))
+                except OSError as exc:
+                    raise ValidationError(f"The live scanner frame queue could not be read: {exc}.") from exc
+                if candidates:
+                    frame_sequence, frame_path = min(candidates, key=lambda item: item[0])
+                else:
+                    frame_path = frames_path / "no-pending-frame.y16"
             else:
-                frame_path = frames_path / "no-pending-frame.y16"
-        else:
-            frame_path = core.workspace.root / ".revopoint-live.raw"
-        try:
-            with frame_path.open("rb") as stream:
-                frame_stat = os.fstat(stream.fileno())
-                payload = stream.read()
-        except OSError:
-            handler._json(404, {"error": "NO_LIVE_FRAME", "message": "Live scanner frame is not available."})
-            return
+                frame_path = core.workspace.root / ".revopoint-live.raw"
+            try:
+                with frame_path.open("rb") as stream:
+                    frame_stat = os.fstat(stream.fileno())
+                    payload = stream.read()
+            except OSError:
+                handler._json(404, {"error": "NO_LIVE_FRAME", "message": "Live scanner frame is not available."})
+                return
         if len(payload) != 640 * 400 * 2:
             handler._json(404, {"error": "NO_LIVE_FRAME", "message": "Live scanner frame is not available."})
             return

@@ -347,6 +347,37 @@ class WebApiTests(unittest.TestCase):
                 self.assertEqual(json.loads(response.read())["preview"]["state"], "idle")
         stop.assert_called_once_with()
 
+    def test_live_scanner_frame_queue_reads_are_serialized(self) -> None:
+        frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"
+        frame_directory.mkdir(parents=True)
+        frame_bytes = bytes(640 * 400 * 2)
+        (frame_directory / "frame-1.y16").write_bytes(frame_bytes)
+        (frame_directory / "frame-2.y16").write_bytes(frame_bytes)
+        barrier = threading.Barrier(2)
+        results: list[tuple[int, str | None, int]] = []
+
+        def read_frame(after: int) -> None:
+            connection = HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+            try:
+                barrier.wait(timeout=2)
+                connection.request("GET", f"/api/v1/scanner/live-frame?after={after}")
+                response = connection.getresponse()
+                payload = response.read()
+                results.append((response.status, response.getheader("X-CADYX-Frame-Sequence"), len(payload)))
+            finally:
+                connection.close()
+
+        readers = [threading.Thread(target=read_frame, args=(after,)) for after in (0, 1)]
+        for reader in readers:
+            reader.start()
+        for reader in readers:
+            reader.join(timeout=4)
+
+        self.assertTrue(all(not reader.is_alive() for reader in readers))
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(status == 200 and sequence in {"1", "2"} and size == len(frame_bytes)
+                            for status, sequence, size in results), results)
+
     def test_project_files_expose_scan_series_folders_and_nested_raw_frames(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Scan files"})
         project_id = created["project"]["id"]

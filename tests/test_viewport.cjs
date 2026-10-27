@@ -4,6 +4,7 @@ const vm = require("node:vm");
 const path = require("node:path");
 const events = {};
 let drawnPoints = [];
+let drawnPointColors = [];
 let segments = 0;
 let drawnLines = [];
 let meshMoves = [];
@@ -20,13 +21,16 @@ const animationFrames = [];
 const context = {
   clearRect() {
     renderCalls++;
-    drawnPoints = []; segments = 0; drawnLines = []; meshMoves = []; drawnLabels = [];
+    drawnPoints = []; drawnPointColors = []; segments = 0; drawnLines = []; meshMoves = []; drawnLabels = [];
     currentPath = []; strokedPaths = []; dashPatterns = []; arcs = 0;
     rasterizedPixels = 0; rasterizedBounds = null;
   },
   fillRect(x, y, width, height) {
     // Capture geometry point markers, not coordinate-label backgrounds.
-    if (width > 0 && height > 0 && width <= 4 && height <= 4) drawnPoints.push([x, y]);
+    if (width > 0 && height > 0 && width <= 4 && height <= 4) {
+      drawnPoints.push([x, y]);
+      drawnPointColors.push(context.fillStyle);
+    }
   },
   beginPath() { currentPath = []; }, moveTo(x, y) { currentPath.push([x, y]); },
   lineTo(x, y) { segments++; drawnLines.push([x, y]); currentPath.push([x, y]); },
@@ -627,8 +631,9 @@ const livePointGeometry = {
 const livePointViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
   showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false,
 });
-livePointViewer.load({ ...livePointGeometry, pointPreviewLimit: 48_000 });
+livePointViewer.load({ ...livePointGeometry, pointPreviewLimit: 48_000, pointColor: '#ff9d54' });
 assert.equal(drawnPoints.length, 48_000, 'live point previews can render their full stable sample');
+assert.deepEqual([...new Set(drawnPointColors)], ['#ff9d54'], 'live preview point brightness stays fixed between frames');
 livePointViewer.load(livePointGeometry);
 assert.equal(drawnPoints.length, 24_000, 'ordinary point clouds retain the existing render budget');
 console.log("Viewport: camera, geometry, transitions, depth-tested edges and scan surface styling passed.");

@@ -25,6 +25,9 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 
+constexpr double kMinimumScanDepthMillimeters = 100.0;
+constexpr double kMaximumScanDepthMillimeters = 250.0;
+
 struct Options {
     std::filesystem::path output_prefix;
     std::filesystem::path q_file;
@@ -523,7 +526,8 @@ std::vector<std::array<double, 3>> Reproject(const std::vector<std::uint8_t>& ra
                 continue;
             }
             const double depth = static_cast<double>(pixel) * depth_scale;
-            if (!std::isfinite(depth) || depth < 1.0) {
+            if (!std::isfinite(depth) || depth < kMinimumScanDepthMillimeters
+                || depth > kMaximumScanDepthMillimeters) {
                 continue;
             }
             // Q maps pixel plus depth to a ray. Scale that ray so its Z equals

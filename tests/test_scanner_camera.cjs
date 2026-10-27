@@ -4,6 +4,7 @@ const {
   scannerOrbitDelta,
   scannerDepthOrder,
   scannerPreviewPoint,
+  scannerDepthInRange,
   scannerReprojectDepthPixel,
   scannerDepthColor,
   normalizeTraceSweepDegrees,
@@ -51,6 +52,12 @@ assert.ok(depthPoint[0] > 10, "horizontal pixel offset is projected along the ca
 assert.ok(depthPoint[1] < 0, "scanner camera Y is inverted into viewport-up coordinates");
 assert.equal(scannerReprojectDepthPixel(153, 299, 0, qMatrix, 0.005), null, "zero depth remains invalid");
 assert.equal(scannerReprojectDepthPixel(153, 299, 1, qMatrix, 0.005), null, "near-zero invalid readings are filtered");
+assert.equal(scannerDepthInRange(19_999, 0.005), false);
+assert.equal(scannerDepthInRange(20_000, 0.005), true);
+assert.equal(scannerDepthInRange(50_000, 0.005), true);
+assert.equal(scannerDepthInRange(50_001, 0.005), false);
+assert.equal(scannerReprojectDepthPixel(153, 299, 19_999, qMatrix, 0.005), null, "depth below 100 mm is outside scan range");
+assert.equal(scannerReprojectDepthPixel(153, 299, 50_001, qMatrix, 0.005), null, "depth above 250 mm is outside scan range");
 
 assert.equal(scannerDepthColor(0), "hsl(25 90% 38%)", "far points use dark orange");
 assert.equal(scannerDepthColor(0.5), "hsl(25 90% 52%)", "depth changes brightness without changing hue");

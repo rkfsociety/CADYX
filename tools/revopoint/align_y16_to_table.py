@@ -20,10 +20,10 @@ if str(REPOSITORY) not in sys.path:
 from tools.revopoint.preprocess_scan_frame import verified_preprocessed_frame
 
 try:
-    from .reproject_y16 import HEIGHT, RAW_BYTES, WIDTH
+    from .reproject_y16 import HEIGHT, MAX_DEPTH_MM, MIN_DEPTH_MM, RAW_BYTES, WIDTH
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from reproject_y16 import HEIGHT, RAW_BYTES, WIDTH
+    from reproject_y16 import HEIGHT, MAX_DEPTH_MM, MIN_DEPTH_MM, RAW_BYTES, WIDTH
 
 _HEADER = struct.Struct("<4I")
 _RECORD = struct.Struct("<2i2f6d")
@@ -102,7 +102,7 @@ def _map_frame(data: bytes) -> dict:
 
 def _reproject_pixel(x: int, y: int, depth_value: int, q: tuple[float, ...], depth_scale: float) -> Vector | None:
     depth = depth_value * depth_scale
-    if depth < 1.0:
+    if not MIN_DEPTH_MM <= depth <= MAX_DEPTH_MM:
         return None
     ray_x = q[0] * x + q[1] * y + q[2] * depth + q[3]
     ray_y = q[4] * x + q[5] * y + q[6] * depth + q[7]
@@ -113,15 +113,18 @@ def _reproject_pixel(x: int, y: int, depth_value: int, q: tuple[float, ...], dep
     return point if all(math.isfinite(value) for value in point) else None
 
 
-def detect_marker_regions(raw: bytes) -> list[list[int]]:
+def detect_marker_regions(raw: bytes, depth_scale: float) -> list[list[int]]:
     """Return accepted connected table-marker pixel regions from a Y16 frame."""
     if len(raw) != RAW_BYTES:
         raise ValueError(f"Y16 frame must be exactly {RAW_BYTES} bytes")
+    if not math.isfinite(depth_scale) or depth_scale <= 0:
+        raise ValueError("Depth scale must be positive and finite")
     values = struct.unpack(f"<{WIDTH * HEIGHT}H", raw)
+    in_range = bytearray(MIN_DEPTH_MM <= value * depth_scale <= MAX_DEPTH_MM for value in values)
     seen = bytearray(WIDTH * HEIGHT)
     regions: list[list[int]] = []
     for seed in range(WIDTH * HEIGHT):
-        if seen[seed] or values[seed] == 0:
+        if seen[seed] or not in_range[seed]:
             continue
         pixels = [seed]
         seen[seed] = 1
@@ -139,7 +142,7 @@ def detect_marker_regions(raw: bytes) -> list[list[int]]:
             neighbors = (index - 1 if x else -1, index + 1 if x < WIDTH - 1 else -1,
                          index - WIDTH if y else -1, index + WIDTH if y < HEIGHT - 1 else -1)
             for neighbor in neighbors:
-                if neighbor >= 0 and not seen[neighbor] and values[neighbor] != 0:
+                if neighbor >= 0 and not seen[neighbor] and in_range[neighbor]:
                     seen[neighbor] = 1
                     pixels.append(neighbor)
             cursor += 1
@@ -155,7 +158,7 @@ def detect_marker_centers(raw: bytes, q: tuple[float, ...], depth_scale: float) 
     """Mirror the live-preview connected-region detector for a saved Y16 frame."""
     values = struct.unpack(f"<{WIDTH * HEIGHT}H", raw)
     centers: list[Vector] = []
-    for pixels in detect_marker_regions(raw):
+    for pixels in detect_marker_regions(raw, depth_scale):
         center_x = sum(index % WIDTH for index in pixels) / len(pixels)
         center_y = sum(index // WIDTH for index in pixels) / len(pixels)
         pixel = min((index for index in pixels if index % 2 == 0),

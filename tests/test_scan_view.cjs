@@ -31,6 +31,10 @@ for (let y = 0; y < 400; y += 1) {
 }
 assert.equal(sampledLivePixels, 48_000, "live preview uses a fixed 48,000-pixel lattice");
 assert.equal(liveSampleSlots.size, 48_000, "each sampled pixel maps to a unique stable slot");
+assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(99.995), false);
+assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(100), true);
+assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(250), true);
+assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(250.005), false);
 assert.equal(sandbox.window.CadyxScanView.smoothLivePreviewDepth(0, 100), 100);
 assert.equal(sandbox.window.CadyxScanView.smoothLivePreviewDepth(100, 120), 115);
 
@@ -57,7 +61,7 @@ mapView.setUint32(12, centers.length, true);
 for (let index = 0; index < centers.length; index += 1) {
   const [centerX, centerY] = centers[index];
   const px = centerX - 320, py = 200 - centerY;
-  const depth = 100 + 0.12 * px + 0.08 * py;
+  const depth = 130 + 0.12 * px + 0.08 * py;
   const cameraPoint = [px, py, -depth];
   const x = xAxis.reduce((sum, value, axis) => sum + value * cameraPoint[axis], 0);
   const y = yAxis.reduce((sum, value, axis) => sum + value * cameraPoint[axis], 0);
@@ -76,15 +80,16 @@ for (const frame of liveRawFrames) {
     for (let y = centerY - 16; y <= centerY + 16; y += 1) for (let x = centerX - 16; x <= centerX + 16; x += 1) {
       if ((x - centerX) ** 2 + (y - centerY) ** 2 > 16 ** 2) continue;
       const pixel = y * 640 + x;
-      const depth = Math.round(100 + 0.12 * (x - 320) - 0.08 * (y - 200));
+      const depth = Math.round(130 + 0.12 * (x - 320) - 0.08 * (y - 200));
       frame[pixel * 2] = depth & 0xff;
       frame[pixel * 2 + 1] = depth >> 8;
-      if (sandbox.window.CadyxScanView.livePreviewSampleIndex(x, y) >= 0) markerPointCount += 1;
+      if (sandbox.window.CadyxScanView.livePreviewSampleIndex(x, y) >= 0
+          && sandbox.window.CadyxScanView.isScanDepthValid(depth)) markerPointCount += 1;
     }
   }
   for (let y = 280; y < 340; y += 1) for (let x = 280; x < 360; x += 1) {
     const pixel = y * 640 + x;
-    frame[pixel * 2] = 80;
+    frame[pixel * 2] = 110;
   }
 }
 let liveFrameSequence = 0;

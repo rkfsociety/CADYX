@@ -24,7 +24,7 @@ class TableMarkerAlignmentTests(unittest.TestCase):
             for center_x, center_y in ((170, 180), (120, 130), (220, 130), (120, 230), (240, 200)):
                 for y in range(center_y - 2, center_y + 3):
                     for x in range(center_x - 2, center_x + 3):
-                        values[y * 640 + x] = 2000
+                        values[y * 640 + x] = 30_000
         return struct.pack("<256000H", *values)
 
     @staticmethod

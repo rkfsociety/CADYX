@@ -12,6 +12,8 @@ from pathlib import Path
 WIDTH = 640
 HEIGHT = 400
 RAW_BYTES = WIDTH * HEIGHT * 2
+MIN_DEPTH_MM = 100.0
+MAX_DEPTH_MM = 250.0
 
 
 def reproject_y16(raw: bytes, q: tuple[float, ...], depth_scale: float) -> list[tuple[float, float, float]]:
@@ -28,7 +30,7 @@ def reproject_y16(raw: bytes, q: tuple[float, ...], depth_scale: float) -> list[
         for x in range(WIDTH):
             pixel = struct.unpack_from("<H", raw, row + x * 2)[0]
             depth = pixel * depth_scale
-            if depth < 1.0:
+            if not MIN_DEPTH_MM <= depth <= MAX_DEPTH_MM:
                 continue
 
             ray_x = q[0] * x + q[1] * y + q[2] * depth + q[3]
