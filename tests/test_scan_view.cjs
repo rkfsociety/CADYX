@@ -412,6 +412,9 @@ assert.match(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8")
 assert.match(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
   /opacity \$\{durationMs\}ms steps\(6, end\)/,
   "cached-frame animation is composited in six 30 FPS steps instead of a main-thread loop");
+assert.match(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
+  /const preserveFrameCrossfade = canCrossfade && frameCrossfadeActive;[\s\S]*?render\(\{ preserveFrameCrossfade \}\)/,
+  "a new sensor frame does not restart an in-progress crossfade");
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);

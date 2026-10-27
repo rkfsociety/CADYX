@@ -222,6 +222,7 @@
     let frameCrossfadeToken = 0;
     let frameCrossfadeCallback = null;
     let frameCrossfadeTimer = null;
+    let frameCrossfadeActive = false;
     let bodyMotionAngleByVertex = new Float32Array(0);
     let sweepProgress = null;
     let loftProgress = null;
@@ -229,6 +230,7 @@
     function cancelFrameCrossfade() {
       frameCrossfadeToken += 1;
       frameCrossfadeCallback = null;
+      frameCrossfadeActive = false;
       if (frameCrossfadeTimer !== null && typeof clearTimeout === "function") clearTimeout(frameCrossfadeTimer);
       frameCrossfadeTimer = null;
       frameCrossfadeCanvas.style.transition = "none";
@@ -250,6 +252,7 @@
       if (token !== frameCrossfadeToken) return;
       if (frameCrossfadeTimer !== null && typeof clearTimeout === "function") clearTimeout(frameCrossfadeTimer);
       frameCrossfadeTimer = null;
+      frameCrossfadeActive = false;
       frameCrossfadeCanvas.style.display = "none";
       const callback = frameCrossfadeCallback;
       frameCrossfadeCallback = null;
@@ -257,8 +260,9 @@
     }
 
     function startFrameCrossfade(durationMs, onFrameRate) {
-      if (!durationMs || !canvas.parentElement) return;
+      if (!durationMs || !canvas.parentElement || frameCrossfadeActive) return;
       const token = ++frameCrossfadeToken;
+      frameCrossfadeActive = true;
       frameCrossfadeCallback = onFrameRate;
       frameCrossfadeCanvas.style.display = "block";
       frameCrossfadeCanvas.style.transition = "none";
@@ -394,8 +398,8 @@
       };
     }
 
-    function render() {
-      cancelFrameCrossfade();
+    function render({ preserveFrameCrossfade = false } = {}) {
+      if (!preserveFrameCrossfade) cancelFrameCrossfade();
       const rect = canvas.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2) * (drag ? INTERACTIVE_RENDER_SCALE : 1);
@@ -1545,9 +1549,11 @@
       },
       load(value, { reset = true, transition: nextTransition = null, smoothShading = false,
         crossfadeDurationMs = 0, onCrossfadeFps = null } = {}) {
-        const shouldCrossfade = Number.isFinite(crossfadeDurationMs) && crossfadeDurationMs > 0
+        const canCrossfade = Number.isFinite(crossfadeDurationMs) && crossfadeDurationMs > 0
           && geometry?.pointCloudVertexCount != null && value.pointCloudVertexCount != null
           && canvas.width > 0 && canvas.height > 0 && Boolean(canvas.parentElement);
+        const preserveFrameCrossfade = canCrossfade && frameCrossfadeActive;
+        const shouldCrossfade = canCrossfade && !preserveFrameCrossfade;
         if (shouldCrossfade) cachePreviousFrame();
         bodyMotionFrame += 1;
         bodyMotion = null;
@@ -1664,7 +1670,7 @@
         if (faceRecords.length !== sourceTriangles.length / 3 * 8) faceRecords = new Float64Array(sourceTriangles.length / 3 * 8);
         if (faceOrder.length !== sourceTriangles.length / 3) faceOrder = new Uint32Array(sourceTriangles.length / 3);
         if (reset) resetView();
-        render();
+        render({ preserveFrameCrossfade });
         if (shouldCrossfade) {
           startFrameCrossfade(Math.min(1000, crossfadeDurationMs), onCrossfadeFps);
         }
