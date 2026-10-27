@@ -206,6 +206,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .button { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; padding: 6px 11px; border: 1px solid var(--line); border-radius: 6px; background: #151e25; color: var(--muted); font: 600 11px/1.2 var(--ui-font); letter-spacing: .01em; text-align: center; text-decoration: none; cursor: pointer; transition: background .12s ease, border-color .12s ease, color .12s ease; }
 .button:hover:not(:disabled) { border-color: #9b6038; background: #26190f; color: #ffad73; }
 .button:disabled { opacity: .43; cursor: not-allowed; }
+#viewport-scan-360[data-capture-locked="true"] { opacity: .43; pointer-events: none; cursor: not-allowed; }
 .model-toolbar { flex: 0 0 auto; }
 .viewport-camera-presets { display: flex; align-items: center; gap: 3px; }
 .viewport-icon-button { display: grid; place-items: center; width: 34px; height: 34px; padding: 7px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }

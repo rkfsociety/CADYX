@@ -1005,10 +1005,14 @@
     const active = () => state === 'starting' || state === 'running';
     const syncCaptureButton = () => {
       if (!captureButton) return;
-      captureButton.dataset.livePreviewLock = String(active());
-      const disabled = active() || captureButton.dataset.scanCaptureBusy === 'true'
-        || captureButton.dataset.scanCapturePending === 'true';
-      if (captureButton.disabled !== disabled) captureButton.disabled = disabled;
+      const target = typeof document !== 'undefined'
+        ? document.querySelector('#viewport-scan-360') || captureButton : captureButton;
+      target.dataset.livePreviewLock = String(active());
+      const locked = active() || target.dataset.scanCaptureBusy === 'true'
+        || target.dataset.scanCapturePending === 'true';
+      target.dataset.captureLocked = String(locked);
+      target.setAttribute('aria-disabled', String(locked));
+      window.cadyxSyncCaptureButton?.();
     };
     const updateButton = preview => {
       state = preview?.state || 'idle';

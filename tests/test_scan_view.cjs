@@ -248,6 +248,7 @@ assert.equal(viewerLoads.at(-1).geometry, serverModelGeometry, "the scan overlay
 
 const html = fs.readFileSync(path.join(__dirname, "../web/index.html"), "utf8");
 const scannerHtml = fs.readFileSync(path.join(__dirname, "../web/scanner.html"), "utf8");
+const styleCss = fs.readFileSync(path.join(__dirname, "../web/style.css"), "utf8");
 const appJs = fs.readFileSync(path.join(__dirname, "../web/app.js"), "utf8");
 assert.match(html, /id="viewport-live-scan"[^>]*>Облако точек<\/button>/);
 assert.match(html, /id="viewport-scan-mesh"[^>]*>Сетка<\/button>/);
@@ -265,6 +266,9 @@ assert.ok(productionTab >= 0 && productionTab < scanningTab && scanningTab < act
   "the Scanning workspace tab follows Manufacturing and precedes Activity");
 assert.doesNotMatch(html, /id="scanning-frame"/, "live scanner preview uses the main viewport without a second iframe");
 assert.match(appJs, /viewer:modelViewer/);
+assert.match(appJs, /window\.cadyxSyncCaptureButton=syncCaptureButton/);
+assert.match(appJs, /if\(scan360\.dataset\.captureLocked==='true'\)return/);
+assert.match(styleCss, /#viewport-scan-360\[data-capture-locked="true"\]\s*\{\s*opacity:\s*\.43;\s*pointer-events:\s*none;/);
 assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.observe\(liveCamera/,
   "changing the live-preview button state must not synthesize a second toggle click");
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);
@@ -284,6 +288,13 @@ verifyScanView().catch(error => {
   const previewCalls = [];
   const cameraButton = element();
   const captureButton = element();
+  sandbox.window.cadyxSyncCaptureButton = () => {
+    const locked = captureButton.dataset.livePreviewLock === "true"
+      || captureButton.dataset.scanCaptureBusy === "true"
+      || captureButton.dataset.scanCapturePending === "true";
+    captureButton.dataset.captureLocked = String(locked);
+    captureButton.setAttribute("aria-disabled", String(locked));
+  };
   const liveViewCalls = [];
   const liveController = sandbox.window.CadyxScanView.initializeLivePreview({
     button: cameraButton,
@@ -309,11 +320,11 @@ verifyScanView().catch(error => {
   assert.equal(duplicateLiveController, liveController, "one camera button owns only one preview poller");
   await new Promise(resolve => setImmediate(resolve));
   await cameraButton.listeners.click();
-  assert.equal(captureButton.disabled, true, "live preview prevents a concurrent saved 360 capture");
+  assert.equal(captureButton.dataset.captureLocked, "true", "live preview prevents a concurrent saved 360 capture");
   assert.equal(liveViewCalls.at(-1)[0], "show");
   assert.equal(liveViewCalls.at(-1)[1].open, true);
   await cameraButton.listeners.click();
-  assert.equal(captureButton.disabled, false, "stopping live preview re-enables 360 capture");
+  assert.equal(captureButton.dataset.captureLocked, "false", "stopping live preview re-enables 360 capture");
   assert.equal(liveViewCalls.at(-1)[0], "close");
   assert.deepEqual(previewCalls.map(call => call.method), ["GET", "POST", "DELETE"]);
   assert.equal(cameraButton.attributes["aria-pressed"], "false");

@@ -750,9 +750,13 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       let pollTimer=null,scanWasRunning=false;
       const projectId=()=>window.cadyxSelectedProjectId?.();
       const syncCaptureButton=()=>{
-        const disabled=scan360.dataset.scanCaptureBusy==='true'||scan360.dataset.scanCapturePending==='true'||scan360.dataset.livePreviewLock==='true';
-        if(scan360.disabled!==disabled)scan360.disabled=disabled;
+        const current=document.querySelector('#viewport-scan-360');
+        if(!current)return;
+        const disabled=current.dataset.scanCaptureBusy==='true'||current.dataset.scanCapturePending==='true'||current.dataset.livePreviewLock==='true';
+        current.dataset.captureLocked=String(disabled);
+        current.setAttribute('aria-disabled',String(disabled));
       };
+      window.cadyxSyncCaptureButton=syncCaptureButton;
       const setCaptureBusy=busy=>{scan360.dataset.scanCaptureBusy=String(busy);syncCaptureButton()};
       scan360.dataset.scanCaptureBusy='false';syncCaptureButton();
       const showCapturePreview=(scan,options)=>scanTreePreviewSelection?null:scanView?.showCapture(scan,options);
@@ -789,6 +793,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       };
       const waitForProjectId=()=>{const id=projectId();if(id)pollScan(id);else pollTimer=setTimeout(waitForProjectId,500)};
       scan360.addEventListener('click',async()=>{
+        if(scan360.dataset.captureLocked==='true')return;
         const id=projectId();
         if(!id){scanStatus.textContent='Сначала выберите проект.';return}
         if(scanTreePreviewSelection)clearScanTreePreview();
