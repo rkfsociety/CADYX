@@ -612,8 +612,7 @@
         ? callback => requestAnimationFrame(callback)
         : callback => setTimeout(() => callback(nowClock()), 1000 / LIVE_PREVIEW_TARGET_FPS);
       const startedAt = nowClock();
-      const tickIntervalMs = Math.max(1000 / LIVE_PREVIEW_MAX_OUTPUT_FPS,
-        Math.min(1000 / LIVE_PREVIEW_MIN_OUTPUT_FPS, 1000 / LIVE_PREVIEW_TARGET_FPS));
+      const tickIntervalMs = 1000 / LIVE_PREVIEW_MAX_OUTPUT_FPS;
       let lastTickAt = startedAt;
       let firstTickAt = startedAt;
       let tickCount = 0;
@@ -1228,6 +1227,9 @@
                       animation_avg_ms: animationFrames > 0 ? animationTimeMs / animationFrames : 0,
                       animation_max_ms: animationMaxMs,
                       display_fps: liveDisplayFpsSmoothed,
+                      frame_cache_frames: Math.min(LIVE_PREVIEW_FRAME_CACHE_LIMIT,
+                        liveCloudQueue.length + (liveDisplayedCloud ? 1 : 0) + (liveCloudTransitionActive ? 1 : 0)),
+                      frame_cache_limit: liveCloudCacheLimit(),
                     } }) }).catch(() => {});
                 }
                 liveFrameSequence = frameSequence;
