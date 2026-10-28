@@ -1033,6 +1033,7 @@
       if (livePreviewOwned || cloudPreviewOpen || meshPreviewOpen || serverPointCloudVisible
           || viewport.dataset.scanTreePreview === 'true'
           || document.querySelector?.('#primary-grid')?.dataset.view !== 'scanning') return false;
+      if (staticTurntableVisible) return true;
       staticTurntableVisible = true;
       updateButton();
       renderTurntableScene({ aligned: false, reset: false });

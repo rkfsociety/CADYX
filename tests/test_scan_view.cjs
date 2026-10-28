@@ -567,7 +567,7 @@ assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
 assert.match(projectUiJs, /let suffix = 2/);
 assert.match(projectUiJs, /front: \{ yaw: Math\.PI \/ 2, pitch: 0 \}/);
 assert.match(projectUiJs, /right: \{ yaw: 0, pitch: 0 \}/);
-assert.match(projectUiJs, /if \(activeView === "scanning"\) initializeScanningFrontView\(\)/,
+assert.match(projectUiJs, /if \(activeView === "scanning"\) \{\s*initializeScanningFrontView\(\);/,
   "the first Scanning view uses the front camera while later user camera choices remain restorable");
 assert.match(projectUiJs,
   /const addressView = new URLSearchParams\(window\.location\.search\)\.get\("view"\);\s*const workspaceView = restorableWorkspaceViews\.has\(addressView\) \? addressView[\s\S]*: primaryGrid\.dataset\.view;/,
@@ -601,6 +601,8 @@ assert.match(scanViewSource, /interactiveRenderScale:\s*0\.25/,
   "the live turntable lowers only its drag resolution while preserving depth visibility");
 assert.match(appJs, /grid\?\.dataset\.view==='scanning'\)scanView\?\.showTurntable\(\)/,
   "entering Scanning shows the static table even when live preview is stopped");
+assert.match(projectUiJs, /if \(activeView === "scanning"\) \{\s*initializeScanningFrontView\(\);\s*window\.CadyxScanView\?\.showTurntable\(\);/,
+  "navigating to Scanning asks the existing scan viewport to show its static table");
 assert.match(appJs, /scanView\?\.hideTurntable\(\)/,
   "leaving Scanning restores the project viewport in the shared canvas");
 assert.match(scanViewSource, /const captureFps = preview\?\.metrics\?\.capture_fps/,

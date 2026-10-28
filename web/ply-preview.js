@@ -481,7 +481,10 @@ function setWorkspaceNavigation(view) {
   else address.searchParams.delete("view");
   window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
   primaryGrid.dataset.view = activeView;
-  if (activeView === "scanning") initializeScanningFrontView();
+  if (activeView === "scanning") {
+    initializeScanningFrontView();
+    window.CadyxScanView?.showTurntable();
+  }
   folderDetail.hidden = !getSelectedFolder() && activeView !== "files";
   $("#comparison-panel").hidden = activeView !== "analysis";
   $("#manufacturing-panel").hidden = activeView !== "manufacturing";
