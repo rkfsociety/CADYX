@@ -636,6 +636,9 @@ assert.equal(drawnPoints.length, 48_000, 'live point previews can render their f
 assert.deepEqual([...new Set(drawnPointColors)], ['#ff9d54'], 'live preview point brightness stays fixed between frames');
 livePointViewer.load(livePointGeometry);
 assert.equal(drawnPoints.length, 24_000, 'ordinary point clouds retain the existing render budget');
+livePointViewer.load({ ...livePointGeometry, points: [], pointLayers: [{ points: new Uint32Array([0]),
+  style: { size: 12, opacity: 1, color: '#00d8ff', shape: 'circle' } }] });
+assert.equal(arcs, 1, 'map marker point layers can render as clear circular symbols');
 const tablePreviewViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
   showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: true,
 });

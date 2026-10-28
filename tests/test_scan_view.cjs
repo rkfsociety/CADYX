@@ -74,6 +74,13 @@ for (let index = 0; index < turntableModel.moving.positions.length; index += 3) 
   if (Math.abs(z) < 1e-5) maximumTopRadius = Math.max(maximumTopRadius, Math.hypot(x, y));
 }
 assert.ok(Math.abs(maximumTopRadius - 100) < 1e-4, "the displayed tabletop radius is exactly 100 mm");
+assert.deepEqual(Array.from(sandbox.window.CadyxScanView.buildPreviewCloudPointIndices(8, 1, [1, 6], true)),
+  [0, 2, 3, 4, 5, 7], "unregistered bright candidates are omitted from the mapped marker preview");
+assert.deepEqual(Array.from(sandbox.window.CadyxScanView.buildPreviewCloudPointIndices(8, 1, [1, 6], false)),
+  [0, 1, 2, 3, 4, 5, 6, 7], "unmapped diagnostic views retain their detected point samples");
+assert.deepEqual(Array.from(sandbox.window.CadyxScanView.buildMatchedMapMarkerPointIndices(
+  { markerPoints: new Uint32Array([10, 11, 12]) }, [2, 0, 99])), [12, 10],
+  "only confirmed correspondences highlight exact map marker locations");
 const rotatedPoint = sandbox.window.CadyxScanView.transformTableDisplayPoint([0, 10, 0], 90, 0);
 assert.ok(Math.abs(rotatedPoint[0] + 10) < 1e-5 && Math.abs(rotatedPoint[1]) < 1e-5,
   "turntable encoder rotation changes only the display-frame point position");
@@ -98,7 +105,7 @@ const getModelGeometry = () => baseGeometry;
 const fetchCloud = async url => ({ ok: true, async text() { assert.match(url, /point-cloud\?/); return pointCloud; } });
 const liveRawFrames = [new Uint8Array(640 * 400 * 2), new Uint8Array(640 * 400 * 2)];
 let liveRawFrameSource = liveRawFrames;
-const centers = [[220, 180], [420, 180], [220, 220], [420, 220], [320, 200]];
+const centers = [[240, 180], [400, 180], [240, 220], [400, 220], [320, 200]];
 const zAxis = [0.12, 0.08, 1].map(value => value / Math.hypot(0.12, 0.08, 1));
 let xAxis = [1 - zAxis[0] * zAxis[0], -zAxis[0] * zAxis[1], -zAxis[0] * zAxis[2]];
 xAxis = xAxis.map(value => value / Math.hypot(...xAxis));
@@ -136,9 +143,7 @@ const recoveredMarkerFit = sandbox.window.CadyxScanView.registerTableMarkers(
 );
 assert.equal(recoveredMarkerFit.matches.length, uniqueMarkerPattern.length,
   "periodic global registration replaces a plausible partial tracked fit with the complete unique-pattern fit");
-let markerPointCount = 0;
 for (const frame of liveRawFrames) {
-  markerPointCount = 0;
   for (const [centerX, centerY] of centers) {
     for (let y = centerY - 16; y <= centerY + 16; y += 1) for (let x = centerX - 16; x <= centerX + 16; x += 1) {
       if ((x - centerX) ** 2 + (y - centerY) ** 2 > 16 ** 2) continue;
@@ -146,7 +151,6 @@ for (const frame of liveRawFrames) {
       const depth = Math.round(130 + 0.12 * (x - 320) - 0.08 * (y - 200));
       frame[pixel * 2] = depth & 0xff;
       frame[pixel * 2 + 1] = depth >> 8;
-      if (sandbox.window.CadyxScanView.isScanDepthValid(depth)) markerPointCount += 1;
     }
   }
   for (let y = 280; y < 340; y += 1) for (let x = 280; x < 360; x += 1) {
@@ -221,49 +225,41 @@ liveFrameSequence = 0;
 const livePreviewLoadStart = viewerLoads.length;
 view.showLivePreview({ open: true });
 await waitUntil(() => viewerLoads.length >= livePreviewLoadStart + 3
-  && viewerLoads.at(-1)?.geometry.points?.length === markerPointCount);
+  && viewerLoads.at(-1)?.geometry.pointLayers?.some(layer => layer.style?.color === "#00d8ff"));
 assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "live");
-assert.ok(viewerLoads.at(-1).geometry.pointLayers?.[0]?.points?.length > 0, cloudButton.title);
 assert.equal(viewerLoads.at(-1).geometry.pointPreviewLimit, 8_000);
-assert.equal(viewerLoads.at(-1).geometry.points.length, markerPointCount,
-  "only the sparse table markers receive the preview highlight");
-assert.equal(viewerLoads.at(-1).geometry.pointStyle.size, 3.5);
-assert.equal(viewerLoads.at(-1).geometry.pointStyle.opacity, 1);
-assert.equal(viewerLoads.at(-1).geometry.pointStyle.color, "#59d9ff");
-const markerPositions = viewerLoads.at(-1).geometry.positions;
-const markerCenter = [0, 0, 0];
-const markerIndices = new Set(viewerLoads.at(-1).geometry.points);
-let minimumObjectZ = Infinity;
-for (let point = viewerLoads.at(-1).geometry.pointCloudVertexRange[0];
-  point < viewerLoads.at(-1).geometry.pointCloudVertexRange[1]; point += 1) {
-  const z = markerPositions[point * 3 + 2];
-  if (!markerIndices.has(point)) minimumObjectZ = Math.min(minimumObjectZ, z);
-}
-assert.ok(minimumObjectZ >= 0, "object points remain at or above the table-marker plane");
-for (const pointIndex of viewerLoads.at(-1).geometry.points) {
+const emptyTableGeometry = viewerLoads.at(-1).geometry;
+const mappedMarkerLayer = emptyTableGeometry.pointLayers.find(layer => layer.style.color === "#d4f6ff");
+const matchedMarkerLayer = emptyTableGeometry.pointLayers.find(layer => layer.style.color === "#00d8ff");
+assert.equal(emptyTableGeometry.points.length, 0, "raw scan samples do not masquerade as map markers");
+assert.equal(mappedMarkerLayer.points.length, centers.length, "all saved map markers remain visible");
+assert.equal(matchedMarkerLayer.points.length, centers.length, "only map-confirmed current markers are highlighted");
+assert.equal(matchedMarkerLayer.style.size, 12);
+assert.equal(mappedMarkerLayer.style.shape, "circle");
+assert.equal(matchedMarkerLayer.style.shape, "circle");
+const markerPositions = emptyTableGeometry.positions;
+for (const pointIndex of [...mappedMarkerLayer.points, ...matchedMarkerLayer.points]) {
   const index = pointIndex * 3;
-  assert.ok(Math.abs(markerPositions[index + 2]) < 2,
-    "table markers lie in the XY plane even when object points are off that plane");
-  for (let axis = 0; axis < 3; axis += 1) markerCenter[axis] += markerPositions[index + axis] / markerPointCount;
+  assert.ok(Math.abs(markerPositions[index + 2]) < 2, "map markers lie on the tabletop plane");
+  assert.ok(Math.hypot(markerPositions[index], markerPositions[index + 1]) <= 100,
+    "every shown map marker lies inside the 200 mm tabletop");
 }
-assert.ok(Math.abs(markerCenter[0]) < 5 && Math.abs(markerCenter[1]) < 5,
-  `table markers stay centered on the calibrated XY origin: ${markerCenter}`);
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0],
   "the mapped table-marker centroid is the preview origin");
-assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0]);
-const firstTurntableCloudIndex = viewerLoads.at(-1).geometry.pointLayers[0].points[0] * 3;
-const firstTurntableCloud = viewerLoads.at(-1).geometry.positions.slice(firstTurntableCloudIndex, firstTurntableCloudIndex + 3);
+const firstMappedMarker = [...markerPositions.slice(mappedMarkerLayer.points[0] * 3,
+  mappedMarkerLayer.points[0] * 3 + 3)];
 const firstLiveFitRadius = viewerLoads.at(-1).geometry.fitRadius;
 await waitUntil(() => livePollDelays.includes(100));
 assert.ok(liveFrameSequence >= 2, "the live point cloud accepted a newer camera frame");
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0], "live frames keep the first-frame camera pivot");
 assert.equal(viewerLoads.at(-1).geometry.fitRadius, firstLiveFitRadius, "live frames keep a fixed view scale");
 assert.equal(viewerLoads.at(-1).options.reset, false, "new live frames never reset the camera");
-const secondTurntableCloudIndex = viewerLoads.at(-1).geometry.pointLayers[0].points[0] * 3;
-const secondTurntableCloud = viewerLoads.at(-1).geometry.positions.slice(secondTurntableCloudIndex, secondTurntableCloudIndex + 3);
-assert.deepEqual([...secondTurntableCloud], [...firstTurntableCloud],
-"identical scanner frames are not rotated a second time using the table angle");
+const nextMappedMarkerLayer = viewerLoads.at(-1).geometry.pointLayers.find(layer => layer.style.color === "#d4f6ff");
+const nextMappedMarker = [...viewerLoads.at(-1).geometry.positions.slice(nextMappedMarkerLayer.points[0] * 3,
+  nextMappedMarkerLayer.points[0] * 3 + 3)];
+assert.ok(Math.hypot(...nextMappedMarker.map((value, axis) => value - firstMappedMarker[axis])) < 1e-4,
+  "identical scanner frames keep table markers at their exact map positions");
 assert.ok(livePollDelays.includes(100),
   `idle frame polling adapts to the measured 250 ms camera cadence (scheduled: ${livePollDelays.join(",")})`);
 view.showCapture({ preview_folder: "scan folder", preview_file: "new-saved-capture.ply", preview_kind: "single" });
@@ -314,20 +310,17 @@ assert.ok(viewerCameraUpdates.includes(savedReloadCamera),
 assert.equal(viewerLoads[mapAlignedStart + 1].options.reset, false,
   "first marker alignment does not replace the restored user camera");
 const mapAlignedGeometries = [viewerLoads[mapAlignedStart + 1].geometry, viewerLoads[mapAlignedStart + 2].geometry];
-const nonMarkerCentroid = geometry => {
-  const markers = new Set(geometry.points);
-  const centroid = [0, 0, 0];
-  let pointCount = 0;
-  for (let point = geometry.pointCloudVertexRange[0]; point < geometry.pointCloudVertexRange[1]; point += 1) {
-    if (markers.has(point)) continue;
-    for (let axis = 0; axis < 3; axis += 1) centroid[axis] += geometry.positions[point * 3 + axis];
-    pointCount += 1;
-  }
-  return centroid.map(value => value / pointCount);
-};
-const alignedObjectCentroids = mapAlignedGeometries.map(nonMarkerCentroid);
-assert.ok(Math.hypot(...alignedObjectCentroids[0].map((value, axis) => value - alignedObjectCentroids[1][axis])) < 1,
-  "re-registering each frame against the table map keeps points fixed in table coordinates as image-space markers move");
+const mappedMarkerCoordinates = mapAlignedGeometries.map(geometry => {
+  const layer = geometry.pointLayers.find(item => item.style.color === "#d4f6ff");
+  const matchedLayer = geometry.pointLayers.find(item => item.style.color === "#00d8ff");
+  assert.equal(layer.points.length, centers.length);
+  assert.equal(matchedLayer.points.length, centers.length);
+  assert.equal(geometry.pointLayers.some(item => item.style.color === "#ff9d54"), false,
+    "an empty tabletop contains no live surface cloud");
+  return [...matchedLayer.points].map(index => [...geometry.positions.slice(index * 3, index * 3 + 3)]);
+});
+assert.deepEqual(mappedMarkerCoordinates[0], mappedMarkerCoordinates[1],
+  "mapped marker highlights stay at exact table-map coordinates as image-space detections move");
 assert.match(mapAlignmentOutput.textContent, /Карта \d+\/5/,
   "the live preview reports its current table-map correspondence quality");
 await waitUntil(() => liveFrameSequence >= 3);
@@ -337,24 +330,29 @@ assert.equal(viewerLoads.length, mapAlignedStart + 3,
 assert.match(mapAlignmentOutput.textContent, /последний кадр/,
   "the map status explains when the preview is retaining its last aligned frame");
 const lastAlignedGeometry = viewerLoads.at(-1).geometry;
-const cloudVertex = lastAlignedGeometry.pointLayers[0].points[0];
-const mapVertex = lastAlignedGeometry.pointLayers[1].points[0];
-const cloudBeforeDisplayRotation = [...lastAlignedGeometry.positions.slice(cloudVertex * 3, cloudVertex * 3 + 3)];
-const mapBeforeDisplayRotation = [...lastAlignedGeometry.positions.slice(mapVertex * 3, mapVertex * 3 + 3)];
+const lastMapLayer = lastAlignedGeometry.pointLayers.find(layer => layer.style.color === "#d4f6ff");
+const lastMatchedLayer = lastAlignedGeometry.pointLayers.find(layer => layer.style.color === "#00d8ff");
+const mapBeforeDisplayRotation = [...lastAlignedGeometry.positions.slice(lastMapLayer.points[0] * 3,
+  lastMapLayer.points[0] * 3 + 3)];
+const matchedBeforeDisplayRotation = [...lastAlignedGeometry.positions.slice(lastMatchedLayer.points[0] * 3,
+  lastMatchedLayer.points[0] * 3 + 3)];
 const beforeDisplayRotationLoads = viewerLoads.length;
 turntableAngleDisplay.textContent = "15.0°";
 await waitUntil(() => viewerLoads.length > beforeDisplayRotationLoads);
 const rotatedGeometry = viewerLoads.at(-1).geometry;
-const rotatedCloudVertex = rotatedGeometry.pointLayers[0].points[0];
-const rotatedMapVertex = rotatedGeometry.pointLayers[1].points[0];
-const rotatedCloud = [...rotatedGeometry.positions.slice(rotatedCloudVertex * 3, rotatedCloudVertex * 3 + 3)];
-const rotatedMap = [...rotatedGeometry.positions.slice(rotatedMapVertex * 3, rotatedMapVertex * 3 + 3)];
+const rotatedMapLayer = rotatedGeometry.pointLayers.find(layer => layer.style.color === "#d4f6ff");
+const rotatedMatchedLayer = rotatedGeometry.pointLayers.find(layer => layer.style.color === "#00d8ff");
+const rotatedMap = [...rotatedGeometry.positions.slice(rotatedMapLayer.points[0] * 3,
+  rotatedMapLayer.points[0] * 3 + 3)];
+const rotatedMatched = [...rotatedGeometry.positions.slice(rotatedMatchedLayer.points[0] * 3,
+  rotatedMatchedLayer.points[0] * 3 + 3)];
 assert.deepEqual([...rotatedGeometry.positions.slice(0, 3)],
   [...lastAlignedGeometry.positions.slice(0, 3)], "the circular lower support stays fixed while the tabletop moves");
-for (const [actual, before] of [[rotatedCloud, cloudBeforeDisplayRotation], [rotatedMap, mapBeforeDisplayRotation]]) {
+for (const [actual, before] of [[rotatedMap, mapBeforeDisplayRotation],
+  [rotatedMatched, matchedBeforeDisplayRotation]]) {
   const expected = sandbox.window.CadyxScanView.transformTableDisplayPoint(before, 15, 0);
   assert.ok(Math.hypot(...actual.map((value, axis) => value - expected[axis])) < 1e-4,
-    "the marker-aligned cloud and existing marker map rotate together for display");
+    "the confirmed map markers rotate together with the table display");
 }
 mapAlignedView.closeLivePreview();
 
@@ -376,19 +374,8 @@ liveRawFrameSource = [
   new Uint8Array(640 * 400 * 2),
   new Uint8Array(640 * 400 * 2),
 ];
-const countValidFramePoints = frame => {
-  const view = new DataView(frame.buffer);
-  let count = 0;
-  for (let pixel = 0; pixel < 640 * 400; pixel += 1) {
-    if (sandbox.window.CadyxScanView.isScanDepthValid(view.getUint16(pixel * 2, true))) count += 1;
-  }
-  return count;
-};
 const displayedLiveCloudCount = geometry => Number.isInteger(geometry.pointCloudVertexCount)
-  && geometry.pointCloudVertexCount > 0 ? geometry.pointCloudVertexCount
-  : geometry.pointLayers?.[0]?.points?.length ?? geometry.pointCloudVertexCount;
-const unalignedExpectedPointCount = countValidFramePoints(liveRawFrameSource[0]);
-const secondUnalignedExpectedPointCount = countValidFramePoints(liveRawFrameSource[1]);
+  ? geometry.pointCloudVertexCount : geometry.pointLayers?.find(layer => layer.style.color === "#ff9d54")?.points.length ?? 0;
 liveFrameSequence = 0;
 const unalignedButton = element();
 const unalignedView = sandbox.window.CadyxScanView.initialize({
@@ -404,14 +391,16 @@ unalignedView.showLivePreview({ open: true });
 await waitUntil(() => viewerLoads.length >= unalignedStart + 3);
 const firstUnaligned = viewerLoads[unalignedStart + 1].geometry;
 const secondUnaligned = viewerLoads[unalignedStart + 2].geometry;
-assert.equal(displayedLiveCloudCount(firstUnaligned), unalignedExpectedPointCount,
-  "sparse depth frames render every valid return, including pixels outside the old preview lattice");
+assert.equal(displayedLiveCloudCount(firstUnaligned), 0,
+  "unmatched marker candidates are hidden until they can be placed on the table map");
+assert.equal(firstUnaligned.pointLayers.find(layer => layer.style.color === "#d4f6ff").points.length, centers.length,
+  "the saved marker map remains visible while live detections wait for enough correspondences");
 assert.deepEqual([...secondUnaligned.orbitCenter], [...firstUnaligned.orbitCenter],
   "unregistered live frames retain the first valid frame camera center");
 assert.equal(secondUnaligned.fitRadius, firstUnaligned.fitRadius,
   "unregistered live frames retain the first valid frame camera scale");
-assert.notDeepEqual([...secondUnaligned.bounds.min], [...firstUnaligned.bounds.min],
-  "the stability assertion covers frames whose cloud bounds actually move");
+assert.deepEqual([...secondUnaligned.bounds.min], [...firstUnaligned.bounds.min],
+  "unmatched detections cannot move the mapped table or marker display");
 await waitUntil(() => liveFrameSequence >= 4);
 await new Promise(resolve => setTimeout(resolve, 20));
 assert.equal(viewerLoads.length, unalignedStart + 3,
@@ -431,8 +420,10 @@ const movingStart = viewerLoads.length;
 movingView.showLivePreview({ open: true });
 await waitUntil(() => viewerLoads.length >= movingStart + 3);
 const movingSecondGeometry = viewerLoads[movingStart + 2].geometry;
-assert.equal(displayedLiveCloudCount(movingSecondGeometry), countValidFramePoints(liveRawFrameSource[1]),
-  "the latest valid moving frame replaces the previous point cloud without temporal blending");
+assert.equal(displayedLiveCloudCount(movingSecondGeometry), 0,
+  "live detections outside reliable map correspondences are not shown as table markers");
+assert.equal(movingSecondGeometry.pointLayers.some(layer => layer.style.color === "#00d8ff"), false,
+  "a moving unmatched set never paints false marker highlights");
 movingView.closeLivePreview();
 
 const denseFrame = new Uint8Array(640 * 400 * 2);
@@ -532,6 +523,9 @@ assert.match(html, /id="scanner-map-alignment"[^>]*aria-label="Сопостав�
 assert.match(projectUiJs, /function projectPath\(projectId\)/);
 assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
 assert.match(projectUiJs, /let suffix = 2/);
+assert.match(projectUiJs,
+  /const addressView = new URLSearchParams\(window\.location\.search\)\.get\("view"\);\s*const workspaceView = restorableWorkspaceViews\.has\(addressView\) \? addressView[\s\S]*: primaryGrid\.dataset\.view;/,
+  "an explicit URL view wins over a temporary Overview while CADYX restores the selected project");
 assert.doesNotMatch(projectUiJs, /searchParams\.set\("project_id"/);
 assert.doesNotMatch(projectUiJs, /window\.location\.assign\(`\/\?project_id=/);
 assert.match(projectUiJs, /await navigateToWorkspaceProject\(result\.project\.id/);

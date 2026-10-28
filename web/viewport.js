@@ -545,6 +545,10 @@
             context.beginPath();
             context.arc(screenX[point], screenY[point], Math.max(2, size), 0, Math.PI * 2);
             context.stroke();
+          } else if (style.shape === "circle") {
+            context.beginPath();
+            context.arc(screenX[point], screenY[point], size / 2, 0, Math.PI * 2);
+            context.fill();
           } else {
             context.fillRect(screenX[point] - size / 2, screenY[point] - size / 2, size, size);
           }

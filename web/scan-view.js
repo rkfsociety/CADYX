@@ -1,5 +1,7 @@
 (() => {
   const LIVE_PREVIEW_POINT_LIMIT = 8_000;
+  const LIVE_TABLE_SURFACE_DISPLAY_HEIGHT = 2.5;
+  const LIVE_MIN_OBJECT_PREVIEW_POINTS = 3;
   const MIN_SCAN_DEPTH_MM = 100;
   const MAX_SCAN_DEPTH_MM = 250;
   const TURNTABLE_DIAMETER_MM = 200;
@@ -235,6 +237,22 @@
     const maxRadius = tableMap.points.reduce((maximum, point) => Math.max(maximum, Math.hypot(...point)), 0);
     return { positions: new Float32Array(positions), markerPoints: new Uint32Array(markerPoints),
       lines: new Uint32Array(lines), maxRadius };
+  };
+
+  const buildPreviewCloudPointIndices = (count, pointStep, markerIndices = [], hideMarkers = false) => {
+    const hiddenMarkers = hideMarkers ? new Set(markerIndices) : null;
+    const indices = [];
+    for (let index = 0; index < count; index += pointStep) {
+      if (!hiddenMarkers?.has(index)) indices.push(index);
+    }
+    return Uint32Array.from(indices);
+  };
+
+  const buildMatchedMapMarkerPointIndices = (overlay, matchedMapIndices = []) => {
+    if (!overlay?.markerPoints) return new Uint32Array(0);
+    return Uint32Array.from(matchedMapIndices.flatMap(index =>
+      Number.isInteger(index) && index >= 0 && index < overlay.markerPoints.length
+        ? [overlay.markerPoints[index]] : []));
   };
 
   const mutualMarkerMatches = (source, target, transform, threshold) => {
@@ -731,6 +749,7 @@
         let tableZ = (frame.zAxis[0] * relativeX + frame.zAxis[1] * relativeY + frame.zAxis[2] * relativeZ) * mapTransform.scale;
         if (tableZ < -2.5) continue;
         if (tableZ < 0) tableZ = 0;
+        if (tableZ <= LIVE_TABLE_SURFACE_DISPLAY_HEIGHT) continue;
         const x = mapTransform.a * tableX + mapTransform.b * tableY + mapTransform.tx;
         const y = mapTransform.c * tableX + mapTransform.d * tableY + mapTransform.ty;
         positions[accepted * 3] = x;
@@ -742,7 +761,7 @@
         bounds.max[0] = Math.max(bounds.max[0], x);
         bounds.max[1] = Math.max(bounds.max[1], y);
         bounds.max[2] = Math.max(bounds.max[2], tableZ);
-        if (markerFlags[index / 3] && tableZ <= 2.5) markerIndices.push(accepted);
+        if (markerFlags[index / 3]) markerIndices.push(accepted);
         accepted += 1;
       }
       return { bounds, markerIndices, count: accepted };
@@ -789,18 +808,22 @@
         || Math.abs(pose.angle - lastRenderedTurntableDisplayPose.angle) > 0.1
         || Math.abs(pose.tilt - lastRenderedTurntableDisplayPose.tilt) > 0.1;
     };
-    const renderTurntableScene = ({ positions = null, count = 0, markerIndices = [], aligned = false,
-      reset = false }) => {
+    const renderTurntableScene = ({ positions = null, count = 0, markerIndices = [], matchedMapIndices = [],
+      aligned = false, reset = false }) => {
       const pose = currentTurntableDisplayPose();
       const pointStep = positions ? Math.max(1, Math.ceil(count / LIVE_PREVIEW_POINT_LIMIT)) : 1;
-      const cloudPointCount = positions ? Math.ceil(count / pointStep) : 0;
+      const overlay = liveTableOverlay;
+      const cloudPointIndices = positions
+        ? buildPreviewCloudPointIndices(count, pointStep, markerIndices, Boolean(overlay)) : new Uint32Array(0);
+      const cloudPointCount = cloudPointIndices.length;
       let extraMarkerCount = 0;
-      for (const index of markerIndices) if (index % pointStep !== 0) extraMarkerCount += 1;
+      if (!overlay) {
+        for (const index of markerIndices) if (index % pointStep !== 0) extraMarkerCount += 1;
+      }
       const cloudVertexCount = cloudPointCount + extraMarkerCount;
       const fixed = turntableDisplayModel.fixed;
       const moving = transformTableDisplayPositions(
         turntableDisplayModel.moving.positions, pose.angle, pose.tilt);
-      const overlay = liveTableOverlay;
       const overlayPositions = overlay
         ? transformTableDisplayPositions(overlay.positions, pose.angle, pose.tilt) : new Float32Array(0);
       const fixedVertexCount = fixed.positions.length / 3;
@@ -811,7 +834,7 @@
       combinedPositions.set(fixed.positions);
       let output = fixed.positions.length;
       const firstCloudVertex = fixedVertexCount;
-      for (let index = 0; positions && index < count; index += pointStep) {
+      for (const index of cloudPointIndices) {
         const point = [positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]];
         const transformed = aligned
           ? transformTableDisplayPoint(point, pose.angle, pose.tilt) : point;
@@ -819,9 +842,9 @@
         combinedPositions[output++] = transformed[1];
         combinedPositions[output++] = transformed[2];
       }
-      const previewMarkerPoints = new Uint32Array(markerIndices.length);
+      const previewMarkerPoints = new Uint32Array(overlay ? 0 : markerIndices.length);
       let extraMarkerIndex = cloudPointCount;
-      for (let markerIndex = 0; markerIndex < markerIndices.length; markerIndex += 1) {
+      for (let markerIndex = 0; !overlay && markerIndex < markerIndices.length; markerIndex += 1) {
         const index = markerIndices[markerIndex];
         if (index % pointStep === 0) previewMarkerPoints[markerIndex] = firstCloudVertex + index / pointStep;
         else {
@@ -846,10 +869,12 @@
       triangleColors.set(turntableDisplayModel.moving.triangleColors, fixed.triangleColors.length);
       const mapMarkerPoints = overlay
         ? Uint32Array.from(overlay.markerPoints, index => index + overlayOffset) : new Uint32Array(0);
+      const matchedMapMarkerPoints = overlay
+        ? Uint32Array.from(buildMatchedMapMarkerPointIndices(overlay, matchedMapIndices), index => index + overlayOffset)
+        : new Uint32Array(0);
       const trajectoryLines = overlay
         ? Uint32Array.from(overlay.lines, index => index + overlayOffset) : new Uint32Array(0);
-      const cloudPoints = new Uint32Array(cloudPointCount);
-      for (let index = 0; index < cloudPoints.length; index += 1) cloudPoints[index] = firstCloudVertex + index;
+      const cloudPoints = Uint32Array.from({ length: cloudPointCount }, (_, index) => firstCloudVertex + index);
       const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
       for (let index = 0; index < combinedPositions.length; index += 3) {
         for (let axis = 0; axis < 3; axis += 1) {
@@ -861,7 +886,9 @@
       if (cloudPoints.length) pointLayers.push({ points: cloudPoints,
         style: { size: 1.25, opacity: 0.78, color: '#ff9d54' } });
       if (overlay) pointLayers.push({ points: mapMarkerPoints,
-        style: { size: 2.6, opacity: 0.95, color: '#a5e9ff' } });
+        style: { size: 6, opacity: 1, color: '#d4f6ff', shape: 'circle' } });
+      if (matchedMapMarkerPoints.length) pointLayers.push({ points: matchedMapMarkerPoints,
+        style: { size: 12, opacity: 1, color: '#00d8ff', shape: 'circle' } });
       viewer.load({ positions: combinedPositions, triangles, triangleColors,
         lines: trajectoryLines, pointCloudVertexCount: cloudPointCount,
         pointPreviewLimit: LIVE_PREVIEW_POINT_LIMIT,
@@ -1181,6 +1208,7 @@
                 const hadTableAlignment = Boolean(liveTableFrame && liveMapTransform);
                 let tableAligned = false;
                 let resetAfterAlignment = false;
+                let matchedMapIndices = [];
                 const priorMarkerMatches = trackTableMarkerMatches(markerCenterPixelPositions, frameSequence);
                 const canRegisterFromTracks = hadTableAlignment && priorMarkerMatches.length >= 4;
                 const canInitializeMap = regions >= 4;
@@ -1204,6 +1232,7 @@
                     liveMarkerTracks = mapTransform.matches.map(match => ({
                       pixel: markerCenterPixelPositions[match.sourceIndex], mapIndex: match.targetIndex,
                     }));
+                    matchedMapIndices = mapTransform.matches.map(match => match.targetIndex);
                     liveMarkerTrackSequence = frameSequence;
                     tableAligned = true;
                     resetAfterAlignment = !hadTableAlignment && liveViewportInitialized && !liveCameraRestored;
@@ -1241,16 +1270,19 @@
                   tablePositions.set(positions.subarray(0, count * 3));
                   const transformed = transformLiveToTableFrame(tablePositions.subarray(0, count * 3), liveTableFrame,
                     liveMapTransform, markerFlags);
-                  if (transformed.count >= 3) {
-                    count = transformed.count;
+                  if (transformed.count >= LIVE_MIN_OBJECT_PREVIEW_POINTS || liveTableMap?.points?.length >= 4) {
+                    count = transformed.count >= LIVE_MIN_OBJECT_PREVIEW_POINTS ? transformed.count : 0;
                     bounds = transformed.bounds;
-                    markerIndices = transformed.markerIndices;
+                    markerIndices = count ? transformed.markerIndices : [];
                     displayPositions = tablePositions;
                     liveFitRadius ||= turntableDisplayModel.fitRadius;
                     orbitCenter = [0, 0, 0];
                     fitRadius = liveFitRadius;
                     lastMapAlignedFrame = { positions: new Float32Array(tablePositions.subarray(0, count * 3)),
-                      count, markerIndices: [...markerIndices], aligned: true };
+                      count, markerIndices: [...markerIndices], matchedMapIndices: [...matchedMapIndices], aligned: true };
+                    if (count === 0) {
+                      setMapAlignmentStatus(`${liveMapAlignmentSummary} · только маркеры карты`, 'aligned');
+                    }
                   } else {
                     liveFrameSequence = frameSequence;
                     cloudButton.title = 'В текущем кадре нет надёжных точек над плоскостью стола; сохраняется последний выровненный кадр.';
@@ -1283,7 +1315,8 @@
                 }
                 const processMs = Math.max(0, clock() - processStartedAt);
                 const renderStartedAt = clock();
-                renderLiveFrame({ positions: displayPositions, count, bounds, markerIndices, aligned: tableAligned,
+                renderLiveFrame({ positions: displayPositions, count, bounds, markerIndices, matchedMapIndices,
+                  aligned: tableAligned,
                   orbitCenter, fitRadius, reset: resetAfterAlignment });
                 const renderMs = Math.max(0, clock() - renderStartedAt);
                 const now = clock();
@@ -1537,5 +1570,5 @@
 
   window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers,
     shouldRunTableMapRansac, buildTurntableDisplayModel, transformTableDisplayPoint,
-    livePreviewSampleIndex, isScanDepthValid };
+    livePreviewSampleIndex, isScanDepthValid, buildPreviewCloudPointIndices, buildMatchedMapMarkerPointIndices };
 })();

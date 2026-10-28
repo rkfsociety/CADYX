@@ -66,6 +66,7 @@ const plyViewer = window.CadyxViewport.createViewer(folderPreviewCanvas);
 const modelViewer = window.CadyxViewport.createViewer($("#model-preview"), {
   showViewCube: true, wireframe: true, onRender: queueViewportSnapshot,
 });
+const restorableWorkspaceViews = new Set(["overview", "geometry", "analysis", "manufacturing", "scanning", "activity", "files", "projects"]);
 const reloadCameraStorageKey = `cadyx:ui-update-camera:${window.location.pathname}`;
 try {
   const savedCamera = sessionStorage.getItem(reloadCameraStorageKey);
@@ -74,8 +75,7 @@ try {
     window.cadyxUiReloadCamera = savedState.camera || savedState;
     window.cadyxUiReloadCameraAppliedToModel = false;
     window.cadyxUiReloadCameraPreset = savedState.cameraPreset;
-    const restorableViews = new Set(["overview", "geometry", "analysis", "manufacturing", "activity", "files", "projects"]);
-    if (restorableViews.has(savedState.workspaceView)) {
+    if (restorableWorkspaceViews.has(savedState.workspaceView)) {
       const address = new URL(window.location.href);
       if (savedState.workspaceView === "overview") address.searchParams.delete("view");
       else address.searchParams.set("view", savedState.workspaceView);
@@ -303,10 +303,14 @@ function reloadForUiAssetChange() {
 
 function persistViewportState() {
   try {
+    const addressView = new URLSearchParams(window.location.search).get("view");
+    const workspaceView = restorableWorkspaceViews.has(addressView) ? addressView
+      : restorableProjectViews.has(pendingInitialWorkspaceView) ? pendingInitialWorkspaceView
+        : primaryGrid.dataset.view;
     sessionStorage.setItem(reloadCameraStorageKey, JSON.stringify({
       camera: modelViewer.getCamera(),
       cameraPreset: cameraPresetButtons.find((button) => button.getAttribute("aria-pressed") === "true")?.dataset.cameraPreset || null,
-      workspaceView: primaryGrid.dataset.view,
+      workspaceView,
     }));
   }
   catch { /* Current session state remains usable when browser storage is unavailable. */ }
