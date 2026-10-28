@@ -14,6 +14,7 @@
     const status = document.querySelector('#turntable-control-status');
     const spinButton = document.querySelector('#turntable-spin');
     const scanButton = document.querySelector('#viewport-scan-360');
+    const scanButtonTitle = scanButton?.title || '';
     let scanActive = false;
     let spinState = 'idle';
     let tiltAtZero = false;
@@ -25,45 +26,69 @@
       profile_id: window.CadyxDeviceSettings?.turntableProfileId?.() || undefined,
     });
     const setStatus = (message, state = 'idle') => {
-      status.textContent = message;
-      status.dataset.state = state;
+      if (status.textContent !== message) status.textContent = message;
+      if (status.dataset.state !== state) status.dataset.state = state;
     };
+    const spinActive = () => spinState === 'starting' || spinState === 'running' || spinState === 'stopping';
     const setBusy = () => {
-      const spinning = spinState === 'running' || spinState === 'stopping';
+      const spinning = spinActive();
       for (const selector of ['#turntable-control-refresh', '#turntable-step', '#turntable-speed',
         '#turntable-rotate-left', '#turntable-rotate-right', '#turntable-tilt-target',
         '#turntable-tilt-apply', '#turntable-zero', '#turntable-spin']) {
         const control = panel.querySelector(selector);
-        if (control) control.disabled = pending || scanActive || spinning && control !== spinButton;
+        if (control) {
+          const disabled = pending || scanActive || spinning && control !== spinButton;
+          if (control.disabled !== disabled) control.disabled = disabled;
+        }
       }
-      panel.querySelector('#turntable-stop').disabled = pending;
-      spinButton.disabled = pending || scanActive && !spinning || !spinning && !tiltAtZero;
-      spinButton.setAttribute('aria-pressed', String(spinning));
-      spinButton.textContent = spinState === 'stopping' ? 'ОСТАНОВКА…'
-        : spinning ? '■ ОСТАНОВИТЬ ВРАЩЕНИЕ' : '▶ ПОСТОЯННОЕ ВРАЩЕНИЕ';
+      const stopButton = panel.querySelector('#turntable-stop');
+      if (stopButton.disabled !== pending) stopButton.disabled = pending;
+      const spinDisabled = pending || scanActive && !spinning || !spinning && !tiltAtZero;
+      if (spinButton.disabled !== spinDisabled) spinButton.disabled = spinDisabled;
+      if (spinButton.getAttribute('aria-pressed') !== String(spinning)) {
+        spinButton.setAttribute('aria-pressed', String(spinning));
+      }
+      const spinLabel = spinState === 'starting' ? 'ПОДКЛЮЧЕНИЕ…'
+        : spinState === 'stopping' ? 'ОСТАНОВКА…'
+          : spinning ? '■ ОСТАНОВИТЬ ВРАЩЕНИЕ' : '▶ ПОСТОЯННОЕ ВРАЩЕНИЕ';
+      if (spinButton.textContent !== spinLabel) spinButton.textContent = spinLabel;
       if (scanButton) {
-        scanButton.dataset.turntableBusy = String(spinning);
-        scanButton.dataset.captureLocked = String(scanButton.dataset.livePreviewLock === 'true' || spinning
+        const busyValue = String(spinning);
+        if (scanButton.dataset.turntableBusy !== busyValue) scanButton.dataset.turntableBusy = busyValue;
+        const captureLocked = String(scanButton.dataset.livePreviewLock === 'true' || spinning
           || scanButton.dataset.scanCaptureBusy === 'true' || scanButton.dataset.scanCapturePending === 'true');
-        scanButton.setAttribute('aria-disabled', scanButton.dataset.captureLocked);
-        if (spinning) scanButton.title = 'Остановите постоянное вращение перед 360°-сканированием';
-        window.cadyxSyncCaptureButton?.();
+        const lockChanged = scanButton.dataset.captureLocked !== captureLocked
+          || scanButton.getAttribute('aria-disabled') !== captureLocked;
+        if (scanButton.dataset.captureLocked !== captureLocked) scanButton.dataset.captureLocked = captureLocked;
+        if (scanButton.getAttribute('aria-disabled') !== captureLocked) {
+          scanButton.setAttribute('aria-disabled', captureLocked);
+        }
+        const captureTitle = spinning ? 'Остановите постоянное вращение перед 360°-сканированием' : scanButtonTitle;
+        if (scanButton.title !== captureTitle) scanButton.title = captureTitle;
+        if (lockChanged) window.cadyxSyncCaptureButton?.();
       }
     };
     const readPosition = position => {
       if (!position) return;
-      if (Number.isFinite(position.angle_degrees)) angle.textContent = finiteAngle(position.angle_degrees);
+      if (Number.isFinite(position.angle_degrees)) {
+        const nextAngle = finiteAngle(position.angle_degrees);
+        if (angle.textContent !== nextAngle) angle.textContent = nextAngle;
+      }
       if (Number.isFinite(position.tilt_degrees)) {
         tiltAtZero = Math.abs(position.tilt_degrees) <= 0.5;
-        tilt.textContent = finiteAngle(position.tilt_degrees);
-        tiltTarget.value = String(Math.max(-10, Math.min(10, Math.round(position.tilt_degrees))));
-        tiltTargetValue.textContent = `${tiltTarget.value}°`;
+        const nextTilt = finiteAngle(position.tilt_degrees);
+        if (tilt.textContent !== nextTilt) tilt.textContent = nextTilt;
+        const nextTarget = String(Math.max(-10, Math.min(10, Math.round(position.tilt_degrees))));
+        if (tiltTarget.value !== nextTarget) tiltTarget.value = nextTarget;
+        const nextTargetLabel = `${nextTarget}°`;
+        if (tiltTargetValue.textContent !== nextTargetLabel) tiltTargetValue.textContent = nextTargetLabel;
       }
       if (Number.isFinite(position.rotation_period_seconds)) {
         const presets = [18, 30, 45, 60, 90];
-        speed.value = String(presets.reduce((nearest, preset) =>
+        const nextSpeed = String(presets.reduce((nearest, preset) =>
           Math.abs(preset - position.rotation_period_seconds) < Math.abs(nearest - position.rotation_period_seconds)
             ? preset : nearest, presets[0]));
+        if (speed.value !== nextSpeed) speed.value = nextSpeed;
       }
     };
     const fetchJson = async (url, options) => {
@@ -92,6 +117,7 @@
         readPosition(control.spin);
         readPosition(control.position);
         if (scanActive) setStatus('Сканирование активно · управление заблокировано', 'error');
+        else if (spinState === 'starting') setStatus(control.spin?.message || 'Подключаюсь к столу…', 'running');
         else if (spinState === 'running') setStatus('Стол вращается · нажмите «Стоп»', 'running');
         else if (spinState === 'stopping') setStatus('Остановка вращения…', 'running');
         else if (spinState === 'failed') setStatus(control.spin.message || 'Драйвер остановил вращение с ошибкой.', 'error');
@@ -106,7 +132,8 @@
         const liveScanning = document.querySelector('.primary-grid')?.dataset.view === 'scanning'
           && document.querySelector('#viewport-live-camera')?.checked;
         pollTimer = setTimeout(() => void refresh({ quiet: true }),
-          spinState === 'running' || spinState === 'stopping' ? 1500 : liveScanning ? 3000 : 15000);
+          spinState === 'starting' ? 600 : spinState === 'running' || spinState === 'stopping'
+            ? 1500 : liveScanning ? 3000 : 15000);
       }
     };
     const command = async (action, value) => {
@@ -132,9 +159,10 @@
           }
         }
         readPosition(result);
-        if (action === 'spin-start') spinState = result.state === 'running' ? 'running' : result.state;
+        if (action === 'spin-start') spinState = result.state || 'failed';
         if (action === 'spin-stop') spinState = result.state || 'idle';
-        if (action === 'spin-start' && spinState === 'running') setStatus('Стол вращается · нажмите «Стоп»', 'running');
+        if (action === 'spin-start' && spinState === 'starting') setStatus('Подключаюсь к столу…', 'running');
+        else if (action === 'spin-start' && spinState === 'running') setStatus('Стол вращается · нажмите «Стоп»', 'running');
         else if (action === 'spin-stop' && spinState === 'stopping') setStatus('Остановка вращения…', 'running');
         else if (action === 'spin-stop') setStatus('Вращение остановлено');
         else if (result.command === 'query') setStatus('Стол подключён');
@@ -161,10 +189,10 @@
     panel.querySelector('#turntable-tilt-apply').addEventListener('click', () => void command('tilt', Number(tiltTarget.value)));
     panel.querySelector('#turntable-zero').addEventListener('click', () => void command('zero'));
     panel.querySelector('#turntable-stop').addEventListener('click', () => {
-      void command(spinState === 'running' || spinState === 'stopping' ? 'spin-stop' : 'stop');
+      void command(spinActive() ? 'spin-stop' : 'stop');
     });
     spinButton.addEventListener('click', () => {
-      void command(spinState === 'running' || spinState === 'stopping' ? 'spin-stop' : 'spin-start');
+      void command(spinActive() ? 'spin-stop' : 'spin-start');
     });
     void refresh();
   };

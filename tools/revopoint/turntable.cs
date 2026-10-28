@@ -24,6 +24,7 @@ internal static class Program
     private const double MinRotationPeriodSeconds = 18.0;
     private const double MaxRotationPeriodSeconds = 90.0;
     private const double TiltSetpointToleranceDegrees = 1.0;
+    private static readonly TimeSpan GattOperationTimeout = TimeSpan.FromSeconds(5);
 
     private sealed class Connection : IDisposable
     {
@@ -866,14 +867,16 @@ internal static class Program
             BluetoothLEDevice device = null;
             try
             {
-                device = await BluetoothLEDevice.FromBluetoothAddressAsync(address);
+                device = await AwaitGattOperationAsync(
+                    BluetoothLEDevice.FromBluetoothAddressAsync(address), "device connection");
                 if (device == null || !String.Equals(device.Name, expectedName, StringComparison.Ordinal))
                 {
                     if (device != null) device.Dispose();
                     continue;
                 }
 
-                var serviceResult = await device.GetGattServicesForUuidAsync(serviceUuid, BluetoothCacheMode.Uncached);
+                var serviceResult = await AwaitGattOperationAsync(
+                    device.GetGattServicesForUuidAsync(serviceUuid, BluetoothCacheMode.Uncached), "service discovery");
                 if (serviceResult.Status != GattCommunicationStatus.Success || serviceResult.Services.Count != 1)
                 {
                     foreach (var unmatchedService in serviceResult.Services) unmatchedService.Dispose();
@@ -882,7 +885,8 @@ internal static class Program
                 }
 
                 GattDeviceService service = serviceResult.Services[0];
-                var characteristicResult = await service.GetCharacteristicsForUuidAsync(characteristicUuid, BluetoothCacheMode.Uncached);
+                var characteristicResult = await AwaitGattOperationAsync(
+                    service.GetCharacteristicsForUuidAsync(characteristicUuid, BluetoothCacheMode.Uncached), "characteristic discovery");
                 if (characteristicResult.Status != GattCommunicationStatus.Success || characteristicResult.Characteristics.Count != 1)
                 {
                     service.Dispose();
@@ -915,13 +919,27 @@ internal static class Program
     {
         connection.Handler = (sender, eventArgs) => connection.Responses.Enqueue(ReadAscii(eventArgs.CharacteristicValue));
         connection.Characteristic.ValueChanged += connection.Handler;
-        var status = await connection.Characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-            GattClientCharacteristicConfigurationDescriptorValue.Notify);
+        var status = await AwaitGattOperationAsync(connection.Characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
+            GattClientCharacteristicConfigurationDescriptorValue.Notify), "notification setup");
         if (status != GattCommunicationStatus.Success)
         {
             throw new InvalidOperationException("Could not enable turntable status notifications: " + status);
         }
         connection.NotificationsEnabled = true;
+    }
+
+    private static async Task<T> AwaitGattOperationAsync<T>(IAsyncOperation<T> operation, string description)
+    {
+        Task<T> task = operation.AsTask();
+        if (await Task.WhenAny(task, Task.Delay(GattOperationTimeout)) != task)
+        {
+            try { operation.Cancel(); } catch { }
+            GC.KeepAlive(task.ContinueWith(completed => { var ignored = completed.Exception; },
+                TaskContinuationOptions.OnlyOnFaulted));
+            throw new TimeoutException("Turntable BLE " + description + " timed out after "
+                + GattOperationTimeout.TotalSeconds.ToString("F0", CultureInfo.InvariantCulture) + " seconds.");
+        }
+        return await task;
     }
 
     private static async Task<string> SendAndReadAsync(Connection connection, string command)
@@ -935,7 +953,8 @@ internal static class Program
             (connection.Characteristic.CharacteristicProperties & GattCharacteristicProperties.WriteWithoutResponse) != 0
                 ? GattWriteOption.WriteWithoutResponse
                 : GattWriteOption.WriteWithResponse;
-        var writeStatus = await connection.Characteristic.WriteValueAsync(writer.DetachBuffer(), option);
+        var writeStatus = await AwaitGattOperationAsync(
+            connection.Characteristic.WriteValueAsync(writer.DetachBuffer(), option), "command write");
         if (writeStatus != GattCommunicationStatus.Success)
         {
             throw new InvalidOperationException("BLE write failed for " + command + ": " + writeStatus);
@@ -947,7 +966,8 @@ internal static class Program
         while (connection.Responses.TryDequeue(out response)) last = response;
         if (last != null) return last;
 
-        var read = await connection.Characteristic.ReadValueAsync(BluetoothCacheMode.Uncached);
+        var read = await AwaitGattOperationAsync(
+            connection.Characteristic.ReadValueAsync(BluetoothCacheMode.Uncached), "command response read");
         if (read.Status != GattCommunicationStatus.Success)
         {
             throw new InvalidOperationException("No BLE notification and readback failed for " + command + ".");

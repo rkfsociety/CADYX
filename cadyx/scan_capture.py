@@ -112,7 +112,9 @@ class _TurntableSpinJob:
     heartbeat_path: Path
     log_path: Path
     device_id: str
+    profile_id: str
     started_at: str
+    started_monotonic: float
 
 
 class Scan360CaptureController:
@@ -266,7 +268,7 @@ class Scan360CaptureController:
                     raise ValidationError(f"The turntable could not be started: {exc}.") from exc
                 log_stream.close()
                 self._turntable_spin = _TurntableSpinJob(process, stop_path, heartbeat_path, log_path, address,
-                    datetime.now(timezone.utc).isoformat())
+                    profile["id"], datetime.now(timezone.utc).isoformat(), time.monotonic())
                 threading.Thread(target=self._maintain_turntable_spin_heartbeat,
                     args=(self._turntable_spin,), daemon=True, name="cadyx-turntable-heartbeat").start()
                 return self._turntable_spin_snapshot_locked()
@@ -402,31 +404,46 @@ class Scan360CaptureController:
         if job is None:
             return {"state": "idle"}
         return_code = job.process.poll()
-        if return_code is None:
-            snapshot: dict[str, Any] = {"state": "stopping" if job.stop_path.exists() else "running",
-                                        "turntable_device_id": job.device_id, "started_at": job.started_at}
-            try:
-                lines = job.log_path.read_bytes()[-2048:].decode("utf-8", errors="replace").splitlines()
-                for line in reversed(lines):
-                    if line.startswith("CADYX_SPIN\t"):
-                        _, angle, tilt = line.split("\t")
-                        snapshot["angle_degrees"] = float(angle)
-                        snapshot["tilt_degrees"] = float(tilt)
-                        break
-            except (OSError, ValueError):
-                pass
-            return snapshot
         try:
             output = job.log_path.read_bytes()[-4096:].decode("utf-8", errors="replace").strip()
         except OSError:
             output = ""
+        spin_started = any(line.startswith("CADYX_SPIN\t") for line in output.splitlines())
+        if return_code is None:
+            if (not spin_started and not job.stop_path.exists()
+                    and time.monotonic() - job.started_monotonic >= 15):
+                try:
+                    with job.stop_path.open("xb"):
+                        pass
+                except FileExistsError:
+                    pass
+                except OSError:
+                    return {"state": "failed", "message": "The turntable startup timed out and its stop signal could not be written.",
+                            "turntable_device_id": job.device_id, "started_at": job.started_at}
+            state = "stopping" if job.stop_path.exists() else "running" if spin_started else "starting"
+            snapshot: dict[str, Any] = {"state": state,
+                                        "turntable_device_id": job.device_id, "started_at": job.started_at}
+            if spin_started:
+                for line in reversed(output.splitlines()):
+                    if line.startswith("CADYX_SPIN\t"):
+                        try:
+                            _, angle, tilt = line.split("\t")
+                            snapshot["angle_degrees"] = float(angle)
+                            snapshot["tilt_degrees"] = float(tilt)
+                        except ValueError:
+                            pass
+                        break
+            if state == "starting" and output:
+                snapshot["message"] = output.splitlines()[-1]
+            return snapshot
+        stop_requested = job.stop_path.exists()
         for path in (job.stop_path, job.heartbeat_path, job.log_path):
             try:
                 path.unlink()
             except FileNotFoundError:
                 pass
         self._turntable_spin = None
-        if return_code != 0:
+        if return_code != 0 or not spin_started and not stop_requested:
             return {"state": "failed", "return_code": return_code, "message": output}
         return {"state": "idle", "message": output}
 
@@ -445,7 +462,26 @@ class Scan360CaptureController:
             try:
                 job.process.wait(timeout=12)
             except subprocess.TimeoutExpired:
-                return self._turntable_spin_snapshot_locked()
+                job.process.terminate()
+                try:
+                    job.process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    job.process.kill()
+                    job.process.wait(timeout=2)
+                log_started = False
+                try:
+                    log_started = any(line.startswith("CADYX_SPIN\t") for line in
+                                      job.log_path.read_bytes()[-4096:].decode("utf-8", errors="replace").splitlines())
+                except OSError:
+                    pass
+                self._turntable_spin_snapshot_locked()
+                if not log_started:
+                    return {"state": "failed", "message": "The turntable driver did not confirm movement before it was stopped during startup.",
+                            "turntable_device_id": job.device_id, "profile_id": job.profile_id}
+                stop_result = self.turntable_control("stop", job.device_id, job.profile_id)
+                return {"state": "idle", "message": "The continuous-spin driver stopped responding; the table STOP command was sent.",
+                        "stop_result": stop_result, "turntable_device_id": job.device_id,
+                        "profile_id": job.profile_id}
         return self._turntable_spin_snapshot_locked()
 
     def save_scanner_calibration(self, scanner_device_id: str, q_matrix: bytes, depth_scale: float) -> dict[str, Any]:

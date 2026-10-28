@@ -15,11 +15,20 @@ assert.doesNotMatch(html, /\.primary-grid\[data-view="scanning"\] \.model-toolba
 
 const handlers = new Map();
 const calls = [];
-const makeElement = () => ({
-  dataset: {}, value: '', textContent: '', disabled: false, attributes: {},
-  addEventListener(name, handler) { handlers.set(`${this.id || ''}:${name}`, handler); },
-  setAttribute(name, value) { this.attributes[name] = value; },
-});
+const makeElement = () => {
+  let text = '';
+  return {
+    dataset: {}, value: '', disabled: false, attributes: {}, attributeWrites: {}, textWrites: 0,
+    get textContent() { return text; },
+    set textContent(value) { this.textWrites += 1; text = value; },
+    addEventListener(name, handler) { handlers.set(`${this.id || ''}:${name}`, handler); },
+    getAttribute(name) { return this.attributes[name] ?? null; },
+    setAttribute(name, value) {
+      this.attributeWrites[name] = (this.attributeWrites[name] || 0) + 1;
+      this.attributes[name] = value;
+    },
+  };
+};
 const ids = [
   'turntable-control-panel', 'turntable-angle', 'turntable-tilt', 'turntable-step', 'turntable-speed',
   'turntable-tilt-target', 'turntable-tilt-target-value', 'turntable-control-status', 'turntable-spin',
@@ -42,6 +51,7 @@ const panelSelectors = {
 elements['turntable-control-panel'].querySelector = selector => elements[panelSelectors[selector]];
 const document = { querySelector: selector => selector === '.primary-grid' ? elements['primary-grid'] : elements[selector.slice(1)] };
 const pollDelays = [];
+let currentSpinState = 'idle';
 const window = {
   CadyxDeviceSettings: {
     turntableDeviceId: () => '0123456789AB', turntableProfileId: () => 'revopoint-dual-axis-table',
@@ -52,14 +62,14 @@ const window = {
 const fetch = async (url, options = {}) => {
   calls.push({ url, options });
   if (!options.method) return { ok: true, async json() { return { control: {
-    spin: { state: 'idle', scan_active: false },
+    spin: { state: currentSpinState, scan_active: false },
     position: { command: 'query', angle_degrees: 12, tilt_degrees: 0, rotation_period_seconds: 17.5 },
   } }; } };
   const body = JSON.parse(options.body);
   let result = { state: 'completed', command: body.command, output: `${body.command} completed`,
     turntable_device_id: body.device_id, profile_id: body.profile_id };
-  if (body.command === 'spin-start') result.state = 'running';
-  if (body.command === 'spin-stop') result.state = 'stopping';
+  if (body.command === 'spin-start') { result.state = 'starting'; currentSpinState = 'starting'; }
+  if (body.command === 'spin-stop') { result.state = 'stopping'; currentSpinState = 'stopping'; }
   return { ok: true, async json() { return { result }; } };
 };
 const context = { window, document, fetch, URLSearchParams,
@@ -96,7 +106,20 @@ const waitUntil = async predicate => {
     JSON.parse(call.options.body).command === 'spin-start'));
   await waitUntil(() => elements['turntable-spin'].attributes['aria-pressed'] === 'true');
   assert.equal(elements['turntable-spin'].attributes['aria-pressed'], 'true');
+  assert.equal(elements['turntable-spin'].textContent, 'ПОДКЛЮЧЕНИЕ…',
+    'the control reports connection startup instead of claiming the table is already moving');
   assert.equal(elements['viewport-scan-360'].dataset.turntableBusy, 'true');
+  currentSpinState = 'running';
+  await handlers.get('turntable-control-refresh:click')();
+  await waitUntil(() => elements['turntable-spin'].textContent === '■ ОСТАНОВИТЬ ВРАЩЕНИЕ');
+  const spinTextWrites = elements['turntable-spin'].textWrites;
+  const spinPressedWrites = elements['turntable-spin'].attributeWrites['aria-pressed'];
+  await handlers.get('turntable-control-refresh:click')();
+  await wait();
+  assert.equal(elements['turntable-spin'].textWrites, spinTextWrites,
+    'polling an unchanged running state does not recreate the button label');
+  assert.equal(elements['turntable-spin'].attributeWrites['aria-pressed'], spinPressedWrites,
+    'polling an unchanged running state does not toggle its pressed attribute');
   await handlers.get('turntable-stop:click')();
   await waitUntil(() => calls.filter(call => call.options.method === 'POST').some(call =>
     JSON.parse(call.options.body).command === 'spin-stop'));

@@ -146,11 +146,63 @@ class Scan360CaptureTests(unittest.TestCase):
             spin_process = SpinProcess()
             with patch("cadyx.scan_capture.subprocess.Popen", return_value=spin_process) as start_spin:
                 started = controller.turntable_control("spin-start", "0123456789AB", profile_id)
-            self.assertEqual(started["state"], "running",
-                             "the live preview must not lock table movement")
+            self.assertEqual(started["state"], "starting",
+                             "a live process is not reported as spinning before driver telemetry confirms motion")
             self.assertEqual(start_spin.call_args.args[0][1], "continuous-spin")
+            log_path = workspace / ".revopoint-turntable-spin.log"
+            log_path.write_text("Connected to REVO_DUAL_AXIS_TABLE\n", encoding="utf-8")
+            starting = controller.turntable_control("spin-status")
+            self.assertEqual(starting["state"], "starting")
+            log_path.write_text("CADYX_SPIN\t12.5\t0.0\n", encoding="utf-8")
+            running = controller.turntable_control("spin-status")
+            self.assertEqual(running["state"], "running")
+            self.assertEqual(running["angle_degrees"], 12.5)
             self.assertFalse(controller.turntable_control("spin-status")["scan_active"])
             self.assertEqual(controller.turntable_control("spin-stop")["state"], "idle")
+
+    @unittest.skipUnless(os.name == "nt", "Turntable controller executable is Windows-only")
+    def test_unresponsive_spin_driver_is_fenced_and_explicit_stop_is_sent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            workspace.mkdir()
+            tool_root = root / "tools" / "revopoint"
+            build = tool_root / "build"
+            build.mkdir(parents=True)
+            (build / "TurntableController.exe").write_bytes(b"test executable placeholder")
+            profile_id = "revopoint-dual-axis-table"
+            (tool_root / "devices.json").write_text(json.dumps({"turntables": [{
+                "id": profile_id, "control_protocol": "revopoint-dual-axis-v1",
+                "gatt_name": "REVO_DUAL_AXIS_TABLE", "advertisement_uuid": "ffe1",
+                "service_uuid": "ffe0", "characteristic_uuid": "ffe1",
+            }]}), encoding="utf-8")
+            controller = Scan360CaptureController(root, workspace)
+            class StuckSpinProcess:
+                running = True
+
+                def poll(self):
+                    return None if self.running else 0
+
+                def wait(self, timeout):
+                    if self.running:
+                        raise subprocess.TimeoutExpired("TurntableController.exe", timeout)
+                    return 0
+
+                def terminate(self):
+                    self.running = False
+
+            spin_process = StuckSpinProcess()
+            stop_result = subprocess.CompletedProcess([], 0, b"Stop sent", b"")
+            with patch("cadyx.scan_capture.subprocess.Popen", return_value=spin_process), \
+                    patch("cadyx.scan_capture.subprocess.run", return_value=stop_result) as send_stop:
+                controller.turntable_control("spin-start", "0123456789AB", profile_id)
+                (workspace / ".revopoint-turntable-spin.log").write_text(
+                    "CADYX_SPIN\t15.0\t0.0\n", encoding="utf-8")
+                result = controller.turntable_control("spin-stop", "0123456789AB", profile_id)
+            self.assertEqual(result["state"], "idle")
+            self.assertEqual(result["stop_result"]["state"], "completed")
+            self.assertEqual(send_stop.call_args.args[0][1:], ["stop", "0123456789AB",
+                "REVO_DUAL_AXIS_TABLE", "ffe1", "ffe0", "ffe1"])
 
     def test_capture_status_reports_per_frame_cleanup_progress(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
