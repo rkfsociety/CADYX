@@ -226,6 +226,11 @@ class Scan360CaptureController:
                 return snapshot
             if command == "spin-stop":
                 return self._stop_turntable_spin_locked()
+            if command == "stop" and spin is None:
+                stop_path = self._workspace_root / ".revopoint-turntable-spin.stop"
+                heartbeat_path = self._workspace_root / ".revopoint-turntable-spin.heartbeat"
+                log_path = self._workspace_root / ".revopoint-turntable-spin.log"
+                self._recover_stale_turntable_spin_files(stop_path, heartbeat_path, log_path)
             if self._job is not None and self._job.process.poll() is None and command != "stop":
                 raise ConflictError("Turntable motion and configuration are locked while a 360 scan is capturing.",
                                     code="SCAN_ACTIVE")
@@ -242,12 +247,7 @@ class Scan360CaptureController:
                 stop_path = self._workspace_root / ".revopoint-turntable-spin.stop"
                 heartbeat_path = self._workspace_root / ".revopoint-turntable-spin.heartbeat"
                 log_path = self._workspace_root / ".revopoint-turntable-spin.log"
-                if stop_path.exists():
-                    raise ConflictError("A stale table-stop signal exists; inspect and remove it before starting rotation.",
-                                        code="TURNTABLE_STOP_SIGNAL_EXISTS")
-                if log_path.exists():
-                    raise ConflictError("A previous table-control log must be cleared before starting rotation.",
-                                        code="TURNTABLE_LOG_EXISTS")
+                self._recover_stale_turntable_spin_files(stop_path, heartbeat_path, log_path)
                 try:
                     heartbeat_path.touch(exist_ok=True)
                     log_stream = log_path.open("xb")
@@ -447,10 +447,97 @@ class Scan360CaptureController:
             return {"state": "failed", "return_code": return_code, "message": output}
         return {"state": "idle", "message": output}
 
+    def _active_turntable_controller_process_ids(self) -> list[int]:
+        if os.name != "nt":
+            return []
+        import ctypes
+        from ctypes import wintypes
+
+        class ProcessEntry32(ctypes.Structure):
+            _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                        ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                        ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                        ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long),
+                        ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260)]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry32)]
+        kernel32.Process32FirstW.restype = wintypes.BOOL
+        kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessEntry32)]
+        kernel32.Process32NextW.restype = wintypes.BOOL
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                                        wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
+        if snapshot == ctypes.c_void_p(-1).value:
+            raise ValidationError("Could not inspect stale turntable controller processes.")
+        expected_path = os.path.normcase(str(self._repository_root / "tools" / "revopoint" / "build"
+                                             / "TurntableController.exe"))
+        process_ids: list[int] = []
+        try:
+            entry = ProcessEntry32()
+            entry.dwSize = ctypes.sizeof(ProcessEntry32)
+            more = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+            while more:
+                if entry.szExeFile.casefold() == "turntablecontroller.exe":
+                    handle = kernel32.OpenProcess(0x1000, False, entry.th32ProcessID)
+                    if not handle:
+                        process_ids.append(int(entry.th32ProcessID))
+                        more = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+                        continue
+                    try:
+                        image_path = ctypes.create_unicode_buffer(32768)
+                        image_length = wintypes.DWORD(len(image_path))
+                        if (not kernel32.QueryFullProcessImageNameW(handle, 0, image_path,
+                                ctypes.byref(image_length))
+                                or os.path.normcase(image_path.value) == expected_path):
+                            process_ids.append(int(entry.th32ProcessID))
+                    finally:
+                        kernel32.CloseHandle(handle)
+                more = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+        finally:
+            kernel32.CloseHandle(snapshot)
+        return process_ids
+
+    def _recover_stale_turntable_spin_files(self, stop_path: Path, heartbeat_path: Path,
+                                            log_path: Path) -> str | None:
+        if not any(path.exists() for path in (stop_path, heartbeat_path, log_path)):
+            return None
+        active = self._active_turntable_controller_process_ids()
+        if active:
+            raise ConflictError("A Revopoint turntable controller is still active; stop it before recovering stale spin files.",
+                                code="TURNTABLE_CONTROLLER_ACTIVE")
+        archived_log = None
+        if log_path.is_file():
+            suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            archived_path = log_path.with_name(f"{log_path.stem}.stale-{suffix}{log_path.suffix}")
+            try:
+                log_path.replace(archived_path)
+            except OSError as exc:
+                raise ValidationError(f"The stale turntable log could not be preserved: {exc}.") from exc
+            archived_log = archived_path.name
+        for path in (stop_path, heartbeat_path):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                raise ValidationError(f"A stale turntable signal could not be cleared: {exc}.") from exc
+        return archived_log
+
     def _stop_turntable_spin_locked(self) -> dict[str, Any]:
         job = self._turntable_spin
         if job is None:
-            return {"state": "idle"}
+            stop_path = self._workspace_root / ".revopoint-turntable-spin.stop"
+            heartbeat_path = self._workspace_root / ".revopoint-turntable-spin.heartbeat"
+            log_path = self._workspace_root / ".revopoint-turntable-spin.log"
+            archived_log = self._recover_stale_turntable_spin_files(stop_path, heartbeat_path, log_path)
+            return ({"state": "idle", "message": "Stale turntable stop state cleared.",
+                     "archived_log": archived_log} if archived_log else {"state": "idle"})
         if job.process.poll() is None:
             try:
                 with job.stop_path.open("xb"):

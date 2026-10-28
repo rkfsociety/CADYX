@@ -204,6 +204,32 @@ class Scan360CaptureTests(unittest.TestCase):
             self.assertEqual(send_stop.call_args.args[0][1:], ["stop", "0123456789AB",
                 "REVO_DUAL_AXIS_TABLE", "ffe1", "ffe0", "ffe1"])
 
+    @unittest.skipUnless(os.name == "nt", "Turntable controller process inspection is Windows-only")
+    def test_spin_stop_recovers_stale_files_only_after_controller_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            workspace.mkdir()
+            controller = Scan360CaptureController(root, workspace)
+            stop_path = workspace / ".revopoint-turntable-spin.stop"
+            heartbeat_path = workspace / ".revopoint-turntable-spin.heartbeat"
+            log_path = workspace / ".revopoint-turntable-spin.log"
+            stop_path.touch()
+            heartbeat_path.touch()
+            log_path.write_text("Connected to REVO_DUAL_AXIS_TABLE\n", encoding="utf-8")
+            with patch.object(controller, "_active_turntable_controller_process_ids", return_value=[1234]):
+                with self.assertRaisesRegex(ConflictError, "controller is still active"):
+                    controller.turntable_control("spin-stop")
+            self.assertTrue(stop_path.exists(), "active controllers keep their stop signal")
+            with patch.object(controller, "_active_turntable_controller_process_ids", return_value=[]):
+                result = controller.turntable_control("spin-stop")
+            self.assertEqual(result["state"], "idle")
+            self.assertFalse(stop_path.exists())
+            self.assertFalse(heartbeat_path.exists())
+            archived = workspace / result["archived_log"]
+            self.assertEqual(archived.read_text(encoding="utf-8"), "Connected to REVO_DUAL_AXIS_TABLE\n")
+            self.assertFalse(log_path.exists())
+
     def test_capture_status_reports_per_frame_cleanup_progress(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
