@@ -510,6 +510,12 @@
     let liveMapTransform = null;
     let liveCameraRestored = false;
     let lastRenderedTurntableDisplayPose = null;
+    let lastTurntableTelemetryAngle = null;
+    let unwrappedTurntableAngle = 0;
+    let turntableTelemetryAt = 0;
+    let turntableDisplayAngularVelocity = 0;
+    let turntableDisplayFrame = 0;
+    let turntableDisplayLastFrameAt = 0;
     let liveMarkerTracks = [];
     let liveMarkerTrackSequence = 0;
     let lastMapRansacSequence = 0;
@@ -918,7 +924,37 @@
           : Number.parseFloat(document.getElementById?.(id)?.textContent || '');
         return Number.isFinite(value) ? value : 0;
       };
-      return { angle: readDegrees('turntable-angle'), tilt: readDegrees('turntable-tilt') };
+      const angle = readDegrees('turntable-angle');
+      const now = globalThis.performance?.now?.() ?? Date.now();
+      const spinning = typeof document !== 'undefined'
+        && document.getElementById?.('turntable-spin')?.getAttribute('aria-pressed') === 'true';
+      if (lastTurntableTelemetryAngle === null) {
+        lastTurntableTelemetryAngle = angle;
+        unwrappedTurntableAngle = angle;
+        turntableTelemetryAt = now;
+      } else if (Math.abs(angle - lastTurntableTelemetryAngle) > 0.01) {
+        let delta = angle - lastTurntableTelemetryAngle;
+        if (delta > 180) delta -= 360;
+        else if (delta < -180) delta += 360;
+        const elapsed = Math.max(0.001, (now - turntableTelemetryAt) / 1000);
+        if (spinning && elapsed <= 5 && Math.abs(delta) > 0.05 && Math.abs(delta) <= 90) {
+          turntableDisplayAngularVelocity = delta / elapsed;
+          unwrappedTurntableAngle += delta;
+        } else {
+          turntableDisplayAngularVelocity = 0;
+          unwrappedTurntableAngle = angle;
+        }
+        lastTurntableTelemetryAngle = angle;
+        turntableTelemetryAt = now;
+      } else if (!spinning) {
+        turntableDisplayAngularVelocity = 0;
+        unwrappedTurntableAngle = angle;
+      }
+      const telemetryAge = Math.max(0, (now - turntableTelemetryAt) / 1000);
+      const displayAngle = spinning && Math.abs(turntableDisplayAngularVelocity) > 0.01 && telemetryAge < 2.5
+        ? unwrappedTurntableAngle + turntableDisplayAngularVelocity * telemetryAge
+        : angle;
+      return { angle: displayAngle, tilt: readDegrees('turntable-tilt') };
     };
     const turntableDisplayPoseChanged = () => {
       const pose = currentTurntableDisplayPose();
@@ -1029,6 +1065,33 @@
       liveViewportInitialized = true;
     };
     const renderLiveFrame = options => renderTurntableScene(options);
+    const turntableSpinIsActive = () => document.getElementById?.('turntable-spin')
+      ?.getAttribute('aria-pressed') === 'true';
+    const syncTurntableDisplayAnimation = () => {
+      const scanningTabActive = document.querySelector?.('#primary-grid')?.dataset.view === 'scanning';
+      if (!turntableSpinIsActive() || !scanningTabActive) {
+        if (turntableDisplayFrame && typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(turntableDisplayFrame);
+        }
+        turntableDisplayFrame = 0;
+        turntableDisplayLastFrameAt = 0;
+        turntableDisplayAngularVelocity = 0;
+        return;
+      }
+      if (turntableDisplayFrame || typeof requestAnimationFrame !== 'function') return;
+      const renderInterpolatedFrame = timestamp => {
+        turntableDisplayFrame = 0;
+        if (!turntableSpinIsActive()) { syncTurntableDisplayAnimation(); return; }
+        if (timestamp - turntableDisplayLastFrameAt >= 100) {
+          turntableDisplayLastFrameAt = timestamp;
+          const frame = staticTurntableVisible ? { aligned: false, reset: false }
+            : lastMapAlignedFrame ? { ...lastMapAlignedFrame, reset: false } : { aligned: false, reset: false };
+          renderTurntableScene(frame);
+        }
+        turntableDisplayFrame = requestAnimationFrame(renderInterpolatedFrame);
+      };
+      turntableDisplayFrame = requestAnimationFrame(renderInterpolatedFrame);
+    };
     const showTurntable = () => {
       if (livePreviewOwned || cloudPreviewOpen || meshPreviewOpen || serverPointCloudVisible
           || viewport.dataset.scanTreePreview === 'true'
@@ -1037,6 +1100,7 @@
       staticTurntableVisible = true;
       updateButton();
       renderTurntableScene({ aligned: false, reset: false });
+      syncTurntableDisplayAnimation();
       return true;
     };
     const hideTurntable = () => {
@@ -1046,16 +1110,20 @@
       const geometry = getModelGeometry() || modelGeometry;
       if (geometry && viewer) viewer.load(geometry, { reset: false });
       modelGeometry = null;
+      syncTurntableDisplayAnimation();
       return true;
     };
     if (typeof MutationObserver === 'function') {
       const poseObserver = new MutationObserver(() => {
         if (staticTurntableVisible && turntableDisplayPoseChanged()) renderTurntableScene({ reset: false });
+        syncTurntableDisplayAnimation();
       });
       for (const id of ['turntable-angle', 'turntable-tilt']) {
         const element = document.getElementById?.(id);
         if (element) poseObserver.observe(element, { childList: true, characterData: true, subtree: true });
       }
+      const spinButton = document.getElementById?.('turntable-spin');
+      if (spinButton) poseObserver.observe(spinButton, { attributes: true, attributeFilter: ['aria-pressed'] });
     }
     cloudSource = pointCloudUrl(null);
     cloudOriginSource = originUrl(null);
@@ -1173,6 +1241,7 @@
       cloudPreviewOpen = false;
       meshPreviewOpen = false;
       livePreviewOwned = true;
+      syncTurntableDisplayAnimation();
       const request = ++liveRequest;
       updateButton();
       const pollFrame = async () => {
