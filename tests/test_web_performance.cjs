@@ -25,7 +25,15 @@ for (const type of ['navigate', 'reload']) {
 const renderProjects = workspace.slice(workspace.indexOf('function renderProjects()'), workspace.indexOf('function showProjectLoading'));
 vm.runInNewContext(`${renderProjects}\nrenderProjects();`, {
   primaryGrid: { dataset: { view: 'geometry' } },
+  updateProjectSelection: () => { throw Error('hidden project view must not update selection controls'); },
   $: () => { throw Error('hidden project cards must not construct thumbnails'); },
 });
+
+const selectionRefresh = new Error('visible project selection refreshed');
+assert.throws(() => vm.runInNewContext(`${renderProjects}\nrenderProjects();`, {
+  primaryGrid: { dataset: { view: 'projects' } },
+  updateProjectSelection: () => { throw selectionRefresh; },
+}), (error) => error === selectionRefresh,
+'visible project list must refresh selection controls');
 
 console.log('Web performance: explicit navigation and hidden project thumbnails passed.');

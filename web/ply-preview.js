@@ -1310,8 +1310,8 @@ $("#projects-grid-view").addEventListener("click", () => setProjectsLayout("grid
 $("#projects-list-view").addEventListener("click", () => setProjectsLayout("list"));
 
 function renderProjects() {
-  updateProjectSelection();
   if (primaryGrid.dataset.view !== "projects") return;
+  updateProjectSelection();
   const list = $("#projects-list");
   const signature = JSON.stringify([
     [...selectedProjectIds], projectBulkDeletionPending,
