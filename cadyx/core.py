@@ -1073,6 +1073,7 @@ class CadyxCore:
                 parameters = item.get("parameters")
                 if (body is None or body.get("type") != "body"
                         or feature_geometry != body.get("geometry")
+                        or not isinstance(feature_geometry, dict)
                         or not isinstance(parameters, dict)
                         or set(parameters) != {"patches", "sewing_tolerance"}):
                     raise ValidationError("Ruled shell feature geometry must match its body and patch parameters.")
@@ -1092,6 +1093,7 @@ class CadyxCore:
                 parameters = item.get("parameters")
                 if (body is None or body.get("type") != "body"
                         or feature_geometry != body.get("geometry")
+                        or not isinstance(feature_geometry, dict)
                         or not isinstance(source_sketch_ids, list) or not isinstance(parameters, dict)
                         or parameters.get("section_sketch_ids") != source_sketch_ids):
                     raise ValidationError("Loft feature geometry must match its body and ordered source sketches.")
@@ -1104,7 +1106,9 @@ class CadyxCore:
                     group_profiles, group_offsets = [], []
                     for sketch_id in group:
                         sketch = by_id.get(sketch_id)
-                        axis = sketch.get("section_normal_axis", {"XY": "Z", "XZ": "Y"}.get(sketch.get("plane"))) if sketch else None
+                        plane_name = sketch.get("plane") if sketch else None
+                        default_axis = {"XY": "Z", "XZ": "Y"}.get(plane_name) if isinstance(plane_name, str) else None
+                        axis = sketch.get("section_normal_axis", default_axis) if sketch else None
                         expected_plane = "XZ" if axis == "Y" else "XY" if axis == "Z" else None
                         if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != expected_plane):
                             raise ValidationError("Loft feature source sketches must match their section normal axis.")
@@ -1189,7 +1193,8 @@ class CadyxCore:
                 source_id = item.get("source_sketch_id")
                 if not isinstance(source_id, str):
                     raise ValidationError("Sweep feature source sketch id is invalid.")
-                if body is None or feature_geometry != body.get("geometry"):
+                if (body is None or not isinstance(feature_geometry, dict)
+                        or feature_geometry != body.get("geometry")):
                     raise ValidationError("Sweep feature geometry must match its body.")
                 plane, path = open_path(document.objects, source_id)
                 if (feature_geometry.get("kind") != "swept_pipe" or feature_geometry.get("plane") != plane
@@ -1239,10 +1244,13 @@ class CadyxCore:
                 lost = comparison.get("lost_volume")
                 added = comparison.get("added_volume")
                 resolution = comparison.get("estimated_volume_resolution")
-                if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
-                       for value in (lost, added, resolution)):
-                    raise ValidationError("OCCT returned invalid profile-geometry comparison metrics.")
-                return lost <= resolution and added <= resolution
+                metrics: list[float] = []
+                for value in (lost, added, resolution):
+                    if (isinstance(value, bool) or not isinstance(value, (int, float))
+                            or not math.isfinite(value) or value < 0):
+                        raise ValidationError("OCCT returned invalid profile-geometry comparison metrics.")
+                    metrics.append(float(value))
+                return metrics[0] <= metrics[2] and metrics[1] <= metrics[2]
 
             spline_profile = closed_spline_profile(document.objects, source_id)
             if spline_profile is not None:
@@ -1255,14 +1263,14 @@ class CadyxCore:
                         profile, plane=kernel_plane(sketch, plane), depth=parameters["depth"],
                         centered=parameters.get("centered", False), curve_points=curve_points,
                     )
-                    spline_expected = place_geometry(sketch, spline_expected, self.kernel)
-                    if profile_geometry_matches(spline_expected):
+                    spline_placed = place_geometry(sketch, dict(spline_expected), self.kernel)
+                    if profile_geometry_matches(spline_placed):
                         continue
                 else:
                     spline_expected = self.kernel.create_revolved_profile(
                         profile, angle_degrees=parameters["angle_degrees"], curve_points=curve_points,
                     )
-                    if profile_geometry_matches(spline_expected):
+                    if profile_geometry_matches(dict(spline_expected)):
                         continue
                 if accepts_legacy_gear_geometry(plane):
                     continue
@@ -1282,15 +1290,15 @@ class CadyxCore:
                         curve_profiles=curve_profiles,
                         segment_profiles=segment_profiles,
                     )
-                    profiles_expected = place_geometry(sketch, profiles_expected, self.kernel)
-                    if not profile_geometry_matches(profiles_expected) and segment_profiles is not None:
+                    profiles_placed = place_geometry(sketch, dict(profiles_expected), self.kernel)
+                    if not profile_geometry_matches(profiles_placed) and segment_profiles is not None:
                         profiles_expected = self.kernel.create_extruded_profile_with_holes(
                             profiles, plane=native_plane, depth=parameters["depth"],
                             centered=parameters.get("centered", False),
                             curve_profiles=curve_profiles,
                         )
-                        profiles_expected = place_geometry(sketch, profiles_expected, self.kernel)
-                    if not profile_geometry_matches(profiles_expected):
+                        profiles_placed = place_geometry(sketch, dict(profiles_expected), self.kernel)
+                    if not profile_geometry_matches(profiles_placed):
                         if accepts_legacy_gear_geometry(plane):
                             continue
                         raise ValidationError(
@@ -1304,18 +1312,18 @@ class CadyxCore:
                     centered=parameters.get("centered", False),
                     segments=sketch_segments(document.objects, source_id),
                 )
-                expected = place_geometry(sketch, expected, self.kernel)
-                if expected == feature_geometry:
+                placed_expected = place_geometry(sketch, dict(expected), self.kernel)
+                if placed_expected == feature_geometry:
                     continue
                 if accepts_legacy_gear_geometry(plane):
                     continue
                 raise ValidationError("Profile feature geometry is out of date with its source sketch or parameters.")
             else:
                 plane, profile = closed_profile(document.objects, source_id)
-            expected_kind = "extruded_profile" if operation == "extrude_sketch" else "revolved_profile"
+            profile_expected_kind = "extruded_profile" if operation == "extrude_sketch" else "revolved_profile"
             if not isinstance(parameters, dict):
                 raise ValidationError("Profile feature parameters are invalid.")
-            if feature_geometry.get("kind") != expected_kind or feature_geometry.get("plane") != plane or feature_geometry.get("profile") != profile:
+            if feature_geometry.get("kind") != profile_expected_kind or feature_geometry.get("plane") != plane or feature_geometry.get("profile") != profile:
                 raise ValidationError("Profile feature geometry is out of date with its source sketch.")
             profile_parameter_name = "depth" if operation == "extrude_sketch" else "angle_degrees"
             if feature_geometry.get(profile_parameter_name) != parameters.get(profile_parameter_name):

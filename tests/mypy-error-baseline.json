@@ -1,11 +1,6 @@
 {
   "commands": {},
-  "core": {
-    "arg-type": 1,
-    "assignment": 2,
-    "operator": 1,
-    "union-attr": 5
-  },
+  "core": {},
   "web": {},
   "workspace": {
     "assignment": 1,
