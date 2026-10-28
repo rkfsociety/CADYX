@@ -103,8 +103,10 @@
         if (!quiet) setStatus(error.message, 'error');
       } finally {
         clearTimeout(pollTimer);
+        const liveScanning = document.querySelector('.primary-grid')?.dataset.view === 'scanning'
+          && document.querySelector('#viewport-live-camera')?.checked;
         pollTimer = setTimeout(() => void refresh({ quiet: true }),
-          spinState === 'running' || spinState === 'stopping' ? 1500 : 15000);
+          spinState === 'running' || spinState === 'stopping' ? 1500 : liveScanning ? 3000 : 15000);
       }
     };
     const command = async (action, value) => {

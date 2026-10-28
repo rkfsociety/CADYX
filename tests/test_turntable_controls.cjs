@@ -8,6 +8,10 @@ const style = fs.readFileSync(path.join(__dirname, '../web/style.css'), 'utf8');
 assert.match(html, /id="turntable-control-panel"[^>]*aria-labelledby="turntable-control-title"/);
 assert.match(style, /\.turntable-control-panel\s*\{[^}]*top:\s*12px;[^}]*right:\s*12px;[^}]*aspect-ratio:\s*1;/,
   'the square turntable controls are overlaid in the viewport upper-right corner');
+assert.match(html, /\.primary-grid\[data-view="scanning"\] \.model-toolbar #viewport-camera-presets\s*\{\s*display:\s*flex !important;/,
+  'standard camera views stay available in the Scanning toolbar');
+assert.doesNotMatch(html, /\.primary-grid\[data-view="scanning"\] \.model-toolbar #viewport-camera-presets\s*,/,
+  'the Scanning layout does not hide the standard camera views');
 
 const handlers = new Map();
 const calls = [];
@@ -21,10 +25,12 @@ const ids = [
   'turntable-tilt-target', 'turntable-tilt-target-value', 'turntable-control-status', 'turntable-spin',
   'viewport-scan-360', 'primary-grid', 'turntable-control-refresh', 'turntable-rotate-left', 'turntable-rotate-right',
   'turntable-tilt-apply', 'turntable-zero', 'turntable-stop',
+  'viewport-live-camera',
 ];
 const elements = Object.fromEntries(ids.map(id => [id, Object.assign(makeElement(), { id })]));
 elements['turntable-step'].value = '15';
 elements['turntable-tilt-target'].value = '0';
+elements['viewport-live-camera'].checked = true;
 elements['primary-grid'].dataset.view = 'scanning';
 const panelSelectors = {
   '#turntable-control-refresh': 'turntable-control-refresh', '#turntable-step': 'turntable-step',
@@ -35,6 +41,7 @@ const panelSelectors = {
 };
 elements['turntable-control-panel'].querySelector = selector => elements[panelSelectors[selector]];
 const document = { querySelector: selector => selector === '.primary-grid' ? elements['primary-grid'] : elements[selector.slice(1)] };
+const pollDelays = [];
 const window = {
   CadyxDeviceSettings: {
     turntableDeviceId: () => '0123456789AB', turntableProfileId: () => 'revopoint-dual-axis-table',
@@ -55,7 +62,8 @@ const fetch = async (url, options = {}) => {
   if (body.command === 'spin-stop') result.state = 'stopping';
   return { ok: true, async json() { return { result }; } };
 };
-const context = { window, document, fetch, URLSearchParams, setTimeout: () => 0, clearTimeout() {} };
+const context = { window, document, fetch, URLSearchParams,
+  setTimeout: (_callback, delay) => { pollDelays.push(delay); return 0; }, clearTimeout() {} };
 vm.runInNewContext(fs.readFileSync(require('node:path').join(__dirname, '../web/turntable-controls.js'), 'utf8'), context);
 window.CadyxTurntableControls.initialize();
 const wait = () => new Promise(resolve => setImmediate(resolve));
@@ -67,6 +75,7 @@ const waitUntil = async predicate => {
 (async () => {
   await wait();
   assert.equal(elements['turntable-angle'].textContent, '12.0°');
+  assert.ok(pollDelays.includes(3000), 'live scanning refreshes table telemetry often enough to animate the preview');
   assert.equal(elements['turntable-speed'].value, '18', 'the closest safe speed preset remains selected');
   await handlers.get('turntable-rotate-right:click')();
   await waitUntil(() => calls.some(call => call.options.method === 'POST'));

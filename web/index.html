@@ -568,10 +568,11 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-live-camera,
 .primary-grid[data-view="scanning"] .model-toolbar #scanning-devices { display: inline-flex !important; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-scan-360-status { display: inline-flex !important; }
-.primary-grid[data-view="scanning"] .model-toolbar #viewport-camera-presets,
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-four-views,
-.primary-grid[data-view="scanning"] .model-toolbar #viewport-fit,
-.primary-grid[data-view="scanning"] .model-toolbar .viewport-toolbar-divider { display: none !important; }
+.primary-grid[data-view="scanning"] .model-toolbar #viewport-fit { display: none !important; }
+.primary-grid[data-view="scanning"] .model-toolbar #viewport-camera-presets {
+  display: flex !important; padding: 2px; border: 1px solid #52616bcc; border-radius: 6px; background: #0b1114ed;
+}
 .primary-grid[data-view="scanning"] .model-toolbar { flex-wrap: wrap; }
 .primary-grid[data-view="analysis"] > #comparison-panel {
   display: grid;

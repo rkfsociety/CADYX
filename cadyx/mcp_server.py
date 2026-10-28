@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import http.client
 import json
+import math
 import os
 import ssl
+import struct
 import sys
 import threading
 import urllib.parse
@@ -30,6 +33,8 @@ _ERROR_RESPONSE_BYTES = 64 * 1024
 _READ_CHUNK_BYTES = 64 * 1024
 _API_TIMEOUT_SECONDS = 600
 _JSON = "application/json"
+_TABLE_MAP_HEADER = struct.Struct("<4I")
+_TABLE_MAP_RECORD = struct.Struct("<2i2f6d")
 # Only these command HTTP responses prove that the submitted mutation was rejected.
 _DEFINITIVE_COMMAND_REJECTION_STATUSES = frozenset({400, 401, 403, 404, 405, 409, 413, 415, 422})
 
@@ -211,6 +216,7 @@ class CadyxAPI:
                 "content_type": content_type,
                 "document_revision": response.headers.get("X-CADYX-Document-Revision"),
                 "viewport_source": response.headers.get("X-CADYX-Viewport-Source"),
+                "table_map_count": response.headers.get("X-CADYX-Table-Map-Count"),
             }
             if response.status >= 400:
                 try:
@@ -240,6 +246,34 @@ class CadyxAPI:
 
     def post(self, path: str, body: dict[str, Any]) -> Any:
         return self.request("POST", path, body)[1]
+
+
+def _decode_turntable_marker_map(data: bytes, declared_count: str | None) -> dict[str, Any]:
+    """Decode the observed MKF record layout returned by the scanner API."""
+    if len(data) < _TABLE_MAP_HEADER.size:
+        raise TransportError("CADYX returned a truncated turntable marker map.")
+    version, field_1, field_2, count = _TABLE_MAP_HEADER.unpack_from(data)
+    expected_size = _TABLE_MAP_HEADER.size + count * _TABLE_MAP_RECORD.size
+    if count < 1 or len(data) != expected_size:
+        raise TransportError("CADYX returned a turntable marker map with an invalid record count.")
+    if declared_count is not None and declared_count.isdecimal() and int(declared_count) != count:
+        raise TransportError("CADYX turntable marker map count header does not match its payload.")
+    markers = []
+    for index in range(count):
+        fields = _TABLE_MAP_RECORD.unpack_from(data, _TABLE_MAP_HEADER.size + index * _TABLE_MAP_RECORD.size)
+        x, y, z, nx, ny, nz = fields[4:]
+        if not all(math.isfinite(value) for value in (x, y, z, nx, ny, nz)):
+            raise TransportError("CADYX returned non-finite turntable marker coordinates.")
+        markers.append({"id": index + 1, "x": x, "y": y, "z": z,
+                        "normal": [nx, ny, nz]})
+    return {
+        "version": version,
+        "header_fields": [field_1, field_2],
+        "count": count,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "coordinate_units": "unverified",
+        "markers": markers,
+    }
 
 
 def _schema(properties: dict[str, Any] | None = None, required: list[str] | None = None) -> dict[str, Any]:
@@ -301,6 +335,13 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_move_project_files", "description": "Move explicitly listed direct project files into a scan-series subfolder after checking the project is free and files are unused.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING, "filenames": {"type": "array", "items": _STRING, "minItems": 1, "maxItems": 1000}}, ["project_id", "folder_name", "filenames"])},
     {"name": "cadyx_start_scan_360", "description": "Start direct-UVC 360-degree point capture in a free project. Set step_degrees (divisor of 360, 1–30; default 30) and align_to_markers=false to preserve camera-frame points for geometry-only registration. The physical turntable must be level.", "inputSchema": _schema({"project_id": _STRING, "step_degrees": {"type": "integer", "minimum": 1, "maximum": 30}, "align_to_markers": {"type": "boolean"}, "rotation_period_seconds": {"type": "number", "minimum": 18, "maximum": 90}, "scanner_device_id": _STRING, "turntable_device_id": _STRING}, ["project_id"])},
     {"name": "cadyx_get_scan_360_status", "description": "Read native 360-degree scan progress and the latest captured point-cloud preview for a project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
+    {"name": "cadyx_get_scanner_devices", "description": "List connected scanners and supported turntables with their device and profile IDs. Device discovery may take several seconds.", "inputSchema": _schema()},
+    {"name": "cadyx_get_turntable_status", "description": "Read turntable angle, tilt, rotation period and motion/scan lock state. Supply the selected device_id and profile_id to avoid rediscovering Bluetooth devices.", "inputSchema": _schema({"device_id": _STRING, "profile_id": _STRING})},
+    {"name": "cadyx_get_turntable_marker_map", "description": "Read the selected turntable's MKF marker map as marker coordinates and normals with a SHA-256. Map coordinate units are not established.", "inputSchema": _schema({"device_id": _STRING, "profile_id": _STRING})},
+    {"name": "cadyx_control_turntable", "description": "Control the connected Revopoint table through CADYX API: query, bounded rotate (±30°), tilt (±10°), speed (18–90 s/revolution), zero, stop, or continuous spin start/stop. Use only a supported command and pass value for rotate, tilt or speed. Live preview may stay active; commands are locked during a 360 capture. Speed is saved to the device profile when resolved device/profile IDs are returned.", "inputSchema": _schema({"command": {"type": "string", "enum": ["query", "rotate", "tilt", "speed", "zero", "stop", "spin-start", "spin-stop"]}, "value": {"type": "number"}, "device_id": _STRING, "profile_id": _STRING}, ["command"])},
+    {"name": "cadyx_get_scanner_live_preview_status", "description": "Read live scanner preview state and capture/render performance metrics without stopping the preview.", "inputSchema": _schema()},
+    {"name": "cadyx_start_scanner_live_preview", "description": "Start the live-only depth preview (5, 10 or 15 requested FPS). The live preview is incompatible with 360 capture.", "inputSchema": _schema({"scanner_device_id": _STRING, "fps": {"type": "integer", "enum": [5, 10, 15]}})},
+    {"name": "cadyx_stop_scanner_live_preview", "description": "Stop the live-only depth preview and remove its temporary frame queue.", "inputSchema": _schema()},
     {"name": "cadyx_upload_project_step", "description": "Copy a local STEP file into a project through the Agent API without overwriting existing files or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
     {"name": "cadyx_upload_project_scan", "description": "Copy a local PLY scan into a project through the Agent API without overwriting the source or changing the original.", "inputSchema": _schema({"project_id": _STRING, "source_path": _STRING}, ["project_id", "source_path"])},
     {"name": "cadyx_remove_staged_step", "description": "Remove an unused direct STEP reference file from a FREE project; CADYX preserves the original local source.", "inputSchema": _schema({"project_id": _STRING, "name": _STRING}, ["project_id", "name"])},
@@ -563,6 +604,43 @@ class MCPApplication:
             return self.api.post(self._project(args["project_id"], "/scans/360"), body)
         if name == "cadyx_get_scan_360_status":
             return self.api.get(self._project(args["project_id"], "/scans/360"))
+        if name == "cadyx_get_scanner_devices":
+            return self.api.get("/api/v1/scanner/devices")
+        if name == "cadyx_get_turntable_status":
+            query = urllib.parse.urlencode({key: args[key] for key in ("device_id", "profile_id") if key in args})
+            suffix = f"?{query}" if query else ""
+            return self.api.get("/api/v1/scanner/turntable/control" + suffix)
+        if name == "cadyx_get_turntable_marker_map":
+            query = urllib.parse.urlencode({key: args[key] for key in ("device_id", "profile_id") if key in args})
+            suffix = f"?{query}" if query else ""
+            data, metadata = self.api.request("GET", "/api/v1/scanner/turntable/map" + suffix)
+            if not isinstance(metadata, dict) or metadata.get("content_type") != "application/octet-stream":
+                raise TransportError("CADYX returned the turntable marker map in an unsupported format.")
+            return {"marker_map": _decode_turntable_marker_map(data, metadata.get("table_map_count"))}
+        if name == "cadyx_control_turntable":
+            command = args["command"]
+            body = {key: args[key] for key in ("command", "value", "device_id", "profile_id") if key in args}
+            result = self.api.post("/api/v1/scanner/turntable/control", body)
+            if command == "speed":
+                control = result.get("result", {}) if isinstance(result, dict) else {}
+                device_id = control.get("turntable_device_id") or args.get("device_id")
+                profile_id = control.get("profile_id") or args.get("profile_id")
+                if device_id and profile_id:
+                    settings = self.api.post("/api/v1/scanner/turntable/settings", {
+                        "turntable_device_id": device_id,
+                        "profile_id": profile_id,
+                        "rotation_period_seconds": args["value"],
+                    })
+                    result["saved_settings"] = settings
+            return result
+        if name == "cadyx_get_scanner_live_preview_status":
+            return self.api.get("/api/v1/scanner/live-preview")
+        if name == "cadyx_start_scanner_live_preview":
+            body = {key: args[key] for key in ("scanner_device_id", "fps") if key in args}
+            return self.api.post("/api/v1/scanner/live-preview", body)
+        if name == "cadyx_stop_scanner_live_preview":
+            raw, _ = self.api.request("DELETE", "/api/v1/scanner/live-preview")
+            return json.loads(raw.decode("utf-8"))
         if name == "cadyx_upload_project_step":
             source = Path(args["source_path"]).expanduser()
             if source.suffix.casefold() not in {".step", ".stp"}:

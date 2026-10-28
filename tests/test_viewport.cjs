@@ -636,5 +636,13 @@ assert.equal(drawnPoints.length, 48_000, 'live point previews can render their f
 assert.deepEqual([...new Set(drawnPointColors)], ['#ff9d54'], 'live preview point brightness stays fixed between frames');
 livePointViewer.load(livePointGeometry);
 assert.equal(drawnPoints.length, 24_000, 'ordinary point clouds retain the existing render budget');
+const tablePreviewViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: true,
+});
+tablePreviewViewer.load({ positions: [0, 0, 0, 100, 0, 0, 0, 100, 0], triangles: [0, 1, 2],
+  lines: [], points: [], bounds: { min: [-100, -100, -10], max: [100, 100, 0] },
+  hideWorldGrid: true, hideWorldAxes: true });
+assert.equal(drawnLabels.length, 0, 'a modeled turntable preview hides coordinate-grid labels');
+assert.equal(drawnLines.length, 0, 'a modeled turntable preview hides the coordinate grid and axes');
 console.log("Viewport: camera, geometry, transitions, depth-tested edges and scan surface styling passed.");
 

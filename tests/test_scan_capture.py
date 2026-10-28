@@ -110,6 +110,10 @@ class Scan360CaptureTests(unittest.TestCase):
             self.assertEqual(result["state"], "completed")
             self.assertEqual(result["turntable_device_id"], "0123456789AB")
             self.assertEqual(result["angle_degrees"], 15.0)
+            cached = controller.cached_turntable_position("0123456789AB", profile_id)
+            self.assertEqual(cached["angle_degrees"], 15.0)
+            self.assertEqual(cached["command"], "query")
+            self.assertIsNone(controller.cached_turntable_position("FFFFFFFFFFFF", profile_id))
             self.assertEqual(run.call_args.args[0][1:], ["rotate", "15", "0123456789AB",
                 "REVO_DUAL_AXIS_TABLE", "ffe1", "ffe0", "ffe1"])
 

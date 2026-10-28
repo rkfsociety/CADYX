@@ -12,6 +12,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from typing import Any
 from .errors import ConflictError, ValidationError
 
 _DEFAULT_FRAME_COUNT = 12
+_TURNTABLE_POSITION_CACHE_SECONDS = 6.0
 _LIVE_PREVIEW_METRICS_PREFIX = "preview_metrics "
 _LIVE_PREVIEW_CLIENT_METRIC_FIELDS = frozenset({
     "window_seconds", "frames", "request_avg_ms", "request_max_ms", "process_avg_ms",
@@ -123,6 +125,8 @@ class Scan360CaptureController:
         self._job: _Scan360Job | None = None
         self._live_preview: _LivePreviewJob | None = None
         self._turntable_spin: _TurntableSpinJob | None = None
+        self._last_turntable_position: dict[str, Any] | None = None
+        self._last_turntable_position_at = 0.0
 
     def list_connected_devices(self) -> dict[str, list[dict[str, Any]]]:
         if os.name != "nt":
@@ -311,7 +315,48 @@ class Scan360CaptureController:
                 response["tilt_degrees"] = float(tilt_match.group(1))
             if command == "speed":
                 response["rotation_period_seconds"] = float(value)
+            self._remember_turntable_position_locked(response)
             return response
+
+    def _remember_turntable_position_locked(self, response: dict[str, Any]) -> None:
+        device_id = response.get("turntable_device_id")
+        profile_id = response.get("profile_id")
+        if not isinstance(device_id, str) or not isinstance(profile_id, str):
+            return
+        previous = self._last_turntable_position
+        if (previous is None or previous.get("turntable_device_id") != device_id
+                or previous.get("profile_id") != profile_id
+                or time.monotonic() - self._last_turntable_position_at > _TURNTABLE_POSITION_CACHE_SECONDS):
+            position: dict[str, Any] = {}
+        else:
+            position = dict(previous)
+        for key in ("angle_degrees", "tilt_degrees", "rotation_period_seconds", "tilt_speed"):
+            candidate = response.get(key)
+            if isinstance(candidate, (int, float)) and not isinstance(candidate, bool) and math.isfinite(candidate):
+                position[key] = float(candidate)
+        if "angle_degrees" not in position:
+            return
+        self._last_turntable_position = {
+            **position,
+            "state": "cached",
+            "command": "query",
+            "turntable_device_id": device_id,
+            "profile_id": profile_id,
+        }
+        self._last_turntable_position_at = time.monotonic()
+
+    def cached_turntable_position(self, turntable_device_id: str | None = None,
+                                  profile_id: str | None = None) -> dict[str, Any] | None:
+        with self._guard:
+            position = self._last_turntable_position
+            if (position is None
+                    or time.monotonic() - self._last_turntable_position_at > _TURNTABLE_POSITION_CACHE_SECONDS):
+                return None
+            if turntable_device_id and position["turntable_device_id"] != turntable_device_id.upper():
+                return None
+            if profile_id and position["profile_id"] != profile_id:
+                return None
+            return dict(position)
 
     @staticmethod
     def _maintain_turntable_spin_heartbeat(job: _TurntableSpinJob) -> None:

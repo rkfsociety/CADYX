@@ -4,6 +4,7 @@ import email.message
 import io
 import json
 import os
+import struct
 import tempfile
 import threading
 import unittest
@@ -92,8 +93,73 @@ class CadyxMCPServerTests(unittest.TestCase):
 
         self.assertEqual(started["scan"], scan)
         self.assertEqual(current["scan"], scan)
-        start.assert_called_once_with(project_id, 18.0, None, None)
+        start.assert_called_once_with(project_id, 18.0, None, None, 30, True)
         status.assert_called_once_with(project_id)
+
+    def test_scanner_and_turntable_api_routes_are_available_through_mcp(self) -> None:
+        device_id = "0123456789AB"
+        profile_id = "revopoint-dual-axis-table"
+        devices = {"scanners": [], "turntables": [{"device_id": device_id, "profile_id": profile_id}]}
+        position = {"command": "query", "angle_degrees": -340.0, "tilt_degrees": 0.0}
+        marker_map = struct.pack("<4I", 1, 0, 0, 2) + b"".join((
+            struct.pack("<2i2f6d", i, 0, 0.0, 0.0, *point)
+            for i, point in enumerate(((1.0, 2.0, 3.0, 0.0, 0.0, 1.0),
+                                       (4.0, 5.0, 6.0, 0.0, 0.0, 1.0)))
+        ))
+        with (
+            patch.object(self.core, "scanner_devices", return_value=devices) as list_devices,
+            patch.object(self.core, "turntable_control", side_effect=[
+                {"state": "idle", "scan_active": False}, position,
+                {"command": "rotate", "angle_degrees": -325.0},
+                {"command": "speed", "turntable_device_id": device_id,
+                 "profile_id": profile_id, "rotation_period_seconds": 45.0},
+            ]) as control,
+            patch.object(self.core, "turntable_marker_map", return_value=(marker_map, 2)) as read_map,
+            patch.object(self.core, "scanner_live_preview_status",
+                         return_value={"state": "running", "frame_mtime_ns": 123}) as preview_status,
+            patch.object(self.core, "save_turntable_settings",
+                         return_value={"configured": True, "rotation_period_seconds": 45.0}) as save_settings,
+            patch.object(self.core, "start_scanner_live_preview",
+                         return_value={"state": "running", "fps": 10}) as start_preview,
+            patch.object(self.core, "stop_scanner_live_preview",
+                         return_value={"state": "stopped"}) as stop_preview,
+        ):
+            self.assertEqual(self._tool_value("cadyx_get_scanner_devices"), devices)
+            table_status = self._tool_value("cadyx_get_turntable_status", {
+                "device_id": device_id, "profile_id": profile_id,
+            })
+            self.assertEqual(table_status["control"]["position"], position)
+            marker_response = self._tool_value("cadyx_get_turntable_marker_map", {
+                "device_id": device_id, "profile_id": profile_id,
+            })["marker_map"]
+            self.assertEqual(marker_response["count"], 2)
+            self.assertEqual(marker_response["markers"][0]["normal"], [0.0, 0.0, 1.0])
+            self.assertEqual(len(marker_response["sha256"]), 64)
+            rotated = self._tool_value("cadyx_control_turntable", {
+                "command": "rotate", "value": 15,
+                "device_id": device_id, "profile_id": profile_id,
+            })
+            self.assertEqual(rotated["result"]["command"], "rotate")
+            speed = self._tool_value("cadyx_control_turntable", {
+                "command": "speed", "value": 45,
+                "device_id": device_id, "profile_id": profile_id,
+            })
+            self.assertEqual(speed["saved_settings"]["rotation_period_seconds"], 45.0)
+            self.assertEqual(self._tool_value("cadyx_get_scanner_live_preview_status"),
+                             {"preview": {"state": "running", "frame_mtime_ns": 123}})
+            self.assertEqual(self._tool_value("cadyx_start_scanner_live_preview", {
+                "scanner_device_id": "scanner-1", "fps": 10,
+            }), {"preview": {"state": "running", "fps": 10}})
+            self.assertEqual(self._tool_value("cadyx_stop_scanner_live_preview"),
+                             {"preview": {"state": "stopped"}})
+
+        list_devices.assert_called_once_with()
+        read_map.assert_called_once_with(device_id, profile_id)
+        preview_status.assert_called_once_with()
+        control.assert_any_call("rotate", device_id, profile_id, 15)
+        save_settings.assert_called_once_with(device_id, 45.0, profile_id)
+        start_preview.assert_called_once_with("scanner-1", 10)
+        stop_preview.assert_called_once_with()
 
     def test_api_reuses_keep_alive_connection(self) -> None:
         class Response:

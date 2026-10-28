@@ -385,7 +385,7 @@
       const referenceOrigin = pointCloudPreview && Array.isArray(geometry.referenceOrigin)
         && geometry.referenceOrigin.length === 3 && geometry.referenceOrigin.every(Number.isFinite)
         ? geometry.referenceOrigin : [0, 0, 0];
-      if (showWorldAxes && pointCloudPreview) {
+      if (showWorldAxes && pointCloudPreview && !geometry.hideWorldGrid) {
         const extent = Math.hypot(width, height) / (2 * scale) * 1.15;
         drawWorldGrid(project, extent, scale, dpr, referenceOrigin);
       }
@@ -447,7 +447,7 @@
         screenY[vertex] = height / 2 - up * scale + cameraPanY * dpr;
       }
 
-      if (showWorldAxes && !pointCloudPreview) drawWorldAxes(project, radius, dpr);
+      if (showWorldAxes && !pointCloudPreview && !geometry.hideWorldAxes) drawWorldAxes(project, radius, dpr);
       if (showRotationAxes) drawRotationAxes(geometry.rotationAxes || [], project, dpr);
       if (triangles.length) renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, bodyMotionAngleByVertex,
@@ -551,7 +551,7 @@
         }
       }
       context.globalAlpha = 1;
-      if (showWorldAxes && pointCloudPreview) {
+      if (showWorldAxes && pointCloudPreview && !geometry.hideWorldAxes) {
         const label = referenceOrigin.map(formatCoordinate).join(", ");
         drawWorldAxes(project, radius, dpr, referenceOrigin, label);
       }

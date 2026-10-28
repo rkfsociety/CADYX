@@ -174,6 +174,10 @@ class CadyxCore:
                           profile_id: str | None = None, value: float | None = None) -> dict[str, Any]:
         return self._scan_capture.turntable_control(command, turntable_device_id, profile_id, value)
 
+    def cached_turntable_position(self, turntable_device_id: str | None = None,
+                                  profile_id: str | None = None) -> dict[str, Any] | None:
+        return self._scan_capture.cached_turntable_position(turntable_device_id, profile_id)
+
     def turntable_marker_map(self, turntable_device_id: str | None = None,
                              profile_id: str | None = None) -> tuple[bytes, int]:
         return self._scan_capture.turntable_marker_map(turntable_device_id, profile_id)

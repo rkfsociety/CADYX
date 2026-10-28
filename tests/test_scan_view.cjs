@@ -25,9 +25,13 @@ const scheduleTestTimeout = (callback, delay, ...args) => {
   return setTimeout(callback, delay, ...args);
 };
 const mapAlignmentOutput = { hidden: true, textContent: "", dataset: {} };
+const turntableAngleDisplay = { textContent: "0.0°" };
+const turntableTiltDisplay = { textContent: "0.0°" };
 const workspaceGrid = { dataset: { view: "scanning" } };
 const testDocument = {
-  getElementById: id => id === "scanner-map-alignment" ? mapAlignmentOutput : null,
+  getElementById: id => id === "scanner-map-alignment" ? mapAlignmentOutput
+    : id === "turntable-angle" ? turntableAngleDisplay
+      : id === "turntable-tilt" ? turntableTiltDisplay : null,
   querySelector: selector => selector === "#primary-grid" ? workspaceGrid : null,
 };
 const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply&scan_origin_file=origin.ply") }, document: testDocument, URL, URLSearchParams, setTimeout: scheduleTestTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
@@ -46,6 +50,32 @@ assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(99.995), false);
 assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(100), true);
 assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(250), true);
 assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(250.005), false);
+assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(3, 16, 8), true,
+  "three frame-to-frame matches cannot register a map and must allow a throttled RANSAC recovery");
+assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(4, 16, 8), false,
+  "four reliable tracks should use the direct tracked registration path");
+assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(2, 15, 8), false,
+  "RANSAC remains throttled until eight frames have elapsed");
+const turntableModel = sandbox.window.CadyxScanView.buildTurntableDisplayModel();
+assert.equal(turntableModel.diameterMm, 200, "the display tabletop uses the user-provided 200 mm diameter");
+assert.equal(turntableModel.thicknessMm, 10, "the display tabletop uses the user-provided 10 mm thickness");
+assert.ok(turntableModel.fixed.triangles.length > 0 && turntableModel.moving.triangles.length > 0,
+  "the preview includes a shaded table base and a separately movable tabletop");
+assert.ok(Math.abs(turntableModel.fixed.bounds.max[0] - turntableModel.fixed.bounds.max[1]) < 1e-4,
+  "the illustrated lower support has a circular footprint");
+let maximumTopRadius = 0;
+for (let index = 0; index < turntableModel.moving.positions.length; index += 3) {
+  const x = turntableModel.moving.positions[index], y = turntableModel.moving.positions[index + 1];
+  const z = turntableModel.moving.positions[index + 2];
+  if (Math.abs(z) < 1e-5) maximumTopRadius = Math.max(maximumTopRadius, Math.hypot(x, y));
+}
+assert.ok(Math.abs(maximumTopRadius - 100) < 1e-4, "the displayed tabletop radius is exactly 100 mm");
+const rotatedPoint = sandbox.window.CadyxScanView.transformTableDisplayPoint([0, 10, 0], 90, 0);
+assert.ok(Math.abs(rotatedPoint[0] + 10) < 1e-5 && Math.abs(rotatedPoint[1]) < 1e-5,
+  "turntable encoder rotation changes only the display-frame point position");
+const tiltedPoint = sandbox.window.CadyxScanView.transformTableDisplayPoint([0, 0, 0], 0, 30);
+assert.ok(Math.abs(tiltedPoint[1] + 12.5) < 1e-5 && tiltedPoint[2] < 0,
+  "the display model follows a 30 degree table tilt around its horizontal pivot");
 
 const pointCloud = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n0 0 -120\n1 0 -119.8\n0 1 -120.1\n";
 const originPoints = [];
@@ -185,7 +215,8 @@ const markerPositions = viewerLoads.at(-1).geometry.positions;
 const markerCenter = [0, 0, 0];
 const markerIndices = new Set(viewerLoads.at(-1).geometry.points);
 let minimumObjectZ = Infinity;
-for (let point = 0; point < markerPositions.length / 3; point += 1) {
+for (let point = viewerLoads.at(-1).geometry.pointCloudVertexRange[0];
+  point < viewerLoads.at(-1).geometry.pointCloudVertexRange[1]; point += 1) {
   const z = markerPositions[point * 3 + 2];
   if (!markerIndices.has(point)) minimumObjectZ = Math.min(minimumObjectZ, z);
 }
@@ -201,17 +232,20 @@ assert.ok(Math.abs(markerCenter[0]) < 5 && Math.abs(markerCenter[1]) < 5,
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0],
   "the mapped table-marker centroid is the preview origin");
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0]);
-const firstTurntableCloud = viewerLoads.at(-1).geometry.positions.slice(0, 3);
+const firstTurntableCloudIndex = viewerLoads.at(-1).geometry.pointLayers[0].points[0] * 3;
+const firstTurntableCloud = viewerLoads.at(-1).geometry.positions.slice(firstTurntableCloudIndex, firstTurntableCloudIndex + 3);
 const firstLiveFitRadius = viewerLoads.at(-1).geometry.fitRadius;
-await new Promise(resolve => setTimeout(resolve, 380));
+await waitUntil(() => livePollDelays.includes(100));
 assert.ok(liveFrameSequence >= 2, "the live point cloud accepted a newer camera frame");
 assert.deepEqual([...viewerLoads.at(-1).geometry.orbitCenter], [0, 0, 0], "live frames keep the first-frame camera pivot");
 assert.equal(viewerLoads.at(-1).geometry.fitRadius, firstLiveFitRadius, "live frames keep a fixed view scale");
 assert.equal(viewerLoads.at(-1).options.reset, false, "new live frames never reset the camera");
-const secondTurntableCloud = viewerLoads.at(-1).geometry.positions.slice(0, 3);
+const secondTurntableCloudIndex = viewerLoads.at(-1).geometry.pointLayers[0].points[0] * 3;
+const secondTurntableCloud = viewerLoads.at(-1).geometry.positions.slice(secondTurntableCloudIndex, secondTurntableCloudIndex + 3);
 assert.deepEqual([...secondTurntableCloud], [...firstTurntableCloud],
 "identical scanner frames are not rotated a second time using the table angle");
-assert.ok(livePollDelays.includes(100), "idle frame polling adapts to the measured 250 ms camera cadence");
+assert.ok(livePollDelays.includes(100),
+  `idle frame polling adapts to the measured 250 ms camera cadence (scheduled: ${livePollDelays.join(",")})`);
 view.showCapture({ preview_folder: "scan folder", preview_file: "new-saved-capture.ply", preview_kind: "single" });
 assert.equal(viewport.dataset.scanPreview, "true", "360 status polling does not replace the live canvas preview");
 view.closeLivePreview();
@@ -256,7 +290,7 @@ const nonMarkerCentroid = geometry => {
   const markers = new Set(geometry.points);
   const centroid = [0, 0, 0];
   let pointCount = 0;
-  for (let point = 0; point < geometry.pointCloudVertexCount; point += 1) {
+  for (let point = geometry.pointCloudVertexRange[0]; point < geometry.pointCloudVertexRange[1]; point += 1) {
     if (markers.has(point)) continue;
     for (let axis = 0; axis < 3; axis += 1) centroid[axis] += geometry.positions[point * 3 + axis];
     pointCount += 1;
@@ -274,6 +308,26 @@ assert.equal(viewerLoads.length, mapAlignedStart + 3,
   "a frame without enough table markers does not replace the last map-aligned cloud with unaligned points");
 assert.match(mapAlignmentOutput.textContent, /последний кадр/,
   "the map status explains when the preview is retaining its last aligned frame");
+const lastAlignedGeometry = viewerLoads.at(-1).geometry;
+const cloudVertex = lastAlignedGeometry.pointLayers[0].points[0];
+const mapVertex = lastAlignedGeometry.pointLayers[1].points[0];
+const cloudBeforeDisplayRotation = [...lastAlignedGeometry.positions.slice(cloudVertex * 3, cloudVertex * 3 + 3)];
+const mapBeforeDisplayRotation = [...lastAlignedGeometry.positions.slice(mapVertex * 3, mapVertex * 3 + 3)];
+const beforeDisplayRotationLoads = viewerLoads.length;
+turntableAngleDisplay.textContent = "15.0°";
+await waitUntil(() => viewerLoads.length > beforeDisplayRotationLoads);
+const rotatedGeometry = viewerLoads.at(-1).geometry;
+const rotatedCloudVertex = rotatedGeometry.pointLayers[0].points[0];
+const rotatedMapVertex = rotatedGeometry.pointLayers[1].points[0];
+const rotatedCloud = [...rotatedGeometry.positions.slice(rotatedCloudVertex * 3, rotatedCloudVertex * 3 + 3)];
+const rotatedMap = [...rotatedGeometry.positions.slice(rotatedMapVertex * 3, rotatedMapVertex * 3 + 3)];
+assert.deepEqual([...rotatedGeometry.positions.slice(0, 3)],
+  [...lastAlignedGeometry.positions.slice(0, 3)], "the circular lower support stays fixed while the tabletop moves");
+for (const [actual, before] of [[rotatedCloud, cloudBeforeDisplayRotation], [rotatedMap, mapBeforeDisplayRotation]]) {
+  const expected = sandbox.window.CadyxScanView.transformTableDisplayPoint(before, 15, 0);
+  assert.ok(Math.hypot(...actual.map((value, axis) => value - expected[axis])) < 1e-4,
+    "the marker-aligned cloud and existing marker map rotate together for display");
+}
 mapAlignedView.closeLivePreview();
 
 const makeUnalignedFrame = (markerCenters, extraDepth = 0) => {
