@@ -63,6 +63,18 @@ assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(34, 16, 8, 34)
 const turntableModel = sandbox.window.CadyxScanView.buildTurntableDisplayModel();
 assert.equal(turntableModel.diameterMm, 200, "the display tabletop uses the user-provided 200 mm diameter");
 assert.equal(turntableModel.thicknessMm, 10, "the display tabletop uses the user-provided 10 mm thickness");
+assert.equal(turntableModel.supportRotationDegrees, -90,
+  "the fixed lower support is turned 90 degrees clockwise independently of the tabletop");
+const fixedSupportHasPoint = (x, y, z) => {
+  for (let index = 0; index < turntableModel.fixed.positions.length; index += 3) {
+    if (Math.abs(turntableModel.fixed.positions[index] - x) < 1e-4
+        && Math.abs(turntableModel.fixed.positions[index + 1] - y) < 1e-4
+        && Math.abs(turntableModel.fixed.positions[index + 2] - z) < 1e-4) return true;
+  }
+  return false;
+};
+assert.ok(fixedSupportHasPoint(0, 55, -25) && fixedSupportHasPoint(0, -55, -25),
+  "the fixed pivot axle rotates with the lower support");
 assert.equal(turntableModel.fitRadius, 120, "the outer degree labels have clearance from the viewport edge");
 assert.equal(turntableModel.degreeTickCount, 72, "the turntable scale has 5 degree ticks through 360 degrees");
 assert.deepEqual(Array.from(turntableModel.degreeTextLabels.filter(label => Number.isFinite(label.minViewDepthZ)), label => label.text),

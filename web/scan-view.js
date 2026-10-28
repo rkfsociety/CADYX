@@ -102,6 +102,16 @@
       { top: [71, 80, 85], side: [46, 54, 59], bottom: [35, 42, 47] });
     addEllipticalCylinder(moving, TURNTABLE_RADIUS_MM, TURNTABLE_RADIUS_MM,
       -TURNTABLE_THICKNESS_MM, 0, 96, dark);
+    const fixedModel = finishMesh(fixed);
+    for (let index = 0; index < fixedModel.positions.length; index += 3) {
+      const x = fixedModel.positions[index], y = fixedModel.positions[index + 1];
+      fixedModel.positions[index] = y;
+      fixedModel.positions[index + 1] = -x;
+    }
+    fixedModel.bounds = {
+      min: [fixedModel.bounds.min[1], -fixedModel.bounds.max[0], fixedModel.bounds.min[2]],
+      max: [fixedModel.bounds.max[1], -fixedModel.bounds.min[0], fixedModel.bounds.max[2]],
+    };
     const degreeLabelPositions = [], degreeTextLabels = [];
     let degreeTickCount = 0;
     for (let degrees = 0; degrees < 360; degrees += 5) {
@@ -167,8 +177,9 @@
       }
     }
     return {
-      fixed: finishMesh(fixed),
+      fixed: fixedModel,
       moving: finishMesh(moving),
+      supportRotationDegrees: -90,
       degreeTickCount,
       degreeLabelPositions: Float32Array.from(degreeLabelPositions),
       degreeTextLabels,
