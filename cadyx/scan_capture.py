@@ -228,7 +228,7 @@ class Scan360CaptureController:
                 return self._stop_turntable_spin_locked()
             if command == "stop" and spin is None:
                 stop_path = self._workspace_root / ".revopoint-turntable-spin.stop"
-                heartbeat_path = self._workspace_root / ".revopoint-turntable-spin.heartbeat"
+                heartbeat_path = Path(str(stop_path) + ".heartbeat")
                 log_path = self._workspace_root / ".revopoint-turntable-spin.log"
                 self._recover_stale_turntable_spin_files(stop_path, heartbeat_path, log_path)
             if self._job is not None and self._job.process.poll() is None and command != "stop":
@@ -245,7 +245,7 @@ class Scan360CaptureController:
                             profile["service_uuid"], profile["characteristic_uuid"]]
             if command == "spin-start":
                 stop_path = self._workspace_root / ".revopoint-turntable-spin.stop"
-                heartbeat_path = self._workspace_root / ".revopoint-turntable-spin.heartbeat"
+                heartbeat_path = Path(str(stop_path) + ".heartbeat")
                 log_path = self._workspace_root / ".revopoint-turntable-spin.log"
                 self._recover_stale_turntable_spin_files(stop_path, heartbeat_path, log_path)
                 try:
@@ -507,7 +507,9 @@ class Scan360CaptureController:
 
     def _recover_stale_turntable_spin_files(self, stop_path: Path, heartbeat_path: Path,
                                             log_path: Path) -> str | None:
-        if not any(path.exists() for path in (stop_path, heartbeat_path, log_path)):
+        legacy_heartbeat_path = self._workspace_root / ".revopoint-turntable-spin.heartbeat"
+        stale_paths = (stop_path, heartbeat_path, legacy_heartbeat_path, log_path)
+        if not any(path.exists() for path in stale_paths):
             return None
         active = self._active_turntable_controller_process_ids()
         if active:
@@ -522,7 +524,7 @@ class Scan360CaptureController:
             except OSError as exc:
                 raise ValidationError(f"The stale turntable log could not be preserved: {exc}.") from exc
             archived_log = archived_path.name
-        for path in (stop_path, heartbeat_path):
+        for path in (stop_path, heartbeat_path, legacy_heartbeat_path):
             try:
                 path.unlink(missing_ok=True)
             except OSError as exc:
@@ -533,7 +535,7 @@ class Scan360CaptureController:
         job = self._turntable_spin
         if job is None:
             stop_path = self._workspace_root / ".revopoint-turntable-spin.stop"
-            heartbeat_path = self._workspace_root / ".revopoint-turntable-spin.heartbeat"
+            heartbeat_path = Path(str(stop_path) + ".heartbeat")
             log_path = self._workspace_root / ".revopoint-turntable-spin.log"
             archived_log = self._recover_stale_turntable_spin_files(stop_path, heartbeat_path, log_path)
             return ({"state": "idle", "message": "Stale turntable stop state cleared.",

@@ -149,6 +149,9 @@ class Scan360CaptureTests(unittest.TestCase):
             self.assertEqual(started["state"], "starting",
                              "a live process is not reported as spinning before driver telemetry confirms motion")
             self.assertEqual(start_spin.call_args.args[0][1], "continuous-spin")
+            self.assertEqual(controller._turntable_spin.heartbeat_path.name,
+                             ".revopoint-turntable-spin.stop.heartbeat",
+                             "the host heartbeat path matches the native driver's stop-path suffix")
             log_path = workspace / ".revopoint-turntable-spin.log"
             log_path.write_text("Connected to REVO_DUAL_AXIS_TABLE\n", encoding="utf-8")
             starting = controller.turntable_control("spin-status")
@@ -212,10 +215,12 @@ class Scan360CaptureTests(unittest.TestCase):
             workspace.mkdir()
             controller = Scan360CaptureController(root, workspace)
             stop_path = workspace / ".revopoint-turntable-spin.stop"
-            heartbeat_path = workspace / ".revopoint-turntable-spin.heartbeat"
+            heartbeat_path = workspace / ".revopoint-turntable-spin.stop.heartbeat"
+            legacy_heartbeat_path = workspace / ".revopoint-turntable-spin.heartbeat"
             log_path = workspace / ".revopoint-turntable-spin.log"
             stop_path.touch()
             heartbeat_path.touch()
+            legacy_heartbeat_path.touch()
             log_path.write_text("Connected to REVO_DUAL_AXIS_TABLE\n", encoding="utf-8")
             with patch.object(controller, "_active_turntable_controller_process_ids", return_value=[1234]):
                 with self.assertRaisesRegex(ConflictError, "controller is still active"):
@@ -226,6 +231,7 @@ class Scan360CaptureTests(unittest.TestCase):
             self.assertEqual(result["state"], "idle")
             self.assertFalse(stop_path.exists())
             self.assertFalse(heartbeat_path.exists())
+            self.assertFalse(legacy_heartbeat_path.exists())
             archived = workspace / result["archived_log"]
             self.assertEqual(archived.read_text(encoding="utf-8"), "Connected to REVO_DUAL_AXIS_TABLE\n")
             self.assertFalse(log_path.exists())
