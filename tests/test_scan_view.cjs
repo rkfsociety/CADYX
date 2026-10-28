@@ -561,7 +561,6 @@ serverPointCloudButton.click();
 assert.equal(viewerLoads.at(-1).geometry, serverModelGeometry, "the scan overlay cannot replace the persisted CAD cloud");
 
 const html = fs.readFileSync(path.join(__dirname, "../web/index.html"), "utf8");
-const scannerHtml = fs.readFileSync(path.join(__dirname, "../web/scanner.html"), "utf8");
 const styleCss = fs.readFileSync(path.join(__dirname, "../web/style.css"), "utf8");
 const appJs = fs.readFileSync(path.join(__dirname, "../web/app.js"), "utf8");
 const projectUiJs = fs.readFileSync(path.join(__dirname, "../web/ply-preview.js"), "utf8");
@@ -636,7 +635,6 @@ assert.doesNotMatch(appJs, /livePreviewController\?\.stop\(\)|stopPreviewOutside
 assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);
 assert.match(appJs, /showCapturePreview\(scan,\{open:captureStarted\}\)/);
 assert.match(appJs, /import_point_cloud:\['Облако точек','cloud'\]/);
-assert.match(scannerHtml, /<a class="brand" href="\/" aria-label="CADYX — проекты"><svg class="brand-mark"/);
 assert.match(appJs, /\.model-toolbar \.cad3-tool/);
 console.log("scan view controls passed");
 }
@@ -693,7 +691,10 @@ verifyScanView().catch(error => {
   await liveController.poll();
   apiState = { state: "running" };
   workspaceGrid.dataset.view = "overview";
+  const requestsBeforeHiding = previewCalls.length;
   await liveController.poll();
+  assert.equal(previewCalls.length, requestsBeforeHiding,
+    "hidden scanner panels do not poll the device-status endpoint");
   assert.equal(previewCalls.at(-1).method, "GET",
     "changing workspace tabs never sends a camera-stop request");
   assert.equal(liveViewCalls.at(-1)[0], "close",

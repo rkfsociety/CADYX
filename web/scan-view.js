@@ -1727,6 +1727,8 @@
     let pending = false;
     let pollTimer = null;
     let previouslyVisible = false;
+    let polling = false;
+    let disposed = false;
     const active = () => state === 'starting' || state === 'running';
     const canShowPreview = () => {
       const grid = typeof document !== 'undefined' ? document.querySelector('#primary-grid') : null;
@@ -1763,9 +1765,19 @@
       if (state === 'failed') view.closeLivePreview();
     };
     const poll = async () => {
+      if (polling || disposed) return;
+      if (!canShowPreview() || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
+        if (previouslyVisible) view.closeLivePreview();
+        previouslyVisible = false;
+        clearTimeout(pollTimer);
+        pollTimer = setTimeout(poll, 3500);
+        return;
+      }
+      polling = true;
       try {
         const response = await fetcher('/api/v1/scanner/live-preview', { cache: 'no-store' });
         const payload = await response.json();
+        if (disposed) return;
         if (!response.ok) throw new Error(payload.error?.message || payload.message || 'Не удалось получить состояние сканера');
         updateButton(payload.preview);
       } catch (error) {
@@ -1773,9 +1785,9 @@
           button.title = `Предпросмотр работает, статус временно недоступен: ${error.message}`;
           syncCaptureButton();
         } else updateButton({ state: 'failed', message: error.message });
-      }
+      } finally { polling = false; }
       clearTimeout(pollTimer);
-      pollTimer = setTimeout(poll, active() ? 900 : 3500);
+      if (!disposed) pollTimer = setTimeout(poll, active() ? 900 : 3500);
     };
     button.addEventListener('click', async () => {
       if (pending) return;
@@ -1799,8 +1811,16 @@
       }
     });
     poll();
+    const resumePoll = () => { clearTimeout(pollTimer); void poll(); };
+    const grid = typeof document !== 'undefined' ? document.querySelector('#primary-grid') : null;
+    const viewObserver = grid && typeof MutationObserver !== 'undefined' ? new MutationObserver(resumePoll) : null;
+    viewObserver?.observe(grid, { attributes: true, attributeFilter: ['data-view'] });
+    if (typeof document !== 'undefined') document.addEventListener?.('visibilitychange', resumePoll);
     const controller = { poll, dispose: () => {
+      disposed = true;
       clearTimeout(pollTimer);
+      viewObserver?.disconnect();
+      if (typeof document !== 'undefined') document.removeEventListener?.('visibilitychange', resumePoll);
       if (button?.__cadyxLivePreviewController === controller) {
         delete button.__cadyxLivePreviewController;
       }

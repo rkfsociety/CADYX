@@ -175,6 +175,7 @@ setImmediate(async () => {
   const formSandbox = {
     $: element, encodeURIComponent,
     window: { location: { assign: (url) => navigations.push(url) } },
+    navigateToWorkspaceProject: async projectId => navigations.push(projectId),
     api: (url, options) => {
       requests.push({ url, options });
       return new Promise((resolve, reject) => { completeRequest = { resolve, reject }; });
@@ -214,7 +215,8 @@ setImmediate(async () => {
   const retry = submit();
   completeRequest.resolve({ project: { id: "new-project" } });
   await retry;
-  assert.deepEqual(navigations, ["/?project_id=new-project"]);
+  assert.deepEqual(navigations, ["new-project"],
+    "creation delegates navigation to the existing canonical project router");
   assert.equal(element("#create-project-error").hidden, true);
 
   await new Promise((resolve) => setImmediate(resolve));

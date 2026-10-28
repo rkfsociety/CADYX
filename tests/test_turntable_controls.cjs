@@ -97,13 +97,15 @@ const waitUntil = async predicate => {
 (async () => {
   await wait();
   assert.equal(elements['turntable-angle'].textContent, '12.0°');
-  assert.ok(pollDelays.includes(250), 'the UI schedules a quick status-only refresh after an API command');
+  assert.equal(calls.some(call => call.options.method === 'POST'), false,
+    'opening the panel reads cached state without contacting or moving hardware');
   assert.equal(elements['turntable-speed'].value, '18', 'the closest safe speed preset remains selected');
   assert.equal(elements['turntable-spin'].disabled, false,
     'continuous rotation is enabled when the scanner preview is live');
   elements['viewport-live-camera'].setAttribute('aria-pressed', 'false');
   await handlers.get('turntable-control-refresh:click')();
   await wait();
+  assert.ok(pollDelays.includes(250), 'an explicit API command schedules a quick status-only refresh');
   assert.equal(elements['turntable-spin'].disabled, true,
     'continuous rotation is disabled when the scanner preview is stopped');
   elements['viewport-live-camera'].setAttribute('aria-pressed', 'true');

@@ -3,6 +3,9 @@ import json
 import re
 import unittest
 from pathlib import Path
+from collections import OrderedDict
+from unittest.mock import patch
+import cadyx.native_kernel as native_module
 
 from cadyx.errors import ValidationError
 from cadyx.native_kernel import (
@@ -25,6 +28,38 @@ class NativeFunction:
 
 
 class NativeKernelFfiTests(unittest.TestCase):
+    def test_graph_metrics_cache_uses_native_inputs_and_returns_isolated_values(self):
+        class Library:
+            def __init__(self):
+                self.calls = 0
+                self.buffer = ctypes.create_string_buffer(b'{"volume":6,"bounds":[1,2,3]}')
+
+            def cadyx_graph(self, *args):
+                self.calls += 1
+                return ctypes.addressof(self.buffer)
+
+            def cadyx_free(self, pointer):
+                pass
+
+        native = NativeKernel.__new__(NativeKernel)
+        native.library = Library()
+        native._graph_node = native_module._GraphNode
+        geometry = {"kind": "box", "dimensions": {"width": 1, "height": 2, "depth": 3}}
+        with patch.object(native_module, "_graph_metrics_cache", OrderedDict()), \
+                patch.object(native_module, "_graph_metrics_cache_bytes", 0):
+            first = native.geometry_graph(geometry)
+            first["bounds"].append(99)
+            second = native.geometry_graph({**geometry, "volume": 123})
+            self.assertEqual(second["bounds"], [1, 2, 3])
+            self.assertEqual(native.library.calls, 1, "descriptor metadata is not a native graph input")
+            native.geometry_graph(geometry, mesh=True)
+            native.geometry_graph(geometry, topology=True)
+            self.assertEqual(native.library.calls, 3, "mesh/topology requests must execute their native path")
+            for width in range(2, 132):
+                native.geometry_graph({**geometry, "dimensions": {**geometry["dimensions"], "width": width}})
+            self.assertEqual(native.library.calls, 133, "changed geometry must not reuse old metrics")
+            self.assertEqual(len(native_module._graph_metrics_cache), 128)
+
     @staticmethod
     def kernel(functions):
         native = NativeKernel.__new__(NativeKernel)

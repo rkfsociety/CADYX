@@ -30,6 +30,37 @@ and callers receive copies so they cannot mutate the cache. Missing projects use
 the existing 404 contract; invalid geometry uses 400. The scene is derived,
 never persisted; no project/document migration is required.
 
+### Browser loading and transport
+
+Scanning uses the project workspace tab (`?view=scanning`). The obsolete
+standalone `/scanner` page and its dedicated `/assets/scanner-camera.js` asset
+are removed; those addresses return 404.
+
+The web panel uses `GET /api/v1/projects/{id}?view=browser` for a validated
+document snapshot with an empty `history` and no encoded `data` in B-rep,
+triangle-mesh or point-cloud descriptors. This display representation must not
+be saved back as a CAD document. The default project and Agent API inspection
+responses retain full geometry and history. Geometry validation precedes both
+representations. Tree/properties panels reuse the viewport loader's matching
+project/revision snapshot instead of fetching another copy of the document and
+scene. Initial SSE enrollment does not restart an already scheduled load;
+reconnections still refresh authoritative state.
+
+Comparison and validation records load in Analysis; project-card thumbnails are
+constructed only in Projects. Scanner status polling pauses outside Scanning
+and in hidden tabs. Opening a page reads cached table state without issuing a
+Bluetooth hardware query. Explicit view
+URLs take precedence over the previously visited section; saved-view restoration
+is limited to reloads.
+
+JSON responses of at least 4096 bytes support negotiated gzip and retain
+`Cache-Control: no-store`; static pages/assets use content ETags for 304
+revalidation. Native graph metrics reuse successful immutable JSON results for
+identical packed graph inputs and the same loaded library (LRU: 128 entries,
+8 MiB). Mesh, topology and export calls retain their native paths. Changed
+inputs and native failures do not reuse a previous result. Workspace loads read
+and checksum each referenced B-rep blob once per load, returning isolated values.
+
 The matching `GET /api/v1/projects/{id}/viewport.png` and
 `GET /api/v1/agent/projects/{id}/viewport.png` endpoints return the exact
 `image/png` frame drawn in the browser's main model canvas when a current

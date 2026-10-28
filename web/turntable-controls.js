@@ -106,7 +106,8 @@
     const refresh = async ({ quiet = false } = {}) => {
       if (pending) return;
       const workspaceView = document.querySelector('.primary-grid')?.dataset.view;
-      if (workspaceView !== 'scanning' && spinState !== 'running' && spinState !== 'stopping') {
+      if (document.visibilityState === 'hidden'
+          || workspaceView !== 'scanning' && spinState !== 'running' && spinState !== 'stopping') {
         clearTimeout(pollTimer);
         pollTimer = setTimeout(() => void refresh({ quiet: true }), 6000);
         return;
@@ -202,7 +203,8 @@
     spinButton.addEventListener('click', () => {
       void command(spinActive() ? 'spin-stop' : 'spin-start');
     });
-    void command('query');
+    // Hydrate from server state; hardware queries are explicit user actions.
+    void refresh({ quiet: true });
   };
 
   window.CadyxTurntableControls = { initialize };

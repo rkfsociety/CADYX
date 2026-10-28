@@ -134,7 +134,7 @@
     return {
       activity: refreshAuxiliary,
       dashboard: refreshAuxiliary,
-      comparison: refreshAuxiliary || view === "analysis",
+      comparison: view === "analysis",
     };
   }
   const multiplyMatrices = (left, right) => [

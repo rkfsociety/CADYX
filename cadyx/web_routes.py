@@ -153,13 +153,11 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/leases/{lease_id}/release", "agent_lease_release", "agent", "json"),
     RouteSpec("GET", "/p/{slug}", "ui_project", "static"),
     RouteSpec("GET", "/", "ui_index", "static"),
-    RouteSpec("GET", "/scanner", "ui_scanner", "static"),
     RouteSpec("GET", "/favicon.svg", "ui_favicon", "static"),
     RouteSpec("GET", "/assets/app.js", "asset_app", "static"),
     RouteSpec("GET", "/assets/viewport.js", "asset_viewport", "static"),
     RouteSpec("GET", "/assets/browser-state.js", "asset_browser_state", "static"),
     RouteSpec("GET", "/assets/trace-draft.js", "asset_trace_draft", "static"),
-    RouteSpec("GET", "/assets/scanner-camera.js", "asset_scanner_camera", "static"),
     RouteSpec("GET", "/assets/ply-parser.js", "asset_ply_parser", "static"),
     RouteSpec("GET", "/assets/ply-preview.js", "asset_ply_preview", "static"),
     RouteSpec("GET", "/assets/scan-view.js", "asset_scan_view", "static"),
@@ -728,7 +726,10 @@ def _dispatch_project(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
     elif name == "project_create":
         _create_project(handler, core, agent_api=False)
     elif name == "project_get":
-        handler._json(200, core.inspect_project(project_id))
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if query and query != {"view": ["browser"]}:
+            raise ValidationError("Project inspection accepts only view=browser.")
+        handler._json(200, core.inspect_project(project_id, browser=bool(query)))
     elif name == "project_delete":
         handler._json(200, core.delete_project(project_id))
     elif name == "project_dashboard":
@@ -1144,13 +1145,11 @@ def _dispatch_static(handler: Any, core: CadyxCore, route: RouteMatch, parsed: S
     assets = {
         "ui_index": ("index.html", "text/html; charset=utf-8"),
         "ui_project": ("index.html", "text/html; charset=utf-8"),
-        "ui_scanner": ("scanner.html", "text/html; charset=utf-8"),
         "ui_favicon": ("favicon.svg", "image/svg+xml"),
         "asset_app": ("app.js", "text/javascript; charset=utf-8"),
         "asset_viewport": ("viewport.js", "text/javascript; charset=utf-8"),
         "asset_browser_state": ("browser-state.js", "text/javascript; charset=utf-8"),
         "asset_trace_draft": ("trace-draft.js", "text/javascript; charset=utf-8"),
-        "asset_scanner_camera": ("scanner-camera.js", "text/javascript; charset=utf-8"),
         "asset_ply_parser": ("ply-parser.js", "text/javascript; charset=utf-8"),
         "asset_ply_preview": ("ply-preview.js", "text/javascript; charset=utf-8"),
         "asset_scan_view": ("scan-view.js", "text/javascript; charset=utf-8"),

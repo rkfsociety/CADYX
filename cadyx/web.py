@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import gzip
 import json
 import mimetypes
 import os
@@ -30,9 +31,9 @@ _SSE_SHUTDOWN_POLL_SECONDS = 0.25
 _SOCKET_REQUEST = socket | tuple[bytes, socket]
 _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 _UI_ASSETS = (
-    "index.html", "scanner.html", "app.js", "style.css", "viewport.js",
-    "ply-parser.js", "ply-preview.js", "scanner-camera.js", "scan-view.js", "device-settings.js",
-    "turntable-controls.js", "scan-preview-worker.js", "favicon.svg",
+    "index.html", "app.js", "style.css", "viewport.js",
+    "ply-parser.js", "ply-preview.js", "scan-view.js", "device-settings.js",
+    "turntable-controls.js", "scan-preview-worker.js", "browser-state.js", "favicon.svg",
 )
 _CLIENT_API_CONTRACT_VERSION = "viewport-snapshot-v1"
 _UI_ASSET_VERSION_LOCK = threading.Lock()
@@ -268,10 +269,20 @@ def make_request_handler(
             extra_headers: tuple[tuple[str, str], ...] = (),
         ) -> None:
             encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+            compressed = False
+            if len(encoded) >= 4096 and any(
+                item.strip().lower() == "gzip"
+                for item in self.headers.get("Accept-Encoding", "").split(",")
+            ):
+                encoded = gzip.compress(encoded, compresslevel=1, mtime=0)
+                compressed = True
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(encoded)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Vary", "Accept-Encoding")
+            if compressed:
+                self.send_header("Content-Encoding", "gzip")
             for name, header_value in extra_headers:
                 self.send_header(name, header_value)
             self.end_headers()
@@ -332,23 +343,32 @@ def make_request_handler(
 
         def _static(self, filename: str, content_type: str) -> None:
             data = (_WEB_ROOT / filename).read_bytes()
-            if filename in {"index.html", "scanner.html"}:
+            if filename == "index.html":
                 version = _ui_asset_version()
                 version_meta = f'<meta name="cadyx-ui-version" content="{version}">'.encode("ascii")
                 data = data.replace(b"</head>", version_meta + b"</head>", 1)
                 assets = (
-                    ("style.css", "viewport.js", "ply-parser.js", "ply-preview.js", "scan-view.js",
-                     "device-settings.js", "turntable-controls.js", "app.js")
-                    if filename == "index.html" else ("style.css", "scanner-camera.js")
+                    "style.css", "viewport.js", "browser-state.js", "ply-parser.js", "ply-preview.js", "scan-view.js",
+                    "device-settings.js", "turntable-controls.js", "app.js"
                 )
                 for asset in assets:
                     reference = f'"/assets/{asset}"'.encode("ascii")
                     versioned = f'"/assets/{asset}?v={version}"'.encode("ascii")
                     data = data.replace(reference, versioned)
+            etag = '"' + hashlib.sha256(data).hexdigest() + '"'
+            matches = [item.strip().removeprefix("W/") for item in
+                       self.headers.get("If-None-Match", "").split(",")]
+            if etag in matches or "*" in matches:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                return
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-cache")
+            self.send_header("ETag", etag)
             self.end_headers()
             self.wfile.write(data)
 

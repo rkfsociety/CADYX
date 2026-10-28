@@ -305,6 +305,12 @@ class ProjectWorkspaceTests(unittest.TestCase):
         self.assertNotIn("A" * 1000, history_path.read_text(encoding="utf-8"))
         self.assertEqual(restored["document"]["objects"][0]["geometry"], geometry)
         self.assertEqual(restored["document"]["objects"][1]["geometry"], geometry)
+        from cadyx.workspace_projects import _brep_key
+        with patch("cadyx.workspace_projects._brep_key", wraps=_brep_key) as verify_blob:
+            loaded_once = self.workspace.load(project["id"])
+        self.assertEqual(verify_blob.call_count, 1, "a repeated blob is read and verified once per load")
+        self.assertIsNot(loaded_once["document"]["objects"][0]["geometry"],
+                         loaded_once["document"]["objects"][1]["geometry"])
         self.assertEqual(restored["history"][0]["result"]["geometry"], geometry)
 
         with history_path.open("ab") as stream:

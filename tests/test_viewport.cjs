@@ -77,9 +77,13 @@ const padGrowthFrame = sandbox.window.CadyxViewport.padGrowthFrame;
 const padGrowthPosition = sandbox.window.CadyxViewport.padGrowthPosition;
 const detailRefreshPlan = sandbox.window.CadyxViewport.detailRefreshPlan;
 const initialRefresh = detailRefreshPlan(true, "overview");
-assert.equal(Object.values(initialRefresh).filter(Boolean).length, 3,
-  "First load requests the activity, dashboard, and comparison snapshots");
-assert.equal(2 + Object.values(initialRefresh).filter(Boolean).length, 5);
+assert.equal(Object.values(initialRefresh).filter(Boolean).length, 2,
+  "First load requests activity and dashboard; comparison waits for Analysis");
+assert.equal(2 + Object.values(initialRefresh).filter(Boolean).length, 4);
+for (const view of ['projects', 'overview', 'geometry', 'manufacturing', 'scanning', 'activity', 'files']) {
+  assert.equal(detailRefreshPlan(true, view).comparison, false,
+    `${view} must not compute a hidden comparison`);
+}
 const ordinaryRefresh = detailRefreshPlan(false, "overview");
 assert.deepEqual({ ...ordinaryRefresh }, { activity: false, dashboard: false, comparison: false });
 assert.equal(Object.values(ordinaryRefresh).filter(Boolean).length, 0,

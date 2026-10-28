@@ -112,9 +112,11 @@ jobs:
           $node = ".\.runtime\node-v$($versions.node.version)-win-x64\node.exe"
           & $node tests/test_viewport.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Viewport tests failed.' }
-          & $node tests/test_scanner_camera.cjs
-          if ($LASTEXITCODE -ne 0) { throw 'Scanner camera tests failed.' }
           & $node tests/test_ply_preview.cjs
           if ($LASTEXITCODE -ne 0) { throw 'PLY preview tests failed.' }
           & $node tests/test_curve_draft.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Trace draft tests failed.' }
+          foreach ($test in @('test_panel_state.cjs', 'test_turntable_controls.cjs', 'test_scan_view.cjs', 'test_web_performance.cjs')) {
+            & $node (Join-Path tests $test)
+            if ($LASTEXITCODE -ne 0) { throw "Browser regression failed: $test" }
+          }

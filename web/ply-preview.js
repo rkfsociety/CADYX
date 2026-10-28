@@ -75,7 +75,8 @@ try {
     window.cadyxUiReloadCamera = savedState.camera || savedState;
     window.cadyxUiReloadCameraAppliedToModel = false;
     window.cadyxUiReloadCameraPreset = savedState.cameraPreset;
-    if (restorableWorkspaceViews.has(savedState.workspaceView)) {
+    if (performance.getEntriesByType("navigation")[0]?.type === "reload"
+        && restorableWorkspaceViews.has(savedState.workspaceView)) {
       const address = new URL(window.location.href);
       if (savedState.workspaceView === "overview") address.searchParams.delete("view");
       else address.searchParams.set("view", savedState.workspaceView);
@@ -395,8 +396,8 @@ function restorePendingWorkspaceView() {
     return;
   }
   if (view === "files") openProjectFilesView();
-  else if (view === "analysis") {
-    refreshValidationRecords().catch(showValidationRecordsError);
+  else if (view === "analysis" && $("#comparison-panel").dataset.comparisonRevision
+      !== `${selectedProjectId}:${renderedSceneRevision}`) {
     refreshDetail().catch(handleRefreshError);
   }
 }
@@ -453,7 +454,6 @@ $("#workspace-navigation").addEventListener("click", (event) => {
     $("#geometry-rows").focus({ preventScroll: true });
   } else if (view === "analysis") {
     $("#comparison-panel").focus({ preventScroll: true });
-    refreshValidationRecords().catch(showValidationRecordsError);
     if (selectedProjectId && !getSelectedFolder()) refreshDetail().catch(handleRefreshError);
   } else if (view === "manufacturing") {
     $("#manufacturing-panel").focus({ preventScroll: true });
@@ -489,6 +489,7 @@ function setWorkspaceNavigation(view) {
   $("#comparison-panel").hidden = activeView !== "analysis";
   $("#manufacturing-panel").hidden = activeView !== "manufacturing";
   projectsPanel.hidden = activeView !== "projects";
+  if (activeView === "projects") renderProjects();
   $("#object-panel").hidden = activeView !== "geometry" || !selectedProjectId || Boolean(getSelectedFolder());
   document.querySelectorAll(".nav-item[data-workspace-view]").forEach((item) => {
     if (item.dataset.workspaceView === activeView) item.setAttribute("aria-current", "page");
@@ -1226,6 +1227,7 @@ $("#projects-grid-view").addEventListener("click", () => setProjectsLayout("grid
 $("#projects-list-view").addEventListener("click", () => setProjectsLayout("list"));
 
 function renderProjects() {
+  if (primaryGrid.dataset.view !== "projects") return;
   const list = $("#projects-list");
   const signature = JSON.stringify([
     projectSort,
@@ -2140,7 +2142,8 @@ async function refreshDetail() {
     || detailedProjectModifiedAt === null
     || !activityRevisionsByProject.has(projectId)
     || !dashboardsByProject.has(projectId);
-  const detailRequests = window.CadyxViewport.detailRefreshPlan(refreshAuxiliary, primaryGrid.dataset.view);
+  const detailRequests = window.CadyxViewport.detailRefreshPlan(
+    refreshAuxiliary, pendingInitialWorkspaceView || primaryGrid.dataset.view);
   const activity = detailRequests.activity
     ? await refreshActivitySnapshot(projectId)
     : (activitiesByProject.get(projectId) || []).slice(-1)[0] || null;
@@ -2154,7 +2157,7 @@ async function refreshDetail() {
   }
   const encodedProjectId = encodeURIComponent(projectId);
   const [info, scene, dashboard] = await Promise.all([
-    api(`/api/v1/projects/${encodedProjectId}`),
+    api(`/api/v1/projects/${encodedProjectId}?view=browser`),
     api(`/api/v1/projects/${encodedProjectId}/viewport`),
     detailRequests.dashboard
       ? api(`/api/v1/projects/${encodedProjectId}/dashboard`)
@@ -2177,6 +2180,7 @@ async function refreshDetail() {
     const comparison = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/comparison`);
     if (projectId !== selectedProjectId || request !== detailRequest) return;
     if (comparison.revision !== scene.revision) { scheduleWorkspaceRefresh(); return; }
+    $("#comparison-panel").dataset.comparisonRevision = `${projectId}:${comparison.revision}`;
     $("#comparison-description").hidden = !comparison.available;
     $("#comparison-empty").hidden = comparison.available;
     $("#comparison-empty").textContent = "Для этого проекта пока нет данных сравнения.";
@@ -2386,9 +2390,12 @@ async function refreshDetail() {
   }
   currentObjects = visibleObjects;
   renderObjectTree(visibleObjects);
+  window.cadyxModelSnapshot = { projectId, info, scene };
   window.dispatchEvent(new CustomEvent("cadyx:model-tree-updated", { detail: { objects: visibleObjects } }));
   updateProjectModelFileImportButton();
-  refreshValidationRecords(projectId).catch(showValidationRecordsError);
+  if (primaryGrid.dataset.view === "analysis" || pendingInitialWorkspaceView === "analysis") {
+    refreshValidationRecords(projectId).catch(showValidationRecordsError);
+  }
   restorePendingWorkspaceView();
 }
 
@@ -2960,7 +2967,13 @@ for (const type of eventTypes) {
   });
 }
 
+let streamHasConnected = false;
 stream.addEventListener("open", () => {
+  if (!streamHasConnected) {
+    streamHasConnected = true;
+    checkAutomaticUpdates();
+    return;
+  }
   activitiesByProject.clear();
   activityRevisionsByProject.clear();
   // Refresh authoritative state as a fallback even with bounded replay.

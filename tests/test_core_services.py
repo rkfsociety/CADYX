@@ -5,11 +5,35 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
+from uuid import uuid4
 from cadyx.core import CadyxCore
 from cadyx.core_services import CommandActivityService, EngineeringValidationService, ProjectLifecycleService, RenderingCacheService
 from cadyx.runtime_cache import RuntimeCachePolicy
 
 class CoreServiceCompositionTests(unittest.TestCase):
+    def test_browser_snapshot_excludes_payloads_after_full_geometry_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            core = CadyxCore(root, kernel=object())
+            project_id = core.create_project("Snapshot payload")["project"]["id"]
+            project = core.workspace.load(project_id)
+            geometry = {"kernel": "occt-v1", "kind": "imported_brep", "data": "QUJD",
+                        "volume": 1.0, "brep_valid": True}
+            project["document"]["objects"] = [{"id": f"body:{uuid4()}", "type": "body",
+                "name": "Part", "geometry": geometry, "feature_ids": []}]
+            project["document"]["revision"] = 1
+            project["history"] = [{"revision": 1, "actor_type": "system", "actor_id": "test",
+                "timestamp": project["modified_at"], "command": {"type": "fixture"}, "result": {}}]
+            core.workspace.save(project)
+            with patch.object(core, "_validate_geometry_once") as validate:
+                browser = core.inspect_project(project_id, browser=True)
+                full = core.inspect_project(project_id)
+                self.assertEqual(validate.call_count, 2)
+            self.assertNotIn("data", browser["document"]["objects"][0]["geometry"])
+            self.assertEqual(browser["document"]["objects"][0]["geometry"]["volume"], 1.0)
+            self.assertEqual(full["document"]["objects"][0]["geometry"]["data"], "QUJD")
+            self.assertEqual(browser["history"], [])
+            self.assertEqual(len(full["history"]), 1)
+
     def test_project_listing_does_not_wait_for_scanner_device_io(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             core = CadyxCore(root, kernel=object())

@@ -439,8 +439,8 @@ class CadyxCore:
             offset=offset, limit=limit, include_metrics=include_metrics,
         )
 
-    def inspect_project(self, project_id: str) -> dict[str, Any]:
-        return self._lifecycle.inspect_project(project_id)
+    def inspect_project(self, project_id: str, *, browser: bool = False) -> dict[str, Any]:
+        return self._lifecycle.inspect_project(project_id, browser=browser)
     def acquire_lease(self, project_id: str, owner_type: str, owner_id: str) -> dict[str, Any]:
         return self._command_activity.acquire_lease(project_id, owner_type, owner_id)
 

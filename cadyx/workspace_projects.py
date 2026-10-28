@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -93,11 +94,14 @@ def _unpack_project_geometries(project: dict[str, Any], directory: Path) -> dict
         return project
     if not isinstance(storage, dict):
         raise ValidationError("Project geometry storage is invalid.")
+    geometries: dict[str, dict[str, Any]] = {}
 
     def restore(value: Any) -> Any:
         if isinstance(value, dict):
             if set(value) == {_GEOMETRY_REF}:
                 key = value[_GEOMETRY_REF]
+                if isinstance(key, str) and key in geometries:
+                    return copy.deepcopy(geometries[key])
                 geometry = None
                 if isinstance(key, str) and re.fullmatch(r"[0-9a-f]{64}", key):
                     blob_path = directory / f".cadyx-brep-{key}.json"
@@ -116,6 +120,7 @@ def _unpack_project_geometries(project: dict[str, Any], directory: Path) -> dict
                     raise ValidationError("Project geometry blob descriptor is invalid.") from exc
                 if actual_key != key:
                     raise ValidationError("Project geometry blob checksum is invalid.")
+                geometries[key] = copy.deepcopy(geometry)
                 return geometry
             return {key: restore(child) for key, child in value.items()}
         if isinstance(value, list):

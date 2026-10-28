@@ -2,6 +2,7 @@
 
 import ctypes
 import base64
+import hashlib
 import json
 import math
 import os
@@ -12,6 +13,7 @@ from typing import Any
 import zlib
 
 from .errors import ValidationError
+from .runtime_cache import remember_bounded_bytes
 
 _PROGRESS_CALLBACK = ctypes.CFUNCTYPE(
     None, ctypes.c_void_p, ctypes.c_char_p, ctypes.c_double,
@@ -22,6 +24,9 @@ _NATIVE_ABI_VERSION = 1
 _periodic_spline_cache: OrderedDict[tuple[bytes, int], tuple[bytes, int]] = OrderedDict()
 _periodic_spline_cache_bytes = 0
 _periodic_spline_cache_lock = Lock()
+_graph_metrics_cache: OrderedDict[tuple[Any, bytes], bytes] = OrderedDict()
+_graph_metrics_cache_bytes = 0
+_graph_metrics_cache_lock = Lock()
 
 
 class _GraphNode(ctypes.Structure):
@@ -550,6 +555,7 @@ class NativeKernel:
             self.library.cadyx_free(result)
 
     def _geometry_graph(self, geometry, *, mesh=False, topology=False, export=False):
+        global _graph_metrics_cache_bytes
         nodes = []
         coordinates = []
         edge_indices = []
@@ -713,6 +719,21 @@ class NativeKernel:
         native_coordinates = (ctypes.c_double * len(coordinates))(*coordinates) if coordinates else None
         native_edges = (ctypes.c_int * len(edge_indices))(*edge_indices) if edge_indices else None
         native_brep_data = (ctypes.c_ubyte * len(brep_data)).from_buffer_copy(brep_data) if brep_data else None
+        metrics_key = None
+        if not (mesh or topology or export):
+            digest = hashlib.sha256(json.dumps(
+                [len(nodes), len(coordinates), len(edge_indices), len(brep_data)],
+            ).encode("ascii"))
+            digest.update(bytes(native_nodes))
+            digest.update(bytes(native_coordinates) if native_coordinates is not None else b"")
+            digest.update(bytes(native_edges) if native_edges is not None else b"")
+            digest.update(brep_data)
+            metrics_key = (self.library, digest.digest())
+            with _graph_metrics_cache_lock:
+                cached = _graph_metrics_cache.get(metrics_key)
+                if cached is not None:
+                    _graph_metrics_cache.move_to_end(metrics_key)
+                    return json.loads(cached)
         error = ctypes.create_string_buffer(1024)
         if export:
             output_size = ctypes.c_size_t()
@@ -739,7 +760,16 @@ class NativeKernel:
                 if metrics_json:
                     self.library.cadyx_free(metrics_json)
         try:
-            return json.loads(ctypes.string_at(result))
+            encoded = ctypes.string_at(result)
+            value = json.loads(encoded)
+            if metrics_key is not None:
+                with _graph_metrics_cache_lock:
+                    _graph_metrics_cache_bytes = remember_bounded_bytes(
+                        _graph_metrics_cache, metrics_key, encoded,
+                        current_bytes=_graph_metrics_cache_bytes, max_entries=128,
+                        max_bytes=8 * 1024 * 1024, size_of=len,
+                    )
+            return value
         finally:
             self.library.cadyx_free(result)
 

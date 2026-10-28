@@ -478,23 +478,34 @@ class ProjectLifecycleService(_CoreService):
                 self.events.publish("workspace.selection.changed", None, selected)
         return selected
 
-    def inspect_project(self, project_id: str) -> dict[str, Any]:
+    def inspect_project(self, project_id: str, *, browser: bool = False) -> dict[str, Any]:
         from .assembly_mates import inspect_assembly_mates
 
         with self._project_lifecycle_lock(project_id):
             # project.json is atomically replaced, so read-only viewers can safely
             # inspect the last committed revision while an agent edits its next one.
-            project = self.workspace.load(project_id)
+            project = self.workspace.load(project_id, include_history=not browser)
             document = Document.from_validated_dict(project["document"])
             self._validate_geometry_once(project_id, document)
             availability = self._project_availability(project_id, nonblocking=True)
             if not availability.permits("read"):
                 raise RuntimeError("Read-only project inspection must remain available while the project is busy.")
+            def browser_value(value: Any) -> Any:
+                if isinstance(value, dict):
+                    return {
+                        key: browser_value(child) for key, child in value.items()
+                        if not (key == "data" and value.get("kind") in
+                                {"imported_brep", "triangle_mesh", "point_cloud"})
+                    }
+                if isinstance(value, list):
+                    return [browser_value(child) for child in value]
+                return value
+
             return {
                 "project": self._summary(project),
                 "lock": availability.lock,
-                "document": document.to_dict(),
-                "history": copy.deepcopy(project["history"]),
+                "document": browser_value(document.to_dict(copy_objects=False)) if browser else document.to_dict(),
+                "history": [] if browser else copy.deepcopy(project["history"]),
                 "assembly_kinematics": inspect_assembly_mates(document.assembly),
             }
 

@@ -83,7 +83,6 @@ body:has(#primary-grid[data-view="projects"]) #workspace-navigation{position:fix
 body:has(#primary-grid[data-view="projects"]) #workspace-navigation .nav-item{flex:0 0 auto;width:auto;min-width:0;height:58px;min-height:58px;justify-content:center;padding:0 18px;border:0;border-bottom:3px solid transparent;border-radius:0;background:transparent;text-decoration:none}
 body:has(#primary-grid[data-view="projects"]) #workspace-navigation .nav-copy strong{color:#c8d0d5;font:600 12px/1.2 var(--ui-font);letter-spacing:0;text-transform:none;white-space:nowrap}
 body:has(#primary-grid[data-view="projects"]) #workspace-navigation .nav-item:hover:not(:disabled) .nav-copy strong{color:#fff}
-body:has(#primary-grid[data-view="projects"]) #workspace-navigation a[href="/scanner"]{border-bottom-color:var(--accent)}
 body:has(#primary-grid[data-view="projects"]) .project-detail{grid-template-rows:0 minmax(0,1fr) var(--cadyx-ai-height)!important}
 body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary-grid[data-view="projects"]) .project-main{grid-row:2!important}
 .brand{gap:9px}
@@ -493,7 +492,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const empty=$('#cad-tree-empty');if(empty)empty.hidden=visibleGroups.some(group=>group.features.length>0);
     }
     search?.addEventListener('input',renderTree);
-    setInterval(()=>{if(grid?.dataset.view==='scanning'&&state.project)loadScanTree(state.project,true)},5000);
+    setInterval(()=>{if(document.visibilityState!=='hidden'&&grid?.dataset.view==='scanning'&&state.project)loadScanTree(state.project,true)},5000);
     new MutationObserver(()=>{scanTreeLoadedProject=null;renderTree()}).observe(grid,{attributes:true,attributeFilter:['data-view']});
     function parameterHtml(o){const entries=Object.entries(o.parameters||{}).filter(([k])=>k!=='section_sketch_ids'&&k!=='section_sketch_groups');if(!entries.length)return'<dt>Параметры</dt><dd>Нет</dd>';return entries.map(([k,v])=>{const edit=(editable[o.operation]||[]).includes(k)&&typeof v==='number';const unit=k.includes('angle')?'°':typeof v==='number'?'мм':'';return`<dt>${esc(pLabel[k]||k)}</dt><dd>${edit?`<input data-p="${k}" data-original="${v}" value="${v}"> ${unit}`:esc(Array.isArray(v)?v.join(', '):v)}</dd>`}).join('')}
     function modelParameterSection(){const entries=Object.entries(state.parameters||{});if(!entries.length)return'';const rows=entries.map(([name,record])=>{const expression=state.bindings.find(item=>(item.expression.match(/[A-Za-z_][A-Za-z0-9_]*/g)||[]).includes(name));return`<dt title="${esc(expression?.expression||'')} ">${esc(name)}</dt><dd><input data-model-parameter="true" data-parameter="${esc(name)}" data-original-value="${Number(record.value)}" value="${Number(record.value)}"> ${esc(record.unit||'мм')}</dd>`}).join('');return`<section class="cad3-sec cad3-model-parameters"><h3>Параметры модели</h3><dl class="cad3-grid">${rows}</dl><button class="cad3-apply-model">ПЕРЕСТРОИТЬ МОДЕЛЬ</button></section>`}
@@ -764,6 +763,9 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const showCapturePreview=(scan,options)=>scanTreePreviewSelection?null:scanView?.showCapture(scan,options);
       const pollScan=async id=>{
         if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
+        if(document.visibilityState==='hidden'||grid?.dataset.view!=='scanning'){
+          pollTimer=setTimeout(()=>pollScan(id),2500);return;
+        }
         try{
           const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{cache:'no-store'});
           const payload=await response.json();
@@ -826,8 +828,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
       return response.json();
     }
-    async function refresh(){const request=++semanticRequest;const id=semanticProjectId();if(!id||detail.hidden)return;try{const [info,scene]=await Promise.all([semanticJson(`/api/v1/projects/${encodeURIComponent(id)}`),semanticJson(`/api/v1/projects/${encodeURIComponent(id)}/viewport`)]);if(request!==semanticRequest||id!==semanticProjectId()||detail.hidden)return;if(scene.revision!==info.document.revision){schedule();return}const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};state.bindings=info.document.parameter_bindings||[];state.assembly=info.document.assembly||null;state.byId=new Map(state.objects.map(o=>[o.id,o]));if(projectChanged)restoreModelTreeState(id);state.scene=scene;makeLabels();if(projectChanged||(state.selected&&!state.byId.has(state.selected))){clearSelection();return}renderTree();state.selected?select(state.selected):renderProps(null);syncOverlay()}catch(e){console.debug('CAD semantic refresh',e)}}
-    let timer;const schedule=()=>{clearTimeout(timer);timer=setTimeout(refresh,80)};['#document-revision','#document-title'].forEach(s=>{const e=$(s);if(e)new MutationObserver(schedule).observe(e,{childList:true,subtree:true,characterData:true})});new MutationObserver(schedule).observe(detail,{attributes:true,attributeFilter:['hidden']});schedule();setTimeout(refresh,600);
+    async function refresh(){const request=++semanticRequest;const id=semanticProjectId();if(!id||detail.hidden)return;try{const snapshot=window.cadyxModelSnapshot;if(!snapshot||snapshot.projectId!==id)return;const {info,scene}=snapshot;if(state.project===id&&state.rev===info.document.revision)return;if(request!==semanticRequest||id!==semanticProjectId()||detail.hidden)return;if(scene.revision!==info.document.revision){schedule();return}const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};state.bindings=info.document.parameter_bindings||[];state.assembly=info.document.assembly||null;state.byId=new Map(state.objects.map(o=>[o.id,o]));if(projectChanged)restoreModelTreeState(id);state.scene=scene;makeLabels();if(projectChanged||(state.selected&&!state.byId.has(state.selected))){clearSelection();return}renderTree();state.selected?select(state.selected):renderProps(null);syncOverlay()}catch(e){console.debug('CAD semantic refresh',e)}}
+    let timer;const schedule=()=>{clearTimeout(timer);timer=setTimeout(refresh,80)};['#document-revision','#document-title'].forEach(s=>{const e=$(s);if(e)new MutationObserver(schedule).observe(e,{childList:true,subtree:true,characterData:true})});new MutationObserver(schedule).observe(detail,{attributes:true,attributeFilter:['hidden']});window.addEventListener('cadyx:model-tree-updated',refresh);schedule();
   }
   const boot=()=>setTimeout(enhance,0);if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();

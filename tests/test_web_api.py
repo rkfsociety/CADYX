@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from http.client import HTTPConnection
 import json
+import gzip
 import os
 import re
 import tempfile
@@ -25,6 +26,42 @@ import cadyx.web as web_module
 
 
 class WebApiTests(unittest.TestCase):
+    def test_static_etag_revalidation_and_json_compression(self) -> None:
+        with urlopen(self.base_url + "/assets/app.js") as response:
+            etag = response.headers["ETag"]
+            self.assertTrue(response.read())
+        request = Request(self.base_url + "/assets/app.js", headers={"If-None-Match": etag})
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(request)
+        self.assertEqual(caught.exception.code, 304)
+        self.assertEqual(caught.exception.read(), b"")
+        caught.exception.close()
+        with patch.object(self.core, "list_workspace", return_value={"data": "repeated " * 2000}):
+            request = Request(self.base_url + "/api/v1/projects", headers={"Accept-Encoding": "gzip"})
+            with urlopen(request) as response:
+                self.assertEqual(response.headers["Content-Encoding"], "gzip")
+                self.assertEqual(response.headers["Vary"], "Accept-Encoding")
+                compressed = response.read()
+                self.assertEqual(json.loads(gzip.decompress(compressed))["data"], "repeated " * 2000)
+                self.assertLess(len(compressed), 1000)
+            request = Request(self.base_url + "/api/v1/projects", headers={"Accept-Encoding": "gzip;q=0"})
+            with urlopen(request) as response:
+                self.assertIsNone(response.headers["Content-Encoding"])
+                self.assertEqual(json.loads(response.read())["data"], "repeated " * 2000)
+
+    def test_browser_inspection_omits_history_but_preserves_default_api(self) -> None:
+        _, created = self.request("/api/v1/projects", {"name": "Browser snapshot"})
+        project_id = created["project"]["id"]
+        path = f"/api/v1/projects/{project_id}"
+        status, browser = self.request(path + "?view=browser")
+        self.assertEqual(status, 200)
+        self.assertEqual(browser["document"]["revision"], 0)
+        self.assertEqual(browser["history"], [])
+        status, full = self.request(path)
+        self.assertEqual(full, browser)
+        status, error = self.request(path + "?view=unknown")
+        self.assertEqual((status, error["error"]), (400, "VALIDATION_ERROR"))
+
     def test_sse_last_event_id_replay_and_gap_wire_protocol(self) -> None:
         first = self.core.events.publish("probe", None, {"n": 1})
         second = self.core.events.publish("probe", None, {"n": 2})
@@ -1536,13 +1573,9 @@ class WebApiTests(unittest.TestCase):
         status, updates = self.request("/api/v1/updates")
         self.assertEqual(status, 200)
         self.assertEqual(version_match.group(1).decode("ascii"), updates["ui_version"])
-        with urlopen(self.base_url + "/scanner", timeout=3) as response:
-            scanner_page = response.read()
-            self.assertEqual(response.status, 200)
-            self.assertIn(b"scanner-camera.js?v=", scanner_page)
-        with urlopen(self.base_url + "/assets/scanner-camera.js", timeout=3) as response:
-            self.assertEqual(response.status, 200)
-            self.assertIn(b"rotateScannerPoint", response.read())
+        for retired in ("/scanner", "/assets/scanner-camera.js"):
+            status, error = self.request(retired)
+            self.assertEqual((status, error["error"]), (404, "NOT_FOUND"))
         with urlopen(self.base_url + "/assets/ply-parser.js", timeout=3) as response:
             self.assertEqual(response.status, 200)
             self.assertIn(b"window.CadyxPlyPreview", response.read())
