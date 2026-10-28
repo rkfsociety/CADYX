@@ -55,12 +55,20 @@ def remember_bounded_bytes(
 ) -> int:
     """Store one LRU value and return exact retained-byte accounting."""
 
-    previous = cache.pop(key, None)
-    if previous is not None:
-        current_bytes -= size_of(previous)
+    value_bytes = size_of(value)
+    had_previous = key in cache
+    previous_bytes = size_of(cache[key]) if had_previous else 0
+    if had_previous:
+        del cache[key]
+        current_bytes -= previous_bytes
+    if max_entries == 0:
+        cache.clear()
+        return 0
+    # Do not evict reusable entries to make room for a value that cannot fit.
+    if value_bytes > max_bytes:
+        return current_bytes
     cache[key] = value
-    cache.move_to_end(key)
-    current_bytes += size_of(value)
+    current_bytes += value_bytes
     while cache and (len(cache) > max_entries or current_bytes > max_bytes):
         _, evicted = cache.popitem(last=False)
         current_bytes -= size_of(evicted)

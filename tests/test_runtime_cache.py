@@ -36,8 +36,48 @@ class RuntimeCacheTests(unittest.TestCase):
             cache, "oversized", b"123456", current_bytes=retained,
             max_entries=2, max_bytes=5, size_of=len,
         )
+        self.assertEqual(list(cache), ["a", "c"])
+        self.assertEqual(retained, 3)
+
+    def test_oversized_replacement_removes_only_stale_entry(self):
+        cache = OrderedDict([("a", b"12"), ("b", b"345")])
+        retained = remember_bounded_bytes(
+            cache, "a", b"123456", current_bytes=5,
+            max_entries=2, max_bytes=5, size_of=len,
+        )
+        self.assertEqual(cache, OrderedDict([("b", b"345")]))
+        self.assertEqual(retained, 3)
+
+    def test_zero_entry_budget_clears_existing_cache(self):
+        cache = OrderedDict([("a", b"12"), ("b", b"345")])
+        retained = remember_bounded_bytes(
+            cache, "c", b"6", current_bytes=5,
+            max_entries=0, max_bytes=5, size_of=len,
+        )
         self.assertEqual(cache, OrderedDict())
         self.assertEqual(retained, 0)
+
+    def test_none_entry_and_failed_size_calculation_preserve_accounting(self):
+        cache = OrderedDict([("empty", None), ("data", b"12")])
+        size_of = lambda value: 0 if value is None else len(value)
+        retained = remember_bounded_bytes(
+            cache, "empty", b"3", current_bytes=2,
+            max_entries=2, max_bytes=5, size_of=size_of,
+        )
+        self.assertEqual(list(cache), ["data", "empty"])
+        self.assertEqual(retained, 3)
+
+        def failing_size(value):
+            if value == b"invalid":
+                raise ValueError("cannot measure value")
+            return len(value)
+
+        with self.assertRaises(ValueError):
+            remember_bounded_bytes(
+                cache, "data", b"invalid", current_bytes=retained,
+                max_entries=2, max_bytes=5, size_of=failing_size,
+            )
+        self.assertEqual(list(cache.items()), [("data", b"12"), ("empty", b"3")])
 
     def test_policy_budgets_are_validated_in_one_object(self):
         policy = RuntimeCachePolicy(
