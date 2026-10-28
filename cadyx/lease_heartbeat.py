@@ -15,17 +15,28 @@ class LeaseHeartbeat:
         timeout = core.leases.timeout_seconds
         self._interval = max(0.001, min(timeout / 3.0, 30.0))
         self._stopped = threading.Event()
+        self._lifecycle_lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._failure: BaseException | None = None
 
     def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, name="cadyx-agent-heartbeat", daemon=True)
-        self._thread.start()
+        # Starting twice would orphan the first worker; starting after stop
+        # would silently run without any lease renewals.
+        with self._lifecycle_lock:
+            if self._stopped.is_set():
+                raise RuntimeError("Cannot start a stopped CADYX lease heartbeat.")
+            if self._thread is not None:
+                raise RuntimeError("CADYX lease heartbeat has already started.")
+            thread = threading.Thread(target=self._run, name="cadyx-agent-heartbeat", daemon=True)
+            thread.start()
+            self._thread = thread
 
     def stop(self) -> None:
-        self._stopped.set()
-        if self._thread is not None:
-            self._thread.join()
+        with self._lifecycle_lock:
+            self._stopped.set()
+            thread = self._thread
+        if thread is not None:
+            thread.join()
 
     def check(self) -> None:
         if self._failure is not None:
