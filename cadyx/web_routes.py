@@ -517,8 +517,8 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
                 if not after_text.isdecimal():
                     raise ValidationError("The live-frame after value must be a non-negative integer.")
                 after_sequence = int(after_text)
-            frames_path = core.workspace.root / ".revopoint-live.raw.frames"
-            raw_path = core.workspace.root / ".revopoint-live.raw"
+            frames_path = core.workspace.state_root / ".revopoint-live.raw.frames"
+            raw_path = core.workspace.state_root / ".revopoint-live.raw"
             if after_sequence is None and not latest_mode and raw_path.is_file():
                 frame_path = raw_path
             else:

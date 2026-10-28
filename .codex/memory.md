@@ -11,6 +11,8 @@
 
 # CADYX project memory
 
+- Confirmed: workspace service artifacts live in the sibling `.<workspace-name>-state/` directory; `ProjectWorkspace.state_root` and scanner state share `cadyx/workspace_state.py`. Keep the projects root for project directories only. Upgrade/migration and backup requirements: `docs/operations.md`.
+
 - User decision: the browser home page is the project list, with user-initiated empty-project creation through the existing Core API. Model editing remains agent-controlled. User workflow: [operations](../docs/operations.md); implementation: `web/ply-preview.js`.
 
 - Confirmed: browser document loads use `?view=browser` after full geometry validation, excluding history and encoded geometry payloads. Semantic panels consume `window.cadyxModelSnapshot` published with `cadyx:model-tree-updated`; do not add a second document/scene fetcher. Hidden sections defer comparison, thumbnails and scanner requests. Native graph metrics cache exact packed inputs without bypassing validation. Contract: [viewport loading and transport](docs/viewport-api.md#browser-loading-and-transport); regressions: `tests/test_web_performance.cjs`, `tests/test_panel_state.cjs`, `tests/test_native_kernel_ffi.py`.

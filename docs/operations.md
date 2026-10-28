@@ -21,6 +21,8 @@ Open <http://127.0.0.1:8888>. Port `8888` is the default; to use another port or
 
 The home page opens the project list. Click “Новый проект”, enter a name and click “Создать” to save and open an empty project. Errors keep the entered name in the dialog and display the failure. Direct `/p/<slug>` links still open the selected model.
 
+The workspace root (`projects/` by default) contains only project directories. Workspace databases, agent reports and scanner preview/turntable runtime artifacts live in the sibling `.<workspace-name>-state/` directory (`.projects-state/` by default). Back up this directory as well to preserve workspace groups and agent state. Stop all workspace writers before upgrading: startup moves legacy `.cadyx-*` and `.revopoint-*` artifacts to the sibling directory, preserving their names and contents; an existing destination causes an explicit error instead of overwriting data. Other loose user files are left untouched.
+
 Checkboxes in the project cards support bulk deletion. The bulk action bar appears after the first selection and hides when all selections are cleared. “Выбрать все в поиске” selects available projects matching the current search; earlier selections remain selected when the search changes. Confirmation lists the count and names of all selected projects before permanent deletion. Busy projects cannot be selected. Partial failures leave unsuccessful projects selected and report the deletion count and failure reasons.
 
 ## Authentication and LAN access

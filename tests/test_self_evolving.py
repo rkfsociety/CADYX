@@ -20,7 +20,7 @@ class SelfEvolvingCapabilityTests(unittest.TestCase):
         self.core = CadyxCore(str(root / "projects"), kernel=PrimitiveKernelAdapter())
         self.engine = SelfEvolvingCapabilityEngine(
             self.core,
-            CapabilityRegistry(root / "projects" / ".cadyx-capabilities.sqlite3"),
+            CapabilityRegistry(self.core.workspace.state_root / ".cadyx-capabilities.sqlite3"),
         )
 
     @staticmethod

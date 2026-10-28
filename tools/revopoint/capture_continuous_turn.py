@@ -217,7 +217,7 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
     tools = repository / "tools" / "revopoint"
     capture_rgb = tools / "build" / "CaptureRgb.exe"
     table = tools / "build" / "TurntableController.exe"
-    live_path = repository / "projects" / ".revopoint-live.raw"
+    live_path = repository / ".projects-state" / ".revopoint-live.raw"
     q_path = tools / "calibration" / "scanners" / "revopoint-mini-y16" / "Q.bin"
     scale_path = tools / "calibration" / "scanners" / "revopoint-mini-y16" / "depth_scale.json"
     for path in (capture_rgb, table, q_path, scale_path):

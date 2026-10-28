@@ -409,7 +409,7 @@ project's lock or activity is not free.
 
 The Projects view also supports logical project groups. Group definitions and
 project-to-group assignments are stored in `.cadyx-project-groups.sqlite3` in
-the workspace root, separate from project documents and physical workspace
+the sibling `.<workspace-name>-state/` directory, separate from project documents and physical workspace
 folders. `GET /api/v1/projects` includes `groups` and each entry's `group_id`;
 `POST /api/v1/project-groups` creates a group, and
 `POST /api/v1/projects/{id}/group` assigns a group or accepts `group_id: null`

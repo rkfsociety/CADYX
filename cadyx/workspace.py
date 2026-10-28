@@ -18,6 +18,7 @@ from uuid import uuid4
 from .errors import ConflictError, NotFoundError, ValidationError
 from .workspace_files import WorkspaceArtifactStore, _is_single_path_segment
 from .workspace_groups import ProjectGroupStore
+from .workspace_state import prepare_workspace_state
 from .workspace_projects import ProjectRecordStore, _PROJECT_ID
 from .revision_diff import RevisionArchive
 from .workspace_validations import ValidationRecordStore
@@ -38,11 +39,12 @@ class ProjectWorkspace:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self.state_root = prepare_workspace_state(self.root)
         self._project_path_guard = threading.RLock()
         self._project_path_by_id: dict[str, Path] = {}
         self._project_id_by_path: dict[Path, str] = {}
         self._projects = ProjectRecordStore()
-        self._groups = ProjectGroupStore(self.root)
+        self._groups = ProjectGroupStore(self.state_root)
         self._validations = ValidationRecordStore()
         self._artifacts = WorkspaceArtifactStore(self._is_internal_project_file)
         # Preserve the private path used by existing revision-token code/tests.

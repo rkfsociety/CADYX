@@ -444,7 +444,7 @@ class WebApiTests(unittest.TestCase):
         stop.assert_called_once_with()
 
     def test_live_scanner_frame_queue_reads_are_serialized(self) -> None:
-        frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"
+        frame_directory = self.core.workspace.state_root / ".revopoint-live.raw.frames"
         frame_directory.mkdir(parents=True)
         frame_bytes = bytes(640 * 400 * 2)
         (frame_directory / "frame-1.y16").write_bytes(frame_bytes)
@@ -475,7 +475,7 @@ class WebApiTests(unittest.TestCase):
                             for status, sequence, size in results), results)
 
     def test_live_scanner_latest_frame_reads_newest_queue_entry_without_consuming_it(self) -> None:
-        frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"
+        frame_directory = self.core.workspace.state_root / ".revopoint-live.raw.frames"
         frame_directory.mkdir(parents=True)
         frame_bytes = 640 * 400 * 2
         first_frame = bytes([1]) * frame_bytes
@@ -500,7 +500,7 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(latest_path.is_file(), "the workspace reader owns queue consumption")
 
     def test_live_scanner_latest_consuming_read_returns_newest_and_discards_stale_frames(self) -> None:
-        frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"
+        frame_directory = self.core.workspace.state_root / ".revopoint-live.raw.frames"
         frame_directory.mkdir(parents=True)
         frame_bytes = 640 * 400 * 2
         paths = [frame_directory / f"frame-{sequence}.y16" for sequence in range(1, 4)]
@@ -522,7 +522,7 @@ class WebApiTests(unittest.TestCase):
                         "a latest-frame read removes skipped source files so the queue stays bounded")
 
     def test_live_scanner_delivers_latest_frame_while_capture_still_holds_file_open(self) -> None:
-        frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"
+        frame_directory = self.core.workspace.state_root / ".revopoint-live.raw.frames"
         frame_directory.mkdir(parents=True)
         frame_bytes = 640 * 400 * 2
         stale_path = frame_directory / "frame-1.y16"
@@ -567,8 +567,8 @@ class WebApiTests(unittest.TestCase):
         self.assertFalse(open_path.exists(), "the previously locked frame is cleaned up on a later poll")
 
     def test_live_scanner_diagnostic_prefers_active_capture_snapshot_when_present(self) -> None:
-        raw_path = self.core.workspace.root / ".revopoint-live.raw"
-        frame_directory = self.core.workspace.root / ".revopoint-live.raw.frames"
+        raw_path = self.core.workspace.state_root / ".revopoint-live.raw"
+        frame_directory = self.core.workspace.state_root / ".revopoint-live.raw.frames"
         frame_directory.mkdir(parents=True)
         raw_frame = bytes([3]) * (640 * 400 * 2)
         queued_frame = bytes([4]) * (640 * 400 * 2)

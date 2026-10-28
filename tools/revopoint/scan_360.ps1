@@ -160,7 +160,7 @@ function Read-ReportedAngle {
 
 $poseLog = Join-Path $runDirectory "${runPrefix}_poses.csv"
 $prefix = Join-Path $runDirectory $runPrefix
-$liveRaw = Join-Path $workspaceRoot '.revopoint-live.raw'
+$liveRaw = Join-Path (Join-Path $repoRoot '.projects-state') '.revopoint-live.raw'
 if ($ManifestOnly) {
     if (-not (Test-Path -LiteralPath $poseLog -PathType Leaf)) {
         throw "Manifest-only repair requires the existing pose log: $poseLog"

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ConflictError, ValidationError
+from .workspace_state import prepare_workspace_state
 
 _DEFAULT_FRAME_COUNT = 12
 _TURNTABLE_POSITION_CACHE_SECONDS = 6.0
@@ -132,6 +133,7 @@ class Scan360CaptureController:
     def __init__(self, repository_root: Path, workspace_root: Path) -> None:
         self._repository_root = repository_root.resolve()
         self._workspace_root = workspace_root.resolve()
+        self._state_root = prepare_workspace_state(self._workspace_root)
         self._guard = threading.RLock()
         self._job: _Scan360Job | None = None
         self._live_preview: _LivePreviewJob | None = None
@@ -243,9 +245,9 @@ class Scan360CaptureController:
                     raise ConflictError("Start the live scanner preview before continuous table rotation.",
                                         code="SCANNER_PREVIEW_REQUIRED")
             if command == "stop" and spin is None:
-                stop_path = self._workspace_root / ".revopoint-turntable-spin.stop"
+                stop_path = self._state_root / ".revopoint-turntable-spin.stop"
                 heartbeat_path = Path(str(stop_path) + ".heartbeat")
-                log_path = self._workspace_root / ".revopoint-turntable-spin.log"
+                log_path = self._state_root / ".revopoint-turntable-spin.log"
                 self._recover_stale_turntable_spin_files(stop_path, heartbeat_path, log_path)
             if self._job is not None and self._job.process.poll() is None and command != "stop":
                 raise ConflictError("Turntable motion and configuration are locked while a 360 scan is capturing.",
@@ -266,7 +268,7 @@ class Scan360CaptureController:
                 duration = int(value)
                 try:
                     with tempfile.TemporaryDirectory(prefix=".turntable-monitor-",
-                                                     dir=self._workspace_root) as temporary:
+                                                     dir=self._state_root) as temporary:
                         telemetry_path = Path(temporary) / "telemetry.csv"
                         result = subprocess.run([str(executable), "monitor", str(duration), str(telemetry_path),
                             *profile_args], cwd=str(self._repository_root), capture_output=True,
@@ -309,9 +311,9 @@ class Scan360CaptureController:
                         "samples": samples, "output": output,
                         "turntable_device_id": address, "profile_id": profile["id"]}
             if command == "spin-start":
-                stop_path = self._workspace_root / ".revopoint-turntable-spin.stop"
+                stop_path = self._state_root / ".revopoint-turntable-spin.stop"
                 heartbeat_path = Path(str(stop_path) + ".heartbeat")
-                log_path = self._workspace_root / ".revopoint-turntable-spin.log"
+                log_path = self._state_root / ".revopoint-turntable-spin.log"
                 self._recover_stale_turntable_spin_files(stop_path, heartbeat_path, log_path)
                 try:
                     heartbeat_path.touch(exist_ok=True)
@@ -684,7 +686,7 @@ class Scan360CaptureController:
 
     def _recover_stale_turntable_spin_files(self, stop_path: Path, heartbeat_path: Path,
                                             log_path: Path) -> str | None:
-        legacy_heartbeat_path = self._workspace_root / ".revopoint-turntable-spin.heartbeat"
+        legacy_heartbeat_path = self._state_root / ".revopoint-turntable-spin.heartbeat"
         stale_paths = (stop_path, heartbeat_path, legacy_heartbeat_path, log_path)
         if not any(path.exists() for path in stale_paths):
             return None
@@ -711,9 +713,9 @@ class Scan360CaptureController:
     def _stop_turntable_spin_locked(self) -> dict[str, Any]:
         job = self._turntable_spin
         if job is None:
-            stop_path = self._workspace_root / ".revopoint-turntable-spin.stop"
+            stop_path = self._state_root / ".revopoint-turntable-spin.stop"
             heartbeat_path = Path(str(stop_path) + ".heartbeat")
-            log_path = self._workspace_root / ".revopoint-turntable-spin.log"
+            log_path = self._state_root / ".revopoint-turntable-spin.log"
             archived_log = self._recover_stale_turntable_spin_files(stop_path, heartbeat_path, log_path)
             return ({"state": "idle", "message": "Stale turntable stop state cleared.",
                      "archived_log": archived_log} if archived_log else {"state": "idle"})
@@ -1115,11 +1117,11 @@ class Scan360CaptureController:
             raise ValidationError("Select a currently connected supported scanner in device settings.")
         self._resolve_scanner_calibration(scanner_device_id, len(scanners), scanner["profile_id"])
 
-        raw_path = self._workspace_root / ".revopoint-live.raw"
-        frames_path = self._workspace_root / ".revopoint-live.raw.frames"
-        stop_path = self._workspace_root / ".revopoint-live-preview.stop"
-        ready_path = self._workspace_root / ".revopoint-live-preview.ready"
-        log_path = self._workspace_root / ".revopoint-live-preview.log"
+        raw_path = self._state_root / ".revopoint-live.raw"
+        frames_path = self._state_root / ".revopoint-live.raw.frames"
+        stop_path = self._state_root / ".revopoint-live-preview.stop"
+        ready_path = self._state_root / ".revopoint-live-preview.ready"
+        log_path = self._state_root / ".revopoint-live-preview.log"
         with self._guard:
             if self._job is not None and self._job.process.poll() is None:
                 raise ConflictError("Stop the 360 capture before starting a live scanner preview.", code="SCANNER_BUSY")
@@ -1176,10 +1178,10 @@ class Scan360CaptureController:
         with self._guard:
             job = self._live_preview
             if job is None:
-                raw_path = self._workspace_root / ".revopoint-live.raw"
-                frames_path = self._workspace_root / ".revopoint-live.raw.frames"
-                stop_path = self._workspace_root / ".revopoint-live-preview.stop"
-                ready_path = self._workspace_root / ".revopoint-live-preview.ready"
+                raw_path = self._state_root / ".revopoint-live.raw"
+                frames_path = self._state_root / ".revopoint-live.raw.frames"
+                stop_path = self._state_root / ".revopoint-live-preview.stop"
+                ready_path = self._state_root / ".revopoint-live-preview.ready"
                 capture_executable = self._repository_root / "tools" / "revopoint" / "build" / "CaptureY16.exe"
                 orphaned = self._stop_orphaned_live_preview_processes(
                     capture_executable, frames_path, stop_path, ready_path,

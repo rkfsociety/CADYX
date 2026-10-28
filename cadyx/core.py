@@ -68,8 +68,8 @@ class CadyxCore:
         else:
             self.leases = EditLeaseManager(self.workspace._project_dir, timeout_seconds=lease_timeout_seconds, clock=lease_clock)
         self.events = EventBroker(
-            dashboard_state_path=self.workspace.root / ".cadyx-agent-dashboards.json",
-            dashboard_database_path=self.workspace.root / ".cadyx-agent-dashboards.sqlite3",
+            dashboard_state_path=self.workspace.state_root / ".cadyx-agent-dashboards.json",
+            dashboard_database_path=self.workspace.state_root / ".cadyx-agent-dashboards.sqlite3",
         )
         self._server_agent_lease_guard = threading.RLock()
         self._server_agent_leases: dict[str, tuple[str, str]] = {}
@@ -78,9 +78,9 @@ class CadyxCore:
         self._command_activity = CommandActivityService(self)
         self._rendering = RenderingCacheService(self, cache_policy=cache_policy)
         self._engineering_validation = EngineeringValidationService(self)
-        self.capability_registry = CapabilityRegistry(self.workspace.root / ".cadyx-capabilities.sqlite3")
+        self.capability_registry = CapabilityRegistry(self.workspace.state_root / ".cadyx-capabilities.sqlite3")
         self.self_evolving = SelfEvolvingCapabilityEngine(self, self.capability_registry)
-        self.source_extensions = SourceExtensionEngine(self.workspace.root / ".cadyx-source-extensions.sqlite3")
+        self.source_extensions = SourceExtensionEngine(self.workspace.state_root / ".cadyx-source-extensions.sqlite3")
         self._command_proposals: dict[str, dict[str, Any]] = {}
         self._proposal_guard = threading.RLock()
 

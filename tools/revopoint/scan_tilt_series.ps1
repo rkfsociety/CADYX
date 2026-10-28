@@ -18,7 +18,7 @@ if (-not $PSBoundParameters.ContainsKey('DepthScale')) {
 if ([double]::IsNaN($DepthScale) -or [double]::IsInfinity($DepthScale) -or $DepthScale -le 0) {
     throw 'DepthScale must be a positive finite value in millimeters per uint16 unit.'
 }
-$liveRaw = Join-Path $repoRoot 'projects\.revopoint-live.raw'
+$liveRaw = Join-Path $repoRoot '.projects-state\.revopoint-live.raw'
 $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'projects')).TrimEnd([char[]]@('\', '/'))
 $ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
 $ProjectPath = [IO.Path]::GetFullPath($ProjectPath).TrimEnd([char[]]@('\', '/'))

@@ -179,7 +179,7 @@ class Scan360CaptureTests(unittest.TestCase):
             controller._job = None
             with self.assertRaisesRegex(ConflictError, "live scanner preview"):
                 controller.turntable_control("spin-start", "0123456789AB", profile_id)
-            ready_path = workspace / ".revopoint-live-preview.ready"
+            ready_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-live-preview.ready"
             ready_path.touch()
             controller._live_preview = type("LivePreview", (), {
                 "process": RunningProcess(), "ready_path": ready_path,
@@ -204,7 +204,7 @@ class Scan360CaptureTests(unittest.TestCase):
             self.assertEqual(controller._turntable_spin.heartbeat_path.name,
                              ".revopoint-turntable-spin.stop.heartbeat",
                              "the host heartbeat path matches the native driver's stop-path suffix")
-            log_path = workspace / ".revopoint-turntable-spin.log"
+            log_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-turntable-spin.log"
             log_path.write_text("Connected to REVO_DUAL_AXIS_TABLE\n", encoding="utf-8")
             starting = controller.turntable_control("spin-status")
             self.assertEqual(starting["state"], "starting")
@@ -251,7 +251,7 @@ class Scan360CaptureTests(unittest.TestCase):
 
             spin_process = StuckSpinProcess()
             stop_result = subprocess.CompletedProcess([], 0, b"Stop sent", b"")
-            ready_path = workspace / ".revopoint-live-preview.ready"
+            ready_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-live-preview.ready"
             ready_path.touch()
             controller._live_preview = type("LivePreview", (), {
                 "process": type("RunningProcess", (), {"poll": lambda self: None})(),
@@ -260,7 +260,7 @@ class Scan360CaptureTests(unittest.TestCase):
             with patch("cadyx.scan_capture.subprocess.Popen", return_value=spin_process), \
                     patch("cadyx.scan_capture.subprocess.run", return_value=stop_result) as send_stop:
                 controller.turntable_control("spin-start", "0123456789AB", profile_id)
-                (workspace / ".revopoint-turntable-spin.log").write_text(
+                ((workspace.parent / f".{workspace.name}-state") / ".revopoint-turntable-spin.log").write_text(
                     "CADYX_SPIN\t15.0\t0.0\n", encoding="utf-8")
                 result = controller.turntable_control("spin-stop", "0123456789AB", profile_id)
             self.assertEqual(result["state"], "idle")
@@ -275,10 +275,10 @@ class Scan360CaptureTests(unittest.TestCase):
             workspace = root / "projects"
             workspace.mkdir()
             controller = Scan360CaptureController(root, workspace)
-            stop_path = workspace / ".revopoint-turntable-spin.stop"
-            heartbeat_path = workspace / ".revopoint-turntable-spin.stop.heartbeat"
-            legacy_heartbeat_path = workspace / ".revopoint-turntable-spin.heartbeat"
-            log_path = workspace / ".revopoint-turntable-spin.log"
+            stop_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-turntable-spin.stop"
+            heartbeat_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-turntable-spin.stop.heartbeat"
+            legacy_heartbeat_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-turntable-spin.heartbeat"
+            log_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-turntable-spin.log"
             stop_path.touch()
             heartbeat_path.touch()
             legacy_heartbeat_path.touch()
@@ -293,7 +293,7 @@ class Scan360CaptureTests(unittest.TestCase):
             self.assertFalse(stop_path.exists())
             self.assertFalse(heartbeat_path.exists())
             self.assertFalse(legacy_heartbeat_path.exists())
-            archived = workspace / result["archived_log"]
+            archived = controller._state_root / result["archived_log"]
             self.assertEqual(archived.read_text(encoding="utf-8"), "Connected to REVO_DUAL_AXIS_TABLE\n")
             self.assertFalse(log_path.exists())
 
@@ -370,9 +370,9 @@ class Scan360CaptureTests(unittest.TestCase):
                 self.assertNotIn("--out-prefix", command)
                 self.assertNotIn("--frames", command)
                 self.assertNotIn("--q-file", command)
-                raw_path = workspace / ".revopoint-live.raw"
-                frames_path = workspace / ".revopoint-live.raw.frames"
-                stop_path = workspace / ".revopoint-live-preview.stop"
+                raw_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-live.raw"
+                frames_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-live.raw.frames"
+                stop_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-live-preview.stop"
                 controller._live_preview.ready_path.touch()
                 frames_path.mkdir()
                 (frames_path / "frame-1.y16").write_bytes(b"current frame")
@@ -425,10 +425,10 @@ class Scan360CaptureTests(unittest.TestCase):
             workspace = root / "projects"
             workspace.mkdir()
             controller = Scan360CaptureController(root, workspace)
-            frames_path = workspace / ".revopoint-live.raw.frames"
+            frames_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-live.raw.frames"
             frames_path.mkdir()
-            stop_path = workspace / ".revopoint-live-preview.stop"
-            ready_path = workspace / ".revopoint-live-preview.ready"
+            stop_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-live-preview.stop"
+            ready_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-live-preview.ready"
             ready_path.touch()
             devices = {"scanners": [{"device_id": "scanner-1", "profile_id": "revopoint-mini-y16"}],
                        "turntables": []}

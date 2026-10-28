@@ -214,7 +214,7 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(self.core.inspect_project(self.project_id)["document"]["revision"], 1)
         self.assertIn("cadyx_capability_runtime_test_box_builder",
                       [spec.name for spec in provider.requests[2][1]])
-        registry = CapabilityRegistry(self.core.workspace.root / ".cadyx-capabilities.sqlite3")
+        registry = CapabilityRegistry(self.core.workspace.state_root / ".cadyx-capabilities.sqlite3")
         self.assertEqual(registry.list(ready_only=True)[0]["id"], "runtime_test_box_builder")
 
     def test_provider_failure_without_a_command_leaves_project_free(self) -> None:

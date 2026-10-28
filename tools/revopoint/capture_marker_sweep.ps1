@@ -52,7 +52,7 @@ if ($busy) { throw "A scanner application is already open: $($busy.ProcessName -
 New-Item -ItemType Directory -Path $outputDirectory | Out-Null
 Copy-Item -LiteralPath $calibration -Destination (Join-Path $outputDirectory 'Q.bin')
 Copy-Item -LiteralPath $depthScaleConfig -Destination (Join-Path $outputDirectory 'depth_scale.json')
-$liveFrame = Join-Path $workspaceRoot '.revopoint-live.raw'
+$liveFrame = Join-Path (Join-Path $repoRoot '.projects-state') '.revopoint-live.raw'
 $manifestPath = Join-Path $outputDirectory 'capture_manifest.json'
 $posesPath = Join-Path $outputDirectory 'poses.csv'
 $manifest = [ordered]@{
