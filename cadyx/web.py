@@ -169,6 +169,7 @@ def make_request_handler(
             parsed = urlsplit(self.path)
             route = match_route("GET", parsed.path)
             try:
+                self._validate_request_framing(body_allowed=False)
                 if route is not None and route.spec.name == "health":
                     dispatch_route(self, core, route, parsed)
                     return
@@ -186,6 +187,7 @@ def make_request_handler(
         def do_POST(self) -> None:
             parsed = urlsplit(self.path)
             try:
+                self._validate_request_framing(body_allowed=True)
                 if not self._require_auth():
                     return
                 route = match_route("POST", parsed.path)
@@ -206,6 +208,7 @@ def make_request_handler(
         def do_DELETE(self) -> None:
             parsed = urlsplit(self.path)
             try:
+                self._validate_request_framing(body_allowed=False)
                 if not self._require_auth():
                     return
                 route = match_route("DELETE", parsed.path)
@@ -242,6 +245,33 @@ def make_request_handler(
                 ),
             )
             return False
+
+        def _validate_request_framing(self, *, body_allowed: bool) -> None:
+            """Reject ambiguous HTTP framing before routing or reusing a connection.
+
+            The stdlib handler does not decode chunked request bodies. Ignoring
+            them (or duplicate Content-Length headers) can turn unread body
+            bytes into the next request on a persistent connection.
+            """
+            if self.headers.get_all("Transfer-Encoding", []):
+                self.close_connection = True
+                raise ValidationError("Transfer-Encoding request bodies are not supported.")
+            lengths = self.headers.get_all("Content-Length", [])
+            if len(lengths) > 1:
+                self.close_connection = True
+                raise ValidationError("Duplicate Content-Length headers are not supported.")
+            if lengths:
+                try:
+                    length = int(lengths[0])
+                except ValueError as exc:
+                    self.close_connection = True
+                    raise ValidationError("Content-Length is invalid.") from exc
+                if length < 0:
+                    self.close_connection = True
+                    raise ValidationError("Content-Length is invalid.")
+                if not body_allowed and length:
+                    self.close_connection = True
+                    raise ValidationError("Request body is not supported for this method.")
 
         def _read_json(self) -> dict[str, Any] | None:
             raw_length = self.headers.get("Content-Length")

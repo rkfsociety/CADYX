@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from email.message import Message
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -120,6 +121,47 @@ class WebRouteTableTests(unittest.TestCase):
 
 
 class HTTPJSONBodyFramingTests(unittest.TestCase):
+    def test_transfer_encoding_rejected_for_all_methods(self) -> None:
+        handler_type = make_request_handler(None)
+        for body_allowed in (False, True):
+            with self.subTest(body_allowed=body_allowed):
+                headers = Message()
+                headers.add_header("Transfer-Encoding", "chunked")
+                request = SimpleNamespace(headers=headers, close_connection=False)
+                with self.assertRaisesRegex(ValidationError, "Transfer-Encoding"):
+                    handler_type._validate_request_framing(request, body_allowed=body_allowed)
+                self.assertTrue(request.close_connection)
+
+    def test_duplicate_content_length_rejected_even_if_equal(self) -> None:
+        handler_type = make_request_handler(None)
+        headers = Message()
+        headers.add_header("Content-Length", "2")
+        headers.add_header("Content-Length", "2")
+        request = SimpleNamespace(headers=headers, close_connection=False)
+        with self.assertRaisesRegex(ValidationError, "Duplicate Content-Length"):
+            handler_type._validate_request_framing(request, body_allowed=True)
+        self.assertTrue(request.close_connection)
+
+    def test_get_and_delete_reject_unread_bodies(self) -> None:
+        handler_type = make_request_handler(None)
+        for raw_length in ("1", "-1", "invalid"):
+            with self.subTest(length=raw_length):
+                headers = Message()
+                headers.add_header("Content-Length", raw_length)
+                request = SimpleNamespace(headers=headers, close_connection=False)
+                with self.assertRaises(ValidationError):
+                    handler_type._validate_request_framing(request, body_allowed=False)
+                self.assertTrue(request.close_connection)
+
+    def test_zero_length_and_valid_post_body_framing_allowed(self) -> None:
+        handler_type = make_request_handler(None)
+        for body_allowed, raw_length in ((False, "0"), (True, "42")):
+            headers = Message()
+            headers.add_header("Content-Length", raw_length)
+            request = SimpleNamespace(headers=headers, close_connection=False)
+            handler_type._validate_request_framing(request, body_allowed=body_allowed)
+            self.assertFalse(request.close_connection)
+
     def test_short_json_body_is_rejected_even_if_prefix_is_valid(self) -> None:
         handler_type = make_request_handler(None)
         for payload, length in ((b"{}", 3), (b"", 1)):
