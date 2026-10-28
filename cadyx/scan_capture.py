@@ -31,6 +31,11 @@ _LIVE_PREVIEW_CLIENT_METRIC_FIELDS = frozenset({
 })
 
 
+def _normalize_turntable_angle(angle_degrees: float) -> float:
+    """Return the equivalent signed table orientation in [-180, 180)."""
+    return (angle_degrees + 180.0) % 360.0 - 180.0
+
+
 def _read_live_preview_metrics(log_path: Path) -> dict[str, Any] | None:
     try:
         with log_path.open("rb") as stream:
@@ -368,12 +373,13 @@ class Scan360CaptureController:
                         try:
                             response["angle_degrees"], response["tilt_degrees"], \
                                 response["rotation_period_seconds"], response["tilt_speed"] = map(float, fields[1:])
+                            response["angle_degrees"] = _normalize_turntable_angle(response["angle_degrees"])
                         except ValueError:
                             pass
             angle_match = re.search(r"angle after(?: zero)?:\s*(-?\d+(?:\.\d+)?)", output)
             tilt_match = re.search(r"tilt after(?: zero)?:\s*(-?\d+(?:\.\d+)?)", output)
             if angle_match:
-                response["angle_degrees"] = float(angle_match.group(1))
+                response["angle_degrees"] = _normalize_turntable_angle(float(angle_match.group(1)))
             if tilt_match:
                 response["tilt_degrees"] = float(tilt_match.group(1))
             if command == "speed":
@@ -409,17 +415,20 @@ class Scan360CaptureController:
         self._last_turntable_position_at = time.monotonic()
 
     def cached_turntable_position(self, turntable_device_id: str | None = None,
-                                  profile_id: str | None = None) -> dict[str, Any] | None:
+                                  profile_id: str | None = None,
+                                  allow_stale: bool = False) -> dict[str, Any] | None:
         with self._guard:
             position = self._last_turntable_position
-            if (position is None
-                    or time.monotonic() - self._last_turntable_position_at > _TURNTABLE_POSITION_CACHE_SECONDS):
+            if position is None:
                 return None
             if turntable_device_id and position["turntable_device_id"] != turntable_device_id.upper():
                 return None
             if profile_id and position["profile_id"] != profile_id:
                 return None
-            return dict(position)
+            age_seconds = max(0.0, time.monotonic() - self._last_turntable_position_at)
+            if age_seconds > _TURNTABLE_POSITION_CACHE_SECONDS and not allow_stale:
+                return None
+            return {**position, "age_seconds": age_seconds}
 
     @staticmethod
     def _maintain_turntable_spin_heartbeat(job: _TurntableSpinJob) -> None:
@@ -496,7 +505,7 @@ class Scan360CaptureController:
                     if line.startswith("CADYX_SPIN\t"):
                         try:
                             _, angle, tilt = line.split("\t")
-                            snapshot["angle_degrees"] = float(angle)
+                            snapshot["angle_degrees"] = _normalize_turntable_angle(float(angle))
                             snapshot["tilt_degrees"] = float(tilt)
                         except ValueError:
                             pass
@@ -511,9 +520,28 @@ class Scan360CaptureController:
             except FileNotFoundError:
                 pass
         self._turntable_spin = None
+        final_position = None
+        if spin_started:
+            for line in reversed(output.splitlines()):
+                if not line.startswith("CADYX_SPIN\t"):
+                    continue
+                try:
+                    _, angle, tilt = line.split("\t")
+                    final_position = {
+                        "angle_degrees": _normalize_turntable_angle(float(angle)),
+                        "tilt_degrees": float(tilt),
+                    }
+                    self._remember_turntable_position_locked({
+                        **final_position,
+                        "turntable_device_id": job.device_id,
+                        "profile_id": job.profile_id,
+                    })
+                except ValueError:
+                    pass
+                break
         if return_code != 0 or not spin_started and not stop_requested:
             return {"state": "failed", "return_code": return_code, "message": output}
-        return {"state": "idle", "message": output}
+        return {"state": "idle", "message": output, **(final_position or {})}
 
     def _active_turntable_controller_process_ids(self) -> list[int]:
         if os.name != "nt":
@@ -571,6 +599,87 @@ class Scan360CaptureController:
                 more = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
         finally:
             kernel32.CloseHandle(snapshot)
+        return process_ids
+
+    def _matching_live_preview_process_ids(self, capture_executable: Path, frames_path: Path,
+                                           stop_path: Path, ready_path: Path) -> list[int]:
+        powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+        if powershell is None:
+            raise ValidationError("Windows PowerShell is required to recover an orphaned live-preview process.")
+
+        def quote(value: Path) -> str:
+            return "'" + str(value).replace("'", "''") + "'"
+
+        script = (f"$exe={quote(capture_executable)}; $frames={quote(frames_path)}; "
+                  f"$stop={quote(stop_path)}; $ready={quote(ready_path)}; "
+                  "$ids = @(Get-CimInstance Win32_Process -Filter \"Name = 'CaptureY16.exe'\" | "
+                  "Where-Object { $_.ExecutablePath -ieq $exe -and $_.CommandLine.Contains('--live-only') "
+                  "-and $_.CommandLine.Contains($frames) -and $_.CommandLine.Contains($stop) "
+                  "-and $_.CommandLine.Contains($ready) } | Select-Object -ExpandProperty ProcessId); "
+                  "ConvertTo-Json -Compress -InputObject @($ids)")
+        try:
+            result = subprocess.run([powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True, text=True, timeout=8, check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValidationError(f"Could not inspect the orphaned live-preview process: {exc}.") from exc
+        output = result.stdout.strip()
+        if not output:
+            return []
+        try:
+            decoded = json.loads(output)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValidationError("Windows PowerShell returned invalid live-preview process data.") from exc
+        values = decoded if isinstance(decoded, list) else [decoded]
+        return [int(value) for value in values if isinstance(value, int) and value > 0]
+
+    def _stop_orphaned_live_preview_processes(self, capture_executable: Path, frames_path: Path,
+                                              stop_path: Path, ready_path: Path) -> list[int]:
+        if not any(path.exists() for path in (frames_path, stop_path, ready_path)):
+            return []
+        process_ids = self._matching_live_preview_process_ids(
+            capture_executable, frames_path, stop_path, ready_path,
+        )
+        if not process_ids:
+            return []
+        try:
+            with stop_path.open("xb"):
+                pass
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise ValidationError(f"Could not signal the orphaned live preview to stop: {exc}.") from exc
+
+        powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+        if powershell is None:
+            raise ValidationError("Windows PowerShell is required to stop an orphaned live-preview process.")
+        id_list = ",".join(str(pid) for pid in process_ids)
+        exe = "'" + str(capture_executable).replace("'", "''") + "'"
+        frames = "'" + str(frames_path).replace("'", "''") + "'"
+        stop = "'" + str(stop_path).replace("'", "''") + "'"
+        ready = "'" + str(ready_path).replace("'", "''") + "'"
+        script = (f"$exe={exe}; $frames={frames}; $stop={stop}; $ready={ready}; "
+                  f"$ids=@({id_list}); foreach($processId in $ids) {{ "
+                  "$p=Get-CimInstance Win32_Process -Filter \"ProcessId = $processId\"; "
+                  "if($p -and $p.ExecutablePath -ieq $exe -and $p.CommandLine.Contains('--live-only') "
+                  "-and $p.CommandLine.Contains($frames) -and $p.CommandLine.Contains($stop) "
+                  "-and $p.CommandLine.Contains($ready)) { "
+                  "try { Wait-Process -Id $processId -Timeout 4 -ErrorAction Stop } catch { } "
+                  "$p=Get-CimInstance Win32_Process -Filter \"ProcessId = $processId\"; "
+                  "if($p -and $p.ExecutablePath -ieq $exe -and $p.CommandLine.Contains('--live-only') "
+                  "-and $p.CommandLine.Contains($frames) -and $p.CommandLine.Contains($stop) "
+                  "-and $p.CommandLine.Contains($ready)) { Stop-Process -Id $processId -Force } } }")
+        try:
+            subprocess.run([powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+                capture_output=True, text=True, timeout=8, check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValidationError(f"The orphaned live-preview process could not be stopped: {exc}.") from exc
+        still_running = self._matching_live_preview_process_ids(
+            capture_executable, frames_path, stop_path, ready_path,
+        )
+        if still_running:
+            raise ValidationError("The orphaned live-preview process is still running after its stop request.")
         return process_ids
 
     def _recover_stale_turntable_spin_files(self, stop_path: Path, heartbeat_path: Path,
@@ -1017,6 +1126,9 @@ class Scan360CaptureController:
             if self._live_preview is not None and self._live_preview.process.poll() is None:
                 return self._live_preview_snapshot_locked()
             self._live_preview = None
+            self._stop_orphaned_live_preview_processes(
+                capture_executable, frames_path, stop_path, ready_path,
+            )
             for path in (raw_path, stop_path, ready_path):
                 try:
                     path.unlink()
@@ -1064,7 +1176,26 @@ class Scan360CaptureController:
         with self._guard:
             job = self._live_preview
             if job is None:
-                return {"state": "idle"}
+                raw_path = self._workspace_root / ".revopoint-live.raw"
+                frames_path = self._workspace_root / ".revopoint-live.raw.frames"
+                stop_path = self._workspace_root / ".revopoint-live-preview.stop"
+                ready_path = self._workspace_root / ".revopoint-live-preview.ready"
+                capture_executable = self._repository_root / "tools" / "revopoint" / "build" / "CaptureY16.exe"
+                orphaned = self._stop_orphaned_live_preview_processes(
+                    capture_executable, frames_path, stop_path, ready_path,
+                )
+                for path in (stop_path, ready_path):
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError as exc:
+                        raise ValidationError(f"A stale live-preview signal could not be cleared: {exc}.") from exc
+                self._clear_live_frame_queue(frames_path)
+                if orphaned:
+                    try:
+                        raw_path.unlink(missing_ok=True)
+                    except OSError as exc:
+                        raise ValidationError(f"A stale live-preview buffer could not be removed: {exc}.") from exc
+                return {"state": "idle", "recovered_orphan": bool(orphaned)}
             spin_status = self._turntable_spin_snapshot_locked()
             if spin_status.get("state") in {"starting", "running", "stopping"}:
                 spin_status = self._stop_turntable_spin_locked()

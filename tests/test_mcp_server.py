@@ -109,7 +109,7 @@ class CadyxMCPServerTests(unittest.TestCase):
         with (
             patch.object(self.core, "scanner_devices", return_value=devices) as list_devices,
             patch.object(self.core, "turntable_control", side_effect=[
-                {"state": "idle", "scan_active": False}, position,
+                {"state": "idle", "scan_active": False},
                 {"command": "rotate", "angle_degrees": -325.0},
                 {"command": "speed", "turntable_device_id": device_id,
                  "profile_id": profile_id, "rotation_period_seconds": 45.0},
@@ -118,6 +118,7 @@ class CadyxMCPServerTests(unittest.TestCase):
                  "samples": [{"utc": "t0", "angle_degrees": -20.0, "tilt_degrees": 0.0},
                              {"utc": "t1", "angle_degrees": -38.0, "tilt_degrees": 0.0}]},
             ]) as control,
+            patch.object(self.core._scan_capture, "cached_turntable_position", return_value=position),
             patch.object(self.core, "turntable_marker_map", return_value=(marker_map, 2)) as read_map,
             patch.object(self.core, "scanner_live_preview_status",
                          return_value={"state": "running", "frame_mtime_ns": 123}) as preview_status,

@@ -128,7 +128,10 @@
         else if (spinState === 'stopping') setStatus('Остановка вращения…', 'running');
         else if (spinState === 'failed') setStatus(control.spin.message || 'Драйвер остановил вращение с ошибкой.', 'error');
         else if (!tiltAtZero) setStatus('Для постоянного вращения установите наклон 0°');
+        else if (Number.isFinite(control.position?.age_seconds) && control.position.age_seconds > 6)
+          setStatus('Положение устарело · нажмите ↻ для обновления');
         else if (control.position?.command === 'query') setStatus('Стол подключён');
+        else if (!control.position) setStatus('Нажмите ↻ для чтения положения стола');
         else setStatus('Положение стола недоступно', 'error');
         setBusy();
       } catch (error) {
@@ -185,7 +188,7 @@
       }
     };
 
-    panel.querySelector('#turntable-control-refresh').addEventListener('click', () => void refresh());
+    panel.querySelector('#turntable-control-refresh').addEventListener('click', () => void command('query'));
     panel.querySelector('#turntable-rotate-left').addEventListener('click', () => void command('rotate', -Number(step.value)));
     panel.querySelector('#turntable-rotate-right').addEventListener('click', () => void command('rotate', Number(step.value)));
     speed.value = String(window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.() || 18);
@@ -199,7 +202,7 @@
     spinButton.addEventListener('click', () => {
       void command(spinActive() ? 'spin-stop' : 'spin-start');
     });
-    void refresh();
+    void command('query');
   };
 
   window.CadyxTurntableControls = { initialize };

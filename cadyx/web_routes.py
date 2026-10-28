@@ -411,9 +411,8 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
         spin = core.turntable_control("spin-status")
         result = {"spin": spin}
         if spin["state"] == "idle" and not spin.get("scan_active"):
-            position = core.cached_turntable_position(device_id or None, profile_id or None)
-            result["position"] = (position if position is not None else
-                                   core.turntable_control("query", device_id or None, profile_id or None))
+            result["position"] = core.cached_turntable_position(device_id or None, profile_id or None,
+                                                                  allow_stale=True)
         handler._json(200, {"control": result})
         return
     if route.spec.name == "turntable_control":

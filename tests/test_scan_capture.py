@@ -137,7 +137,7 @@ class Scan360CaptureTests(unittest.TestCase):
             }]}), encoding="utf-8")
             controller = Scan360CaptureController(root, workspace)
             completed = subprocess.CompletedProcess([], 0,
-                b"angle before: 0.0\nangle after: 15.0\nmeasured delta: 15.0\n", b"")
+                b"angle before: 0.0\nangle after: -345.0\nmeasured change: 15.0\n", b"")
             with patch("cadyx.scan_capture.subprocess.run", return_value=completed) as run:
                 result = controller.turntable_control("rotate", "0123456789ab", profile_id, 15)
             self.assertEqual(result["state"], "completed")
@@ -147,12 +147,25 @@ class Scan360CaptureTests(unittest.TestCase):
             self.assertEqual(cached["angle_degrees"], 15.0)
             self.assertEqual(cached["command"], "query")
             self.assertIsNone(controller.cached_turntable_position("FFFFFFFFFFFF", profile_id))
+            controller._last_turntable_position_at -= 1
+            with patch("cadyx.scan_capture._TURNTABLE_POSITION_CACHE_SECONDS", 0):
+                self.assertIsNone(controller.cached_turntable_position("0123456789AB", profile_id))
+                stale = controller.cached_turntable_position("0123456789AB", profile_id, allow_stale=True)
+            self.assertEqual(stale["angle_degrees"], 15.0)
+            self.assertGreater(stale["age_seconds"], 0)
             self.assertEqual(run.call_args.args[0][1:], ["rotate", "15", "0123456789AB",
                 "REVO_DUAL_AXIS_TABLE", "ffe1", "ffe0", "ffe1"])
 
             with self.assertRaisesRegex(ValidationError, "between -30 and 30"):
                 controller.turntable_control("rotate", "0123456789AB", profile_id, 45)
             run.assert_called_once()
+
+            query = subprocess.CompletedProcess([], 0,
+                b"CADYX_STATUS\t-355.00\t0.00\t17.50\t7.00\n", b"")
+            with patch("cadyx.scan_capture.subprocess.run", return_value=query):
+                position = controller.turntable_control("query", "0123456789AB", profile_id)
+            self.assertEqual(position["angle_degrees"], 5.0,
+                "a cyclic encoder reading of -355 degrees is displayed as the equivalent +5 degree orientation")
 
             class RunningProcess:
                 def poll(self):
@@ -195,12 +208,15 @@ class Scan360CaptureTests(unittest.TestCase):
             log_path.write_text("Connected to REVO_DUAL_AXIS_TABLE\n", encoding="utf-8")
             starting = controller.turntable_control("spin-status")
             self.assertEqual(starting["state"], "starting")
-            log_path.write_text("CADYX_SPIN\t12.5\t0.0\n", encoding="utf-8")
+            log_path.write_text("CADYX_SPIN\t-355.0\t0.0\n", encoding="utf-8")
             running = controller.turntable_control("spin-status")
             self.assertEqual(running["state"], "running")
-            self.assertEqual(running["angle_degrees"], 12.5)
+            self.assertEqual(running["angle_degrees"], 5.0)
             self.assertFalse(controller.turntable_control("spin-status")["scan_active"])
-            self.assertEqual(controller.turntable_control("spin-stop")["state"], "idle")
+            stopped = controller.turntable_control("spin-stop")
+            self.assertEqual(stopped["state"], "idle")
+            self.assertEqual(stopped["angle_degrees"], 5.0)
+            self.assertEqual(controller.cached_turntable_position("0123456789AB", profile_id)["angle_degrees"], 5.0)
 
     @unittest.skipUnless(os.name == "nt", "Turntable controller executable is Windows-only")
     def test_unresponsive_spin_driver_is_fenced_and_explicit_stop_is_sent(self) -> None:
@@ -394,6 +410,37 @@ class Scan360CaptureTests(unittest.TestCase):
                 self.assertFalse(raw_path.exists(), "stopping the preview removes any legacy current-frame cache")
                 self.assertFalse(frames_path.exists(), "stopping the preview removes its temporary frame queue")
                 self.assertFalse(stop_path.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Live preview executable is Windows-only")
+    def test_live_preview_start_recovers_a_matching_orphan_process_before_restarting(self) -> None:
+        class FakeProcess:
+            def poll(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "tools" / "revopoint" / "build" / "CaptureY16.exe"
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            workspace = root / "projects"
+            workspace.mkdir()
+            controller = Scan360CaptureController(root, workspace)
+            frames_path = workspace / ".revopoint-live.raw.frames"
+            frames_path.mkdir()
+            stop_path = workspace / ".revopoint-live-preview.stop"
+            ready_path = workspace / ".revopoint-live-preview.ready"
+            ready_path.touch()
+            devices = {"scanners": [{"device_id": "scanner-1", "profile_id": "revopoint-mini-y16"}],
+                       "turntables": []}
+            with patch.object(controller, "list_connected_devices", return_value=devices), \
+                    patch.object(controller, "_resolve_scanner_calibration", return_value=(root / "Q.bin", 0.005)), \
+                    patch.object(controller, "_stop_orphaned_live_preview_processes", return_value=[4321]) as recover, \
+                    patch("cadyx.scan_capture.subprocess.Popen", return_value=FakeProcess()):
+                result = controller.start_live_preview("scanner-1", fps=10)
+            self.assertEqual(result["state"], "starting")
+            recover.assert_called_once_with(executable, frames_path, stop_path, ready_path)
+            self.assertFalse(frames_path.exists(), "restart clears the old orphan's temporary frame queue")
+            self.assertFalse(ready_path.exists())
 
     def test_live_preview_and_360_capture_share_one_scanner_lease(self) -> None:
         class FakeProcess:

@@ -213,33 +213,33 @@ class WebApiTests(unittest.TestCase):
         read_map.assert_called_once_with("table-1", "revopoint-dual-axis-table")
 
     def test_turntable_control_routes_expose_status_and_validate_command_shape(self) -> None:
-        with patch.object(self.core, "turntable_control", side_effect=[
-                {"state": "idle", "scan_active": False},
-                {"state": "completed", "command": "query", "angle_degrees": 12.5},
-        ]) as control:
+        with (
+            patch.object(self.core, "turntable_control",
+                         return_value={"state": "idle", "scan_active": False}) as control,
+            patch.object(self.core._scan_capture, "cached_turntable_position", return_value=None) as cached,
+        ):
             status, result = self.request(
                 "/api/v1/scanner/turntable/control?device_id=0123456789AB&profile_id=revopoint-dual-axis-table",
             )
         self.assertEqual(status, 200)
-        self.assertEqual(result["control"]["position"]["angle_degrees"], 12.5)
-        self.assertEqual(control.call_args_list[0].args, ("spin-status",))
-        self.assertEqual(control.call_args_list[1].args,
-                         ("query", "0123456789AB", "revopoint-dual-axis-table"))
+        self.assertIsNone(result["control"]["position"])
+        control.assert_called_once_with("spin-status")
+        cached.assert_called_once_with("0123456789AB", "revopoint-dual-axis-table", allow_stale=True)
 
-        cached_position = {"state": "cached", "command": "query", "angle_degrees": -355.0,
+        cached_position = {"state": "cached", "command": "query", "angle_degrees": 5.0, "age_seconds": 14.0,
                            "tilt_degrees": 0.0, "turntable_device_id": "0123456789AB",
                            "profile_id": "revopoint-dual-axis-table"}
         with (
             patch.object(self.core, "turntable_control",
                          return_value={"state": "idle", "scan_active": False}) as control,
-            patch.object(self.core, "cached_turntable_position", return_value=cached_position) as cached,
+            patch.object(self.core._scan_capture, "cached_turntable_position", return_value=cached_position) as cached,
         ):
             status, result = self.request(
                 "/api/v1/scanner/turntable/control?device_id=0123456789AB&profile_id=revopoint-dual-axis-table",
             )
         self.assertEqual(status, 200)
         self.assertEqual(result["control"]["position"], cached_position)
-        cached.assert_called_once_with("0123456789AB", "revopoint-dual-axis-table")
+        cached.assert_called_once_with("0123456789AB", "revopoint-dual-axis-table", allow_stale=True)
         control.assert_called_once_with("spin-status")
 
         with patch.object(self.core, "turntable_control", return_value={"state": "completed"}) as control:

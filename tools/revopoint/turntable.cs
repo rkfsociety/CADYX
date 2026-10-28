@@ -308,14 +308,15 @@ internal static class Program
                 return 0;
             }
 
-            string commandReply = await SendAndReadAsync(connection, "+CT,TURNANGLE=360;");
+            string commandReply = await SendAndReadAsync(connection, "+CT,TURNANGLE=-360;");
             if (commandReply.IndexOf("ERR", StringComparison.OrdinalIgnoreCase) >= 0
                 || commandReply.IndexOf("FAIL", StringComparison.OrdinalIgnoreCase) >= 0)
                 throw new InvalidOperationException("Turntable rejected the continuous-rotation command: " + commandReply);
 
             double previousAngle = angle;
             double unwrapped = 0;
-            int stableAfterFullTurn = 0;
+            int queuedTurns = 1;
+            int stalledAtEndpointSamples = 0;
             int sample = 0;
             DateTime deadline = DateTime.UtcNow.AddSeconds(120);
             while (DateTime.UtcNow < deadline)
@@ -354,18 +355,34 @@ internal static class Program
                     await SendAndReadAsync(connection, "+CR,STOP;");
                     throw new InvalidOperationException("Turntable tilt changed during continuous rotation; both axes were stopped.");
                 }
-                bool nearFullTurn = Math.Abs(Math.Abs(unwrapped) - 360.0) <= 5.0;
-                stableAfterFullTurn = nearFullTurn && Math.Abs(delta) <= 0.2 ? stableAfterFullTurn + 1 : 0;
+                if (unwrapped <= -360.0 * queuedTurns + 45.0)
+                {
+                    string queuedReply = await SendAndReadAsync(connection, "+CT,TURNANGLE=-360;");
+                    if (queuedReply.IndexOf("ERR", StringComparison.OrdinalIgnoreCase) >= 0
+                        || queuedReply.IndexOf("FAIL", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        await SendAndReadAsync(connection, "+CT,STOP;");
+                        await SendAndReadAsync(connection, "+CR,STOP;");
+                        throw new InvalidOperationException("Turntable rejected a queued continuous-rotation command: " + queuedReply);
+                    }
+                    queuedTurns++;
+                    deadline = DateTime.UtcNow.AddSeconds(120);
+                    Console.WriteLine("continuous revolution queued before the previous endpoint: angle="
+                        + currentAngle.ToString("F1", CultureInfo.InvariantCulture));
+                }
+                bool pausedAtEndpoint = queuedTurns > 1
+                    && Math.Abs(unwrapped + 360.0 * (queuedTurns - 1)) <= 5.0
+                    && Math.Abs(delta) <= 0.2;
+                stalledAtEndpointSamples = pausedAtEndpoint ? stalledAtEndpointSamples + 1 : 0;
+                if (stalledAtEndpointSamples >= 2)
+                {
+                    await SendAndReadAsync(connection, "+CT,STOP;");
+                    await SendAndReadAsync(connection, "+CR,STOP;");
+                    throw new InvalidOperationException("The firmware stopped at a revolution endpoint despite the queued turn; both axes were stopped.");
+                }
                 if (++sample % 3 == 0)
                     Console.WriteLine("CADYX_SPIN\t" + currentAngle.ToString("F2", CultureInfo.InvariantCulture)
                         + "\t" + currentTilt.ToString("F2", CultureInfo.InvariantCulture));
-                if (stableAfterFullTurn >= 2)
-                {
-                    angle = currentAngle;
-                    tilt = currentTilt;
-                    Console.WriteLine("continuous revolution completed: angle=" + angle.ToString("F1", CultureInfo.InvariantCulture));
-                    break;
-                }
                 await Task.Delay(100);
             }
             if (DateTime.UtcNow >= deadline)
@@ -834,20 +851,38 @@ internal static class Program
         return await FindAdvertisedAddressesAsync(new[] { advertisedUuid });
     }
 
+    private static async Task<ulong[]> FindAdvertisedAddressesAsync(Guid advertisedUuid, ulong requestedAddress)
+    {
+        return await FindAdvertisedAddressesAsync(new[] { advertisedUuid }, requestedAddress);
+    }
+
     private static async Task<ulong[]> FindAdvertisedAddressesAsync(Guid[] advertisedUuids)
     {
+        return await FindAdvertisedAddressesAsync(advertisedUuids, 0);
+    }
+
+    private static async Task<ulong[]> FindAdvertisedAddressesAsync(Guid[] advertisedUuids,
+                                                                     ulong requestedAddress)
+    {
         var addresses = new ConcurrentDictionary<ulong, byte>();
+        var requestedAddressFound = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var watcher = new BluetoothLEAdvertisementWatcher { ScanningMode = BluetoothLEScanningMode.Active };
         TypedEventHandler<BluetoothLEAdvertisementWatcher, BluetoothLEAdvertisementReceivedEventArgs> handler = (sender, eventArgs) =>
         {
             if (eventArgs.Advertisement.ServiceUuids.Any(advertisedUuids.Contains))
+            {
                 addresses[eventArgs.BluetoothAddress] = 0;
+                if (requestedAddress != 0 && eventArgs.BluetoothAddress == requestedAddress)
+                    requestedAddressFound.TrySetResult(true);
+            }
         };
         watcher.Received += handler;
         try
         {
             watcher.Start();
-            await Task.Delay(TimeSpan.FromSeconds(8));
+            Task scanTimeout = Task.Delay(TimeSpan.FromSeconds(8));
+            if (requestedAddress == 0) await scanTimeout;
+            else await Task.WhenAny(scanTimeout, requestedAddressFound.Task);
         }
         finally
         {
@@ -871,7 +906,7 @@ internal static class Program
         if (!String.IsNullOrWhiteSpace(selectedAddress) &&
             !UInt64.TryParse(selectedAddress, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out requestedAddress))
             throw new ArgumentException("The selected turntable address is invalid.");
-        foreach (ulong address in await FindAdvertisedAddressesAsync(advertisedUuid))
+        foreach (ulong address in await FindAdvertisedAddressesAsync(advertisedUuid, requestedAddress))
         {
             if (requestedAddress != 0 && address != requestedAddress) continue;
             BluetoothLEDevice device = null;

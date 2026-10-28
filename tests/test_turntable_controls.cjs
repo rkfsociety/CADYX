@@ -52,6 +52,7 @@ const panelSelectors = {
 elements['turntable-control-panel'].querySelector = selector => elements[panelSelectors[selector]];
 const document = { querySelector: selector => selector === '.primary-grid' ? elements['primary-grid'] : elements[selector.slice(1)] };
 const pollDelays = [];
+const scheduledTimers = [];
 let currentSpinState = 'idle';
 const window = {
   CadyxDeviceSettings: {
@@ -69,12 +70,18 @@ const fetch = async (url, options = {}) => {
   const body = JSON.parse(options.body);
   let result = { state: 'completed', command: body.command, output: `${body.command} completed`,
     turntable_device_id: body.device_id, profile_id: body.profile_id };
+  if (body.command === 'query') {
+    result.angle_degrees = 12;
+    result.tilt_degrees = 0;
+    result.rotation_period_seconds = 18;
+  }
   if (body.command === 'spin-start') { result.state = 'starting'; currentSpinState = 'starting'; }
   if (body.command === 'spin-stop') { result.state = 'stopping'; currentSpinState = 'stopping'; }
   return { ok: true, async json() { return { result }; } };
 };
 const context = { window, document, fetch, URLSearchParams,
-  setTimeout: (_callback, delay) => { pollDelays.push(delay); return 0; }, clearTimeout() {} };
+  setTimeout: (callback, delay) => { pollDelays.push(delay); scheduledTimers.push({ callback, delay }); return scheduledTimers.length; },
+  clearTimeout() {} };
 vm.runInNewContext(fs.readFileSync(require('node:path').join(__dirname, '../web/turntable-controls.js'), 'utf8'), context);
 window.CadyxTurntableControls.initialize();
 const wait = () => new Promise(resolve => setImmediate(resolve));
@@ -86,7 +93,7 @@ const waitUntil = async predicate => {
 (async () => {
   await wait();
   assert.equal(elements['turntable-angle'].textContent, '12.0°');
-  assert.ok(pollDelays.includes(3000), 'live scanning refreshes table telemetry often enough to animate the preview');
+  assert.ok(pollDelays.includes(250), 'the UI schedules a quick status-only refresh after an API command');
   assert.equal(elements['turntable-speed'].value, '18', 'the closest safe speed preset remains selected');
   assert.equal(elements['turntable-spin'].disabled, false,
     'continuous rotation is enabled when the scanner preview is live');
@@ -101,8 +108,10 @@ const waitUntil = async predicate => {
   assert.equal(elements['turntable-spin'].disabled, false,
     'continuous rotation is re-enabled only after the scanner preview is ready');
   await handlers.get('turntable-rotate-right:click')();
-  await waitUntil(() => calls.some(call => call.options.method === 'POST'));
-  let controlCall = calls.find(call => call.options.method === 'POST');
+  await waitUntil(() => calls.filter(call => call.options.method === 'POST').some(call =>
+    JSON.parse(call.options.body).command === 'rotate'));
+  let controlCall = calls.filter(call => call.options.method === 'POST').filter(call =>
+    JSON.parse(call.options.body).command === 'rotate').at(-1);
   assert.equal(JSON.parse(controlCall.options.body).value, 15);
   assert.equal(JSON.parse(controlCall.options.body).command, 'rotate');
   await waitUntil(() => !elements['turntable-control-refresh'].disabled);
@@ -123,16 +132,19 @@ const waitUntil = async predicate => {
     'the control reports connection startup instead of claiming the table is already moving');
   assert.equal(elements['viewport-scan-360'].dataset.turntableBusy, 'true');
   currentSpinState = 'running';
-  await handlers.get('turntable-control-refresh:click')();
+  await scheduledTimers.filter(timer => timer.delay === 250).at(-1).callback();
   await waitUntil(() => elements['turntable-spin'].textContent === '■ ОСТАНОВИТЬ ВРАЩЕНИЕ');
+  await handlers.get('turntable-control-refresh:click')();
+  await waitUntil(() => JSON.parse(calls.filter(call => call.options.method === 'POST').at(-1).options.body).command === 'query');
   const spinTextWrites = elements['turntable-spin'].textWrites;
   const spinPressedWrites = elements['turntable-spin'].attributeWrites['aria-pressed'];
   await handlers.get('turntable-control-refresh:click')();
+  await waitUntil(() => calls.filter(call => call.options.method === 'POST').at(-1).options.body.includes('"command":"query"'));
   await wait();
   assert.equal(elements['turntable-spin'].textWrites, spinTextWrites,
-    'polling an unchanged running state does not recreate the button label');
+    'a status query does not recreate the running button label');
   assert.equal(elements['turntable-spin'].attributeWrites['aria-pressed'], spinPressedWrites,
-    'polling an unchanged running state does not toggle its pressed attribute');
+    'a status query does not toggle the pressed attribute');
   await handlers.get('turntable-stop:click')();
   await waitUntil(() => calls.filter(call => call.options.method === 'POST').some(call =>
     JSON.parse(call.options.body).command === 'spin-stop'));
