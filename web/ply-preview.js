@@ -993,6 +993,8 @@ $("#create-project-form").addEventListener("submit", async (event) => {
     const result = await api("/api/v1/projects", {
       method: "POST", body: JSON.stringify({ name, project_type: projectType }),
     });
+    $("#create-project-dialog").close();
+    $("#new-project-name").value = "";
     await navigateToWorkspaceProject(result.project.id, result.project.name);
   } catch (error) {
     $("#create-project-error").textContent = `Не удалось создать проект: ${error.message}`;

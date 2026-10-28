@@ -175,7 +175,12 @@ setImmediate(async () => {
   const formSandbox = {
     $: element, encodeURIComponent,
     window: { location: { assign: (url) => navigations.push(url) } },
-    navigateToWorkspaceProject: async projectId => navigations.push(projectId),
+    navigateToWorkspaceProject: async projectId => {
+      assert.equal(element("#create-project-dialog").open, false,
+        "successful creation closes the dialog before navigation");
+      assert.equal(element("#new-project-name").value, "");
+      navigations.push(projectId);
+    },
     api: (url, options) => {
       requests.push({ url, options });
       return new Promise((resolve, reject) => { completeRequest = { resolve, reject }; });
@@ -218,6 +223,10 @@ setImmediate(async () => {
   assert.deepEqual(navigations, ["new-project"],
     "creation delegates navigation to the existing canonical project router");
   assert.equal(element("#create-project-error").hidden, true);
+
+  assert.equal(element("#create-project-dialog").open, false);
+  await submit();
+  assert.equal(requests.length, 2, "the completed form cannot create another identical project");
 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(captures, 1);
