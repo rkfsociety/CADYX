@@ -2345,8 +2345,9 @@ async function refreshDetail() {
     currentModelViewportGeometry = viewportGeometry;
     const viewport = $("#viewport");
     const livePreviewActive = viewport?.dataset.scanPreviewMode === "live";
+    const staticTurntableActive = viewport?.dataset.scanPreviewMode === "turntable";
     const scanTreePreviewActive = viewport?.dataset.scanTreePreview === "true";
-    if (!livePreviewActive && !scanTreePreviewActive) {
+    if (!livePreviewActive && !staticTurntableActive && !scanTreePreviewActive) {
       modelViewer.load(viewportGeometry, {
         reset: !renderedSceneKey?.startsWith(`${projectId}:`), transition, smoothShading: true,
       });

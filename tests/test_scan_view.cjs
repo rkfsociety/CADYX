@@ -228,7 +228,9 @@ assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
 assert.match(cloudButton.title, /Скрыть/);
 view.setOpen(false);
 assert.equal(viewport.dataset.scanPreview, "false");
-assert.equal(viewerLoads.at(-1).geometry, baseGeometry, "closing the cloud restores the CAD model in the same canvas");
+assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0,
+  "closing the cloud leaves the static turntable in the same canvas");
+assert.equal(viewport.dataset.scanPreviewMode, "turntable");
 view.setOpen(true);
 await new Promise(resolve => setImmediate(resolve));
 assert.equal(viewerLoads.at(-1).options.reset, false, "reopening the same cloud preserves the shared viewer orbit");
@@ -294,8 +296,19 @@ assert.ok(livePollDelays.includes(100),
 view.showCapture({ preview_folder: "scan folder", preview_file: "new-saved-capture.ply", preview_kind: "single" });
 assert.equal(viewport.dataset.scanPreview, "true", "360 status polling does not replace the live canvas preview");
 view.closeLivePreview();
-assert.equal(viewport.dataset.scanPreview, "false", "stopping the live preview restores the CAD geometry");
+assert.equal(viewport.dataset.scanPreview, "false", "stopping the scanner preview leaves only the static table");
+assert.equal(viewport.dataset.scanPreviewMode, "turntable",
+  "the table remains visible after the scanner preview is stopped");
+assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0,
+  "the idle Scanning view renders the display-only table");
+assert.equal(viewerLoads.at(-1).geometry.pointLayers.length, 0,
+  "the idle table view does not fabricate live markers");
+assert.equal(viewerLoads.at(-1).options.reset, false,
+  "showing the idle turntable preserves the user's camera");
+assert.equal(view.hideTurntable(), true);
 assert.equal(viewport.dataset.scanPreviewMode, "");
+assert.equal(viewerLoads.at(-1).geometry, baseGeometry,
+  "leaving Scanning restores the project model in the same viewport");
 
 const makeMapAlignedFrame = () => {
   const frame = new Uint8Array(640 * 400 * 2);
@@ -586,6 +599,10 @@ assert.match(styleCss, /\.primary-grid:not\(\[data-view="scanning"\]\) #viewport
 const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
 assert.match(scanViewSource, /interactiveRenderScale:\s*0\.25/,
   "the live turntable lowers only its drag resolution while preserving depth visibility");
+assert.match(appJs, /grid\?\.dataset\.view==='scanning'\)scanView\?\.showTurntable\(\)/,
+  "entering Scanning shows the static table even when live preview is stopped");
+assert.match(appJs, /scanView\?\.hideTurntable\(\)/,
+  "leaving Scanning restores the project viewport in the shared canvas");
 assert.match(scanViewSource, /const captureFps = preview\?\.metrics\?\.capture_fps/,
   "the badge uses the native measured sensor rate");
 assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),

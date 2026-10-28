@@ -486,6 +486,7 @@
       liveMapAlignmentIndicator.dataset.state = state;
     };
     let livePreviewOwned = false;
+    let staticTurntableVisible = false;
     let serverPointCloudVisible = false;
     let cloudPreviewOpen = false;
     let meshPreviewOpen = false;
@@ -572,7 +573,8 @@
       const cloudSelected = cloudPreviewOpen;
       const meshSelected = meshPreviewOpen;
       const previewVisible = String(livePreviewOwned);
-      viewport.dataset.scanPreviewMode = livePreviewOwned ? 'live' : cloudSelected ? 'cloud' : meshSelected ? 'mesh' : '';
+      viewport.dataset.scanPreviewMode = livePreviewOwned ? 'live' : cloudSelected ? 'cloud'
+        : meshSelected ? 'mesh' : staticTurntableVisible ? 'turntable' : '';
       if (viewport.dataset.scanPreview !== previewVisible) viewport.dataset.scanPreview = previewVisible;
       cloudButton.disabled = serverPointCloudVisible;
       setAttribute(cloudButton, 'aria-label', 'Облако точек');
@@ -597,10 +599,14 @@
       livePreviewOwned = false;
       cloudPreviewOpen = false;
       meshPreviewOpen = false;
+      staticTurntableVisible = false;
       updateButton();
       const geometry = getModelGeometry() || modelGeometry;
       if (geometry && viewer) viewer.load(geometry, { reset: false });
       modelGeometry = null;
+      if (!serverPointCloudVisible && document.querySelector?.('#primary-grid')?.dataset.view === 'scanning') {
+        showTurntable();
+      }
     };
     const pointCloudUrl = scan => {
       const url = new URL('/api/v1/scanner/point-cloud', location.origin);
@@ -924,7 +930,7 @@
       aligned = false, reset = false }) => {
       const pose = currentTurntableDisplayPose();
       const pointStep = positions ? Math.max(1, Math.ceil(count / LIVE_PREVIEW_POINT_LIMIT)) : 1;
-      const overlay = liveTableOverlay;
+      const overlay = staticTurntableVisible ? null : liveTableOverlay;
       const cloudPointIndices = positions
         ? buildPreviewCloudPointIndices(count, pointStep, markerIndices, Boolean(overlay)) : new Uint32Array(0);
       const cloudPointCount = cloudPointIndices.length;
@@ -1018,11 +1024,38 @@
         pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' }, pointLayers,
         lineStyle: overlay ? { color: '#668994', opacity: 0.16, width: 0.8, dash: [5, 6] } : undefined,
         orbitCenter: [0, 0, 0], fitRadius: turntableDisplayModel.fitRadius },
-      { reset: reset || !liveViewportInitialized });
+      { reset: reset || !liveViewportInitialized && !staticTurntableVisible });
       lastRenderedTurntableDisplayPose = pose;
       liveViewportInitialized = true;
     };
     const renderLiveFrame = options => renderTurntableScene(options);
+    const showTurntable = () => {
+      if (livePreviewOwned || cloudPreviewOpen || meshPreviewOpen || serverPointCloudVisible
+          || viewport.dataset.scanTreePreview === 'true'
+          || document.querySelector?.('#primary-grid')?.dataset.view !== 'scanning') return false;
+      staticTurntableVisible = true;
+      updateButton();
+      renderTurntableScene({ aligned: false, reset: false });
+      return true;
+    };
+    const hideTurntable = () => {
+      if (!staticTurntableVisible) return false;
+      staticTurntableVisible = false;
+      updateButton();
+      const geometry = getModelGeometry() || modelGeometry;
+      if (geometry && viewer) viewer.load(geometry, { reset: false });
+      modelGeometry = null;
+      return true;
+    };
+    if (typeof MutationObserver === 'function') {
+      const poseObserver = new MutationObserver(() => {
+        if (staticTurntableVisible && turntableDisplayPoseChanged()) renderTurntableScene({ reset: false });
+      });
+      for (const id of ['turntable-angle', 'turntable-tilt']) {
+        const element = document.getElementById?.(id);
+        if (element) poseObserver.observe(element, { childList: true, characterData: true, subtree: true });
+      }
+    }
     cloudSource = pointCloudUrl(null);
     cloudOriginSource = originUrl(null);
     const loadCloud = async ({ reset = true } = {}) => {
@@ -1065,6 +1098,7 @@
     };
     const showCloud = async (open = true) => {
       livePreviewOwned = false;
+      staticTurntableVisible = false;
       clearTimeout(liveTimer);
       liveTimer = null;
       if (open && !cloudPreviewOpen) modelGeometry = getModelGeometry();
@@ -1080,6 +1114,7 @@
     };
     const showMesh = (open = true) => {
       livePreviewOwned = false;
+      staticTurntableVisible = false;
       clearTimeout(liveTimer);
       liveTimer = null;
       if (open && !meshPreviewOpen) modelGeometry = getModelGeometry();
@@ -1100,6 +1135,7 @@
     };
     const showLivePreview = ({ open = false } = {}) => {
       if (!open) return;
+      staticTurntableVisible = false;
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
       liveClientWindowStartedAt = 0;
       liveClientWindowFrames = 0;
@@ -1609,7 +1645,8 @@
     });
     updateButton();
     if (new URLSearchParams(location.search).get('live_scan') === '1') setOpen(true);
-    return { setOpen, setMode, showCapture, showLivePreview, closeLivePreview, updateLivePreviewStatus };
+    return { setOpen, setMode, showCapture, showLivePreview, closeLivePreview,
+      showTurntable, hideTurntable, updateLivePreviewStatus };
   };
 
   const initializeLivePreview = ({ button, view, captureButton }, location = window.location, fetcher = fetch) => {

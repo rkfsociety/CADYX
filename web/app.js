@@ -360,6 +360,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           scanView?.showCapture(latestScanPreview.scan,{open:true});restored=Boolean(scanView);
         }
       }
+      if(!restored&&grid?.dataset.view==='scanning')scanView?.showTurntable();
       if(!preserveMode)scanTreePreviewRestoreMode=null;
       return restored;
     }
@@ -735,11 +736,15 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const toolbar=$('.model-toolbar'),presets=$('#viewport-camera-presets'),fit=$('#viewport-fit'),four=$('#viewport-four-views'),divider=$('.viewport-toolbar-divider'),liveScan=$('#viewport-live-scan'),scanMesh=$('#viewport-scan-mesh'),liveCamera=$('#viewport-live-camera'),scanViewport=$('#viewport'),scan360=$('#viewport-scan-360'),scanStatus=$('#viewport-scan-360-status');if(toolbar&&presets&&fit&&four&&divider){detail.dataset.cadTool='orbit';fit.innerHTML=`${I.fit}<span class="toolbar-label">Вписать</span>`;fit.classList.add('cad3-tool');four.classList.add('cad3-tool');liveScan?.classList.add('cad3-tool');scanMesh?.classList.add('cad3-tool');liveCamera?.classList.add('cad3-tool');toolbar.replaceChildren(fit,four,divider,presets,...(liveScan?[liveScan]:[]),...(scanMesh?[scanMesh]:[]),...(scan360?[scan360]:[]),...(liveCamera?[liveCamera]:[]),...(scanStatus?[scanStatus]:[]))}
     const scanParams=new URLSearchParams(location.search),scanMeshReady=scanParams.get('scan_mesh_ready')==='1'&&scanParams.get('scan_kind')!=='provisional_fusion';
     const scanView=liveScan&&scanMesh&&scanViewport?window.CadyxScanView?.initialize({cloudButton:liveScan,meshButton:scanMesh,viewport:scanViewport,viewer:modelViewer,getModelGeometry:()=>currentModelViewportGeometry,getProjectId:()=>window.cadyxSelectedProjectId?.(),hasPersistentPointCloud:file=>state.objects.some(o=>o.type==='feature'&&o.operation==='import_point_cloud'&&o.source?.project_file===file),meshReady:scanMeshReady}):null;
-    new MutationObserver(()=>{
-      if(grid?.dataset.view!=='scanning'){
+    const syncScanningTurntable=()=>{
+      if(grid?.dataset.view==='scanning')scanView?.showTurntable();
+      else{
         if(scanTreePreviewSelection)clearScanTreePreview();
+        scanView?.hideTurntable();
       }
-    }).observe(grid,{attributes:true,attributeFilter:['data-view']});
+    };
+    syncScanningTurntable();
+    new MutationObserver(syncScanningTurntable).observe(grid,{attributes:true,attributeFilter:['data-view']});
     liveCamera?.addEventListener('click',()=>{if(scanTreePreviewSelection)clearScanTreePreview()},{capture:true});
     if(liveCamera&&scanView)window.CadyxScanView?.initializeLivePreview({button:liveCamera,view:scanView,captureButton:scan360});
     window.CadyxTurntableControls?.initialize();
