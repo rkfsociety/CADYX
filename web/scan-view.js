@@ -98,6 +98,8 @@
     addColoredBox(fixed, [-55, -18, -55], [-38, 18, -25], [39, 46, 50]);
     addColoredBox(fixed, [38, -18, -55], [55, 18, -25], [39, 46, 50]);
     addCylinderAlongX(fixed, 110, 13, TURNTABLE_TILT_PIVOT_Z_MM, 48, [55, 63, 68]);
+    addColoredBox(fixed, [-57, -6.5, -31.5], [-55, 6.5, -18.5], [92, 103, 108]);
+    addColoredBox(fixed, [-58.5, -4, -29], [-57, 4, -21], [19, 26, 29]);
     addEllipticalCylinder(moving, 27, 27, -25, -10, 48,
       { top: [71, 80, 85], side: [46, 54, 59], bottom: [35, 42, 47] });
     addEllipticalCylinder(moving, TURNTABLE_RADIUS_MM, TURNTABLE_RADIUS_MM,

@@ -75,6 +75,12 @@ const fixedSupportHasPoint = (x, y, z) => {
 };
 assert.ok(fixedSupportHasPoint(0, 55, -25) && fixedSupportHasPoint(0, -55, -25),
   "the fixed pivot axle rotates with the lower support");
+assert.ok(Array.from({ length: turntableModel.fixed.positions.length / 3 }, (_, index) => index)
+  .some(index => Math.abs(turntableModel.fixed.positions[index * 3]) < 4.01
+    && turntableModel.fixed.positions[index * 3 + 1] > 57.1
+    && turntableModel.fixed.positions[index * 3 + 2] >= -29
+    && turntableModel.fixed.positions[index * 3 + 2] <= -21),
+"the front-facing turntable button is fixed on the zero-degree side of the support");
 assert.equal(turntableModel.fitRadius, 120, "the outer degree labels have clearance from the viewport edge");
 assert.equal(turntableModel.degreeTickCount, 72, "the turntable scale has 5 degree ticks through 360 degrees");
 assert.deepEqual(Array.from(turntableModel.degreeTextLabels.filter(label => Number.isFinite(label.minViewDepthZ)), label => label.text),
@@ -84,6 +90,11 @@ const zeroDegreePosition = Array.from(turntableModel.degreeLabelPositions.slice(
 assert.ok(Math.abs(zeroDegreePosition[0]) < 0.1
   && Math.abs(zeroDegreePosition[1] - 110) < 0.1,
 "the top-face zero-degree label is outside the table at the bottom in top view");
+const zeroDegreeSidePosition = Array.from(turntableModel.degreeLabelPositions.slice(3, 6));
+assert.ok(Math.abs(zeroDegreeSidePosition[0]) < 0.1
+  && Math.abs(zeroDegreeSidePosition[1] - 110) < 0.1
+  && Math.abs(zeroDegreeSidePosition[2] - 3) < 0.1,
+"the front-facing zero-degree label is centered above the fixed support button");
 assert.equal(turntableModel.degreeTextLabels.filter(label => Number.isFinite(label.maxViewDepthZ)).length, 12,
   "side-face degree labels are provided for front and isometric views");
 assert.ok(turntableModel.fixed.triangles.length > 0 && turntableModel.moving.triangles.length > 0,
@@ -565,8 +576,12 @@ assert.match(html, /id="scanner-map-alignment"[^>]*aria-label="Сопостав�
 assert.match(projectUiJs, /function projectPath\(projectId\)/);
 assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
 assert.match(projectUiJs, /let suffix = 2/);
-assert.match(projectUiJs, /front: \{ yaw: Math\.PI \/ 2, pitch: 0 \}/);
-assert.match(projectUiJs, /right: \{ yaw: 0, pitch: 0 \}/);
+assert.match(projectUiJs, /front: \{ yaw: 0, pitch: 0 \}/,
+  "the front view looks along the turntable's zero-degree axis so the button and zero label align");
+assert.match(projectUiJs, /right: \{ yaw: Math\.PI \/ 2, pitch: 0 \}/,
+  "the right view remains perpendicular to the front view");
+assert.match(projectUiJs, /#ortho-front[\s\S]*camera: \{ yaw: 0, pitch: 0 \}/);
+assert.match(projectUiJs, /#ortho-right[\s\S]*camera: \{ yaw: Math\.PI \/ 2, pitch: 0 \}/);
 assert.match(projectUiJs, /if \(activeView === "scanning"\) \{\s*initializeScanningFrontView\(\);/,
   "the first Scanning view uses the front camera while later user camera choices remain restorable");
 assert.match(projectUiJs,
