@@ -89,7 +89,7 @@ def authorization_matches(header_value: str | None, auth_token: str | None) -> b
 
     try:
         decoded = base64.b64decode(credentials, validate=True).decode("utf-8")
-    except (binascii.Error, UnicodeDecodeError):
+    except (binascii.Error, UnicodeDecodeError, ValueError):
         return False
     username, separator, password = decoded.partition(":")
     if not separator or username != "cadyx":

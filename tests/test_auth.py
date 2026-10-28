@@ -71,6 +71,13 @@ class AuthenticationConfigTests(unittest.TestCase):
         self.assertFalse(authorization_matches(None, _TOKEN))
         self.assertTrue(authorization_matches(None, None))
 
+    def test_non_ascii_basic_credentials_are_rejected(self) -> None:
+        # HTTP headers may contain Latin-1 text; b64decode raises ValueError
+        # for non-ASCII input, which must not escape authentication.
+        for credentials in ("éé", "ÿ", "💥"):
+            with self.subTest(credentials=credentials):
+                self.assertFalse(authorization_matches(f"Basic {credentials}", _TOKEN))
+
 
 class AuthenticatedWebApiTests(unittest.TestCase):
     def setUp(self) -> None:
