@@ -40,6 +40,7 @@ const elements = Object.fromEntries(ids.map(id => [id, Object.assign(makeElement
 elements['turntable-step'].value = '15';
 elements['turntable-tilt-target'].value = '0';
 elements['viewport-live-camera'].checked = true;
+elements['viewport-live-camera'].dataset.previewState = 'running';
 elements['primary-grid'].dataset.view = 'scanning';
 const panelSelectors = {
   '#turntable-control-refresh': 'turntable-control-refresh', '#turntable-step': 'turntable-step',
@@ -87,6 +88,18 @@ const waitUntil = async predicate => {
   assert.equal(elements['turntable-angle'].textContent, '12.0°');
   assert.ok(pollDelays.includes(3000), 'live scanning refreshes table telemetry often enough to animate the preview');
   assert.equal(elements['turntable-speed'].value, '18', 'the closest safe speed preset remains selected');
+  assert.equal(elements['turntable-spin'].disabled, false,
+    'continuous rotation is enabled when the scanner preview is live');
+  elements['viewport-live-camera'].dataset.previewState = 'idle';
+  await handlers.get('turntable-control-refresh:click')();
+  await wait();
+  assert.equal(elements['turntable-spin'].disabled, true,
+    'continuous rotation is disabled when the scanner preview is stopped');
+  elements['viewport-live-camera'].dataset.previewState = 'running';
+  await handlers.get('turntable-control-refresh:click')();
+  await wait();
+  assert.equal(elements['turntable-spin'].disabled, false,
+    'continuous rotation is re-enabled only after the scanner preview is ready');
   await handlers.get('turntable-rotate-right:click')();
   await waitUntil(() => calls.some(call => call.options.method === 'POST'));
   let controlCall = calls.find(call => call.options.method === 'POST');

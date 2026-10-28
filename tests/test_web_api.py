@@ -250,6 +250,15 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual((status, result["result"]["state"]), (200, "completed"))
         control.assert_called_once_with("rotate", "0123456789AB", "revopoint-dual-axis-table", -15)
 
+        monitor_result = {"state": "completed", "command": "monitor", "sample_count": 2}
+        with patch.object(self.core, "turntable_control", return_value=monitor_result) as control:
+            status, result = self.request("/api/v1/scanner/turntable/control", {
+                "command": "monitor", "device_id": "0123456789AB",
+                "profile_id": "revopoint-dual-axis-table", "value": 30,
+            })
+        self.assertEqual((status, result["result"]), (200, monitor_result))
+        control.assert_called_once_with("monitor", "0123456789AB", "revopoint-dual-axis-table", 30)
+
         with patch.object(self.core, "turntable_control", side_effect=ValidationError("Unsupported turntable control command.")):
             status, error = self.request("/api/v1/scanner/turntable/control", {"command": "exec"})
         self.assertEqual(status, 400)

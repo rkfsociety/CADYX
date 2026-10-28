@@ -113,6 +113,10 @@ class CadyxMCPServerTests(unittest.TestCase):
                 {"command": "rotate", "angle_degrees": -325.0},
                 {"command": "speed", "turntable_device_id": device_id,
                  "profile_id": profile_id, "rotation_period_seconds": 45.0},
+                {"state": "completed", "command": "monitor", "duration_seconds": 30,
+                 "sample_count": 2, "net_rotation_degrees": -18.0,
+                 "samples": [{"utc": "t0", "angle_degrees": -20.0, "tilt_degrees": 0.0},
+                             {"utc": "t1", "angle_degrees": -38.0, "tilt_degrees": 0.0}]},
             ]) as control,
             patch.object(self.core, "turntable_marker_map", return_value=(marker_map, 2)) as read_map,
             patch.object(self.core, "scanner_live_preview_status",
@@ -145,6 +149,12 @@ class CadyxMCPServerTests(unittest.TestCase):
                 "device_id": device_id, "profile_id": profile_id,
             })
             self.assertEqual(speed["saved_settings"]["rotation_period_seconds"], 45.0)
+            monitored = self._tool_value("cadyx_control_turntable", {
+                "command": "monitor", "value": 30,
+                "device_id": device_id, "profile_id": profile_id,
+            })
+            self.assertEqual(monitored["result"]["sample_count"], 2)
+            self.assertEqual(monitored["result"]["net_rotation_degrees"], -18.0)
             self.assertEqual(self._tool_value("cadyx_get_scanner_live_preview_status"),
                              {"preview": {"state": "running", "frame_mtime_ns": 123}})
             self.assertEqual(self._tool_value("cadyx_start_scanner_live_preview", {
@@ -157,6 +167,7 @@ class CadyxMCPServerTests(unittest.TestCase):
         read_map.assert_called_once_with(device_id, profile_id)
         preview_status.assert_called_once_with()
         control.assert_any_call("rotate", device_id, profile_id, 15)
+        control.assert_any_call("monitor", device_id, profile_id, 30)
         save_settings.assert_called_once_with(device_id, 45.0, profile_id)
         start_preview.assert_called_once_with("scanner-1", 10)
         stop_preview.assert_called_once_with()

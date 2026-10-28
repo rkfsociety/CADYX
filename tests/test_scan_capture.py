@@ -85,6 +85,39 @@ class Scan360CaptureTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "invalid header or record count"):
             Scan360CaptureController._validate_marker_map(bytes(16))
 
+    def test_turntable_monitor_returns_read_only_wrapped_angle_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            workspace.mkdir()
+            build = root / "tools" / "revopoint" / "build"
+            build.mkdir(parents=True)
+            (build / "TurntableController.exe").write_bytes(b"test executable placeholder")
+            profile_id = "revopoint-dual-axis-table"
+            (root / "tools" / "revopoint" / "devices.json").write_text(json.dumps({"turntables": [{
+                "id": profile_id, "control_protocol": "revopoint-dual-axis-v1",
+                "gatt_name": "REVO_DUAL_AXIS_TABLE", "advertisement_uuid": "ffe1",
+                "service_uuid": "ffe0", "characteristic_uuid": "ffe1",
+            }]}), encoding="utf-8")
+            controller = Scan360CaptureController(root, workspace)
+
+            def write_samples(arguments, **options):
+                Path(arguments[3]).write_text(
+                    "utc,angle_degrees,tilt_degrees,rotation_response,tilt_response\n"
+                    "t0,-350,0,angle,tilt\n"
+                    "t1,-10,0,angle,tilt\n"
+                    "t2,-20,0,angle,tilt\n", encoding="utf-8")
+                return subprocess.CompletedProcess(arguments, 0, b"monitor complete", b"")
+
+            with patch("cadyx.scan_capture.subprocess.run", side_effect=write_samples) as monitor:
+                result = controller.turntable_control("monitor", "0123456789AB", profile_id, 10)
+            self.assertEqual(monitor.call_args.args[0][1:3], ["monitor", "10"])
+            self.assertEqual(monitor.call_args.kwargs["timeout"], 40)
+        self.assertEqual(result["sample_count"], 3)
+        self.assertEqual(result["net_rotation_degrees"], -30)
+        self.assertEqual(result["samples"][0]["angle_degrees"], -350)
+        self.assertEqual(result["samples"][-1]["angle_degrees"], -20)
+
     @unittest.skipUnless(os.name == "nt", "Turntable controller executable is Windows-only")
     def test_turntable_control_uses_validated_native_commands_and_scan_only_lock(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -131,7 +164,13 @@ class Scan360CaptureTests(unittest.TestCase):
             self.assertEqual(controller.turntable_control("spin-status")["scan_active"], True)
 
             controller._job = None
-            controller._live_preview = type("LivePreview", (), {"process": RunningProcess()})()
+            with self.assertRaisesRegex(ConflictError, "live scanner preview"):
+                controller.turntable_control("spin-start", "0123456789AB", profile_id)
+            ready_path = workspace / ".revopoint-live-preview.ready"
+            ready_path.touch()
+            controller._live_preview = type("LivePreview", (), {
+                "process": RunningProcess(), "ready_path": ready_path,
+            })()
 
             class SpinProcess:
                 running = True
@@ -196,6 +235,12 @@ class Scan360CaptureTests(unittest.TestCase):
 
             spin_process = StuckSpinProcess()
             stop_result = subprocess.CompletedProcess([], 0, b"Stop sent", b"")
+            ready_path = workspace / ".revopoint-live-preview.ready"
+            ready_path.touch()
+            controller._live_preview = type("LivePreview", (), {
+                "process": type("RunningProcess", (), {"poll": lambda self: None})(),
+                "ready_path": ready_path,
+            })()
             with patch("cadyx.scan_capture.subprocess.Popen", return_value=spin_process), \
                     patch("cadyx.scan_capture.subprocess.run", return_value=stop_result) as send_stop:
                 controller.turntable_control("spin-start", "0123456789AB", profile_id)

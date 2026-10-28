@@ -14,6 +14,7 @@
     const status = document.querySelector('#turntable-control-status');
     const spinButton = document.querySelector('#turntable-spin');
     const scanButton = document.querySelector('#viewport-scan-360');
+    const livePreviewButton = document.querySelector('#viewport-live-camera');
     const scanButtonTitle = scanButton?.title || '';
     let scanActive = false;
     let spinState = 'idle';
@@ -30,6 +31,7 @@
       if (status.dataset.state !== state) status.dataset.state = state;
     };
     const spinActive = () => spinState === 'starting' || spinState === 'running' || spinState === 'stopping';
+    const livePreviewReady = () => livePreviewButton?.dataset.previewState === 'running';
     const setBusy = () => {
       const spinning = spinActive();
       for (const selector of ['#turntable-control-refresh', '#turntable-step', '#turntable-speed',
@@ -43,7 +45,8 @@
       }
       const stopButton = panel.querySelector('#turntable-stop');
       if (stopButton.disabled !== pending) stopButton.disabled = pending;
-      const spinDisabled = pending || scanActive && !spinning || !spinning && !tiltAtZero;
+      const spinDisabled = pending || scanActive && !spinning
+        || !spinning && (!tiltAtZero || !livePreviewReady());
       if (spinButton.disabled !== spinDisabled) spinButton.disabled = spinDisabled;
       if (spinButton.getAttribute('aria-pressed') !== String(spinning)) {
         spinButton.setAttribute('aria-pressed', String(spinning));
@@ -52,6 +55,9 @@
         : spinState === 'stopping' ? 'ОСТАНОВКА…'
           : spinning ? '■ ОСТАНОВИТЬ ВРАЩЕНИЕ' : '▶ ПОСТОЯННОЕ ВРАЩЕНИЕ';
       if (spinButton.textContent !== spinLabel) spinButton.textContent = spinLabel;
+      const spinTitle = !spinning && !livePreviewReady()
+        ? 'Сначала включите предпросмотр сканера' : '';
+      if (spinButton.title !== spinTitle) spinButton.title = spinTitle;
       if (scanButton) {
         const busyValue = String(spinning);
         if (scanButton.dataset.turntableBusy !== busyValue) scanButton.dataset.turntableBusy = busyValue;
@@ -129,8 +135,7 @@
         if (!quiet) setStatus(error.message, 'error');
       } finally {
         clearTimeout(pollTimer);
-        const liveScanning = document.querySelector('.primary-grid')?.dataset.view === 'scanning'
-          && document.querySelector('#viewport-live-camera')?.checked;
+        const liveScanning = document.querySelector('.primary-grid')?.dataset.view === 'scanning';
         pollTimer = setTimeout(() => void refresh({ quiet: true }),
           spinState === 'starting' ? 600 : spinState === 'running' || spinState === 'stopping'
             ? 1500 : liveScanning ? 3000 : 15000);

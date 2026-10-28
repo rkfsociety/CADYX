@@ -122,13 +122,23 @@ internal static class Program
             }
             else if (operation == "monitor")
             {
-                if ((args.Length != 3 && args.Length != 5) || !Int32.TryParse(args[1], out monitorSeconds) || monitorSeconds < 1 || monitorSeconds > 300)
-                    throw new ArgumentException("monitor requires duration (1–300 s), CSV path, and optional rotate-delay plus degrees.");
+                if ((args.Length != 3 && args.Length != 5 && args.Length != 8 && args.Length != 10)
+                    || !Int32.TryParse(args[1], out monitorSeconds) || monitorSeconds < 1 || monitorSeconds > 300)
+                    throw new ArgumentException("monitor requires duration (1–300 s), CSV path, optional rotate-delay plus degrees, and optional turntable profile parameters.");
                 monitorPath = args[2];
-                if (args.Length == 5 && (!Int32.TryParse(args[3], out rotateAfterSeconds) || rotateAfterSeconds < 0 || rotateAfterSeconds >= monitorSeconds ||
+                bool monitorMoveRequested = args.Length == 5 || args.Length == 10;
+                bool monitorProfileSpecified = args.Length == 8 || args.Length == 10;
+                if (monitorMoveRequested && (!Int32.TryParse(args[3], out rotateAfterSeconds) || rotateAfterSeconds < 0 || rotateAfterSeconds >= monitorSeconds ||
                     !double.TryParse(args[4], NumberStyles.Float, CultureInfo.InvariantCulture, out degrees) || !IsFinite(degrees) ||
                     Math.Abs(degrees) < 0.1 || Math.Abs(degrees) > MaxDegreesPerCommand))
                     throw new ArgumentException("monitor rotation requires delay < duration and degrees from -30 to 30.");
+                if (monitorProfileSpecified)
+                {
+                    int profileStart = monitorMoveRequested ? 5 : 3;
+                    turntableAddress = args[profileStart]; turntableName = args[profileStart + 1];
+                    advertisementUuid = args[profileStart + 2]; serviceUuid = args[profileStart + 3];
+                    characteristicUuid = args[profileStart + 4];
+                }
             }
             else if (operation == "sweep")
             {
@@ -229,7 +239,7 @@ internal static class Program
         Console.WriteLine("TurntableController.exe rotate <degrees>   (one bounded relative move, max 30 degrees)");
         Console.WriteLine("TurntableController.exe stop");
         Console.WriteLine("TurntableController.exe continuous-spin <stop-signal-path> [address name advertisement-uuid service-uuid characteristic-uuid]   (repeats full turns until stopped)");
-        Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv>");
+        Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv> [rotate-delay-seconds degrees] [address name advertisement-uuid service-uuid characteristic-uuid]");
         Console.WriteLine("TurntableController.exe monitor <seconds> <output.csv> <rotate-delay-seconds> <degrees>");
         Console.WriteLine("TurntableController.exe sweep <steps> <degrees-per-step> <output.csv>   (one BLE connection; each step is verified before the next)");
         Console.WriteLine("TurntableController.exe continuous-turn <output.csv> [address name advertisement-uuid service-uuid characteristic-uuid]   (one uninterrupted 360-degree move; requires live Y16 and RGB capture)");

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import csv
 import json
 import math
 import os
@@ -11,6 +12,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -115,6 +117,8 @@ class _TurntableSpinJob:
     profile_id: str
     started_at: str
     started_monotonic: float
+    preview_process: subprocess.Popen[bytes]
+    preview_ready_path: Path
 
 
 class Scan360CaptureController:
@@ -214,7 +218,8 @@ class Scan360CaptureController:
                           profile_id: str | None = None, value: float | None = None) -> dict[str, Any]:
         if os.name != "nt":
             raise ValidationError("Revopoint turntable control is available only on the Windows scanner host.")
-        if command not in {"query", "speed", "rotate", "tilt", "zero", "stop", "spin-start", "spin-stop", "spin-status"}:
+        if command not in {"query", "speed", "rotate", "tilt", "zero", "stop", "monitor",
+                           "spin-start", "spin-stop", "spin-status"}:
             raise ValidationError("Unsupported turntable control command.")
         if command in {"query", "zero", "stop", "spin-start", "spin-stop", "spin-status"} and value is not None:
             raise ValidationError(f"Turntable {command} does not accept a value.")
@@ -226,6 +231,12 @@ class Scan360CaptureController:
                 return snapshot
             if command == "spin-stop":
                 return self._stop_turntable_spin_locked()
+            if command == "spin-start":
+                preview = self._live_preview
+                if (preview is None or preview.process.poll() is not None
+                        or not preview.ready_path.is_file()):
+                    raise ConflictError("Start the live scanner preview before continuous table rotation.",
+                                        code="SCANNER_PREVIEW_REQUIRED")
             if command == "stop" and spin is None:
                 stop_path = self._workspace_root / ".revopoint-turntable-spin.stop"
                 heartbeat_path = Path(str(stop_path) + ".heartbeat")
@@ -243,6 +254,55 @@ class Scan360CaptureController:
                 raise ValidationError("Build the Revopoint tools before controlling the turntable.")
             profile_args = [address, profile["gatt_name"], profile["advertisement_uuid"],
                             profile["service_uuid"], profile["characteristic_uuid"]]
+            if command == "monitor":
+                if (isinstance(value, bool) or not isinstance(value, (int, float))
+                        or not math.isfinite(value) or not 5 <= value <= 60 or not float(value).is_integer()):
+                    raise ValidationError("Turntable monitor duration must be a whole number from 5 to 60 seconds.")
+                duration = int(value)
+                try:
+                    with tempfile.TemporaryDirectory(prefix=".turntable-monitor-",
+                                                     dir=self._workspace_root) as temporary:
+                        telemetry_path = Path(temporary) / "telemetry.csv"
+                        result = subprocess.run([str(executable), "monitor", str(duration), str(telemetry_path),
+                            *profile_args], cwd=str(self._repository_root), capture_output=True,
+                            timeout=duration + 30, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                        output = result.stdout.decode("utf-8", errors="replace").strip()
+                        samples: list[dict[str, Any]] = []
+                        with telemetry_path.open("r", encoding="utf-8-sig", newline="") as stream:
+                            for row in csv.DictReader(stream):
+                                try:
+                                    angle = float(row["angle_degrees"])
+                                    tilt = float(row["tilt_degrees"])
+                                except (KeyError, TypeError, ValueError):
+                                    continue
+                                if not math.isfinite(angle) or not math.isfinite(tilt):
+                                    continue
+                                samples.append({"utc": row.get("utc", ""), "angle_degrees": angle,
+                                                "tilt_degrees": tilt})
+                except subprocess.CalledProcessError as exc:
+                    output = (exc.stdout or b"").decode("utf-8", errors="replace").strip()
+                    error = (exc.stderr or b"").decode("utf-8", errors="replace").strip()
+                    raise ValidationError(error or output or "The turntable telemetry monitor failed.") from exc
+                except (OSError, subprocess.SubprocessError) as exc:
+                    raise ValidationError(f"The turntable telemetry monitor could not complete: {exc}.") from exc
+                if len(samples) < 2:
+                    raise ValidationError("The turntable telemetry monitor returned fewer than two valid samples.")
+                unwrapped_delta = 0.0
+                for previous, current in zip(samples, samples[1:]):
+                    delta = current["angle_degrees"] - previous["angle_degrees"]
+                    if delta > 180.0:
+                        delta -= 360.0
+                    elif delta < -180.0:
+                        delta += 360.0
+                    unwrapped_delta += delta
+                final_sample = samples[-1]
+                self._remember_turntable_position_locked({"turntable_device_id": address,
+                    "profile_id": profile["id"], "angle_degrees": final_sample["angle_degrees"],
+                    "tilt_degrees": final_sample["tilt_degrees"]})
+                return {"state": "completed", "command": "monitor", "duration_seconds": duration,
+                        "sample_count": len(samples), "net_rotation_degrees": unwrapped_delta,
+                        "samples": samples, "output": output,
+                        "turntable_device_id": address, "profile_id": profile["id"]}
             if command == "spin-start":
                 stop_path = self._workspace_root / ".revopoint-turntable-spin.stop"
                 heartbeat_path = Path(str(stop_path) + ".heartbeat")
@@ -268,7 +328,8 @@ class Scan360CaptureController:
                     raise ValidationError(f"The turntable could not be started: {exc}.") from exc
                 log_stream.close()
                 self._turntable_spin = _TurntableSpinJob(process, stop_path, heartbeat_path, log_path, address,
-                    profile["id"], datetime.now(timezone.utc).isoformat(), time.monotonic())
+                    profile["id"], datetime.now(timezone.utc).isoformat(), time.monotonic(),
+                    self._live_preview.process, self._live_preview.ready_path)
                 threading.Thread(target=self._maintain_turntable_spin_heartbeat,
                     args=(self._turntable_spin,), daemon=True, name="cadyx-turntable-heartbeat").start()
                 return self._turntable_spin_snapshot_locked()
@@ -364,6 +425,13 @@ class Scan360CaptureController:
     def _maintain_turntable_spin_heartbeat(job: _TurntableSpinJob) -> None:
         interval = threading.Event()
         while job.process.poll() is None and not job.stop_path.exists():
+            if job.preview_process.poll() is not None or not job.preview_ready_path.is_file():
+                try:
+                    with job.stop_path.open("xb"):
+                        pass
+                except (FileExistsError, OSError):
+                    pass
+                return
             try:
                 job.heartbeat_path.touch()
             except OSError:
@@ -997,6 +1065,12 @@ class Scan360CaptureController:
             job = self._live_preview
             if job is None:
                 return {"state": "idle"}
+            spin_status = self._turntable_spin_snapshot_locked()
+            if spin_status.get("state") in {"starting", "running", "stopping"}:
+                spin_status = self._stop_turntable_spin_locked()
+                if spin_status.get("state") in {"starting", "running", "stopping"}:
+                    raise ConflictError("Stop continuous table rotation before stopping the scanner preview.",
+                                        code="TURNTABLE_SPIN_ACTIVE")
             if job.process.poll() is None:
                 try:
                     with job.stop_path.open("xb"):
