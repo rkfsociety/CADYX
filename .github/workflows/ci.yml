@@ -116,7 +116,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'PLY preview tests failed.' }
           & $node tests/test_curve_draft.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Trace draft tests failed.' }
-          foreach ($test in @('test_panel_state.cjs', 'test_turntable_controls.cjs', 'test_scan_view.cjs', 'test_web_performance.cjs')) {
+          foreach ($test in @('test_panel_state.cjs', 'test_turntable_controls.cjs', 'test_scan_view.cjs', 'test_web_performance.cjs', 'test_project_bulk_delete.cjs')) {
             & $node (Join-Path tests $test)
             if ($LASTEXITCODE -ne 0) { throw "Browser regression failed: $test" }
           }

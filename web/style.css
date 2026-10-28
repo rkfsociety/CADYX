@@ -157,6 +157,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .primary-grid[data-view="projects"] > :not(#projects-panel) { display: none; }
 .primary-grid[data-view="projects"] > #projects-panel { display: grid; grid-column: 1; grid-row: 1; min-height: 0; grid-template-rows: 46px minmax(0, 1fr) auto; overflow: hidden; }
 .primary-grid:not([data-view="projects"]) #projects-panel { display: none; }
+.projects-selection-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 24px 12px; }
+.projects-selection-toolbar span { color: var(--muted); }
+#delete-selected-projects { color: #ffb6bb; border-color: #a64d57; }
+.workspace-project-selection { position: absolute; top: 10px; left: 10px; z-index: 2; width: 22px; height: 22px; accent-color: #539dcc; cursor: pointer; }
+.workspace-project-selection:disabled { cursor: not-allowed; }
 .projects-toolbar { display: flex; align-items: center; gap: 8px; }
 .projects-toolbar label { color: var(--dim); font: 10px var(--mono); letter-spacing: .04em; }
 .projects-toolbar select { max-width: min(245px, 48vw); min-height: 34px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; background: #151e25; color: var(--text); font: 11px var(--ui-font); }

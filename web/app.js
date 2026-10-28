@@ -87,7 +87,7 @@ body:has(#primary-grid[data-view="projects"]) .project-detail{grid-template-rows
 body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary-grid[data-view="projects"]) .project-main{grid-row:2!important}
 .brand{gap:9px}
 .brand-mark{display:block;width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-#projects-panel{grid-template-rows:auto minmax(0,1fr) auto!important;border:0;border-radius:0!important;background:transparent}
+#projects-panel{grid-template-rows:auto auto minmax(0,1fr) auto!important;border:0;border-radius:0!important;background:transparent}
 .projects-page-heading{display:flex;min-width:0;align-items:end;justify-content:space-between;gap:22px;padding:24px 24px 14px}
 .projects-title-block{display:grid;min-width:220px;gap:3px}
 .projects-eyebrow{color:var(--muted);font:12px/1.3 var(--ui-font)}

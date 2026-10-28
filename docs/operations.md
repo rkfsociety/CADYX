@@ -21,6 +21,8 @@ Open <http://127.0.0.1:8888>. Port `8888` is the default; to use another port or
 
 The home page opens the project list. Click “Новый проект”, enter a name and click “Создать” to save and open an empty project. Errors keep the entered name in the dialog and display the failure. Direct `/p/<slug>` links still open the selected model.
 
+Project checkboxes support bulk deletion. “Выбрать все в поиске” selects available projects matching the current search; earlier selections remain selected when the search changes. Confirmation lists the count and names of all selected projects before permanent deletion. Busy projects cannot be selected. Partial failures leave unsuccessful projects selected and report the deletion count and failure reasons.
+
 ## Authentication and LAN access
 
 CADYX treats LAN exposure as an explicit authenticated mode. Configure one reusable token of at least 32 non-whitespace characters through `CADYX_AUTH_TOKEN`, or store it in a UTF-8 file and pass `--auth-token-file` (or set `CADYX_AUTH_TOKEN_FILE`). Do not configure both sources. For example, in PowerShell:

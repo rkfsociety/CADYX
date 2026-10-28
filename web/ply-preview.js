@@ -1036,7 +1036,75 @@ async function setProjectGroup(projectId, groupId) {
   await refreshWorkspace();
 }
 
+const selectedProjectIds = new Set();
+let projectBulkDeletionPending = false;
+
+function updateProjectSelection() {
+  const existing = new Set(projects.map((entry) => entry.project.id));
+  for (const id of selectedProjectIds) if (!existing.has(id)) selectedProjectIds.delete(id);
+  $("#projects-selection-count").textContent = `Выбрано: ${selectedProjectIds.size}`;
+  $("#delete-selected-projects").disabled = projectBulkDeletionPending || !selectedProjectIds.size;
+  $("#select-visible-projects").disabled = projectBulkDeletionPending;
+  $("#clear-project-selection").disabled = projectBulkDeletionPending || !selectedProjectIds.size;
+}
+
+$("#select-visible-projects").addEventListener("click", () => {
+  const query = $("#projects-search").value.trim().toLocaleLowerCase("ru-RU");
+  for (const { project } of projects) {
+    if (canSelectProject(project.id) && (!query || project.name.toLocaleLowerCase("ru-RU").includes(query))) {
+      selectedProjectIds.add(project.id);
+    }
+  }
+  renderProjects();
+});
+$("#clear-project-selection").addEventListener("click", () => {
+  selectedProjectIds.clear();
+  renderProjects();
+});
+$("#delete-selected-projects").addEventListener("click", deleteSelectedProjects);
+
+async function deleteSelectedProjects() {
+  if (projectBulkDeletionPending) return;
+  const targets = projects.filter(({ project }) => selectedProjectIds.has(project.id));
+  if (!targets.length || !window.confirm(
+    `Безвозвратно удалить выбранные проекты (${targets.length})?\n\n` +
+    targets.map(({ project }) => `• ${project.name}`).join("\n") +
+    "\n\nБудут удалены модели, история, файлы и сканы этих проектов. Это действие нельзя отменить.",
+  )) return;
+  projectBulkDeletionPending = true;
+  renderProjects();
+  let deleted = 0;
+  let cleanupPending = false;
+  let redirect = false;
+  const failures = [];
+  try {
+    for (const { project } of targets) {
+      try {
+        if (!canSelectProject(project.id)) throw new Error("Проект занят или его доступность не подтверждена");
+        const result = await api(`/api/v1/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
+        selectedProjectIds.delete(project.id);
+        deleted += 1;
+        cleanupPending ||= result.cleanup_pending;
+        redirect ||= projectAddressPinned && selectedProjectId === project.id;
+      } catch (error) {
+        failures.push(`${project.name}: ${error.message}`);
+      }
+    }
+    notify(`Удалено проектов: ${deleted} из ${targets.length}.` +
+      (cleanupPending ? " Очистка файлов завершится после закрытия открытых ресурсов." : "") +
+      (failures.length ? ` Не удалось удалить:\n${failures.join("\n")}` : ""), failures.length > 0);
+    if (redirect) window.location.assign("/?view=projects");
+    else await refreshWorkspace();
+  } catch (error) {
+    notify(`Не удалось обновить список проектов: ${error.message}`, true);
+  } finally {
+    projectBulkDeletionPending = false;
+    renderProjects();
+  }
+}
+
 async function deleteProject(projectId, projectName) {
+  if (projectBulkDeletionPending) return;
   const confirmed = window.confirm(
     `Безвозвратно удалить проект «${projectName}»?\n\n` +
     "Будут удалены модель, история, файлы и сканы проекта. Это действие нельзя отменить.",
@@ -1093,6 +1161,19 @@ function renderProjectCard(entry) {
   }, { once: true });
   thumbnail.append(image, state);
 
+  const selection = document.createElement("input");
+  selection.type = "checkbox";
+  selection.className = "workspace-project-selection";
+  selection.checked = selectedProjectIds.has(project.id);
+  selection.disabled = projectBulkDeletionPending || !projectAvailable;
+  selection.setAttribute("aria-label", `Выбрать для удаления проект «${project.name}»`);
+  selection.addEventListener("change", () => {
+    if (selection.checked) selectedProjectIds.add(project.id);
+    else selectedProjectIds.delete(project.id);
+    updateProjectSelection();
+  });
+  thumbnail.append(selection);
+
   const heading = document.createElement("div");
   heading.className = "workspace-project-card-heading";
   const name = document.createElement("h3");
@@ -1112,7 +1193,7 @@ function renderProjectCard(entry) {
   remove.className = "workspace-project-delete";
   remove.type = "button";
   remove.textContent = "Удалить проект";
-  remove.disabled = !projectAvailable;
+  remove.disabled = projectBulkDeletionPending || !projectAvailable;
   remove.setAttribute("aria-label", `Удалить проект «${project.name}»`);
   remove.addEventListener("click", () => deleteProject(project.id, project.name));
   morePopover.append(remove);
@@ -1229,9 +1310,11 @@ $("#projects-grid-view").addEventListener("click", () => setProjectsLayout("grid
 $("#projects-list-view").addEventListener("click", () => setProjectsLayout("list"));
 
 function renderProjects() {
+  updateProjectSelection();
   if (primaryGrid.dataset.view !== "projects") return;
   const list = $("#projects-list");
   const signature = JSON.stringify([
+    [...selectedProjectIds], projectBulkDeletionPending,
     projectSort,
     $("#projects-search").value.trim().toLocaleLowerCase("ru-RU"),
     projectGroups.map(({ id, name }) => [id, name]),
@@ -2704,6 +2787,7 @@ function handleStreamEvent(type, event) {
     return;
   }
   if (type === "project.deleted") {
+    if (projectBulkDeletionPending) return;
     if (projectAddressPinned && projectId === selectedProjectId) window.location.assign("/");
     else scheduleWorkspaceRefresh();
     return;
