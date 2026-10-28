@@ -73,7 +73,7 @@ def _safe_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_safe_value(item) for item in value]
     if isinstance(value, dict):
-        return {str(key): _safe_value(item) for key, item in value.items()}
+        return {public_text(str(key)): _safe_value(item) for key, item in value.items()}
     if type(value) is float:
         return value if math.isfinite(value) else None
     if value is None or type(value) in {bool, int}:

@@ -50,13 +50,12 @@ def load_auth_token(environment_token: str | None, token_file: str | None) -> st
     if token_file:
         try:
             token = Path(token_file).read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeError) as exc:
             raise AuthenticationConfigError(
                 f"Could not read CADYX authentication token file: {token_file}"
             ) from exc
-        # A single trailing newline is convenient for generated secret files; internal
-        # or leading whitespace remains invalid.
-        token = token.rstrip("\r\n")
+        # Accept one optional line ending; extra blank lines remain invalid whitespace.
+        token = token.removesuffix("\n").removesuffix("\r")
         return normalize_auth_token(token)
     return normalize_auth_token(environment_token)
 
