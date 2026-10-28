@@ -282,7 +282,7 @@ class ProjectWorkspace:
         self.load(project_id)
         return self._validations.list(self._project_dir(project_id), limit=limit)
 
-    def list(self) -> list[dict[str, Any]]:
+    def list(self, *, summary_only: bool = False) -> list[dict[str, Any]]:
         projects: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
         self._cleanup_deleted_project_directories()
@@ -298,7 +298,10 @@ class ProjectWorkspace:
                     code="DUPLICATE_PROJECT_ID",
                 )
             seen_ids.add(project_id)
-            projects.append(self._load_project_from_directory(entry, project_id, include_history=False))
+            if summary_only:
+                projects.append(self._projects.load(entry, project_id, summary_only=True))
+            else:
+                projects.append(self._load_project_from_directory(entry, project_id, include_history=False))
         projects.sort(key=lambda item: (item["name"].casefold(), item["id"]))
         return projects
 

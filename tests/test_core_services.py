@@ -3,12 +3,39 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from cadyx.core import CadyxCore
 from cadyx.core_services import CommandActivityService, EngineeringValidationService, ProjectLifecycleService, RenderingCacheService
 from cadyx.runtime_cache import RuntimeCachePolicy
 
 class CoreServiceCompositionTests(unittest.TestCase):
+    def test_project_listing_does_not_wait_for_scanner_device_io(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            core = CadyxCore(root, kernel=object())
+            project_id = core.create_project("Independent listing")["project"]["id"]
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                # The request runs on another thread, as in the HTTP server.
+                # Holding the scanner guard simulates a slow table query.
+                with core._scan_capture._guard:
+                    future = pool.submit(core.list_workspace)
+                    listing = future.result(timeout=1)
+                    availability = pool.submit(
+                        core._project_availability, project_id, nonblocking=True,
+                    ).result(timeout=1)
+                    self.assertTrue(availability.running_operation)
+                self.assertEqual(len(listing["projects"]), 1)
+                self.assertFalse(core._scan_capture.is_running(project_id))
+
+    def test_project_listing_reads_metadata_without_expanding_documents(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            core = CadyxCore(root, kernel=object())
+            created = core.create_project("Metadata listing")
+            with patch("cadyx.workspace_projects._unpack_project_geometries", side_effect=AssertionError):
+                listing = core.list_workspace()
+            self.assertEqual(listing["projects"][0]["project"], created["project"])
+            self.assertEqual(listing["projects"][0]["lock"]["state"], "FREE")
+
     def test_core_composes_services(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             core = CadyxCore(root, kernel=object())

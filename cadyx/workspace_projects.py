@@ -186,7 +186,10 @@ class ProjectRecordStore:
             "history": [],
         }
 
-    def load(self, directory: Path, project_id: str, *, include_history: bool = True) -> dict[str, Any]:
+    def load(
+        self, directory: Path, project_id: str, *, include_history: bool = True,
+        summary_only: bool = False,
+    ) -> dict[str, Any]:
         project_file = directory / "project.json"
         try:
             with project_file.open("r", encoding="utf-8") as stream:
@@ -197,6 +200,21 @@ class ProjectRecordStore:
             raise ValidationError(f"Project file could not be read: {exc}.") from exc
         if not isinstance(project, dict):
             raise ValidationError("Project file must contain a JSON object.")
+        if summary_only:
+            # Listing needs the envelope, not expanded geometry or command history.
+            # Older envelopes still pass through the normal migration/validation path.
+            if project.get("version") != PROJECT_VERSION:
+                project = self.load(directory, project_id, include_history=False)
+            if "url_slug" not in project and isinstance(project.get("name"), str):
+                project["url_slug"] = self.default_url_slug(project["name"])
+            if "project_type" not in project:
+                project["project_type"] = self.infer_project_type(project)
+            self.validate_metadata(project, expected_id=project_id)
+            return {
+                key: project[key]
+                for key in ("id", "format", "version", "name", "url_slug", "project_type",
+                            "created_at", "modified_at")
+            }
         if isinstance(project, dict):
             storage = project.get(_STORAGE_KEY)
             history_pointer = storage.get("history") if isinstance(storage, dict) else None
@@ -324,10 +342,7 @@ class ProjectRecordStore:
         ProjectRecordStore.validate_current(migrated, expected_id=expected_id)
 
     @staticmethod
-    def validate_current(
-        project: Any, *, expected_id: str | None = None, history_start: int = 0,
-        document_validated: bool = False,
-    ) -> None:
+    def validate_metadata(project: Any, *, expected_id: str | None = None) -> None:
         if not isinstance(project, dict):
             raise ValidationError("Project file must contain a JSON object.")
         if (
@@ -348,6 +363,13 @@ class ProjectRecordStore:
         ProjectRecordStore.normalize_project_type(project.get("project_type", "single_model"))
         if not isinstance(project.get("created_at"), str) or not isinstance(project.get("modified_at"), str):
             raise ValidationError("Project timestamps are invalid.")
+
+    @staticmethod
+    def validate_current(
+        project: Any, *, expected_id: str | None = None, history_start: int = 0,
+        document_validated: bool = False,
+    ) -> None:
+        ProjectRecordStore.validate_metadata(project, expected_id=expected_id)
         document = (Document.from_validated_dict(project.get("document")) if document_validated else
                     Document.from_current_dict(project.get("document")))
         history = project.get("history")

@@ -39,6 +39,39 @@ class ProjectWorkspaceTests(unittest.TestCase):
         self.assertEqual(renamed["url_slug"], "gypsum-figurine-5-views")
         self.assertEqual(self.workspace.load(project["id"])["url_slug"], "gypsum-figurine-5-views")
 
+    def test_summary_listing_skips_model_validation_and_refreshes_saved_metadata(self) -> None:
+        project = self.workspace.create("Original")
+        path = self.workspace._project_dir(project["id"]) / "project.json"
+        with patch("cadyx.workspace_projects._unpack_project_geometries", side_effect=AssertionError), \
+                patch.object(ProjectRecordStore, "validate_current", side_effect=AssertionError):
+            summary = self.workspace.list(summary_only=True)[0]
+            self.assertEqual(summary["id"], project["id"])
+            self.assertNotIn("document", summary)
+            self.assertNotIn("history", summary)
+            summary["name"] = "Caller change"
+            self.assertEqual(self.workspace.list(summary_only=True)[0]["name"], "Original")
+            project["name"] = "External rename"
+            project["project_type"] = "assembly"
+            path.write_text(json.dumps(project), encoding="utf-8")
+            updated = self.workspace.list(summary_only=True)[0]
+            self.assertEqual(updated["name"], "External rename")
+            self.assertEqual(updated["project_type"], "assembly")
+
+    def test_summary_listing_preserves_legacy_defaults_and_rejects_invalid_metadata(self) -> None:
+        project = self.workspace.create("Legacy")
+        path = self.workspace._project_dir(project["id"]) / "project.json"
+        project.pop("url_slug")
+        project.pop("project_type")
+        path.write_text(json.dumps(project), encoding="utf-8")
+        summary = self.workspace.list(summary_only=True)[0]
+        self.assertEqual(summary["url_slug"], "legacy")
+        self.assertEqual(summary["project_type"], "single_model")
+        self.assertNotIn("url_slug", json.loads(path.read_text(encoding="utf-8")))
+        project["name"] = ""
+        path.write_text(json.dumps(project), encoding="utf-8")
+        with self.assertRaises(ValidationError):
+            self.workspace.list(summary_only=True)
+
     def test_project_type_persists_and_legacy_type_is_inferred(self) -> None:
         assembly = self.workspace.create("Assembly project", project_type="assembly")
         self.assertEqual(self.workspace.load(assembly["id"])["project_type"], "assembly")
@@ -141,6 +174,18 @@ class ProjectWorkspaceTests(unittest.TestCase):
 
         self.assertEqual(renamed["name"], "Renamed stored project")
         self.assertEqual(restored["history"][0]["result"]["geometry"], geometry)
+
+        # Card metadata remains available without loading external geometry/history;
+        # inspecting the document must still detect a missing geometry blob.
+        blob = next(self.workspace._project_dir(project["id"]).glob(".cadyx-brep-*.json"))
+        blob_content = blob.read_bytes()
+        blob.unlink()
+        try:
+            self.assertEqual(self.workspace.list(summary_only=True)[0]["id"], project["id"])
+            with self.assertRaises(ValidationError):
+                self.workspace.load(project["id"])
+        finally:
+            blob.write_bytes(blob_content)
         self.assertEqual(len(list(self.workspace._project_dir(project["id"]).glob(".cadyx-brep-*.json"))), 1)
 
     def test_rename_chooses_available_directory_without_overwriting(self) -> None:

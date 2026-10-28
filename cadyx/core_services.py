@@ -88,7 +88,7 @@ class ProjectLifecycleService(_CoreService):
             lock=lock,
             running_operation=(
                 any(item.get("state") == "running" for item in activities)
-                or self._scan_capture.is_running(project_id)
+                or self._scan_capture.is_running(project_id, nonblocking=nonblocking)
             ),
         )
 
@@ -407,7 +407,7 @@ class ProjectLifecycleService(_CoreService):
     def list_projects(self) -> list[dict[str, Any]]:
         result = []
         group_by_project = self.workspace.project_group_assignments()
-        for project in self.workspace.list():
+        for project in self.workspace.list(summary_only=True):
             project_id = project["id"]
             result.append({
                 "project": self._summary(project),

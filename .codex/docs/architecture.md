@@ -48,6 +48,10 @@ single Core boundary used by project reads, writes, file management, resource
 selection and destructive lifecycle operations. A lock snapshot that is
 missing, busy or otherwise unknown does not count as free.
 
+Nonblocking availability reads also avoid waiting on the scanner controller's
+device-I/O guard. While that guard is held, scan state is conservatively treated
+as running; authoritative mutation checks still wait for the actual state.
+
 Read-only inspection and listings use the nonblocking lease snapshot and
 continue to return the last atomically saved project state while a writer is
 active. A new write lease requires a free project with no recovery requirement

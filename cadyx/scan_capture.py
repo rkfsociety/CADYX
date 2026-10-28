@@ -1295,13 +1295,19 @@ class Scan360CaptureController:
                 return self._latest_completed_snapshot(project_directory)
             return self._snapshot_locked()
 
-    def is_running(self, project_id: str) -> bool:
-        with self._guard:
+    def is_running(self, project_id: str, *, nonblocking: bool = False) -> bool:
+        # Device I/O can hold this guard for seconds. Display-only availability
+        # must not wait for it; unknown scan state stays conservatively busy.
+        if not self._guard.acquire(blocking=not nonblocking):
+            return True
+        try:
             return bool(
                 self._job is not None
                 and self._job.project_id == project_id
                 and self._job.process.poll() is None
             )
+        finally:
+            self._guard.release()
 
     def _snapshot_locked(self) -> dict[str, Any]:
         assert self._job is not None

@@ -129,6 +129,13 @@ Migration preserves metadata, ids, geometry, references and existing history;
 it never adds a command or increments a revision. Reapplying migration to a
 current snapshot leaves its value unchanged.
 
+Project-list endpoints read and validate only the project envelope metadata from
+the atomic `project.json` snapshot. They do not expand B-rep blobs, read command
+history, or validate the model. Missing legacy slugs and project types are
+inferred in memory without rewriting the record. Opening/inspecting a document
+still performs the full load and validation described above; listing metadata
+does not certify the integrity of its geometry or history.
+
 Reads, listings, lease operations and rejected commands do not rewrite existing
 project records for schema migration. Project listing can initialize an
 unregistered workspace directory as described above. The next successful Core
