@@ -72,6 +72,7 @@ class WebRouteTableTests(unittest.TestCase):
             ("GET", "/assets/viewport.js", "asset_viewport", {}),
             ("GET", "/assets/browser-state.js", "asset_browser_state", {}),
             ("GET", "/assets/scan-view.js", "asset_scan_view", {}),
+            ("GET", "/assets/scan-preview-worker.js", "asset_scan_preview_worker", {}),
         )
         for method, path, name, params in cases:
             with self.subTest(method=method, path=path):

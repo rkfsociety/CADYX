@@ -47,7 +47,7 @@ function createStressScene(cells) {
   };
 }
 
-function createViewer(scene, { shaded, wireframe }) {
+function createViewer(scene, { shaded, wireframe, interactiveRasterMode }) {
   const eventHandlers = {};
   const animationFrames = [];
   const context = {
@@ -91,7 +91,7 @@ function createViewer(scene, { shaded, wireframe }) {
     wireframe,
   });
   const loadStarted = performance.now();
-  viewer.load(scene);
+  viewer.load({ ...scene, interactiveRasterMode });
   viewer.setCamera({ yaw: 0.68, pitch: 0.38, zoom: cameraZoom, projection: "orthographic" });
   const setupMs = performance.now() - loadStarted;
 
@@ -206,6 +206,8 @@ async function main() {
       { name: "edges-full", shaded: false, wireframe: true },
       { name: "shaded+edges-full", shaded: true, wireframe: true },
       { name: "shaded+edges-orbit", shaded: true, wireframe: true, orbit: true },
+      { name: "shaded+edges-orbit-painter", shaded: true, wireframe: true,
+        orbit: true, interactiveRasterMode: "painter" },
     ];
     for (const mode of modes) {
       const bench = createViewer(scene, mode);

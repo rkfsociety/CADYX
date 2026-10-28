@@ -460,7 +460,7 @@
         selectedFeatureId
           ? geometry.featureTriangleRanges?.filter((range) => range.featureId === selectedFeatureId) || []
           : geometry.bodyTriangleRanges?.filter((range) => range.objectId === selectedBodyId) || [],
-        geometry.overlayTriangleRanges || [],
+        geometry.overlayTriangleRanges || [], geometry.interactiveRasterMode,
       );
       else if (geometry.pointCloudVertexCount != null || !geometry.lines) {
         renderPoints(geometry.pointCloudVertexCount ?? positions.length / 3, camera, screenX, screenY, scale,
@@ -563,7 +563,8 @@
         const x = screenX[pointIndex], y = screenY[pointIndex];
         const pixelX = Math.round(x), pixelY = Math.round(y);
         if (pixelX < 0 || pixelX >= width || pixelY < 0 || pixelY >= height) continue;
-        const surfaceDepth = meshDepth[pixelY * width + pixelX];
+        const surfaceDepth = drag && geometry.interactiveRasterMode === "painter"
+          ? -Infinity : meshDepth[pixelY * width + pixelX];
         const labelDepth = camera[pointIndex * 3 + 2];
         if (Number.isFinite(surfaceDepth) && labelDepth + 1e-4 < surfaceDepth) continue;
         const fontSize = Number.isFinite(label.size) ? Math.max(6, Math.min(16, label.size)) : 8;
@@ -1073,7 +1074,8 @@
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, motionAngles,
       vertexNormals, orientation, faceNormals, featureEdges, featureEdgeFaces, silhouetteCandidates, colors, triangleColors,
       showWireframe, shaded, interactive,
-      wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = [], overlayRanges = []) {
+      wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = [], overlayRanges = [],
+      interactiveRasterMode = null) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
       // A broad key and weaker fill keep both sides readable without a flat glow.
@@ -1144,7 +1146,8 @@
       }
 
       const visibleFaces = faceOrder.subarray(0, visibleCount);
-      const depthBufferValid = shaded
+      const fastInteractivePass = interactive && interactiveRasterMode === "painter";
+      const depthBufferValid = shaded && !fastInteractivePass
         && rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors, triangleColors,
           selectedRanges, overlayRanges, smooth ? vertexLight : null);
       if (shaded && !depthBufferValid) {
@@ -1263,7 +1266,7 @@
         }
         flushVisibleRun();
       };
-      if (showWireframe && featureEdges?.length) {
+      if (showWireframe && featureEdges?.length && !fastInteractivePass) {
         context.save();
         context.strokeStyle = wireframeColor;
         context.globalAlpha = wireframeOpacity;

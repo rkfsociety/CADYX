@@ -520,6 +520,39 @@
       seen: new Uint8Array(640 * 400),
       queue: new Int32Array(640 * 400),
     };
+    let liveFrameWorker = null;
+    let liveFrameWorkerRequestId = 0;
+    const liveFrameWorkerRequests = new Map();
+    const processLiveFrameInWorker = (raw, matrix, scale) => {
+      if (typeof window.Worker !== 'function') return null;
+      if (!liveFrameWorker) {
+        liveFrameWorker = new window.Worker('/assets/scan-preview-worker.js');
+        liveFrameWorker.onmessage = event => {
+          const pending = liveFrameWorkerRequests.get(event.data?.requestId);
+          if (!pending) return;
+          liveFrameWorkerRequests.delete(event.data.requestId);
+          if (event.data.error) pending.reject(new Error(event.data.error));
+          else pending.resolve(event.data.result);
+        };
+        liveFrameWorker.onerror = event => {
+          const error = new Error(event.message || 'Не удалось обработать кадр сканера в фоновом потоке.');
+          for (const pending of liveFrameWorkerRequests.values()) pending.reject(error);
+          liveFrameWorkerRequests.clear();
+          liveFrameWorker?.terminate();
+          liveFrameWorker = null;
+        };
+      }
+      const requestId = ++liveFrameWorkerRequestId;
+      return new Promise((resolve, reject) => {
+        liveFrameWorkerRequests.set(requestId, { resolve, reject });
+        try {
+          liveFrameWorker.postMessage({ requestId, rawBuffer: raw.buffer, matrix, scale }, [raw.buffer]);
+        } catch (error) {
+          liveFrameWorkerRequests.delete(requestId);
+          reject(error);
+        }
+      });
+    };
     const setAttribute = (element, name, value) => {
       const current = element.getAttribute(name);
       if (current !== value) element.setAttribute(name, value);
@@ -966,6 +999,7 @@
         style: { size: 12, opacity: 1, color: '#00d8ff', shape: 'circle' } });
       viewer.load({ positions: combinedPositions, triangles, triangleColors,
         lines: trajectoryLines, textLabels: degreeTextLabels, pointCloudVertexCount: cloudPointCount,
+        interactiveRasterMode: 'painter',
         pointPreviewLimit: LIVE_PREVIEW_POINT_LIMIT,
         pointCloudVertexRange: [firstCloudVertex, firstCloudVertex + cloudPointCount],
         hideWorldAxes: true, hideWorldGrid: true,
@@ -1167,7 +1201,18 @@
               throw new Error('Размер кадра Y16 не совпадает.');
             }
               const { matrix, depth_scale_mm_per_raw_unit: scale } = liveCalibration;
-              const { depths, markerPixelIndices, positions, markerFlags, markerPixels, markerCenterPixels, seen, queue } = liveFrameScratch;
+              let workerFrame = processLiveFrameInWorker(raw, matrix, scale);
+              if (workerFrame) workerFrame = await workerFrame;
+              let regions = 0, markerPositions = [], markerCenterPositions = [];
+              let markerCenterPixelPositions = [], positions = null, markerFlags = null, count = 0;
+              let rawBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+              if (workerFrame) {
+                ({ regions, markerPositions, markerCenterPositions, markerCenterPixelPositions,
+                  positions, markerFlags, count, rawBounds } = workerFrame);
+              } else {
+              const { depths, markerPixelIndices, markerPixels, markerCenterPixels, seen, queue } = liveFrameScratch;
+              positions = liveFrameScratch.positions;
+              markerFlags = liveFrameScratch.markerFlags;
               markerPixels.fill(0);
               markerCenterPixels.fill(0);
               seen.fill(0);
@@ -1178,7 +1223,7 @@
                 if (depths[pixel] > 0) currentValidPixels += 1;
               }
               const valid = i => depths[i] > 0;
-              let regions = 0;
+              regions = 0;
               let markerPixelCount = 0;
               for (let seed = 0; seed < seen.length; seed += 1) {
                 if (seen[seed] || !valid(seed)) continue;
@@ -1222,11 +1267,11 @@
                 }
               }
               const displayDepthCount = currentValidPixels;
-              const markerPositions = [];
-              const markerCenterPositions = [];
-              const markerCenterPixelPositions = [];
-              let count = 0;
-              const rawBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+              markerPositions = [];
+              markerCenterPositions = [];
+              markerCenterPixelPositions = [];
+              count = 0;
+              rawBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
               const projectedPoint = [0, 0, 0];
               const sampleBudget = LIVE_PREVIEW_POINT_LIMIT - 512;
               const selectedMarkerBudget = Math.min(markerPixelCount, sampleBudget);
@@ -1277,6 +1322,7 @@
                 rawBounds.max[1] = Math.max(rawBounds.max[1], projectedPoint[1]);
                 rawBounds.max[2] = Math.max(rawBounds.max[2], projectedPoint[2]);
                 count += 1;
+              }
               }
               if (request !== liveRequest || !livePreviewOwned) return;
               if (count >= 3) {

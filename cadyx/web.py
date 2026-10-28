@@ -32,7 +32,7 @@ _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 _UI_ASSETS = (
     "index.html", "scanner.html", "app.js", "style.css", "viewport.js",
     "ply-parser.js", "ply-preview.js", "scanner-camera.js", "scan-view.js", "device-settings.js",
-    "turntable-controls.js", "favicon.svg",
+    "turntable-controls.js", "scan-preview-worker.js", "favicon.svg",
 )
 _CLIENT_API_CONTRACT_VERSION = "viewport-snapshot-v1"
 _UI_ASSET_VERSION_LOCK = threading.Lock()

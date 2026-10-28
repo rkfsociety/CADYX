@@ -16,6 +16,7 @@ let arcs = 0;
 let animationTime = 0;
 let renderCalls = 0;
 let rasterizedPixels = 0;
+let rasterUploads = 0;
 let rasterizedBounds = null;
 const animationFrames = [];
 const context = {
@@ -40,6 +41,7 @@ const context = {
   measureText(value) { return { width: String(value).length * 7 }; },
   createImageData(width, height) { return { width, height, data: new Uint8ClampedArray(width * height * 4) }; },
   putImageData(image) {
+    rasterUploads += 1;
     let minX = image.width, maxX = -1, minY = image.height, maxY = -1;
     for (let y = 0; y < image.height; y += 1) {
       for (let x = 0; x < image.width; x += 1) {
@@ -661,5 +663,20 @@ tablePreviewViewer.load({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0.3, 0.35]
   ],
   bounds: { min: [0, 0, 0], max: [1, 1, 0.35] }, hideWorldAxes: true }, { reset: false });
 assert.deepEqual(drawnLabels, ['top-label'], 'top camera shows only the outward top-view scale labels');
+tablePreviewViewer.load({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], triangles: [0, 1, 2],
+  lines: [], points: [], interactiveRasterMode: 'painter',
+  bounds: { min: [0, 0, 0], max: [1, 1, 0] } });
+const rasterUploadsBeforeDrag = rasterUploads;
+const queuedFrameCount = animationFrames.length;
+events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 7 });
+events.pointermove({ clientX: 320, clientY: 215 });
+const interactiveFrame = animationFrames.splice(queuedFrameCount, 1)[0];
+assert.equal(typeof interactiveFrame, 'function', 'camera movement schedules one interactive render');
+interactiveFrame();
+assert.equal(rasterUploads, rasterUploadsBeforeDrag,
+  'scanner preview skips the costly pixel depth raster while the camera is moving');
+events.pointerup({});
+assert.ok(rasterUploads > rasterUploadsBeforeDrag,
+  'full depth-correct rendering returns after camera movement stops');
 console.log("Viewport: camera, geometry, transitions, depth-tested edges and scan surface styling passed.");
 

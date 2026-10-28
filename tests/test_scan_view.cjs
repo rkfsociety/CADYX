@@ -235,12 +235,18 @@ assert.equal(viewerLoads.length, loadCount, "repeated status polls do not reload
 liveFrameSequence = 0;
 const livePreviewLoadStart = viewerLoads.length;
 view.showLivePreview({ open: true });
-await waitUntil(() => viewerLoads.length >= livePreviewLoadStart + 3
-  && viewerLoads.at(-1)?.geometry.pointLayers?.some(layer => layer.style?.color === "#00d8ff"));
+let mappedLiveGeometry = null;
+await waitUntil(() => {
+  if (viewerLoads.length < livePreviewLoadStart + 3) return false;
+  const geometry = viewerLoads.at(-1)?.geometry;
+  if (!geometry?.pointLayers?.some(layer => layer.style?.color === "#00d8ff")) return false;
+  mappedLiveGeometry = geometry;
+  return true;
+});
 assert.equal(viewport.dataset.scanPreview, "true", "live scanner frames are rendered in the main preview canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "live");
-assert.equal(viewerLoads.at(-1).geometry.pointPreviewLimit, 8_000);
-const emptyTableGeometry = viewerLoads.at(-1).geometry;
+assert.equal(mappedLiveGeometry.pointPreviewLimit, 8_000);
+const emptyTableGeometry = mappedLiveGeometry;
 const mappedMarkerLayer = emptyTableGeometry.pointLayers.find(layer => layer.style.color === "#d4f6ff");
 const matchedMarkerLayer = emptyTableGeometry.pointLayers.find(layer => layer.style.color === "#00d8ff");
 assert.equal(emptyTableGeometry.points.length, 0, "raw scan samples do not masquerade as map markers");
@@ -566,6 +572,8 @@ assert.match(styleCss, /\.scanner-map-alignment\s*\{[^}]*left:\s*82px;[^}]*botto
 assert.match(styleCss, /\.primary-grid:not\(\[data-view="scanning"\]\) #viewport-live-camera,[\s\S]*?#scanner-map-alignment \{ display: none !important; \}/,
   "scanner controls and overlays are hidden outside the Scanning tab");
 const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
+assert.match(scanViewSource, /interactiveRasterMode:\s*'painter'/,
+  "the live turntable uses the fast interactive renderer while its camera moves");
 assert.match(scanViewSource, /const captureFps = preview\?\.metrics\?\.capture_fps/,
   "the badge uses the native measured sensor rate");
 assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
