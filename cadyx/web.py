@@ -250,10 +250,15 @@ def make_request_handler(
             try:
                 length = int(raw_length)
             except ValueError as exc:
+                self.close_connection = True
                 raise ValidationError("Content-Length is invalid.") from exc
             if length < 0 or length > _MAX_BODY_BYTES:
+                self.close_connection = True
                 raise ValidationError("Request body exceeds the 1 MB limit.")
             raw = self.rfile.read(length)
+            if len(raw) != length:
+                self.close_connection = True
+                raise ValidationError("Request body was incomplete.")
             if not raw:
                 return None
             value = json.loads(raw.decode("utf-8"))

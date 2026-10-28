@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import unittest
+from io import BytesIO
+from types import SimpleNamespace
 
 from cadyx.errors import ValidationError
+from cadyx.web import make_request_handler
 from cadyx.web_routes import _scanner_point_cloud_vertex_count, match_route, route_specs
 
 
@@ -114,6 +117,46 @@ class WebRouteTableTests(unittest.TestCase):
         self.assertEqual(snapshot.spec.body_kind, "png")
         self.assertEqual(upload.spec.body_kind, "project_source")
         self.assertEqual(command.spec.body_kind, "json")
+
+
+class HTTPJSONBodyFramingTests(unittest.TestCase):
+    def test_short_json_body_is_rejected_even_if_prefix_is_valid(self) -> None:
+        handler_type = make_request_handler(None)
+        for payload, length in ((b"{}", 3), (b"", 1)):
+            with self.subTest(payload=payload, length=length):
+                request = SimpleNamespace(
+                    headers={"Content-Length": str(length)},
+                    rfile=BytesIO(payload),
+                    close_connection=False,
+                )
+                with self.assertRaisesRegex(ValidationError, "incomplete"):
+                    handler_type._read_json(request)
+                self.assertTrue(request.close_connection)
+
+    def test_exact_json_length_and_empty_body_remain_supported(self) -> None:
+        handler_type = make_request_handler(None)
+        for payload, expected in ((b'{"ok":true}', {"ok": True}), (b"", None)):
+            with self.subTest(payload=payload):
+                request = SimpleNamespace(
+                    headers={"Content-Length": str(len(payload))},
+                    rfile=BytesIO(payload),
+                    close_connection=False,
+                )
+                self.assertEqual(handler_type._read_json(request), expected)
+                self.assertFalse(request.close_connection)
+
+    def test_invalid_or_oversized_json_length_closes_connection(self) -> None:
+        handler_type = make_request_handler(None)
+        for raw_length in ("invalid", "-1", "1000001"):
+            with self.subTest(raw_length=raw_length):
+                request = SimpleNamespace(
+                    headers={"Content-Length": raw_length},
+                    rfile=BytesIO(b""),
+                    close_connection=False,
+                )
+                with self.assertRaises(ValidationError):
+                    handler_type._read_json(request)
+                self.assertTrue(request.close_connection)
 
 
 if __name__ == "__main__":
