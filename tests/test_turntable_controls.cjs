@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const html = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
 const style = fs.readFileSync(path.join(__dirname, '../web/style.css'), 'utf8');
+const workspaceSource = fs.readFileSync(path.join(__dirname, '../web/ply-preview.js'), 'utf8');
 assert.match(html, /id="turntable-control-panel"[^>]*aria-labelledby="turntable-control-title"/);
 assert.match(style, /\.turntable-control-panel\s*\{[^}]*top:\s*12px;[^}]*right:\s*12px;[^}]*aspect-ratio:\s*1;/,
   'the square turntable controls are overlaid in the viewport upper-right corner');
@@ -12,6 +13,9 @@ assert.match(html, /\.primary-grid\[data-view="scanning"\] \.model-toolbar #view
   'standard camera views stay available in the Scanning toolbar');
 assert.doesNotMatch(html, /\.primary-grid\[data-view="scanning"\] \.model-toolbar #viewport-camera-presets\s*,/,
   'the Scanning layout does not hide the standard camera views');
+assert.match(workspaceSource,
+  /document\.querySelectorAll\("#project-detail button"\)\.forEach\(\(button\) => \{\s*if \(button\.closest\("#turntable-control-panel"\)\) return;/,
+  'workspace lock refreshes leave turntable controls to their own state controller');
 
 const handlers = new Map();
 const calls = [];
@@ -40,7 +44,7 @@ const elements = Object.fromEntries(ids.map(id => [id, Object.assign(makeElement
 elements['turntable-step'].value = '15';
 elements['turntable-tilt-target'].value = '0';
 elements['viewport-live-camera'].checked = true;
-elements['viewport-live-camera'].dataset.previewState = 'running';
+elements['viewport-live-camera'].setAttribute('aria-pressed', 'true');
 elements['primary-grid'].dataset.view = 'scanning';
 const panelSelectors = {
   '#turntable-control-refresh': 'turntable-control-refresh', '#turntable-step': 'turntable-step',
@@ -97,12 +101,12 @@ const waitUntil = async predicate => {
   assert.equal(elements['turntable-speed'].value, '18', 'the closest safe speed preset remains selected');
   assert.equal(elements['turntable-spin'].disabled, false,
     'continuous rotation is enabled when the scanner preview is live');
-  elements['viewport-live-camera'].dataset.previewState = 'idle';
+  elements['viewport-live-camera'].setAttribute('aria-pressed', 'false');
   await handlers.get('turntable-control-refresh:click')();
   await wait();
   assert.equal(elements['turntable-spin'].disabled, true,
     'continuous rotation is disabled when the scanner preview is stopped');
-  elements['viewport-live-camera'].dataset.previewState = 'running';
+  elements['viewport-live-camera'].setAttribute('aria-pressed', 'true');
   await handlers.get('turntable-control-refresh:click')();
   await wait();
   assert.equal(elements['turntable-spin'].disabled, false,

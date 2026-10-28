@@ -399,6 +399,7 @@ function updateWorkspaceControls() {
   }
 
   document.querySelectorAll("#project-detail button").forEach((button) => {
+    if (button.closest("#turntable-control-panel")) return;
     const filesUnavailable = button.dataset.workspaceView === "files" && !canOpenFilesView();
     const projectsNavigation = button.dataset.workspaceView === "projects";
     const projectNavigation = button.dataset.projectNavigation === "true";

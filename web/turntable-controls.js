@@ -31,7 +31,7 @@
       if (status.dataset.state !== state) status.dataset.state = state;
     };
     const spinActive = () => spinState === 'starting' || spinState === 'running' || spinState === 'stopping';
-    const livePreviewReady = () => livePreviewButton?.dataset.previewState === 'running';
+    const livePreviewReady = () => livePreviewButton?.getAttribute('aria-pressed') === 'true';
     const setBusy = () => {
       const spinning = spinActive();
       for (const selector of ['#turntable-control-refresh', '#turntable-step', '#turntable-speed',
