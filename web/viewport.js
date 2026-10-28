@@ -192,6 +192,7 @@
     let meshImage = null;
     let meshDepth = new Float32Array(0);
     let meshDepthFace = new Int32Array(0);
+    let meshDepthValid = false;
     let geometry = null;
     let selectedBodyId = null;
     let selectedFeatureId = null;
@@ -337,7 +338,10 @@
     function render() {
       const rect = canvas.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2) * (drag ? INTERACTIVE_RENDER_SCALE : 1);
+      meshDepthValid = false;
+      const interactiveScale = Number.isFinite(geometry?.interactiveRenderScale)
+        ? Math.max(0.25, Math.min(1, geometry.interactiveRenderScale)) : INTERACTIVE_RENDER_SCALE;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2) * (drag ? interactiveScale : 1);
       const width = Math.round(rect.width * dpr);
       const height = Math.round(rect.height * dpr);
       if (canvas.width !== width || canvas.height !== height) {
@@ -449,7 +453,16 @@
 
       if (showWorldAxes && !pointCloudPreview && !geometry.hideWorldAxes) drawWorldAxes(project, radius, dpr);
       if (showRotationAxes) drawRotationAxes(geometry.rotationAxes || [], project, dpr);
-      if (triangles.length) renderMesh(
+      const depthVisibleAt = (x, y, pointDepth) => {
+        if (!meshDepthValid) return true;
+        const pixelX = Math.floor(x), pixelY = Math.floor(y);
+        if (pixelX < 0 || pixelX >= width || pixelY < 0 || pixelY >= height) return true;
+        const surfaceDepth = meshDepth[pixelY * width + pixelX];
+        return !Number.isFinite(surfaceDepth) || pointDepth + Math.max(1e-4, 0.35 / scale) >= surfaceDepth;
+      };
+      const pointDepthVisible = point => point >= 0 && point < screenX.length
+        && depthVisibleAt(screenX[point], screenY[point], camera[point * 3 + 2]);
+      if (triangles.length) meshDepthValid = renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, bodyMotionAngleByVertex,
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.featureEdgeFaces,
@@ -460,11 +473,11 @@
         selectedFeatureId
           ? geometry.featureTriangleRanges?.filter((range) => range.featureId === selectedFeatureId) || []
           : geometry.bodyTriangleRanges?.filter((range) => range.objectId === selectedBodyId) || [],
-        geometry.overlayTriangleRanges || [], geometry.interactiveRasterMode,
+        geometry.overlayTriangleRanges || [],
       );
       else if (geometry.pointCloudVertexCount != null || !geometry.lines) {
         renderPoints(geometry.pointCloudVertexCount ?? positions.length / 3, camera, screenX, screenY, scale,
-          geometry.colors, geometry.pointPreviewLimit, geometry.pointColor);
+          geometry.colors, geometry.pointPreviewLimit, geometry.pointColor, pointDepthVisible);
       }
       const directLineCount = geometry.type === "body" ? 0 : (geometry.lines || []).length;
       const lineStyle = geometry.lineStyle || {};
@@ -478,6 +491,9 @@
         let startX = screenX[a], startY = screenY[a];
         let endX = screenX[b], endY = screenY[b];
         const lineMode = geometry.line_modes?.[index / 2] || "segment";
+        if (meshDepthValid && lineMode === "segment"
+            && !depthVisibleAt((startX + endX) / 2, (startY + endY) / 2,
+              (camera[a * 3 + 2] + camera[b * 3 + 2]) / 2)) continue;
         if (lineMode === "infinite") {
           const dx = endX - startX, dy = endY - startY;
           const length = Math.hypot(dx, dy);
@@ -519,6 +535,7 @@
       const pointStep = Math.max(1, Math.ceil(points.length / MAX_PREVIEW_POINTS));
       for (let pointIndex = 0; pointIndex < points.length; pointIndex += pointStep) {
         const point = points[pointIndex];
+        if (!pointDepthVisible(point)) continue;
         const forming = transition?.pointIndex === point;
         const size = forming ? pointSize * Math.max(0.05, progress) : pointSize;
         context.globalAlpha = forming ? 0.2 + (pointOpacity - 0.2) * progress : pointOpacity;
@@ -539,6 +556,7 @@
         context.globalAlpha = Number.isFinite(style.opacity) ? Math.max(0, Math.min(1, style.opacity)) : 1;
         for (const point of layer.points || []) {
           if (point < 0 || point >= screenX.length) continue;
+          if (!pointDepthVisible(point)) continue;
           if (geometry.construction) {
             context.strokeStyle = context.fillStyle;
             context.lineWidth = 1.5;
@@ -563,8 +581,7 @@
         const x = screenX[pointIndex], y = screenY[pointIndex];
         const pixelX = Math.round(x), pixelY = Math.round(y);
         if (pixelX < 0 || pixelX >= width || pixelY < 0 || pixelY >= height) continue;
-        const surfaceDepth = drag && geometry.interactiveRasterMode === "painter"
-          ? -Infinity : meshDepth[pixelY * width + pixelX];
+        const surfaceDepth = meshDepthValid ? meshDepth[pixelY * width + pixelX] : -Infinity;
         const labelDepth = camera[pointIndex * 3 + 2];
         if (Number.isFinite(surfaceDepth) && labelDepth + 1e-4 < surfaceDepth) continue;
         const fontSize = Number.isFinite(label.size) ? Math.max(6, Math.min(16, label.size)) : 8;
@@ -1074,8 +1091,7 @@
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, motionAngles,
       vertexNormals, orientation, faceNormals, featureEdges, featureEdgeFaces, silhouetteCandidates, colors, triangleColors,
       showWireframe, shaded, interactive,
-      wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = [], overlayRanges = [],
-      interactiveRasterMode = null) {
+      wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = [], overlayRanges = []) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
       // A broad key and weaker fill keep both sides readable without a flat glow.
@@ -1146,8 +1162,7 @@
       }
 
       const visibleFaces = faceOrder.subarray(0, visibleCount);
-      const fastInteractivePass = interactive && interactiveRasterMode === "painter";
-      const depthBufferValid = shaded && !fastInteractivePass
+      const depthBufferValid = shaded
         && rasterizeShadedMesh(visibleFaces, triangles, camera, progress, colors, triangleColors,
           selectedRanges, overlayRanges, smooth ? vertexLight : null);
       if (shaded && !depthBufferValid) {
@@ -1266,7 +1281,7 @@
         }
         flushVisibleRun();
       };
-      if (showWireframe && featureEdges?.length && !fastInteractivePass) {
+      if (showWireframe && featureEdges?.length) {
         context.save();
         context.strokeStyle = wireframeColor;
         context.globalAlpha = wireframeOpacity;
@@ -1318,10 +1333,11 @@
         context.stroke();
         context.restore();
       }
+      return depthBufferValid;
     }
 
     function renderPoints(pointCount, camera, screenX, screenY, scale, colors = null,
-      previewLimit = MAX_PREVIEW_POINTS, pointColor = null) {
+      previewLimit = MAX_PREVIEW_POINTS, pointColor = null, isPointVisible = null) {
       const pointLimit = Number.isInteger(previewLimit) && previewLimit > 0
         ? previewLimit : MAX_PREVIEW_POINTS;
       const step = Math.max(1, Math.ceil(pointCount / pointLimit));
@@ -1329,12 +1345,14 @@
       if (pointColor) {
         context.fillStyle = pointColor;
         for (let point = 0; point < pointCount; point += step) {
+          if (isPointVisible && !isPointVisible(point)) continue;
           context.fillRect(screenX[point], screenY[point], pointSize, pointSize);
         }
         return;
       }
       let near = -Infinity, far = Infinity;
       for (let point = 0; point < pointCount; point += step) {
+        if (isPointVisible && !isPointVisible(point)) continue;
         const depth = camera[point * 3 + 2];
         near = Math.max(near, depth);
         far = Math.min(far, depth);

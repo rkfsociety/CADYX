@@ -663,9 +663,20 @@ tablePreviewViewer.load({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0.3, 0.35]
   ],
   bounds: { min: [0, 0, 0], max: [1, 1, 0.35] }, hideWorldAxes: true }, { reset: false });
 assert.deepEqual(drawnLabels, ['top-label'], 'top camera shows only the outward top-view scale labels');
+tablePreviewViewer.setCamera({ yaw: Math.PI / 2, pitch: 0, zoom: 1, projection: 'orthographic' });
+tablePreviewViewer.load({
+  positions: [0, -2, -2, 0, 2, -2, 0, 0, 2, -1, 0, 0, 1, 0, 0],
+  triangles: [0, 1, 2], lines: [], points: [], pointLayers: [
+    { points: [3], style: { size: 2, color: '#behind-point' } },
+    { points: [4], style: { size: 2, color: '#front-point' } },
+  ], orbitCenter: [0, 0, 0], fitRadius: 3,
+  bounds: { min: [-1, -2, -2], max: [1, 2, 2] }, hideWorldAxes: true,
+}, { reset: false });
+assert.deepEqual(drawnPointColors, ['#front-point'],
+  'opaque table surfaces hide map and cloud points behind them');
 tablePreviewViewer.load({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], triangles: [0, 1, 2],
-  lines: [], points: [], interactiveRasterMode: 'painter',
-  bounds: { min: [0, 0, 0], max: [1, 1, 0] } });
+  lines: [], points: [], interactiveRenderScale: 0.35,
+  bounds: { min: [0, 0, 0], max: [1, 1, 0] } }, { reset: false });
 const rasterUploadsBeforeDrag = rasterUploads;
 const queuedFrameCount = animationFrames.length;
 events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 7 });
@@ -673,10 +684,26 @@ events.pointermove({ clientX: 320, clientY: 215 });
 const interactiveFrame = animationFrames.splice(queuedFrameCount, 1)[0];
 assert.equal(typeof interactiveFrame, 'function', 'camera movement schedules one interactive render');
 interactiveFrame();
-assert.equal(rasterUploads, rasterUploadsBeforeDrag,
-  'scanner preview skips the costly pixel depth raster while the camera is moving');
-events.pointerup({});
 assert.ok(rasterUploads > rasterUploadsBeforeDrag,
-  'full depth-correct rendering returns after camera movement stops');
+  'scanner preview keeps the opaque depth buffer active while the camera moves');
+const rasterUploadsDuringDrag = rasterUploads;
+assert.equal(canvas.width, 210, 'scanner drag uses the reduced per-geometry render resolution');
+events.pointerup({});
+assert.ok(rasterUploads > rasterUploadsDuringDrag,
+  'full-resolution depth-correct rendering returns after camera movement stops');
+assert.equal(canvas.width, 600);
+tablePreviewViewer.setCamera({ yaw: Math.PI / 2, pitch: 0, zoom: 1, projection: 'orthographic' });
+tablePreviewViewer.load({
+  positions: [0, -2, -2, 0, 2, -2, 0, 0, 2, -1, 0, 0, 1, 0, 0],
+  triangles: [0, 1, 2], lines: [], points: [],
+  pointLayers: [
+    { points: [3], style: { size: 2, color: '#behind-point' } },
+    { points: [4], style: { size: 2, color: '#front-point' } },
+  ],
+  orbitCenter: [0, 0, 0], fitRadius: 3,
+  bounds: { min: [-1, -2, -2], max: [1, 2, 2] }, hideWorldAxes: true,
+}, { reset: false });
+assert.deepEqual(drawnPointColors, ['#front-point'],
+  'opaque table surfaces hide map and cloud points behind them');
 console.log("Viewport: camera, geometry, transitions, depth-tested edges and scan surface styling passed.");
 

@@ -572,8 +572,8 @@ assert.match(styleCss, /\.scanner-map-alignment\s*\{[^}]*left:\s*82px;[^}]*botto
 assert.match(styleCss, /\.primary-grid:not\(\[data-view="scanning"\]\) #viewport-live-camera,[\s\S]*?#scanner-map-alignment \{ display: none !important; \}/,
   "scanner controls and overlays are hidden outside the Scanning tab");
 const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
-assert.match(scanViewSource, /interactiveRasterMode:\s*'painter'/,
-  "the live turntable uses the fast interactive renderer while its camera moves");
+assert.match(scanViewSource, /interactiveRenderScale:\s*0\.25/,
+  "the live turntable lowers only its drag resolution while preserving depth visibility");
 assert.match(scanViewSource, /const captureFps = preview\?\.metrics\?\.capture_fps/,
   "the badge uses the native measured sensor rate");
 assert.doesNotMatch(fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8"),
