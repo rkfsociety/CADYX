@@ -7,6 +7,8 @@ from .errors import ConflictError, ValidationError
 
 def prepare_workspace_state(root: Path) -> Path:
     """Migrate legacy service artifacts while all workspace writers are stopped."""
+    # Match ProjectWorkspace's canonical root, including Windows 8.3 aliases.
+    root = root.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     state = root.parent / f".{root.name}-state"
     if state.is_symlink():

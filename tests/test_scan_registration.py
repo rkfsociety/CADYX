@@ -61,7 +61,7 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
             raw_path.write_bytes(struct.pack("<256000H", *values))
             q = (1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0)
             q_path.write_bytes(struct.pack("<16f", *q))
-            points = [(float(index % 640), -float(index // 640), -2.0)
+            points = [(float(index % 640), -float(index // 640), -200.0)
                       for index, value in enumerate(values) if value > 0]
             ply_path.write_text(
                 f"ply\nformat ascii 1.0\nelement vertex {len(points)}\n"
@@ -70,7 +70,7 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
 
             report = preprocess_frame_file(ply_path, cleaned_path, report_path, 0,
                                            raw_path=raw_path, calibration_path=q_path,
-                                           depth_scale=0.001)
+                                           depth_scale=0.1)
 
             self.assertEqual(report["table_marker_detection"], "completed")
             self.assertEqual(report["detected_table_markers"], 3)
@@ -131,7 +131,7 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
             self.assertEqual(frame_report["removed_by_method"]["isolation_filter"], 4)
             self.assertEqual(frame_report["processing_mode"], "in_place")
             self.assertEqual(frame_report["source_sha256"], hashlib.sha256(source_bytes).hexdigest())
-            self.assertEqual(verified[0], source_path)
+            self.assertEqual(verified[0], source_path.resolve())
             self.assertNotEqual(source_path.read_bytes(), source_bytes)
             self.assertFalse(source_path.with_name(source_path.stem + "_cleaned.ply").exists())
 

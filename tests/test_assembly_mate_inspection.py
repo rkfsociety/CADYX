@@ -26,7 +26,7 @@ class ReadOnlyAssemblyMateInspectionTests(unittest.TestCase):
                    "document": document.to_dict(), "history": []}
 
         class Workspace:
-            def load(self, project_id):
+            def load(self, project_id, *, include_history=True):
                 return project
 
         class LeaseManager:
@@ -45,7 +45,7 @@ class ReadOnlyAssemblyMateInspectionTests(unittest.TestCase):
 
         class ScanCapture:
             @staticmethod
-            def is_running(project_id):
+            def is_running(project_id, *, nonblocking=False):
                 return False
 
         class Core:

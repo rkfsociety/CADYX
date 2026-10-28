@@ -438,7 +438,8 @@ class Scan360CaptureTests(unittest.TestCase):
                     patch("cadyx.scan_capture.subprocess.Popen", return_value=FakeProcess()):
                 result = controller.start_live_preview("scanner-1", fps=10)
             self.assertEqual(result["state"], "starting")
-            recover.assert_called_once_with(executable, frames_path, stop_path, ready_path)
+            recover.assert_called_once_with(executable.resolve(), frames_path.resolve(),
+                                            stop_path.resolve(), ready_path.resolve())
             self.assertFalse(frames_path.exists(), "restart clears the old orphan's temporary frame queue")
             self.assertFalse(ready_path.exists())
 
