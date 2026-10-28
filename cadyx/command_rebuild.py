@@ -29,6 +29,22 @@ class RebuildCommands:
         source_sketch_id = (feature.get("source_sketch_id") or parameters.get("source_sketch_id")
                             or parameters.get("sketch_id"))
         operation = feature.get("operation")
+        if operation == "loft_profiles":
+            sketch_ids = feature.get("source_sketch_ids")
+            offsets = parameters.get("section_offsets")
+            if (not isinstance(sketch_ids, list) or len(sketch_ids) < 2
+                    or not isinstance(offsets, list) or len(offsets) != len(sketch_ids)
+                    or any(type(value) not in (int, float) or not math.isfinite(value) for value in offsets)
+                    or any(right <= left for left, right in zip(offsets, offsets[1:]))):
+                raise ValidationError("Loft feature section references are invalid.")
+            sections = []
+            for sketch_id in sketch_ids:
+                sketch = document.find_object(sketch_id, "sketch")
+                if sketch is None or sketch.get("plane") != "XZ":
+                    raise ValidationError("Loft section sketch is missing or not on XZ.")
+                _, section = closed_profile(document.objects, sketch_id)
+                sections.append(section)
+            return self.kernel.create_lofted_profiles(sections, section_offsets=offsets)
         if operation in {"pad_sketch_to_body", "rib_from_sketch", "pocket_sketch"}:
             sketch = document.find_object(source_sketch_id, "sketch")
             if sketch is None:
@@ -155,7 +171,7 @@ class RebuildCommands:
             elif feature.get("operation") in {"rib_from_sketch", "pocket_sketch"}:
                 sketch_id = (feature.get("parameters") or {}).get("sketch_id")
                 source_sketch_ids = [sketch_id] if isinstance(sketch_id, str) else []
-            if (feature.get("operation") not in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches", "pad_sketch_to_body"}
+            if (feature.get("operation") not in {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches", "loft_profiles", "pad_sketch_to_body"}
                     and feature.get("operation") not in {"rib_from_sketch", "pocket_sketch"}
                     or not changed_sketches.intersection(source_sketch_ids)):
                 continue

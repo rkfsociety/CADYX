@@ -422,8 +422,10 @@ between each adjacent pair, and animates the path while it is drawn. A path sket
 cannot contain branches, loops, circles, or constraints.
 
 `sweep_sketch` accepts `sketch_id`, a positive circular section `radius`, and
-optional `name`. It sweeps a circle along the sketch's open line chain, fitting a
-C2 B-spline spine within the OCCT approximation tolerance. XY and XZ paths are
+optional `name`. The open path must contain at least three finite points (two
+segments); a two-point line remains valid sketch geometry but is rejected as a
+sweep trajectory. The command sweeps a circle along the path, fitting a C2
+B-spline spine within the OCCT approximation tolerance. XY and XZ paths are
 supported; an XZ path is vertical in global Z. The resulting `swept_pipe` is a
 closed OCCT solid, remains linked to the source sketch, and rebuilds when path
 points or the radius change. The command transition progressively reveals the

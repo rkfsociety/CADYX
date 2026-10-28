@@ -16,7 +16,7 @@ from .errors import CadyxError
 from .models import Document
 
 _ROOTS = {"create_box", "metric_thread", "extrude_profile_on_plane"}
-_SKETCH_ROOTS = {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches"}
+_SKETCH_ROOTS = {"extrude_sketch", "revolve_sketch", "sweep_sketch", "loft_sketches", "loft_profiles"}
 _DERIVED = {
     "fillet_edges", "chamfer_edges", "fuse_bodies", "cut_bodies",
     "linear_pattern_body", "circular_pattern_body", "hole", "boss",
@@ -143,8 +143,8 @@ def run_rebuild_regression(
     if any(body["id"] not in modeled_ids for body in bodies):
         return "untested", {**evidence, "reason": "body without a reconstructible feature"}
     if any(f.get("operation") in _SKETCH_ROOTS and
-           not f.get("source_sketch_id") and
-           f.get("operation") != "loft_sketches" for f in features):
+           not f.get("source_sketch_id") and not f.get("source_sketch_ids")
+           for f in features):
         return "untested", {**evidence, "reason": "sketch-driven feature lacks its saved source sketch"}
 
     baseline_design = _design_fingerprint(original)

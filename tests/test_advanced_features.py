@@ -7,14 +7,28 @@ from cadyx import capabilities
 from cadyx.advanced_features import _raw_brep
 from cadyx.commands import CommandSystem
 from cadyx.models import Document
+from cadyx.rebuild_regression import run_rebuild_regression
 
 
 class LoftKernel:
     def create_lofted_profiles(self, sections, *, section_offsets):
         self.sections = sections
         self.offsets = section_offsets
+        points = [point for section in sections for point in section]
         return {"kernel": "occt-v1", "kind": "lofted_profiles", "sections": sections,
-                "section_offsets": section_offsets, "volume": 1.0}
+                "section_offsets": section_offsets, "volume": 1.0, "brep_valid": True,
+                "bounds": {"min": [min(p["x"] for p in points), min(section_offsets),
+                                   min(p["y"] for p in points)],
+                           "max": [max(p["x"] for p in points), max(section_offsets),
+                                   max(p["y"] for p in points)]},
+                "topology": {"solid_count": 1}}
+
+    def validate(self, geometry):
+        return None
+
+    def metrics(self, geometry):
+        return {"volume": geometry["volume"], "bounds": geometry["bounds"],
+                "topology": geometry["topology"], "brep_valid": geometry["brep_valid"]}
 
 
 class AdvancedFeaturesTests(unittest.TestCase):
@@ -22,6 +36,9 @@ class AdvancedFeaturesTests(unittest.TestCase):
         names = {item["type"] for item in capabilities.COMMAND_CAPABILITIES}
         self.assertTrue({"loft_profiles", "shell_body", "draft_faces", "chamfer_edges",
                          "variable_fillet_edges", "hole", "boss"} <= names)
+        sweep = next(item for item in capabilities.COMMAND_CAPABILITIES
+                     if item["type"] == "sweep_sketch")
+        self.assertIn("at least 3 points", " ".join(sweep["constraints"]))
 
     def test_section_sketches_can_loft_without_step_provenance(self):
         kernel = LoftKernel()
@@ -39,6 +56,41 @@ class AdvancedFeaturesTests(unittest.TestCase):
         self.assertTrue(result["body_id"].startswith("body:"))
         self.assertEqual(kernel.offsets, [0.0, 20.0])
         document.validate()
+
+    def test_loft_profiles_survive_cold_and_warm_rebuild(self):
+        kernel = LoftKernel()
+        document = Document.create()
+        system = CommandSystem(kernel)
+        sketches = []
+        for offset, size in ((10.0, 8.0), (30.0, 6.0)):
+            sketch_id = system.execute(
+                document, {"type": "create_section_sketch", "offset": offset},
+            )["sketch_id"]
+            system.execute(document, {
+                "type": "add_sketch_rectangle", "sketch_id": sketch_id,
+                "x": -size / 2, "y": -size / 2, "width": size, "height": size,
+            })
+            sketches.append(sketch_id)
+        result = system.execute(document, {
+            "type": "loft_profiles", "sketch_ids": sketches,
+            "section_offsets": [10.0, 30.0],
+        })
+        document.validate()
+        before = document.to_dict()
+
+        class Core:
+            def __init__(self):
+                self.kernel = kernel
+                self.commands = CommandSystem(kernel)
+
+        status, evidence = run_rebuild_regression(
+            Core(), document, max_bodies=128, checkpoint=lambda: None,
+        )
+
+        self.assertEqual(status, "pass", evidence)
+        self.assertEqual(evidence["compared_bodies"], 1)
+        self.assertEqual(evidence["metric_difference_count"], 0)
+        self.assertEqual(document.to_dict(), before)
 
     def test_imported_brep_decodes_without_native_export_round_trip(self):
         raw = b"DBRep_DrawableShape\noptimized-path\n"
