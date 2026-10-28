@@ -352,6 +352,8 @@ const restorableProjectViews = new Set(["geometry", "analysis", "manufacturing",
 let pendingInitialWorkspaceView = projectAddressPinned && !initialAddress.has("folder")
   && restorableProjectViews.has(initialAddress.get("view")) ? initialAddress.get("view") : null;
 let projectCreationPending = false;
+const selectedProjectIds = new Set();
+let projectBulkDeletionPending = false;
 const primaryGrid = $("#primary-grid");
 const folderDetail = $("#folder-detail");
 const folderInspector = $("#folder-inspector");
@@ -1035,9 +1037,6 @@ async function setProjectGroup(projectId, groupId) {
   }
   await refreshWorkspace();
 }
-
-const selectedProjectIds = new Set();
-let projectBulkDeletionPending = false;
 
 function updateProjectSelection() {
   const existing = new Set(projects.map((entry) => entry.project.id));

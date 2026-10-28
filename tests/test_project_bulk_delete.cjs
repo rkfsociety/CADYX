@@ -31,7 +31,13 @@ const sandbox = {
   refreshWorkspace: async () => { refreshes += 1; },
 };
 const context = vm.createContext(sandbox);
-vm.runInContext(source.slice(source.indexOf("const selectedProjectIds ="), source.indexOf("async function deleteProject(")), context);
+// Run selection initialization and the real first-render selection update in startup order.
+const initialization = source.slice(source.indexOf("const selectedProjectIds ="), source.indexOf('const primaryGrid ='));
+assert.ok(source.indexOf("const selectedProjectIds =") < source.indexOf('setWorkspaceNavigation(projectsChooserPinned'),
+  "selection state must exist before the projects page first renders");
+const selectionUpdate = source.slice(source.indexOf("function updateProjectSelection()"), source.indexOf('$("#select-visible-projects").addEventListener'));
+vm.runInContext(`${initialization}\n${selectionUpdate}\nupdateProjectSelection();`, context);
+vm.runInContext(source.slice(source.indexOf('$("#select-visible-projects").addEventListener'), source.indexOf("async function deleteProject(")), context);
 (async () => {
   vm.runInContext("updateProjectSelection()", context);
   assert.equal(sandbox.$("#projects-selection-toolbar").hidden, true);
