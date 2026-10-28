@@ -1,10 +1,13 @@
-"""Regression scenarios for read-only assembly instance interference screening.
-
-Intentionally not run locally; covered by the Windows native CI lane.
-"""
+"""Regression scenarios for read-only assembly interference and report persistence."""
 from __future__ import annotations
 
 import unittest
+import hashlib
+import json
+import tempfile
+from pathlib import Path
+
+from cadyx.workspace_validations import ValidationRecordStore
 
 from cadyx.assembly_fit import evaluate_assembly_fit
 from cadyx.commands import CommandSystem
@@ -62,3 +65,15 @@ class AssemblyFitTests(unittest.TestCase):
             self.fit(samples=[{"joint_values": [{"mate_id": "missing", "angle_deg": 45}]}])
         with self.assertRaises(ValidationError):
             self.fit(samples=[{"joint_values": [{"mate_id": "missing", "offset_mm": float("nan")}]}])
+
+    def test_fit_report_persists_and_reloads_without_model_changes(self):
+        result = self.fit()
+        before = self.document.to_dict()
+        result["geometry_sha256"] = hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            store = ValidationRecordStore()
+            record = store.record(Path(directory), "assembly_fit", result)
+            records = store.list(Path(directory))
+            self.assertEqual(record["kind"], "assembly_fit")
+            self.assertEqual(records[0]["result"], result)
+            self.assertEqual(self.document.to_dict(), before)

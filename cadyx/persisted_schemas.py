@@ -99,10 +99,10 @@ def _validate_loft(item: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> No
         for sketch_id in group:
             typed_id(sketch_id, "sketch")
             sketch = by_id.get(sketch_id)
-            axis = sketch.get("section_normal_axis") if sketch else None
+            axis = sketch.get("section_normal_axis", {"XY": "Z", "XZ": "Y"}.get(sketch.get("plane"))) if sketch else None
             expected_plane = "XZ" if axis == "Y" else "XY" if axis == "Z" else None
             if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != expected_plane
-                    or sketch.get("section_offset") != offset):
+                    or sketch.get("section_offset", 0.0) != offset):
                 raise ValidationError("Loft feature source sketch is missing or has changed section metadata.")
             axes.add(axis)
         if len(axes) != 1 or axes.pop() != parameters.get("section_axis", "Y"):

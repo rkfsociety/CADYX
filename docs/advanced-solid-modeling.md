@@ -18,7 +18,9 @@ These OCCT-backed operations extend the earlier Document v8 feature model; they 
 
 ## Direct section loft workflow
 
-Use `create_section_sketch` to create editable XZ sections at explicit Y offsets, draw closed profiles with the normal sketch commands, then call `loft_profiles` with the ordered sketch ids and matching strictly increasing offsets. Unlike `loft_sketches`, this workflow does not require the sketches to originate from an imported STEP section.
+Use `create_section_sketch` to create editable XZ sections at explicit Y offsets, draw closed profiles with the normal sketch commands, then call `loft_profiles` with the ordered sketch ids and matching strictly increasing offsets.
+
+`loft_sketches` also accepts directly authored XY/Z-normal or XZ/Y-normal sketches. An ordinary named sketch without section metadata is the zero-offset station on its canonical axis; later stations specify matching `section_normal_axis` and `section_offset`. Creation, section replacement, persistence and parameter rebuild use the same defaults. Imported STEP sections are optional.
 
 `create_sketch_from_body_section` can extract closed sections from any editable B-rep body on X, Y or Z planes for downstream reconstruction or feature authoring.
 

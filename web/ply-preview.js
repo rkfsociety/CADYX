@@ -869,9 +869,9 @@ function renderWorkflowHistory(value) {
 }
 
 function renderSceneMetrics(scene, objectsById, visibleSketchId) {
-  const bodyMeshes = scene.objects.filter((item) => objectsById.get(item.object_id)?.type === "body");
+  const bodyMeshes = scene.objects.filter((item) => objectsById.get(item.source_body_id || item.object_id)?.type === "body");
   const visibleObjects = scene.objects.filter((item) => {
-    const source = objectsById.get(item.object_id);
+    const source = objectsById.get(item.source_body_id || item.object_id);
     return source?.type === "body" || source?.sketch_id === visibleSketchId;
   });
   const vertexCount = bodyMeshes.reduce((total, item) => total + item.positions.length / 3, 0);
@@ -2267,7 +2267,7 @@ async function refreshDetail() {
     const bodyLineRanges = [], bodyTriangleRanges = [], featureTriangleRanges = [], overlayTriangleRanges = [], surfaceTriangleRanges = [];
     let targetFound = false;
     for (const object of scene.objects) {
-      const source = objectsById.get(object.object_id);
+      const source = objectsById.get(object.source_body_id || object.object_id);
       if (source?.type !== "body" && object.type !== "feature_overlay" && source?.sketch_id !== visibleSketchId) continue;
       const offset = positions.length / 3;
       const lineOffset = lines.length;

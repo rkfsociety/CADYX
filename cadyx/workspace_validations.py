@@ -19,6 +19,9 @@ _SUPPORTED_VALIDATION_KINDS = {
     "body_thickness",
     "planetary_kinematics",
     "project_check",
+    "assembly_fit",
+    "assembly_mass_properties",
+    "model_specification",
 }
 
 

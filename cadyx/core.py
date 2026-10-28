@@ -1104,14 +1104,14 @@ class CadyxCore:
                     group_profiles, group_offsets = [], []
                     for sketch_id in group:
                         sketch = by_id.get(sketch_id)
-                        axis = sketch.get("section_normal_axis") if sketch else None
+                        axis = sketch.get("section_normal_axis", {"XY": "Z", "XZ": "Y"}.get(sketch.get("plane"))) if sketch else None
                         expected_plane = "XZ" if axis == "Y" else "XY" if axis == "Z" else None
                         if (sketch is None or sketch.get("type") != "sketch" or sketch.get("plane") != expected_plane):
                             raise ValidationError("Loft feature source sketches must match their section normal axis.")
                         section_axes.append(axis)
                         _, profile = closed_profile(document.objects, sketch_id)
                         group_profiles.append(profile)
-                        offset = sketch.get("section_offset")
+                        offset = sketch.get("section_offset", 0.0)
                         if isinstance(offset, bool) or not isinstance(offset, (int, float)):
                             raise ValidationError("Loft source sketch section offset is invalid.")
                         group_offsets.append(float(offset))

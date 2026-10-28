@@ -177,16 +177,16 @@ class BodyCommands:
             group_profiles, group_offsets = [], []
             for sketch_id in group:
                 sketch = self._find_sketch(document, sketch_id)
-                axis = sketch.get("section_normal_axis")
+                axis = sketch.get("section_normal_axis", {"XY": "Z", "XZ": "Y"}.get(sketch.get("plane")))
                 expected_plane = "XZ" if axis == "Y" else "XY" if axis == "Z" else None
                 if sketch.get("plane") != expected_plane:
                     raise ValidationError("Loft sections must be parallel XZ/Y-normal or XY/Z-normal sketches.")
                 section_axes.append(axis)
-                if not isinstance(sketch.get("section_offset"), (int, float)):
+                if not isinstance(sketch.get("section_offset", 0.0), (int, float)):
                     raise ValidationError("Each loft sketch must retain its source section offset.")
                 _, profile = closed_profile(document.objects, sketch_id)
                 group_profiles.append(profile)
-                group_offsets.append(float(sketch["section_offset"]))
+                group_offsets.append(float(sketch.get("section_offset", 0.0)))
             if any(offset != group_offsets[0] for offset in group_offsets):
                 raise ValidationError("All sketches in one loft station must share a section_offset.")
             sections.append(group_profiles)
@@ -265,12 +265,12 @@ class BodyCommands:
             group_offsets, group_profiles = [], []
             for sketch_id in group:
                 sketch = self._find_sketch(document, sketch_id)
-                axis = sketch.get("section_normal_axis")
+                axis = sketch.get("section_normal_axis", {"XY": "Z", "XZ": "Y"}.get(sketch.get("plane")))
                 expected_plane = "XZ" if axis == "Y" else "XY" if axis == "Z" else None
                 if sketch.get("plane") != expected_plane:
                     raise ValidationError("Loft sections must be parallel XZ/Y-normal or XY/Z-normal sketches.")
                 section_axes.append(axis)
-                group_offsets.append(_finite_number(sketch.get("section_offset"), "section_offset"))
+                group_offsets.append(_finite_number(sketch.get("section_offset", 0.0), "section_offset"))
                 _, profile = closed_profile(document.objects, sketch_id)
                 group_profiles.append(profile)
             if any(offset != group_offsets[0] for offset in group_offsets):

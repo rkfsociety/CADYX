@@ -119,13 +119,13 @@ class RebuildCommands:
                     sketch = document.find_object(sketch_id)
                     if sketch is None:
                         raise ValidationError("Loft section sketch is missing.")
-                    axis = sketch.get("section_normal_axis")
+                    axis = sketch.get("section_normal_axis", {"XY": "Z", "XZ": "Y"}.get(sketch.get("plane")))
                     if sketch.get("plane") != ("XZ" if axis == "Y" else "XY" if axis == "Z" else None):
                         raise ValidationError("Loft section sketch plane does not match its normal axis.")
                     section_axes.append(axis)
                     _, section = closed_profile(document.objects, sketch_id)
                     group_profiles.append(section)
-                    group_offsets.append(sketch.get("section_offset"))
+                    group_offsets.append(sketch.get("section_offset", 0.0))
                 if not group_offsets or any(value != group_offsets[0] for value in group_offsets):
                     raise ValidationError("Loft section group has inconsistent section offsets.")
                 sections.append(group_profiles)
