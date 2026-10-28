@@ -916,6 +916,72 @@
           && first >= vertexRange[0] && first < vertexRange[1]
           && second >= vertexRange[0] && second < vertexRange[1]
           && third >= vertexRange[0] && third < vertexRange[1];
+        const stableUniformColor = !vertexLight && !(forming && progress < 1);
+        let uniformRed = 0, uniformGreen = 0, uniformBlue = 0;
+        if (stableUniformColor) {
+          const steel = Math.round(60 + faceBrightness * 125);
+          uniformRed = Math.round(steel * 0.9);
+          uniformGreen = steel;
+          uniformBlue = Math.round(steel * 1.12);
+        }
+
+        if (!colors && !triangleColors && stableUniformColor) {
+          const depthStepX = z0 * w0StepX + z1 * w1StepX + z2 * w2StepX;
+          const depthStepY = z0 * w0StepY + z1 * w1StepY + z2 * w2StepY;
+          let depthRow = z0 * rowW0 + z1 * rowW1 + z2 * rowW2;
+          for (let y = minY; y <= maxY; y += 1) {
+            let spanStart = 0, spanEnd = maxX - minX;
+            if (w0StepX > 0) spanStart = Math.max(spanStart, Math.ceil((-1e-7 - rowW0) / w0StepX) - 1);
+            else if (w0StepX < 0) spanEnd = Math.min(spanEnd, Math.floor((-1e-7 - rowW0) / w0StepX) + 1);
+            else if (rowW0 < -1e-7) spanStart = spanEnd + 1;
+            if (w1StepX > 0) spanStart = Math.max(spanStart, Math.ceil((-1e-7 - rowW1) / w1StepX) - 1);
+            else if (w1StepX < 0) spanEnd = Math.min(spanEnd, Math.floor((-1e-7 - rowW1) / w1StepX) + 1);
+            else if (rowW1 < -1e-7) spanStart = spanEnd + 1;
+            if (w2StepX > 0) spanStart = Math.max(spanStart, Math.ceil((-1e-7 - rowW2) / w2StepX) - 1);
+            else if (w2StepX < 0) spanEnd = Math.min(spanEnd, Math.floor((-1e-7 - rowW2) / w2StepX) + 1);
+            else if (rowW2 < -1e-7) spanStart = spanEnd + 1;
+            spanStart = Math.max(0, spanStart);
+            spanEnd = Math.min(maxX - minX, spanEnd);
+
+            while (spanStart <= spanEnd) {
+              const w0 = rowW0 + spanStart * w0StepX;
+              const w1 = rowW1 + spanStart * w1StepX;
+              const w2 = rowW2 + spanStart * w2StepX;
+              if (w0 >= -1e-7 && w1 >= -1e-7 && w2 >= -1e-7) break;
+              spanStart += 1;
+            }
+            while (spanStart <= spanEnd) {
+              const w0 = rowW0 + spanEnd * w0StepX;
+              const w1 = rowW1 + spanEnd * w1StepX;
+              const w2 = rowW2 + spanEnd * w2StepX;
+              if (w0 >= -1e-7 && w1 >= -1e-7 && w2 >= -1e-7) break;
+              spanEnd -= 1;
+            }
+
+            if (spanStart <= spanEnd) {
+              let depth = depthRow + spanStart * depthStepX;
+              let pixelIndex = y * width + minX + spanStart;
+              for (let x = spanStart; x <= spanEnd; x += 1) {
+                if (depth + 1e-7 >= meshDepth[pixelIndex]) {
+                  meshDepth[pixelIndex] = depth;
+                  meshDepthFace[pixelIndex] = face;
+                  const byteIndex = pixelIndex * 4;
+                  pixels[byteIndex] = uniformRed;
+                  pixels[byteIndex + 1] = uniformGreen;
+                  pixels[byteIndex + 2] = uniformBlue;
+                  pixels[byteIndex + 3] = 255;
+                }
+                pixelIndex += 1;
+                depth += depthStepX;
+              }
+            }
+            rowW0 += w0StepY;
+            rowW1 += w1StepY;
+            rowW2 += w2StepY;
+            depthRow += depthStepY;
+          }
+          continue;
+        }
 
         if (!colors && !triangleColors) {
           for (let y = minY; y <= maxY; y += 1) {
@@ -943,16 +1009,25 @@
                     meshDepth[pixelIndex] = depth;
                     meshDepthFace[pixelIndex] = face;
                     const byteIndex = pixelIndex * 4;
-                    const brightness = vertexLight
-                      ? vertexLight[first] * w0 + vertexLight[second] * w1 + vertexLight[third] * w2
-                      : faceBrightness;
-                    const steel = Math.round(60 + brightness * 125);
-                    let red = Math.round(steel * 0.9), green = steel, blue = Math.round(steel * 1.12);
-                    if (forming && progress < 1) {
-                      const glow = (1 - progress) * 0.38;
-                      red = Math.round(red + (112 - red) * glow);
-                      green = Math.round(green + (218 - green) * glow);
-                      blue = Math.round(blue + (236 - blue) * glow);
+                    let red, green, blue;
+                    if (stableUniformColor) {
+                      red = uniformRed;
+                      green = uniformGreen;
+                      blue = uniformBlue;
+                    } else {
+                      const brightness = vertexLight
+                        ? vertexLight[first] * w0 + vertexLight[second] * w1 + vertexLight[third] * w2
+                        : faceBrightness;
+                      const steel = Math.round(60 + brightness * 125);
+                      red = Math.round(steel * 0.9);
+                      green = steel;
+                      blue = Math.round(steel * 1.12);
+                      if (forming && progress < 1) {
+                        const glow = (1 - progress) * 0.38;
+                        red = Math.round(red + (112 - red) * glow);
+                        green = Math.round(green + (218 - green) * glow);
+                        blue = Math.round(blue + (236 - blue) * glow);
+                      }
                     }
                     pixels[byteIndex] = red;
                     pixels[byteIndex + 1] = green;
