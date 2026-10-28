@@ -410,6 +410,7 @@
     let liveTableOverlay = null;
     let lastMapAlignedFrame = null;
     let liveMapTransform = null;
+    let liveCameraRestored = false;
     let lastRenderedTurntableDisplayPose = null;
     let liveMarkerTracks = [];
     let liveMarkerTrackSequence = 0;
@@ -1007,16 +1008,20 @@
             if (!mapResponse.ok) throw new Error(`Карта стола недоступна (HTTP ${mapResponse.status}).`);
             liveTableMap = parseTableMarkerMap(await mapResponse.arrayBuffer());
             liveTableOverlay = buildTableMapOverlay(liveTableMap);
+            const cameraBeforeLiveScene = window.cadyxUiReloadCamera || viewer.getCamera?.();
             renderTurntableScene({ aligned: false, reset: !liveViewportInitialized });
-            if (window.cadyxUiReloadCamera) {
-              const cameraToRestore = window.cadyxUiReloadCamera;
+            if (cameraBeforeLiveScene) {
+              const cameraToRestore = cameraBeforeLiveScene;
+              liveCameraRestored = true;
               viewer.setCamera(cameraToRestore);
-              window.setTimeout(() => {
-                if (window.cadyxUiReloadCamera !== cameraToRestore || !livePreviewOwned) return;
-                viewer.setCamera(cameraToRestore);
-                window.cadyxUiReloadCamera = null;
-                window.cadyxUiReloadCameraAppliedToModel = false;
-              }, 650);
+              if (window.cadyxUiReloadCamera === cameraToRestore) {
+                window.setTimeout(() => {
+                  if (window.cadyxUiReloadCamera !== cameraToRestore || !livePreviewOwned) return;
+                  viewer.setCamera(cameraToRestore);
+                  window.cadyxUiReloadCamera = null;
+                  window.cadyxUiReloadCameraAppliedToModel = false;
+                }, 650);
+              }
             }
           }
           if (!liveCalibration) {
@@ -1201,7 +1206,7 @@
                     }));
                     liveMarkerTrackSequence = frameSequence;
                     tableAligned = true;
-                    resetAfterAlignment = !hadTableAlignment && liveViewportInitialized;
+                    resetAfterAlignment = !hadTableAlignment && liveViewportInitialized && !liveCameraRestored;
                     liveMapAlignmentSummary = `Карта ${mapTransform.matches.length}/${liveTableMap.points.length}`
                       + ` · остаток ${mapTransform.medianResidual.toFixed(1)} ед.`;
                     setMapAlignmentStatus(liveMapAlignmentSummary, 'aligned');

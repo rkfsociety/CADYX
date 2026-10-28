@@ -34,7 +34,7 @@ const testDocument = {
       : id === "turntable-tilt" ? turntableTiltDisplay : null,
   querySelector: selector => selector === "#primary-grid" ? workspaceGrid : null,
 };
-const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply&scan_origin_file=origin.ply") }, document: testDocument, URL, URLSearchParams, setTimeout: scheduleTestTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
+const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply&scan_origin_file=origin.ply"), setTimeout }, document: testDocument, URL, URLSearchParams, setTimeout: scheduleTestTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"), sandbox);
 let sampledLivePixels = 0;
 const liveSampleSlots = new Set();
@@ -82,7 +82,13 @@ const originPoints = [];
 for (let y = -35; y < 35; y += 1) for (let x = -35; x < 35; x += 1) originPoints.push(`${x} ${y} ${-120 + 0.2 * x - 0.1 * y}`);
 const originCloud = `ply\nformat ascii 1.0\nelement vertex ${originPoints.length}\nproperty float x\nproperty float y\nproperty float z\nelement face 0\nend_header\n${originPoints.join("\n")}\n`;
 const viewerLoads = [];
-const viewer = { load(geometry, options) { viewerLoads.push({ geometry, options }); } };
+let viewerCamera = { orientation: [1, 0, 0, 0, 1, 0, 0, 0, 1], zoom: 1, panX: 0, panY: 0, projection: "orthographic" };
+const viewerCameraUpdates = [];
+const viewer = {
+  load(geometry, options) { viewerLoads.push({ geometry, options }); },
+  getCamera() { return viewerCamera; },
+  setCamera(camera) { viewerCamera = camera; viewerCameraUpdates.push(camera); },
+};
 const baseGeometry = { positions: new Float64Array([0, 0, 0]), triangles: new Uint32Array(0), bounds: { min: [0, 0, 0], max: [0, 0, 0] } };
 const getModelGeometry = () => baseGeometry;
 const fetchCloud = async url => ({ ok: true, async text() { assert.match(url, /point-cloud\?/); return pointCloud; } });
@@ -278,6 +284,10 @@ for (let y = 0; y < 400; y += 1) for (let x = 0; x < 640; x += 1) {
 }
 liveRawFrameSource = [unshiftedMapFrame, translatedMapFrame, new Uint8Array(640 * 400 * 2)];
 liveFrameSequence = 0;
+sandbox.window.cadyxUiReloadCamera = {
+  orientation: [0, 0, -1, 0, 1, 0, 1, 0, 0], zoom: 1.7, panX: 13, panY: -9, projection: "orthographic",
+};
+const savedReloadCamera = sandbox.window.cadyxUiReloadCamera;
 const mapAlignedView = sandbox.window.CadyxScanView.initialize({
   cloudButton: element(), meshButton: element(), viewport: element(), viewer, getModelGeometry, meshReady: true,
 }, undefined, fetchPreview);
@@ -285,6 +295,10 @@ const mapAlignedStart = viewerLoads.length;
 mapAlignedView.showLivePreview({ open: true });
 await waitUntil(() => viewerLoads.length >= mapAlignedStart + 3
   && liveFrameSequence >= 2);
+assert.ok(viewerCameraUpdates.includes(savedReloadCamera),
+  "the saved camera is restored after the first table-map scene load");
+assert.equal(viewerLoads[mapAlignedStart + 1].options.reset, false,
+  "first marker alignment does not replace the restored user camera");
 const mapAlignedGeometries = [viewerLoads[mapAlignedStart + 1].geometry, viewerLoads[mapAlignedStart + 2].geometry];
 const nonMarkerCentroid = geometry => {
   const markers = new Set(geometry.points);
