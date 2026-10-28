@@ -98,7 +98,7 @@ class _DashboardRecord:
                 or not 0 <= workflow["progress_percent"] <= 100
                 or (
                     workflow["eta_seconds"] is not None
-                    and type(workflow["eta_seconds"]) is not int
+                    and (type(workflow["eta_seconds"]) is not int or workflow["eta_seconds"] < 0)
                 )
                 or not isinstance(workflow["phases"], list)
             ):
@@ -106,8 +106,10 @@ class _DashboardRecord:
             if any(
                 not isinstance(phase, dict)
                 or set(phase) != {"id", "title", "state"}
-                or phase.get("state")
-                not in {"pending", "in_progress", "completed", "failed"}
+                or not isinstance(phase["id"], str)
+                or not isinstance(phase["title"], str)
+                or not isinstance(phase["state"], str)
+                or phase["state"] not in {"pending", "in_progress", "completed", "failed"}
                 for phase in workflow["phases"]
             ):
                 raise ValueError("invalid dashboard state structure")
@@ -115,7 +117,10 @@ class _DashboardRecord:
         if not all(
             isinstance(task, dict)
             and set(task) == {"id", "title", "state"}
-            and task.get("state") in {"pending", "running", "completed", "failed"}
+            and isinstance(task["id"], str)
+            and isinstance(task["title"], str)
+            and isinstance(task["state"], str)
+            and task["state"] in {"pending", "running", "completed", "failed"}
             for task in value["tasks"]
         ):
             raise ValueError("invalid dashboard state structure")

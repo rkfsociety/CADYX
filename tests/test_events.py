@@ -52,6 +52,34 @@ class EventBrokerTests(unittest.TestCase):
         self.assertIsNone(resumed["elapsed_seconds"])
         self.assertEqual(failed_result["elapsed_seconds"], 4)
 
+    def test_malformed_dashboard_fields_fail_before_publishing(self):
+        broker = EventBroker()
+        subscriber_id, events = broker.subscribe()
+        workflow = {
+            "title": "Build", "progress_percent": 25, "eta_seconds": 10,
+            "phases": [{"id": "build", "title": "Build", "state": "in_progress"}],
+        }
+        task = {"id": "test", "title": "Test", "state": "running"}
+        invalid_reports = [
+            {"workflow": {**workflow, "eta_seconds": -1}, "tasks": []},
+            {"workflow": {**workflow, "phases": [{**workflow["phases"][0], "id": []}]}, "tasks": []},
+            {"workflow": {**workflow, "phases": [{**workflow["phases"][0], "title": 42}]}, "tasks": []},
+            {"workflow": {**workflow, "phases": [{**workflow["phases"][0], "state": []}]}, "tasks": []},
+            {"workflow": None, "tasks": [{**task, "id": []}]},
+            {"workflow": None, "tasks": [{**task, "title": 42}]},
+            {"workflow": None, "tasks": [{**task, "state": []}]},
+        ]
+        try:
+            for report in invalid_reports:
+                with self.subTest(report=report):
+                    with self.assertRaises(ValueError):
+                        broker.publish_agent_dashboard("p", report)
+                    self.assertEqual(broker.agent_dashboard_revision("p"), 0)
+                    self.assertEqual(broker.agent_work_snapshot()["revision"], 0)
+                    self.assertTrue(events.empty())
+        finally:
+            broker.unsubscribe(subscriber_id)
+
     def test_legacy_dashboard_state_without_timer_fields_remains_valid(self):
         self.assertTrue(EventBroker._dashboard_state_is_valid({
             "workflow": None, "tasks": [], "revision": 1,
