@@ -60,6 +60,28 @@ class CoreServiceCompositionTests(unittest.TestCase):
             self.assertEqual(listing["projects"][0]["project"], created["project"])
             self.assertEqual(listing["projects"][0]["lock"]["state"], "FREE")
 
+    def test_missing_saved_feature_geometry_is_a_validation_error(self) -> None:
+        # Corrupt snapshots must not leak AttributeError to API clients.
+        from types import SimpleNamespace
+        from cadyx.errors import ValidationError
+
+        with tempfile.TemporaryDirectory() as root:
+            core = CadyxCore(root, kernel=object())
+            features = (
+                ("create_ruled_shell", {"parameters": {"patches": [], "sewing_tolerance": 0.01}}),
+                ("loft_sketches", {"source_sketch_ids": [], "parameters": {"section_sketch_ids": []}}),
+                ("sweep_sketch", {"source_sketch_id": "sketch", "parameters": {"radius": 1.0}}),
+            )
+            for operation, fields in features:
+                with self.subTest(operation=operation):
+                    document = SimpleNamespace(revision=1, objects=[
+                        {"id": "body", "type": "body", "geometry": None},
+                        {"id": "feature", "type": "feature", "body_id": "body",
+                         "operation": operation, "geometry": None, **fields},
+                    ])
+                    with self.assertRaises(ValidationError):
+                        core._validate_geometry(document)
+
     def test_core_composes_services(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             core = CadyxCore(root, kernel=object())
