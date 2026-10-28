@@ -709,5 +709,59 @@ tablePreviewViewer.load({
 }, { reset: false });
 assert.deepEqual(drawnPointColors, ['#front-point'],
   'opaque table surfaces hide map and cloud points behind them');
+
+const denseTriangles = new Uint32Array(30_001 * 3);
+for (let face = 0; face < denseTriangles.length; face += 3) {
+  denseTriangles[face] = 0;
+  denseTriangles[face + 1] = 1;
+  denseTriangles[face + 2] = 2;
+}
+const denseViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false,
+  wireframe: false, shaded: true,
+});
+denseViewer.load({ positions: [0, 0, 0, 1, 0, 0, 2, 0, 0], triangles: denseTriangles,
+  lines: [0, 1], points: [], interactiveRenderScale: 0.25,
+  bounds: { min: [0, 0, 0], max: [2, 0, 0] } });
+const denseUploadsBeforeDrag = rasterUploads;
+const denseFrameOffset = animationFrames.length;
+events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 8 });
+events.pointermove({ clientX: 320, clientY: 215 });
+const denseInteractiveFrame = animationFrames.splice(denseFrameOffset, 1)[0];
+assert.equal(typeof denseInteractiveFrame, 'function');
+denseInteractiveFrame();
+assert.equal(rasterUploads, denseUploadsBeforeDrag,
+  'dense camera drags use the temporary wireframe fallback instead of full shaded rasterization');
+assert.ok(segments > 0, 'the dense fallback continues to draw the model wireframe');
+events.pointerup({});
+assert.ok(rasterUploads > denseUploadsBeforeDrag,
+  'dense models return to shaded rendering when camera movement ends');
+
+animationTime = 2000;
+const denseSweepViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false,
+  wireframe: false, shaded: true,
+});
+const denseSweepUploadStart = rasterUploads;
+const denseSweepFrameStart = animationFrames.length;
+denseSweepViewer.load({ positions: [0, 0, 0, 0.5, 0, 0, 1, 0, 0],
+  triangles: denseTriangles, lines: [0, 2], points: [], type: 'body',
+  bounds: { min: [0, 0, 0], max: [1, 0, 0] } },
+{ transition: { type: 'sweep', path: [{ x: 0, y: 0 }, { x: 1, y: 0 }], plane: 'XY', durationMs: 100 } });
+const denseSweepMidFrame = animationFrames.splice(denseSweepFrameStart, 1)[0];
+animationTime = 2050;
+denseSweepMidFrame();
+assert.ok(segments > 0, 'a dense sweep transition reveals its wireframe path progressively');
+assert.equal(rasterUploads, denseSweepUploadStart,
+  'dense transitions defer shaded rasterization while preserving their animated geometry');
+const denseSweepMidEndpoint = drawnLines.at(-1).slice();
+const denseSweepEndFrame = animationFrames.splice(denseSweepFrameStart, 1)[0];
+animationTime = 2100;
+denseSweepEndFrame();
+assert.ok(rasterUploads > denseSweepUploadStart,
+  'dense sweep transitions return to shaded rendering at completion');
+assert.notDeepEqual(drawnLines.at(-1), denseSweepMidEndpoint,
+  'the dense sweep wireframe continues along its path instead of revealing the final edge early');
+
 console.log("Viewport: camera, geometry, transitions, depth-tested edges and scan surface styling passed.");
 

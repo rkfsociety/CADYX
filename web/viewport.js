@@ -1,5 +1,6 @@
 (() => {
   const MAX_PREVIEW_POINTS = 24000;
+  const MAX_INTERACTIVE_SHADED_FACES = 8000;
   const INTERACTIVE_RENDER_SCALE = 0.6;
   const VIEWPORT_MESH_DEFLECTION = 0.01;
   const formatCoordinate = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format;
@@ -462,13 +463,17 @@
       };
       const pointDepthVisible = point => point >= 0 && point < screenX.length
         && depthVisibleAt(screenX[point], screenY[point], camera[point * 3 + 2]);
+      const denseInteractiveFallback = Boolean(drag || transition || bodyMotion) && shaded
+        && triangles.length / 3 > MAX_INTERACTIVE_SHADED_FACES;
+      const renderWireframe = wireframe || denseInteractiveFallback;
+      const renderShaded = shaded && !denseInteractiveFallback;
       if (triangles.length) meshDepthValid = renderMesh(
         triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, bodyMotionAngleByVertex,
         geometry.vertexNormals, cameraOrientation, geometry.faceNormals, geometry.featureEdges,
         geometry.featureEdgeFaces,
-        geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, wireframe, shaded,
+        geometry.silhouetteCandidates, geometry.colors, geometry.triangleColors, renderWireframe, renderShaded,
         Boolean(drag),
-        wireframeColor, wireframeOpacity, dpr,
+        wireframeColor, denseInteractiveFallback && !wireframe ? 0.55 : wireframeOpacity, dpr,
         Math.max(1.5 / scale, 2 * VIEWPORT_MESH_DEFLECTION),
         selectedFeatureId
           ? geometry.featureTriangleRanges?.filter((range) => range.featureId === selectedFeatureId) || []
@@ -1289,6 +1294,22 @@
       }
       const depthFaceBuffer = depthBufferValid ? meshDepthFace : null;
       const width = canvas.width, height = canvas.height;
+      const transitionProgress = sweepProgress || loftProgress;
+      const isFaceFormed = face => {
+        if (!transitionProgress || progress >= 1) return true;
+        const first = triangles[face * 3], second = triangles[face * 3 + 1], third = triangles[face * 3 + 2];
+        return (transitionProgress[first] + transitionProgress[second] + transitionProgress[third]) / 3 <= progress;
+      };
+      const edgeProgressRange = (start, end) => {
+        if (!transitionProgress || progress >= 1) return [0, 1];
+        const startProgress = transitionProgress[start], endProgress = transitionProgress[end];
+        const startFormed = startProgress <= progress, endFormed = endProgress <= progress;
+        if (startFormed && endFormed) return [0, 1];
+        if (!startFormed && !endFormed) return null;
+        const fraction = Math.max(0, Math.min(1,
+          (progress - startProgress) / (endProgress - startProgress)));
+        return startFormed ? [0, fraction] : [fraction, 1];
+      };
       const surfaceDepthAt = (x, y, pixelX, pixelY, ignoredFaceA, ignoredFaceB) => {
         let nearestDepth = -Infinity;
         for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
@@ -1319,14 +1340,21 @@
         }
         return nearestDepth;
       };
-      const drawEdge = (start, end, adjacentFaceA = -1, adjacentFaceB = -1, minimumVisibleLength = 1.5 * dpr) => {
+      const drawEdge = (start, end, adjacentFaceA = -1, adjacentFaceB = -1,
+        minimumVisibleLength = 1.5 * dpr, startFraction = 0, endFraction = 1) => {
         const startOffset = start * 3, endOffset = end * 3;
-        const x0 = screenX[start], y0 = screenY[start];
-        const x1 = screenX[end], y1 = screenY[end];
+        const fullX0 = screenX[start], fullY0 = screenY[start];
+        const fullX1 = screenX[end], fullY1 = screenY[end];
+        const x0 = fullX0 + (fullX1 - fullX0) * startFraction;
+        const y0 = fullY0 + (fullY1 - fullY0) * startFraction;
+        const x1 = fullX0 + (fullX1 - fullX0) * endFraction;
+        const y1 = fullY0 + (fullY1 - fullY0) * endFraction;
         const dx = x1 - x0, dy = y1 - y0;
         const lengthSquared = dx * dx + dy * dy;
         const steps = Math.max(1, Math.ceil(Math.sqrt(lengthSquared)));
-        const startDepth = camera[startOffset + 2], endDepth = camera[endOffset + 2];
+        const fullStartDepth = camera[startOffset + 2], fullEndDepth = camera[endOffset + 2];
+        const startDepth = fullStartDepth + (fullEndDepth - fullStartDepth) * startFraction;
+        const endDepth = fullStartDepth + (fullEndDepth - fullStartDepth) * endFraction;
         let runStart = null, runEnd = null;
         const flushVisibleRun = () => {
           if (!runStart) return;
@@ -1371,9 +1399,12 @@
           // The reduced-resolution drag frame otherwise turns short edge runs into specks.
           for (let index = start; index < end; index += 2) {
             const faceIndex = index;
-            drawEdge(featureEdges[index], featureEdges[index + 1],
+            const edgeStart = featureEdges[index], edgeEnd = featureEdges[index + 1];
+            const edgeProgress = edgeProgressRange(edgeStart, edgeEnd);
+            if (!edgeProgress) continue;
+            drawEdge(edgeStart, edgeEnd,
               featureEdgeFaces?.[faceIndex] ?? -1, featureEdgeFaces?.[faceIndex + 1] ?? -1,
-              interactive ? 3 * dpr : 1.5 * dpr);
+              interactive ? 3 * dpr : 1.5 * dpr, edgeProgress[0], edgeProgress[1]);
           }
           context.stroke();
         }
@@ -1382,6 +1413,10 @@
       if (showWireframe && silhouetteCandidates?.length) {
         if (faceFacing.length < faceTotal) faceFacing = new Int8Array(faceTotal);
         for (let face = 0; face < faceTotal; face += 1) {
+          if (!isFaceFormed(face)) {
+            faceFacing[face] = 0;
+            continue;
+          }
           const first = triangles[face * 3] * 3;
           const second = triangles[face * 3 + 1] * 3;
           const third = triangles[face * 3 + 2] * 3;
@@ -1402,8 +1437,10 @@
           const secondFace = faceFacing[silhouetteCandidates[index + 3]];
           if (firstFace === secondFace || firstFace === 0 && secondFace === 0) continue;
           const start = silhouetteCandidates[index], end = silhouetteCandidates[index + 1];
+          const edgeProgress = edgeProgressRange(start, end);
+          if (!edgeProgress) continue;
           drawEdge(start, end, silhouetteCandidates[index + 2], silhouetteCandidates[index + 3],
-            interactive ? 3 * dpr : 1.5 * dpr);
+            interactive ? 3 * dpr : 1.5 * dpr, edgeProgress[0], edgeProgress[1]);
         }
         context.stroke();
         context.restore();
