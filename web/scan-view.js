@@ -8,8 +8,8 @@
   const TURNTABLE_TILT_PIVOT_Z_MM = -25;
   const isScanDepthValid = depth => Number.isFinite(depth)
     && depth >= MIN_SCAN_DEPTH_MM && depth <= MAX_SCAN_DEPTH_MM;
-  const shouldRunTableMapRansac = (priorMatchCount, frameSequence, lastSequence) => priorMatchCount < 4
-    && (lastSequence === 0 || frameSequence - lastSequence >= 8);
+  const shouldRunTableMapRansac = (priorMatchCount, frameSequence, lastSequence, mapPointCount = 4) =>
+    lastSequence === 0 || frameSequence - lastSequence >= 8 && priorMatchCount < mapPointCount;
   const createMeshBuilder = () => ({ positions: [], triangles: [], triangleColors: [] });
   const addTriangle = (mesh, first, second, third, color) => {
     mesh.triangles.push(first, second, third);
@@ -306,7 +306,7 @@
         }
       }
     }
-    if (!best && allowRansac && livePoints.length >= 4) {
+    if (allowRansac && livePoints.length >= 4) {
       let seed = 0x51f15e5d;
       const randomIndex = length => {
         seed = (Math.imul(seed ^ seed >>> 15, 1 | seed) + 0x6d2b79f5) | 0;
@@ -1195,7 +1195,7 @@
                         axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]));
                     }
                     const allowRansac = shouldRunTableMapRansac(
-                      priorMarkerMatches.length, frameSequence, lastMapRansacSequence);
+                      priorMarkerMatches.length, frameSequence, lastMapRansacSequence, liveTableMap.points.length);
                     if (allowRansac) lastMapRansacSequence = frameSequence;
                     const mapTransform = registerTableMarkers(markerCoordinates, liveTableMap, 5,
                       priorMarkerMatches, allowRansac);

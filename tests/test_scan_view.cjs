@@ -53,9 +53,13 @@ assert.equal(sandbox.window.CadyxScanView.isScanDepthValid(250.005), false);
 assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(3, 16, 8), true,
   "three frame-to-frame matches cannot register a map and must allow a throttled RANSAC recovery");
 assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(4, 16, 8), false,
-  "four reliable tracks should use the direct tracked registration path");
+  "four reliable tracks wait for the periodic global recheck");
 assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(2, 15, 8), false,
   "RANSAC remains throttled until eight frames have elapsed");
+assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(7, 16, 8, 34), true,
+  "a partial marker subset periodically searches the full map for a better global fit");
+assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(34, 16, 8, 34), false,
+  "a complete map match needs no periodic global search");
 const turntableModel = sandbox.window.CadyxScanView.buildTurntableDisplayModel();
 assert.equal(turntableModel.diameterMm, 200, "the display tabletop uses the user-provided 200 mm diameter");
 assert.equal(turntableModel.thicknessMm, 10, "the display tabletop uses the user-provided 10 mm thickness");
@@ -122,6 +126,16 @@ for (let index = 0; index < centers.length; index += 1) {
 assert.throws(() => sandbox.window.CadyxScanView.registerTableMarkers(
   [[0, 0], [10, 0], [20, 0], [30, 0]], { points: [[0, 0], [10, 0], [20, 0], [30, 0]] }, 2,
 ), /почти на одной линии/, "collinear map detections cannot define a reliable table frame");
+const uniqueMarkerPattern = [
+  [0, 0], [20, 0], [0, 20], [20, 20],
+  [100, 2], [120, -1], [102, 22], [118, 18],
+];
+const recoveredMarkerFit = sandbox.window.CadyxScanView.registerTableMarkers(
+  uniqueMarkerPattern, { points: uniqueMarkerPattern }, 5,
+  [0, 1, 2, 3].map(index => ({ sourceIndex: index, targetIndex: index + 4 })), true,
+);
+assert.equal(recoveredMarkerFit.matches.length, uniqueMarkerPattern.length,
+  "periodic global registration replaces a plausible partial tracked fit with the complete unique-pattern fit");
 let markerPointCount = 0;
 for (const frame of liveRawFrames) {
   markerPointCount = 0;
