@@ -33,6 +33,10 @@ const sandbox = {
 const context = vm.createContext(sandbox);
 vm.runInContext(source.slice(source.indexOf("const selectedProjectIds ="), source.indexOf("async function deleteProject(")), context);
 (async () => {
+  vm.runInContext("updateProjectSelection()", context);
+  assert.equal(sandbox.$("#projects-selection-toolbar").hidden, true);
+  vm.runInContext('selectedProjectIds.add("a"); updateProjectSelection();', context);
+  assert.equal(sandbox.$("#projects-selection-toolbar").hidden, false, "the first checkbox reveals bulk actions");
   sandbox.$("#projects-search").value = "duplicate";
   handlers.get("#select-visible-projects:click")();
   assert.equal(sandbox.$("#projects-selection-count").textContent, "Выбрано: 2");
@@ -55,6 +59,7 @@ vm.runInContext(source.slice(source.indexOf("const selectedProjectIds ="), sourc
   assert.match(notices[0].text, /Очистка файлов/);
   assert.equal(notices[0].error, true);
   handlers.get("#clear-project-selection:click")();
+  assert.equal(sandbox.$("#projects-selection-toolbar").hidden, true, "clearing the last selection hides bulk actions");
   assert.equal(sandbox.$("#delete-selected-projects").disabled, true);
   vm.runInContext('selectedProjectIds.add("busy"); selectedProjectIds.add("missing"); updateProjectSelection();', context);
   assert.equal(sandbox.$("#projects-selection-count").textContent, "Выбрано: 1", "removed projects are pruned from selection");

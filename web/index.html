@@ -781,10 +781,10 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                     <button id="create-project-group" class="button projects-create-group" type="button">Новая папка</button>
                   </div>
                 </div>
-                <div class="projects-selection-toolbar" role="group" aria-label="Массовое удаление проектов">
+                <div id="projects-selection-toolbar" class="projects-selection-toolbar" role="group" aria-label="Массовое удаление проектов" hidden>
+                  <span id="projects-selection-count" role="status" aria-live="polite">Выбрано: 0</span>
                   <button id="select-visible-projects" class="button" type="button">Выбрать все в поиске</button>
                   <button id="clear-project-selection" class="button" type="button" disabled>Снять выбор</button>
-                  <span id="projects-selection-count" role="status" aria-live="polite">Выбрано: 0</span>
                   <button id="delete-selected-projects" class="button" type="button" disabled>Удалить выбранные</button>
                 </div>
                 <div id="projects-list" class="projects-list" role="list" aria-label="Сохранённые проекты" tabindex="-1"></div>

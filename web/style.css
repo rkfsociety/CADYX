@@ -157,11 +157,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .primary-grid[data-view="projects"] > :not(#projects-panel) { display: none; }
 .primary-grid[data-view="projects"] > #projects-panel { display: grid; grid-column: 1; grid-row: 1; min-height: 0; grid-template-rows: 46px minmax(0, 1fr) auto; overflow: hidden; }
 .primary-grid:not([data-view="projects"]) #projects-panel { display: none; }
-.projects-selection-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 24px 12px; }
-.projects-selection-toolbar span { color: var(--muted); }
-#delete-selected-projects { color: #ffb6bb; border-color: #a64d57; }
-.workspace-project-selection { position: absolute; top: 10px; left: 10px; z-index: 2; width: 22px; height: 22px; accent-color: #539dcc; cursor: pointer; }
-.workspace-project-selection:disabled { cursor: not-allowed; }
+.projects-selection-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 24px 14px; padding: 10px 14px; border: 1px solid #40596b; border-radius: 10px; background: #14232e; box-shadow: 0 6px 18px #0002; }
+.projects-selection-toolbar[hidden] { display: none; }
+.projects-selection-toolbar span { margin-right: auto; color: #d9eaf5; font-weight: 600; }
+#delete-selected-projects { color: #ffc5c8; border-color: #a64d57; background: #54232b; }
+#delete-selected-projects:hover:not(:disabled) { background: #71303b; }
+.workspace-project-selection { appearance: none; position: absolute; bottom: 12px; left: 12px; z-index: 2; width: 26px; height: 26px; margin: 0; border: 1px solid #778c9b; border-radius: 7px; background: #101a20ee; box-shadow: 0 2px 8px #0005; cursor: pointer; transition: background .15s, border-color .15s; }
+.workspace-project-selection:hover:not(:disabled) { border-color: #b6dbf4; background-color: #233c4d; }
+.workspace-project-selection:checked { border-color: #79c2f0; background: #3987bc url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m6 12 4 4 8-8' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 22px no-repeat; }
+.workspace-project-selection:disabled { opacity: .4; cursor: not-allowed; }
+#projects-panel .workspace-project-card:has(.workspace-project-selection:checked) { border-color: #62acd9; box-shadow: 0 0 0 1px #62acd955, 0 8px 24px #0003; }
 .projects-toolbar { display: flex; align-items: center; gap: 8px; }
 .projects-toolbar label { color: var(--dim); font: 10px var(--mono); letter-spacing: .04em; }
 .projects-toolbar select { max-width: min(245px, 48vw); min-height: 34px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px; background: #151e25; color: var(--text); font: 11px var(--ui-font); }

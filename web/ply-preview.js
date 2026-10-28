@@ -1042,6 +1042,7 @@ let projectBulkDeletionPending = false;
 function updateProjectSelection() {
   const existing = new Set(projects.map((entry) => entry.project.id));
   for (const id of selectedProjectIds) if (!existing.has(id)) selectedProjectIds.delete(id);
+  $("#projects-selection-toolbar").hidden = !selectedProjectIds.size && !projectBulkDeletionPending;
   $("#projects-selection-count").textContent = `Выбрано: ${selectedProjectIds.size}`;
   $("#delete-selected-projects").disabled = projectBulkDeletionPending || !selectedProjectIds.size;
   $("#select-visible-projects").disabled = projectBulkDeletionPending;
