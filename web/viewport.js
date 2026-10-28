@@ -554,6 +554,26 @@
           }
         }
       }
+      for (const label of geometry.textLabels || []) {
+        const viewDepthZ = cameraOrientation[5];
+        if (Number.isFinite(label.minViewDepthZ) && viewDepthZ < label.minViewDepthZ
+            || Number.isFinite(label.maxViewDepthZ) && viewDepthZ >= label.maxViewDepthZ) continue;
+        const pointIndex = label.pointIndex;
+        if (!Number.isInteger(pointIndex) || pointIndex < 0 || pointIndex >= screenX.length) continue;
+        const x = screenX[pointIndex], y = screenY[pointIndex];
+        const pixelX = Math.round(x), pixelY = Math.round(y);
+        if (pixelX < 0 || pixelX >= width || pixelY < 0 || pixelY >= height) continue;
+        const surfaceDepth = meshDepth[pixelY * width + pixelX];
+        const labelDepth = camera[pointIndex * 3 + 2];
+        if (Number.isFinite(surfaceDepth) && labelDepth + 1e-4 < surfaceDepth) continue;
+        const fontSize = Number.isFinite(label.size) ? Math.max(6, Math.min(16, label.size)) : 8;
+        context.globalAlpha = Number.isFinite(label.opacity) ? Math.max(0, Math.min(1, label.opacity)) : 1;
+        context.fillStyle = label.color || "#e6eef1";
+        context.font = `600 ${fontSize * dpr}px ${label.fontFamily || "sans-serif"}`;
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillText(String(label.text ?? ""), x, y);
+      }
       context.globalAlpha = 1;
       if (showWorldAxes && pointCloudPreview && !geometry.hideWorldAxes) {
         const label = referenceOrigin.map(formatCoordinate).join(", ");

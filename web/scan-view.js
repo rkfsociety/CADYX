@@ -7,6 +7,7 @@
   const TURNTABLE_DIAMETER_MM = 200;
   const TURNTABLE_THICKNESS_MM = 10;
   const TURNTABLE_RADIUS_MM = TURNTABLE_DIAMETER_MM / 2;
+  const TURNTABLE_DEGREE_SCALE_ZERO_DEGREES = 90;
   const TURNTABLE_TILT_PIVOT_Z_MM = -25;
   const isScanDepthValid = depth => Number.isFinite(depth)
     && depth >= MIN_SCAN_DEPTH_MM && depth <= MAX_SCAN_DEPTH_MM;
@@ -101,13 +102,80 @@
       { top: [71, 80, 85], side: [46, 54, 59], bottom: [35, 42, 47] });
     addEllipticalCylinder(moving, TURNTABLE_RADIUS_MM, TURNTABLE_RADIUS_MM,
       -TURNTABLE_THICKNESS_MM, 0, 96, dark);
+    const degreeLabelPositions = [], degreeTextLabels = [];
+    let degreeTickCount = 0;
+    for (let degrees = 0; degrees < 360; degrees += 5) {
+      const radians = (degrees + TURNTABLE_DEGREE_SCALE_ZERO_DEGREES) * Math.PI / 180;
+      const cosine = Math.cos(radians), sine = Math.sin(radians);
+      const major = degrees % 30 === 0;
+      const innerRadius = major ? 93.5 : 97;
+      const outerRadius = 99.2;
+      const halfWidth = major ? 0.55 : 0.28;
+      const z = 0.12;
+      const point = (radius, tangent) => [
+        radius * cosine - tangent * sine,
+        radius * sine + tangent * cosine,
+        z,
+      ];
+      const outerLeft = point(outerRadius, -halfWidth), outerRight = point(outerRadius, halfWidth);
+      const innerLeft = point(innerRadius, -halfWidth), innerRight = point(innerRadius, halfWidth);
+      const tickColor = major ? [220, 228, 232] : [142, 158, 164];
+      addTriangle(moving, ...[outerLeft, outerRight, innerRight].map(vertex => {
+        const index = moving.positions.length / 3;
+        moving.positions.push(...vertex);
+        return index;
+      }), tickColor);
+      addTriangle(moving, ...[outerLeft, innerRight, innerLeft].map(vertex => {
+        const index = moving.positions.length / 3;
+        moving.positions.push(...vertex);
+        return index;
+      }), tickColor);
+      const sideHalfWidth = (major ? 0.58 : 0.28) / TURNTABLE_RADIUS_MM;
+      const sideTop = major ? -2.1 : -4.1;
+      const sideBottom = major ? -7.9 : -5.9;
+      const sidePoint = (angle, z) => [
+        (TURNTABLE_RADIUS_MM + 0.03) * Math.cos(angle),
+        (TURNTABLE_RADIUS_MM + 0.03) * Math.sin(angle),
+        z,
+      ];
+      const sideQuad = [
+        sidePoint(radians - sideHalfWidth, sideTop), sidePoint(radians + sideHalfWidth, sideTop),
+        sidePoint(radians + sideHalfWidth, sideBottom), sidePoint(radians - sideHalfWidth, sideBottom),
+      ];
+      addTriangle(moving, ...sideQuad.slice(0, 3).map(vertex => {
+        const index = moving.positions.length / 3;
+        moving.positions.push(...vertex);
+        return index;
+      }), tickColor);
+      addTriangle(moving, ...[sideQuad[0], sideQuad[2], sideQuad[3]].map(vertex => {
+        const index = moving.positions.length / 3;
+        moving.positions.push(...vertex);
+        return index;
+      }), tickColor);
+      degreeTickCount += 1;
+      if (major) {
+        const topPointIndex = degreeLabelPositions.length / 3;
+        degreeLabelPositions.push(cosine * (TURNTABLE_RADIUS_MM + 10),
+          sine * (TURNTABLE_RADIUS_MM + 10), 0.35);
+        degreeTextLabels.push({ pointIndex: topPointIndex, text: `${degrees}°`, size: 8, color: '#f3f7f8',
+          minViewDepthZ: 0.75 });
+        const sidePointIndex = degreeLabelPositions.length / 3;
+        degreeLabelPositions.push(cosine * (TURNTABLE_RADIUS_MM + 10),
+          sine * (TURNTABLE_RADIUS_MM + 10), 3);
+        degreeTextLabels.push({ pointIndex: sidePointIndex, text: `${degrees}°`, size: 8, color: '#f3f7f8',
+          maxViewDepthZ: 0.75 });
+      }
+    }
     return {
       fixed: finishMesh(fixed),
       moving: finishMesh(moving),
+      degreeTickCount,
+      degreeLabelPositions: Float32Array.from(degreeLabelPositions),
+      degreeTextLabels,
       pivotZ: TURNTABLE_TILT_PIVOT_Z_MM,
       diameterMm: TURNTABLE_DIAMETER_MM,
       thicknessMm: TURNTABLE_THICKNESS_MM,
-      fitRadius: 112,
+      fitRadius: 120,
     };
   };
   const turntableDisplayModel = buildTurntableDisplayModel();
@@ -826,11 +894,14 @@
         turntableDisplayModel.moving.positions, pose.angle, pose.tilt);
       const overlayPositions = overlay
         ? transformTableDisplayPositions(overlay.positions, pose.angle, pose.tilt) : new Float32Array(0);
+      const degreeLabelPositions = transformTableDisplayPositions(
+        turntableDisplayModel.degreeLabelPositions, pose.angle, pose.tilt);
       const fixedVertexCount = fixed.positions.length / 3;
       const movingOffset = fixedVertexCount + cloudVertexCount;
       const overlayOffset = movingOffset + moving.length / 3;
+      const degreeLabelOffset = overlayOffset + overlayPositions.length / 3;
       const combinedPositions = new Float32Array(fixed.positions.length + cloudVertexCount * 3
-        + moving.length + overlayPositions.length);
+        + moving.length + overlayPositions.length + degreeLabelPositions.length);
       combinedPositions.set(fixed.positions);
       let output = fixed.positions.length;
       const firstCloudVertex = fixedVertexCount;
@@ -858,6 +929,7 @@
       }
       combinedPositions.set(moving, movingOffset * 3);
       if (overlay) combinedPositions.set(overlayPositions, overlayOffset * 3);
+      combinedPositions.set(degreeLabelPositions, degreeLabelOffset * 3);
       const triangles = new Uint32Array(fixed.triangles.length + turntableDisplayModel.moving.triangles.length);
       triangles.set(fixed.triangles);
       for (let index = 0; index < turntableDisplayModel.moving.triangles.length; index += 1) {
@@ -872,6 +944,9 @@
       const matchedMapMarkerPoints = overlay
         ? Uint32Array.from(buildMatchedMapMarkerPointIndices(overlay, matchedMapIndices), index => index + overlayOffset)
         : new Uint32Array(0);
+      const degreeTextLabels = turntableDisplayModel.degreeTextLabels.map(label => ({
+        ...label, pointIndex: degreeLabelOffset + label.pointIndex,
+      }));
       const trajectoryLines = overlay
         ? Uint32Array.from(overlay.lines, index => index + overlayOffset) : new Uint32Array(0);
       const cloudPoints = Uint32Array.from({ length: cloudPointCount }, (_, index) => firstCloudVertex + index);
@@ -890,7 +965,7 @@
       if (matchedMapMarkerPoints.length) pointLayers.push({ points: matchedMapMarkerPoints,
         style: { size: 12, opacity: 1, color: '#00d8ff', shape: 'circle' } });
       viewer.load({ positions: combinedPositions, triangles, triangleColors,
-        lines: trajectoryLines, pointCloudVertexCount: cloudPointCount,
+        lines: trajectoryLines, textLabels: degreeTextLabels, pointCloudVertexCount: cloudPointCount,
         pointPreviewLimit: LIVE_PREVIEW_POINT_LIMIT,
         pointCloudVertexRange: [firstCloudVertex, firstCloudVertex + cloudPointCount],
         hideWorldAxes: true, hideWorldGrid: true,

@@ -63,6 +63,17 @@ assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(34, 16, 8, 34)
 const turntableModel = sandbox.window.CadyxScanView.buildTurntableDisplayModel();
 assert.equal(turntableModel.diameterMm, 200, "the display tabletop uses the user-provided 200 mm diameter");
 assert.equal(turntableModel.thicknessMm, 10, "the display tabletop uses the user-provided 10 mm thickness");
+assert.equal(turntableModel.fitRadius, 120, "the outer degree labels have clearance from the viewport edge");
+assert.equal(turntableModel.degreeTickCount, 72, "the turntable scale has 5 degree ticks through 360 degrees");
+assert.deepEqual(Array.from(turntableModel.degreeTextLabels.filter(label => Number.isFinite(label.minViewDepthZ)), label => label.text),
+  ["0°", "30°", "60°", "90°", "120°", "150°", "180°", "210°", "240°", "270°", "300°", "330°"],
+  "the top-face scale labels each 30 degree major division");
+const zeroDegreePosition = Array.from(turntableModel.degreeLabelPositions.slice(0, 3));
+assert.ok(Math.abs(zeroDegreePosition[0]) < 0.1
+  && Math.abs(zeroDegreePosition[1] - 110) < 0.1,
+"the top-face zero-degree label is outside the table at the bottom in top view");
+assert.equal(turntableModel.degreeTextLabels.filter(label => Number.isFinite(label.maxViewDepthZ)).length, 12,
+  "side-face degree labels are provided for front and isometric views");
 assert.ok(turntableModel.fixed.triangles.length > 0 && turntableModel.moving.triangles.length > 0,
   "the preview includes a shaded table base and a separately movable tabletop");
 assert.ok(Math.abs(turntableModel.fixed.bounds.max[0] - turntableModel.fixed.bounds.max[1]) < 1e-4,
@@ -523,6 +534,10 @@ assert.match(html, /id="scanner-map-alignment"[^>]*aria-label="Сопостав�
 assert.match(projectUiJs, /function projectPath\(projectId\)/);
 assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
 assert.match(projectUiJs, /let suffix = 2/);
+assert.match(projectUiJs, /front: \{ yaw: Math\.PI \/ 2, pitch: 0 \}/);
+assert.match(projectUiJs, /right: \{ yaw: 0, pitch: 0 \}/);
+assert.match(projectUiJs, /if \(activeView === "scanning"\) initializeScanningFrontView\(\)/,
+  "the first Scanning view uses the front camera while later user camera choices remain restorable");
 assert.match(projectUiJs,
   /const addressView = new URLSearchParams\(window\.location\.search\)\.get\("view"\);\s*const workspaceView = restorableWorkspaceViews\.has\(addressView\) \? addressView[\s\S]*: primaryGrid\.dataset\.view;/,
   "an explicit URL view wins over a temporary Overview while CADYX restores the selected project");

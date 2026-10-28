@@ -61,6 +61,10 @@ for (const filename of ["trace-draft.js", "browser-api.js", "viewport-helpers.js
 
 const helpers = browserSandbox.window.CadyxViewportHelpers;
 assert.equal(helpers.isRotationMatrix(helpers.cameraMatrixFromYawPitch(0.4, 0.2)), true);
+assert.equal(helpers.CAMERA_PRESETS.front.yaw, Math.PI / 2,
+  "the front preset looks along the turntable hinge axis");
+assert.equal(helpers.CAMERA_PRESETS.right.yaw, 0,
+  "the right preset shows the side opposite the requested front-facing hinge view");
 const edges = helpers.buildFeatureEdges([0, 0, 0, 1, 0, 0, 0, 1, 0], [0, 1, 2]);
 assert.deepEqual(Array.from(edges.featureEdges), [0, 1, 1, 2, 2, 0]);
 const raster = helpers.rasterTriangleSetup(1, 1, 5, 1, 1, 5, 10, 10);
@@ -100,11 +104,14 @@ const presetViewer = {
 };
 const presetController = viewerModule.createCameraPresetController({ root, canvas, viewer: presetViewer });
 assert.equal(presetController.apply("front"), true);
-assert.equal(appliedCamera.yaw, 0);
+assert.equal(appliedCamera.yaw, Math.PI / 2);
 assert.equal(appliedCamera.pitch, 0);
 assert.equal(appliedCamera.zoom, 2.5);
 assert.equal(appliedCamera.projection, "orthographic");
 assert.equal(presetButtons[1].pressed, "true");
+assert.equal(presetController.apply("right"), true);
+assert.equal(appliedCamera.yaw, 0);
+assert.equal(presetButtons[1].pressed, "false");
 assert.equal(presetController.apply("missing"), false);
 
 let captures = 0;

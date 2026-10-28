@@ -1,8 +1,8 @@
 (() => {
   const CAMERA_PRESETS = Object.freeze({
     isometric: Object.freeze({ yaw: 0.68, pitch: 0.38 }),
-    front: Object.freeze({ yaw: 0, pitch: 0 }),
-    right: Object.freeze({ yaw: Math.PI / 2, pitch: 0 }),
+    front: Object.freeze({ yaw: Math.PI / 2, pitch: 0 }),
+    right: Object.freeze({ yaw: 0, pitch: 0 }),
     top: Object.freeze({ yaw: 0, pitch: Math.PI / 2 }),
   });
 

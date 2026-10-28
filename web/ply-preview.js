@@ -92,8 +92,8 @@ const emptyViewportGeometry = {
 };
 let currentModelViewportGeometry = emptyViewportGeometry;
 const orthographicViewers = [
-  { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: 0 } },
-  { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: Math.PI / 2, pitch: 0 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: Math.PI / 2, pitch: 0 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: 0 } },
   { viewer: window.CadyxViewport.createViewer($("#ortho-top"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: Math.PI / 2 } },
 ];
 orthographicViewers.forEach((view) => {
@@ -102,8 +102,8 @@ orthographicViewers.forEach((view) => {
 const cameraPresetButtons = [...document.querySelectorAll("[data-camera-preset]")];
 const cameraPresets = {
   isometric: { yaw: 0.68, pitch: 0.38 },
-  front: { yaw: 0, pitch: 0 },
-  right: { yaw: Math.PI / 2, pitch: 0 },
+  front: { yaw: Math.PI / 2, pitch: 0 },
+  right: { yaw: 0, pitch: 0 },
   top: { yaw: 0, pitch: Math.PI / 2 },
 };
 if (window.cadyxUiReloadCameraPreset && cameraPresets[window.cadyxUiReloadCameraPreset]
@@ -120,6 +120,24 @@ function setCameraPresetState(selectedPreset) {
   cameraPresetButtons.forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.cameraPreset === selectedPreset));
   });
+}
+let scanningFrontViewInitialized = false;
+const scanningFrontViewKey = `cadyx:scanning-front-view:${window.location.pathname}`;
+function initializeScanningFrontView() {
+  if (scanningFrontViewInitialized) return;
+  scanningFrontViewInitialized = true;
+  try {
+    if (sessionStorage.getItem(scanningFrontViewKey) === "initialized") return;
+    sessionStorage.setItem(scanningFrontViewKey, "initialized");
+  } catch { /* Keep the front view for this page session if storage is unavailable. */ }
+  const currentCamera = modelViewer.getCamera();
+  const frontCamera = { ...cameraPresets.front, zoom: currentCamera.zoom, panX: currentCamera.panX,
+    panY: currentCamera.panY, projection: "orthographic" };
+  window.cadyxUiReloadCamera = frontCamera;
+  window.cadyxUiReloadCameraAppliedToModel = false;
+  window.cadyxUiReloadCameraPreset = "front";
+  modelViewer.setCamera(frontCamera);
+  setCameraPresetState("front");
 }
 if (window.cadyxUiReloadCameraPreset !== undefined) {
   setCameraPresetState(window.cadyxUiReloadCameraPreset);
@@ -463,6 +481,7 @@ function setWorkspaceNavigation(view) {
   else address.searchParams.delete("view");
   window.history.replaceState(null, "", `${address.pathname}${address.search}${address.hash}`);
   primaryGrid.dataset.view = activeView;
+  if (activeView === "scanning") initializeScanningFrontView();
   folderDetail.hidden = !getSelectedFolder() && activeView !== "files";
   $("#comparison-panel").hidden = activeView !== "analysis";
   $("#manufacturing-panel").hidden = activeView !== "manufacturing";

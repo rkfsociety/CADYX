@@ -647,5 +647,19 @@ tablePreviewViewer.load({ positions: [0, 0, 0, 100, 0, 0, 0, 100, 0], triangles:
   hideWorldGrid: true, hideWorldAxes: true });
 assert.equal(drawnLabels.length, 0, 'a modeled turntable preview hides coordinate-grid labels');
 assert.equal(drawnLines.length, 0, 'a modeled turntable preview hides the coordinate grid and axes');
+tablePreviewViewer.load({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0.3, 0.35],
+  triangles: [0, 1, 2], lines: [], points: [],
+  textLabels: [{ pointIndex: 3, text: '30°', color: '#f3f7f8', size: 8 }],
+  bounds: { min: [0, 0, 0], max: [1, 1, 0.35] }, hideWorldAxes: true }, { reset: false });
+assert.ok(drawnLabels.includes('30°'), 'viewport geometry can display degree labels attached to moving table points');
+tablePreviewViewer.setCamera({ yaw: 0, pitch: Math.PI / 2, zoom: 1, projection: 'orthographic' });
+tablePreviewViewer.load({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0.3, 0.35],
+  triangles: [0, 1, 2], lines: [], points: [],
+  textLabels: [
+    { pointIndex: 3, text: 'top-label', minViewDepthZ: 0.75 },
+    { pointIndex: 3, text: 'side-label', maxViewDepthZ: 0.75 },
+  ],
+  bounds: { min: [0, 0, 0], max: [1, 1, 0.35] }, hideWorldAxes: true }, { reset: false });
+assert.deepEqual(drawnLabels, ['top-label'], 'top camera shows only the outward top-view scale labels');
 console.log("Viewport: camera, geometry, transitions, depth-tested edges and scan surface styling passed.");
 
