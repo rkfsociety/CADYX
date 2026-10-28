@@ -69,6 +69,14 @@ def validate_bind_auth(host: str, auth_token: str | None) -> None:
         )
 
 
+def _token_matches(candidate: str, expected: str) -> bool:
+    """Compare UTF-8 credentials in constant time, rejecting invalid Unicode."""
+    try:
+        return secrets.compare_digest(candidate.encode("utf-8"), expected.encode("utf-8"))
+    except UnicodeEncodeError:
+        return False
+
+
 def authorization_matches(header_value: str | None, auth_token: str | None) -> bool:
     """Validate Bearer or browser-friendly Basic credentials for one configured token."""
     if auth_token is None:
@@ -82,7 +90,7 @@ def authorization_matches(header_value: str | None, auth_token: str | None) -> b
     credentials = credentials.strip()
 
     if scheme.lower() == "bearer":
-        return secrets.compare_digest(credentials, auth_token)
+        return _token_matches(credentials, auth_token)
 
     if scheme.lower() != "basic":
         return False
@@ -94,4 +102,4 @@ def authorization_matches(header_value: str | None, auth_token: str | None) -> b
     username, separator, password = decoded.partition(":")
     if not separator or username != "cadyx":
         return False
-    return secrets.compare_digest(password, auth_token)
+    return _token_matches(password, auth_token)

@@ -79,6 +79,21 @@ class AuthenticationConfigTests(unittest.TestCase):
                 self.assertFalse(authorization_matches(f"Basic {credentials}", _TOKEN))
 
 
+    def test_non_ascii_token_comparisons_do_not_raise(self) -> None:
+        token = "é" * 32
+        basic = base64.b64encode(f"cadyx:{token}".encode("utf-8")).decode("ascii")
+        wrong_basic = base64.b64encode(f"cadyx:{'é' * 31}x".encode("utf-8")).decode("ascii")
+
+        self.assertTrue(authorization_matches(f"Bearer {token}", token))
+        self.assertTrue(authorization_matches(f"Basic {basic}", token))
+        self.assertFalse(authorization_matches(f"Bearer {'é' * 31}x", token))
+        self.assertFalse(authorization_matches(f"Basic {wrong_basic}", token))
+        self.assertFalse(authorization_matches("Bearer 💥", _TOKEN))
+        self.assertFalse(authorization_matches("Bearer \ud800", _TOKEN))
+        self.assertFalse(authorization_matches(f"Bearer {_TOKEN}", "\ud800" * 32))
+        self.assertFalse(authorization_matches(f"Basic {basic}", "\ud800" * 32))
+
+
 class AuthenticatedWebApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
