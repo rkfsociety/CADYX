@@ -12,6 +12,10 @@ assert.match(assemblyEditor, /owner_type:'human'/,
 assert.match(assemblyEditor, /expected_revision:revision/,
   "browser assembly edits submit the inspected revision");
 assert.match(assemblyEditor, /data-assembly-undo/);
+assert.match(assemblyEditor, /cad3-assembly-select\{flex:1;min-width:0;grid-template-columns:18px minmax\(0,1fr\)\}/,
+  "assembly rows do not reserve an empty grid column ahead of the full instance name");
+assert.match(assemblyEditor, /cad3-assembly-select \.cad-tree-label\{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;/,
+  "full assembly instance names wrap instead of inheriting one-line ellipsis");
 assert.match(assemblyEditor, /previewAssemblyTransform\(/,
   "mouse manipulation updates an isolated viewport preview");
 assert.match(assemblyEditor, /data-gizmo-kind/,
