@@ -461,7 +461,10 @@ class EventBroker:
             id=self._next_id,
             event=event,
             project_id=project_id,
-            data=data,
+            # SSE subscribers consume events asynchronously. Keep their live
+            # payload independent of the publisher's mutable input, just as
+            # the encoded replay history already is.
+            data=copy.deepcopy(data),
             occurred_at=occurred_at or datetime.now(timezone.utc).isoformat(),
         )
         # Do not consume an event ID until the payload is serializable.

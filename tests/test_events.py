@@ -302,6 +302,32 @@ class EventBrokerTests(unittest.TestCase):
         finally:
             broker.unsubscribe(subscription_id)
 
+    def test_live_events_keep_published_payload_when_caller_mutates_it(self):
+        broker = EventBroker()
+        subscriber_id, events = broker.subscribe("a")
+        try:
+            source = {"child": {"n": 1}, "values": [1]}
+            published = broker.publish("probe", "a", source)
+            source["child"]["n"] = 999
+            source["values"].append(2)
+            source["new"] = "late"
+
+            live = events.get_nowait()
+            expected = {"child": {"n": 1}, "values": [1]}
+            self.assertEqual(published.data, expected)
+            self.assertEqual(live.data, expected)
+            self.assertTrue(events.empty())
+
+            replay_id, replay = broker.subscribe(
+                "a", last_event_id=broker.event_cursor(0),
+            )
+            try:
+                self.assertEqual(replay.get_nowait().data, expected)
+            finally:
+                broker.unsubscribe(replay_id)
+        finally:
+            broker.unsubscribe(subscriber_id)
+
     def test_replay_keeps_immutable_encoded_event_data(self):
         broker = EventBroker()
         source = {"child": {"n": 1}}
