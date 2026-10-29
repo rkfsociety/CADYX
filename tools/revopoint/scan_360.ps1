@@ -251,6 +251,10 @@ if ($ManifestOnly) {
 $complete = $false
 try {
     Invoke-Turntable -Arguments @(
+        'zero', $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
+        $TurntableServiceUuid, $TurntableCharacteristicUuid
+    ) | Out-Null
+    Invoke-Turntable -Arguments @(
         'speed', $TurntableRotationPeriodSeconds.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture),
         $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
         $TurntableServiceUuid, $TurntableCharacteristicUuid

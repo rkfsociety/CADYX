@@ -389,7 +389,7 @@ function workspaceControlLockReason() {
 function restorePendingWorkspaceView() {
   const view = pendingInitialWorkspaceView;
   if (!view || !selectedProjectId || getSelectedFolder() || detailedProjectId !== selectedProjectId) return;
-  if (workspaceControlLockReason() !== null || (view === "files" && !canOpenFilesView())) return;
+  if (view === "files" && !canOpenFilesView()) return;
   pendingInitialWorkspaceView = null;
   setWorkspaceNavigation(view);
   if (primaryGrid.dataset.view !== view) {
@@ -426,8 +426,9 @@ function updateWorkspaceControls() {
     if (button.closest("#turntable-control-panel")) return;
     const filesUnavailable = button.dataset.workspaceView === "files" && !canOpenFilesView();
     const projectsNavigation = button.dataset.workspaceView === "projects";
+    const workspaceNavigation = Boolean(button.dataset.workspaceView);
     const projectNavigation = button.dataset.projectNavigation === "true";
-    button.disabled = (!projectsNavigation && !projectNavigation && !available) || filesUnavailable;
+    button.disabled = (!projectsNavigation && !projectNavigation && !workspaceNavigation && !available) || filesUnavailable;
     if (button.dataset.workspaceView) {
       button.title = projectsNavigation ? ""
         : lockReason || (filesUnavailable
@@ -473,7 +474,6 @@ $("#workspace-navigation").addEventListener("click", (event) => {
 function setWorkspaceNavigation(view) {
   const views = new Set(["overview", "geometry", "analysis", "manufacturing", "scanning", "activity", "files", "projects"]);
   const activeView = views.has(view)
-    && (view === "overview" || view === "projects" || workspaceControlLockReason() === null)
     && (view !== "files" || canOpenFilesView()) ? view : "overview";
   const address = new URL(window.location.href);
   if (activeView === "projects") address.searchParams.set("view", "projects");
@@ -484,7 +484,6 @@ function setWorkspaceNavigation(view) {
   primaryGrid.dataset.view = activeView;
   if (activeView === "scanning") {
     initializeScanningFrontView();
-    window.CadyxScanView?.showTurntable();
   }
   folderDetail.hidden = !getSelectedFolder() && activeView !== "files";
   $("#comparison-panel").hidden = activeView !== "analysis";

@@ -23,6 +23,7 @@ internal static class Program
     private const double MaxSafeTiltDegrees = 10.0;
     private const double MinRotationPeriodSeconds = 18.0;
     private const double MaxRotationPeriodSeconds = 90.0;
+    private const double RotationSetpointToleranceDegrees = 1.5;
     private const double TiltSetpointToleranceDegrees = 1.0;
     private static readonly TimeSpan GattOperationTimeout = TimeSpan.FromSeconds(5);
 
@@ -653,7 +654,7 @@ internal static class Program
                                 currentAngle = angle;
                                 currentTilt = tilt;
                                 double sweepMeasured = SignedAngleDelta(sweepBefore, currentAngle);
-                                bool targetReached = Math.Abs(sweepMeasured - degrees) <= 1.0;
+                                bool targetReached = Math.Abs(sweepMeasured - degrees) <= RotationSetpointToleranceDegrees;
                                 WriteSweepRow(writer, step, targetReached ? "target_reached" : "telemetry",
                                     degrees, currentAngle, currentTilt, "", rotationResponse, tiltResponse);
                                 if (Math.Abs(currentTilt - baselineTilt) > 0.5)
@@ -758,6 +759,10 @@ internal static class Program
                 }
                 Console.WriteLine("angle before zero: " + zeroBaseline.ToString("F1", CultureInfo.InvariantCulture) + " deg");
                 Console.WriteLine("tilt before zero: " + tiltBaseline.ToString("F1", CultureInfo.InvariantCulture) + " deg");
+                if (Math.Abs(tiltBaseline) > MaxSafeTiltDegrees)
+                {
+                    throw new InvalidOperationException("Tilt exceeds the safe automatic-zero range of ±10 degrees; no axis was moved.");
+                }
                 string reply = await SendAndReadAsync(connection, "+CT,TOZERO;");
                 Console.WriteLine("+CT,TOZERO; => " + reply);
                 string tiltReply = await SendAndReadAsync(connection, "+CR,TOZERO;");
@@ -1063,8 +1068,8 @@ internal static class Program
 
     private static async Task PauseAfterCaptureAsync()
     {
-        Console.WriteLine("camera release and table-settle pause after frame: 3 seconds");
-        await Task.Delay(TimeSpan.FromSeconds(3));
+        Console.WriteLine("camera release and table-settle pause after frame: 2 seconds");
+        await Task.Delay(TimeSpan.FromSeconds(2));
     }
 
     private static void CaptureY16Pose(ScanCaptureOptions options, string prefix)
