@@ -1,7 +1,6 @@
 (() => {
   const MAX_PREVIEW_POINTS = 24000;
   const MAX_INTERACTIVE_SHADED_FACES = 8000;
-  const INTERACTIVE_RENDER_SCALE = 0.6;
   const VIEWPORT_MESH_DEFLECTION = 0.01;
   const formatCoordinate = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format;
   const meshEdgesCache = new WeakMap();
@@ -342,9 +341,7 @@
       const rect = canvas.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
       meshDepthValid = false;
-      const interactiveScale = Number.isFinite(geometry?.interactiveRenderScale)
-        ? Math.max(0.25, Math.min(1, geometry.interactiveRenderScale)) : INTERACTIVE_RENDER_SCALE;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2) * (drag ? interactiveScale : 1);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const width = Math.round(rect.width * dpr);
       const height = Math.round(rect.height * dpr);
       if (canvas.width !== width || canvas.height !== height) {

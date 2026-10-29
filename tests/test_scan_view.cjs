@@ -616,8 +616,8 @@ assert.match(styleCss, /\.scanner-map-alignment\s*\{[^}]*left:\s*82px;[^}]*botto
 assert.match(styleCss, /\.primary-grid:not\(\[data-view="scanning"\]\) #viewport-live-camera,[\s\S]*?#scanner-map-alignment \{ display: none !important; \}/,
   "scanner controls and overlays are hidden outside the Scanning tab");
 const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
-assert.match(scanViewSource, /interactiveRenderScale:\s*0\.25/,
-  "the live turntable lowers only its drag resolution while preserving depth visibility");
+assert.doesNotMatch(scanViewSource, /interactiveRenderScale/,
+  "the live turntable keeps full-resolution rendering while rotating");
 assert.match(appJs, /grid\?\.dataset\.view==='scanning'\)scanView\?\.showTurntable\(\)/,
   "entering Scanning shows the static table even when live preview is stopped");
 assert.match(projectUiJs, /if \(activeView === "scanning"\) \{\s*initializeScanningFrontView\(\);/,

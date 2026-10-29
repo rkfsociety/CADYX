@@ -47,7 +47,7 @@ function createStressScene(cells) {
   };
 }
 
-function createViewer(scene, { shaded, wireframe, interactiveRenderScale }) {
+function createViewer(scene, { shaded, wireframe }) {
   const eventHandlers = {};
   const animationFrames = [];
   const context = {
@@ -91,7 +91,7 @@ function createViewer(scene, { shaded, wireframe, interactiveRenderScale }) {
     wireframe,
   });
   const loadStarted = performance.now();
-  viewer.load({ ...scene, interactiveRenderScale });
+  viewer.load(scene);
   viewer.setCamera({ yaw: 0.68, pitch: 0.38, zoom: cameraZoom, projection: "orthographic" });
   const setupMs = performance.now() - loadStarted;
 
@@ -206,10 +206,6 @@ async function main() {
       { name: "edges-full", shaded: false, wireframe: true },
       { name: "shaded+edges-full", shaded: true, wireframe: true },
       { name: "shaded+edges-orbit", shaded: true, wireframe: true, orbit: true },
-      { name: "shaded+edges-orbit-depth-0.35", shaded: true, wireframe: true,
-        orbit: true, interactiveRenderScale: 0.35 },
-      { name: "shaded+edges-orbit-depth-0.25", shaded: true, wireframe: true,
-        orbit: true, interactiveRenderScale: 0.25 },
     ];
     for (const mode of modes) {
       const bench = createViewer(scene, mode);

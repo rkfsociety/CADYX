@@ -210,10 +210,8 @@ events.pointermove({ clientX: 300, clientY: 230 });
 assert.equal(animationFrames.length, 1, "A burst of camera events is coalesced into one animation frame");
 animationFrames.shift()(animationTime);
 assert.equal(renderCalls, initialRenderCalls + 1, "A camera event burst triggers one render, not one render per input event");
-assert.equal(canvas.width, 360, "Interactive orbit reduces the backing width while dragging");
-assert.equal(canvas.height, 240, "Interactive orbit reduces the backing height while dragging");
-assert.equal(canvas.width * canvas.height, 600 * 400 * 0.36,
-  "Interactive orbit rasterizes 36% as many pixels as the full-resolution viewport");
+assert.equal(canvas.width, 600, "Interactive orbit keeps the full backing width while dragging");
+assert.equal(canvas.height, 400, "Interactive orbit keeps the full backing height while dragging");
 const interactiveRenderCalls = renderCalls;
 events.pointerup();
 assert.equal(canvas.width, 600, "Releasing the pointer restores full-resolution width");
@@ -679,7 +677,7 @@ tablePreviewViewer.load({
 assert.deepEqual(drawnPointColors, ['#front-point'],
   'opaque table surfaces hide map and cloud points behind them');
 tablePreviewViewer.load({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], triangles: [0, 1, 2],
-  lines: [], points: [], interactiveRenderScale: 0.35,
+  lines: [], points: [],
   bounds: { min: [0, 0, 0], max: [1, 1, 0] } }, { reset: false });
 const rasterUploadsBeforeDrag = rasterUploads;
 const queuedFrameCount = animationFrames.length;
@@ -691,7 +689,8 @@ interactiveFrame();
 assert.ok(rasterUploads > rasterUploadsBeforeDrag,
   'scanner preview keeps the opaque depth buffer active while the camera moves');
 const rasterUploadsDuringDrag = rasterUploads;
-assert.equal(canvas.width, 210, 'scanner drag uses the reduced per-geometry render resolution');
+assert.equal(canvas.width, 600, 'scanner drag keeps the full-resolution viewport');
+assert.equal(canvas.height, 400, 'scanner drag keeps the full-resolution viewport height');
 events.pointerup({});
 assert.ok(rasterUploads > rasterUploadsDuringDrag,
   'full-resolution depth-correct rendering returns after camera movement stops');
@@ -721,7 +720,7 @@ const denseViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
   wireframe: false, shaded: true,
 });
 denseViewer.load({ positions: [0, 0, 0, 1, 0, 0, 2, 0, 0], triangles: denseTriangles,
-  lines: [0, 1], points: [], interactiveRenderScale: 0.25,
+  lines: [0, 1], points: [],
   bounds: { min: [0, 0, 0], max: [2, 0, 0] } });
 const denseUploadsBeforeDrag = rasterUploads;
 const denseFrameOffset = animationFrames.length;

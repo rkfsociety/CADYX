@@ -1056,7 +1056,6 @@
         style: { size: 12, opacity: 1, color: '#00d8ff', shape: 'circle' } });
       viewer.load({ positions: combinedPositions, triangles, triangleColors,
         lines: trajectoryLines, textLabels: degreeTextLabels, pointCloudVertexCount: cloudPointCount,
-        interactiveRenderScale: 0.25,
         pointPreviewLimit: LIVE_PREVIEW_POINT_LIMIT,
         pointCloudVertexRange: [firstCloudVertex, firstCloudVertex + cloudPointCount],
         hideWorldAxes: true, hideWorldGrid: true,
