@@ -111,6 +111,39 @@ async function testAssemblyDragAndHistory() {
   assert.equal(calls[1][0].type, "apply");
   assert.equal(calls[1][1].historyAction, "redo");
 
+  const integratedRequests = [], api = { refresh: async () => {} };
+  api.request = async (url, options = {}) => {
+    integratedRequests.push([url, options]);
+    if (!options.method) return { document: { revision: 3 }, lock: { state: "FREE" } };
+    if (url.endsWith("/leases")) return { lease: { lease_id: "lease:integrated" } };
+    if (url.endsWith("/commands")) return { history_entry: { result: {} } };
+    return {};
+  };
+  const instance = { id: "instance:a", translation: [0, 0, 0], rotation: [1, 0, 0, 0] };
+  const integrated = { assemblyDrag: { pointerId: 9, instance, moved: true,
+      currentLocal: { translation: [0, 0, 0], rotation: [1, 0, 0, 0] },
+      nextLocal: { translation: [4, 0, 0], rotation: [1, 0, 0, 0] } },
+    state: { project: "project:test", rev: 3, assemblyCoordinateMode: "local", selectedInstancePath: [] },
+    window: { cadyxApi: api }, crypto: { randomUUID: () => "drag-owner" },
+    assemblyUndo: [], assemblyRedo: [], assemblyLastRevision: null,
+    assemblyTransformTargets: (_instance, pose) => [{ ...pose, instance_id: instance.id }],
+    assemblyInstance: () => instance, instancePose: pose => ({ translation: pose.translation.slice(), rotation: pose.rotation.slice() }),
+    poseCompose: () => ({}), poseInverse: () => ({}), quatMultiply: () => [1, 0, 0, 0], quatInverse: () => [1, 0, 0, 0],
+    resetAssemblyHistory: () => {}, setAssemblyStatus: () => {}, clearAssemblyPreview: () => {}, };
+  vm.runInNewContext([
+    appFunction("executeAssemblyCommand", "    async function pickAssemblyGeometryFace"),
+    appFunction("commitAssemblyTransform", "    async function applyAssemblyTransform"),
+    appFunction("finishAssemblyGizmo", "    gizmoRoot.addEventListener"),
+    "this.finish=finishAssemblyGizmo;",
+  ].join("\n"), integrated);
+  await integrated.finish({ pointerId: 9 }, true);
+  const savedTransform = JSON.parse(integratedRequests[2][1].body);
+  assert.equal(savedTransform.command.type, "transform_assembly_instance");
+  assert.deepEqual(savedTransform.command.translation, [4, 0, 0]);
+  assert.equal(savedTransform.expected_revision, 3);
+  assert.match(integratedRequests[3][0], /release$/,
+    "pointer commit reaches Core through a lease and releases it");
+
   async function commandProtocol({ commandFails = false, revision = 12, lockState = "FREE" } = {}) {
     const requests = [], api = { refreshCount: 0, refresh: async () => { api.refreshCount++; } };
     api.request = async (url, options = {}) => {
