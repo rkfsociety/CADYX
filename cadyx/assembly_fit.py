@@ -26,6 +26,16 @@ def _nonnegative(value: Any, name: str) -> float:
     return result
 
 
+def _finite_number(value: Any) -> bool:
+    """Reject unbounded Python integers before math.isfinite can overflow."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
+
+
 def _samples(value: Any, graph: dict[str, Any]) -> list[dict[str, Any]]:
     if value is None:
         return []
@@ -52,7 +62,7 @@ def _samples(value: Any, graph: dict[str, Any]) -> list[dict[str, Any]]:
             for key in ("angle_deg", "offset_mm"):
                 if key in entry:
                     number = entry[key]
-                    if type(number) not in (int, float) or not math.isfinite(number):
+                    if not _finite_number(number):
                         raise ValidationError(f"{key} must be finite.")
             overrides.append(dict(entry))
         normalized.append({"joint_values": overrides})
@@ -87,9 +97,9 @@ def _classify(measured: dict[str, Any], required: float, tolerance: float) -> di
     distance = measured.get("minimum_distance")
     deflection = measured.get("deflection")
     volume = measured.get("intersection_volume")
-    if (type(distance) not in (float, int) or not math.isfinite(distance) or distance < 0
-            or type(deflection) not in (float, int) or not math.isfinite(deflection) or deflection <= 0
-            or type(volume) not in (float, int) or not math.isfinite(volume) or volume < 0
+    if (not _finite_number(distance) or distance < 0
+            or not _finite_number(deflection) or deflection <= 0
+            or not _finite_number(volume) or volume < 0
             or type(measured.get("inner_solution")) is not bool
             or type(measured.get("solution_count")) is not int or measured["solution_count"] < 1):
         raise ValidationError("OCCT returned invalid assembly-fit metrics.")
@@ -97,10 +107,12 @@ def _classify(measured: dict[str, Any], required: float, tolerance: float) -> di
     for field in ("point_on_first", "point_on_second"):
         point = measured.get(field)
         if (not isinstance(point, list) or len(point) != 3
-                or any(type(v) not in (int, float) or not math.isfinite(v) for v in point)):
+                or any(not _finite_number(v) for v in point)):
             raise ValidationError("OCCT returned invalid assembly-fit witness points.")
         witnesses.append([float(v) for v in point])
     lower, upper = max(0.0, distance - deflection), distance + deflection
+    if not math.isfinite(upper):
+        raise ValidationError("OCCT returned an overflowing assembly-fit distance interval.")
     threshold = max(0.0, required - tolerance)
     if measured["inner_solution"] or volume > deflection ** 3:
         interference = "interfering"
