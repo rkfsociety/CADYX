@@ -77,6 +77,7 @@ class AssemblyCommands:
             "parent_id": parent_id, "target_id": target["id"],
             "translation": translation.copy() if isinstance(translation, list) else translation,
             "rotation": rotation.copy() if isinstance(rotation, list) else rotation,
+            "grounded": False, "visible": True,
         }
         document.assembly["instances"].append(instance)
         validate_assembly(document.assembly, document.objects)
@@ -91,13 +92,39 @@ class AssemblyCommands:
                          if item["id"] == command["instance_id"]), None)
         if instance is None:
             raise NotFoundError("Assembly instance does not exist.")
+        if instance["grounded"]:
+            raise ValidationError("A grounded assembly instance cannot be moved; unground it first.")
         for key in ("translation", "rotation"):
             if key in command:
                 instance[key] = command[key].copy() if isinstance(command[key], list) else command[key]
-        diagnostics = solve_assembly_mates(document.assembly, anchor_instance_id=instance["id"])
+        diagnostics = solve_assembly_mates(
+            document.assembly, anchor_instance_id=instance["id"], require_unfixed_anchor=True
+        )
         validate_assembly(document.assembly, document.objects)
         return {"instance_id": instance["id"], "translation": instance["translation"],
                 "rotation": instance["rotation"], "kinematics": diagnostics}
+
+    @staticmethod
+    def _set_assembly_instance_properties(document: Document, command: dict[str, Any]) -> dict[str, Any]:
+        _fields(command, {"instance_id"}, {"name", "grounded", "visible"})
+        if len(command) == 2:
+            raise ValidationError("Instance properties require at least one changed field.")
+        instance = next((item for item in document.assembly["instances"]
+                         if item["id"] == command["instance_id"]), None)
+        if instance is None:
+            raise NotFoundError("Assembly instance does not exist.")
+        if "name" in command:
+            instance["name"] = _text(command["name"], "Instance name")
+        for key in ("grounded", "visible"):
+            if key in command:
+                if type(command[key]) is not bool:
+                    raise ValidationError(f"Instance {key} must be boolean.")
+                instance[key] = command[key]
+        diagnostics = solve_assembly_mates(document.assembly)
+        validate_assembly(document.assembly, document.objects)
+        return {"instance_id": instance["id"], "name": instance["name"],
+                "grounded": instance["grounded"], "visible": instance["visible"],
+                "kinematics": diagnostics}
 
     @staticmethod
     def _remove_assembly_instance(document: Document, command: dict[str, Any]) -> dict[str, Any]:
@@ -200,6 +227,7 @@ COMMAND_HANDLERS = {
     "create_subassembly": _call("_create_subassembly"),
     "add_assembly_instance": _call("_add_assembly_instance"),
     "transform_assembly_instance": _call("_transform_assembly_instance"),
+    "set_assembly_instance_properties": _call("_set_assembly_instance_properties"),
     "remove_assembly_instance": _call("_remove_assembly_instance"),
     "remove_assembly_component": _call("_remove_assembly_component"),
     "add_assembly_mate": _call("_add_assembly_mate"),

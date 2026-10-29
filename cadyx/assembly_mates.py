@@ -129,7 +129,8 @@ def _matches(a: dict[str, Any], b: dict[str, Any]) -> bool:
 
 
 def solve_assembly_mates(graph: dict[str, Any], *,
-                         anchor_instance_id: str | None = None) -> dict[str, Any]:
+                         anchor_instance_id: str | None = None,
+                         require_unfixed_anchor: bool = False) -> dict[str, Any]:
     """Solve placements in parent-local frames; mutate only after closure checks."""
     validate_mate_records(graph)
     instances = {item["id"]: item for item in graph["instances"]}
@@ -149,10 +150,12 @@ def solve_assembly_mates(graph: dict[str, Any], *,
     internal_dof = 0
     redundant: set[str] = set()
     used: set[str] = set()
-    order = sorted(instances)
-    if anchor_instance_id is not None:
-        order.remove(anchor_instance_id)
-        order.insert(0, anchor_instance_id)
+    grounded = sorted(ident for ident, item in instances.items() if item["grounded"])
+    preferred = [anchor_instance_id] if anchor_instance_id is not None else []
+    order = grounded + [ident for ident in preferred if ident not in grounded] + [
+        ident for ident in sorted(instances)
+        if ident not in grounded and ident not in preferred
+    ]
     for root in order:
         if root in solutions:
             continue
@@ -173,10 +176,29 @@ def solve_assembly_mates(graph: dict[str, Any], *,
                     if mate["id"] not in used:
                         redundant.add(mate["id"])
                 else:
+                    if instances[other]["grounded"] and not _matches(
+                        _pose(instances[other]["translation"], instances[other]["rotation"]),
+                        candidate,
+                    ):
+                        raise ValidationError(
+                            f"Conflicting grounded instance {other} at mate {mate['id']}; "
+                            "its saved pose does not satisfy the assembly connection."
+                        )
                     solutions[other] = candidate
                     queue.append(other)
                     internal_dof += MATE_DOF[mate["kind"]]
                 used.add(mate["id"])
+
+        if require_unfixed_anchor and root != anchor_instance_id:
+            if anchor_instance_id in solutions and any(
+                item["grounded"] and item["id"] in solutions
+                for item in instances.values()
+                if item["id"] != anchor_instance_id
+            ):
+                raise ValidationError(
+                    f"Cannot move {anchor_instance_id}: its assembly group contains a grounded instance; "
+                    "change a joint coordinate instead."
+                )
 
     # Only commit placements when every closure is verified.
     for ident, pose in solutions.items():
@@ -187,8 +209,11 @@ def solve_assembly_mates(graph: dict[str, Any], *,
             "underconstrained" if internal_dof or len(anchors) > 1 else "fully_mated"),
         "anchor_instance_ids": anchors,
         "component_count": len(anchors),
-        "global_dof": 6 * len(anchors),
+        "global_dof": sum(0 if instances[root]["grounded"] else 6 for root in anchors),
         "internal_dof": internal_dof,
+        "grounded_instance_ids": sorted(
+            ident for ident, item in instances.items() if item["grounded"]
+        ),
         "redundant_mate_ids": sorted(redundant),
         "instance_poses": [
             {"instance_id": ident, "translation": solutions[ident]["translation"].copy(),

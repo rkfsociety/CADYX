@@ -8,7 +8,7 @@
 
 ### Формат хранения проекта v1
 
-Оболочка проекта v1 отделена от версии документа модели, сейчас v12. Авторитетное состояние сохраняет ProjectWorkspace, атомарно заменяя `project.json`; служебная история, B-rep и блокировки имеют собственные файлы. Пользовательские исходники в `projects/` нужно сохранять и резервировать независимо от Git. Изменения выполняются только через Core/Command System с защитой ревизии и блокировки. Старые версии мигрируют по правилам `cadyx/migrations.py`; чтение не даёт разрешения переписывать исходные файлы.
+Оболочка проекта v1 отделена от версии документа модели, сейчас v13. Авторитетное состояние сохраняет ProjectWorkspace, атомарно заменяя `project.json`; служебная история, B-rep и блокировки имеют собственные файлы. Пользовательские исходники в `projects/` нужно сохранять и резервировать независимо от Git. Изменения выполняются только через Core/Command System с защитой ревизии и блокировки. Старые версии мигрируют по правилам `cadyx/migrations.py`; чтение не даёт разрешения переписывать исходные файлы.
 
 Новые проекты помечаются типом `single_model` (одиночная модель) или `assembly` (сборка). Для старых записей без поля тип определяется по графу сборки.
 
@@ -30,13 +30,13 @@ Every project lives at `projects/<project-name>/project.json`. Newly created pro
   "modified_at": "<UTC ISO-8601>",
   "document": {
     "id": "document:<uuid>",
-    "version": 12,
+    "version": 13,
     "revision": 0,
     "objects": [],
     "model_parameters": {},
     "parameter_bindings": [],
     "assembly": {
-      "version": 3,
+      "version": 4,
       "units": "mm",
       "parts": [],
       "subassemblies": [],
@@ -99,13 +99,13 @@ Agent stop fences and resumed-lease revision protection are stored separately
 in `.cadyx-agent.sqlite3`; they do not change the portable schema. See the
 [stop/resume contract](architecture.md#safe-agent-stop-and-resume).
 
-The project envelope remains version 1; the current nested document uses version **12** (`cadyx/migrations.py`).
-Legacy document v1 through v11 snapshots are upgraded **in memory** on read and
+The project envelope remains version 1; the current nested document uses version **13** (`cadyx/migrations.py`).
+Legacy document v1 through v12 snapshots are upgraded **in memory** on read and
 persisted only by a successful command. See [Document Model v7](document-model-v7.md)
 for the base object graph, [v8](document-model-v8.md) for named parameters,
 [v9](document-model-v9.md) for assemblies, [v10](document-model-v10.md) for mates,
-[v11](document-model-v11.md) for materials, and [v12](../../docs/sketch-workplanes.md)
-for editable YZ, custom and face-attached sketch work planes.
+[v11](document-model-v11.md) for materials, [v12](../../docs/sketch-workplanes.md)
+for editable work planes, and [v13](document-model-v13.md) for assembly instance state.
 
 Box geometry is stored as a JSON descriptor with its kernel id, dimensions, and measured volume. New descriptors use `occt-v1`; Open CASCADE reconstructs the B-rep from dimensions and checks its validity when creating or validating a project. Native kernel objects are not serialized. Existing `primitive-v1` box descriptors remain readable and are checked by rebuilding the corresponding Open CASCADE solid.
 
@@ -116,7 +116,7 @@ steps. Project-envelope and document versions are independent: migrate the
 envelope first, then the nested document. The envelope is still v1 (no envelope
 step is needed); the supported document steps are v1 to v2, v2 to v3, v3 to v4,
 v4 to v5, v5 to v6, v6 to v7, v7 to v8, v8 to v9, v9 to v10,
-v10 to v11, and v11 to v12. New schema changes
+v10 to v11, v11 to v12, and v12 to v13. New schema changes
 must add each required consecutive step instead of relabelling an unknown
 snapshot. Missing steps, unsupported versions (including future versions), and
 non-integer version tags are errors.

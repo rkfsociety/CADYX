@@ -4,7 +4,7 @@
 
 ## Русский
 
-Источник истины — текущий код `main`, прежде всего `cadyx/migrations.py`, `cadyx/capabilities.py`, `cadyx/web_routes.py`, `cadyx/api_contracts.py` и тесты. Карта служит навигацией, а не дополнительной спецификацией. Оболочка проекта — **v1**, документ — **v12**, граф сборки — **v3**. Старые версии контрактов описывают возможности на момент их введения; поздние версии могут менять ограничения.
+Источник истины — текущий код `main`, прежде всего `cadyx/migrations.py`, `cadyx/capabilities.py`, `cadyx/web_routes.py`, `cadyx/api_contracts.py` и тесты. Карта служит навигацией, а не дополнительной спецификацией. Оболочка проекта — **v1**, документ — **v13**, граф сборки — **v4**. Старые версии контрактов описывают возможности на момент их введения; поздние версии могут менять ограничения.
 
 ### Начало работы
 
@@ -21,7 +21,7 @@
 | Плоскости эскизов, документ v12 | [XY/XZ/YZ, CUSTOM и FACE](sketch-workplanes.md) |
 | Профили и зависимые тела | [Базовый контракт v7](../.codex/docs/document-model-v7.md), [сложные тела EN](advanced-solid-modeling.md) · [RU](advanced-solid-modeling.ru.md), [трассировка кривых EN](../.codex/docs/curve-editing.md) · [RU](../.codex/docs/curve-editing.ru.md) |
 | Параметры и перестроение | [Документ v8 EN](../.codex/docs/document-model-v8.md) · [RU](../.codex/docs/document-model-v8.ru.md) |
-| Сборки, сопряжения и материалы | [v9 EN](../.codex/docs/document-model-v9.md) · [RU](../.codex/docs/document-model-v9.ru.md), [v10 EN](../.codex/docs/document-model-v10.md) · [RU](../.codex/docs/document-model-v10.ru.md), [v11 EN](../.codex/docs/document-model-v11.md) · [RU](../.codex/docs/document-model-v11.ru.md) |
+| Сборки, сопряжения, материалы, закрепление и видимость экземпляров | [v9 EN](../.codex/docs/document-model-v9.md) · [RU](../.codex/docs/document-model-v9.ru.md), [v10 EN](../.codex/docs/document-model-v10.md) · [RU](../.codex/docs/document-model-v10.ru.md), [v11 EN](../.codex/docs/document-model-v11.md) · [RU](../.codex/docs/document-model-v11.ru.md), [v13 EN](../.codex/docs/document-model-v13.md) · [RU](../.codex/docs/document-model-v13.ru.md) |
 | Масса и зазоры сборки | [Масса EN](assembly-mass.md) · [RU](assembly-mass.ru.md), [положения EN](assembly-fit.md) · [RU](assembly-fit.ru.md) |
 | Проверка геометрии | [Инженерные проверки EN](engineering-validation.md) · [RU](engineering-validation.ru.md), [спецификации модели EN](../.codex/docs/model-specifications.md) · [RU](../.codex/docs/model-specifications.ru.md), [проверка проекта EN](../.codex/docs/project-checks.md) · [RU](../.codex/docs/project-checks.ru.md) |
 | История ревизий | [Сравнение моделей EN](revision-comparison.md) · [RU](revision-comparison.ru.md) |
@@ -47,7 +47,7 @@ README, эта карта, руководства участия, безопас
 
 ## English
 
-**Source of truth:** current `main` implementation, particularly `cadyx/migrations.py`, `cadyx/capabilities.py`, `cadyx/web_routes.py`, `cadyx/api_contracts.py` and the tests. This map is an entry point, **not** an extra versioned specification. The project envelope is **v1**, the document schema is **v12**, and the assembly graph schema is **v3** (introduced in Document v11). Older document-model files record an introduction-era contract; later versions can supersede their stated limitations.
+**Source of truth:** current `main` implementation, particularly `cadyx/migrations.py`, `cadyx/capabilities.py`, `cadyx/web_routes.py`, `cadyx/api_contracts.py` and the tests. This map is an entry point, **not** an extra versioned specification. The project envelope is **v1**, the document schema is **v13**, and the assembly graph schema is **v4**. Older document-model files record an introduction-era contract; later versions can supersede their stated limitations.
 
 ## Get started and operate
 
@@ -66,7 +66,7 @@ README, эта карта, руководства участия, безопас
 | Sketch work planes, Document v12 | [Named YZ, CUSTOM and FACE EN](sketch-workplanes.md) · [RU](sketch-workplanes.ru.md) |
 | Sketch profiles and dependent solids | [Document v7 base contract](../.codex/docs/document-model-v7.md) · [RU](../.codex/docs/document-model-v7.ru.md), [advanced solids](advanced-solid-modeling.md) · [RU](advanced-solid-modeling.ru.md), [curve tracing](../.codex/docs/curve-editing.md) · [RU](../.codex/docs/curve-editing.ru.md) |
 | Parameters and atomic rebuilds | [Document v8](../.codex/docs/document-model-v8.md) · [RU](../.codex/docs/document-model-v8.ru.md) |
-| Assembly graph, mates, materials | [v9 EN](../.codex/docs/document-model-v9.md) · [RU](../.codex/docs/document-model-v9.ru.md), [v10 EN](../.codex/docs/document-model-v10.md) · [RU](../.codex/docs/document-model-v10.ru.md), [v11 EN](../.codex/docs/document-model-v11.md) · [RU](../.codex/docs/document-model-v11.ru.md) |
+| Assembly graph, mates, materials, instance grounding and visibility | [v9 EN](../.codex/docs/document-model-v9.md) · [RU](../.codex/docs/document-model-v9.ru.md), [v10 EN](../.codex/docs/document-model-v10.md) · [RU](../.codex/docs/document-model-v10.ru.md), [v11 EN](../.codex/docs/document-model-v11.md) · [RU](../.codex/docs/document-model-v11.ru.md), [v13 EN](../.codex/docs/document-model-v13.md) · [RU](../.codex/docs/document-model-v13.ru.md) |
 | Assembly properties and fit | [Mass/inertia](assembly-mass.md), [discrete-pose fit](assembly-fit.md) |
 | Geometry verification | [Engineering validation](engineering-validation.md), [model specifications](../.codex/docs/model-specifications.md), [project checks](../.codex/docs/project-checks.md) |
 | Revision history and comparison | [Revision diff](revision-comparison.md) |
@@ -85,7 +85,8 @@ README, эта карта, руководства участия, безопас
 - [Document v9](../.codex/docs/document-model-v9.md): assembly graph v1.
 - [Document v10](../.codex/docs/document-model-v10.md): assembly mates, graph v2.
 - [Document v11](../.codex/docs/document-model-v11.md) · [RU](../.codex/docs/document-model-v11.ru.md): material records, graph v3.
-- [Document v12 EN](../.codex/docs/document-model-v12.md) · [RU](../.codex/docs/document-model-v12.ru.md): current-schema entry point and [persistent work-plane frames](sketch-workplanes.md).
+- [Document v12 EN](../.codex/docs/document-model-v12.md) · [RU](../.codex/docs/document-model-v12.ru.md): persistent work-plane frames.
+- [Document v13 EN](../.codex/docs/document-model-v13.md) · [RU](../.codex/docs/document-model-v13.ru.md): current-schema entry point and assembly occurrence state.
 
 ## Validation and scope
 

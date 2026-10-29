@@ -883,6 +883,7 @@ class WebApiTests(unittest.TestCase):
         advertised = {item["type"] for item in capabilities["commands"]}
         self.assertEqual(len(advertised), len(capabilities["commands"]))
         self.assertIn("import_project_point_cloud", advertised)
+        self.assertIn("set_assembly_instance_properties", advertised)
 
         self.assertIn("add_sketch_circle_tangent_to_line", advertised)
         self.assertIn("add_sketch_circle_tangent_to_two_lines", advertised)

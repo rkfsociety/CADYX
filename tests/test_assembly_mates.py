@@ -124,18 +124,29 @@ class AssemblyMateTests(unittest.TestCase):
         self.run_command("remove_assembly_mate", mate_id=mate_id)
         self.run_command("remove_assembly_instance", instance_id=self.b)
 
+    def test_joint_update_cannot_move_another_grounded_instance(self):
+        mate_id = self.run_command("add_assembly_mate", kind="slider",
+                                   a_instance_id=self.a, b_instance_id=self.b)["mate_id"]
+        self.run_command("set_assembly_instance_properties", instance_id=self.a, grounded=True)
+        self.run_command("set_assembly_instance_properties", instance_id=self.b, grounded=True)
+        with self.assertRaisesRegex(ValidationError, "Conflicting grounded instance"):
+            self.run_command("set_assembly_mate", mate_id=mate_id, offset_mm=5)
+
     def test_migrate_v9_preserves_existing_instances(self):
         old = self.document.to_dict()
         old["version"] = 9
         old["assembly"].pop("mates")
         for part in old["assembly"]["parts"]:
             part.pop("material")
+        for instance in old["assembly"]["instances"]:
+            instance.pop("grounded")
+            instance.pop("visible")
         old["assembly"]["version"] = 1
         before = copy.deepcopy(old)
         upgraded = migrate_document(old)
         self.assertEqual(old, before)
         self.assertEqual(upgraded["version"], DOCUMENT_VERSION)
-        self.assertEqual(upgraded["assembly"]["version"], 3)
+        self.assertEqual(upgraded["assembly"]["version"], 4)
         self.assertEqual(upgraded["assembly"]["mates"], [])
         self.assertEqual(Document.from_dict(upgraded).to_dict(), upgraded)
 
@@ -156,7 +167,14 @@ class AssemblyMateTests(unittest.TestCase):
             b = execute({"type": "add_assembly_instance", "target_id": part})["instance_id"]
             execute({"type": "add_assembly_mate", "kind": "fixed",
                      "a_instance_id": a, "b_instance_id": b})
+            execute({"type": "set_assembly_instance_properties", "instance_id": b,
+                     "grounded": True, "visible": False})
             snapshot = core.inspect_project(project_id)
             self.assertEqual(snapshot["assembly_kinematics"]["internal_dof"], 0)
+            self.assertEqual(snapshot["assembly_kinematics"]["global_dof"], 0)
             self.assertEqual(len(snapshot["document"]["assembly"]["mates"]), 1)
+            saved = {instance["id"]: instance
+                     for instance in snapshot["document"]["assembly"]["instances"]}[b]
+            self.assertTrue(saved["grounded"])
+            self.assertFalse(saved["visible"])
             core.release_lease(project_id, lease_id)

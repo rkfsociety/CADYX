@@ -10,7 +10,7 @@ from typing import Any, Callable
 from .errors import ValidationError
 
 PROJECT_VERSION = 1
-DOCUMENT_VERSION = 12
+DOCUMENT_VERSION = 13
 
 
 def _document_v1_to_v2(value: dict[str, Any]) -> None:
@@ -120,12 +120,28 @@ def _document_v11_to_v12(value: dict[str, Any]) -> None:
     value["version"] = 12
 
 
+def _document_v12_to_v13(value: dict[str, Any]) -> None:
+    graph = value.get("assembly")
+    if (not isinstance(graph, dict) or graph.get("version") != 3
+            or not isinstance(graph.get("instances"), list)):
+        raise ValidationError("Document v12 requires an assembly v3 graph.")
+    for instance in graph["instances"]:
+        if not isinstance(instance, dict) or set(instance) != {
+            "id", "name", "parent_id", "target_id", "translation", "rotation"
+        }:
+            raise ValidationError("Document v12 has an invalid assembly instance.")
+        instance["grounded"] = False
+        instance["visible"] = True
+    graph["version"] = 4
+    value["version"] = 13
+
+
 _DOCUMENT_STEPS = {1: _document_v1_to_v2, 2: _document_v2_to_v3,
                    3: _document_v3_to_v4, 4: _document_v4_to_v5,
                    5: _document_v5_to_v6, 6: _document_v6_to_v7,
                    7: _document_v7_to_v8, 8: _document_v8_to_v9,
                    9: _document_v9_to_v10, 10: _document_v10_to_v11,
-                   11: _document_v11_to_v12}
+                   11: _document_v11_to_v12, 12: _document_v12_to_v13}
 _PROJECT_STEPS: dict[int, Callable[[dict[str, Any]], None]] = {}
 
 

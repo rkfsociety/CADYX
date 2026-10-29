@@ -32,7 +32,7 @@ class AssemblyTests(unittest.TestCase):
         new = migrate_document(old)
         self.assertEqual(old, before)
         self.assertEqual(new["version"], DOCUMENT_VERSION)
-        self.assertEqual(new["assembly"], {"version": 3, "units": "mm",
+        self.assertEqual(new["assembly"], {"version": 4, "units": "mm",
                                          "parts": [], "subassemblies": [], "instances": [], "mates": []})
         self.assertEqual(Document.from_dict(new).to_dict(), new)
 
@@ -86,6 +86,45 @@ class AssemblyTests(unittest.TestCase):
             self.cmd("remove_assembly_component", component_id=part)
         self.cmd("remove_assembly_instance", instance_id=instance)
         self.cmd("remove_assembly_component", component_id=part)
+
+    def test_grounded_instance_is_fixed_and_reported(self):
+        body = self.cmd("create_box", width=1, height=1, depth=1)["body_id"]
+        part = self.cmd("create_assembly_part", body_id=body)["part_id"]
+        instance = self.cmd("add_assembly_instance", target_id=part)["instance_id"]
+        result = self.cmd("set_assembly_instance_properties", instance_id=instance,
+                          grounded=True)
+        self.assertEqual(result["kinematics"]["grounded_instance_ids"], [instance])
+        self.assertEqual(result["kinematics"]["global_dof"], 0)
+        with self.assertRaisesRegex(ValidationError, "grounded assembly instance"):
+            self.cmd("transform_assembly_instance", instance_id=instance,
+                     translation=[3, 0, 0])
+        self.cmd("set_assembly_instance_properties", instance_id=instance, grounded=False)
+        moved = self.cmd("transform_assembly_instance", instance_id=instance,
+                         translation=[3, 0, 0])
+        self.assertEqual(moved["translation"], [3, 0, 0])
+
+    def test_grounded_member_rejects_rigid_group_transform(self):
+        body = self.cmd("create_box", width=1, height=1, depth=1)["body_id"]
+        part = self.cmd("create_assembly_part", body_id=body)["part_id"]
+        a = self.cmd("add_assembly_instance", target_id=part)["instance_id"]
+        b = self.cmd("add_assembly_instance", target_id=part, translation=[4, 0, 0])["instance_id"]
+        self.commands.execute(self.document, {"type": "add_assembly_mate", "kind": "fixed",
+                                             "a_instance_id": a, "b_instance_id": b})
+        self.cmd("set_assembly_instance_properties", instance_id=a, grounded=True)
+        with self.assertRaisesRegex(ValidationError, "group contains a grounded instance"):
+            self.cmd("transform_assembly_instance", instance_id=b, translation=[2, 0, 0])
+
+    def test_hidden_subassembly_occurrence_is_omitted_from_scene(self):
+        body = self.cmd("create_box", width=1, height=1, depth=1)["body_id"]
+        part = self.cmd("create_assembly_part", body_id=body)["part_id"]
+        sub = self.cmd("create_subassembly", name="Hidden group")["subassembly_id"]
+        self.cmd("add_assembly_instance", target_id=part, parent_id=sub)
+        root = self.cmd("add_assembly_instance", target_id=sub)["instance_id"]
+        self.assertEqual(len(flatten_assembly(self.document.assembly)), 1)
+        self.cmd("set_assembly_instance_properties", instance_id=root, visible=False)
+        self.assertEqual(flatten_assembly(self.document.assembly), [])
+        scene = render_scene(self.document, self.kernel)
+        self.assertFalse(any("instance_path" in item for item in scene["objects"]))
 
     def test_quaternion_transform(self):
         q = [math.sqrt(0.5), 0, 0, math.sqrt(0.5)]

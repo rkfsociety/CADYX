@@ -6,7 +6,7 @@ from typing import Any
 
 from .errors import ValidationError
 
-ASSEMBLY_VERSION = 3
+ASSEMBLY_VERSION = 4
 IDENTITY_ROTATION = [1.0, 0.0, 0.0, 0.0]
 IDENTITY_TRANSLATION = [0.0, 0.0, 0.0]
 
@@ -97,9 +97,12 @@ def validate_assembly(graph: Any, objects: list[dict[str, Any]]) -> None:
     edges: dict[str, set[str]] = {sub: set() for sub in subassemblies}
     for instance in graph["instances"]:
         if not isinstance(instance, dict) or set(instance) != {
-            "id", "name", "parent_id", "target_id", "translation", "rotation"
+            "id", "name", "parent_id", "target_id", "translation", "rotation",
+            "grounded", "visible",
         }:
             raise ValidationError("Assembly instance record has invalid fields.")
+        if type(instance["grounded"]) is not bool or type(instance["visible"]) is not bool:
+            raise ValidationError("Assembly instance grounded and visible fields must be boolean.")
         _name(instance, "Instance")
         ident = instance["id"]
         if not isinstance(ident, str) or not ident.startswith("instance:") or not ident[9:] or ident in instance_ids:
@@ -170,10 +173,14 @@ def flatten_assembly(graph: dict[str, Any], *, limit: int = 4096) -> list[dict[s
     leaves: list[dict[str, Any]] = []
 
     def walk(parent: str | None, path: tuple[str, ...],
-             translation: list[float], rotation: list[float], depth: int) -> None:
+             translation: list[float], rotation: list[float], depth: int,
+             visible: bool = True) -> None:
         if depth > 32:
             raise ValidationError("Assembly nesting exceeds 32 viewport levels.")
         for instance in children.get(parent, []):
+            instance_visible = visible and instance["visible"]
+            if not instance_visible:
+                continue
             next_path = (*path, instance["id"])
             next_translation = transform_point(instance["translation"], translation, rotation)
             next_rotation = _multiply(rotation, instance["rotation"])
@@ -186,7 +193,8 @@ def flatten_assembly(graph: dict[str, Any], *, limit: int = 4096) -> list[dict[s
                                "body_id": parts[target]["body_id"], "name": instance["name"],
                                "translation": next_translation, "rotation": next_rotation})
             else:
-                walk(target, next_path, next_translation, next_rotation, depth + 1)
+                walk(target, next_path, next_translation, next_rotation, depth + 1,
+                     instance_visible)
 
     walk(None, (), IDENTITY_TRANSLATION, IDENTITY_ROTATION, 0)
     return leaves

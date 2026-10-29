@@ -6,13 +6,13 @@
 
 ### Исторический контракт документа v4
 
-Этот документ сохраняет исходное описание схемы v4, её эскизов, геометрии и команд. Он нужен для понимания совместимости и эволюции модели, а не для определения текущего полного API. Актуальная схема — v12 по `cadyx/migrations.py`; последующие контракты могут заменять ограничения v4. Текущие команды проверяйте через discovery и реализацию. Исходные примеры и подробности схемы оставлены ниже на английском.
+Этот документ сохраняет исходное описание схемы v4, её эскизов, геометрии и команд. Он нужен для понимания совместимости и эволюции модели, а не для определения текущего полного API. Актуальная схема — v13 по `cadyx/migrations.py`; последующие контракты могут заменять ограничения v4. Текущие команды проверяйте через discovery и реализацию. Исходные примеры и подробности схемы оставлены ниже на английском.
 
 Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
 
 ## English reference
 
-> **Versioned contract (4), not the current schema.** This document records the behavior introduced with Document v4. Current saved documents use **v12**; the project envelope remains v1. Read the [current documentation map](../../docs/README.md) and subsequent version contracts before interpreting introduction-era limits as current restrictions. The historical command/schema examples below are retained for migration and compatibility work.
+> **Versioned contract (4), not the current schema.** This document records the behavior introduced with Document v4. Current saved documents use **v13**; the project envelope remains v1. Read the [current documentation map](../../docs/README.md) and subsequent version contracts before interpreting introduction-era limits as current restrictions. The historical command/schema examples below are retained for migration and compatibility work.
 
 
 The project envelope remains `cadyx-project` version 1. New documents use version
