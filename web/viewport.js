@@ -199,7 +199,7 @@
     let selectedBodyIds = new Set();
     let selectedFaceIds = new Set();
     let selectedFeatureId = null;
-    let cameraOrientation = cameraMatrixFromYawPitch(0.68, 0.38);
+    let cameraOrientation = cameraMatrixFromYawPitch(Math.PI / 4, Math.atan(1 / Math.sqrt(2)));
     let zoom = 1;
     let cameraPanX = 0;
     let cameraPanY = 0;
@@ -1542,7 +1542,7 @@
     new ResizeObserver(render).observe(canvas);
 
     function resetView() {
-      cameraOrientation = cameraMatrixFromYawPitch(0.68, 0.38);
+      cameraOrientation = cameraMatrixFromYawPitch(Math.PI / 4, Math.atan(1 / Math.sqrt(2)));
       zoom = 1;
       cameraPanX = 0;
       cameraPanY = 0;

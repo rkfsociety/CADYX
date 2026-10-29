@@ -18,6 +18,7 @@ from tools.revopoint.preprocess_scan_frame import (
     verified_preprocessed_frame, watch_capture,
 )
 from tools.revopoint.register_point_clouds_first_frame import source_paths
+from tools.revopoint.register_point_clouds_first_frame import transform_points_to_table_map
 
 
 class PointCloudRegistrationInputTests(unittest.TestCase):
@@ -29,6 +30,28 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
         return ("ply\nformat ascii 1.0\nelement vertex 148\n"
                 "property float x\nproperty float y\nproperty float z\nend_header\n" +
                 "".join(f"{x} {y} {z}\n" for x, y, z in points)).encode("ascii")
+
+    def test_frame_zero_marker_fit_rebases_fused_cloud_to_table_xy(self) -> None:
+        frame = {
+            "scanner_table_plane_origin": [1.0, 2.0, 3.0],
+            "scanner_table_plane_axes": {
+                "x": [0.0, 1.0, 0.0],
+                "y": [0.0, 0.0, 1.0],
+                "z": [1.0, 0.0, 0.0],
+            },
+            "map_similarity": {
+                "a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0,
+                "tx": 10.0, "ty": -5.0, "scale": 2.0,
+            },
+        }
+        source = np.asarray([[1.0, 2.0, 3.0], [5.0, 4.0, 6.0],
+                             [0.0, 2.0, 3.0], [-2.0, 2.0, 3.0]])
+
+        aligned, clipped = transform_points_to_table_map(source, frame)
+
+        self.assertEqual(clipped, 1)
+        np.testing.assert_allclose(aligned, [[10.0, -5.0, 0.0], [14.0, 1.0, 8.0],
+                                             [10.0, -5.0, 0.0]])
 
     def test_source_frame_is_cleaned_before_registration(self) -> None:
         surface = np.array([(x, y, 0.0) for x in range(12) for y in range(12)], dtype=np.float64)

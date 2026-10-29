@@ -68,6 +68,17 @@ assert.deepEqual({ ...helpers.CAMERA_PRESETS.front }, { yaw: 0, pitch: 0 },
   "the front preset looks along global Y with X horizontal and global Z vertical");
 assert.deepEqual({ ...helpers.CAMERA_PRESETS.right }, { yaw: Math.PI / 2, pitch: 0 },
   "the right preset looks along global X while keeping global Z vertical");
+assert.equal(helpers.CAMERA_PRESETS.isometric.yaw, Math.PI / 4);
+assert.equal(helpers.CAMERA_PRESETS.isometric.pitch, Math.atan(1 / Math.sqrt(2)));
+const isoOrientation = helpers.cameraMatrixFromYawPitch(
+  helpers.CAMERA_PRESETS.isometric.yaw, helpers.CAMERA_PRESETS.isometric.pitch);
+const projectedAxisLengths = [0, 1, 2].map(axis => {
+  const horizontal = isoOrientation[axis];
+  const vertical = isoOrientation[6 + axis];
+  return Math.hypot(horizontal, vertical);
+});
+assert.ok(projectedAxisLengths.every(length => Math.abs(length - projectedAxisLengths[0]) < 1e-12),
+  "the isometric camera projects global X, Y and Z axes to equal lengths");
 const frontOrientation = helpers.cameraMatrixFromYawPitch(
   helpers.CAMERA_PRESETS.front.yaw, helpers.CAMERA_PRESETS.front.pitch);
 assert.deepEqual(Array.from(frontOrientation.slice(0, 3)), [1,0,0], "front view keeps global X horizontal");

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -19,6 +20,38 @@ if str(REPOSITORY) not in sys.path:
 from tools.revopoint.preprocess_scan_frame import preprocess_points, verified_preprocessed_frame
 
 _RUN_ID = re.compile(r"^revopoint_\d{8}T\d{6}Z$")
+
+
+def transform_points_to_table_map(points: np.ndarray, frame: dict[str, Any],
+                                 clip_below_table: float = -2.5) -> tuple[np.ndarray, int]:
+    """Rebase first-frame points through its marker fit into the table-map XY frame."""
+    point_array = np.asarray(points, dtype=np.float64)
+    if point_array.ndim != 2 or point_array.shape[1] != 3 or not np.isfinite(point_array).all():
+        raise ValueError("point cloud must be a finite Nx3 array")
+    try:
+        origin = np.asarray(frame["scanner_table_plane_origin"], dtype=np.float64)
+        axes = frame["scanner_table_plane_axes"]
+        basis = np.asarray([axes["x"], axes["y"], axes["z"]], dtype=np.float64)
+        similarity = frame["map_similarity"]
+        a, b, c, d, tx, ty, scale = (float(similarity[key]) for key in
+                                      ("a", "b", "c", "d", "tx", "ty", "scale"))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("frame-zero marker transform is incomplete") from error
+    if (origin.shape != (3,) or basis.shape != (3, 3)
+            or not np.isfinite(origin).all() or not np.isfinite(basis).all()
+            or not np.allclose(basis @ basis.T, np.eye(3), atol=1e-3)
+            or np.linalg.det(basis) < 0.999
+            or not all(math.isfinite(value) for value in (a, b, c, d, tx, ty, scale))
+            or scale <= 0 or not math.isfinite(clip_below_table)):
+        raise ValueError("frame-zero marker transform is not a finite right-handed orthonormal frame")
+
+    local = (point_array - origin) @ basis.T
+    mapped_z = local[:, 2] * scale
+    keep = mapped_z >= clip_below_table
+    mapped = np.column_stack((a * local[:, 0] + b * local[:, 1] + tx,
+                              c * local[:, 0] + d * local[:, 1] + ty,
+                              np.maximum(mapped_z, 0.0)))
+    return mapped[keep], int(np.count_nonzero(~keep))
 
 
 def preprocess_frame_points(points: np.ndarray, frame_index: int) -> tuple[np.ndarray, dict[str, Any]]:
@@ -74,7 +107,8 @@ def _overlap_in_bounds(source: np.ndarray, target: np.ndarray,
 
 
 def register_sequence(project: Path, run_id: str, output: Path,
-                      voxel_size: float = 2.0, fused_voxel_size: float = 0.75) -> dict[str, Any]:
+                      voxel_size: float = 2.0, fused_voxel_size: float = 0.75,
+                      table_alignment_report: Path | None = None) -> dict[str, Any]:
     import open3d as o3d
 
     project = project.resolve(strict=True)
@@ -92,6 +126,24 @@ def register_sequence(project: Path, run_id: str, output: Path,
         raise ValueError("voxel size must be positive and finite")
     if not math.isfinite(fused_voxel_size) or fused_voxel_size <= 0:
         raise ValueError("fused voxel size must be positive and finite")
+
+    alignment_path: Path | None = None
+    alignment_data: dict[str, Any] | None = None
+    frame0_alignment: dict[str, Any] | None = None
+    if table_alignment_report is not None:
+        alignment_path = table_alignment_report.resolve(strict=True)
+        try:
+            alignment_data = json.loads(alignment_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+            raise ValueError("table-alignment report is unreadable") from error
+        if (not isinstance(alignment_data, dict)
+                or alignment_data.get("run_id") != run_id
+                or alignment_data.get("coordinate_frame") != "table_marker_map_center_xy"):
+            raise ValueError("table-alignment report does not match this scan run and coordinate frame")
+        frame0_alignment = next((frame for frame in alignment_data.get("frames", [])
+                                 if isinstance(frame, dict) and frame.get("index") == 0), None)
+        if not isinstance(frame0_alignment, dict) or frame0_alignment.get("status") != "aligned":
+            raise ValueError("frame zero does not have a verified table-marker alignment")
 
     o3d.utility.random.seed(20261020)
     paths = source_paths(project, run_id)
@@ -264,30 +316,55 @@ def register_sequence(project: Path, run_id: str, output: Path,
         raise RuntimeError("fusion produced no connected point-cloud component")
     dominant = int(cluster_ids[int(np.argmax(cluster_sizes))])
     fused = sampled.select_by_index(np.flatnonzero(labels == dominant).tolist())
-    output.parent.mkdir(parents=True, exist_ok=True)
-    if not o3d.io.write_point_cloud(str(output), fused, write_ascii=True, compressed=False):
-        raise OSError(f"Open3D failed to write {output}")
-
     bounds = np.asarray(fused.get_axis_aligned_bounding_box().get_box_points())
-    lower, upper = bounds.min(axis=0), bounds.max(axis=0)
+    registration_lower, registration_upper = bounds.min(axis=0), bounds.max(axis=0)
     overlap = [
         _overlap_in_bounds(np.asarray(registered[index].points),
-                           np.asarray(registered[index + 1].points), lower, upper)
+                           np.asarray(registered[index + 1].points),
+                           registration_lower, registration_upper)
         for index in range(frame_count - 1)
     ]
     closure = _overlap_in_bounds(np.asarray(registered[-1].points),
-                                 np.asarray(registered[0].points), lower, upper)
+                                 np.asarray(registered[0].points),
+                                 registration_lower, registration_upper)
     closure_icp = registration.registration_icp(
         registered[-1], registered[0], correspondence_distance, np.eye(4),
         registration.TransformationEstimationPointToPoint(False))
     correction = np.asarray(closure_icp.transformation)
     correction_rotation = float(np.degrees(np.arccos(np.clip(
         (np.trace(correction[:3, :3]) - 1.0) / 2.0, -1.0, 1.0))))
+    coordinate_frame = "first captured point cloud"
+    table_map_alignment: dict[str, Any] | None = None
+    clipped_below_table = 0
+    if frame0_alignment is not None and alignment_data is not None and alignment_path is not None:
+        mapped_points, clipped_below_table = transform_points_to_table_map(
+            np.asarray(fused.points), frame0_alignment,
+        )
+        if len(mapped_points) == 0:
+            raise RuntimeError("frame-zero table transform clipped every fused point")
+        fused.points = o3d.utility.Vector3dVector(mapped_points)
+        coordinate_frame = "table_marker_map_center_xy"
+        table_map_alignment = {
+            "report_file": alignment_path.name,
+            "report_sha256": hashlib.sha256(alignment_path.read_bytes()).hexdigest(),
+            "frame_index": 0,
+            "matched_marker_count": frame0_alignment["matched_marker_count"],
+            "marker_median_residual_map_units": frame0_alignment["marker_median_residual_map_units"],
+            "scanner_to_map_scale": frame0_alignment["scanner_to_map_scale"],
+            "clipped_below_table_points": clipped_below_table,
+        }
+    output_bounds = np.asarray(fused.get_axis_aligned_bounding_box().get_box_points())
+    output_lower, output_upper = output_bounds.min(axis=0), output_bounds.max(axis=0)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if not o3d.io.write_point_cloud(str(output), fused, write_ascii=True, compressed=False):
+        raise OSError(f"Open3D failed to write {output}")
     result: dict[str, Any] = {
         "format": "cadyx-geometric-point-cloud-fusion-v1",
         "status": "provisional",
         "run_id": run_id,
-        "coordinate_frame": "first captured point cloud",
+        "coordinate_frame": coordinate_frame,
+        "registration_coordinate_frame": "first captured point cloud",
+        "table_map_alignment": table_map_alignment,
         "registration": "adjacent FPFH/RANSAC seeding, incremental merge-to-accumulated robust ICP, pose-graph loop optimization",
         "table_encoder_or_axis_used": False,
         "preprocessing": {
@@ -308,7 +385,10 @@ def register_sequence(project: Path, run_id: str, output: Path,
         "output_points": len(fused.points),
         "discarded_isolated_points": int(len(sampled.points) - len(fused.points)),
         "dominant_component_fraction": float(len(fused.points) / max(1, len(sampled.points))),
-        "dimensions_q": (upper - lower).tolist(),
+        "registration_dimensions_q": (registration_upper - registration_lower).tolist(),
+        "output_dimensions": (output_upper - output_lower).tolist(),
+        "output_coordinate_units": ("table map units; physical scale unverified"
+                                    if table_map_alignment else "Q-derived units; physical scale unverified"),
         "adjacent_edges": adjacent_edges,
         "incremental_edges": incremental_edges,
         "loop_edges_to_first_frame": loop_edges,
@@ -338,10 +418,13 @@ def main() -> int:
                         help="Q-derived units used for registration (default: 2.0)")
     parser.add_argument("--fused-voxel-size", type=float, default=0.75,
                         help="Q-derived units used for point-only fusion (default: 0.75)")
+    parser.add_argument("--table-alignment-report", type=Path,
+                        help="rebase the fused first-frame cloud to table-map XY using frame zero's marker fit")
     args = parser.parse_args()
     try:
         print(json.dumps(register_sequence(args.project_directory, args.run_id, args.output_ply,
-                                           args.voxel_size, args.fused_voxel_size), indent=2))
+                                           args.voxel_size, args.fused_voxel_size,
+                                           args.table_alignment_report), indent=2))
         return 0
     except (OSError, ValueError, RuntimeError) as error:
         print(f"error: {error}", file=sys.stderr)
