@@ -325,6 +325,8 @@ def make_request_handler(
             self.send_header("Content-Length", str(len(encoded)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("Vary", "Accept-Encoding")
+            if self.close_connection and not any(name.lower() == "connection" for name, _ in extra_headers):
+                self.send_header("Connection", "close")
             if compressed:
                 self.send_header("Content-Encoding", "gzip")
             for name, header_value in extra_headers:

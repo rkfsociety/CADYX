@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import unittest
+import threading
+from http.client import HTTPConnection
 from email.message import Message
 from io import BytesIO
 import json
@@ -10,7 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from cadyx.errors import ValidationError
-from cadyx.web import make_request_handler
+from cadyx.web import CadyxHTTPServer, make_request_handler
 from cadyx.web_routes import _scanner_point_cloud_vertex_count, match_route, route_specs
 
 
@@ -224,6 +226,34 @@ class HTTPJSONBodyFramingTests(unittest.TestCase):
                     handler_type.do_POST(request)
                 self.assertTrue(request.close_connection)
                 self.assertEqual(responses[0][0], expected_status)
+
+    def test_rejected_post_advertises_close_and_next_request_reconnects(self) -> None:
+        # A rejected POST can leave unread bytes. HTTP/1.1 clients must be
+        # told that the server will close, or their next request uses a dead socket.
+        server = CadyxHTTPServer(("127.0.0.1", 0), make_request_handler(None))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+            try:
+                client.request("POST", "/not-a-route", body=b"x",
+                               headers={"Content-Length": "+1"})
+                rejected = client.getresponse()
+                self.assertEqual(rejected.status, 400)
+                self.assertEqual(rejected.getheader("Connection"), "close")
+                rejected.read()
+
+                # Reuse the same client object: it must establish a fresh socket.
+                client.request("GET", "/not-a-route")
+                followup = client.getresponse()
+                self.assertEqual(followup.status, 404)
+                followup.read()
+            finally:
+                client.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_binary_content_type_rejection_closes_unread_request(self) -> None:
         handler_type = make_request_handler(None)
