@@ -339,7 +339,7 @@ This is an authentication boundary, not transport encryption. The built-in serve
 ## APIs and events
 
 Document Model v8 extended v7 with named numeric parameters and expression bindings;
-current Document v15 retains point/line/circle/ellipse/spline primitives and
+current Document v16 retains point/line/circle/ellipse/spline primitives and
 adds YZ, custom and face-attached sketch work planes to the earlier XY/XZ planes,
 atomic builders for polylines/polygons, rectangles, and circles, checked
 geometric/dimensional constraints, and linked OCCT extrusion, revolution, sweep,

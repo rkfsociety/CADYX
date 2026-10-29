@@ -136,6 +136,10 @@ class PersistedSchemaTests(unittest.TestCase):
                     "version": 2, "units": "mm", "parts": [],
                     "subassemblies": [], "instances": [], "mates": [],
                 }
+            elif version >= 11:
+                saved["assembly"]["version"] = {
+                    11: 3, 12: 3, 13: 4, 14: 5, 15: 6, 16: 7,
+                }[version]
             if version == 1:
                 saved["objects"] = [item for item in saved["objects"] if item["type"] != "sketch"]
             original = deepcopy(saved)

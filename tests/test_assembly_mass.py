@@ -89,7 +89,7 @@ class MassPropertiesTests(unittest.TestCase):
             part.pop("material")
         migrated = migrate_document(old)
         self.assertEqual(migrated["version"], DOCUMENT_VERSION)
-        self.assertEqual(migrated["assembly"]["version"], 6)
+        self.assertEqual(migrated["assembly"]["version"], 7)
         self.assertIsNone(migrated["assembly"]["parts"][0]["material"])
         self.assertEqual(old["assembly"]["version"], 2)
         self.cmd("set_assembly_part_material", part_id=self.part, material=None)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import deque
 from copy import deepcopy
+import json
 import math
 from typing import Any
 
@@ -15,9 +16,13 @@ from .assemblies import _multiply, _rotate, transform_point, validate_transform
 from .errors import ValidationError
 
 MATE_DOF = {"fixed": 0, "coincident": 3, "coaxial": 2,
-            "revolute": 1, "slider": 1, "cylindrical": 2, "spherical": 3}
+            "revolute": 1, "slider": 1, "cylindrical": 2, "spherical": 3,
+            "parallel": 4, "perpendicular": 5, "distance": 5, "angle": 5}
+AXIS_RELATIONS = {"parallel", "perpendicular", "distance", "angle"}
 POSITION_TOLERANCE_MM = 1e-6
 ROTATION_TOLERANCE_RAD = 1e-6
+MAX_ASSEMBLY_INSTANCES = 16384
+MAX_ASSEMBLY_MATES = 65536
 IDENTITY_FRAME = {"translation": [0.0, 0.0, 0.0],
                   "rotation": [1.0, 0.0, 0.0, 0.0]}
 DEFAULT_LIMITS = {"angle_min_deg": None, "angle_max_deg": None,
@@ -79,8 +84,8 @@ def _limits(value: Any, kind: str, angle: float, offset: float) -> None:
         low, high = parsed[minimum], parsed[maximum]
         if low is not None and high is not None and low > high:
             raise ValidationError(f"Mate limit {minimum} must not exceed {maximum}.")
-    angle_allowed = kind in {"revolute", "coaxial", "cylindrical"}
-    offset_allowed = kind in {"slider", "coaxial", "cylindrical"}
+    angle_allowed = kind in {"revolute", "coaxial", "cylindrical", "angle"}
+    offset_allowed = kind in {"slider", "coaxial", "cylindrical", "distance"}
     if not angle_allowed and any(parsed[key] is not None
                                  for key in ("angle_min_deg", "angle_max_deg")):
         raise ValidationError(f"{kind} mates do not accept angular limits.")
@@ -135,15 +140,20 @@ def validate_mate_records(graph: dict[str, Any]) -> None:
         if not isinstance(orientation, list) or len(orientation) != 4:
             raise ValidationError("Mate orientation must be a unit quaternion.")
         validate_transform([0.0, 0.0, 0.0], orientation)
-        if kind in ("fixed", "coincident", "spherical") and (angle != 0 or offset != 0):
-            raise ValidationError("Fixed/coincident/spherical mates do not allow angle or offset values.")
-        if kind == "revolute" and offset != 0:
-            raise ValidationError("Revolute mates do not allow axial offset.")
-        if kind == "slider" and angle != 0:
-            raise ValidationError("Slider mates do not allow axial rotation.")
+        if (kind in {"fixed", "coincident", "spherical", "parallel", "perpendicular"}
+                and (angle != 0 or offset != 0)):
+            raise ValidationError(f"{kind} mates do not accept angle or distance coordinates.")
+        if kind in {"revolute", "angle"} and offset != 0:
+            raise ValidationError(f"{kind} mates do not accept distance coordinates.")
+        if kind in {"slider", "distance"} and angle != 0:
+            raise ValidationError(f"{kind} mates do not accept angle coordinates.")
         if kind not in {"coincident", "spherical"} and orientation != [1.0, 0.0, 0.0, 0.0]:
             raise ValidationError("Only coincident and spherical mates accept free relative orientation.")
         _limits(mate["limits"], kind, angle, offset)
+        if kind == "angle" and not 0.0 <= angle <= 180.0:
+            raise ValidationError("Assembly angle constraints must be between 0 and 180 degrees.")
+        if kind == "distance" and offset < 0:
+            raise ValidationError("Assembly point distance cannot be negative.")
         _geometry_reference(mate["reference_a"], "Mate reference A")
         _geometry_reference(mate["reference_b"], "Mate reference B")
         if (mate["reference_a"] is None) != (mate["reference_b"] is None):
@@ -180,13 +190,118 @@ def _motion(mate: dict[str, Any]) -> dict[str, list[float]]:
 
 
 def _next_pose(source: dict[str, Any], mate: dict[str, Any],
-               forward: bool) -> dict[str, list[float]]:
+               forward: bool, initial: dict[str, dict[str, list[float]]]) -> dict[str, list[float]]:
+    kind = mate["kind"]
+    if kind in AXIS_RELATIONS:
+        source_id = mate["a_instance_id"] if forward else mate["b_instance_id"]
+        target_id = mate["b_instance_id"] if forward else mate["a_instance_id"]
+        source_frame = mate["frame_a"] if forward else mate["frame_b"]
+        target_frame = mate["frame_b"] if forward else mate["frame_a"]
+        group_delta = _compose(source, _inverse(initial[source_id]))
+        candidate = _compose(group_delta, initial[target_id])
+        source_world = _compose(source, source_frame)
+        target_world = _compose(candidate, target_frame)
+        axis_a = _rotate(source_world["rotation"], [0.0, 0.0, 1.0])
+        axis_b = _rotate(target_world["rotation"], [0.0, 0.0, 1.0])
+        if kind in {"parallel", "perpendicular", "angle"}:
+            dot = sum(a * b for a, b in zip(axis_a, axis_b, strict=True))
+            tangent = [axis_b[i] - dot * axis_a[i] for i in range(3)]
+            tangent_length = math.sqrt(sum(value * value for value in tangent))
+            if tangent_length <= 1e-12:
+                helper = [1.0, 0.0, 0.0] if abs(axis_a[0]) < 0.8 else [0.0, 1.0, 0.0]
+                tangent = _cross(axis_a, helper)
+                tangent_length = math.sqrt(sum(value * value for value in tangent))
+            tangent = [value / tangent_length for value in tangent]
+            if kind == "parallel":
+                desired_axis = axis_a if dot >= 0 else [-value for value in axis_a]
+            elif kind == "perpendicular":
+                desired_axis = tangent
+            else:
+                angle = math.radians(mate["angle_deg"])
+                desired_axis = [math.cos(angle) * axis_a[i] + math.sin(angle) * tangent[i]
+                                for i in range(3)]
+            correction = _rotation_between(axis_b, desired_axis)
+            held_origin = target_world["translation"]
+            candidate["rotation"] = _multiply(correction, candidate["rotation"])
+            rotated_frame_origin = _rotate(candidate["rotation"], target_frame["translation"])
+            candidate["translation"] = [held_origin[i] - rotated_frame_origin[i] for i in range(3)]
+        if kind == "distance":
+            delta = [target_world["translation"][i] - source_world["translation"][i]
+                     for i in range(3)]
+            distance = math.sqrt(sum(value * value for value in delta))
+            direction = ([value / distance for value in delta] if distance > 1e-12 else axis_a)
+            desired_origin = [source_world["translation"][i] + mate["offset_mm"] * direction[i]
+                              for i in range(3)]
+            candidate["translation"] = [candidate["translation"][i]
+                                         + desired_origin[i] - target_world["translation"][i]
+                                         for i in range(3)]
+        return candidate
     left = mate["frame_a"] if forward else mate["frame_b"]
     right = mate["frame_b"] if forward else mate["frame_a"]
     motion = _motion(mate)
     return _compose(_compose(_compose(source, left),
                              motion if forward else _inverse(motion)),
                     _inverse(right))
+
+
+def _cross(a: list[float], b: list[float]) -> list[float]:
+    return [a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0]]
+
+
+def _rotation_between(source: list[float], target: list[float]) -> list[float]:
+    dot = min(1.0, max(-1.0, sum(a * b for a, b in zip(source, target, strict=True))))
+    if dot < -1.0 + 1e-12:
+        helper = [1.0, 0.0, 0.0] if abs(source[0]) < 0.8 else [0.0, 1.0, 0.0]
+        axis = _cross(source, helper)
+        length = math.sqrt(sum(value * value for value in axis))
+        return [0.0, *(value / length for value in axis)]
+    cross = _cross(source, target)
+    quaternion = [1.0 + dot, *cross]
+    length = math.sqrt(sum(value * value for value in quaternion))
+    return [value / length for value in quaternion]
+
+
+def _relation_matches(a: dict[str, Any], b: dict[str, Any], mate: dict[str, Any],
+                      forward: bool) -> bool:
+    source_frame = mate["frame_a"] if forward else mate["frame_b"]
+    target_frame = mate["frame_b"] if forward else mate["frame_a"]
+    source_world, target_world = _compose(a, source_frame), _compose(b, target_frame)
+    axis_a = _rotate(source_world["rotation"], [0.0, 0.0, 1.0])
+    axis_b = _rotate(target_world["rotation"], [0.0, 0.0, 1.0])
+    dot = min(1.0, max(-1.0, sum(x * y for x, y in zip(axis_a, axis_b, strict=True))))
+    kind = mate["kind"]
+    if kind == "parallel":
+        return math.acos(min(1.0, abs(dot))) <= ROTATION_TOLERANCE_RAD
+    if kind == "perpendicular":
+        return abs(dot) <= ROTATION_TOLERANCE_RAD
+    if kind == "angle":
+        return abs(math.degrees(math.acos(dot)) - mate["angle_deg"]) <= math.degrees(ROTATION_TOLERANCE_RAD)
+    distance = math.dist(source_world["translation"], target_world["translation"])
+    return abs(distance - mate["offset_mm"]) <= POSITION_TOLERANCE_MM
+
+
+def _mate_signature(mate: dict[str, Any]) -> str:
+    reverse = mate["a_instance_id"] > mate["b_instance_id"]
+    kind = mate["kind"]
+    if kind in {"coincident", "spherical"} or (kind == "distance" and mate["offset_mm"] == 0):
+        kind = "origin_coincidence"
+    elif kind == "angle" and mate["angle_deg"] in {0, 180}:
+        kind = "parallel"
+    elif kind == "angle" and mate["angle_deg"] == 90:
+        kind = "perpendicular"
+    first = mate["frame_b" if reverse else "frame_a"]
+    second = mate["frame_a" if reverse else "frame_b"]
+    pair = sorted((mate["a_instance_id"], mate["b_instance_id"]))
+    if kind == "origin_coincidence":
+        fields = [pair, kind, first["translation"], second["translation"]]
+    else:
+        fields = [pair, kind, first, second, float(mate["angle_deg"]), float(mate["offset_mm"]),
+                  mate["orientation"],
+                  mate["reference_b" if reverse else "reference_a"],
+                  mate["reference_a" if reverse else "reference_b"]]
+    return json.dumps(fields, sort_keys=True, separators=(",", ":"))
 
 
 def _matches(a: dict[str, Any], b: dict[str, Any]) -> bool:
@@ -201,8 +316,20 @@ def solve_assembly_mates(graph: dict[str, Any], *,
                          anchor_instance_id: str | None = None,
                          require_unfixed_anchor: bool = False) -> dict[str, Any]:
     """Solve placements in parent-local frames; mutate only after closure checks."""
+    if len(graph.get("instances", [])) > MAX_ASSEMBLY_INSTANCES:
+        raise ValidationError("Assembly solver instance limit exceeded.", code="RESOURCE_LIMIT",
+                              diagnostics={"category": "resource_limit",
+                                           "measurements": {"instance_count": len(graph["instances"]),
+                                                            "maximum": MAX_ASSEMBLY_INSTANCES}})
+    if len(graph.get("mates", [])) > MAX_ASSEMBLY_MATES:
+        raise ValidationError("Assembly solver mate limit exceeded.", code="RESOURCE_LIMIT",
+                              diagnostics={"category": "resource_limit",
+                                           "measurements": {"mate_count": len(graph["mates"]),
+                                                            "maximum": MAX_ASSEMBLY_MATES}})
     validate_mate_records(graph)
     instances = {item["id"]: item for item in graph["instances"]}
+    initial = {ident: _pose(item["translation"].copy(), item["rotation"].copy())
+               for ident, item in instances.items()}
     if anchor_instance_id is not None and anchor_instance_id not in instances:
         raise ValidationError("Mate solve anchor instance does not exist.")
     adjacency: dict[str, list[tuple[dict[str, Any], bool]]] = {
@@ -216,9 +343,8 @@ def solve_assembly_mates(graph: dict[str, Any], *,
 
     solutions: dict[str, dict[str, list[float]]] = {}
     anchors: list[str] = []
-    internal_dof = 0
     redundant: set[str] = set()
-    used: set[str] = set()
+    component_for: dict[str, str] = {}
     grounded = sorted(ident for ident, item in instances.items() if item["grounded"])
     preferred = [anchor_instance_id] if anchor_instance_id is not None else []
     order = grounded + [ident for ident in preferred if ident not in grounded] + [
@@ -229,34 +355,75 @@ def solve_assembly_mates(graph: dict[str, Any], *,
         if root in solutions:
             continue
         anchors.append(root)
+        component_for[root] = root
         solutions[root] = _pose(instances[root]["translation"].copy(),
                                 instances[root]["rotation"].copy())
         queue = deque([root])
         while queue:
             current = queue.popleft()
+            by_neighbor: dict[str, list[tuple[dict[str, Any], bool]]] = {}
             for mate, forward in adjacency[current]:
                 other = mate["b_instance_id"] if forward else mate["a_instance_id"]
-                candidate = _next_pose(solutions[current], mate, forward)
+                by_neighbor.setdefault(other, []).append((mate, forward))
+            for other, relations in by_neighbor.items():
+                relations.sort(key=lambda entry: (
+                    entry[0]["kind"] in AXIS_RELATIONS,
+                    -(6 - MATE_DOF[entry[0]["kind"]]), entry[0]["id"],
+                ))
                 if other in solutions:
-                    if not _matches(solutions[other], candidate):
+                    for mate, forward in relations:
+                        satisfied = (_relation_matches(solutions[current], solutions[other], mate, forward)
+                                     if mate["kind"] in AXIS_RELATIONS
+                                     else _matches(solutions[other], _next_pose(
+                                         solutions[current], mate, forward, initial)))
+                        if not satisfied:
+                            raise ValidationError(
+                                f"Conflicting assembly mate loop at {mate['id']} between "
+                                f"{current} and {other}; check frames and joint coordinates.")
+                    continue
+
+                mate, forward = relations[0]
+                candidate = _next_pose(solutions[current], mate, forward, initial)
+                for additional, additional_forward in relations[1:]:
+                    if additional["kind"] in AXIS_RELATIONS:
+                        source_id = (additional["a_instance_id"] if additional_forward
+                                     else additional["b_instance_id"])
+                        target_id = (additional["b_instance_id"] if additional_forward
+                                     else additional["a_instance_id"])
+                        local_initial = {source_id: solutions[current], target_id: candidate}
+                        candidate = _next_pose(solutions[current], additional,
+                                               additional_forward, local_initial)
+                    else:
+                        exact = _next_pose(solutions[current], additional,
+                                           additional_forward, initial)
+                        if not _matches(candidate, exact):
+                            raise ValidationError(
+                                f"Conflicting assembly mate loop at {additional['id']} between "
+                                f"{current} and {other}; check frames and joint coordinates.")
+
+                grounded_pose = initial[other]
+                for mate, forward in relations:
+                    if mate["kind"] in AXIS_RELATIONS:
+                        satisfied = _relation_matches(solutions[current], candidate, mate, forward)
+                    else:
+                        exact = _next_pose(solutions[current], mate, forward, initial)
+                        satisfied = _matches(candidate, exact)
+                    if instances[other]["grounded"]:
+                        satisfied = (_relation_matches(solutions[current], grounded_pose, mate, forward)
+                                     if mate["kind"] in AXIS_RELATIONS
+                                     else _matches(grounded_pose, _next_pose(
+                                         solutions[current], mate, forward, initial)))
+                    if not satisfied:
+                        if instances[other]["grounded"]:
+                            raise ValidationError(
+                                f"Conflicting grounded instance {other} at mate {mate['id']}; "
+                                "its saved pose does not satisfy the assembly connection.")
                         raise ValidationError(
                             f"Conflicting assembly mate loop at {mate['id']} between "
                             f"{current} and {other}; check frames and joint coordinates.")
-                    if mate["id"] not in used:
-                        redundant.add(mate["id"])
-                else:
-                    if instances[other]["grounded"] and not _matches(
-                        _pose(instances[other]["translation"], instances[other]["rotation"]),
-                        candidate,
-                    ):
-                        raise ValidationError(
-                            f"Conflicting grounded instance {other} at mate {mate['id']}; "
-                            "its saved pose does not satisfy the assembly connection."
-                        )
-                    solutions[other] = candidate
-                    queue.append(other)
-                    internal_dof += MATE_DOF[mate["kind"]]
-                used.add(mate["id"])
+                solutions[other] = grounded_pose if instances[other]["grounded"] else candidate
+                queue.append(other)
+                component_for[other] = root
 
         if require_unfixed_anchor and root != anchor_instance_id:
             if anchor_instance_id in solutions and any(
@@ -268,6 +435,27 @@ def solve_assembly_mates(graph: dict[str, Any], *,
                     f"Cannot move {anchor_instance_id}: its assembly group contains a grounded instance; "
                     "change a joint coordinate instead."
                 )
+
+    internal_dof = 0
+    mates_by_component: dict[str, list[dict[str, Any]]] = {root: [] for root in anchors}
+    for mate in graph["mates"]:
+        mates_by_component[component_for[mate["a_instance_id"]]].append(mate)
+    for root in anchors:
+        members = {ident for ident, component in component_for.items() if component == root}
+        budget = 6 * max(0, len(members) - 1)
+        used_constraints = 0
+        signatures: set[str] = set()
+        component_mates = sorted(mates_by_component[root],
+                                 key=lambda mate: (-(6 - MATE_DOF[mate["kind"]]), mate["id"]))
+        for mate in component_mates:
+            signature = _mate_signature(mate)
+            contribution = 6 - MATE_DOF[mate["kind"]]
+            if signature in signatures or used_constraints + contribution > budget:
+                redundant.add(mate["id"])
+                continue
+            signatures.add(signature)
+            used_constraints += contribution
+        internal_dof += max(0, budget - used_constraints)
 
     # Only commit placements when every closure is verified.
     for ident, pose in solutions.items():

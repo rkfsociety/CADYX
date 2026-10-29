@@ -12,7 +12,7 @@
 
 ## English reference
 
-> **Versioned contract (7), not the current schema.** This document records the behavior introduced with Document v7. Current saved documents use **v15**; the project envelope remains v1. Read the [current documentation map](../../docs/README.md) and subsequent version contracts before interpreting introduction-era limits as current restrictions. The historical command/schema examples below are retained for migration and compatibility work.
+> **Versioned contract (7), not the current schema.** This document records the behavior introduced with Document v7. Current saved documents use **v16**; the project envelope remains v1. Read the [current documentation map](../../docs/README.md) and subsequent version contracts before interpreting introduction-era limits as current restrictions. The historical command/schema examples below are retained for migration and compatibility work.
 
 
 The project envelope remains `cadyx-project` version 1. New documents use version

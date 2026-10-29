@@ -4,7 +4,6 @@ import copy
 import json
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from cadyx.core import CadyxCore
@@ -38,7 +37,7 @@ class MigrationTests(unittest.TestCase):
         original = copy.deepcopy(self.legacy)
         expected = copy.deepcopy(original)
         expected["document"]["version"] = DOCUMENT_VERSION
-        expected["document"]["assembly"] = {"version": 6, "units": "mm", "parts": [], "subassemblies": [], "instances": [], "mates": []}
+        expected["document"]["assembly"] = {"version": 7, "units": "mm", "parts": [], "subassemblies": [], "instances": [], "mates": []}
         expected["document"]["model_parameters"] = {}
         expected["document"]["parameter_bindings"] = []
         migrated = migrate_project(self.legacy)
@@ -54,7 +53,7 @@ class MigrationTests(unittest.TestCase):
         migrated = migrate_document(document)
 
         self.assertEqual(migrated["version"], DOCUMENT_VERSION)
-        self.assertEqual(migrated["assembly"]["version"], 6)
+        self.assertEqual(migrated["assembly"]["version"], 7)
         self.assertEqual(migrated["model_parameters"], {})
         self.assertEqual(migrated["parameter_bindings"], [])
         self.assertEqual(document["version"], 7)
@@ -77,7 +76,7 @@ class MigrationTests(unittest.TestCase):
         migrated = migrate_document(legacy)
         self.assertEqual(legacy, original)
         self.assertEqual(migrated["version"], DOCUMENT_VERSION)
-        self.assertEqual(migrated["assembly"]["version"], 6)
+        self.assertEqual(migrated["assembly"]["version"], 7)
         self.assertEqual(migrated["assembly"]["instances"][0]["grounded"], False)
         self.assertEqual(migrated["assembly"]["instances"][0]["visible"], True)
         self.assertEqual(Document.from_dict(migrated).to_dict(), migrated)
@@ -106,7 +105,7 @@ class MigrationTests(unittest.TestCase):
         migrated = migrate_document(legacy)
         self.assertEqual(legacy, original)
         self.assertEqual(migrated["version"], DOCUMENT_VERSION)
-        self.assertEqual(migrated["assembly"]["version"], 6)
+        self.assertEqual(migrated["assembly"]["version"], 7)
         self.assertEqual(migrated["assembly"]["mates"][0]["limits"], {
             "angle_min_deg": None, "angle_max_deg": None,
             "offset_min_mm": None, "offset_max_mm": None,
@@ -136,9 +135,20 @@ class MigrationTests(unittest.TestCase):
         migrated = migrate_document(legacy)
         self.assertEqual(legacy, original)
         self.assertEqual(migrated["version"], DOCUMENT_VERSION)
-        self.assertEqual(migrated["assembly"]["version"], 6)
+        self.assertEqual(migrated["assembly"]["version"], 7)
         self.assertIsNone(migrated["assembly"]["mates"][0]["reference_a"])
         self.assertIsNone(migrated["assembly"]["mates"][0]["reference_b"])
+        self.assertEqual(Document.from_dict(migrated).to_dict(), migrated)
+
+    def test_v15_migration_advances_assembly_graph_schema_without_mutating_source(self):
+        legacy = Document.create().to_dict()
+        legacy["version"] = 15
+        legacy["assembly"]["version"] = 6
+        original = copy.deepcopy(legacy)
+        migrated = migrate_document(legacy)
+        self.assertEqual(legacy, original)
+        self.assertEqual(migrated["version"], DOCUMENT_VERSION)
+        self.assertEqual(migrated["assembly"]["version"], 7)
         self.assertEqual(Document.from_dict(migrated).to_dict(), migrated)
 
     def test_project_migration_deep_copies_nested_document_once(self):

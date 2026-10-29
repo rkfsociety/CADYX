@@ -238,8 +238,15 @@ class AssemblyCommands:
         }
         document.assembly["mates"].append(mate)
         if mate["reference_a"] is not None:
+            saved_poses = {
+                item["id"]: (item["translation"].copy(), item["rotation"].copy())
+                for item in document.assembly["instances"]
+            }
             from .assembly_geometry import refresh_assembly_geometry_references
             refresh_assembly_geometry_references(document.assembly, document.objects, self.kernel)
+            for instance in document.assembly["instances"]:
+                translation, rotation = saved_poses[instance["id"]]
+                instance["translation"], instance["rotation"] = translation, rotation
         diagnostics = solve_assembly_mates(document.assembly, anchor_instance_id=mate["a_instance_id"])
         validate_assembly(document.assembly, document.objects)
         return {"mate_id": mate["id"], "kind": mate["kind"], "kinematics": diagnostics}

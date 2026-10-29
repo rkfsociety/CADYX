@@ -8,8 +8,9 @@ import copy
 import math
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from cadyx.assembly_mates import inspect_assembly_mates
+from cadyx.assembly_mates import inspect_assembly_mates, solve_assembly_mates
 from cadyx.migrations import DOCUMENT_VERSION
 from cadyx.commands import CommandSystem
 from cadyx.core import CadyxCore
@@ -76,6 +77,83 @@ class AssemblyMateTests(unittest.TestCase):
         self.run_command("add_assembly_mate", kind="coaxial",
                          a_instance_id=self.a, b_instance_id=self.b, offset_mm=-2)
         self.assertAlmostEqual(self.placement(self.b)["translation"][2], -2)
+
+    def test_geometric_axis_and_anchor_relations_solve_and_report_dof(self):
+        parallel = self.run_command("add_assembly_mate", kind="parallel",
+                                    a_instance_id=self.a, b_instance_id=self.b)["mate_id"]
+        self.assertEqual(inspect_assembly_mates(self.document.assembly)["internal_dof"], 4)
+        self.assertEqual(self.placement(self.b)["translation"], [8, 3, 1])
+        self.run_command("remove_assembly_mate", mate_id=parallel)
+
+        perpendicular = self.run_command("add_assembly_mate", kind="perpendicular",
+                                         a_instance_id=self.a, b_instance_id=self.b)["mate_id"]
+        dot = sum(a * b for a, b in zip(self.placement(self.a)["rotation"],
+                                        self.placement(self.b)["rotation"], strict=True))
+        self.assertAlmostEqual(abs(dot), math.sqrt(0.5))
+        self.assertEqual(inspect_assembly_mates(self.document.assembly)["internal_dof"], 5)
+        self.run_command("remove_assembly_mate", mate_id=perpendicular)
+
+        angle = self.run_command("add_assembly_mate", kind="angle",
+                                 a_instance_id=self.a, b_instance_id=self.b,
+                                 angle_deg=60)["mate_id"]
+        self.assertAlmostEqual(self.placement(self.b)["rotation"][0], math.cos(math.radians(30)))
+        self.assertEqual(inspect_assembly_mates(self.document.assembly)["internal_dof"], 5)
+        self.run_command("remove_assembly_mate", mate_id=angle)
+
+        distance = self.run_command("add_assembly_mate", kind="distance",
+                                    a_instance_id=self.a, b_instance_id=self.b,
+                                    offset_mm=10)["mate_id"]
+        self.assertAlmostEqual(math.dist(self.placement(self.a)["translation"],
+                                         self.placement(self.b)["translation"]), 10)
+        self.assertEqual(inspect_assembly_mates(self.document.assembly)["internal_dof"], 5)
+        self.run_command("remove_assembly_mate", mate_id=distance)
+
+    def test_axis_relation_cycles_detect_conflicts_and_report_redundancy(self):
+        self.run_command("add_assembly_mate", kind="parallel",
+                         a_instance_id=self.a, b_instance_id=self.b)
+        self.run_command("add_assembly_mate", kind="parallel",
+                         a_instance_id=self.a, b_instance_id=self.b)
+        result = inspect_assembly_mates(self.document.assembly)
+        self.assertEqual(len(result["redundant_mate_ids"]), 1)
+        with self.assertRaisesRegex(ValidationError, "Conflicting assembly mate loop"):
+            self.run_command("add_assembly_mate", kind="perpendicular",
+                             a_instance_id=self.a, b_instance_id=self.b)
+
+    def test_independent_relations_reduce_dof_and_equivalent_relations_are_redundant(self):
+        self.run_command("add_assembly_mate", kind="parallel",
+                         a_instance_id=self.a, b_instance_id=self.b)
+        self.run_command("add_assembly_mate", kind="distance",
+                         a_instance_id=self.a, b_instance_id=self.b, offset_mm=10)
+        independent = inspect_assembly_mates(self.document.assembly)
+        self.assertEqual(independent["internal_dof"], 3)
+        self.assertEqual(independent["redundant_mate_ids"], [])
+        self.document.assembly["mates"].clear()
+        self.run_command("add_assembly_mate", kind="parallel",
+                         a_instance_id=self.a, b_instance_id=self.b)
+        self.run_command("add_assembly_mate", kind="angle",
+                         a_instance_id=self.a, b_instance_id=self.b, angle_deg=0)
+        equivalent = inspect_assembly_mates(self.document.assembly)
+        self.assertEqual(equivalent["internal_dof"], 4)
+        self.assertEqual(len(equivalent["redundant_mate_ids"]), 1)
+
+    def test_solver_fails_closed_above_configured_graph_budgets(self):
+        with patch("cadyx.assembly_mates.MAX_ASSEMBLY_INSTANCES", 2):
+            with self.assertRaisesRegex(ValidationError, "instance limit") as failure:
+                solve_assembly_mates(self.document.assembly)
+        self.assertEqual(failure.exception.code, "RESOURCE_LIMIT")
+
+    def test_group_transform_preserves_parallel_and_distance_relations(self):
+        self.run_command("add_assembly_mate", kind="parallel",
+                         a_instance_id=self.a, b_instance_id=self.b)
+        self.run_command("add_assembly_mate", kind="distance",
+                         a_instance_id=self.a, b_instance_id=self.b, offset_mm=10)
+        moved = self.run_command("transform_assembly_instances", transforms=[{
+            "instance_id": self.a, "translation": [12, -4, 2],
+        }])
+        self.assertAlmostEqual(math.dist(self.placement(self.a)["translation"],
+                                         self.placement(self.b)["translation"]), 10)
+        self.assertEqual(self.placement(self.a)["translation"], [12, -4, 2])
+        self.assertEqual(moved["kinematics"]["internal_dof"], 3)
 
     def test_spherical_orientation_and_joint_limits(self):
         spherical = self.run_command(
@@ -227,7 +305,7 @@ class AssemblyMateTests(unittest.TestCase):
         upgraded = migrate_document(old)
         self.assertEqual(old, before)
         self.assertEqual(upgraded["version"], DOCUMENT_VERSION)
-        self.assertEqual(upgraded["assembly"]["version"], 6)
+        self.assertEqual(upgraded["assembly"]["version"], 7)
         self.assertEqual(upgraded["assembly"]["mates"], [])
         self.assertEqual(Document.from_dict(upgraded).to_dict(), upgraded)
 

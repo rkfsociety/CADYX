@@ -8,7 +8,7 @@
 
 ### Масса и инерция сборки
 
-Документ v11 ввёл явные материалы; текущий документ v14 использует граф сборки v5. `set_assembly_part_material` принимает название, положительную плотность в кг/м³ и источник либо `null`. `cadyx_measure_assembly_mass_properties` рассчитывает массу, центр масс и тензор инерции по подходящим OCCT B-rep с привязкой к ревизии. Единицы результата — кг, мм и кг·мм². Массы экземпляров суммируются, пересечения автоматически не вычитаются. Неизвестная плотность, сеточная геометрия и устаревшая ревизия вызывают явную ошибку.
+Документ v11 ввёл явные материалы; текущий документ v16 использует граф сборки v7. `set_assembly_part_material` принимает название, положительную плотность в кг/м³ и источник либо `null`. `cadyx_measure_assembly_mass_properties` рассчитывает массу, центр масс и тензор инерции по подходящим OCCT B-rep с привязкой к ревизии. Единицы результата — кг, мм и кг·мм². Массы экземпляров суммируются, пересечения автоматически не вычитаются. Неизвестная плотность, сеточная геометрия и устаревшая ревизия вызывают явную ошибку.
 
 Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
 
@@ -17,7 +17,7 @@
 ## Persisted schema
 
 Document **v11** introduced assembly **v2 → v3** material fields; document
-**v15** uses assembly graph v6 with saved per-instance grounding, visibility, spherical mates and motion limits.
+**v16** uses assembly graph v7 with saved per-instance grounding, visibility, spherical mates and motion limits.
 Each part definition has a
 `material` field which is either `null` (not assigned, the migration default)
 or exactly:

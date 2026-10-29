@@ -163,6 +163,10 @@ def _faces_for_body(body: dict[str, Any], kernel: Any) -> list[dict[str, Any]]:
     size = len(str(faces).encode("utf-8"))
     if size <= _TOPOLOGY_CACHE_MAX_BYTES:
         with _TOPOLOGY_CACHE_LOCK:
+            concurrent = _TOPOLOGY_CACHE.get(key)
+            if concurrent is not None:
+                _TOPOLOGY_CACHE.move_to_end(key)
+                return concurrent[0]
             while (_TOPOLOGY_CACHE and
                    (_TOPOLOGY_CACHE_BYTES + size > _TOPOLOGY_CACHE_MAX_BYTES
                     or len(_TOPOLOGY_CACHE) >= _TOPOLOGY_CACHE_MAX_ENTRIES)):
@@ -195,7 +199,8 @@ def refresh_assembly_geometry_references(
             if kind == "spherical" and surface != "sphere":
                 raise ValidationError("Spherical mates require spherical face references.",
                                       code="ASSEMBLY_REFERENCE_INVALID")
-            if kind in {"revolute", "slider", "coaxial", "cylindrical"} \
+            if kind in {"revolute", "slider", "coaxial", "cylindrical",
+                        "parallel", "perpendicular", "angle"} \
                     and surface not in {"plane", "cylinder", "cone"}:
                 raise ValidationError(f"{kind} mates require a planar or axial face reference.",
                                       code="ASSEMBLY_REFERENCE_INVALID")

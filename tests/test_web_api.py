@@ -890,6 +890,8 @@ class WebApiTests(unittest.TestCase):
                              if item["type"] == "add_assembly_mate")
         self.assertIn("limits", mate_contract["optional"])
         self.assertIn("spherical", mate_contract["constraints"][0])
+        for relation in ("parallel", "perpendicular", "distance", "angle"):
+            self.assertIn(relation, mate_contract["constraints"][0])
 
         self.assertIn("add_sketch_circle_tangent_to_line", advertised)
         self.assertIn("add_sketch_circle_tangent_to_two_lines", advertised)

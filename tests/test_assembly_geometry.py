@@ -26,6 +26,11 @@ def plane_face(index, semantic_key, center):
             "center": center, "normal": [0.0, 0.0, 1.0], "area": 12.0}
 
 
+def sphere_face(index, semantic_key, center):
+    return {"index": index, "semantic_key": semantic_key, "surface": "sphere",
+            "center": center, "axis_direction": [0.0, 0.0, 1.0], "area": 12.0}
+
+
 class AssemblyGeometryReferenceTests(unittest.TestCase):
     def setUp(self):
         self.face = plane_face(0, "face:top-v1", [1.0, 2.0, 3.0])
@@ -65,6 +70,43 @@ class AssemblyGeometryReferenceTests(unittest.TestCase):
         self.assertEqual(mate["reference_b"]["body_id"], self.body_id)
         self.assertEqual(mate["frame_a"], expected)
         self.assertEqual(mate["frame_b"], expected)
+
+    def test_face_referenced_axis_relation_reaches_solved_saved_pose(self):
+        self.commands.execute(self.document, {
+            "type": "remove_assembly_mate", "mate_id": self.mate()["id"],
+        })
+        reference = make_face_reference(self.body_id, self.face)
+        saved_a_pose = next(item for item in self.document.assembly["instances"]
+                            if item["id"] == self.a)["translation"].copy()
+        result = self.commands.execute(self.document, {
+            "type": "add_assembly_mate", "kind": "perpendicular",
+            "a_instance_id": self.a, "b_instance_id": self.b,
+            "reference_a": reference, "reference_b": reference,
+        })
+        self.assertEqual(result["kinematics"]["internal_dof"], 5)
+        poses = {item["id"]: item for item in self.document.assembly["instances"]}
+        self.assertEqual(poses[self.a]["translation"], saved_a_pose)
+        qa, qb = poses[self.a]["rotation"], poses[self.b]["rotation"]
+        za = [2 * (qa[1] * qa[3] + qa[0] * qa[2]),
+              2 * (qa[2] * qa[3] - qa[0] * qa[1]),
+              1 - 2 * (qa[1] ** 2 + qa[2] ** 2)]
+        zb = [2 * (qb[1] * qb[3] + qb[0] * qb[2]),
+              2 * (qb[2] * qb[3] - qb[0] * qb[1]),
+              1 - 2 * (qb[1] ** 2 + qb[2] ** 2)]
+        self.assertAlmostEqual(sum(a * b for a, b in zip(za, zb, strict=True)), 0.0)
+        self.assertEqual(self.document.assembly["mates"][0]["reference_a"]["face_key"],
+                         "face:top-v1")
+
+    def test_axis_relations_reject_faces_without_an_analytic_axis(self):
+        graph = deepcopy(self.document.assembly)
+        mate = graph["mates"][0]
+        mate["kind"] = "angle"
+        sphere = sphere_face(1, "face:sphere-v1", [1.0, 2.0, 3.0])
+        reference = make_face_reference(self.body_id, sphere)
+        mate["reference_a"] = reference
+        mate["reference_b"] = reference
+        with self.assertRaisesRegex(ValidationError, "require a planar or axial face"):
+            refresh_assembly_geometry_references(graph, self.document.objects, self.kernel)
 
     def test_unique_semantic_rebind_refreshes_frames_after_geometry_change(self):
         self.kernel.faces = [plane_face(1, "face:top-v2", [1.0, 2.0, 4.0])]
@@ -136,9 +178,10 @@ class AssemblyGeometryReferenceTests(unittest.TestCase):
             a = execute({"type": "add_assembly_instance", "target_id": part})["instance_id"]
             b = execute({"type": "add_assembly_instance", "target_id": part})["instance_id"]
             reference = make_face_reference(body, self.face)
-            execute({"type": "add_assembly_mate", "kind": "fixed",
+            mate_result = execute({"type": "add_assembly_mate", "kind": "perpendicular",
                      "a_instance_id": a, "b_instance_id": b,
                      "reference_a": reference, "reference_b": reference})
+            self.assertEqual(mate_result["kinematics"]["internal_dof"], 5)
 
             self.kernel.faces = [plane_face(3, "face:top-v2", [1.0, 2.0, 5.0])]
             execute({"type": "set_parameter", "feature_id": feature, "name": "width", "value": 2})

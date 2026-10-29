@@ -16,12 +16,20 @@ assert.match(assemblyEditor, /previewAssemblyTransform\(/,
   "mouse manipulation updates an isolated viewport preview");
 assert.match(assemblyEditor, /data-gizmo-kind/,
   "the viewport exposes axis and rotation manipulators");
+assert.match(assemblyEditor, /kinematics\.redundant_mate_ids\?\.length/,
+  "the assembly inspector exposes solver redundancy diagnostics");
 assert.match(assemblyEditor, /pickAssemblyGeometryFace\(/,
   "viewport face selection resolves against read-only OCCT topology");
 assert.match(assemblyEditor, /createAssemblyMateFromFaces\(/,
   "two selected geometry references create a persisted assembly mate");
+for (const relation of ["parallel", "perpendicular", "distance", "angle"]) {
+  assert.match(assemblyEditor, new RegExp(`value="${relation}"`),
+    `${relation} can be selected for face based assembly constraints`);
+}
 assert.match(assemblyEditor, /cadyx:project-lock/,
   "the assembly editor reacts to AI and human lock state");
+assert.match(assemblyEditor, /finishAssemblyGizmo\(\{pointerId\},false\)/,
+  "an AI edit cancels and clears an in-flight human drag preview");
 const start = source.indexOf("    const positions = [], bodyPositions = []");
 const end = source.indexOf("    currentModelViewportGeometry = viewportGeometry;", start);
 assert.ok(start > 0 && end > start);
