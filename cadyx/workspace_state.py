@@ -19,8 +19,17 @@ def prepare_workspace_state(root: Path) -> Path:
     for entry in legacy:
         if entry.is_symlink():
             raise ValidationError("Legacy workspace state must not be a symbolic link.")
-        if (state / entry.name).exists():
+        destination = state / entry.name
+        if destination.exists() or destination.is_symlink():
             raise ConflictError(f"Workspace state migration destination already exists: {entry.name}")
-    for entry in legacy:
-        entry.rename(state / entry.name)
+    moved: list[Path] = []
+    try:
+        for entry in legacy:
+            entry.rename(state / entry.name)
+            moved.append(entry)
+    except OSError:
+        # A failed later rename must not strand earlier artifacts in the new state root.
+        for entry in reversed(moved):
+            (state / entry.name).rename(entry)
+        raise
     return state

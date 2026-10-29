@@ -3,6 +3,7 @@ from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from cadyx.errors import ConflictError
 from cadyx.workspace import ProjectWorkspace
@@ -46,3 +47,47 @@ class WorkspaceStateTests(unittest.TestCase):
             self.assertEqual((root / ".cadyx-first").read_text(), "first")
             self.assertEqual((root / ".cadyx-conflict").read_text(), "old")
             self.assertEqual((state / ".cadyx-conflict").read_text(), "new")
+
+    def test_dangling_destination_symlink_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "projects"
+            root.mkdir()
+            state = prepare_workspace_state(root)
+            source = root / ".cadyx-old"
+            source.write_text("preserve")
+            target = state / source.name
+            try:
+                target.symlink_to(state / "missing-target")
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlinks are not available")
+            with self.assertRaises(ConflictError):
+                prepare_workspace_state(root)
+            self.assertEqual(source.read_text(), "preserve")
+            self.assertTrue(target.is_symlink())
+
+    def test_failed_later_rename_rolls_back_earlier_moves(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "projects"
+            root.mkdir()
+            state = prepare_workspace_state(root)
+            first = root / ".cadyx-first"
+            second = root / ".cadyx-second"
+            first.write_text("first")
+            second.write_text("second")
+            original_rename = Path.rename
+            calls = 0
+
+            def fail_second(path, target):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise PermissionError("simulated file lock")
+                return original_rename(path, target)
+
+            with patch.object(Path, "rename", fail_second):
+                with self.assertRaisesRegex(PermissionError, "simulated file lock"):
+                    prepare_workspace_state(root)
+            self.assertEqual(first.read_text(), "first")
+            self.assertEqual(second.read_text(), "second")
+            self.assertFalse((state / first.name).exists())
+            self.assertFalse((state / second.name).exists())
