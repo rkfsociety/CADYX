@@ -1100,9 +1100,10 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     gizmoRoot.addEventListener('pointerup',event=>void finishAssemblyGizmo(event,true));
     gizmoRoot.addEventListener('pointercancel',event=>void finishAssemblyGizmo(event,false));
     let down=null;
+    function assemblyCanvasDragAllowed(){return state.lock?.state==='FREE'&&!state.lock?.recovery_required}
     canvas.addEventListener('pointerdown',e=>{
       if(e.button!==0)return;
-      const facePick=state.assemblyFacePickMode,mesh=facePick?null:pick(e),instanceId=mesh?.instance_path?.length?mesh.instance_id:null,instance=assemblyInstance(instanceId);
+      const facePick=state.assemblyFacePickMode,mesh=facePick?null:pick(e),instanceId=assemblyCanvasDragAllowed()&&mesh?.instance_path?.length?mesh.instance_id:null,instance=assemblyInstance(instanceId);
       down={x:e.clientX,y:e.clientY,pointerId:e.pointerId,instance,mode:state.assemblyCoordinateMode,
         startLocal:instance?instancePose(instance):null,startShown:instance?selectedPose(instance,state.assemblyCoordinateMode):null,
         parent:instance?parentPoseForPath(state.selectedInstancePath):null,projection:instance?projectSetup():null,
@@ -1248,7 +1249,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         syncOverlay();
       }catch(e){console.debug('CAD semantic refresh',e)}
     }
-    let timer;const schedule=()=>{clearTimeout(timer);timer=setTimeout(refresh,80)};['#document-revision','#document-title'].forEach(s=>{const e=$(s);if(e)new MutationObserver(schedule).observe(e,{childList:true,subtree:true,characterData:true})});new MutationObserver(schedule).observe(detail,{attributes:true,attributeFilter:['hidden']});window.addEventListener('cadyx:model-tree-updated',refresh);window.addEventListener('cadyx:project-lock',event=>{if(event.detail?.projectId!==state.project)return;state.lock=event.detail.lock;if(state.lock?.state!=='FREE'||state.lock?.recovery_required){if(assemblyDrag){const pointerId=assemblyDrag.pointerId;void finishAssemblyGizmo({pointerId},false).then(()=>window.cadyxApi?.refresh?.()).catch(error=>setAssemblyStatus(`Не удалось обновить сборку после отмены: ${error.message}`))}}renderTree();if(state.selectedInstanceId)renderAssemblyProps()});schedule();
+    let timer;const schedule=()=>{clearTimeout(timer);timer=setTimeout(refresh,80)};['#document-revision','#document-title'].forEach(s=>{const e=$(s);if(e)new MutationObserver(schedule).observe(e,{childList:true,subtree:true,characterData:true})});new MutationObserver(schedule).observe(detail,{attributes:true,attributeFilter:['hidden']});window.addEventListener('cadyx:model-tree-updated',refresh);window.addEventListener('cadyx:project-lock',event=>{if(event.detail?.projectId!==state.project)return;state.lock=event.detail.lock;if(state.lock?.state!=='FREE'||state.lock?.recovery_required){down=null;if(assemblyDrag){const pointerId=assemblyDrag.pointerId;void finishAssemblyGizmo({pointerId},false).then(()=>window.cadyxApi?.refresh?.()).catch(error=>setAssemblyStatus(`Не удалось обновить сборку после отмены: ${error.message}`))}}renderTree();if(state.selectedInstanceId)renderAssemblyProps()});schedule();
   }
   const boot=()=>setTimeout(enhance,0);if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();

@@ -20,6 +20,8 @@ assert.match(assemblyEditor, /previewAssemblyTransform\(/,
   "mouse manipulation updates an isolated viewport preview");
 assert.match(assemblyEditor, /canvas\.addEventListener\('pointerdown',e=>\{\s*if\(e\.button!==0\)return;\s*const facePick=state\.assemblyFacePickMode,mesh=facePick\?null:pick\(e\)/,
   "left pointer down selects a viewport occurrence as the start of direct drag manipulation");
+assert.match(assemblyEditor, /mesh=facePick\?null:pick\(e\),instanceId=assemblyCanvasDragAllowed\(\)&&mesh\?\.instance_path/,
+  "occurrence selection remains available while assembly dragging respects edit locks");
 assert.match(assemblyEditor, /const right=\[orientation\[0\],orientation\[1\],orientation\[2\]\],up=\[orientation\[6\],orientation\[7\],orientation\[8\]\]/,
   "direct assembly dragging derives its axes from the camera orientation");
 const dragPoseStart = assemblyEditor.indexOf("    function assemblyDragPose(");
@@ -103,6 +105,17 @@ function appFunction(name, nextMarker) {
 }
 
 async function testAssemblyDragAndHistory() {
+  const editLockSandbox = { state: { lock: { state: "FREE", recovery_required: false } } };
+  const dragAllowedStart = assemblyEditor.indexOf("    function assemblyCanvasDragAllowed()");
+  const dragAllowedEnd = assemblyEditor.indexOf("    canvas.addEventListener('pointerdown'", dragAllowedStart);
+  assert.ok(dragAllowedStart >= 0 && dragAllowedEnd > dragAllowedStart);
+  vm.runInNewContext(`${assemblyEditor.slice(dragAllowedStart, dragAllowedEnd)}; this.allowed=assemblyCanvasDragAllowed;`, editLockSandbox);
+  assert.equal(editLockSandbox.allowed(), true, "human canvas dragging is enabled with a confirmed free lock");
+  editLockSandbox.state.lock = { state: "AI_LOCKED", recovery_required: false };
+  assert.equal(editLockSandbox.allowed(), false, "AI edits block canvas dragging");
+  editLockSandbox.state.lock = { state: "FREE", recovery_required: true };
+  assert.equal(editLockSandbox.allowed(), false, "recovery-required projects block canvas dragging");
+
   const commits = [], clears = [];
   const drag = { pointerId: 4, instance: { id: "instance:a" }, moved: true,
     currentLocal: { translation: [0, 0, 0], rotation: [1, 0, 0, 0] },
