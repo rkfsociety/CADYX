@@ -164,6 +164,41 @@ const jsonResponse = (status, value) => ({
 });
 
 setImmediate(async () => {
+  // Streaming and buffered previews must choose the same vertices, even when
+  // the vertex count is not divisible by the requested preview size.
+  const parseStream = parserSandbox.window.CadyxPlyPreview.parseStream;
+  for (const format of ["ascii", "binary_little_endian"]) {
+    const header = Buffer.from(`ply\nformat ${format} 1.0\nelement vertex 10\nproperty float x\nproperty float y\nproperty float z\nend_header\n`);
+    let body;
+    if (format === "ascii") {
+      body = Buffer.from(Array.from({ length: 10 }, (_, i) => `${i} ${i * 2} ${-i}\n`).join(""));
+    } else {
+      body = Buffer.alloc(10 * 12);
+      for (let i = 0; i < 10; i += 1) {
+        [i, i * 2, -i].forEach((value, axis) => body.writeFloatLE(value, i * 12 + axis * 4));
+      }
+    }
+    const bytes = Buffer.concat([header, body]);
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    const expected = parse(buffer, { maxPreviewPoints: 3 });
+    assert.deepEqual(Array.from(expected.positions).filter((_, i) => i % 3 === 0), [0, 4, 7]);
+    for (const chunkSize of [7, bytes.length]) {
+      const stream = new ReadableStream({
+        start(controller) {
+          for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+            controller.enqueue(bytes.subarray(offset, offset + chunkSize));
+          }
+          controller.close();
+        },
+      });
+      const actual = await parseStream(stream, { maxPreviewPoints: 3 });
+      assert.deepEqual(Array.from(actual.positions), Array.from(expected.positions),
+        `${format} streaming sample differs at chunk size ${chunkSize}`);
+      assert.deepEqual(Array.from(actual.bounds.min), Array.from(expected.bounds.min));
+      assert.deepEqual(Array.from(actual.bounds.max), Array.from(expected.bounds.max));
+      assert.equal(actual.previewVertexCount, expected.previewVertexCount);
+    }
+  }
   // Exercise the actual form handlers without starting the viewport or touching saved projects.
   const source = fs.readFileSync(path.join(__dirname, "../web/ply-preview.js"), "utf8");
   const startupSource = source.slice(source.indexOf("const initialAddress ="), source.indexOf("const primaryGrid ="));

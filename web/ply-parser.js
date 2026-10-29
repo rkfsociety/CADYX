@@ -670,7 +670,6 @@
       if (coordinates.some(value => !value)) throw new Error("У вершин PLY должны быть координаты x, y, z.");
 
       const previewVertexCount = Math.min(vertex.count, maxPreviewPoints);
-      const sampleStride = vertex.count / previewVertexCount;
       const positions = new Float32Array(previewVertexCount * 3);
       const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
       let vertexIndex = 0;
@@ -678,8 +677,11 @@
       const saveVertex = (x, y, z) => {
         const point = [x, y, z];
         if (!point.every(Number.isFinite)) throw new Error("В PLY найдены некорректные координаты.");
-        const previewOffset = nextSample * 3;
-        if (nextSample < previewVertexCount && vertexIndex >= Math.floor(nextSample * sampleStride)) {
+        const sampleIndex = Math.floor(vertexIndex * previewVertexCount / vertex.count);
+        const previousSampleIndex = vertexIndex > 0
+          ? Math.floor((vertexIndex - 1) * previewVertexCount / vertex.count) : -1;
+        if (sampleIndex !== previousSampleIndex) {
+          const previewOffset = sampleIndex * 3;
           for (let axis = 0; axis < 3; axis += 1) {
             const value = Math.fround(point[axis]);
             if (!Number.isFinite(value)) throw new Error("Координаты PLY слишком велики для предпросмотра.");
