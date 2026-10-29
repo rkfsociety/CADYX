@@ -18,6 +18,29 @@ assert.match(assemblyEditor, /cad3-assembly-select \.cad-tree-label\{white-space
   "full assembly instance names wrap instead of inheriting one-line ellipsis");
 assert.match(assemblyEditor, /previewAssemblyTransform\(/,
   "mouse manipulation updates an isolated viewport preview");
+assert.match(assemblyEditor, /canvas\.addEventListener\('pointerdown',e=>\{\s*if\(e\.button!==0\)return;\s*const facePick=state\.assemblyFacePickMode,mesh=facePick\?null:pick\(e\)/,
+  "left pointer down selects a viewport occurrence as the start of direct drag manipulation");
+assert.match(assemblyEditor, /const right=\[orientation\[0\],orientation\[1\],orientation\[2\]\],up=\[orientation\[6\],orientation\[7\],orientation\[8\]\]/,
+  "direct assembly dragging derives its axes from the camera orientation");
+const dragPoseStart = assemblyEditor.indexOf("    function assemblyDragPose(");
+const dragPoseEnd = assemblyEditor.indexOf("    function pick(e)", dragPoseStart);
+assert.ok(dragPoseStart >= 0 && dragPoseEnd > dragPoseStart);
+const dragPoseSandbox = { rotateVector: (q, v) => v,
+  quatInverse: q => q };
+vm.runInNewContext(`${assemblyEditor.slice(dragPoseStart, dragPoseEnd)}; this.dragPose=assemblyDragPose;`, dragPoseSandbox);
+const dragPose = dragPoseSandbox.dragPose({ translation: [0,0,0], rotation: [1,0,0,0] }, 10, 0,
+  [1,0,0,0,1,0,0,0,1], 20, 2, "global", [1,0,0,0], 0.5, true);
+assert.deepEqual(Array.from(dragPose.translation), [1,0,0],
+  "camera-plane dragging converts CSS pixels to world units and applies translation snapping");
+const dragPoseDpr1 = dragPoseSandbox.dragPose({ translation: [0,0,0], rotation: [1,0,0,0] }, 10, 0,
+  [1,0,0,0,1,0,0,0,1], 10, 1, "global", [1,0,0,0], 0, false);
+assert.deepEqual(Array.from(dragPoseDpr1.translation), [1,0,0],
+  "the same CSS drag produces the same world displacement at DPR 1 and DPR 2");
+const viewportSource = fs.readFileSync(path.join(__dirname, "../web/viewport.js"), "utf8");
+assert.match(viewportSource, /event\.button === 2\) \{\s*drag = \{ type: "orbit"/,
+  "right pointer drag orbits the viewport camera");
+assert.match(viewportSource, /event\.button === 1\) \{\s*event\.preventDefault\(\);\s*drag = \{ type: "pan"/,
+  "middle pointer drag continues to pan the viewport");
 assert.match(assemblyEditor, /data-gizmo-kind/,
   "the viewport exposes axis and rotation manipulators");
 assert.match(assemblyEditor, /kinematics\.redundant_mate_ids\?\.length/,

@@ -986,6 +986,14 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if (u < 0 || v < 0 || u + v > 1) return null;
       return (1 - u - v) * az + v * bz + u * cz;
     }
+    function assemblyDragPose(startShown,dx,dy,orientation,scale,dpr,mode,parentRotation,step,snap){
+      const pixelsPerUnit=scale/dpr;if(!pixelsPerUnit)return null;
+      const right=[orientation[0],orientation[1],orientation[2]],up=[orientation[6],orientation[7],orientation[8]];
+      const worldDelta=right.map((value,index)=>(value*dx-up[index]*dy)/pixelsPerUnit);
+      let coordinateDelta=mode==='local'?rotateVector(quatInverse(parentRotation),worldDelta):worldDelta;
+      if(snap&&step>0)coordinateDelta=coordinateDelta.map(value=>Math.round(value/step)*step);
+      return{translation:startShown.translation.map((value,index)=>value+coordinateDelta[index]),rotation:startShown.rotation.slice()};
+    }
     function pick(e) {
       const projection = projectSetup(), rect = canvas.getBoundingClientRect();
       if (!projection || !rect.width) return;
@@ -1017,14 +1025,15 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           }
         }
       }
-      if (!best) {clearSelection();return}
-      if(state.assemblyFacePickMode){if(best.mesh.instance_path?.length&&(state.assemblyPickKind==='vertex'||Number.isInteger(best.faceIndex)))void pickAssemblyGeometryFace(best.mesh,best.faceIndex,e,best.depth);else setAssemblyStatus('Выберите геометрию B-rep размещённой детали.');return}
-      if(best.mesh.instance_path?.length){selectAssemblyOccurrence(best.mesh.object_id,best.mesh.instance_id,e);return}
+      if (!best) {clearSelection();return null}
+      if(state.assemblyFacePickMode){if(best.mesh.instance_path?.length&&(state.assemblyPickKind==='vertex'||Number.isInteger(best.faceIndex)))void pickAssemblyGeometryFace(best.mesh,best.faceIndex,e,best.depth);else setAssemblyStatus('Выберите геометрию B-rep размещённой детали.');return best.mesh}
+      if(best.mesh.instance_path?.length){selectAssemblyOccurrence(best.mesh.object_id,best.mesh.instance_id,e);return best.mesh}
       const body=state.byId.get(best.mesh.source_body_id||best.mesh.object_id);
-      if(!body)return;
+      if(!body)return best.mesh;
       const featureId = [...(body.feature_ids || [])].reverse()
         .find(id => state.byId.get(id)?.type === 'feature');
       if (featureId) select(featureId, true);else select(body.id,true);
+      return best.mesh;
     }
     function previewAssemblyTransform(instance,localPose){
       const affected=new Map();
@@ -1085,10 +1094,38 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     gizmoRoot.addEventListener('pointerup',event=>void finishAssemblyGizmo(event,true));
     gizmoRoot.addEventListener('pointercancel',event=>void finishAssemblyGizmo(event,false));
     let down=null;
-    canvas.addEventListener('pointerdown',e=>{if(e.button===0)down={x:e.clientX,y:e.clientY,pointerId:e.pointerId}},true);
-    canvas.addEventListener('pointermove',e=>{if(down?.pointerId===e.pointerId&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>=6)down=null},true);
-    canvas.addEventListener('pointerup',e=>{if(down?.pointerId!==e.pointerId)return;const click=e.button===0&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<6;down=null;if(click)pick(e)},true);
-    canvas.addEventListener('pointercancel',()=>{down=null},true);
+    canvas.addEventListener('pointerdown',e=>{
+      if(e.button!==0)return;
+      const facePick=state.assemblyFacePickMode,mesh=facePick?null:pick(e),instanceId=mesh?.instance_path?.length?mesh.instance_id:null,instance=assemblyInstance(instanceId);
+      down={x:e.clientX,y:e.clientY,pointerId:e.pointerId,instance,mode:state.assemblyCoordinateMode,
+        startLocal:instance?instancePose(instance):null,startShown:instance?selectedPose(instance,state.assemblyCoordinateMode):null,
+        parent:instance?parentPoseForPath(state.selectedInstancePath):null,projection:instance?projectSetup():null,
+        dpr:Math.min(devicePixelRatio||1,2),facePick,moved:false};
+      if(instance&&down.projection){try{canvas.setPointerCapture(e.pointerId)}catch{}}
+    },true);
+    canvas.addEventListener('pointermove',e=>{
+      const drag=down;if(drag?.pointerId!==e.pointerId||!drag.instance||!drag.projection)return;
+      const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(!drag.moved&&Math.hypot(dx,dy)<3)return;
+      drag.moved=true;e.preventDefault();
+      const projection=drag.projection,rect=canvas.getBoundingClientRect();if(!rect.width)return;
+      const step=Number(props.querySelector('[data-assembly-step]')?.value),shown=assemblyDragPose(drag.startShown,dx,dy,modelViewer.getCamera().orientation,projection.scale,drag.dpr,drag.mode,drag.parent.rotation,step,state.snapEnabled);
+      if(!shown)return;
+      const nextLocal=localPoseFromMode(shown,drag.mode);
+      assemblyDrag={pointerId:e.pointerId,instance:drag.instance,mode:drag.mode,shownPose:shown,nextLocal,moved:true};
+      previewAssemblyTransform(drag.instance,nextLocal);lastOverlaySignature=null;syncOverlay();
+    },true);
+    const finishCanvasDrag=(e,commit)=>{
+      const drag=down;if(!drag||drag.pointerId!==e.pointerId)return;down=null;
+      if(!drag.moved){if((drag.facePick||!drag.instance)&&e.type==='pointerup')pick(e);return}
+      const active=assemblyDrag;if(!active||active.pointerId!==e.pointerId)return;
+      assemblyDrag=null;
+      if(commit){const changed=active.nextLocal.translation.some((value,index)=>Math.abs(value-drag.startLocal.translation[index])>1e-9);
+        if(changed)void commitAssemblyTransform(drag.instance,active.nextLocal).catch(()=>{});}
+      clearAssemblyPreview();
+    };
+    canvas.addEventListener('pointerup',e=>finishCanvasDrag(e,true),true);
+    canvas.addEventListener('pointercancel',e=>finishCanvasDrag(e,false),true);
+    canvas.addEventListener('contextmenu',e=>e.preventDefault());
     const toolbar=$('.model-toolbar'),presets=$('#viewport-camera-presets'),fit=$('#viewport-fit'),four=$('#viewport-four-views'),divider=$('.viewport-toolbar-divider'),liveScan=$('#viewport-live-scan'),scanMesh=$('#viewport-scan-mesh'),liveCamera=$('#viewport-live-camera'),scanViewport=$('#viewport'),scan360=$('#viewport-scan-360'),scanStatus=$('#viewport-scan-360-status');if(toolbar&&presets&&fit&&four&&divider){detail.dataset.cadTool='orbit';fit.innerHTML=`${I.fit}<span class="toolbar-label">Вписать</span>`;fit.classList.add('cad3-tool');four.classList.add('cad3-tool');liveScan?.classList.add('cad3-tool');scanMesh?.classList.add('cad3-tool');liveCamera?.classList.add('cad3-tool');toolbar.replaceChildren(fit,four,divider,presets,...(liveScan?[liveScan]:[]),...(scanMesh?[scanMesh]:[]),...(scan360?[scan360]:[]),...(liveCamera?[liveCamera]:[]),...(scanStatus?[scanStatus]:[]))}
     const scanParams=new URLSearchParams(location.search),scanMeshReady=scanParams.get('scan_mesh_ready')==='1'&&scanParams.get('scan_kind')!=='provisional_fusion';
     const scanView=liveScan&&scanMesh&&scanViewport?window.CadyxScanView?.initialize({cloudButton:liveScan,meshButton:scanMesh,viewport:scanViewport,viewer:modelViewer,getModelGeometry:()=>currentModelViewportGeometry,getProjectId:()=>window.cadyxSelectedProjectId?.(),hasPersistentPointCloud:file=>state.objects.some(o=>o.type==='feature'&&o.operation==='import_point_cloud'&&o.source?.project_file===file),meshReady:scanMeshReady}):null;

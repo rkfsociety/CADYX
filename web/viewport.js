@@ -1491,7 +1491,7 @@
       if (event.button === 1) {
         event.preventDefault();
         drag = { type: "pan", clientX: event.clientX, clientY: event.clientY };
-      } else if (event.button === 0) {
+      } else if (event.button === 2) {
         drag = { type: "orbit", clientX: event.clientX, clientY: event.clientY };
       } else {
         return;
@@ -1529,6 +1529,7 @@
     };
     canvas.addEventListener("pointerup", stopDrag);
     canvas.addEventListener("pointercancel", stopDrag);
+    canvas.addEventListener("contextmenu", (event) => event.preventDefault());
     canvas.addEventListener("dblclick", () => {
       resetView();
       render();
