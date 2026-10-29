@@ -1160,6 +1160,44 @@ class WebApiTests(unittest.TestCase):
         self.core.release_lease(project_id, human["lease"]["lease_id"])
         self.assertEqual(self.core.inspect_project(project_id)["document"]["revision"], 0)
 
+    def test_manual_assembly_transform_persists_across_core_reload(self) -> None:
+        _, created = self.request("/api/v1/projects", {
+            "name": "Assembly transform persistence", "project_type": "assembly",
+        })
+        project_id = created["project"]["id"]
+        _, lease = self.request(f"/api/v1/projects/{project_id}/leases", {
+            "owner_type": "human", "owner_id": "assembly-editor",
+        })
+        lease_id = lease["lease"]["lease_id"]
+        revision = 0
+
+        def command(payload):
+            nonlocal revision
+            status, result = self.request(f"/api/v1/projects/{project_id}/commands", {
+                "lease_id": lease_id, "expected_revision": revision, "command": payload,
+            })
+            self.assertEqual(status, 200, result)
+            revision = result["document"]["revision"]
+            return result["history_entry"]["result"]
+
+        try:
+            body_id = command({"type": "create_box", "width": 2, "height": 2, "depth": 2})["body_id"]
+            part_id = command({"type": "create_assembly_part", "body_id": body_id})["part_id"]
+            instance_id = command({"type": "add_assembly_instance", "target_id": part_id})["instance_id"]
+            command({"type": "transform_assembly_instance", "instance_id": instance_id,
+                     "translation": [7.0, -3.0, 2.0]})
+        finally:
+            self.core.release_lease(project_id, lease_id)
+
+        reloaded = CadyxCore(str(Path(self.temporary_directory.name) / "projects"),
+                             kernel=self.core.kernel)
+        saved = reloaded.inspect_project(project_id)
+        instance = next(item for item in saved["document"]["assembly"]["instances"]
+                        if item["id"] == instance_id)
+        self.assertEqual(instance["translation"], [7.0, -3.0, 2.0])
+        self.assertEqual(saved["document"]["revision"], revision)
+        self.assertEqual(saved["lock"]["state"], "FREE")
+
     def test_project_file_api_lists_and_serves_only_direct_user_files(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Files API"})
         project_id = created["project"]["id"]
