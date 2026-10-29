@@ -30,24 +30,24 @@ def _build_kd_tree(points: list[tuple[float, float, float]], indices: list[int])
     return minimum, maximum, axis, None, left, right
 
 
-def _box_distance_squared(node: _KDNode, point: tuple[float, float, float]) -> float:
+def _box_distance(node: _KDNode, point: tuple[float, float, float]) -> float:
     minimum, maximum = node[0], node[1]
     dx = max(minimum[0] - point[0], point[0] - maximum[0], 0.0)
     dy = max(minimum[1] - point[1], point[1] - maximum[1], 0.0)
     dz = max(minimum[2] - point[2], point[2] - maximum[2], 0.0)
-    return dx * dx + dy * dy + dz * dz
+    return math.hypot(dx, dy, dz)
 
 
 def _nearest_points(points: list[tuple[float, float, float]], tree: _KDNode,
-                    point: tuple[float, float, float], radius_squared: float, limit: int,
+                    point: tuple[float, float, float], radius: float, limit: int,
                     comparisons: list[int], *, budget_message: str) -> list[tuple[float, int]]:
     nearest: list[tuple[float, int]] = []
-    pending = [(_box_distance_squared(tree, point), 0, tree)]
+    pending = [(_box_distance(tree, point), 0, tree)]
     sequence = 1
     while pending:
-        node_distance_squared, _, node = heapq.heappop(pending)
-        search_radius_squared = min(radius_squared, -nearest[0][0]) if len(nearest) == limit else radius_squared
-        if node_distance_squared > search_radius_squared:
+        node_distance, _, node = heapq.heappop(pending)
+        search_radius = min(radius, -nearest[0][0]) if len(nearest) == limit else radius
+        if node_distance > search_radius:
             break
         _, _, _, indices, left, right = node
         if indices is not None:
@@ -58,32 +58,27 @@ def _nearest_points(points: list[tuple[float, float, float]], tree: _KDNode,
                         budget_message,
                         code="RESOURCE_LIMIT",
                     )
-                candidate = points[index]
-                dx = point[0] - candidate[0]
-                dy = point[1] - candidate[1]
-                dz = point[2] - candidate[2]
-                squared_distance = dx * dx + dy * dy + dz * dz
-                if squared_distance <= radius_squared:
-                    entry = (-squared_distance, -index)
+                distance = math.dist(point, points[index])
+                if distance <= radius:
+                    entry = (-distance, -index)
                     if len(nearest) < limit:
                         heapq.heappush(nearest, entry)
-                    elif squared_distance < -nearest[0][0] or (
-                            squared_distance == -nearest[0][0] and index < -nearest[0][1]):
+                    elif distance < -nearest[0][0] or (
+                            distance == -nearest[0][0] and index < -nearest[0][1]):
                         heapq.heapreplace(nearest, entry)
             continue
 
         if left is not None:
-            distance_squared = _box_distance_squared(left, point)
-            if distance_squared <= search_radius_squared:
-                heapq.heappush(pending, (distance_squared, sequence, left))
+            distance = _box_distance(left, point)
+            if distance <= search_radius:
+                heapq.heappush(pending, (distance, sequence, left))
                 sequence += 1
         if right is not None:
-            distance_squared = _box_distance_squared(right, point)
-            if distance_squared <= search_radius_squared:
-                heapq.heappush(pending, (distance_squared, sequence, right))
+            distance = _box_distance(right, point)
+            if distance <= search_radius:
+                heapq.heappush(pending, (distance, sequence, right))
                 sequence += 1
-    return sorted((math.sqrt(-distance), -index) for distance, index in nearest)
-
+    return sorted((-distance, -index) for distance, index in nearest)
 
 def _points_in_box(points: list[tuple[float, float, float]], tree: _KDNode,
                    minimum: tuple[float, float, float],
@@ -126,7 +121,7 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
             if i in removed:
                 continue
             nearest = _nearest_points(
-                current, tree, point, radius * radius, 48, comparisons,
+                current, tree, point, radius, 48, comparisons,
                 budget_message="Surface processing exceeds its 20M comparison budget; reduce radius or iterations.",
             )
             neighbors = [j for _, j in nearest]
@@ -212,7 +207,6 @@ def isolation_points(points: list[tuple[float, float, float]], rate: float,
         sizes[first_root] += sizes[second_root]
 
     component_comparisons = [0]
-    radius_squared = component_radius * component_radius
     for index, point in enumerate(points):
         minimum = tuple(value - component_radius for value in point)
         maximum = tuple(value + component_radius for value in point)
@@ -222,8 +216,7 @@ def isolation_points(points: list[tuple[float, float, float]], rate: float,
             component_comparisons[0] += 1
             if comparisons[0] + component_comparisons[0] > MAX_SURFACE_COMPARISONS:
                 raise ValidationError("Isolation detection exceeds its 20M comparison budget; downsample first.", code="RESOURCE_LIMIT")
-            delta = [point[axis] - points[other][axis] for axis in range(3)]
-            if math.fsum(value * value for value in delta) <= radius_squared:
+            if math.dist(point, points[other]) <= component_radius:
                 union(index, other)
 
     roots = [find(index) for index in range(len(points))]

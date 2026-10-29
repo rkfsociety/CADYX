@@ -133,6 +133,25 @@ class PointCloudProcessingTests(unittest.TestCase):
                                 for axis, value in enumerate(candidate)) for candidate in geometric))
         self.assertEqual(points[0], (0., 0., 0.))
 
+    def test_nearest_neighbors_handle_large_and_subnormal_distances(self):
+        from cadyx.point_cloud_surface import _build_kd_tree, _nearest_points
+
+        for scale in (1e-200, 1e200):
+            with self.subTest(scale=scale):
+                points = [(0., 0., 0.), (scale, 0., 0.),
+                          (0., scale, 0.), (scale, scale, 0.)]
+                tree = _build_kd_tree(points, list(range(len(points))))
+                neighbors = _nearest_points(points, tree, points[0], scale * 1.1, 4, [0],
+                                            budget_message="budget exceeded")
+                self.assertEqual([index for _, index in neighbors], [0, 1, 2])
+                self.assertEqual([distance for distance, _ in neighbors], [0., scale, scale])
+
+    def test_isolation_filter_does_not_join_diagonal_outlier_at_large_scale(self):
+        scale = 1e200
+        points = [(0., 0., 0.), (scale, 0., 0.), (0., scale, 0.),
+                  (scale, scale, 0.), (3.5 * scale, 3.5 * scale, 0.)]
+        self.assertEqual(process_points(points, "isolation_filter", {"rate": 20}), points[:4])
+
     def test_geometric_simplification_handles_large_finite_coordinates(self):
         # Squaring these finite bounds overflows, although the cloud is valid.
         points = [(float(x) * 1e154, float(y) * 1e154, 0.)
