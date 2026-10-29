@@ -38,6 +38,12 @@ def normalize_auth_token(token: str | None) -> str | None:
         raise AuthenticationConfigError(
             f"CADYX authentication tokens must be at least {_MIN_TOKEN_LENGTH} characters long."
         )
+    try:
+        token.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise AuthenticationConfigError("CADYX authentication tokens must be valid UTF-8.") from exc
+    if any(ord(character) < 32 or ord(character) == 127 for character in token):
+        raise AuthenticationConfigError("CADYX authentication tokens must not contain control characters.")
     return token
 
 

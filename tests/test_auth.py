@@ -62,6 +62,19 @@ class AuthenticationConfigTests(unittest.TestCase):
                     with self.assertRaises(AuthenticationConfigError):
                         load_auth_token(None, str(token_file))
 
+    def test_token_loading_rejects_controls_and_invalid_unicode(self) -> None:
+        for token in (_TOKEN + "\x00", _TOKEN + "\x1b", _TOKEN + "\x7f", _TOKEN + "\ud800"):
+            with self.subTest(token=repr(token)):
+                with self.assertRaises(AuthenticationConfigError):
+                    load_auth_token(token, None)
+
+        self.assertEqual(load_auth_token("é" * 32, None), "é" * 32)
+        with tempfile.TemporaryDirectory() as directory:
+            token_file = Path(directory) / "token.txt"
+            token_file.write_bytes((_TOKEN + "\x00\n").encode("utf-8"))
+            with self.assertRaises(AuthenticationConfigError):
+                load_auth_token(None, str(token_file))
+
     def test_bearer_and_basic_credentials(self) -> None:
         basic = base64.b64encode(f"cadyx:{_TOKEN}".encode()).decode()
         self.assertTrue(authorization_matches(f"Bearer {_TOKEN}", _TOKEN))
