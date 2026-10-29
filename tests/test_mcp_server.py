@@ -323,9 +323,11 @@ class CadyxMCPServerTests(unittest.TestCase):
             "require_assembly": True,
         })
         self.assertEqual(report["revision"], 0)
-        self.assertEqual(report["status"], "untested")
+        self.assertEqual(report["status"], "fail")
         self.assertFalse(report["passed"])
-        self.assertEqual(next(s for s in report["stages"] if s["id"] == "assembly")["status"], "untested")
+        assembly = next(s for s in report["stages"] if s["id"] == "assembly")
+        self.assertEqual(assembly["status"], "fail")
+        self.assertEqual(assembly["evidence"]["reason"], "assembly graph has no placed instances")
         detail = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
         self.assertEqual(detail["lock"]["state"], "FREE")
         self.assertEqual(detail["document"]["revision"], 0)
