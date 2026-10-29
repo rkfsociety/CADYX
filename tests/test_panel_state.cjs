@@ -46,7 +46,12 @@ async function main() {
   const feature = { id: 'last-feature', type: 'feature', body_id: 'result-body', operation: 'fillet_edges' };
   const selectionCalls = [];
   const selectionSandbox = {
-    state: { byId: new Map([[feature.id, feature]]), objects: [feature] },
+    state: {
+      byId: new Map([[feature.id, feature]]), objects: [feature],
+      selectedOccurrenceId: null, selectedOccurrenceIds: new Set(),
+      selectedInstanceId: null, selectedInstancePath: [],
+      assemblyFacePicks: [], assemblyFacePickMode: false, selectionCleared: false,
+    },
     modelGroups: () => [{ body: { id: 'result-body' }, features: [feature] }],
     modelViewer: {
       setSelectedFeature: id => selectionCalls.push(['feature', id]),
