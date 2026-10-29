@@ -11,6 +11,12 @@ from cadyx.source_extension import SourceExtensionEngine
 
 
 class SourceExtensionTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows command output code page required")
+    def test_sandbox_command_output_decodes_windows_ansi_bytes(self) -> None:
+        from cadyx.source_sandbox import _decode_windows_command_output
+
+        self.assertEqual(len(_decode_windows_command_output(b"\x93")), 1)
+
     def test_source_path_policy_rejects_escape_and_non_code(self) -> None:
         with self.assertRaises(ValidationError):
             SourceExtensionEngine._source_path("../secret.txt")

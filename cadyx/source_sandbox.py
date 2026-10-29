@@ -25,6 +25,11 @@ class SourceSandboxUnavailable(CadyxError):
     http_status = 503
 
 
+def _decode_windows_command_output(value: bytes) -> str:
+    """Decode localized Windows command output without failing on code-page bytes."""
+    return value.decode("mbcs", errors="replace")
+
+
 def run_appcontainer_process(
     application: Path,
     arguments: Sequence[str],
@@ -209,10 +214,12 @@ def run_appcontainer_process(
     delete_profile.restype = ctypes.c_long
 
     def acl(*args: str) -> None:
-        completed = subprocess.run([str(icacls), *args], capture_output=True, text=True,
+        completed = subprocess.run([str(icacls), *args], capture_output=True,
                                    creationflags=0x08000000)
         if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout).strip()[-500:]
+            detail = _decode_windows_command_output(
+                completed.stderr or completed.stdout
+            ).strip()[-500:]
             raise SourceSandboxUnavailable(f"Windows could not apply source-test AppContainer ACLs (exit {completed.returncode}): {detail}")
 
     try:
@@ -336,9 +343,11 @@ def run_appcontainer_process(
         cleanup_errors = []
         for path in reversed(acl_paths):
             completed = subprocess.run([str(icacls), str(path), "/remove:g", f"*{sid}", "/T", "/C", "/Q"],
-                                       capture_output=True, text=True, creationflags=0x08000000)
+                                       capture_output=True, creationflags=0x08000000)
             if completed.returncode != 0:
-                cleanup_errors.append((completed.stderr or completed.stdout).strip()[-300:])
+                cleanup_errors.append(_decode_windows_command_output(
+                    completed.stderr or completed.stdout
+                ).strip()[-300:])
         delete_result = delete_profile(profile_name)
         advapi32.FreeSid(package_sid)
         if cleanup_errors or delete_result < 0:
