@@ -40,6 +40,15 @@ class AssemblyMateTests(unittest.TestCase):
     def placement(self, instance_id):
         return next(item for item in self.document.assembly["instances"] if item["id"] == instance_id)
 
+    def test_pose_match_is_stable_for_roundoff_near_unit_quaternions(self):
+        from cadyx.assembly_mates import _matches
+
+        first = {"translation": [0.0, 0.0, 0.0],
+                 "rotation": [0.9999999999999376, 0.0, 0.0, 0.0]}
+        second = {"translation": [0.0, 0.0, 0.0],
+                  "rotation": [0.9999999999999374, 0.0, 0.0, 0.0]}
+        self.assertTrue(_matches(first, second))
+
     def test_fixed_chain_and_consistent_redundant_cycle(self):
         self.assertEqual(inspect_assembly_mates(self.document.assembly)["status"],
                          "underconstrained")

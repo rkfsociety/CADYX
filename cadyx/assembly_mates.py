@@ -295,8 +295,15 @@ def _relation_matches(a: dict[str, Any], b: dict[str, Any], mate: dict[str, Any]
 def _matches(a: dict[str, Any], b: dict[str, Any]) -> bool:
     distance = math.sqrt(sum((float(x) - float(y)) ** 2 for x, y in
                              zip(a["translation"], b["translation"])))
-    dot = abs(sum(float(x) * float(y) for x, y in zip(a["rotation"], b["rotation"])))
-    angle = 2 * math.acos(min(1.0, max(-1.0, dot)))
+    rotation_a, rotation_b = a["rotation"], b["rotation"]
+    inverse_a = [float(rotation_a[0]), *[-float(value) for value in rotation_a[1:]]]
+    relative = _multiply(inverse_a, [float(value) for value in rotation_b])
+    relative_norm = math.sqrt(sum(value * value for value in relative))
+    if relative_norm <= 1e-15:
+        return False
+    angle = 2 * math.atan2(
+        math.sqrt(sum(value * value for value in relative[1:])), abs(relative[0])
+    )
     return distance <= POSITION_TOLERANCE_MM and angle <= ROTATION_TOLERANCE_RAD
 
 
