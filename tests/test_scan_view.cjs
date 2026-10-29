@@ -529,14 +529,16 @@ const polledCloudButton = element();
 const polled = sandbox.window.CadyxScanView.initialize({
   cloudButton: polledCloudButton, meshButton: element(), viewport: element(), viewer, getModelGeometry, meshReady: false,
 }, undefined, fetchPreview);
-const capture = { preview_folder: "scan folder", preview_file: "frame-1.ply", origin_file: "origin.ply", preview_kind: "single" };
+const capture = { preview_folder: "scan folder", preview_subfolder: "run-1", preview_file: "frame-1.ply",
+  origin_file: "origin.ply", preview_kind: "single" };
 polled.showCapture(capture);
 assert.equal(polledCloudButton.attributes["aria-pressed"], "false", "background scan polling does not open a closed preview");
-polled.showCapture(capture, { open: true });
+polled.showCapture({ ...capture, state: "running" });
 await new Promise(resolve => setImmediate(resolve));
-assert.equal(polledCloudButton.attributes["aria-pressed"], "true", "the explicit scan start opens the point cloud inside the main canvas");
+assert.equal(polledCloudButton.attributes["aria-pressed"], "true",
+  "the first saved frame opens in the main canvas while capture is running");
 polled.setOpen(false);
-polled.showCapture({ ...capture, preview_file: "frame-2.ply" });
+polled.showCapture({ ...capture, state: "running", preview_file: "frame-2.ply" });
 assert.equal(polledCloudButton.attributes["aria-pressed"], "false", "new frames update without reopening a preview the user closed");
 
 const serverPointCloudButton = element();

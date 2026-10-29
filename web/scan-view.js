@@ -496,6 +496,8 @@
     let cloudOriginSource = null;
     let cloudTableFrame = null;
     let renderedCloudSource = null;
+    let capturePreviewRun = null;
+    let capturePreviewAutoOpened = false;
     let cloudRequest = 0;
     let liveRequest = 0;
     let liveTimer = null;
@@ -1664,6 +1666,13 @@
       else updateButton();
     };
     const showCapture = (scan, { open = false } = {}) => {
+      const captureRun = scan?.preview_subfolder || (scan?.state === 'running' ? scan.preview_file : null);
+      if (scan?.state === 'running' && captureRun && captureRun !== capturePreviewRun) {
+        capturePreviewRun = captureRun;
+        capturePreviewAutoOpened = false;
+      }
+      const shouldOpenCapturePreview = ['running', 'completed'].includes(scan?.state)
+        && Boolean(scan?.preview_file) && !capturePreviewAutoOpened;
       if (scan?.state === 'completed' && scan.preview_file && hasPersistentPointCloud(scan.preview_file)) {
         serverPointCloudVisible = true;
         if (livePreviewOwned) closeLivePreview();
@@ -1698,6 +1707,13 @@
         renderedCloudSource = null;
         cloudButton.title = 'Ожидание первого кадра сканирования';
       }
+      if (shouldOpenCapturePreview && source && !cloudPreviewOpen) {
+        capturePreviewAutoOpened = true;
+        cloudTableFrame = null;
+        renderedCloudSource = null;
+        void showCloud(true).catch(error => { cloudButton.title = error.message; });
+        return;
+      }
       if (open) { void showCloud(true); return; }
     };
     const updateLivePreviewStatus = preview => {
@@ -1708,7 +1724,10 @@
     cloudButton.addEventListener('click', () => {
       if (serverPointCloudVisible) return;
       if (cloudPreviewOpen) void showCloud(false);
-      else void showCloud(true);
+      else {
+        if (capturePreviewRun) capturePreviewAutoOpened = true;
+        void showCloud(true);
+      }
     });
     meshButton.addEventListener('click', () => {
       if (!meshReady) return;
