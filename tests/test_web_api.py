@@ -891,6 +891,13 @@ class WebApiTests(unittest.TestCase):
         mate_contract = next(item for item in capabilities["commands"]
                              if item["type"] == "add_assembly_mate")
         self.assertIn("limits", mate_contract["optional"])
+        expected_limit_fields = {"angle_min_deg", "angle_max_deg", "offset_min_mm", "offset_max_mm"}
+        for command_name in ("add_assembly_mate", "set_assembly_mate"):
+            contract = next(item for item in capabilities["commands"]
+                            if item["type"] == command_name)
+            limits_schema = contract["parameter_schemas"]["limits"]
+            self.assertEqual(set(limits_schema["properties"]), expected_limit_fields)
+            self.assertEqual(set(limits_schema["required"]), expected_limit_fields)
         self.assertIn("spherical", mate_contract["constraints"][0])
         for relation in ("parallel", "perpendicular", "distance", "angle"):
             self.assertIn(relation, mate_contract["constraints"][0])
