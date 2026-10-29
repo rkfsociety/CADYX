@@ -156,7 +156,8 @@ class CompactInspectionTransportTests(unittest.TestCase):
                       "?section=summary&expected_revision=1", "?invalid=1"):
             with self.subTest(query=query), self.assertRaises(HTTPError) as raised:
                 urlopen(self.base + path + query, timeout=5)
-            self.assertEqual(raised.exception.code, 409 if "expected_revision" in query else 400)
+            with raised.exception:
+                self.assertEqual(raised.exception.code, 409 if "expected_revision" in query else 400)
         tool = next(item for item in TOOLS if item["name"] == "cadyx_inspect_compact")
         self.assertIn("limit", tool["inputSchema"]["properties"])
         api = CadyxAPI()

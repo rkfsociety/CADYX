@@ -216,6 +216,25 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(len(connections), 1)
         self.assertEqual(connections[0].requests, 2)
 
+    def test_api_close_closes_connections_created_by_worker_threads(self) -> None:
+        api = self.app.api
+        barrier = threading.Barrier(2)
+
+        def request_health() -> dict:
+            result = api.get("/api/v1/health")
+            barrier.wait(timeout=3)
+            return result
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [pool.submit(request_health) for _ in range(2)]
+            self.assertEqual([result.result(timeout=5) for result in results],
+                             [{"status": "ok", "api_version": 1}] * 2)
+
+        connections = tuple(api._open_connections)
+        self.assertEqual(len(connections), 2)
+        api.close()
+        self.assertTrue(all(connection.sock is None for connection in connections))
+
     def test_api_bounds_response_reads(self) -> None:
         class Response:
             status = 200
@@ -896,6 +915,7 @@ class CadyxMCPResponseLimitsTests(unittest.TestCase):
             server = CadyxHTTPServer(("127.0.0.1", 0), make_request_handler(core))
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
+            api = None
             try:
                 with patch.dict(os.environ, {"CADYX_API_URL": f"http://127.0.0.1:{server.server_port}"}):
                     api = CadyxAPI()
@@ -922,6 +942,8 @@ class CadyxMCPResponseLimitsTests(unittest.TestCase):
                     self.assertEqual(detail["structuredContent"]["document"]["revision"], 1)
                     self.assertEqual(detail["structuredContent"]["lock"]["state"], "FREE")
             finally:
+                if api is not None:
+                    api.close()
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)

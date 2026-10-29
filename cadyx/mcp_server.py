@@ -145,6 +145,8 @@ class CadyxAPI:
             if not self.token:
                 raise ValueError("CADYX_API_TOKEN_FILE is empty.")
         self._connections = threading.local()
+        self._connection_lock = threading.Lock()
+        self._open_connections: set[http.client.HTTPConnection] = set()
 
     def _connection(self, parsed: urllib.parse.SplitResult) -> http.client.HTTPConnection:
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -156,12 +158,17 @@ class CadyxAPI:
             connections = self._connections.by_origin = {}
         connection = connections.get(key)
         if connection is None or connection.sock is None:
+            if connection is not None:
+                with self._connection_lock:
+                    self._open_connections.discard(connection)
             connection_type = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
             options = {"timeout": _API_TIMEOUT_SECONDS}
             if parsed.scheme == "https":
                 options["context"] = ssl.create_default_context()
             connection = connection_type(parsed.hostname, port, **options)
             connections[key] = connection
+            with self._connection_lock:
+                self._open_connections.add(connection)
         return connection
 
     def _drop_connection(self, parsed: urllib.parse.SplitResult) -> None:
@@ -169,13 +176,17 @@ class CadyxAPI:
         key = (parsed.scheme, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
         connection = connections.pop(key, None)
         if connection is not None:
+            with self._connection_lock:
+                self._open_connections.discard(connection)
             connection.close()
 
     def close(self) -> None:
-        """Close the calling thread's idle keep-alive connections."""
-        connections = getattr(self._connections, "by_origin", {})
+        """Close every idle keep-alive connection opened by this API client."""
+        with self._connection_lock:
+            connections = tuple(self._open_connections)
+            self._open_connections.clear()
         self._connections.by_origin = {}
-        for connection in connections.values():
+        for connection in connections:
             connection.close()
 
     def request(self, method: str, path: str, body: dict[str, Any] | bytes | None = None) -> tuple[bytes, Any]:
@@ -972,6 +983,7 @@ def main() -> int:
                     sys.stdout.flush()
     finally:
         pool.shutdown(wait=True)
+        app.api.close()
     return 0
 
 
