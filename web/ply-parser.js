@@ -637,16 +637,19 @@
       while (!header) {
         const { value, done } = await reader.read();
         if (done) throw new Error("Данные PLY обрезаны до конца заголовка.");
-        const joined = new Uint8Array(headerBytes.length + value.length);
+        // A reader may deliver the entire multi-gigabyte file in one chunk.
+        // Only copy the bounded header; retain the body as a view of that chunk.
+        const previousLength = headerBytes.length;
+        const prefix = value.subarray(0, 65_536 - previousLength);
+        const joined = new Uint8Array(previousLength + prefix.length);
         joined.set(headerBytes);
-        joined.set(value, headerBytes.length);
+        joined.set(prefix, previousLength);
+        bytesRead += value.length;
         const dataOffset = findPlyDataOffset(joined);
         if (dataOffset >= 0) {
-          if (dataOffset > 65_536) throw new Error("Заголовок PLY слишком длинный.");
           headerBytes = joined.subarray(0, dataOffset);
-          initialData = joined.subarray(dataOffset);
+          initialData = value.subarray(dataOffset - previousLength);
           header = parseHeader(headerBytes);
-          bytesRead = joined.length;
         } else {
           if (joined.length >= 65_536) throw new Error("Заголовок PLY слишком длинный.");
           headerBytes = joined;
@@ -699,7 +702,7 @@
 
       if (format === "ascii") {
         const decoder = new TextDecoder("ascii");
-        let pending = decoder.decode(initialData, { stream: true });
+        let pending = "";
         const coordinateColumns = ["x", "y", "z"].map(name => vertex.properties.findIndex(property => property.name === name));
         const consumeLines = (flush = false) => {
           let lineStart = 0;
@@ -722,7 +725,18 @@
             pending = pending.slice(lineStart);
           }
         };
-        consumeLines();
+        // Decode incrementally even if a stream read supplies a huge byte array.
+        // An unterminated ASCII vertex must not grow without a bound.
+        const appendAscii = (chunk) => {
+          for (let offset = 0; offset < chunk.length && vertexIndex < vertex.count; offset += 65_536) {
+            pending += decoder.decode(chunk.subarray(offset, offset + 65_536), { stream: true });
+            consumeLines();
+            if (pending.length > 1_048_576) {
+              throw new Error("Слишком длинная строка вершин PLY.");
+            }
+          }
+        };
+        appendAscii(initialData);
         reportProgress();
         while (vertexIndex < vertex.count) {
           const { value, done } = await reader.read();
@@ -732,37 +746,57 @@
             break;
           }
           bytesRead += value.length;
-          pending += decoder.decode(value, { stream: true });
-          consumeLines();
+          appendAscii(value);
           reportProgress();
         }
       } else {
-        let pending = initialData;
+        // Parse complete records in place and copy only a partial record across
+        // chunk boundaries. Never concatenate a small tail with a huge next chunk.
+        let pending = new Uint8Array(0);
         const dataViewFor = buffer => new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        const consumeBinary = (chunk) => {
+          let offset = 0;
+          if (pending.length) {
+            const needed = stride - pending.length;
+            if (chunk.length < needed) {
+              const partial = new Uint8Array(pending.length + chunk.length);
+              partial.set(pending);
+              partial.set(chunk, pending.length);
+              pending = partial;
+              return;
+            }
+            const record = new Uint8Array(stride);
+            record.set(pending);
+            record.set(chunk.subarray(0, needed), pending.length);
+            const view = dataViewFor(record);
+            saveVertex(...coordinates.map(property => scalarTypes[property.type].read(view, property.offset, littleEndian)));
+            offset = needed;
+            pending = new Uint8Array(0);
+          }
+          const available = Math.min(Math.floor((chunk.length - offset) / stride), vertex.count - vertexIndex);
+          if (available) {
+            const view = dataViewFor(chunk.subarray(offset, offset + available * stride));
+            for (let record = 0; record < available; record += 1) {
+              const base = record * stride;
+              saveVertex(...coordinates.map(property => scalarTypes[property.type].read(view, base + property.offset, littleEndian)));
+            }
+            offset += available * stride;
+          }
+          // slice() releases the backing allocation of a large input chunk.
+          if (vertexIndex < vertex.count) pending = new Uint8Array(chunk.subarray(offset));
+        };
+        consumeBinary(initialData);
+        reportProgress();
         while (vertexIndex < vertex.count) {
-          if (pending.length < stride) {
-            const { value, done } = await reader.read();
-            if (done) throw new Error("Данные вершин PLY обрезаны.");
-            const joined = new Uint8Array(pending.length + value.length);
-            joined.set(pending);
-            joined.set(value, pending.length);
-            pending = joined;
-            bytesRead += value.length;
-          }
-          const available = Math.min(Math.floor(pending.length / stride), vertex.count - vertexIndex);
-          if (!available) continue;
-          const view = dataViewFor(pending);
-          for (let record = 0; record < available; record += 1) {
-            const base = record * stride;
-            saveVertex(...coordinates.map(property => scalarTypes[property.type].read(view, base + property.offset, littleEndian)));
-          }
-          pending = pending.subarray(available * stride);
+          const { value, done } = await reader.read();
+          if (done) throw new Error("Данные вершин PLY обрезаны.");
+          bytesRead += value.length;
+          consumeBinary(value);
           reportProgress();
         }
       }
 
       if (vertexIndex !== vertex.count || nextSample !== previewVertexCount) throw new Error("Данные вершин PLY обрезаны.");
-      await reader.cancel().catch(() => {});
       return {
         positions,
         colors: null,
@@ -776,6 +810,8 @@
         previewFaceCount: 0,
       };
     } finally {
+      // Also stop the network download on invalid or truncated input.
+      await reader.cancel().catch(() => {});
       reader.releaseLock();
     }
   }

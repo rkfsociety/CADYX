@@ -199,6 +199,63 @@ setImmediate(async () => {
       assert.equal(actual.previewVertexCount, expected.previewVertexCount);
     }
   }
+  // Large stream chunks must not cause equally large temporary allocations or
+  // full-chunk text decoding. A one-byte record split must still be supported.
+  class BoundedBytes extends Uint8Array {
+    constructor(...args) {
+      if (typeof args[0] === "number" && args[0] > 65_536) {
+        throw new Error("stream parser allocated an oversized byte buffer");
+      }
+      super(...args);
+    }
+  }
+  class BoundedDecoder extends TextDecoder {
+    decode(bytes, options) {
+      if (bytes?.byteLength > 65_536) throw new Error("stream parser decoded an oversized chunk");
+      return super.decode(bytes, options);
+    }
+  }
+  const guarded = { window: {}, Uint8Array: BoundedBytes, TextDecoder: BoundedDecoder };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/ply-parser.js"), "utf8"), guarded);
+  const parseGuarded = guarded.window.CadyxPlyPreview.parseStream;
+  const chunksToStream = chunks => new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+  const vertexCount = 100_000;
+  const binaryHeader = Buffer.from(`ply\nformat binary_little_endian 1.0\nelement vertex ${vertexCount}\nproperty float x\nproperty float y\nproperty float z\nend_header\n`);
+  const binaryBody = Buffer.alloc(vertexCount * 12);
+  for (let index = 0; index < vertexCount; index += 1) {
+    binaryBody.writeFloatLE(index, index * 12);
+  }
+  for (const chunks of [
+    [Buffer.concat([binaryHeader, binaryBody])],
+    [Buffer.concat([binaryHeader, binaryBody.subarray(0, 5)]), binaryBody.subarray(5)],
+  ]) {
+    const parsed = await parseGuarded(chunksToStream(chunks), { maxPreviewPoints: 100 });
+    assert.equal(parsed.vertexCount, vertexCount);
+    assert.equal(parsed.bounds.max[0], vertexCount - 1);
+    assert.equal(parsed.positions[0], 0);
+    assert.equal(parsed.positions[99 * 3], 99_000);
+  }
+  const asciiHeader = Buffer.from(`ply\nformat ascii 1.0\nelement vertex ${vertexCount}\nproperty float x\nproperty float y\nproperty float z\nend_header\n`);
+  const asciiBody = Buffer.from(Array.from({ length: vertexCount }, (_, index) => `${index} 0 0\n`).join(""));
+  const asciiParsed = await parseGuarded(
+    chunksToStream([Buffer.concat([asciiHeader, asciiBody])]), { maxPreviewPoints: 100 });
+  assert.equal(asciiParsed.bounds.max[0], vertexCount - 1);
+  assert.equal(asciiParsed.positions[99 * 3], 99_000);
+  let canceledInvalidStream = false;
+  const invalidStream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(asciiHeader);
+      controller.enqueue(Buffer.from("0 ".repeat(600_000) + "0\n"));
+    },
+    cancel() { canceledInvalidStream = true; },
+  });
+  await assert.rejects(() => parseGuarded(invalidStream), /Слишком длинная строка/);
+  assert.equal(canceledInvalidStream, true, "invalid streams must cancel their reader");
   // Exercise the actual form handlers without starting the viewport or touching saved projects.
   const source = fs.readFileSync(path.join(__dirname, "../web/ply-preview.js"), "utf8");
   const startupSource = source.slice(source.indexOf("const initialAddress ="), source.indexOf("const primaryGrid ="));
