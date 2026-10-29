@@ -36,6 +36,51 @@ assert.match(assemblyEditor, /cadyx:project-lock/,
   "the assembly editor reacts to AI and human lock state");
 assert.match(assemblyEditor, /finishAssemblyGizmo\(\{pointerId\},false\)/,
   "an AI edit cancels and clears an in-flight human drag preview");
+
+function appFunction(name, nextMarker) {
+  const start = assemblyEditor.indexOf(`    async function ${name}(`);
+  const end = assemblyEditor.indexOf(nextMarker, start);
+  assert.ok(start >= 0 && end > start, `${name} implementation is present`);
+  return assemblyEditor.slice(start, end).trim();
+}
+
+async function testAssemblyDragAndHistory() {
+  const commits = [], clears = [];
+  const drag = { pointerId: 4, instance: { id: "instance:a" }, moved: true,
+    currentLocal: { translation: [0, 0, 0], rotation: [1, 0, 0, 0] },
+    nextLocal: { translation: [2, 0, 0], rotation: [1, 0, 0, 0] } };
+  const dragSandbox = { assemblyDrag: drag,
+    commitAssemblyTransform: async (...args) => commits.push(args),
+    clearAssemblyPreview: () => clears.push(true) };
+  vm.runInNewContext(`${appFunction("finishAssemblyGizmo", "    gizmoRoot.addEventListener")}; this.finish=finishAssemblyGizmo;`, dragSandbox);
+  await dragSandbox.finish({ pointerId: 4 }, true);
+  assert.equal(commits.length, 1, "pointerup commits a changed assembly pose");
+  assert.equal(clears.length, 1, "committed drag clears its transient preview");
+  assert.equal(dragSandbox.assemblyDrag, null);
+
+  dragSandbox.assemblyDrag = { ...drag, pointerId: 5 };
+  await dragSandbox.finish({ pointerId: 5 }, false);
+  assert.equal(commits.length, 1, "pointercancel discards the drag without a command");
+  assert.equal(clears.length, 2, "cancelled drag clears its transient preview");
+
+  const undo = [{ undo: { type: "restore" }, redo: { type: "apply" } }], redo = [], calls = [];
+  const historySandbox = { assemblyUndo: undo, assemblyRedo: redo,
+    executeAssemblyCommand: async (command, options) => {
+      calls.push([command, options]);
+      if (options.historyAction === "undo") historySandbox.assemblyRedo.push(historySandbox.assemblyUndo.pop());
+      else if (options.historyAction === "redo") historySandbox.assemblyUndo.push(historySandbox.assemblyRedo.pop());
+    },
+    setAssemblyStatus: () => {} };
+  vm.runInNewContext(`${appFunction("travelAssemblyHistory", "    const quatMultiply")}; this.travel=travelAssemblyHistory;`, historySandbox);
+  await historySandbox.travel("undo");
+  assert.equal(calls[0][0].type, "restore");
+  assert.equal(calls[0][1].historyAction, "undo");
+  await historySandbox.travel("redo");
+  assert.equal(calls[1][0].type, "apply");
+  assert.equal(calls[1][1].historyAction, "redo");
+}
+
+testAssemblyDragAndHistory().catch((error) => { console.error(error); process.exitCode = 1; });
 const start = source.indexOf("    const positions = [], bodyPositions = []");
 const end = source.indexOf("    currentModelViewportGeometry = viewportGeometry;", start);
 assert.ok(start > 0 && end > start);
