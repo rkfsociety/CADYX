@@ -5,7 +5,9 @@ from __future__ import annotations
 import unittest
 from email.message import Message
 from io import BytesIO
+import json
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from cadyx.errors import ValidationError
 from cadyx.web import make_request_handler
@@ -186,6 +188,43 @@ class HTTPJSONBodyFramingTests(unittest.TestCase):
                 )
                 self.assertEqual(handler_type._read_json(request), expected)
                 self.assertFalse(request.close_connection)
+
+    def test_post_errors_close_connection_with_unread_body(self) -> None:
+        handler_type = make_request_handler(None)
+        for error, expected_status in (
+            (ValidationError("Invalid upload."), 400),
+            (json.JSONDecodeError("Invalid JSON", "x", 0), 400),
+            (RuntimeError("Unexpected failure"), 500),
+        ):
+            with self.subTest(error=type(error).__name__):
+                headers = Message()
+                headers.add_header("Content-Length", "4")
+                responses = []
+                request = SimpleNamespace(
+                    path="/api/v1/agent/projects/p-1/files/source.step",
+                    headers=headers,
+                    close_connection=False,
+                    _require_auth=lambda: True,
+                    _json=lambda status, body: responses.append((status, body)),
+                )
+                # Simulate a route failing before it reads the four payload bytes.
+                with patch("cadyx.web.dispatch_route", side_effect=error):
+                    handler_type.do_POST(request)
+                self.assertTrue(request.close_connection)
+                self.assertEqual(responses[0][0], expected_status)
+
+    def test_binary_content_type_rejection_closes_unread_request(self) -> None:
+        handler_type = make_request_handler(None)
+        for reader in ("_read_viewport_png", "_read_project_source_upload"):
+            with self.subTest(reader=reader):
+                request = SimpleNamespace(
+                    headers={"Content-Type": "text/plain", "Content-Length": "4"},
+                    rfile=BytesIO(b"data"),
+                    close_connection=False,
+                )
+                with self.assertRaisesRegex(ValidationError, "Content-Type"):
+                    getattr(handler_type, reader)(request)
+                self.assertTrue(request.close_connection)
 
     def test_invalid_or_oversized_json_length_closes_connection(self) -> None:
         handler_type = make_request_handler(None)

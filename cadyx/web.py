@@ -198,11 +198,16 @@ def make_request_handler(
                     self._not_found()
                     return
                 dispatch_route(self, core, route, parsed)
+            # A route may reject a POST before reading its framed body. Never
+            # interpret leftover payload bytes as another keep-alive request.
             except CadyxError as exc:
+                self.close_connection = True
                 self._json(exc.http_status, exc.as_dict())
             except (json.JSONDecodeError, UnicodeDecodeError):
+                self.close_connection = True
                 self._json(400, {"error": "INVALID_JSON", "message": "Request body must be valid UTF-8 JSON."})
             except Exception:
+                self.close_connection = True
                 self._json(500, {"error": "INTERNAL_ERROR", "message": "CADYX encountered an unexpected internal error."})
 
         def do_DELETE(self) -> None:
@@ -326,6 +331,7 @@ def make_request_handler(
         def _read_viewport_png(self) -> bytes:
             content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
             if content_type != "image/png":
+                self.close_connection = True
                 raise ValidationError("Viewport snapshots must use Content-Type image/png.")
             raw_length = self.headers.get("Content-Length")
             try:
@@ -344,6 +350,7 @@ def make_request_handler(
         def _read_project_source_upload(self) -> bytes:
             content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
             if content_type != "application/octet-stream":
+                self.close_connection = True
                 raise ValidationError("Project source uploads must use Content-Type application/octet-stream.")
             raw_length = self.headers.get("Content-Length")
             try:
