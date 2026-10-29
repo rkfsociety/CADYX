@@ -96,6 +96,18 @@ class AssemblyGeometryReferenceTests(unittest.TestCase):
             )
         self.assertEqual(self.document.assembly, before)
 
+    def test_reused_face_index_does_not_break_an_ambiguous_rebind_tie(self):
+        self.kernel.faces = [plane_face(0, "face:new-a", [1.0, 2.0, 4.0]),
+                             plane_face(1, "face:new-b", [1.0, 2.0, 4.0])]
+        changed_geometry = self.kernel.create_box(width=2, height=1, depth=1)
+        for item in self.document.objects:
+            if item.get("id") in {self.body_id, self.feature_id}:
+                item["geometry"] = changed_geometry
+        with self.assertRaisesRegex(ValidationError, "became ambiguous"):
+            refresh_assembly_geometry_references(
+                self.document.assembly, self.document.objects, self.kernel,
+            )
+
     def test_read_validation_requires_the_saved_semantic_face(self):
         self.kernel.faces = [plane_face(1, "face:changed", [1.0, 2.0, 3.0])]
         changed_geometry = self.kernel.create_box(width=2, height=1, depth=1)

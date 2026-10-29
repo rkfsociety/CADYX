@@ -137,8 +137,7 @@ def _reference_candidate(reference: dict[str, Any], faces: list[dict[str, Any]],
                               code="ASSEMBLY_REFERENCE_INVALID",
                               diagnostics={"entity_ids": [reference["face_key"]],
                                            "failed_precondition": "a matching analytic face must remain"})
-    if (len(candidates) > 1 and abs(candidates[1][0] - candidates[0][0]) <= 1e-7
-            and candidates[0][1].get("index") != reference["face_index"]):
+    if len(candidates) > 1 and abs(candidates[1][0] - candidates[0][0]) <= 1e-7:
         raise ValidationError("Assembly face reference became ambiguous after a geometry change.",
                               code="ASSEMBLY_REFERENCE_AMBIGUOUS",
                               diagnostics={"entity_ids": [reference["face_key"]],
