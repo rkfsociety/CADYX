@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import unittest
-from urllib.error import URLError
 from unittest.mock import patch
 
-from cadyx.errors import ConflictError, ValidationError, public_data, public_text
+from cadyx.errors import ValidationError, public_data, public_text
 from cadyx.mcp_server import CadyxAPI, MCPApplication
 
 
@@ -71,7 +70,7 @@ class ErrorDiagnosticsTests(unittest.TestCase):
 
     def test_mcp_transport_failure_has_typed_uncertain_diagnostic(self) -> None:
         app = MCPApplication(CadyxAPI())
-        with patch("urllib.request.urlopen", side_effect=URLError("Bearer supersecret")):
+        with patch("http.client.HTTPConnection.request", side_effect=OSError("Bearer supersecret")):
             result = app.call_tool("cadyx_health", {})
         self.assertEqual(result["structuredContent"]["error"], "TRANSIENT_TRANSPORT")
         self.assertEqual(result["structuredContent"]["diagnostics"]["category"], "transport")
