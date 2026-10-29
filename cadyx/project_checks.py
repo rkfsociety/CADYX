@@ -9,6 +9,8 @@ from collections.abc import Callable
 from typing import Any
 
 from .delivery import geometry_sha256
+from .assemblies import validate_assembly
+from .assembly_mates import inspect_assembly_mates
 from .errors import CadyxError, ConflictError, ValidationError
 from .model_specifications import (
     evaluate_core_check, evaluate_specification, validate_specification_shape,
@@ -169,10 +171,35 @@ def check_project(
     except CadyxError as exc:
         add("export_eligibility", "fail", "OCCT_BRep_preflight", {"error": exc.as_dict()})
 
-    for name, needed in (("assembly", require_assembly), ("drawings", require_drawings)):
-        add(name, "untested", "capability_gate",
-            {"reason": "unsupported backend" if needed else "not requested"},
-            required=needed)
+    if require_assembly:
+        try:
+            checkpoint()
+            instances = document.assembly.get("instances", [])
+            if not instances:
+                add("assembly", "fail", "assembly_graph_and_mate_validation",
+                    {"reason": "assembly graph has no placed instances"})
+            else:
+                validate_assembly(document.assembly, document.objects)
+                kinematics = inspect_assembly_mates(document.assembly)
+                add("assembly", "pass", "assembly_graph_and_mate_validation", {
+                    "part_count": len(document.assembly.get("parts", [])),
+                    "instance_count": len(instances),
+                    "mate_count": len(document.assembly.get("mates", [])),
+                    "kinematics_status": kinematics["status"],
+                    "internal_dof": kinematics["internal_dof"],
+                    "redundant_mate_ids": kinematics["redundant_mate_ids"],
+                })
+            checkpoint()
+        except _Interrupted as exc:
+            add("assembly", "untested", "assembly_graph_and_mate_validation", {"reason": str(exc)})
+        except CadyxError as exc:
+            add("assembly", "fail", "assembly_graph_and_mate_validation", {"error": exc.as_dict()})
+    else:
+        add("assembly", "untested", "assembly_graph_and_mate_validation",
+            {"reason": "not requested"}, required=False)
+    add("drawings", "untested", "capability_gate",
+        {"reason": "unsupported backend" if require_drawings else "not requested"},
+        required=require_drawings)
 
     current = Document.from_dict(core.workspace.load(project_id)["document"])
     if current.revision != revision:

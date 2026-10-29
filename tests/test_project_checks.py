@@ -88,6 +88,39 @@ class ProjectCheckTests(unittest.TestCase):
         self.assertEqual(stages["export_eligibility"]["status"], "pass")
         self.assertTrue(report["passed"])
 
+    def test_strict_project_check_validates_a_saved_assembly_and_mates(self) -> None:
+        from cadyx.models import OwnerType
+        lease = self.core.acquire_lease(self.project_id, "agent", "assembly-check")
+        try:
+            def execute(revision, command):
+                return self.core.execute_command(
+                    self.project_id, lease["lease_id"], command,
+                    expected_owner_type=OwnerType.AGENT, expected_revision=revision,
+                )
+
+            body = execute(0, {"type": "create_box", "width": 2, "height": 2, "depth": 2})
+            body_id = body["history_entry"]["result"]["body_id"]
+            part = execute(1, {"type": "create_assembly_part", "body_id": body_id})
+            part_id = part["history_entry"]["result"]["part_id"]
+            first = execute(2, {"type": "add_assembly_instance", "target_id": part_id})
+            first_id = first["history_entry"]["result"]["instance_id"]
+            second = execute(3, {"type": "add_assembly_instance", "target_id": part_id,
+                                  "translation": [3, 0, 0]})
+            second_id = second["history_entry"]["result"]["instance_id"]
+            mate = execute(4, {"type": "add_assembly_mate", "kind": "fixed",
+                               "a_instance_id": first_id, "b_instance_id": second_id})
+            report = self.core.check_project(
+                self.project_id, mate["document"]["revision"], strict=True,
+                require_assembly=True, export_body_id=body_id,
+            )
+        finally:
+            self.core.release_lease(self.project_id, lease["lease_id"])
+        stage = next(item for item in report["stages"] if item["id"] == "assembly")
+        self.assertEqual(stage["status"], "pass")
+        self.assertEqual(stage["evidence"]["instance_count"], 2)
+        self.assertEqual(stage["evidence"]["mate_count"], 1)
+        self.assertTrue(report["passed"], report)
+
     def _create_box_for_rebuild(self) -> None:
         from cadyx.models import OwnerType
         lease = self.core.acquire_lease(self.project_id, "agent", "rebuild-check")
