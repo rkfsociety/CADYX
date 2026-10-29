@@ -1,4 +1,5 @@
 """Behavioral checks for full-resolution point processing and persisted stage lineage."""
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -131,6 +132,21 @@ class PointCloudProcessingTests(unittest.TestCase):
         self.assertTrue(all(all(min(point[axis] for point in points) <= value <= max(point[axis] for point in points)
                                 for axis, value in enumerate(candidate)) for candidate in geometric))
         self.assertEqual(points[0], (0., 0., 0.))
+
+    def test_geometric_simplification_handles_large_finite_coordinates(self):
+        # Squaring these finite bounds overflows, although the cloud is valid.
+        points = [(float(x) * 1e154, float(y) * 1e154, 0.)
+                  for x in range(20) for y in range(15)]
+        result = process_points(points, "simplify", {"strategy": "geometric", "ratio": 40})
+        self.assertGreaterEqual(len(result), 3)
+        self.assertLess(len(result), len(points))
+        self.assertTrue(all(math.isfinite(value) for point in result for value in point))
+
+    def test_voxel_centroids_do_not_overflow_finite_coordinates(self):
+        # Summing a voxel before dividing would overflow for either outer cluster.
+        points = [(x, 0., 0.) for x in (-1e308, 0., 1e308) for _ in range(3)]
+        result = process_points(points, "voxel_downsample", {"voxel_size": 1e308})
+        self.assertEqual(result, [(-1e308, 0., 0.), (0., 0., 0.), (1e308, 0., 0.)])
 
     def test_surface_budget_fails_without_mutating_input(self):
         from unittest.mock import patch

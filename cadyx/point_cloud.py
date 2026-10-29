@@ -73,17 +73,17 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
             result = [points[(i * len(points)) // target] for i in range(target)]
         else:
             bounds = [max(point[a] for point in points) - min(point[a] for point in points) for a in range(3)]
-            high = math.sqrt(math.fsum(side * side for side in bounds)) or 1.
+            high = math.hypot(*bounds) or 1.
             low = high / (len(points) ** (1 / 3) * 4)
             best: list[tuple[float, float, float]] | None = None
             best_gap = math.inf
             for _ in range(18):
-                size = (low + high) / 2
+                size = low + (high - low) / 2
                 buckets: dict[tuple[int, int, int], list[tuple[float, float, float]]] = {}
                 for point in points:
                     key = tuple(math.floor(value / size) for value in point)
                     buckets.setdefault(key, []).append(point)
-                candidate = [tuple(math.fsum(point[a] for point in group) / len(group) for a in range(3))
+                candidate = [tuple(math.fsum(point[a] / len(group) for point in group) for a in range(3))
                              for group in buckets.values()]
                 if len(candidate) >= 3 and abs(len(candidate) - target) < best_gap:
                     best, best_gap = candidate, abs(len(candidate) - target)
@@ -112,7 +112,7 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
                 raise ValidationError("Point-cloud distance is too small for these source coordinates.") from exc
             buckets.setdefault(key, []).append(index)
         if method == "voxel_downsample":
-            result = [tuple(math.fsum(points[i][axis] for i in indices) / len(indices) for axis in range(3))
+            result = [tuple(math.fsum(points[i][axis] / len(indices) for i in indices) for axis in range(3))
                       for indices in buckets.values()]
         else:
             result = []
