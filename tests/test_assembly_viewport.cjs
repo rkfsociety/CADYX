@@ -63,6 +63,26 @@ async function testAssemblyDragAndHistory() {
   assert.equal(commits.length, 1, "pointercancel discards the drag without a command");
   assert.equal(clears.length, 2, "cancelled drag clears its transient preview");
 
+  const moveStart = assemblyEditor.indexOf("    function moveAssemblyGizmo(");
+  const moveEnd = assemblyEditor.indexOf("    async function finishAssemblyGizmo(", moveStart);
+  assert.ok(moveStart >= 0 && moveEnd > moveStart);
+  const moveDrag = { pointerId: 7, kind: "translate", mode: "local", index: 0,
+    axisScreen: [10, 0], lengthSquared: 100, dpr: 1, startClientX: 0, startClientY: 0,
+    startShownPose: { translation: [0, 0, 0], rotation: [1, 0, 0, 0] },
+    shownPose: { translation: [0, 0, 0], rotation: [1, 0, 0, 0] },
+    currentLocal: { translation: [0, 0, 0], rotation: [1, 0, 0, 0] },
+    instance: { id: "instance:a" }, moved: false };
+  const previews = [], moveSandbox = { assemblyDrag: moveDrag,
+    props: { querySelector: () => ({ value: "1" }) }, state: { snapEnabled: true },
+    localPoseFromMode: pose => pose,
+    previewAssemblyTransform: (...args) => previews.push(args),
+    lastOverlaySignature: "cached", syncOverlay: () => {} };
+  vm.runInNewContext(`${assemblyEditor.slice(moveStart, moveEnd)}; this.move=moveAssemblyGizmo;`, moveSandbox);
+  moveSandbox.move({ pointerId: 7, clientX: 25, clientY: 0, preventDefault() {} });
+  assert.equal(moveDrag.nextLocal.translation[0], 3, "pointermove snaps translation to the configured step");
+  assert.equal(previews.length, 1, "pointermove refreshes the viewport preview immediately");
+  assert.equal(moveSandbox.lastOverlaySignature, null);
+
   const undo = [{ undo: { type: "restore" }, redo: { type: "apply" } }], redo = [], calls = [];
   const historySandbox = { assemblyUndo: undo, assemblyRedo: redo,
     executeAssemblyCommand: async (command, options) => {
