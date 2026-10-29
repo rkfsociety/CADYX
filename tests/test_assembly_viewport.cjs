@@ -40,6 +40,26 @@ assert.match(assemblyEditor, /cadyx:project-lock/,
   "the assembly editor reacts to AI and human lock state");
 assert.match(assemblyEditor, /finishAssemblyGizmo\(\{pointerId\},false\)/,
   "an AI edit cancels and clears an in-flight human drag preview");
+const occurrenceStart = assemblyEditor.indexOf("    function selectAssemblyOccurrence(");
+const occurrenceEnd = assemblyEditor.indexOf("    function clearSelection(", occurrenceStart);
+assert.ok(occurrenceStart >= 0 && occurrenceEnd > occurrenceStart);
+const selectedBodies = [], selectionState = { selectedOccurrenceIds: new Set(), selected: null };
+let selectionRenders = 0, clearedGroup = 0;
+const selectionSandbox = { state: selectionState,
+  assemblyInstance: id => ({ id, parent_id: null }),
+  parentPoseForPath: () => ({ translation: [0,0,0], rotation: [1,0,0,0] }),
+  modelViewer: { setSelectedBodies: ids => selectedBodies.push([...ids]) },
+  clearSelection: () => { clearedGroup++; selectionState.selectedOccurrenceIds.clear(); },
+  renderTree: () => {}, renderAssemblyProps: () => {}, detail: { dataset: {} }, syncOverlay: () => { selectionRenders++; } };
+vm.runInNewContext(`${assemblyEditor.slice(occurrenceStart, occurrenceEnd)}; this.select=selectAssemblyOccurrence;`, selectionSandbox);
+selectionSandbox.select("instance:a", "a", {});
+selectionSandbox.select("instance:b", "b", { shiftKey: true });
+assert.deepEqual(selectedBodies.at(-1), ["instance:a", "instance:b"], "Shift-click selects multiple assembly occurrences");
+selectionSandbox.select("instance:b", "b", { shiftKey: true });
+assert.deepEqual(selectedBodies.at(-1), ["instance:a"], "Shift-click toggles one occurrence out of the selection");
+selectionSandbox.select("instance:a", "a", { ctrlKey: true });
+assert.equal(clearedGroup, 1, "toggling off the final occurrence clears the assembly selection");
+assert.ok(selectionRenders >= 2);
 const pickStart = assemblyEditor.indexOf("    function pick(e) {");
 const pickEnd = assemblyEditor.indexOf("    function previewAssemblyTransform(", pickStart);
 assert.ok(pickStart >= 0 && pickEnd > pickStart);
