@@ -144,6 +144,17 @@ class HTTPJSONBodyFramingTests(unittest.TestCase):
             handler_type._validate_request_framing(request, body_allowed=True)
         self.assertTrue(request.close_connection)
 
+    def test_non_decimal_content_length_rejected(self) -> None:
+        handler_type = make_request_handler(None)
+        for raw_length in ("+4", "-0", "4, 4", "0x4", "4.0", "４"):
+            with self.subTest(raw_length=raw_length):
+                headers = Message()
+                headers.add_header("Content-Length", raw_length)
+                request = SimpleNamespace(headers=headers, close_connection=False)
+                with self.assertRaisesRegex(ValidationError, "Content-Length is invalid"):
+                    handler_type._validate_request_framing(request, body_allowed=True)
+                self.assertTrue(request.close_connection)
+
     def test_get_and_delete_reject_unread_bodies(self) -> None:
         handler_type = make_request_handler(None)
         for raw_length in ("1", "-1", "invalid"):
@@ -200,13 +211,14 @@ class HTTPJSONBodyFramingTests(unittest.TestCase):
                 headers = Message()
                 headers.add_header("Content-Length", "4")
                 responses = []
-                request = SimpleNamespace(
-                    path="/api/v1/agent/projects/p-1/files/source.step",
-                    headers=headers,
-                    close_connection=False,
-                    _require_auth=lambda: True,
-                    _json=lambda status, body: responses.append((status, body)),
-                )
+                # Use an actual handler instance so framing validation runs;
+                # a SimpleNamespace lacks the handler's bound methods.
+                request = handler_type.__new__(handler_type)
+                request.path = "/api/v1/agent/projects/p-1/files/source.step"
+                request.headers = headers
+                request.close_connection = False
+                request._require_auth = lambda: True
+                request._json = lambda status, body: responses.append((status, body))
                 # Simulate a route failing before it reads the four payload bytes.
                 with patch("cadyx.web.dispatch_route", side_effect=error):
                     handler_type.do_POST(request)

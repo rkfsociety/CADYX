@@ -266,14 +266,18 @@ def make_request_handler(
                 self.close_connection = True
                 raise ValidationError("Duplicate Content-Length headers are not supported.")
             if lengths:
+                # HTTP Content-Length is decimal digits, optionally surrounded
+                # by header whitespace. int() also accepts signs and other
+                # spellings that intermediaries may parse differently.
+                raw_length = lengths[0].strip(" \t")
+                if not raw_length or not raw_length.isascii() or not raw_length.isdigit():
+                    self.close_connection = True
+                    raise ValidationError("Content-Length is invalid.")
                 try:
-                    length = int(lengths[0])
+                    length = int(raw_length)
                 except ValueError as exc:
                     self.close_connection = True
                     raise ValidationError("Content-Length is invalid.") from exc
-                if length < 0:
-                    self.close_connection = True
-                    raise ValidationError("Content-Length is invalid.")
                 if not body_allowed and length:
                     self.close_connection = True
                     raise ValidationError("Request body is not supported for this method.")
