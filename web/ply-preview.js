@@ -50,6 +50,7 @@ const api = async (path, options = {}) => {
   }
   return value;
 };
+window.cadyxApi = Object.freeze({ request: api, refresh: () => refreshDetail() });
 const loadedUiVersion = document.querySelector('meta[name="cadyx-ui-version"]')?.content || null;
 
 const $ = (selector) => document.querySelector(selector);
@@ -248,6 +249,7 @@ function queueViewportSnapshot() {
   window.dispatchEvent(new Event("cadyx:viewport-rendered"));
   if (!selectedProjectId || selectedProjectId.startsWith(FOLDER_SELECTION_PREFIX)
       || $("#viewport")?.dataset.scanPreviewMode || $("#viewport")?.dataset.scanTreePreview === "true"
+      || $("#viewport")?.dataset.assemblyPreview === "true"
       || renderedSceneProjectId !== selectedProjectId
       || !Number.isInteger(renderedSceneRevision)) return;
   viewportSnapshotDirty = true;
@@ -261,7 +263,8 @@ function queueViewportSnapshot() {
 
 async function publishViewportSnapshot() {
   if (viewportSnapshotInFlight || !viewportSnapshotDirty) return;
-  if ($("#viewport")?.dataset.scanPreviewMode || $("#viewport")?.dataset.scanTreePreview === "true") {
+  if ($("#viewport")?.dataset.scanPreviewMode || $("#viewport")?.dataset.scanTreePreview === "true"
+      || $("#viewport")?.dataset.assemblyPreview === "true") {
     viewportSnapshotDirty = false;
     return;
   }
@@ -273,7 +276,8 @@ async function publishViewportSnapshot() {
     const image = await modelViewer.createSnapshotBlob();
     if (projectId !== selectedProjectId || projectId !== renderedSceneProjectId
         || revision !== renderedSceneRevision || $("#viewport")?.dataset.scanPreviewMode
-        || $("#viewport")?.dataset.scanTreePreview === "true") {
+        || $("#viewport")?.dataset.scanTreePreview === "true"
+        || $("#viewport")?.dataset.assemblyPreview === "true") {
       viewportSnapshotDirty = true;
       return;
     }
@@ -2349,7 +2353,7 @@ async function refreshDetail() {
   }
   if (renderedSceneKey !== key) {
     const positions = [], bodyPositions = [], triangles = [], lines = [], points = [], rotationAxes = [];
-    const bodyLineRanges = [], bodyTriangleRanges = [], featureTriangleRanges = [], overlayTriangleRanges = [], surfaceTriangleRanges = [];
+    const bodyLineRanges = [], bodyTriangleRanges = [], bodyVertexRanges = [], featureTriangleRanges = [], overlayTriangleRanges = [], surfaceTriangleRanges = [];
     let targetFound = false;
     for (const object of scene.objects) {
       const source = objectsById.get(object.source_body_id || object.object_id);
@@ -2368,6 +2372,7 @@ async function refreshDetail() {
       }
       if (source?.type === "body" && object.type === "body" && object.triangles.length) {
         bodyTriangleRanges.push({ objectId: object.object_id, start: triangleStart, end: triangles.length / 3 });
+        bodyVertexRanges.push({ objectId: object.object_id, start: offset, end: offset + object.positions.length / 3 });
       }
       if (object.type === "feature_overlay" && object.triangles.length) {
         overlayTriangleRanges.push({ start: triangleStart, end: triangles.length / 3 });
@@ -2432,7 +2437,7 @@ async function refreshDetail() {
     const hasPointCloud = visibleObjects.some((item) => item.type === "feature"
       && item.operation === "import_point_cloud");
     const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes,
-      bodyLineRanges, bodyTriangleRanges, featureTriangleRanges, overlayTriangleRanges, surfaceTriangleRanges,
+      bodyLineRanges, bodyTriangleRanges, bodyVertexRanges, featureTriangleRanges, overlayTriangleRanges, surfaceTriangleRanges,
       ...(hasPointCloud ? { pointStyle: { size: 1.5, opacity: 0.94, color: "#ff7417" } } : {}) };
     currentModelViewportGeometry = viewportGeometry;
     const viewport = $("#viewport");
@@ -2840,6 +2845,7 @@ function handleStreamEvent(type, event) {
     if (projectId === selectedProjectId) animateModelCamera(data);
   } else if (type === "project.lock.changed") {
     agentLocksByProject.set(projectId, data);
+    window.dispatchEvent(new CustomEvent("cadyx:project-lock", { detail: { projectId, lock: data } }));
     if (projectId === selectedProjectId) {
       renderAgentActivity(activitiesByProject.get(projectId) || [], data);
     } else if (primaryGrid.dataset.view === "projects") {

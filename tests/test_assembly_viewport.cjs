@@ -4,6 +4,20 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "../web/ply-preview.js"), "utf8");
+const assemblyEditor = fs.readFileSync(path.join(__dirname, "../web/app.js"), "utf8");
+assert.match(assemblyEditor, /selectAssemblyOccurrence\(pathId,instanceId,event\)/,
+  "assembly occurrences are selectable from the tree and viewport");
+assert.match(assemblyEditor, /owner_type:'human'/,
+  "browser assembly edits acquire a human lease");
+assert.match(assemblyEditor, /expected_revision:revision/,
+  "browser assembly edits submit the inspected revision");
+assert.match(assemblyEditor, /data-assembly-undo/);
+assert.match(assemblyEditor, /previewAssemblyTransform\(/,
+  "mouse manipulation updates an isolated viewport preview");
+assert.match(assemblyEditor, /data-gizmo-kind/,
+  "the viewport exposes axis and rotation manipulators");
+assert.match(assemblyEditor, /cadyx:project-lock/,
+  "the assembly editor reacts to AI and human lock state");
 const start = source.indexOf("    const positions = [], bodyPositions = []");
 const end = source.indexOf("    currentModelViewportGeometry = viewportGeometry;", start);
 assert.ok(start > 0 && end > start);
@@ -21,6 +35,9 @@ for (const objects of [[mesh("instance:a", 0), mesh("instance:b", 10)], [mesh(bo
   vm.runInNewContext(`${source.slice(start, end)}\nthis.geometry = viewportGeometry;`, sandbox);
   assert.equal(sandbox.geometry.triangles.length, objects.length * 3);
   assert.equal(sandbox.geometry.bodyTriangleRanges.length, objects.length);
+  assert.equal(sandbox.geometry.bodyVertexRanges.length, objects.length);
+  assert.deepEqual(Array.from(sandbox.geometry.bodyVertexRanges, (range) => range.objectId),
+    objects.map((object) => object.object_id));
   assert.deepEqual(Array.from(sandbox.geometry.bodyTriangleRanges, (range) => range.objectId),
     objects.map((object) => object.object_id));
   assert.equal(sandbox.geometry.bounds.max[0], objects.length === 2 ? 11 : 1);

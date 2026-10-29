@@ -170,6 +170,29 @@ class AssemblyMateTests(unittest.TestCase):
         self.run_command("remove_assembly_mate", mate_id=mate_id)
         self.run_command("remove_assembly_instance", instance_id=self.b)
 
+    def test_multi_group_transform_is_atomic_and_preserves_mates(self):
+        self.run_command("add_assembly_mate", kind="fixed", a_instance_id=self.a,
+                         b_instance_id=self.b)
+        result = self.run_command("transform_assembly_instances", transforms=[
+            {"instance_id": self.a, "translation": [10, 0, 0]},
+            {"instance_id": self.c, "translation": [0, 10, 0]},
+        ])
+        self.assertEqual(self.placement(self.a)["translation"], [10, 0, 0])
+        self.assertEqual(self.placement(self.b)["translation"], [10, 0, 0])
+        self.assertEqual(self.placement(self.c)["translation"], [0, 10, 0])
+        self.assertEqual(len(result["transforms"]), 2)
+
+    def test_multi_group_transform_rejects_duplicate_connected_anchors_without_mutation(self):
+        self.run_command("add_assembly_mate", kind="fixed", a_instance_id=self.a,
+                         b_instance_id=self.b)
+        before = copy.deepcopy(self.document.assembly)
+        with self.assertRaisesRegex(ValidationError, "one selected instance per connected mate group"):
+            self.run_command("transform_assembly_instances", transforms=[
+                {"instance_id": self.a, "translation": [10, 0, 0]},
+                {"instance_id": self.b, "translation": [10, 0, 0]},
+            ])
+        self.assertEqual(self.document.assembly, before)
+
     def test_joint_update_cannot_move_another_grounded_instance(self):
         mate_id = self.run_command("add_assembly_mate", kind="slider",
                                    a_instance_id=self.a, b_instance_id=self.b)["mate_id"]

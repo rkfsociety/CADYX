@@ -105,6 +105,65 @@ class AssemblyCommands:
                 "rotation": instance["rotation"], "kinematics": diagnostics}
 
     @staticmethod
+    def _transform_assembly_instances(document: Document, command: dict[str, Any]) -> dict[str, Any]:
+        _fields(command, {"transforms"})
+        transforms = command["transforms"]
+        if not isinstance(transforms, list) or not transforms:
+            raise ValidationError("Assembly transforms must be a nonempty list.")
+        candidate = deepcopy(document.assembly)
+        instances = {item["id"]: item for item in candidate["instances"]}
+        requested: list[str] = []
+        for transform in transforms:
+            if not isinstance(transform, dict) or set(transform) - {"instance_id", "translation", "rotation"}:
+                raise ValidationError("An assembly transform has invalid fields.")
+            ident = transform.get("instance_id")
+            instance = instances.get(ident) if isinstance(ident, str) else None
+            if instance is None:
+                raise NotFoundError("Assembly instance does not exist.")
+            if ident in requested:
+                raise ValidationError("Each assembly instance may be transformed only once per command.")
+            if "translation" not in transform and "rotation" not in transform:
+                raise ValidationError("Each assembly transform needs translation or rotation.")
+            if instance["grounded"]:
+                raise ValidationError("A grounded assembly instance cannot be moved; unground it first.")
+            if "translation" in transform:
+                instance["translation"] = transform["translation"].copy() if isinstance(transform["translation"], list) else transform["translation"]
+            if "rotation" in transform:
+                instance["rotation"] = transform["rotation"].copy() if isinstance(transform["rotation"], list) else transform["rotation"]
+            requested.append(ident)
+
+        mates = candidate["mates"]
+        neighbors: dict[str, set[str]] = {ident: set() for ident in instances}
+        for mate in mates:
+            a, b = mate["a_instance_id"], mate["b_instance_id"]
+            neighbors[a].add(b)
+            neighbors[b].add(a)
+        visited: set[str] = set()
+        for anchor in requested:
+            if anchor in visited:
+                raise ValidationError("Transform one selected instance per connected mate group.")
+            stack = [anchor]
+            while stack:
+                current = stack.pop()
+                if current in visited:
+                    continue
+                visited.add(current)
+                stack.extend(neighbors[current] - visited)
+
+        diagnostics = None
+        for anchor in requested:
+            diagnostics = solve_assembly_mates(
+                candidate, anchor_instance_id=anchor, require_unfixed_anchor=True
+            )
+        validate_assembly(candidate, document.objects)
+        document.assembly = candidate
+        return {"transforms": [
+            {"instance_id": ident, "translation": instances[ident]["translation"],
+             "rotation": instances[ident]["rotation"]}
+            for ident in requested
+        ], "kinematics": diagnostics}
+
+    @staticmethod
     def _set_assembly_instance_properties(document: Document, command: dict[str, Any]) -> dict[str, Any]:
         _fields(command, {"instance_id"}, {"name", "grounded", "visible"})
         if len(command) == 2:
@@ -228,6 +287,7 @@ COMMAND_HANDLERS = {
     "create_subassembly": _call("_create_subassembly"),
     "add_assembly_instance": _call("_add_assembly_instance"),
     "transform_assembly_instance": _call("_transform_assembly_instance"),
+    "transform_assembly_instances": _call("_transform_assembly_instances"),
     "set_assembly_instance_properties": _call("_set_assembly_instance_properties"),
     "remove_assembly_instance": _call("_remove_assembly_instance"),
     "remove_assembly_component": _call("_remove_assembly_component"),

@@ -257,6 +257,8 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
         scene_item = {"object_id": item["id"], "type": kind,
                       "positions": positions, "triangles": triangles,
                       "lines": lines, "points": points}
+        if kind == "body" and item.get("geometry") is not None:
+            scene_item["face_triangle_ranges"] = mesh.get("face_triangle_ranges", [])
         if feature_face_ranges:
             scene_item["feature_face_ranges"] = feature_face_ranges
         if kind in {"point", "line", "spline"}:
@@ -323,7 +325,7 @@ def render_scene(document: Document, kernel: GeometryKernel) -> dict:
             "source_body_id": body_id,
             "positions": positions, "triangles": mesh["triangles"],
             "lines": [edge_offset + index for index in mesh.get("edge_lines", [])],
-            "points": [],
+            "points": [], "face_triangle_ranges": mesh.get("face_triangle_ranges", []),
         })
     bounds = None
     if has_coordinates:

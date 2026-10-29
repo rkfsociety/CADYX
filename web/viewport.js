@@ -196,6 +196,7 @@
     let meshDepthValid = false;
     let geometry = null;
     let selectedBodyId = null;
+    let selectedBodyIds = new Set();
     let selectedFeatureId = null;
     let cameraOrientation = cameraMatrixFromYawPitch(0.68, 0.38);
     let zoom = 1;
@@ -477,7 +478,7 @@
         Math.max(1.5 / scale, 2 * VIEWPORT_MESH_DEFLECTION),
         selectedFeatureId
           ? geometry.featureTriangleRanges?.filter((range) => range.featureId === selectedFeatureId) || []
-          : geometry.bodyTriangleRanges?.filter((range) => range.objectId === selectedBodyId) || [],
+          : geometry.bodyTriangleRanges?.filter((range) => selectedBodyIds.has(range.objectId)) || [],
         geometry.overlayTriangleRanges || [],
       );
       else if (geometry.pointCloudVertexCount != null || !geometry.lines) {
@@ -1549,8 +1550,20 @@
       createSnapshotBlob,
       setSelectedBody(bodyId) {
         const next = typeof bodyId === "string" ? bodyId : null;
-        if (selectedBodyId === next && selectedFeatureId === null) return;
+        if (selectedBodyId === next && selectedBodyIds.size === (next ? 1 : 0)
+            && (!next || selectedBodyIds.has(next)) && selectedFeatureId === null) return;
         selectedBodyId = next;
+        selectedBodyIds = new Set(next ? [next] : []);
+        selectedFeatureId = null;
+        render();
+      },
+      setSelectedBodies(bodyIds) {
+        const next = new Set(Array.isArray(bodyIds)
+          ? bodyIds.filter((bodyId) => typeof bodyId === "string") : []);
+        if (selectedFeatureId === null && next.size === selectedBodyIds.size
+            && [...next].every((bodyId) => selectedBodyIds.has(bodyId))) return;
+        selectedBodyIds = next;
+        selectedBodyId = next.values().next().value || null;
         selectedFeatureId = null;
         render();
       },
@@ -1559,6 +1572,7 @@
         if (selectedFeatureId === next && selectedBodyId === null) return;
         selectedFeatureId = next;
         selectedBodyId = null;
+        selectedBodyIds = new Set();
         render();
       },
       animateBodyMotion(tracks, durationMs) {

@@ -59,6 +59,8 @@ class AssemblyTests(unittest.TestCase):
         self.assertEqual(len(objects), 2)
         self.assertEqual(len({obj["object_id"] for obj in objects}), 2)
         self.assertEqual({obj["source_body_id"] for obj in objects}, {body})
+        self.assertEqual([face["face_index"] for face in objects[0]["face_triangle_ranges"]],
+                         list(range(6)))
         self.assertTrue(scene["bounds"]["max"][0] >= 10)
 
     def test_cycles_and_invalid_transform_rejected(self):

@@ -175,6 +175,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}.cad3-scan-file{overflow-wrap:anywhere;padding-left:32px!important}.cad3-scan-file-button{width:100%;border:0;border-radius:4px;background:transparent;color:var(--muted);font:11px/1.4 var(--ui-font);text-align:left;cursor:pointer}.cad3-scan-file-button:hover{background:#ffffff08;color:var(--text)}.cad3-scan-file-button:focus-visible{outline:1px solid #ff8740;outline-offset:1px}.cad3-scan-file-button[aria-pressed="true"]{background:#ffffff0c;color:#ffe7d6;box-shadow:inset 2px 0 #ff8740}.cad3-scan-run-row{grid-template-columns:20px minmax(0,1fr) 28px}.cad3-scan-delete{display:grid;place-items:center;width:26px;height:30px;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:#f07171;cursor:pointer}.cad3-scan-delete:hover:not(:disabled){border-color:#713131;background:#351919;color:#ff8888}.cad3-scan-delete:disabled{color:#805454;cursor:not-allowed;opacity:.65}.cad3-scan-delete svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.cad3-cloud-root-row{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:2px}.cad3-cloud-disclosure{display:grid;place-items:center;width:22px;height:32px;padding:0;border:1px solid transparent;border-radius:4px;background:transparent;color:#b6c0c6;font:500 18px/1 var(--ui-font);cursor:pointer}.cad3-cloud-disclosure:hover{border-color:#51331f;background:#ffffff08;color:#ff9653}.cad3-cloud-root{min-height:34px;grid-template-columns:18px minmax(0,1fr)!important;font-weight:650;color:#e8eef1}.cad3-cloud-stages{display:grid;gap:2px;margin:2px 0 3px 24px;padding-left:6px;border-left:1px solid #32404a}.cad3-cloud-stages[hidden]{display:none!important}.cad3-cloud-stages .cad3-tree-node{grid-template-columns:minmax(0,1fr);gap:0}.cad3-tree-leaf-row{grid-column:1/-1;min-width:0}.cad3-tree-leaf-row>.cad-tree-feature{width:100%;min-height:32px;padding:5px 8px;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;font-size:11px}.cad3-cloud-stages .cad3-model-note{padding:2px 8px 5px}';
     style.textContent += '.cad3-tree-leaf-row>.cad-tree-feature{grid-template-columns:16px 22px minmax(0,1fr);gap:8px}.cad3-tree-leaf-row>.cad-tree-feature::before{content:""}';
     style.textContent += '.cad3-tree-parent-row{align-items:center}.cad3-tree-parent-row>.cad-tree-feature,.cad3-tree-disclosure{align-self:center}.cad-tree-feature>.cad3-icon{display:grid;place-items:center;align-self:center;line-height:0}.cad-tree-feature>.cad-tree-label{align-self:center;line-height:1.2}';
+    style.textContent += '.cad3-assembly-tree{display:grid;gap:2px;padding:6px 0 10px;margin-bottom:7px;border-bottom:1px solid #28343b}.cad3-assembly-row{display:flex;align-items:center;gap:3px;padding-left:calc(var(--assembly-depth,0)*11px)}.cad3-assembly-select{flex:1;min-width:0}.cad3-assembly-joint-count{min-width:34px;color:#8e9aa1;font-size:9px}.cad3-assembly-state{width:25px;height:25px;padding:0;border:1px solid #334047;border-radius:5px;background:#171f23;color:#c6d0d4;cursor:pointer}.cad3-assembly-state:hover:not(:disabled){border-color:#b75c2b;color:#ffb27e}.cad3-assembly-state:disabled{opacity:.45;cursor:not-allowed}.cad3-assembly-state[data-active="true"]{border-color:#9e4c24;color:#ffb27e;background:#422413}';
+    style.textContent += '.cad3-gizmo-root{position:absolute;z-index:7;inset:0;pointer-events:none}.cad3-gizmo-root[hidden]{display:none}.cad3-gizmo-root button{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border:1px solid #4e5c63;border-radius:50%;background:#10181de8;color:#e8f0f2;font:700 11px var(--ui-font);pointer-events:auto;touch-action:none;cursor:grab;box-shadow:0 2px 8px #0008}.cad3-gizmo-root button[data-gizmo-kind="translate"][data-axis="X"]{border-color:#f06c68;color:#ff928c}.cad3-gizmo-root button[data-gizmo-kind="translate"][data-axis="Y"]{border-color:#72c990;color:#91e0a9}.cad3-gizmo-root button[data-gizmo-kind="translate"][data-axis="Z"]{border-color:#70a8ff;color:#91baff}.cad3-gizmo-root button[data-gizmo-kind="rotate"]{border-radius:8px;width:34px;height:24px;margin:0;font-size:10px}.cad3-gizmo-root button:active{cursor:grabbing;background:#342116}';
     document.head.appendChild(style);
     if(!$('.cad3-headrail')){const h=document.createElement('div');h.className='cad3-headrail';h.innerHTML=I.model;$('.topbar')?.prepend(h)}
     if(!$('.cad3-rail')){const r=document.createElement('nav');r.className='cad3-rail';r.setAttribute('aria-label','Основная навигация');r.innerHTML=`<button data-view="geometry" title="Геометрия">${I.model}</button><button data-view="files" title="Файлы">${I.files}</button><button data-view="projects" title="Проекты">${I.projects}</button><button data-view="activity" title="Активность">${I.activity}</button>`;detail.prepend(r);const syncRail=()=>{$$('[data-view]',r).forEach(b=>{const view=b.dataset.view,src=nav.querySelector(`[data-workspace-view="${view}"]`),active=view===(grid.dataset.view||'overview');b.setAttribute('aria-label',b.title);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');b.dataset.on=String(active);b.disabled=!src||src.disabled})};r.addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b||b.disabled)return;nav.querySelector(`[data-workspace-view="${b.dataset.view}"]`)?.click()});new MutationObserver(syncRail).observe(grid,{attributes:true,attributeFilter:['data-view']});new MutationObserver(syncRail).observe(nav,{subtree:true,attributes:true,attributeFilter:['disabled','aria-current']});syncRail()}
@@ -182,13 +184,23 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const oldList=$('#cad-tree-features'),oldSearch=$('.cad-tree-search input');let list=oldList,search=oldSearch,modelTabs;if(oldList){modelTabs=document.createElement('div');modelTabs.className='cad3-model-tabs';modelTabs.setAttribute('role','tablist');modelTabs.setAttribute('aria-label','Модели');oldList.before(modelTabs);list=oldList.cloneNode(false);list.classList.add('cad3-model-tree');oldList.replaceWith(list)}if(oldSearch){search=oldSearch.cloneNode(true);oldSearch.replaceWith(search)}
     let props=$('.cad3-props');if(!props){props=document.createElement('section');props.className='cad3-props cad-inspector-pane';inspector.append(props)}
     const overlay=document.createElement('canvas');overlay.className='cad3-overlay';panel.append(overlay);
-    const state={objects:[],byId:new Map(),scene:null,labels:new Map(),selected:null,selectionCleared:false,rev:null,project:null,parameters:{},bindings:[],assembly:null,activeModelBodyId:null};
+    const gizmoRoot=document.createElement('div');gizmoRoot.className='cad3-gizmo-root';gizmoRoot.hidden=true;
+    for(const axis of ['X','Y','Z']){const move=document.createElement('button');move.type='button';move.dataset.gizmoKind='translate';move.dataset.axis=axis;move.title=`Переместить по ${axis}`;move.textContent=axis;gizmoRoot.append(move);const rotate=document.createElement('button');rotate.type='button';rotate.dataset.gizmoKind='rotate';rotate.dataset.axis=axis;rotate.title=`Повернуть вокруг ${axis}`;rotate.textContent=`↻${axis}`;gizmoRoot.append(rotate)}
+    panel.append(gizmoRoot);
+    const state={objects:[],byId:new Map(),scene:null,labels:new Map(),selected:null,selectedInstanceId:null,selectedInstancePath:[],selectedOccurrenceId:null,selectedOccurrenceIds:new Set(),selectionCleared:false,rev:null,project:null,parameters:{},bindings:[],assembly:null,lock:null,kinematics:null,assemblyCoordinateMode:'local',assemblyStep:1,assemblyAngleStep:5,snapEnabled:true,activeModelBodyId:null};
+    const assemblyUndo=[],assemblyRedo=[];let assemblyLastRevision=null;
+    let assemblyDrag=null;
     const opType=o=>o?.operation==='recognize_mesh'?'Опорная геометрия сетки':cadyxMeshStage(o)?.title||cadyxCloudStage(o||{})?.title||meta[o?.operation]?.[0]||(o?.operation?`Операция: ${String(o.operation).replace(/_/g,' ')}`:'Элемент'), opIcon=o=>cadyxCloudStage(o||{})?I.cloud:I[meta[o?.operation]?.[1]||'model'];
     function featureDetails(o){const p=o.parameters||{},fmt=v=>Number.isFinite(Number(v))?new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(Number(v)):null,mm=v=>{const n=fmt(v);return n===null?null:`${n} мм`},pos=Array.isArray(p.origin)?p.origin.slice(0,2).map((v,i)=>`${i?'Y':'X'}${fmt(v)}`).filter(x=>!x.endsWith('null')).join(', '):'';let d=[];switch(o.operation){case'create_box':d=[mm(p.width),mm(p.height),mm(p.depth)].filter(Boolean);return d.length?d.join(' × '):'';case'extrude_sketch':case'pad_sketch_to_body':case'rib_from_sketch':case'pocket_sketch':case'extrude_profile_on_plane':d=[mm(p.depth)];break;case'revolve_sketch':d=[p.angle_degrees==null?null:`${fmt(p.angle_degrees)}°`];break;case'boss':d=[p.diameter==null?null:`Ø${mm(p.diameter)}`,mm(p.depth)];break;case'hole':case'through_hole':case'counterbore_hole':case'countersink_hole':case'threaded_hole':d=[p.diameter==null?null:`Ø${mm(p.diameter)}`,p.hole_depth==null?null:mm(p.hole_depth),p.thread_size||null];break;case'fillet_edges':d=[p.radius==null?null:`R${mm(p.radius)}`];break;case'variable_fillet_edges':d=[p.start_radius==null?null:`R${mm(p.start_radius)}`,p.end_radius==null?null:`R${mm(p.end_radius)}`];break;case'chamfer_edges':d=[mm(p.distance)];break;case'shell_body':case'offset_body':d=[mm(p.thickness??p.offset)];break;case'draft_faces':d=[p.angle_degrees==null?null:`${fmt(p.angle_degrees)}°`];break;case'linear_pattern_body':case'circular_pattern_body':d=[p.count==null?null:`${fmt(p.count)} шт.`];break;default:return''}if(pos)d.push(pos);return d.filter(Boolean).join(' · ')}
     function makeLabels(){state.labels.clear();const count={sketch:0};const ops={};for(const o of state.objects){if(o.type==='sketch')state.labels.set(o.id,o.name&&o.name!=='Sketch'?o.name:`Эскиз ${String(++count.sketch).padStart(3,'0')}`);if(o.type==='feature'){const base=opType(o);ops[base]=(ops[base]||0)+1;const details=featureDetails(o);state.labels.set(o.id,o.name||`${base} ${String(ops[base]).padStart(3,'0')}${details?` · ${details}`:''}`)}}}
     const label=id=>state.labels.get(id)||state.byId.get(id)?.name||id?.split(':')[0]||'—';
     function consumed(){const s=new Set;for(const f of state.objects.filter(x=>x.type==='feature')){if(['fuse_bodies','cut_bodies'].includes(f.operation)){s.add(f.base_body_id);s.add(f.tool_body_id)}if(['fillet_edges','chamfer_edges','resize_imported_thread','transform_imported_brep'].includes(f.operation))s.add(f.source_body_id)}return s}
     const sceneBody=id=>state.scene?.objects?.find(x=>x.object_id===id);
+    const assemblyInstances=()=>state.assembly?.instances||[];
+    const assemblyInstance=id=>assemblyInstances().find(item=>item.id===id)||null;
+    const assemblyTargetName=id=>state.assembly?.parts?.find(item=>item.id===id)?.name
+      ||state.assembly?.subassemblies?.find(item=>item.id===id)?.name||id?.split(':')[0]||'Деталь';
+    const occurrenceScene=id=>state.scene?.objects?.find(item=>item.type==='body'&&item.object_id===id&&item.instance_id)||null;
     function deps(o){if(!o)return[];const d=[];const add=(id,role)=>{if(id&&state.byId.has(id))d.push({id,role})};add(o.source_sketch_id,'Профиль');(o.source_sketch_ids||[]).forEach(id=>add(id,'Сечение'));add(o.source_body_id,'Исходное тело');add(o.base_body_id,'Основное тело');add(o.tool_body_id,'Инструментальное тело');for(const x of state.objects){if(x===o||x.type!=='feature')continue;if(x.source_sketch_id===o.id||(x.source_sketch_ids||[]).includes(o.id)||x.source_body_id===o.body_id||x.base_body_id===o.body_id||x.tool_body_id===o.body_id)add(x.id,'Используется в')}return d}
     const expandedFeatures=new Set();
     const collapsedClouds=new Set();
@@ -426,6 +438,41 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         notify(`Серия «${title}» удалена.`);
       }catch(error){notify(`Не удалось удалить серию «${title}»: ${error.message}`,true)}
     }
+    function renderAssemblyTree(){
+      if(!hasAssemblyStructure())return;
+      const section=document.createElement('section');section.className='cad3-assembly-tree';
+      const heading=document.createElement('div');heading.className='cad3-model-title';heading.textContent='Экземпляры сборки';section.append(heading);
+      const children=new Map();for(const instance of assemblyInstances()){const key=instance.parent_id||null;if(!children.has(key))children.set(key,[]);children.get(key).push(instance)}
+      for(const items of children.values())items.sort((a,b)=>a.name.localeCompare(b.name,'ru'));
+      const mates=state.assembly?.mates||[],canEdit=state.lock?.state==='FREE'&&!state.lock?.recovery_required;
+      let rendered=0;
+      const addInstance=(instance,path,depth)=>{
+        if(rendered>=4096)return;rendered++;
+        const fullPath=[...path,instance.id],pathId=fullPath.join('/'),row=document.createElement('div');
+        row.className='cad3-assembly-row';row.style.setProperty('--assembly-depth',String(Math.min(depth,16)));
+        const button=document.createElement('button');button.type='button';button.className='cad-tree-feature cad3-assembly-select';
+        button.dataset.selected=String(state.selectedOccurrenceIds.has(pathId));button.dataset.id=pathId;
+        button.title=`${instance.name} · ${assemblyTargetName(instance.target_id)}`;
+        button.innerHTML='<span class="cad3-icon">▰</span><span class="cad-tree-label"></span>';
+        button.querySelector('.cad-tree-label').textContent=instance.name;
+        button.onclick=event=>selectAssemblyOccurrence(pathId,instance.id,event);
+        const linked=mates.filter(mate=>mate.a_instance_id===instance.id||mate.b_instance_id===instance.id).length;
+        const joint=document.createElement('small');joint.className='cad3-assembly-joint-count';joint.textContent=linked?`${linked} сопр.`:'';
+        const visibility=document.createElement('button');visibility.type='button';visibility.className='cad3-assembly-state';
+        visibility.textContent=instance.visible?'◉':'○';visibility.title=instance.visible?'Скрыть экземпляр':'Показать экземпляр';
+        visibility.setAttribute('aria-label',visibility.title);visibility.disabled=!canEdit;
+        visibility.onclick=event=>{event.stopPropagation();void editAssemblyProperties(instance,{visible:!instance.visible})};
+        const grounded=document.createElement('button');grounded.type='button';grounded.className='cad3-assembly-state';
+        grounded.textContent=instance.grounded?'⚓':'◇';grounded.title=instance.grounded?'Снять закрепление':'Закрепить экземпляр';
+        grounded.setAttribute('aria-label',grounded.title);grounded.disabled=!canEdit;
+        grounded.onclick=event=>{event.stopPropagation();void editAssemblyProperties(instance,{grounded:!instance.grounded})};
+        row.append(button,joint,visibility,grounded);section.append(row);
+        for(const child of children.get(instance.target_id)||[])addInstance(child,fullPath,depth+1);
+      };
+      for(const instance of children.get(null)||[])addInstance(instance,[],0);
+      if(rendered>=4096){const note=document.createElement('div');note.className='cad3-model-note';note.textContent='Дерево ограничено 4096 экземплярами.';section.append(note)}
+      list.append(section);
+    }
     function renderTree(){
       if(!list)return;
       const scanning=grid?.dataset.view==='scanning';
@@ -436,13 +483,14 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if(search){search.placeholder=scanning?'Поиск по сериям и файлам…':'Поиск по элементам…';search.setAttribute('aria-label',scanning?'Поиск по дереву сканирования':'Поиск по дереву модели')}
       if(scanning){modelTabs?.setAttribute('hidden','');if(scanTreeLoadedProject!==state.project)loadScanTree(state.project);else renderScanTree();return}
       modelTabs?.removeAttribute('hidden');
+      list.replaceChildren();
+      renderAssemblyTree();
       const query=(search?.value||'').toLowerCase().trim(),groups=modelGroups();
       if(!groups.some(group=>group.body.id===state.activeModelBodyId))state.activeModelBodyId=groups[0]?.body.id||null;
       const modelSelectorVisible=hasAssemblyStructure()&&groups.length>1;
       if(modelTabs)modelTabs.hidden=!modelSelectorVisible;
       modelTabs?.replaceChildren();
       if(modelSelectorVisible)for(const group of groups){const tab=document.createElement('button');tab.type='button';tab.className='cad3-model-tab';tab.setAttribute('role','tab');tab.dataset.bodyId=group.body.id;tab.setAttribute('aria-selected',String(group.body.id===state.activeModelBodyId));tab.title=group.body.name;tab.textContent=group.body.name;tab.onclick=()=>{state.activeModelBodyId=group.body.id;renderTree()};modelTabs?.append(tab)}
-      list.replaceChildren();
       const active=groups.find(group=>group.body.id===state.activeModelBodyId);
       const visibleGroups=modelSelectorVisible?(active?[active]:[]):groups;
       for(const group of visibleGroups){
@@ -490,7 +538,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         const hasSketches=features.some(feature=>feature.source_sketch_id||feature.source_sketch_ids?.length);
         if(!hasSketches&&!features.some(feature=>cadyxCloudStage(feature))){const note=document.createElement('div');note.className='cad3-model-note';note.textContent=features.some(feature=>feature.operation==='reconstruct_scan')?'Редактируемого эскиза нет: сетка построена по данным сканирования.':'Редактируемого эскиза нет.';list.append(note)}
       }
-      const empty=$('#cad-tree-empty');if(empty)empty.hidden=visibleGroups.some(group=>group.features.length>0);
+      const empty=$('#cad-tree-empty');if(empty)empty.hidden=hasAssemblyStructure()||visibleGroups.some(group=>group.features.length>0);
     }
     search?.addEventListener('input',renderTree);
     setInterval(()=>{if(document.visibilityState!=='hidden'&&grid?.dataset.view==='scanning'&&state.project)loadScanTree(state.project,true)},5000);
@@ -580,13 +628,153 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       densityInput.addEventListener('input', updateMass);
       if (savedMaterial) updateMass();
     };
+    const setAssemblyStatus=message=>{const node=props.querySelector('[data-assembly-status]');if(node)node.textContent=message};
+    function renderAssemblyProps(){
+      const instance=assemblyInstance(state.selectedInstanceId);
+      if(!instance){props.innerHTML='<div class="cad3-empty">Выберите экземпляр сборки в дереве или 3D-предпросмотре.</div>';return}
+      const selectedCount=state.selectedOccurrenceIds.size;
+      const mates=(state.assembly?.mates||[]).filter(mate=>mate.a_instance_id===instance.id||mate.b_instance_id===instance.id);
+      const canEdit=state.lock?.state==='FREE'&&!state.lock?.recovery_required;
+      const lockLabel=state.lock?.state==='AI_LOCKED'?'ИИ редактирует сборку':state.lock?.state==='HUMAN_LOCKED'?'Сборка редактируется':state.lock?.state==='SYSTEM_LOCKED'?'Core выполняет операцию':state.lock?.state==='FREE'&&!state.lock?.recovery_required?'Готово к редактированию':'Доступность не подтверждена';
+      const kinematics=state.kinematics||{},mode=state.assemblyCoordinateMode,displayPose=selectedPose(instance,mode),translation=displayPose.translation,rotation=displayPose.rotation;
+      const row=(name,value,axis)=>`<dt>${name}</dt><dd><input data-assembly-value="${axis}" type="number" step="any" value="${Number(value)}"></dd>`;
+      props.innerHTML=`<div class="cad3-head"><span class="cad3-icon">▰</span><div><strong>${esc(instance.name)}</strong><small>${esc(assemblyTargetName(instance.target_id))}</small></div></div>
+        <section class="cad3-sec"><h3>Состояние сборки</h3><dl class="cad3-grid"><dt>Редактор</dt><dd data-assembly-lock>${esc(lockLabel)}</dd><dt>Степени свободы</dt><dd>${fmt(kinematics.global_dof??0)} глоб. · ${fmt(kinematics.internal_dof??0)} относ.</dd><dt>Сопряжения</dt><dd>${mates.length}</dd><dt>Выделено</dt><dd>${selectedCount}</dd></dl></section>
+        <section class="cad3-sec"><h3>Экземпляр</h3><label class="cad3-assembly-check"><input type="checkbox" data-assembly-visible ${instance.visible?'checked':''} ${canEdit?'':'disabled'}> Видимый</label><label class="cad3-assembly-check"><input type="checkbox" data-assembly-grounded ${instance.grounded?'checked':''} ${canEdit?'':'disabled'}> Закреплён</label></section>
+        <section class="cad3-sec"><h3>Положение</h3><label class="cad3-assembly-check">Координаты <select data-assembly-coordinate><option value="local" ${mode==='local'?'selected':''}>Локальные</option><option value="global" ${mode==='global'?'selected':''}>Глобальные</option></select></label><dl class="cad3-grid">${row('X, мм',translation[0],'tx')}${row('Y, мм',translation[1],'ty')}${row('Z, мм',translation[2],'tz')}${row('Qw',rotation[0],'qw')}${row('Qx',rotation[1],'qx')}${row('Qy',rotation[2],'qy')}${row('Qz',rotation[3],'qz')}</dl><div class="cad3-assembly-actions"><button type="button" data-assembly-transform ${canEdit?'':'disabled'}>Применить положение</button><button type="button" data-assembly-undo ${canEdit&&assemblyUndo.length?'':'disabled'}>Undo</button><button type="button" data-assembly-redo ${canEdit&&assemblyRedo.length?'':'disabled'}>Redo</button></div></section>
+        <section class="cad3-sec"><h3>Манипуляторы · шаг и привязка</h3><div class="cad3-assembly-actions"><input data-assembly-step type="number" min="0.001" step="any" value="${state.assemblyStep}" aria-label="Шаг перемещения, мм"><span>мм</span><input data-assembly-angle-step type="number" min="0.1" step="any" value="${state.assemblyAngleStep}" aria-label="Шаг поворота, градусы"><span>°</span><label><input type="checkbox" data-assembly-snap ${state.snapEnabled?'checked':''}> Привязка</label></div><div class="cad3-assembly-actions">${['X','Y','Z'].map(axis=>`<button type="button" data-assembly-axis="${axis}" data-assembly-sign="-1" ${canEdit?'':'disabled'}>−${axis}</button><button type="button" data-assembly-axis="${axis}" data-assembly-sign="1" ${canEdit?'':'disabled'}>+${axis}</button>`).join('')}</div><div class="cad3-assembly-actions">${['X','Y','Z'].map(axis=>`<button type="button" data-assembly-rotate-axis="${axis}" data-assembly-sign="-1" ${canEdit?'':'disabled'}>↶${axis}</button><button type="button" data-assembly-rotate-axis="${axis}" data-assembly-sign="1" ${canEdit?'':'disabled'}>↷${axis}</button>`).join('')}</div></section>
+        <section class="cad3-sec"><h3>Сопряжения</h3>${mates.length?mates.map(mate=>`<div class="cad3-assembly-mate"><strong>${esc(mate.name)} · ${esc(mate.kind)}</strong><dl class="cad3-grid">${mate.kind==='revolute'||mate.kind==='coaxial'||mate.kind==='cylindrical'?`<dt>Угол, °</dt><dd><input data-mate-angle="${mate.id}" type="number" step="any" value="${Number(mate.angle_deg)}" ${canEdit?'':'disabled'}></dd>`:''}${mate.kind==='slider'||mate.kind==='coaxial'||mate.kind==='cylindrical'?`<dt>Смещение, мм</dt><dd><input data-mate-offset="${mate.id}" type="number" step="any" value="${Number(mate.offset_mm)}" ${canEdit?'':'disabled'}></dd>`:''}</dl><button type="button" data-mate-apply="${mate.id}" ${canEdit?'':'disabled'}>Изменить координату</button><small>Пределы: ${esc(JSON.stringify(mate.limits||{}))}</small></div>`).join(''):'<div class="cad3-empty">Нет сопряжений у выбранного экземпляра.</div>'}</section><div class="cad3-model-note" data-assembly-status aria-live="polite">${canEdit?'':esc(lockLabel+' · просмотр доступен')}</div>`;
+      props.querySelector('[data-assembly-visible]')?.addEventListener('change',event=>void editAssemblyProperties(instance,{visible:event.target.checked}));
+      props.querySelector('[data-assembly-grounded]')?.addEventListener('change',event=>void editAssemblyProperties(instance,{grounded:event.target.checked}));
+      props.querySelector('[data-assembly-coordinate]')?.addEventListener('change',event=>{state.assemblyCoordinateMode=event.target.value;renderAssemblyProps()});
+      props.querySelector('[data-assembly-snap]')?.addEventListener('change',event=>{state.snapEnabled=event.target.checked});
+      props.querySelector('[data-assembly-step]')?.addEventListener('input',event=>{const value=Number(event.target.value);if(Number.isFinite(value)&&value>0)state.assemblyStep=value});
+      props.querySelector('[data-assembly-angle-step]')?.addEventListener('input',event=>{const value=Number(event.target.value);if(Number.isFinite(value)&&value>0)state.assemblyAngleStep=value});
+      props.querySelector('[data-assembly-transform]')?.addEventListener('click',()=>void applyAssemblyTransform(instance));
+      props.querySelector('[data-assembly-undo]')?.addEventListener('click',()=>void travelAssemblyHistory('undo'));
+      props.querySelector('[data-assembly-redo]')?.addEventListener('click',()=>void travelAssemblyHistory('redo'));
+      props.querySelectorAll('[data-assembly-axis]').forEach(button=>button.addEventListener('click',()=>void nudgeAssemblyInstance(instance,button.dataset.assemblyAxis,Number(button.dataset.assemblySign))));
+      props.querySelectorAll('[data-assembly-rotate-axis]').forEach(button=>button.addEventListener('click',()=>void nudgeAssemblyInstance(instance,button.dataset.assemblyRotateAxis,Number(button.dataset.assemblySign),true)));
+      props.querySelectorAll('[data-mate-apply]').forEach(button=>button.addEventListener('click',()=>void applyAssemblyMate(instance,button.dataset.mateApply)));
+    }
     props.addEventListener('click',e=>{const b=e.target.closest('[data-dep]');if(b)select(b.dataset.dep,true)});
     const tabs=$('.cad-inspector-tabs');tabs?.addEventListener('click',()=>queueMicrotask(()=>{const active=$('.cad-inspector-tab[aria-selected=true]',tabs)?.dataset.cadInspector||'properties';props.hidden=active!=='properties'}));
-    function select(id,reveal=false){if(!state.byId.has(id))return;const selected=state.byId.get(id);if(selected.type==='sketch'){const owner=state.objects.find(item=>item.type==='feature'&&(item.source_sketch_id===id||(item.source_sketch_ids||[]).includes(id)));if(owner){expandedFeatures.add(owner.id);saveModelTreeState()}}const selectedBodyId=selected.type==='body'?selected.id:selected.body_id;const ownerGroup=modelGroups().find(group=>group.body.id===selectedBodyId||group.features.some(feature=>feature.id===id));if(ownerGroup)state.activeModelBodyId=ownerGroup.body.id;state.selected=id;state.selectionCleared=false;try{selectedObjectId=id}catch{}if(selected.type==='feature')modelViewer?.setSelectedFeature?.(selected.id);else modelViewer?.setSelectedBody?.(bodyFor(selected)?.id||null);renderTree();renderProps(selected);if(reveal)list?.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'nearest'});detail.dataset.v2Selection='true';syncOverlay()}
-    function clearSelection(){if(!state.selected&&state.selectionCleared)return;state.selected=null;state.selectionCleared=true;try{selectedObjectId=null}catch{}modelViewer?.setSelectedBody?.(null);renderTree();renderProps(null);detail.dataset.v2Selection='true';syncOverlay()}
+    function select(id,reveal=false){if(!state.byId.has(id))return;state.selectedOccurrenceId=null;state.selectedOccurrenceIds.clear();state.selectedInstanceId=null;state.selectedInstancePath=[];const selected=state.byId.get(id);if(selected.type==='sketch'){const owner=state.objects.find(item=>item.type==='feature'&&(item.source_sketch_id===id||(item.source_sketch_ids||[]).includes(id)));if(owner){expandedFeatures.add(owner.id);saveModelTreeState()}}const selectedBodyId=selected.type==='body'?selected.id:selected.body_id;const ownerGroup=modelGroups().find(group=>group.body.id===selectedBodyId||group.features.some(feature=>feature.id===id));if(ownerGroup)state.activeModelBodyId=ownerGroup.body.id;state.selected=id;state.selectionCleared=false;try{selectedObjectId=id}catch{}if(selected.type==='feature')modelViewer?.setSelectedFeature?.(selected.id);else modelViewer?.setSelectedBody?.(bodyFor(selected)?.id||null);renderTree();renderProps(selected);if(reveal)list?.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'nearest'});detail.dataset.v2Selection='true';syncOverlay()}
+    function selectAssemblyOccurrence(pathId,instanceId,event){
+      if(!pathId||!instanceId)return;
+      const multi=Boolean(event&&(event.ctrlKey||event.metaKey||event.shiftKey));
+      if(!multi)state.selectedOccurrenceIds.clear();
+      if(multi&&state.selectedOccurrenceIds.has(pathId))state.selectedOccurrenceIds.delete(pathId);
+      else state.selectedOccurrenceIds.add(pathId);
+      if(!state.selectedOccurrenceIds.size){clearSelection();return}
+      const activePath=state.selectedOccurrenceIds.has(pathId)?pathId:[...state.selectedOccurrenceIds].at(-1)||pathId;
+      state.selectedOccurrenceId=activePath;state.selectedInstanceId=state.selectedOccurrenceIds.has(pathId)?instanceId:activePath.split('/').at(-1);state.selectedInstancePath=activePath.split('/');state.selected=null;state.selectionCleared=false;
+      const selectedIds=[...state.selectedOccurrenceIds];
+      if(modelViewer?.setSelectedBodies)modelViewer.setSelectedBodies(selectedIds);
+      else modelViewer?.setSelectedBody?.(pathId);
+      renderTree();renderAssemblyProps();detail.dataset.v2Selection='true';syncOverlay();
+    }
+    function clearSelection(){if(!state.selected&&!state.selectedOccurrenceIds.size&&state.selectionCleared)return;state.selected=null;state.selectedOccurrenceId=null;state.selectedOccurrenceIds.clear();state.selectedInstanceId=null;state.selectedInstancePath=[];state.selectionCleared=true;try{selectedObjectId=null}catch{}modelViewer?.setSelectedBodies?.([]);modelViewer?.setSelectedBody?.(null);renderTree();renderProps(null);detail.dataset.v2Selection='true';syncOverlay()}
+    const cloneJson=value=>JSON.parse(JSON.stringify(value));
+    const resetAssemblyHistory=()=>{assemblyUndo.length=0;assemblyRedo.length=0;assemblyLastRevision=null};
+    async function executeAssemblyCommand(command,{history=null,historyAction=null}={}){
+      const projectId=state.project,client=window.cadyxApi?.request;
+      if(!projectId||!client)throw new Error('Командный API сборки недоступен.');
+      const encoded=encodeURIComponent(projectId);let leaseId=null,result=null,commandError=null,releaseError=null,revision=null;
+      setAssemblyStatus('Проверяю ревизию и блокировку…');
+      try{
+        const info=await client(`/api/v1/projects/${encoded}?view=browser`);
+        if(projectId!==state.project)throw new Error('Выбран другой проект.');
+        revision=info.document?.revision;
+        if(!Number.isInteger(revision))throw new Error('Сервер не вернул ревизию документа.');
+        if(state.rev!==null&&revision!==state.rev){resetAssemblyHistory();await window.cadyxApi.refresh();throw new Error('Сборка изменилась в другом сеансе. Данные обновлены; повторите действие.');}
+        if(info.lock?.state!=='FREE'||info.lock?.recovery_required)throw new Error(info.lock?.state==='AI_LOCKED'?'ИИ сейчас изменяет сборку. Просмотр остаётся доступен.':'Сборка занята или требует восстановления блокировки.');
+        if(historyAction&&assemblyLastRevision!==revision){resetAssemblyHistory();await window.cadyxApi.refresh();throw new Error('История Undo/Redo устарела после внешнего изменения сборки.');}
+        const lease=await client(`/api/v1/projects/${encoded}/leases`,{method:'POST',body:JSON.stringify({owner_type:'human',owner_id:`assembly-ui:${crypto.randomUUID()}`})});
+        leaseId=lease.lease?.lease_id;if(!leaseId)throw new Error('Core не выдал блокировку редактирования.');
+        result=await client(`/api/v1/projects/${encoded}/commands`,{method:'POST',body:JSON.stringify({lease_id:leaseId,expected_revision:revision,command})});
+      }catch(error){commandError=error}
+      finally{if(leaseId){try{await client(`/api/v1/projects/${encoded}/leases/${encodeURIComponent(leaseId)}/release`,{method:'POST',body:'{}'})}catch(error){releaseError=error}}}
+      if(commandError){setAssemblyStatus(commandError.message);throw commandError}
+      const nextRevision=revision+1;
+      if(historyAction==='undo'){assemblyUndo.pop();assemblyRedo.push(history)}
+      else if(historyAction==='redo'){assemblyRedo.pop();assemblyUndo.push(history)}
+      else if(history){if(assemblyLastRevision!==null&&assemblyLastRevision!==revision)resetAssemblyHistory();assemblyUndo.push(history);assemblyRedo.length=0}
+      assemblyLastRevision=nextRevision;
+      try{await window.cadyxApi.refresh()}catch{}
+      if(releaseError){setAssemblyStatus(`Изменение сохранено, но блокировка не освобождена: ${releaseError.message}`);throw releaseError}
+      setAssemblyStatus('Изменение сохранено.');
+      return result;
+    }
+    async function editAssemblyProperties(instance,fields){
+      const command={type:'set_assembly_instance_properties',instance_id:instance.id,...fields};
+      const inverse={type:'set_assembly_instance_properties',instance_id:instance.id};
+      for(const key of Object.keys(fields))inverse[key]=instance[key];
+      try{await executeAssemblyCommand(command,{history:{undo:inverse,redo:command}})}catch(error){setAssemblyStatus(error.message)}
+    }
+    function assemblyTransformTargets(instance,nextPose){
+      const paths=[...state.selectedOccurrenceIds],representatives=[],covered=new Set();
+      for(const pathId of paths){const path=pathId.split('/'),id=path.at(-1),component=assemblyComponentIds(id);if([...component].some(member=>covered.has(member)))continue;for(const member of component)covered.add(member);representatives.push({id,path})}
+      if(!representatives.length)representatives.push({id:instance.id,path:state.selectedInstancePath.slice()});
+      representatives.sort((a,b)=>Number(b.id===instance.id)-Number(a.id===instance.id));
+      if(representatives.length===1)return[{instance_id:instance.id,path:state.selectedInstancePath.slice(),translation:nextPose.translation.slice(),rotation:nextPose.rotation.slice()}];
+      const oldLocal=instancePose(instance),parent=parentPoseForPath(state.selectedInstancePath),oldWorld=poseCompose(parent,oldLocal),newWorld=poseCompose(parent,nextPose),worldDelta=poseCompose(newWorld,poseInverse(oldWorld)),localTranslationDelta=nextPose.translation.map((value,index)=>value-oldLocal.translation[index]),localRotationDelta=quatMultiply(quatInverse(oldLocal.rotation),nextPose.rotation);
+      return representatives.map(({id,path})=>{const target=assemblyInstance(id),old=instancePose(target);if(id===instance.id)return{instance_id:id,path,translation:nextPose.translation.slice(),rotation:nextPose.rotation.slice()};if(state.assemblyCoordinateMode==='local')return{instance_id:id,path,translation:old.translation.map((value,index)=>value+localTranslationDelta[index]),rotation:quatMultiply(old.rotation,localRotationDelta)};const parentPose=parentPoseForPath(path),oldWorldPose=poseCompose(parentPose,old),newWorldPose=poseCompose(worldDelta,oldWorldPose),local=poseCompose(poseInverse(parentPose),newWorldPose);return{instance_id:id,path,translation:local.translation,rotation:local.rotation}});
+    }
+    async function commitAssemblyTransform(instance,nextPose){
+      const transforms=assemblyTransformTargets(instance,nextPose).map(({path,...item})=>item);
+      if(transforms.length>1){const command={type:'transform_assembly_instances',transforms},previous=transforms.map(item=>{const old=assemblyInstance(item.instance_id);return{instance_id:item.instance_id,translation:old.translation.slice(),rotation:old.rotation.slice()}});
+        try{await executeAssemblyCommand(command,{history:{undo:{type:'transform_assembly_instances',transforms:previous},redo:command}})}
+        catch(error){setAssemblyStatus(error.message);throw error}return;
+      }
+      const previous={translation:instance.translation.slice(),rotation:instance.rotation.slice()},command={type:'transform_assembly_instance',instance_id:instance.id,translation:nextPose.translation.slice(),rotation:nextPose.rotation.slice()};
+      try{await executeAssemblyCommand(command,{history:{undo:{...command,...previous},redo:command}})}
+      catch(error){setAssemblyStatus(error.message);throw error}
+    }
+    async function applyAssemblyTransform(instance){
+      const values=key=>Number(props.querySelector(`[data-assembly-value="${key}"]`)?.value);
+      let pose={translation:[values('tx'),values('ty'),values('tz')],rotation:[values('qw'),values('qx'),values('qy'),values('qz')]};
+      if(!pose.translation.every(Number.isFinite)||!pose.rotation.every(Number.isFinite)){setAssemblyStatus('Введите конечные координаты и quaternion.');return}
+      const norm=Math.hypot(...pose.rotation);if(Math.abs(norm-1)>1e-5){setAssemblyStatus('Quaternion должен иметь единичную длину.');return}
+      const step=Number(props.querySelector('[data-assembly-step]')?.value);if(state.snapEnabled&&Number.isFinite(step)&&step>0)pose.translation=pose.translation.map(value=>Math.round(value/step)*step);
+      pose=localPoseFromMode(pose,state.assemblyCoordinateMode);
+      try{await commitAssemblyTransform(instance,pose)}catch{}
+    }
+    async function nudgeAssemblyInstance(instance,axis,sign,rotate=false){
+      const index={X:0,Y:1,Z:2}[axis];if(index===undefined)return;
+      const current={translation:instance.translation.slice(),rotation:instance.rotation.slice()},mode=state.assemblyCoordinateMode,shown=selectedPose(instance,mode),next={translation:shown.translation.slice(),rotation:shown.rotation.slice()};
+      if(rotate){const degrees=Number(props.querySelector('[data-assembly-angle-step]')?.value);if(!Number.isFinite(degrees)||degrees<=0){setAssemblyStatus('Шаг поворота должен быть положительным.');return}const half=degrees*Math.PI/360*Math.sign(sign),delta=[Math.cos(half),...(index===0?[Math.sin(half),0,0]:index===1?[0,Math.sin(half),0]:[0,0,Math.sin(half)])];next.rotation=mode==='global'?quatMultiply(delta,shown.rotation):quatMultiply(shown.rotation,delta)}
+      else{const amount=Number(props.querySelector('[data-assembly-step]')?.value);if(!Number.isFinite(amount)||amount<=0){setAssemblyStatus('Шаг перемещения должен быть положительным.');return}next.translation[index]+=amount*Math.sign(sign);if(state.snapEnabled)next.translation[index]=Math.round(next.translation[index]/amount)*amount}
+      const local=localPoseFromMode(next,mode);
+      try{await commitAssemblyTransform(instance,local)}catch{}
+    }
+    async function applyAssemblyMate(instance,mateId){
+      const mate=(state.assembly?.mates||[]).find(item=>item.id===mateId);if(!mate)return;
+      const command={type:'set_assembly_mate',mate_id:mateId},inverse={type:'set_assembly_mate',mate_id:mateId};
+      const angle=props.querySelector(`[data-mate-angle="${CSS.escape(mateId)}"]`),offset=props.querySelector(`[data-mate-offset="${CSS.escape(mateId)}"]`);
+      if(angle&&Number.isFinite(Number(angle.value))&&Number(angle.value)!==mate.angle_deg){command.angle_deg=Number(angle.value);inverse.angle_deg=mate.angle_deg}
+      if(offset&&Number.isFinite(Number(offset.value))&&Number(offset.value)!==mate.offset_mm){command.offset_mm=Number(offset.value);inverse.offset_mm=mate.offset_mm}
+      if(Object.keys(command).length===2){setAssemblyStatus('Координаты сопряжения не изменились.');return}
+      try{await executeAssemblyCommand(command,{history:{undo:inverse,redo:command}})}catch(error){setAssemblyStatus(error.message)}
+    }
+    async function travelAssemblyHistory(direction){
+      const source=direction==='undo'?assemblyUndo:assemblyRedo,entry=source[source.length-1];if(!entry)return;
+      const command=entry[direction];if(!command)return;
+      try{await executeAssemblyCommand(command,{history:entry,historyAction:direction})}catch(error){setAssemblyStatus(error.message)}
+    }
+    const quatMultiply=(a,b)=>[a[0]*b[0]-a[1]*b[1]-a[2]*b[2]-a[3]*b[3],a[0]*b[1]+a[1]*b[0]+a[2]*b[3]-a[3]*b[2],a[0]*b[2]-a[1]*b[3]+a[2]*b[0]+a[3]*b[1],a[0]*b[3]+a[1]*b[2]-a[2]*b[1]+a[3]*b[0]];
+    const quatInverse=q=>[q[0],-q[1],-q[2],-q[3]];
+    const rotateVector=(q,v)=>{const p=[0,...v],r=quatMultiply(quatMultiply(q,p),quatInverse(q));return r.slice(1)};
+    const poseCompose=(a,b)=>({translation:rotateVector(a.rotation,b.translation).map((value,index)=>value+a.translation[index]),rotation:quatMultiply(a.rotation,b.rotation)});
+    const poseInverse=pose=>{const rotation=quatInverse(pose.rotation);return{translation:rotateVector(rotation,pose.translation.map(value=>-value)),rotation}};
+    const instancePose=instance=>({translation:instance.translation.slice(),rotation:instance.rotation.slice()});
+    function parentPoseForPath(path){let pose={translation:[0,0,0],rotation:[1,0,0,0]};for(const id of path.slice(0,-1)){const instance=assemblyInstance(id);if(instance)pose=poseCompose(pose,instancePose(instance))}return pose}
+    function selectedPose(instance,mode){const local=instancePose(instance);return mode==='global'?poseCompose(parentPoseForPath(state.selectedInstancePath),local):local}
+    function localPoseFromMode(pose,mode){return mode==='global'?poseCompose(poseInverse(parentPoseForPath(state.selectedInstancePath)),pose):pose}
+    function assemblyComponentIds(instanceId){const root=assemblyInstance(instanceId);if(!root)return new Set();const connected=new Set([instanceId]);let changed=true;while(changed){changed=false;for(const mate of state.assembly?.mates||[]){const a=assemblyInstance(mate.a_instance_id),b=assemblyInstance(mate.b_instance_id);if(!a||!b||a.parent_id!==root.parent_id||b.parent_id!==root.parent_id)continue;if(connected.has(a.id)&&!connected.has(b.id)){connected.add(b.id);changed=true}if(connected.has(b.id)&&!connected.has(a.id)){connected.add(a.id);changed=true}}}return connected}
     sidebar?.addEventListener('click',event=>{if(event.target.closest('button,input,select,textarea,a,[contenteditable="true"]'))return;clearSelection()},true);
     function bodyFor(o){if(!o)return null;if(o.type==='body')return o;return state.byId.get(o.body_id)||null}
-    function projectSetup(){let viewer;try{viewer=modelViewer}catch{return null}const c=viewer?.getCamera?.();if(!c?.orientation||!state.scene)return null;const meshes=state.objects.filter(o=>o.type==='body').map(o=>sceneBody(o.id)).filter(Boolean);if(!meshes.length)return null;const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];for(const m of meshes)for(let i=0;i<m.positions.length;i+=3)for(let a=0;a<3;a++){min[a]=Math.min(min[a],m.positions[i+a]);max[a]=Math.max(max[a],m.positions[i+a])}const center=min.map((x,a)=>(x+max[a])/2);let radius=.001;for(const m of meshes)for(let i=0;i<m.positions.length;i+=3)radius=Math.max(radius,Math.hypot(m.positions[i]-center[0],m.positions[i+1]-center[1],m.positions[i+2]-center[2]));const W=canvas.width,H=canvas.height,dpr=Math.min(devicePixelRatio||1,2),scale=Math.min(W,H)*.43*c.zoom/radius,O=c.orientation;return{W,H,p:(x,y,z)=>{x-=center[0];y-=center[1];z-=center[2];return[W/2+(O[0]*x+O[1]*y+O[2]*z)*scale+c.panX*dpr,H/2-(O[6]*x+O[7]*y+O[8]*z)*scale+c.panY*dpr,O[3]*x+O[4]*y+O[5]*z]}}}
+    function projectSetup(){let viewer;try{viewer=modelViewer}catch{return null}const c=viewer?.getCamera?.();if(!c?.orientation||!state.scene)return null;const meshes=(state.scene.objects||[]).filter(item=>item.type==='body'&&item.positions?.length);if(!meshes.length)return null;const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];for(const m of meshes)for(let i=0;i<m.positions.length;i+=3)for(let a=0;a<3;a++){min[a]=Math.min(min[a],m.positions[i+a]);max[a]=Math.max(max[a],m.positions[i+a])}const center=min.map((x,a)=>(x+max[a])/2);let radius=.001;for(const m of meshes)for(let i=0;i<m.positions.length;i+=3)radius=Math.max(radius,Math.hypot(m.positions[i]-center[0],m.positions[i+1]-center[1],m.positions[i+2]-center[2]));const W=canvas.width,H=canvas.height,dpr=Math.min(devicePixelRatio||1,2),scale=Math.min(W,H)*.43*c.zoom/radius,O=c.orientation;return{W,H,p:(x,y,z)=>{x-=center[0];y-=center[1];z-=center[2];return[W/2+(O[0]*x+O[1]*y+O[2]*z)*scale+c.panX*dpr,H/2-(O[6]*x+O[7]*y+O[8]*z)*scale+c.panY*dpr,O[3]*x+O[4]*y+O[5]*z]}}}
     function sketchWorldPoint(sketch,x,y){const axis=sketch.section_normal_axis,offset=sketch.section_offset;if(axis==='X'&&Number.isFinite(offset))return[offset,x,y];if(axis==='Y'&&Number.isFinite(offset))return[x,offset,y];if(axis==='Z'&&Number.isFinite(offset))return[x,y,offset];return sketch.plane==='XZ'?[x,0,y]:[x,y,0]}
     function drawSelectedSketch(sketch,P,ctx,dpr){
       const byId=state.byId,owned=state.objects.filter(item=>item.sketch_id===sketch.id&&!item.construction&&['line','circle','ellipse','spline'].includes(item.type));
@@ -599,6 +787,28 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         if(item.type==='spline'){const points=(item.point_ids||[]).map(id=>byId.get(id)).filter(Boolean).map(point=>sketchWorldPoint(sketch,point.x,point.y));strokePoints(points,item.mode==='closed')}
       }
       ctx.restore();
+    }
+    function drawAssemblyGizmo(ctx,P,dpr){
+      gizmoRoot.hidden=true;
+      const instance=assemblyInstance(state.selectedInstanceId);if(!instance||!state.selectedInstancePath.length)return;
+      const mode=state.assemblyCoordinateMode,displayPose=assemblyDrag?.instance.id===instance.id?assemblyDrag.shownPose:selectedPose(instance,mode),worldPose=mode==='global'?displayPose:poseCompose(parentPoseForPath(state.selectedInstancePath),displayPose);
+      const origin=P.p(...worldPose.translation),targets=assemblyTransformTargets(instance,instancePose(instance)),blocked=targets.some(target=>[...assemblyComponentIds(target.instance_id)].some(id=>assemblyInstance(id)?.grounded))||state.lock?.state!=='FREE'||state.lock?.recovery_required;
+      gizmoRoot.hidden=false;
+      const colors={X:'#f06c68',Y:'#72c990',Z:'#70a8ff'};
+      ['X','Y','Z'].forEach((axis,index)=>{
+        const basis=index===0?[1,0,0]:index===1?[0,1,0]:[0,0,1];
+        const worldAxis=mode==='local'?rotateVector(worldPose.rotation,basis):basis;
+        const projected=P.p(worldPose.translation.map((value,i)=>value+worldAxis[i]));
+        let dx=projected[0]-origin[0],dy=projected[1]-origin[1],length=Math.hypot(dx,dy);
+        if(length<1e-6){dx=[1,0,-1][index];dy=[0,-1,-1][index];length=Math.hypot(dx,dy)}
+        dx/=length;dy/=length;const end=[origin[0]+dx*74*dpr,origin[1]+dy*74*dpr];
+        ctx.save();ctx.strokeStyle=colors[axis];ctx.lineWidth=2*dpr;ctx.globalAlpha=.9;ctx.beginPath();ctx.moveTo(origin[0],origin[1]);ctx.lineTo(end[0],end[1]);ctx.stroke();ctx.restore();
+        const move=gizmoRoot.querySelector(`[data-gizmo-kind="translate"][data-axis="${axis}"]`);
+        if(move){move.style.left=`${end[0]/dpr}px`;move.style.top=`${end[1]/dpr}px`;move.disabled=blocked}
+        const rotate=gizmoRoot.querySelector(`[data-gizmo-kind="rotate"][data-axis="${axis}"]`);
+        if(rotate){const offset=[[42,-28],[4,-52],[-38,-30]][index];rotate.style.left=`${origin[0]/dpr+offset[0]}px`;rotate.style.top=`${origin[1]/dpr+offset[1]}px`;rotate.disabled=blocked}
+      });
+      ctx.save();ctx.fillStyle='#f1f5f6';ctx.beginPath();ctx.arc(origin[0],origin[1],4*dpr,0,Math.PI*2);ctx.fill();ctx.restore();
     }
     function drawOverlay(){
       const dpr=Math.min(devicePixelRatio||1,2),rect=panel.getBoundingClientRect();
@@ -620,6 +830,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         }
         ctx.restore();
       }
+      if(P)drawAssemblyGizmo(ctx,P,dpr);else gizmoRoot.hidden=true;
       if(o?.type==='sketch'&&P){drawSelectedSketch(o,P,ctx,dpr);return}
       const body=bodyFor(o),m=sceneBody(body?.id);
       if(!m||!P)return;
@@ -673,7 +884,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       ctx.restore();
     }
     let lastOverlaySignature=null;
-    function syncOverlay(){let c;try{c=modelViewer?.getCamera?.()}catch{}const r=panel.getBoundingClientRect(),sig=state.scene&&c?.orientation?`${state.project}|${state.rev}|${state.selected||''}|${r.width|0}|${r.height|0}|${c.zoom}|${c.panX}|${c.panY}|${c.orientation.join(',')}`:'';if(sig===lastOverlaySignature)return;lastOverlaySignature=sig;drawOverlay()}
+    function syncOverlay(){let c;try{c=modelViewer?.getCamera?.()}catch{}const r=panel.getBoundingClientRect(),sig=state.scene&&c?.orientation?`${state.project}|${state.rev}|${state.selected||''}|${state.selectedOccurrenceId||''}|${state.assemblyCoordinateMode}|${state.lock?.state||''}|${r.width|0}|${r.height|0}|${c.zoom}|${c.panX}|${c.panY}|${c.orientation.join(',')}`:'';if(sig===lastOverlaySignature)return;lastOverlaySignature=sig;drawOverlay()}
     window.addEventListener('cadyx:viewport-rendered',syncOverlay);
     window.addEventListener('resize',syncOverlay);
     syncOverlay();
@@ -698,10 +909,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if (!projection || !rect.width) return;
       const x = (e.clientX - rect.left) * canvas.width / rect.width;
       const y = (e.clientY - rect.top) * canvas.height / rect.height;
-      const consumedBodies = consumed();
       let best = null;
-      for (const body of state.objects.filter(item => item.type === 'body' && !consumedBodies.has(item.id))) {
-        const mesh = sceneBody(body.id);
+      for (const mesh of (state.scene?.objects||[]).filter(item=>item.type==='body')) {
         if (!mesh?.triangles?.length) continue;
         const projected = new Float64Array(mesh.positions.length);
         for (let vertex = 0; vertex < mesh.positions.length; vertex += 3) {
@@ -720,14 +929,75 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
               || y < Math.min(ay, by, cy) || y > Math.max(ay, by, cy)) continue;
           const depth = triangleDepth(x, y, ax, ay, projected[a + 2],
             bx, by, projected[b + 2], cx, cy, projected[c + 2]);
-          if (depth !== null && (!best || depth > best.depth)) best = { body, depth };
+          if (depth !== null && (!best || depth > best.depth)) best = { mesh, depth };
         }
       }
       if (!best) return;
-      const featureId = [...(best.body.feature_ids || [])].reverse()
+      if(best.mesh.instance_path?.length){selectAssemblyOccurrence(best.mesh.object_id,best.mesh.instance_id,e);return}
+      const body=state.byId.get(best.mesh.source_body_id||best.mesh.object_id);
+      if(!body)return;
+      const featureId = [...(body.feature_ids || [])].reverse()
         .find(id => state.byId.get(id)?.type === 'feature');
-      if (featureId) select(featureId, true);
+      if (featureId) select(featureId, true);else select(body.id,true);
     }
+    function previewAssemblyTransform(instance,localPose){
+      const affected=new Map();
+      for(const target of assemblyTransformTargets(instance,localPose)){
+        const moved=assemblyInstance(target.instance_id),path=target.path,parent=parentPoseForPath(path),oldWorld=poseCompose(parent,instancePose(moved)),nextWorld=poseCompose(parent,{translation:target.translation,rotation:target.rotation}),delta=poseCompose(nextWorld,poseInverse(oldWorld));
+        const component=assemblyComponentIds(moved.id),prefix=path.slice(0,-1),memberIndex=prefix.length,parentId=moved.parent_id;
+        for(const item of state.scene?.objects||[]){const occurrencePath=item.instance_path;if(item.type!=='body'||!Array.isArray(occurrencePath)||occurrencePath.length<=memberIndex||!component.has(occurrencePath[memberIndex]))continue;
+          const sameParent=memberIndex===0?parentId===null:assemblyInstance(occurrencePath[memberIndex-1])?.target_id===parentId;
+          if(sameParent)affected.set(item.object_id,delta)}
+      }
+      if(!affected.size||!currentModelViewportGeometry?.bodyVertexRanges)return;
+      const positions=Float64Array.from(currentModelViewportGeometry.positions);
+      for(const range of currentModelViewportGeometry.bodyVertexRanges){const delta=affected.get(range.objectId);if(!delta)continue;for(let vertex=range.start;vertex<range.end;vertex++){const offset=vertex*3,point=rotateVector(delta.rotation,[positions[offset],positions[offset+1],positions[offset+2]]);positions[offset]=point[0]+delta.translation[0];positions[offset+1]=point[1]+delta.translation[1];positions[offset+2]=point[2]+delta.translation[2]}}
+      const bounds={min:[Infinity,Infinity,Infinity],max:[-Infinity,-Infinity,-Infinity]};
+      for(let offset=0;offset<positions.length;offset+=3)for(let axis=0;axis<3;axis++){bounds.min[axis]=Math.min(bounds.min[axis],positions[offset+axis]);bounds.max[axis]=Math.max(bounds.max[axis],positions[offset+axis])}
+      const preview={...currentModelViewportGeometry,positions,bounds};const viewport=$('#viewport');if(viewport)viewport.dataset.assemblyPreview='true';
+      modelViewer?.load(preview,{reset:false,smoothShading:true});for(const view of orthographicViewers)view.viewer.load(preview,{reset:false});
+    }
+    function clearAssemblyPreview(){const viewport=$('#viewport');if(viewport)delete viewport.dataset.assemblyPreview;const geometry=currentModelViewportGeometry;if(geometry){modelViewer?.load(geometry,{reset:false,smoothShading:true});for(const view of orthographicViewers)view.viewer.load(geometry,{reset:false})}assemblyDrag=null;lastOverlaySignature=null;syncOverlay()}
+    function startAssemblyGizmoDrag(event){
+      const button=event.target.closest('button[data-gizmo-kind]'),instance=assemblyInstance(state.selectedInstanceId);if(!button||!instance)return;
+      if(button.disabled)return;event.preventDefault();event.stopPropagation();
+      const targets=assemblyTransformTargets(instance,instancePose(instance));if(targets.some(target=>[...assemblyComponentIds(target.instance_id)].some(id=>assemblyInstance(id)?.grounded))){setAssemblyStatus('Выбранная группа содержит закреплённую деталь. Меняйте координату допустимого сопряжения.');return}
+      const mode=state.assemblyCoordinateMode,shownPose=selectedPose(instance,mode),parent=parentPoseForPath(state.selectedInstancePath),world=poseCompose(parent,instancePose(instance)),projection=projectSetup();if(!projection)return;
+      const kind=button.dataset.gizmoKind,axis=button.dataset.axis,index={X:0,Y:1,Z:2}[axis],basis=index===0?[1,0,0]:index===1?[0,1,0]:[0,0,1],worldAxis=mode==='local'?rotateVector(world.rotation,basis):basis;
+      const origin=projection.p(...world.translation),end=projection.p(world.translation.map((value,i)=>value+worldAxis[i])),axisScreen=[end[0]-origin[0],end[1]-origin[1]],lengthSquared=axisScreen[0]**2+axisScreen[1]**2;
+      if(kind==='translate'&&lengthSquared<1e-10)return;
+      assemblyDrag={pointerId:event.pointerId,button,instance,mode,kind,axis,index,basis,worldAxis,
+        startClientX:event.clientX,startClientY:event.clientY,origin,axisScreen,lengthSquared,dpr:Math.min(devicePixelRatio||1,2),shownPose,startShownPose:cloneJson(shownPose),
+        currentLocal:instancePose(instance),nextLocal:instancePose(instance),moved:false};
+      try{button.setPointerCapture(event.pointerId)}catch{}
+    }
+    function moveAssemblyGizmo(event){
+      const drag=assemblyDrag;if(!drag||drag.pointerId!==event.pointerId)return;
+      event.preventDefault();const dx=(event.clientX-drag.startClientX)*drag.dpr,dy=(event.clientY-drag.startClientY)*drag.dpr,next={translation:drag.startShownPose.translation.slice(),rotation:drag.startShownPose.rotation.slice()};
+      if(drag.kind==='translate'){
+        let amount=(dx*drag.axisScreen[0]+dy*drag.axisScreen[1])/drag.lengthSquared;
+        const step=Number(props.querySelector('[data-assembly-step]')?.value);if(state.snapEnabled&&step>0)amount=Math.round(amount/step)*step;
+        if(drag.mode==='local')next.translation[drag.index]+=amount;else next.translation[drag.index]+=amount;
+      }else{
+        let degrees=dx*0.5;const angleStep=Number(props.querySelector('[data-assembly-angle-step]')?.value);if(state.snapEnabled&&angleStep>0)degrees=Math.round(degrees/angleStep)*angleStep;
+        const half=degrees*Math.PI/360,delta=[Math.cos(half),...(drag.index===0?[Math.sin(half),0,0]:drag.index===1?[0,Math.sin(half),0]:[0,0,Math.sin(half)])];
+        next.rotation=drag.mode==='global'?quatMultiply(delta,drag.shownPose.rotation):quatMultiply(drag.shownPose.rotation,delta);
+      }
+      drag.nextLocal=localPoseFromMode(next,drag.mode);drag.shownPose=next;drag.moved=Math.hypot(dx,dy)>=2;
+      if(drag.moved)previewAssemblyTransform(drag.instance,drag.nextLocal);
+      lastOverlaySignature=null;syncOverlay();
+    }
+    async function finishAssemblyGizmo(event,commit){
+      const drag=assemblyDrag;if(!drag||event.pointerId!==undefined&&drag.pointerId!==event.pointerId)return;
+      assemblyDrag=null;
+      const poseChanged=drag.nextLocal.translation.some((value,index)=>Math.abs(value-drag.currentLocal.translation[index])>1e-9)||drag.nextLocal.rotation.some((value,index)=>Math.abs(value-drag.currentLocal.rotation[index])>1e-9);
+      if(commit&&drag.moved&&poseChanged){try{await commitAssemblyTransform(drag.instance,drag.nextLocal)}catch{}}
+      clearAssemblyPreview();
+    }
+    gizmoRoot.addEventListener('pointerdown',startAssemblyGizmoDrag);
+    gizmoRoot.addEventListener('pointermove',moveAssemblyGizmo);
+    gizmoRoot.addEventListener('pointerup',event=>void finishAssemblyGizmo(event,true));
+    gizmoRoot.addEventListener('pointercancel',event=>void finishAssemblyGizmo(event,false));
     let down=null;
     canvas.addEventListener('pointerdown',e=>{if(e.button===0)down={x:e.clientX,y:e.clientY,pointerId:e.pointerId}},true);
     canvas.addEventListener('pointermove',e=>{if(down?.pointerId===e.pointerId&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>=6)down=null},true);
@@ -829,8 +1099,28 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
       return response.json();
     }
-    async function refresh(){const request=++semanticRequest;const id=semanticProjectId();if(!id||detail.hidden)return;try{const snapshot=window.cadyxModelSnapshot;if(!snapshot||snapshot.projectId!==id)return;const {info,scene}=snapshot;if(state.project===id&&state.rev===info.document.revision)return;if(request!==semanticRequest||id!==semanticProjectId()||detail.hidden)return;if(scene.revision!==info.document.revision){schedule();return}const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};state.bindings=info.document.parameter_bindings||[];state.assembly=info.document.assembly||null;state.byId=new Map(state.objects.map(o=>[o.id,o]));if(projectChanged)restoreModelTreeState(id);state.scene=scene;makeLabels();if(projectChanged||(state.selected&&!state.byId.has(state.selected))){clearSelection();return}renderTree();state.selected?select(state.selected):renderProps(null);syncOverlay()}catch(e){console.debug('CAD semantic refresh',e)}}
-    let timer;const schedule=()=>{clearTimeout(timer);timer=setTimeout(refresh,80)};['#document-revision','#document-title'].forEach(s=>{const e=$(s);if(e)new MutationObserver(schedule).observe(e,{childList:true,subtree:true,characterData:true})});new MutationObserver(schedule).observe(detail,{attributes:true,attributeFilter:['hidden']});window.addEventListener('cadyx:model-tree-updated',refresh);schedule();
+    async function refresh(){
+      const request=++semanticRequest,id=semanticProjectId();if(!id||detail.hidden)return;
+      try{
+        const snapshot=window.cadyxModelSnapshot;if(!snapshot||snapshot.projectId!==id)return;
+        const {info,scene}=snapshot;if(request!==semanticRequest||id!==semanticProjectId()||detail.hidden)return;
+        state.lock=info.lock||state.lock;state.kinematics=info.assembly_kinematics||state.kinematics;
+        if(state.project===id&&state.rev===info.document.revision){if(state.selectedInstanceId)renderAssemblyProps();return}
+        if(scene.revision!==info.document.revision){schedule();return}
+        const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;
+        state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};
+        state.bindings=info.document.parameter_bindings||[];state.assembly=info.document.assembly||null;
+        state.byId=new Map(state.objects.map(o=>[o.id,o]));if(projectChanged)restoreModelTreeState(id);
+        state.scene=scene;makeLabels();
+        if(projectChanged||(state.selected&&!state.byId.has(state.selected))||(state.selectedInstanceId&&!assemblyInstance(state.selectedInstanceId))){clearSelection();return}
+        renderTree();
+        if(state.selected)select(state.selected);
+        else if(state.selectedInstanceId){modelViewer?.setSelectedBodies?.([...state.selectedOccurrenceIds]);renderAssemblyProps()}
+        else renderProps(null);
+        syncOverlay();
+      }catch(e){console.debug('CAD semantic refresh',e)}
+    }
+    let timer;const schedule=()=>{clearTimeout(timer);timer=setTimeout(refresh,80)};['#document-revision','#document-title'].forEach(s=>{const e=$(s);if(e)new MutationObserver(schedule).observe(e,{childList:true,subtree:true,characterData:true})});new MutationObserver(schedule).observe(detail,{attributes:true,attributeFilter:['hidden']});window.addEventListener('cadyx:model-tree-updated',refresh);window.addEventListener('cadyx:project-lock',event=>{if(event.detail?.projectId!==state.project)return;state.lock=event.detail.lock;renderTree();if(state.selectedInstanceId)renderAssemblyProps()});schedule();
   }
   const boot=()=>setTimeout(enhance,0);if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();

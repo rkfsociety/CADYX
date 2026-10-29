@@ -14,11 +14,11 @@
 
 ## English reference
 
-CADYX keeps the browser observation-only for ordinary CAD authoring. Human curve correction is a narrow opt-in exception for reference tracing: a local client may prepare a draft of connected line and circular-arc segments, undo/redo that unsaved draft, and submit a confirmed version through the same human lease and Command System used by every browser-originated document mutation.
+The browser includes a lease-protected assembly editor in Geometry. Human curve correction remains a separate, narrow reference-tracing workflow: a local client may prepare a draft of connected line and circular-arc segments, undo/redo that unsaved draft, and submit a confirmed version through the same human lease and Command System used by browser-originated document mutations.
 
 ## Browser entry point
 
-The scanner window exposes a separate `ТРАССИРОВКА КРИВОЙ` dialog. It is intentionally outside the ordinary CAD viewport so the main project surface stays observation-only. The dialog lets the user choose a local source image and an existing project, trace a single connected chain with line/circular-arc tools, undo/redo the local draft, close the contour, and enter the source-to-model coordinate system.
+The scanner window exposes a separate `ТРАССИРОВКА КРИВОЙ` dialog. It stays outside the assembly viewport and lets the user choose a local source image and an existing project, trace a single connected chain with line/circular-arc tools, undo/redo the local draft, close the contour, and enter the source-to-model coordinate system.
 
 The selected image is never uploaded or persisted by the editor. The browser computes its SHA-256 locally and stores only that digest plus coordinate-system provenance with the saved trace. Before save, the dialog checks the current project availability, reads the current document revision, acquires a human lease, submits the versioned trace command, and releases the lease in `finally`. Agent-active, locked, recovery-required, stale-revision and stale-trace-version cases remain server-authoritative failures.
 
