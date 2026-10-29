@@ -98,6 +98,35 @@ async function testAssemblyDragAndHistory() {
   await historySandbox.travel("redo");
   assert.equal(calls[1][0].type, "apply");
   assert.equal(calls[1][1].historyAction, "redo");
+
+  async function commandProtocol(commandFails) {
+    const requests = [], api = { refresh: async () => {} };
+    api.request = async (url, options = {}) => {
+      requests.push([url, options]);
+      if (!options.method) return { document: { revision: 12 }, lock: { state: "FREE" } };
+      if (url.endsWith("/leases")) return { lease: { lease_id: "lease:test" } };
+      if (url.endsWith("/commands")) {
+        if (commandFails) throw new Error("solver rejected movement");
+        return { history_entry: { result: { instance_id: "instance:a" } } };
+      }
+      return { lock: { state: "FREE" } };
+    };
+    const sandbox = { state: { project: "project:test", rev: 12 }, window: { cadyxApi: api },
+      crypto: { randomUUID: () => "test-owner" }, assemblyUndo: [], assemblyRedo: [],
+      assemblyLastRevision: null, setAssemblyStatus: () => {}, resetAssemblyHistory() {}, };
+    vm.runInNewContext(`${appFunction("executeAssemblyCommand", "    async function pickAssemblyGeometryFace")}; this.execute=executeAssemblyCommand;`, sandbox);
+    if (commandFails) await assert.rejects(sandbox.execute({ type: "transform_assembly_instances" }), /solver rejected movement/);
+    else await sandbox.execute({ type: "transform_assembly_instances" });
+    return requests;
+  }
+  const requests = await commandProtocol(false);
+  assert.match(requests[0][0], /\?view=browser$/);
+  assert.equal(JSON.parse(requests[1][1].body).owner_type, "human");
+  assert.equal(JSON.parse(requests[2][1].body).expected_revision, 12);
+  assert.match(requests[3][0], /\/lease%3Atest\/release$/);
+  const failedRequests = await commandProtocol(true);
+  assert.ok(failedRequests.some(([url]) => url.endsWith("/lease%3Atest/release")),
+    "command failure still releases its human lease");
 }
 
 testAssemblyDragAndHistory().catch((error) => { console.error(error); process.exitCode = 1; });
