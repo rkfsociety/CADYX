@@ -53,6 +53,12 @@ class AssemblyFitNumericValidationTests(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     _classify(measured, 0.5, 0.01)
 
+    def test_large_finite_deflection_does_not_overflow_cube(self):
+        measured = self._metrics()
+        measured["minimum_distance"] = 1e104
+        measured["deflection"] = 1e103
+        self.assertEqual(_classify(measured, 0.5, 0.01)["status"], "pass")
+
     def test_distance_interval_overflow_is_not_reported_as_infinity(self):
         measured = self._metrics()
         measured["minimum_distance"] = 1e308

@@ -114,7 +114,7 @@ def _classify(measured: dict[str, Any], required: float, tolerance: float) -> di
     if not math.isfinite(upper):
         raise ValidationError("OCCT returned an overflowing assembly-fit distance interval.")
     threshold = max(0.0, required - tolerance)
-    if measured["inner_solution"] or volume > deflection ** 3:
+    if measured["inner_solution"] or volume > deflection * deflection * deflection:
         interference = "interfering"
     elif volume > 0 or distance <= deflection:
         interference = "touching_or_indeterminate"
