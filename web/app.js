@@ -1066,7 +1066,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       }else{
         let degrees=dx*0.5;const angleStep=Number(props.querySelector('[data-assembly-angle-step]')?.value);if(state.snapEnabled&&angleStep>0)degrees=Math.round(degrees/angleStep)*angleStep;
         const half=degrees*Math.PI/360,delta=[Math.cos(half),...(drag.index===0?[Math.sin(half),0,0]:drag.index===1?[0,Math.sin(half),0]:[0,0,Math.sin(half)])];
-        next.rotation=drag.mode==='global'?quatMultiply(delta,drag.shownPose.rotation):quatMultiply(drag.shownPose.rotation,delta);
+        next.rotation=drag.mode==='global'?quatMultiply(delta,drag.startShownPose.rotation):quatMultiply(drag.startShownPose.rotation,delta);
       }
       drag.nextLocal=localPoseFromMode(next,drag.mode);drag.shownPose=next;drag.moved=Math.hypot(dx,dy)>=2;
       if(drag.moved)previewAssemblyTransform(drag.instance,drag.nextLocal);

@@ -83,6 +83,18 @@ async function testAssemblyDragAndHistory() {
   assert.equal(previews.length, 1, "pointermove refreshes the viewport preview immediately");
   assert.equal(moveSandbox.lastOverlaySignature, null);
 
+  moveDrag.kind = "rotate";
+  moveDrag.index = 2;
+  moveDrag.shownPose = { translation: [0, 0, 0], rotation: [1, 0, 0, 0] };
+  moveDrag.startShownPose = { translation: [0, 0, 0], rotation: [1, 0, 0, 0] };
+  moveSandbox.quatMultiply = (a, b) => [a[0]*b[0]-a[1]*b[1]-a[2]*b[2]-a[3]*b[3], a[0]*b[1]+a[1]*b[0]+a[2]*b[3]-a[3]*b[2], a[0]*b[2]-a[1]*b[3]+a[2]*b[0]+a[3]*b[1], a[0]*b[3]+a[1]*b[2]-a[2]*b[1]+a[3]*b[0]];
+  moveSandbox.props.querySelector = () => ({ value: "0" });
+  moveSandbox.move({ pointerId: 7, clientX: 20, clientY: 0, preventDefault() {} });
+  const firstRotation = moveDrag.nextLocal.rotation.slice();
+  moveSandbox.move({ pointerId: 7, clientX: 20, clientY: 0, preventDefault() {} });
+  moveDrag.nextLocal.rotation.forEach((value, index) => assert.ok(Math.abs(value - firstRotation[index]) < 1e-12,
+    "repeated pointermove coordinates do not accumulate the same rotation twice"));
+
   const undo = [{ undo: { type: "restore" }, redo: { type: "apply" } }], redo = [], calls = [];
   const historySandbox = { assemblyUndo: undo, assemblyRedo: redo,
     executeAssemblyCommand: async (command, options) => {
