@@ -121,6 +121,23 @@ async function testAssemblyDragAndHistory() {
   assert.equal(commits.length, 1, "pointercancel discards the drag without a command");
   assert.equal(clears.length, 2, "cancelled drag clears its transient preview");
 
+  const canvasCommits = [], canvasClears = [];
+  const canvasDrag = { moved: true, instance: { id: "instance:canvas" },
+    startLocal: { translation: [0,0,0], rotation: [1,0,0,0] } };
+  const canvasActive = { nextLocal: { translation: [1,0,0], rotation: [1,0,0,0] } };
+  const canvasSandbox = { commitAssemblyTransform: async (...args) => canvasCommits.push(args),
+    clearAssemblyPreview: () => canvasClears.push(true) };
+  vm.runInNewContext(`${appFunction("finishCanvasAssemblyDrag", "    gizmoRoot.addEventListener")}; this.finish=finishCanvasAssemblyDrag;`, canvasSandbox);
+  await canvasSandbox.finish(canvasDrag, canvasActive, true);
+  assert.equal(canvasCommits.length, 1, "left-button canvas drag commits the occurrence pose on pointerup");
+  assert.equal(canvasClears.length, 1, "canvas drag clears the preview after a successful command");
+  await canvasSandbox.finish(canvasDrag, canvasActive, false);
+  assert.equal(canvasCommits.length, 1, "pointercancel discards a left-button canvas drag without a command");
+  assert.equal(canvasClears.length, 2, "cancelled canvas drag clears its transient preview");
+  canvasSandbox.commitAssemblyTransform = async () => { throw new Error("constraint conflict"); };
+  await assert.rejects(canvasSandbox.finish(canvasDrag, canvasActive, true), /constraint conflict/);
+  assert.equal(canvasClears.length, 3, "a rejected constrained movement still restores the saved viewport");
+
   const moveStart = assemblyEditor.indexOf("    function moveAssemblyGizmo(");
   const moveEnd = assemblyEditor.indexOf("    async function finishAssemblyGizmo(", moveStart);
   assert.ok(moveStart >= 0 && moveEnd > moveStart);

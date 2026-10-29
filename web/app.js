@@ -1089,6 +1089,12 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if(commit&&drag.moved&&poseChanged){try{await commitAssemblyTransform(drag.instance,drag.nextLocal)}catch{}}
       clearAssemblyPreview();
     }
+    async function finishCanvasAssemblyDrag(drag,active,commit){
+      if(!drag?.moved||!active)return;
+      const changed=active.nextLocal.translation.some((value,index)=>Math.abs(value-drag.startLocal.translation[index])>1e-9);
+      try{if(commit&&changed)await commitAssemblyTransform(drag.instance,active.nextLocal)}
+      finally{clearAssemblyPreview()}
+    }
     gizmoRoot.addEventListener('pointerdown',startAssemblyGizmoDrag);
     gizmoRoot.addEventListener('pointermove',moveAssemblyGizmo);
     gizmoRoot.addEventListener('pointerup',event=>void finishAssemblyGizmo(event,true));
@@ -1119,9 +1125,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if(!drag.moved){if((drag.facePick||!drag.instance)&&e.type==='pointerup')pick(e);return}
       const active=assemblyDrag;if(!active||active.pointerId!==e.pointerId)return;
       assemblyDrag=null;
-      if(commit){const changed=active.nextLocal.translation.some((value,index)=>Math.abs(value-drag.startLocal.translation[index])>1e-9);
-        if(changed)void commitAssemblyTransform(drag.instance,active.nextLocal).catch(()=>{});}
-      clearAssemblyPreview();
+      void finishCanvasAssemblyDrag(drag,active,commit).catch(()=>{});
     };
     canvas.addEventListener('pointerup',e=>finishCanvasDrag(e,true),true);
     canvas.addEventListener('pointercancel',e=>finishCanvasDrag(e,false),true);
