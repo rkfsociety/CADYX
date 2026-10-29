@@ -1198,6 +1198,54 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(saved["document"]["revision"], revision)
         self.assertEqual(saved["lock"]["state"], "FREE")
 
+    def test_agent_api_mate_limits_accept_boundary_and_reject_out_of_range_atomically(self) -> None:
+        _, created = self.request("/api/v1/projects", {
+            "name": "Assembly mate limits", "project_type": "assembly",
+        })
+        project_id = created["project"]["id"]
+        _, acquired = self.request(f"/api/v1/projects/{project_id}/leases", {
+            "owner_type": "human", "owner_id": "mate-limits-test",
+        })
+        lease_id = acquired["lease"]["lease_id"]
+        revision = 0
+
+        def command(payload):
+            nonlocal revision
+            status, result = self.request(f"/api/v1/projects/{project_id}/commands", {
+                "lease_id": lease_id, "expected_revision": revision, "command": payload,
+            })
+            self.assertEqual(status, 200, result)
+            revision = result["document"]["revision"]
+            return result["history_entry"]["result"]
+
+        try:
+            body_id = command({"type": "create_box", "width": 2, "height": 2, "depth": 2})["body_id"]
+            part_id = command({"type": "create_assembly_part", "body_id": body_id})["part_id"]
+            first = command({"type": "add_assembly_instance", "target_id": part_id})["instance_id"]
+            second = command({"type": "add_assembly_instance", "target_id": part_id,
+                              "translation": [2, 0, 0]})["instance_id"]
+            limits = {"angle_min_deg": -90, "angle_max_deg": 90,
+                      "offset_min_mm": None, "offset_max_mm": None}
+            mate_id = command({"type": "add_assembly_mate", "kind": "revolute",
+                               "a_instance_id": first, "b_instance_id": second,
+                               "limits": limits})["mate_id"]
+            command({"type": "set_assembly_mate", "mate_id": mate_id, "angle_deg": 90})
+            saved_revision = revision
+            status, error = self.request(f"/api/v1/projects/{project_id}/commands", {
+                "lease_id": lease_id, "expected_revision": revision,
+                "command": {"type": "set_assembly_mate", "mate_id": mate_id, "angle_deg": 91},
+            })
+            self.assertEqual((status, error["error"]), (400, "VALIDATION_ERROR"))
+            snapshot_status, snapshot = self.request(f"/api/v1/projects/{project_id}?view=browser")
+            self.assertEqual(snapshot_status, 200)
+            self.assertEqual(snapshot["document"]["revision"], saved_revision)
+            mate = snapshot["document"]["assembly"]["mates"][0]
+            self.assertEqual(mate["angle_deg"], 90)
+            self.assertEqual(mate["limits"], limits)
+        finally:
+            self.core.release_lease(project_id, lease_id)
+        self.assertEqual(self.core.inspect_project(project_id)["lock"]["state"], "FREE")
+
     def test_project_file_api_lists_and_serves_only_direct_user_files(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Files API"})
         project_id = created["project"]["id"]
