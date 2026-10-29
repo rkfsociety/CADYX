@@ -6,6 +6,8 @@ from cadyx.commands import CommandSystem
 from cadyx.errors import ValidationError
 from cadyx.mesh_geometry import geometry_from_native_buffer, point_cloud_geometry, tessellate_mesh_geometry
 from cadyx.models import Document
+from cadyx.scan_reverse_alignment import _apply_alignment
+from cadyx.scan_reverse_common import _finite, _pack_mesh
 
 
 def _box_mesh(*, x=1.0, y=1.0, z=1.0):
@@ -192,6 +194,25 @@ class ScanReverseTests(unittest.TestCase):
         self.assertAlmostEqual(result["scan_to_body"]["rms"], 0.0, places=12)
         self.assertAlmostEqual(result["body_to_scan"]["max"], 0.0, places=12)
         self.assertEqual(result["scan_to_body"]["within_tolerance_percent"], 100.0)
+
+
+class ScanReverseNumericValidationTests(unittest.TestCase):
+    def test_oversized_integer_parameter_is_a_validation_error(self):
+        with self.assertRaisesRegex(ValidationError, "finite number"):
+            _finite(10**400, "scale")
+
+    def test_transformed_mesh_rejects_nonfinite_coordinates(self):
+        with self.assertRaisesRegex(ValidationError, "float32"):
+            _pack_mesh([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, float("inf"), 0.0], [0, 1, 2])
+
+    def test_alignment_rejects_float32_overflow(self):
+        record = {
+            "basis": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            "origin": [0.0, 0.0, 0.0], "scale": 1e39,
+            "translation": [0.0, 0.0, 0.0],
+        }
+        with self.assertRaisesRegex(ValidationError, "float32"):
+            _apply_alignment(_box_mesh(), record)
 
 
 if __name__ == "__main__":

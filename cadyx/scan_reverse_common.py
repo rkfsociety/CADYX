@@ -17,7 +17,10 @@ _EPS = 1e-12
 def _finite(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValidationError(f"{name} must be a finite number.")
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValidationError(f"{name} must be a finite number.") from exc
     if not math.isfinite(result):
         raise ValidationError(f"{name} must be a finite number.")
     return result
@@ -73,6 +76,10 @@ def _pack_mesh(positions: list[float], triangles: list[int]) -> dict[str, Any]:
     vertex_count, triangle_count = len(positions) // 3, len(triangles) // 3
     if not 3 <= vertex_count <= 300_000 or triangle_count < 1:
         raise ValidationError("Transformed scan exceeds the cadyx-mesh-v1 vertex limits.")
+    # Mesh storage uses IEEE-754 float32; reject overflow before packing so
+    # invalid alignments return a domain error instead of leaking OverflowError.
+    if any(not math.isfinite(value) or abs(value) > 3.4028234663852886e38 for value in positions):
+        raise ValidationError("Transformed scan coordinates must fit finite float32 values.")
     native_positions = array("f", positions)
     native_triangles = array("I", triangles)
     if sys.byteorder != "little":
