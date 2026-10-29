@@ -575,12 +575,10 @@ assert.match(html, /id="scanner-map-alignment"[^>]*aria-label="Сопостав�
 assert.match(projectUiJs, /function projectPath\(projectId\)/);
 assert.match(projectUiJs, /function projectIdForPathSlug\(requestedSlug\)/);
 assert.match(projectUiJs, /let suffix = 2/);
-assert.match(projectUiJs, /front: \{ yaw: 0, pitch: 0 \}/,
-  "the front view looks along the turntable's zero-degree axis so the button and zero label align");
-assert.match(projectUiJs, /right: \{ yaw: Math\.PI \/ 2, pitch: 0 \}/,
-  "the right view remains perpendicular to the front view");
-assert.match(projectUiJs, /#ortho-front[\s\S]*camera: \{ yaw: 0, pitch: 0 \}/);
-assert.match(projectUiJs, /#ortho-right[\s\S]*camera: \{ yaw: Math\.PI \/ 2, pitch: 0 \}/);
+assert.match(projectUiJs, /const cameraPresets = window\.CadyxViewportHelpers\.CAMERA_PRESETS/,
+  "the visible orthographic views and toolbar share one canonical orientation map");
+assert.match(projectUiJs, /#ortho-front[\s\S]*camera: cameraPresets\.front/);
+assert.match(projectUiJs, /#ortho-right[\s\S]*camera: cameraPresets\.right/);
 assert.match(projectUiJs, /if \(activeView === "scanning"\) \{\s*initializeScanningFrontView\(\);/,
   "the first Scanning view uses the front camera while later user camera choices remain restorable");
 assert.match(projectUiJs,

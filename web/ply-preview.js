@@ -93,21 +93,16 @@ const emptyViewportGeometry = {
   bounds: { min: [0, 0, 0], max: [0, 0, 0] },
 };
 let currentModelViewportGeometry = emptyViewportGeometry;
+const cameraPresets = window.CadyxViewportHelpers.CAMERA_PRESETS;
 const orthographicViewers = [
-  { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: 0 } },
-  { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: Math.PI / 2, pitch: 0 } },
-  { viewer: window.CadyxViewport.createViewer($("#ortho-top"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: { yaw: 0, pitch: Math.PI / 2 } },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-front"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: cameraPresets.front },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-right"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: cameraPresets.right },
+  { viewer: window.CadyxViewport.createViewer($("#ortho-top"), { showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false, wireframe: true, shaded: false, wireframeColor: "#c7d5d8", wireframeOpacity: 0.86 }), camera: cameraPresets.top },
 ];
 orthographicViewers.forEach((view) => {
   view.viewer.setCamera({ ...view.camera, zoom: 1, projection: "orthographic" });
 });
 const cameraPresetButtons = [...document.querySelectorAll("[data-camera-preset]")];
-const cameraPresets = {
-  isometric: { yaw: 0.68, pitch: 0.38 },
-  front: { yaw: 0, pitch: 0 },
-  right: { yaw: Math.PI / 2, pitch: 0 },
-  top: { yaw: 0, pitch: Math.PI / 2 },
-};
 if (window.cadyxUiReloadCameraPreset && cameraPresets[window.cadyxUiReloadCameraPreset]
     && window.cadyxUiReloadCamera) {
   window.cadyxUiReloadCamera = {

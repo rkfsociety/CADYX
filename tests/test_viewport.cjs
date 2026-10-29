@@ -203,7 +203,7 @@ const isRotationMatrix = (matrix) => {
   return true;
 };
 const initialRenderCalls = renderCalls;
-events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 1 });
+events.pointerdown({ button: 2, clientX: 300, clientY: 200, pointerId: 1 });
 assert.equal(canvas.style.cursor, "grabbing", "Drag sets the grabbing cursor");
 events.pointermove({ clientX: 300, clientY: 220 });
 events.pointermove({ clientX: 300, clientY: 230 });
@@ -223,7 +223,7 @@ assert.equal(canvas.style.cursor, "", "Releasing the pointer restores the CSS cu
 const downward = viewer.getCamera();
 assert.notDeepEqual(downward.orientation, initial.orientation, "Dragging rotates the camera");
 assert.ok(isRotationMatrix(downward.orientation), "Drag keeps the full camera orientation orthonormal");
-events.pointerdown({ button: 0, clientX: 300, clientY: 230, pointerId: 1 });
+events.pointerdown({ button: 2, clientX: 300, clientY: 230, pointerId: 1 });
 events.pointermove({ clientX: 300, clientY: 220 });
 events.pointermove({ clientX: 300, clientY: 200 });
 events.pointerup();
@@ -232,7 +232,7 @@ assert.ok(viewer.getCamera().orientation.every((value, index) => Math.abs(value 
   "Reverse drag restores the full camera orientation");
 const dragOrbit = (startX, startY) => {
   viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
-  events.pointerdown({ button: 0, clientX: startX, clientY: startY, pointerId: 1 });
+  events.pointerdown({ button: 2, clientX: startX, clientY: startY, pointerId: 1 });
   events.pointermove({ clientX: startX + 45, clientY: startY + 25 });
   events.pointerup();
   while (animationFrames.length) animationFrames.shift()(animationTime);
@@ -244,7 +244,7 @@ assert.ok(orbitFromUpperLeft.every((value, index) => Math.abs(value - orbitFromL
   "Equal pointer deltas orbit around the model center regardless of where dragging starts");
 const horizontalDrag = deltaX => {
   viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
-  events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 1 });
+  events.pointerdown({ button: 2, clientX: 300, clientY: 200, pointerId: 1 });
   events.pointermove({ clientX: 300 + deltaX, clientY: 200 });
   events.pointerup();
   while (animationFrames.length) animationFrames.shift()(animationTime);
@@ -256,13 +256,13 @@ assert.ok(positiveHorizontalDrag.every((value, index) => Math.abs(value - viewer
   "Dragging right rotates horizontally in the corrected direction");
 viewer.setCamera({ yaw: 0, pitch: 0, zoom: 1, projection: "orthographic" });
 const halfTurnDrag = Math.PI / 0.01;
-events.pointerdown({ button: 0, clientX: 300, clientY: 210, pointerId: 1 });
+events.pointerdown({ button: 2, clientX: 300, clientY: 210, pointerId: 1 });
 events.pointermove({ clientX: 300, clientY: 210 + halfTurnDrag });
 events.pointerup();
 animationFrames.shift()(animationTime);
 assert.ok(viewer.getCamera().orientation[8] < -0.999,
   "A vertical orbit can turn the camera upside down without a pitch clamp");
-events.pointerdown({ button: 0, clientX: 300, clientY: 210 + halfTurnDrag, pointerId: 1 });
+events.pointerdown({ button: 2, clientX: 300, clientY: 210 + halfTurnDrag, pointerId: 1 });
 events.pointermove({ clientX: 300, clientY: 210 + halfTurnDrag * 2 });
 events.pointerup();
 animationFrames.shift()(animationTime);
@@ -407,7 +407,7 @@ for (const [yaw, pitch] of [[0.17, 0.2], [0.73, -0.35], [1.41, 0.4], [2.62, -0.2
     `Each visible cylinder side reaches from top to bottom at yaw ${yaw} and pitch ${pitch}`);
 }
 cylinderViewer.setCamera({ yaw: 0.68, pitch: 0.38, zoom: 1.5, projection: "orthographic" });
-events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 3 });
+events.pointerdown({ button: 2, clientX: 300, clientY: 200, pointerId: 3 });
 for (const [clientX, clientY] of [[340, 190], [380, 200], [410, 230], [390, 270], [350, 290], [310, 270]]) {
   events.pointermove({ clientX, clientY });
   animationFrames.shift()(animationTime);
@@ -492,7 +492,7 @@ transientEdgeViewer.load({
 transientEdgeViewer.setCamera({ yaw: 0, pitch: 0, zoom: 3, projection: "orthographic" });
 assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 1,
   "A B-rep edge longer than the full-resolution detail threshold remains visible");
-events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 4 });
+events.pointerdown({ button: 2, clientX: 300, clientY: 200, pointerId: 4 });
 events.pointermove({ clientX: 320, clientY: 200 });
 animationFrames.shift()(animationTime);
 assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 0,
@@ -683,7 +683,7 @@ tablePreviewViewer.load({ positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], triangles: [0,
   bounds: { min: [0, 0, 0], max: [1, 1, 0] } }, { reset: false });
 const rasterUploadsBeforeDrag = rasterUploads;
 const queuedFrameCount = animationFrames.length;
-events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 7 });
+events.pointerdown({ button: 2, clientX: 300, clientY: 200, pointerId: 7 });
 events.pointermove({ clientX: 320, clientY: 215 });
 const interactiveFrame = animationFrames.splice(queuedFrameCount, 1)[0];
 assert.equal(typeof interactiveFrame, 'function', 'camera movement schedules one interactive render');
@@ -725,7 +725,7 @@ denseViewer.load({ positions: [0, 0, 0, 1, 0, 0, 2, 0, 0], triangles: denseTrian
   bounds: { min: [0, 0, 0], max: [2, 0, 0] } });
 const denseUploadsBeforeDrag = rasterUploads;
 const denseFrameOffset = animationFrames.length;
-events.pointerdown({ button: 0, clientX: 300, clientY: 200, pointerId: 8 });
+events.pointerdown({ button: 2, clientX: 300, clientY: 200, pointerId: 8 });
 events.pointermove({ clientX: 320, clientY: 215 });
 const denseInteractiveFrame = animationFrames.splice(denseFrameOffset, 1)[0];
 assert.equal(typeof denseInteractiveFrame, 'function');

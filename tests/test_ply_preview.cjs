@@ -61,10 +61,14 @@ for (const filename of ["trace-draft.js", "browser-api.js", "viewport-helpers.js
 
 const helpers = browserSandbox.window.CadyxViewportHelpers;
 assert.equal(helpers.isRotationMatrix(helpers.cameraMatrixFromYawPitch(0.4, 0.2)), true);
-assert.equal(helpers.CAMERA_PRESETS.front.yaw, Math.PI / 2,
-  "the front preset looks along the turntable hinge axis");
-assert.equal(helpers.CAMERA_PRESETS.right.yaw, 0,
-  "the right preset shows the side opposite the requested front-facing hinge view");
+assert.deepEqual({ ...helpers.CAMERA_PRESETS.front }, { yaw: 0, pitch: 0 },
+  "the front preset looks along global Y with X horizontal and global Z vertical");
+assert.deepEqual({ ...helpers.CAMERA_PRESETS.right }, { yaw: Math.PI / 2, pitch: 0 },
+  "the right preset looks along global X while keeping global Z vertical");
+const frontOrientation = helpers.cameraMatrixFromYawPitch(
+  helpers.CAMERA_PRESETS.front.yaw, helpers.CAMERA_PRESETS.front.pitch);
+assert.deepEqual(Array.from(frontOrientation.slice(0, 3)), [1,0,0], "front view keeps global X horizontal");
+assert.deepEqual(Array.from(frontOrientation.slice(6, 9)), [0,0,1], "front view keeps global Z vertical");
 const edges = helpers.buildFeatureEdges([0, 0, 0, 1, 0, 0, 0, 1, 0], [0, 1, 2]);
 assert.deepEqual(Array.from(edges.featureEdges), [0, 1, 1, 2, 2, 0]);
 const raster = helpers.rasterTriangleSetup(1, 1, 5, 1, 1, 5, 10, 10);
@@ -104,13 +108,13 @@ const presetViewer = {
 };
 const presetController = viewerModule.createCameraPresetController({ root, canvas, viewer: presetViewer });
 assert.equal(presetController.apply("front"), true);
-assert.equal(appliedCamera.yaw, Math.PI / 2);
+assert.equal(appliedCamera.yaw, 0);
 assert.equal(appliedCamera.pitch, 0);
 assert.equal(appliedCamera.zoom, 2.5);
 assert.equal(appliedCamera.projection, "orthographic");
 assert.equal(presetButtons[1].pressed, "true");
 assert.equal(presetController.apply("right"), true);
-assert.equal(appliedCamera.yaw, 0);
+assert.equal(appliedCamera.yaw, Math.PI / 2);
 assert.equal(presetButtons[1].pressed, "false");
 assert.equal(presetController.apply("missing"), false);
 
