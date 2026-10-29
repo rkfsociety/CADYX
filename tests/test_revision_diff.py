@@ -20,7 +20,7 @@ def document(revision: int = 0, *, objects: list[dict] | None = None) -> dict:
         "id": "document:comparison", "version": 11, "revision": revision,
         "objects": copy.deepcopy(objects or []),
         "model_parameters": {}, "parameter_bindings": [],
-        "assembly": {"version": 5, "parts": [], "subassemblies": [],
+        "assembly": {"version": 6, "parts": [], "subassemblies": [],
                      "instances": [], "mates": []},
     }
 

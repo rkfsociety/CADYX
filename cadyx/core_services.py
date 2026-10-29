@@ -487,6 +487,10 @@ class ProjectLifecycleService(_CoreService):
             project = self.workspace.load(project_id, include_history=not browser)
             document = Document.from_validated_dict(project["document"])
             self._validate_geometry_once(project_id, document)
+            from .assembly_geometry import refresh_assembly_geometry_references
+            refresh_assembly_geometry_references(
+                document.assembly, document.objects, self.kernel, allow_rebind=False,
+            )
             availability = self._project_availability(project_id, nonblocking=True)
             if not availability.permits("read"):
                 raise RuntimeError("Read-only project inspection must remain available while the project is busy.")
@@ -947,6 +951,12 @@ class CommandActivityService(_CoreService):
             try:
                 document = Document.from_validated_dict(project["document"])
                 result = self.commands.execute(document, command, progress=report_progress, project_id=project_id)
+                from .assembly_geometry import refresh_assembly_geometry_references
+                refreshed_kinematics = refresh_assembly_geometry_references(
+                    document.assembly, document.objects, self.kernel,
+                )
+                if refreshed_kinematics is not None and "kinematics" in result:
+                    result["kinematics"] = refreshed_kinematics
                 activity["result"] = copy.deepcopy(result)
                 activity["phase"] = "validate_document"
                 self._publish_activity(project_id, activity)

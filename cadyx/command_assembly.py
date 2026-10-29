@@ -213,12 +213,16 @@ class AssemblyCommands:
                 return {"removed_component_id": target}
         raise NotFoundError("Assembly part or subassembly does not exist.")
 
-    @staticmethod
-    def _add_assembly_mate(document: Document, command: dict[str, Any]) -> dict[str, Any]:
+    def _add_assembly_mate(self, document: Document, command: dict[str, Any]) -> dict[str, Any]:
         _fields(command, {"kind", "a_instance_id", "b_instance_id"},
-                {"name", "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation", "limits"})
+                {"name", "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation", "limits",
+                 "reference_a", "reference_b", "mate_id"})
+        mate_id = command.get("mate_id", f"mate:{uuid4()}")
+        if (not isinstance(mate_id, str) or not mate_id.startswith("mate:")
+                or not mate_id[5:] or any(mate["id"] == mate_id for mate in document.assembly["mates"])):
+            raise ValidationError("Assembly mate ID must be unique and typed.")
         mate = {
-            "id": f"mate:{uuid4()}",
+            "id": mate_id,
             "name": _text(command.get("name", command["kind"]), "Mate name"),
             "kind": command["kind"],
             "a_instance_id": command["a_instance_id"],
@@ -229,8 +233,13 @@ class AssemblyCommands:
             "offset_mm": command.get("offset_mm", 0.0),
             "orientation": deepcopy(command.get("orientation", IDENTITY_ROTATION)),
             "limits": deepcopy(command.get("limits", DEFAULT_LIMITS)),
+            "reference_a": deepcopy(command.get("reference_a")),
+            "reference_b": deepcopy(command.get("reference_b")),
         }
         document.assembly["mates"].append(mate)
+        if mate["reference_a"] is not None:
+            from .assembly_geometry import refresh_assembly_geometry_references
+            refresh_assembly_geometry_references(document.assembly, document.objects, self.kernel)
         diagnostics = solve_assembly_mates(document.assembly, anchor_instance_id=mate["a_instance_id"])
         validate_assembly(document.assembly, document.objects)
         return {"mate_id": mate["id"], "kind": mate["kind"], "kinematics": diagnostics}

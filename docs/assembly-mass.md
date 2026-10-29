@@ -17,7 +17,7 @@
 ## Persisted schema
 
 Document **v11** introduced assembly **v2 → v3** material fields; document
-**v14** uses assembly graph v5 with saved per-instance grounding, visibility, spherical mates and motion limits.
+**v15** uses assembly graph v6 with saved per-instance grounding, visibility, spherical mates and motion limits.
 Each part definition has a
 `material` field which is either `null` (not assigned, the migration default)
 or exactly:

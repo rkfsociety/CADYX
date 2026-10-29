@@ -197,6 +197,7 @@
     let geometry = null;
     let selectedBodyId = null;
     let selectedBodyIds = new Set();
+    let selectedFaceIds = new Set();
     let selectedFeatureId = null;
     let cameraOrientation = cameraMatrixFromYawPitch(0.68, 0.38);
     let zoom = 1;
@@ -478,7 +479,9 @@
         Math.max(1.5 / scale, 2 * VIEWPORT_MESH_DEFLECTION),
         selectedFeatureId
           ? geometry.featureTriangleRanges?.filter((range) => range.featureId === selectedFeatureId) || []
-          : geometry.bodyTriangleRanges?.filter((range) => selectedBodyIds.has(range.objectId)) || [],
+          : selectedFaceIds.size
+            ? geometry.faceTriangleRanges?.filter((range) => selectedFaceIds.has(`${range.objectId}:${range.faceIndex}`)) || []
+            : geometry.bodyTriangleRanges?.filter((range) => selectedBodyIds.has(range.objectId)) || [],
         geometry.overlayTriangleRanges || [],
       );
       else if (geometry.pointCloudVertexCount != null || !geometry.lines) {
@@ -1554,6 +1557,7 @@
             && (!next || selectedBodyIds.has(next)) && selectedFeatureId === null) return;
         selectedBodyId = next;
         selectedBodyIds = new Set(next ? [next] : []);
+        selectedFaceIds = new Set();
         selectedFeatureId = null;
         render();
       },
@@ -1564,6 +1568,17 @@
             && [...next].every((bodyId) => selectedBodyIds.has(bodyId))) return;
         selectedBodyIds = next;
         selectedBodyId = next.values().next().value || null;
+        selectedFaceIds = new Set();
+        selectedFeatureId = null;
+        render();
+      },
+      setSelectedFaces(faces) {
+        const next = new Set(Array.isArray(faces) ? faces.filter((face) => face
+          && typeof face.objectId === "string" && Number.isInteger(face.faceIndex) && face.faceIndex >= 0)
+          .map((face) => `${face.objectId}:${face.faceIndex}`) : []);
+        if (selectedFeatureId === null && next.size === selectedFaceIds.size
+            && [...next].every((faceId) => selectedFaceIds.has(faceId))) return;
+        selectedFaceIds = next;
         selectedFeatureId = null;
         render();
       },
@@ -1573,6 +1588,7 @@
         selectedFeatureId = next;
         selectedBodyId = null;
         selectedBodyIds = new Set();
+        selectedFaceIds = new Set();
         render();
       },
       animateBodyMotion(tracks, durationMs) {

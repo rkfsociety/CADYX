@@ -24,7 +24,7 @@ change model geometry.
 Call `POST /api/v1/agent/projects/{id}/validations/specification` with an exact
 `expected_revision` and a version 1 `specification`. The sample value `12`
 for `expected_revision` is a **project revision example**, not the document
-schema version (which currently happens to be v14):
+schema version (which currently happens to be v15):
 
 ```json
 {

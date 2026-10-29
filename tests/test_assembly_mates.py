@@ -123,6 +123,18 @@ class AssemblyMateTests(unittest.TestCase):
                              limits={"angle_min_deg": -1, "angle_max_deg": None,
                                      "offset_min_mm": None, "offset_max_mm": None})
 
+    def test_mate_id_can_be_replayed_after_removal_for_editor_redo(self):
+        mate_id = self.run_command("add_assembly_mate", kind="fixed",
+                                   a_instance_id=self.a, b_instance_id=self.b)["mate_id"]
+        with self.assertRaisesRegex(ValidationError, "must be unique and typed"):
+            self.run_command("add_assembly_mate", kind="fixed", a_instance_id=self.a,
+                             b_instance_id=self.c, mate_id=mate_id)
+        self.run_command("remove_assembly_mate", mate_id=mate_id)
+        replayed = self.run_command("add_assembly_mate", kind="fixed",
+                                    a_instance_id=self.a, b_instance_id=self.b,
+                                    mate_id=mate_id)
+        self.assertEqual(replayed["mate_id"], mate_id)
+
     def test_local_frames_and_coincident_orientation(self):
         local_frame = {"translation": [1, 0, 0], "rotation": [1, 0, 0, 0]}
         self.run_command("add_assembly_mate", kind="coincident", a_instance_id=self.a,
@@ -215,7 +227,7 @@ class AssemblyMateTests(unittest.TestCase):
         upgraded = migrate_document(old)
         self.assertEqual(old, before)
         self.assertEqual(upgraded["version"], DOCUMENT_VERSION)
-        self.assertEqual(upgraded["assembly"]["version"], 5)
+        self.assertEqual(upgraded["assembly"]["version"], 6)
         self.assertEqual(upgraded["assembly"]["mates"], [])
         self.assertEqual(Document.from_dict(upgraded).to_dict(), upgraded)
 

@@ -2353,7 +2353,7 @@ async function refreshDetail() {
   }
   if (renderedSceneKey !== key) {
     const positions = [], bodyPositions = [], triangles = [], lines = [], points = [], rotationAxes = [];
-    const bodyLineRanges = [], bodyTriangleRanges = [], bodyVertexRanges = [], featureTriangleRanges = [], overlayTriangleRanges = [], surfaceTriangleRanges = [];
+    const bodyLineRanges = [], bodyTriangleRanges = [], bodyVertexRanges = [], faceTriangleRanges = [], featureTriangleRanges = [], overlayTriangleRanges = [], surfaceTriangleRanges = [];
     let targetFound = false;
     for (const object of scene.objects) {
       const source = objectsById.get(object.source_body_id || object.object_id);
@@ -2373,6 +2373,10 @@ async function refreshDetail() {
       if (source?.type === "body" && object.type === "body" && object.triangles.length) {
         bodyTriangleRanges.push({ objectId: object.object_id, start: triangleStart, end: triangles.length / 3 });
         bodyVertexRanges.push({ objectId: object.object_id, start: offset, end: offset + object.positions.length / 3 });
+        for (const face of object.face_triangle_ranges || []) {
+          faceTriangleRanges.push({ objectId: object.object_id, faceIndex: face.face_index,
+            start: triangleStart + face.start, end: triangleStart + face.end });
+        }
       }
       if (object.type === "feature_overlay" && object.triangles.length) {
         overlayTriangleRanges.push({ start: triangleStart, end: triangles.length / 3 });
@@ -2437,7 +2441,7 @@ async function refreshDetail() {
     const hasPointCloud = visibleObjects.some((item) => item.type === "feature"
       && item.operation === "import_point_cloud");
     const viewportGeometry = { positions, triangles, lines, points, bounds, rotationAxes,
-      bodyLineRanges, bodyTriangleRanges, bodyVertexRanges, featureTriangleRanges, overlayTriangleRanges, surfaceTriangleRanges,
+      bodyLineRanges, bodyTriangleRanges, bodyVertexRanges, faceTriangleRanges, featureTriangleRanges, overlayTriangleRanges, surfaceTriangleRanges,
       ...(hasPointCloud ? { pointStyle: { size: 1.5, opacity: 0.94, color: "#ff7417" } } : {}) };
     currentModelViewportGeometry = viewportGeometry;
     const viewport = $("#viewport");

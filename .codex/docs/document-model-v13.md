@@ -4,7 +4,7 @@
 
 ## English
 
-Document v13 introduced saved per-instance grounding and visibility. The current document schema is v14; see the [v14 contract](document-model-v14.md) for the current mate and graph schema.
+Document v13 introduced saved per-instance grounding and visibility. The current document schema is v15; see the [v15 contract](document-model-v15.md) for the current mate and graph schema.
 
 - `grounded`: keeps this occurrence at its saved pose during mate solving. A connection that would move a grounded occurrence fails atomically. Rigid transforms of a grounded occurrence or a connected group containing one are rejected; use a joint coordinate to exercise an allowed relative degree of freedom.
 - `visible`: controls display per occurrence. Hiding a subassembly occurrence hides its complete nested branch without changing source body visibility or geometry.

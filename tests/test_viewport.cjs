@@ -764,9 +764,13 @@ assert.notDeepEqual(drawnLines.at(-1), denseSweepMidEndpoint,
   'the dense sweep wireframe continues along its path instead of revealing the final edge early');
 
 denseSweepViewer.setSelectedBodies(["instance:a", "instance:b"]);
+denseSweepViewer.setSelectedFaces([{ objectId: "instance:a", faceIndex: 0 }]);
+denseSweepViewer.setSelectedFaces([]);
 denseSweepViewer.setSelectedBodies([]);
 assert.equal(typeof denseSweepViewer.setSelectedBodies, "function",
   "assembly multi-selection is exposed by the shared viewport renderer");
+assert.equal(typeof denseSweepViewer.setSelectedFaces, "function",
+  "assembly face selection is exposed by the shared viewport renderer");
 
 console.log("Viewport: camera, geometry, transitions, depth-tested edges and scan surface styling passed.");
 

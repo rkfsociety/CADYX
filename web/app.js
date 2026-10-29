@@ -187,8 +187,9 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const gizmoRoot=document.createElement('div');gizmoRoot.className='cad3-gizmo-root';gizmoRoot.hidden=true;
     for(const axis of ['X','Y','Z']){const move=document.createElement('button');move.type='button';move.dataset.gizmoKind='translate';move.dataset.axis=axis;move.title=`Переместить по ${axis}`;move.textContent=axis;gizmoRoot.append(move);const rotate=document.createElement('button');rotate.type='button';rotate.dataset.gizmoKind='rotate';rotate.dataset.axis=axis;rotate.title=`Повернуть вокруг ${axis}`;rotate.textContent=`↻${axis}`;gizmoRoot.append(rotate)}
     panel.append(gizmoRoot);
-    const state={objects:[],byId:new Map(),scene:null,labels:new Map(),selected:null,selectedInstanceId:null,selectedInstancePath:[],selectedOccurrenceId:null,selectedOccurrenceIds:new Set(),selectionCleared:false,rev:null,project:null,parameters:{},bindings:[],assembly:null,lock:null,kinematics:null,assemblyCoordinateMode:'local',assemblyStep:1,assemblyAngleStep:5,snapEnabled:true,activeModelBodyId:null};
+    const state={objects:[],byId:new Map(),scene:null,labels:new Map(),selected:null,selectedInstanceId:null,selectedInstancePath:[],selectedOccurrenceId:null,selectedOccurrenceIds:new Set(),assemblyFacePickMode:false,assemblyFacePicks:[],selectionCleared:false,rev:null,project:null,parameters:{},bindings:[],assembly:null,lock:null,kinematics:null,assemblyCoordinateMode:'local',assemblyStep:1,assemblyAngleStep:5,snapEnabled:true,activeModelBodyId:null};
     const assemblyUndo=[],assemblyRedo=[];let assemblyLastRevision=null;
+    const assemblyTopologyCache=new Map();
     let assemblyDrag=null;
     const opType=o=>o?.operation==='recognize_mesh'?'Опорная геометрия сетки':cadyxMeshStage(o)?.title||cadyxCloudStage(o||{})?.title||meta[o?.operation]?.[0]||(o?.operation?`Операция: ${String(o.operation).replace(/_/g,' ')}`:'Элемент'), opIcon=o=>cadyxCloudStage(o||{})?I.cloud:I[meta[o?.operation]?.[1]||'model'];
     function featureDetails(o){const p=o.parameters||{},fmt=v=>Number.isFinite(Number(v))?new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(Number(v)):null,mm=v=>{const n=fmt(v);return n===null?null:`${n} мм`},pos=Array.isArray(p.origin)?p.origin.slice(0,2).map((v,i)=>`${i?'Y':'X'}${fmt(v)}`).filter(x=>!x.endsWith('null')).join(', '):'';let d=[];switch(o.operation){case'create_box':d=[mm(p.width),mm(p.height),mm(p.depth)].filter(Boolean);return d.length?d.join(' × '):'';case'extrude_sketch':case'pad_sketch_to_body':case'rib_from_sketch':case'pocket_sketch':case'extrude_profile_on_plane':d=[mm(p.depth)];break;case'revolve_sketch':d=[p.angle_degrees==null?null:`${fmt(p.angle_degrees)}°`];break;case'boss':d=[p.diameter==null?null:`Ø${mm(p.diameter)}`,mm(p.depth)];break;case'hole':case'through_hole':case'counterbore_hole':case'countersink_hole':case'threaded_hole':d=[p.diameter==null?null:`Ø${mm(p.diameter)}`,p.hole_depth==null?null:mm(p.hole_depth),p.thread_size||null];break;case'fillet_edges':d=[p.radius==null?null:`R${mm(p.radius)}`];break;case'variable_fillet_edges':d=[p.start_radius==null?null:`R${mm(p.start_radius)}`,p.end_radius==null?null:`R${mm(p.end_radius)}`];break;case'chamfer_edges':d=[mm(p.distance)];break;case'shell_body':case'offset_body':d=[mm(p.thickness??p.offset)];break;case'draft_faces':d=[p.angle_degrees==null?null:`${fmt(p.angle_degrees)}°`];break;case'linear_pattern_body':case'circular_pattern_body':d=[p.count==null?null:`${fmt(p.count)} шт.`];break;default:return''}if(pos)d.push(pos);return d.filter(Boolean).join(' · ')}
@@ -638,20 +639,27 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const lockLabel=state.lock?.state==='AI_LOCKED'?'ИИ редактирует сборку':state.lock?.state==='HUMAN_LOCKED'?'Сборка редактируется':state.lock?.state==='SYSTEM_LOCKED'?'Core выполняет операцию':state.lock?.state==='FREE'&&!state.lock?.recovery_required?'Готово к редактированию':'Доступность не подтверждена';
       const kinematics=state.kinematics||{},mode=state.assemblyCoordinateMode,displayPose=selectedPose(instance,mode),translation=displayPose.translation,rotation=displayPose.rotation;
       const row=(name,value,axis)=>`<dt>${name}</dt><dd><input data-assembly-value="${axis}" type="number" step="any" value="${Number(value)}"></dd>`;
+      const facePicks=state.assemblyFacePicks,faceInstances=facePicks.map(pick=>assemblyInstance(pick.instance_id));
+      const canCreateMate=facePicks.length===2&&facePicks[0].instance_id!==facePicks[1].instance_id
+        &&faceInstances[0]?.parent_id===faceInstances[1]?.parent_id&&canEdit;
       const mateEditor=mate=>{
         const angleKind=['revolute','coaxial','cylindrical'].includes(mate.kind),offsetKind=['slider','coaxial','cylindrical'].includes(mate.kind),orientationKind=['spherical','coincident'].includes(mate.kind),limits=mate.limits||{};
         const limitInput=(field,label,value)=>`<dt>${label}</dt><dd><input data-mate-limit="${mate.id}:${field}" type="number" step="any" value="${value==null?'':Number(value)}" ${canEdit?'':'disabled'}></dd>`;
         const quaternionInput=(index,value)=>`<dt>Q${['w','x','y','z'][index]}</dt><dd><input data-mate-orientation="${mate.id}:${index}" type="number" step="any" value="${Number(value)}" ${canEdit?'':'disabled'}></dd>`;
-        return `<div class="cad3-assembly-mate"><strong>${esc(mate.name)} · ${esc(mate.kind)}</strong><dl class="cad3-grid">${angleKind?`<dt>Угол, °</dt><dd><input data-mate-angle="${mate.id}" type="number" step="any" value="${Number(mate.angle_deg)}" ${canEdit?'':'disabled'}></dd>${limitInput('angle_min_deg','Мин. угол, °',limits.angle_min_deg)}${limitInput('angle_max_deg','Макс. угол, °',limits.angle_max_deg)}`:''}${offsetKind?`<dt>Смещение, мм</dt><dd><input data-mate-offset="${mate.id}" type="number" step="any" value="${Number(mate.offset_mm)}" ${canEdit?'':'disabled'}></dd>${limitInput('offset_min_mm','Мин. смещение, мм',limits.offset_min_mm)}${limitInput('offset_max_mm','Макс. смещение, мм',limits.offset_max_mm)}`:''}${orientationKind?(mate.orientation||[1,0,0,0]).map((value,index)=>quaternionInput(index,value)).join(''):''}</dl><button type="button" data-mate-apply="${mate.id}" ${canEdit?'':'disabled'}>Изменить координату</button><small>Геометрические ссылки: ${esc([mate.reference_a?.face_key,mate.reference_b?.face_key].filter(Boolean).join(' · ')||'нет')}</small></div>`;
+        return `<div class="cad3-assembly-mate"><strong>${esc(mate.name)} · ${esc(mate.kind)}</strong><dl class="cad3-grid">${angleKind?`<dt>Угол, °</dt><dd><input data-mate-angle="${mate.id}" type="number" step="any" value="${Number(mate.angle_deg)}" ${canEdit?'':'disabled'}></dd>${limitInput('angle_min_deg','Мин. угол, °',limits.angle_min_deg)}${limitInput('angle_max_deg','Макс. угол, °',limits.angle_max_deg)}`:''}${offsetKind?`<dt>Смещение, мм</dt><dd><input data-mate-offset="${mate.id}" type="number" step="any" value="${Number(mate.offset_mm)}" ${canEdit?'':'disabled'}></dd>${limitInput('offset_min_mm','Мин. смещение, мм',limits.offset_min_mm)}${limitInput('offset_max_mm','Макс. смещение, мм',limits.offset_max_mm)}`:''}${orientationKind?(mate.orientation||[1,0,0,0]).map((value,index)=>quaternionInput(index,value)).join(''):''}</dl><div class="cad3-assembly-actions"><button type="button" data-mate-apply="${mate.id}" ${canEdit?'':'disabled'}>Применить</button><button type="button" data-mate-remove="${mate.id}" ${canEdit?'':'disabled'}>Удалить сопряжение</button></div><small>Геометрические ссылки: ${esc([mate.reference_a?.face_key,mate.reference_b?.face_key].filter(Boolean).join(' · ')||'нет')}</small></div>`;
       };
       props.innerHTML=`<div class="cad3-head"><span class="cad3-icon">▰</span><div><strong>${esc(instance.name)}</strong><small>${esc(assemblyTargetName(instance.target_id))}</small></div></div>
         <section class="cad3-sec"><h3>Состояние сборки</h3><dl class="cad3-grid"><dt>Редактор</dt><dd data-assembly-lock>${esc(lockLabel)}</dd><dt>Степени свободы</dt><dd>${fmt(kinematics.global_dof??0)} глоб. · ${fmt(kinematics.internal_dof??0)} относ.</dd><dt>Сопряжения</dt><dd>${mates.length}</dd><dt>Выделено</dt><dd>${selectedCount}</dd></dl></section>
         <section class="cad3-sec"><h3>Экземпляр</h3><label class="cad3-assembly-check"><input type="checkbox" data-assembly-visible ${instance.visible?'checked':''} ${canEdit?'':'disabled'}> Видимый</label><label class="cad3-assembly-check"><input type="checkbox" data-assembly-grounded ${instance.grounded?'checked':''} ${canEdit?'':'disabled'}> Закреплён</label></section>
+        <section class="cad3-sec"><h3>Сопряжение по граням</h3><button type="button" data-assembly-face-mode ${canEdit?'':'disabled'}>${state.assemblyFacePickMode?'Завершить выбор граней':'Выбрать две грани в 3D'}</button><div class="cad3-model-note">${facePicks.length?facePicks.map((pick,index)=>`${index?'B':'A'}: ${esc(assemblyInstance(pick.instance_id)?.name||pick.instance_id)} · ${esc(pick.reference.surface)} · ${esc(pick.reference.face_key)}`).join('<br>'):'Выберите геометрию на двух деталях.'}</div><label class="cad3-assembly-check">Тип <select data-assembly-mate-kind ${canEdit?'':'disabled'}><option value="fixed">Жёсткое</option><option value="revolute">Вращательное</option><option value="slider">Поступательное</option><option value="cylindrical">Цилиндрическое</option><option value="coaxial">Соосное</option><option value="spherical">Шаровое</option><option value="coincident">Совпадение точек</option></select></label><button type="button" data-assembly-create-mate ${canCreateMate?'':'disabled'}>Создать сопряжение</button><button type="button" data-assembly-clear-face-picks ${facePicks.length?'':'disabled'}>Очистить выбор</button></section>
         <section class="cad3-sec"><h3>Положение</h3><label class="cad3-assembly-check">Координаты <select data-assembly-coordinate><option value="local" ${mode==='local'?'selected':''}>Локальные</option><option value="global" ${mode==='global'?'selected':''}>Глобальные</option></select></label><dl class="cad3-grid">${row('X, мм',translation[0],'tx')}${row('Y, мм',translation[1],'ty')}${row('Z, мм',translation[2],'tz')}${row('Qw',rotation[0],'qw')}${row('Qx',rotation[1],'qx')}${row('Qy',rotation[2],'qy')}${row('Qz',rotation[3],'qz')}</dl><div class="cad3-assembly-actions"><button type="button" data-assembly-transform ${canEdit?'':'disabled'}>Применить положение</button><button type="button" data-assembly-undo ${canEdit&&assemblyUndo.length?'':'disabled'}>Undo</button><button type="button" data-assembly-redo ${canEdit&&assemblyRedo.length?'':'disabled'}>Redo</button></div></section>
         <section class="cad3-sec"><h3>Манипуляторы · шаг и привязка</h3><div class="cad3-assembly-actions"><input data-assembly-step type="number" min="0.001" step="any" value="${state.assemblyStep}" aria-label="Шаг перемещения, мм"><span>мм</span><input data-assembly-angle-step type="number" min="0.1" step="any" value="${state.assemblyAngleStep}" aria-label="Шаг поворота, градусы"><span>°</span><label><input type="checkbox" data-assembly-snap ${state.snapEnabled?'checked':''}> Привязка</label></div><div class="cad3-assembly-actions">${['X','Y','Z'].map(axis=>`<button type="button" data-assembly-axis="${axis}" data-assembly-sign="-1" ${canEdit?'':'disabled'}>−${axis}</button><button type="button" data-assembly-axis="${axis}" data-assembly-sign="1" ${canEdit?'':'disabled'}>+${axis}</button>`).join('')}</div><div class="cad3-assembly-actions">${['X','Y','Z'].map(axis=>`<button type="button" data-assembly-rotate-axis="${axis}" data-assembly-sign="-1" ${canEdit?'':'disabled'}>↶${axis}</button><button type="button" data-assembly-rotate-axis="${axis}" data-assembly-sign="1" ${canEdit?'':'disabled'}>↷${axis}</button>`).join('')}</div></section>
         <section class="cad3-sec"><h3>Сопряжения</h3>${mates.length?mates.map(mateEditor).join(''):'<div class="cad3-empty">Нет сопряжений у выбранного экземпляра.</div>'}</section><div class="cad3-model-note" data-assembly-status aria-live="polite">${canEdit?'':esc(lockLabel+' · просмотр доступен')}</div>`;
       props.querySelector('[data-assembly-visible]')?.addEventListener('change',event=>void editAssemblyProperties(instance,{visible:event.target.checked}));
       props.querySelector('[data-assembly-grounded]')?.addEventListener('change',event=>void editAssemblyProperties(instance,{grounded:event.target.checked}));
+      props.querySelector('[data-assembly-face-mode]')?.addEventListener('click',()=>{state.assemblyFacePickMode=!state.assemblyFacePickMode;setAssemblyStatus(state.assemblyFacePickMode?'Кликните грань на детали A, затем на детали B.':'Выбор граней приостановлен.');renderAssemblyProps()});
+      props.querySelector('[data-assembly-clear-face-picks]')?.addEventListener('click',()=>{state.assemblyFacePicks=[];modelViewer?.setSelectedFaces?.([]);renderAssemblyProps()});
+      props.querySelector('[data-assembly-create-mate]')?.addEventListener('click',()=>void createAssemblyMateFromFaces(props.querySelector('[data-assembly-mate-kind]')?.value));
       props.querySelector('[data-assembly-coordinate]')?.addEventListener('change',event=>{state.assemblyCoordinateMode=event.target.value;renderAssemblyProps()});
       props.querySelector('[data-assembly-snap]')?.addEventListener('change',event=>{state.snapEnabled=event.target.checked});
       props.querySelector('[data-assembly-step]')?.addEventListener('input',event=>{const value=Number(event.target.value);if(Number.isFinite(value)&&value>0)state.assemblyStep=value});
@@ -662,10 +670,11 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       props.querySelectorAll('[data-assembly-axis]').forEach(button=>button.addEventListener('click',()=>void nudgeAssemblyInstance(instance,button.dataset.assemblyAxis,Number(button.dataset.assemblySign))));
       props.querySelectorAll('[data-assembly-rotate-axis]').forEach(button=>button.addEventListener('click',()=>void nudgeAssemblyInstance(instance,button.dataset.assemblyRotateAxis,Number(button.dataset.assemblySign),true)));
       props.querySelectorAll('[data-mate-apply]').forEach(button=>button.addEventListener('click',()=>void applyAssemblyMate(instance,button.dataset.mateApply)));
+      props.querySelectorAll('[data-mate-remove]').forEach(button=>button.addEventListener('click',()=>void removeAssemblyMate(button.dataset.mateRemove)));
     }
     props.addEventListener('click',e=>{const b=e.target.closest('[data-dep]');if(b)select(b.dataset.dep,true)});
     const tabs=$('.cad-inspector-tabs');tabs?.addEventListener('click',()=>queueMicrotask(()=>{const active=$('.cad-inspector-tab[aria-selected=true]',tabs)?.dataset.cadInspector||'properties';props.hidden=active!=='properties'}));
-    function select(id,reveal=false){if(!state.byId.has(id))return;state.selectedOccurrenceId=null;state.selectedOccurrenceIds.clear();state.selectedInstanceId=null;state.selectedInstancePath=[];const selected=state.byId.get(id);if(selected.type==='sketch'){const owner=state.objects.find(item=>item.type==='feature'&&(item.source_sketch_id===id||(item.source_sketch_ids||[]).includes(id)));if(owner){expandedFeatures.add(owner.id);saveModelTreeState()}}const selectedBodyId=selected.type==='body'?selected.id:selected.body_id;const ownerGroup=modelGroups().find(group=>group.body.id===selectedBodyId||group.features.some(feature=>feature.id===id));if(ownerGroup)state.activeModelBodyId=ownerGroup.body.id;state.selected=id;state.selectionCleared=false;try{selectedObjectId=id}catch{}if(selected.type==='feature')modelViewer?.setSelectedFeature?.(selected.id);else modelViewer?.setSelectedBody?.(bodyFor(selected)?.id||null);renderTree();renderProps(selected);if(reveal)list?.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'nearest'});detail.dataset.v2Selection='true';syncOverlay()}
+    function select(id,reveal=false){if(!state.byId.has(id))return;state.selectedOccurrenceId=null;state.selectedOccurrenceIds.clear();state.selectedInstanceId=null;state.selectedInstancePath=[];state.assemblyFacePicks=[];state.assemblyFacePickMode=false;modelViewer?.setSelectedFaces?.([]);const selected=state.byId.get(id);if(selected.type==='sketch'){const owner=state.objects.find(item=>item.type==='feature'&&(item.source_sketch_id===id||(item.source_sketch_ids||[]).includes(id)));if(owner){expandedFeatures.add(owner.id);saveModelTreeState()}}const selectedBodyId=selected.type==='body'?selected.id:selected.body_id;const ownerGroup=modelGroups().find(group=>group.body.id===selectedBodyId||group.features.some(feature=>feature.id===id));if(ownerGroup)state.activeModelBodyId=ownerGroup.body.id;state.selected=id;state.selectionCleared=false;try{selectedObjectId=id}catch{}if(selected.type==='feature')modelViewer?.setSelectedFeature?.(selected.id);else modelViewer?.setSelectedBody?.(bodyFor(selected)?.id||null);renderTree();renderProps(selected);if(reveal)list?.querySelector(`[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'nearest'});detail.dataset.v2Selection='true';syncOverlay()}
     function selectAssemblyOccurrence(pathId,instanceId,event){
       if(!pathId||!instanceId)return;
       const multi=Boolean(event&&(event.ctrlKey||event.metaKey||event.shiftKey));
@@ -680,7 +689,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       else modelViewer?.setSelectedBody?.(pathId);
       renderTree();renderAssemblyProps();detail.dataset.v2Selection='true';syncOverlay();
     }
-    function clearSelection(){if(!state.selected&&!state.selectedOccurrenceIds.size&&state.selectionCleared)return;state.selected=null;state.selectedOccurrenceId=null;state.selectedOccurrenceIds.clear();state.selectedInstanceId=null;state.selectedInstancePath=[];state.selectionCleared=true;try{selectedObjectId=null}catch{}modelViewer?.setSelectedBodies?.([]);modelViewer?.setSelectedBody?.(null);renderTree();renderProps(null);detail.dataset.v2Selection='true';syncOverlay()}
+    function clearSelection(){if(!state.selected&&!state.selectedOccurrenceIds.size&&state.selectionCleared)return;state.selected=null;state.selectedOccurrenceId=null;state.selectedOccurrenceIds.clear();state.selectedInstanceId=null;state.selectedInstancePath=[];state.assemblyFacePicks=[];state.assemblyFacePickMode=false;state.selectionCleared=true;try{selectedObjectId=null}catch{}modelViewer?.setSelectedFaces?.([]);modelViewer?.setSelectedBodies?.([]);modelViewer?.setSelectedBody?.(null);renderTree();renderProps(null);detail.dataset.v2Selection='true';syncOverlay()}
     const cloneJson=value=>JSON.parse(JSON.stringify(value));
     const resetAssemblyHistory=()=>{assemblyUndo.length=0;assemblyRedo.length=0;assemblyLastRevision=null};
     async function executeAssemblyCommand(command,{history=null,historyAction=null}={}){
@@ -703,6 +712,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       finally{if(leaseId){try{await client(`/api/v1/projects/${encoded}/leases/${encodeURIComponent(leaseId)}/release`,{method:'POST',body:'{}'})}catch(error){releaseError=error}}}
       if(commandError){setAssemblyStatus(commandError.message);throw commandError}
       const nextRevision=revision+1;
+      if(typeof history==='function')history=history(result);
       if(historyAction==='undo'){assemblyUndo.pop();assemblyRedo.push(history)}
       else if(historyAction==='redo'){assemblyRedo.pop();assemblyUndo.push(history)}
       else if(history){if(assemblyLastRevision!==null&&assemblyLastRevision!==revision)resetAssemblyHistory();assemblyUndo.push(history);assemblyRedo.length=0}
@@ -711,6 +721,43 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if(releaseError){setAssemblyStatus(`Изменение сохранено, но блокировка не освобождена: ${releaseError.message}`);throw releaseError}
       setAssemblyStatus('Изменение сохранено.');
       return result;
+    }
+    async function pickAssemblyGeometryFace(mesh,faceIndex){
+      const projectId=state.project,instance=assemblyInstance(mesh.instance_id),body=state.byId.get(mesh.source_body_id);
+      if(!projectId||!instance||!body){setAssemblyStatus('Выбранная грань не принадлежит экземпляру сборки.');return}
+      const range=(mesh.face_triangle_ranges||[]).find(item=>item.face_index===faceIndex);
+      if(!range){setAssemblyStatus('На этой поверхности нет стабильной B-rep грани.');return}
+      const cacheKey=`${projectId}:${state.rev}:${body.id}`;let topology=assemblyTopologyCache.get(cacheKey);
+      try{
+        if(!topology){topology=await window.cadyxApi.request(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/topology?body_id=${encodeURIComponent(body.id)}`);if(projectId!==state.project||topology.revision!==state.rev)throw new Error('Геометрия изменилась. Повторите выбор грани после обновления.');assemblyTopologyCache.set(cacheKey,topology)}
+        const faces=topology.faces||[],matches=faces.filter(face=>face.index===faceIndex);
+        if(matches.length!==1||!matches[0].semantic_key)throw new Error('Выбранную B-rep грань нельзя однозначно связать с топологией.');
+        const face=matches[0],surface=face.surface;
+        const origin=['cylinder','cone'].includes(surface)?face.axis_origin:face.center;
+        const direction=surface==='plane'?face.normal:face.axis_direction;
+        if(!['plane','cylinder','cone','sphere'].includes(surface)||!Array.isArray(origin)||!Array.isArray(direction))throw new Error(`Сопряжение по поверхности «${surface||'неизвестно'}» не поддерживается.`);
+        const reference={body_id:body.id,face_key:face.semantic_key,face_index:face.index,surface,origin,direction};
+        const pick={instance_id:instance.id,instance_path:mesh.instance_path.slice(),object_id:mesh.object_id,reference};
+        const existing=state.assemblyFacePicks.findIndex(item=>item.object_id===pick.object_id&&item.reference.face_index===face.index);
+        if(existing>=0)state.assemblyFacePicks.splice(existing,1);else{state.assemblyFacePicks.push(pick);if(state.assemblyFacePicks.length>2)state.assemblyFacePicks.shift()}
+        selectAssemblyOccurrence(mesh.object_id,instance.id);
+        state.selectedInstancePath=mesh.instance_path.slice();
+        modelViewer?.setSelectedFaces?.(state.assemblyFacePicks.map(item=>({objectId:item.object_id,faceIndex:item.reference.face_index})));
+        setAssemblyStatus(`Выбрано граней: ${state.assemblyFacePicks.length}/2`);renderAssemblyProps();
+      }catch(error){setAssemblyStatus(error.message)}
+    }
+    async function createAssemblyMateFromFaces(kind){
+      const picks=state.assemblyFacePicks;if(picks.length!==2){setAssemblyStatus('Для сопряжения выберите две грани.');return}
+      const [a,b]=picks,instanceA=assemblyInstance(a.instance_id),instanceB=assemblyInstance(b.instance_id);
+      if(!instanceA||!instanceB||instanceA.id===instanceB.id||instanceA.parent_id!==instanceB.parent_id){setAssemblyStatus('Выберите грани двух разных экземпляров одного родительского узла.');return}
+      if(kind==='spherical'&&(a.reference.surface!=='sphere'||b.reference.surface!=='sphere')){setAssemblyStatus('Для шарового сопряжения выберите две сферические грани.');return}
+      if(['revolute','coaxial','cylindrical','slider'].includes(kind)&&![a.reference.surface,b.reference.surface].every(surface=>['plane','cylinder','cone'].includes(surface))){setAssemblyStatus('Для осевого сопряжения выберите плоские или цилиндрические грани.');return}
+      const command={type:'add_assembly_mate',kind,a_instance_id:a.instance_id,b_instance_id:b.instance_id,
+        name:`${kind} · ${instanceA.name} — ${instanceB.name}`,reference_a:a.reference,reference_b:b.reference};
+      try{
+        await executeAssemblyCommand(command,{history:result=>{const mateId=result.history_entry?.result?.mate_id;if(!mateId)throw new Error('Core не вернул ID созданного сопряжения.');command.mate_id=mateId;return{undo:{type:'remove_assembly_mate',mate_id:mateId},redo:cloneJson(command)}}});
+        state.assemblyFacePicks=[];state.assemblyFacePickMode=false;modelViewer?.setSelectedFaces?.([]);renderAssemblyProps();
+      }catch(error){setAssemblyStatus(error.message)}
     }
     async function editAssemblyProperties(instance,fields){
       const command={type:'set_assembly_instance_properties',instance_id:instance.id,...fields};
@@ -767,6 +814,12 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if(quaternionInputs.length===4){const orientation=quaternionInputs.sort((a,b)=>Number(a.dataset.mateOrientation.split(':').at(-1))-Number(b.dataset.mateOrientation.split(':').at(-1))).map(input=>Number(input.value));if(!orientation.every(Number.isFinite)){setAssemblyStatus('Введите конечные компоненты quaternion.');return}const norm=Math.hypot(...orientation);if(Math.abs(norm-1)>1e-5){setAssemblyStatus('Quaternion должен иметь единичную длину.');return}if(orientation.some((value,index)=>value!==mate.orientation[index])){command.orientation=orientation;inverse.orientation=mate.orientation.slice()}}
       if(Object.keys(command).length===2){setAssemblyStatus('Координаты сопряжения не изменились.');return}
       try{await executeAssemblyCommand(command,{history:{undo:inverse,redo:command}})}catch(error){setAssemblyStatus(error.message)}
+    }
+    async function removeAssemblyMate(mateId){
+      const mate=(state.assembly?.mates||[]).find(item=>item.id===mateId);if(!mate)return;
+      const {id,...record}=cloneJson(mate),command={type:'remove_assembly_mate',mate_id:id};
+      const undo={type:'add_assembly_mate',mate_id:id,...record};
+      try{await executeAssemblyCommand(command,{history:{undo,redo:command}})}catch(error){setAssemblyStatus(error.message)}
     }
     async function travelAssemblyHistory(direction){
       const source=direction==='undo'?assemblyUndo:assemblyRedo,entry=source[source.length-1];if(!entry)return;
@@ -940,10 +993,14 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
               || y < Math.min(ay, by, cy) || y > Math.max(ay, by, cy)) continue;
           const depth = triangleDepth(x, y, ax, ay, projected[a + 2],
             bx, by, projected[b + 2], cx, cy, projected[c + 2]);
-          if (depth !== null && (!best || depth > best.depth)) best = { mesh, depth };
+          if (depth !== null && (!best || depth > best.depth)) {
+            const triangleIndex=Math.floor(face/3),faceRange=(mesh.face_triangle_ranges||[]).find(range=>triangleIndex>=range.start&&triangleIndex<range.end);
+            best={mesh,depth,faceIndex:faceRange?.face_index};
+          }
         }
       }
       if (!best) return;
+      if(state.assemblyFacePickMode){if(best.mesh.instance_path?.length&&Number.isInteger(best.faceIndex))void pickAssemblyGeometryFace(best.mesh,best.faceIndex);else setAssemblyStatus('Выберите грань B-rep размещённой детали.');return}
       if(best.mesh.instance_path?.length){selectAssemblyOccurrence(best.mesh.object_id,best.mesh.instance_id,e);return}
       const body=state.byId.get(best.mesh.source_body_id||best.mesh.object_id);
       if(!body)return;
@@ -1118,7 +1175,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         state.lock=info.lock||state.lock;state.kinematics=info.assembly_kinematics||state.kinematics;
         if(state.project===id&&state.rev===info.document.revision){if(state.selectedInstanceId)renderAssemblyProps();return}
         if(scene.revision!==info.document.revision){schedule();return}
-        const projectChanged=state.project!==id;state.project=id;state.rev=info.document.revision;
+        const projectChanged=state.project!==id,revisionChanged=!projectChanged&&state.rev!==info.document.revision;state.project=id;state.rev=info.document.revision;
+        if(projectChanged||revisionChanged){assemblyTopologyCache.clear();state.assemblyFacePicks=[];state.assemblyFacePickMode=false;modelViewer?.setSelectedFaces?.([])}
         state.objects=info.document.objects||[];state.parameters=info.document.model_parameters||{};
         state.bindings=info.document.parameter_bindings||[];state.assembly=info.document.assembly||null;
         state.byId=new Map(state.objects.map(o=>[o.id,o]));if(projectChanged)restoreModelTreeState(id);

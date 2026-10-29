@@ -21,9 +21,9 @@ v12 добавляет сохраняемые рабочие плоскости 
 
 ## English
 
-Document v12 introduced persisted work-plane frames. The current document version is **v14**, the project envelope remains **v1**, and the assembly graph is **v5**. A schema version is distinct from a project revision: `expected_revision` must match that project's saved revision.
+Document v12 introduced persisted work-plane frames. The current document version is **v15**, the project envelope remains **v1**, and the assembly graph is **v6**. A schema version is distinct from a project revision: `expected_revision` must match that project's saved revision.
 
-v12 adds persisted YZ, CUSTOM and FACE sketch work planes while preserving legacy XY/XZ sketches, local coordinates and offsets. The authoritative field definitions, face-attachment rules, v11→v12 migration and operation limitations live in the [work-plane contract](../../docs/sketch-workplanes.md). The current document version is **v14**; see the [v14 entry point](document-model-v14.md).
+v12 adds persisted YZ, CUSTOM and FACE sketch work planes while preserving legacy XY/XZ sketches, local coordinates and offsets. The authoritative field definitions, face-attachment rules, v11→v12 migration and operation limitations live in the [work-plane contract](../../docs/sketch-workplanes.md). The current document version is **v15**; see the [v15 entry point](document-model-v15.md).
 
 Other applicable contracts:
 

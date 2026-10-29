@@ -22,6 +22,7 @@ IDENTITY_FRAME = {"translation": [0.0, 0.0, 0.0],
                   "rotation": [1.0, 0.0, 0.0, 0.0]}
 DEFAULT_LIMITS = {"angle_min_deg": None, "angle_max_deg": None,
                   "offset_min_mm": None, "offset_max_mm": None}
+FACE_SURFACES = {"plane", "cylinder", "cone", "sphere"}
 
 
 def _number(value: Any, label: str) -> float:
@@ -34,6 +35,32 @@ def _frame(value: Any, label: str) -> None:
     if not isinstance(value, dict) or set(value) != {"translation", "rotation"}:
         raise ValidationError(f"{label} requires translation and rotation.")
     validate_transform(value["translation"], value["rotation"])
+
+
+def _vector(value: Any, label: str) -> None:
+    if (not isinstance(value, list) or len(value) != 3
+            or any(type(component) not in (int, float) or not math.isfinite(component)
+                   for component in value)):
+        raise ValidationError(f"{label} must be a finite XYZ vector.")
+
+
+def _geometry_reference(value: Any, label: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, dict) or set(value) != {
+        "body_id", "face_key", "face_index", "surface", "origin", "direction"
+    }:
+        raise ValidationError(f"{label} requires body_id, semantic face key, index, surface and local axis data.")
+    if (not isinstance(value["body_id"], str) or not value["body_id"].startswith("body:")
+            or not isinstance(value["face_key"], str) or not value["face_key"].startswith("face:")
+            or type(value["face_index"]) is not int or value["face_index"] < 0
+            or value["surface"] not in FACE_SURFACES):
+        raise ValidationError(f"{label} has invalid body or face identity.")
+    _vector(value["origin"], f"{label} origin")
+    _vector(value["direction"], f"{label} direction")
+    norm = math.sqrt(sum(float(component) ** 2 for component in value["direction"]))
+    if abs(norm - 1.0) > 1e-6:
+        raise ValidationError(f"{label} direction must be unit length.")
 
 
 def _limits(value: Any, kind: str, angle: float, offset: float) -> None:
@@ -80,7 +107,8 @@ def validate_mate_records(graph: dict[str, Any]) -> None:
     for mate in mates:
         if not isinstance(mate, dict) or set(mate) != {
             "id", "name", "kind", "a_instance_id", "b_instance_id",
-            "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation", "limits"
+            "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation", "limits",
+            "reference_a", "reference_b",
         }:
             raise ValidationError("Assembly mate record has invalid fields.")
         ident = mate["id"]
@@ -116,6 +144,10 @@ def validate_mate_records(graph: dict[str, Any]) -> None:
         if kind not in {"coincident", "spherical"} and orientation != [1.0, 0.0, 0.0, 0.0]:
             raise ValidationError("Only coincident and spherical mates accept free relative orientation.")
         _limits(mate["limits"], kind, angle, offset)
+        _geometry_reference(mate["reference_a"], "Mate reference A")
+        _geometry_reference(mate["reference_b"], "Mate reference B")
+        if (mate["reference_a"] is None) != (mate["reference_b"] is None):
+            raise ValidationError("Geometry-referenced mates need matching references A and B.")
 
 
 def _pose(translation: list[float], rotation: list[float]) -> dict[str, list[float]]:

@@ -16,6 +16,10 @@ assert.match(assemblyEditor, /previewAssemblyTransform\(/,
   "mouse manipulation updates an isolated viewport preview");
 assert.match(assemblyEditor, /data-gizmo-kind/,
   "the viewport exposes axis and rotation manipulators");
+assert.match(assemblyEditor, /pickAssemblyGeometryFace\(/,
+  "viewport face selection resolves against read-only OCCT topology");
+assert.match(assemblyEditor, /createAssemblyMateFromFaces\(/,
+  "two selected geometry references create a persisted assembly mate");
 assert.match(assemblyEditor, /cadyx:project-lock/,
   "the assembly editor reacts to AI and human lock state");
 const start = source.indexOf("    const positions = [], bodyPositions = []");
@@ -25,6 +29,7 @@ const body = { id: "body:part", type: "body", geometry: { kind: "extruded_profil
 const mesh = (id, x, instance = true) => ({
   object_id: id, ...(instance ? { source_body_id: body.id } : {}), type: "body",
   positions: [x, 0, 0, x + 1, 0, 0, x, 1, 0], triangles: [0, 1, 2], lines: [0, 1], points: [],
+  face_triangle_ranges: [{ face_index: 3, start: 0, end: 1 }],
 });
 for (const objects of [[mesh("instance:a", 0), mesh("instance:b", 10)], [mesh(body.id, 0, false)]]) {
   const sandbox = {
@@ -36,6 +41,9 @@ for (const objects of [[mesh("instance:a", 0), mesh("instance:b", 10)], [mesh(bo
   assert.equal(sandbox.geometry.triangles.length, objects.length * 3);
   assert.equal(sandbox.geometry.bodyTriangleRanges.length, objects.length);
   assert.equal(sandbox.geometry.bodyVertexRanges.length, objects.length);
+  assert.equal(sandbox.geometry.faceTriangleRanges.length, objects.length);
+  assert.deepEqual(Array.from(sandbox.geometry.faceTriangleRanges, (range) => range.faceIndex),
+    objects.map(() => 3));
   assert.deepEqual(Array.from(sandbox.geometry.bodyVertexRanges, (range) => range.objectId),
     objects.map((object) => object.object_id));
   assert.deepEqual(Array.from(sandbox.geometry.bodyTriangleRanges, (range) => range.objectId),

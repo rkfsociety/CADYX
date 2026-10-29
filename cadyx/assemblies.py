@@ -6,7 +6,7 @@ from typing import Any
 
 from .errors import ValidationError
 
-ASSEMBLY_VERSION = 5
+ASSEMBLY_VERSION = 6
 IDENTITY_ROTATION = [1.0, 0.0, 0.0, 0.0]
 IDENTITY_TRANSLATION = [0.0, 0.0, 0.0]
 

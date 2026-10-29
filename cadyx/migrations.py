@@ -10,7 +10,7 @@ from typing import Any, Callable
 from .errors import ValidationError
 
 PROJECT_VERSION = 1
-DOCUMENT_VERSION = 14
+DOCUMENT_VERSION = 15
 
 
 def _document_v1_to_v2(value: dict[str, Any]) -> None:
@@ -156,13 +156,31 @@ def _document_v13_to_v14(value: dict[str, Any]) -> None:
     value["version"] = 14
 
 
+def _document_v14_to_v15(value: dict[str, Any]) -> None:
+    graph = value.get("assembly")
+    if (not isinstance(graph, dict) or graph.get("version") != 5
+            or not isinstance(graph.get("mates"), list)):
+        raise ValidationError("Document v14 requires an assembly v5 graph.")
+    legacy_mate_fields = {
+        "id", "name", "kind", "a_instance_id", "b_instance_id",
+        "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation", "limits",
+    }
+    for mate in graph["mates"]:
+        if not isinstance(mate, dict) or set(mate) != legacy_mate_fields:
+            raise ValidationError("Document v14 has an invalid assembly mate.")
+        mate["reference_a"] = None
+        mate["reference_b"] = None
+    graph["version"] = 6
+    value["version"] = 15
+
+
 _DOCUMENT_STEPS = {1: _document_v1_to_v2, 2: _document_v2_to_v3,
                    3: _document_v3_to_v4, 4: _document_v4_to_v5,
                    5: _document_v5_to_v6, 6: _document_v6_to_v7,
                    7: _document_v7_to_v8, 8: _document_v8_to_v9,
                    9: _document_v9_to_v10, 10: _document_v10_to_v11,
                    11: _document_v11_to_v12, 12: _document_v12_to_v13,
-                   13: _document_v13_to_v14}
+                   13: _document_v13_to_v14, 14: _document_v14_to_v15}
 _PROJECT_STEPS: dict[int, Callable[[dict[str, Any]], None]] = {}
 
 
