@@ -40,6 +40,17 @@ assert.match(assemblyEditor, /cadyx:project-lock/,
   "the assembly editor reacts to AI and human lock state");
 assert.match(assemblyEditor, /finishAssemblyGizmo\(\{pointerId\},false\)/,
   "an AI edit cancels and clears an in-flight human drag preview");
+const pickStart = assemblyEditor.indexOf("    function pick(e) {");
+const pickEnd = assemblyEditor.indexOf("    function previewAssemblyTransform(", pickStart);
+assert.ok(pickStart >= 0 && pickEnd > pickStart);
+let clearedEmptySelection = 0;
+const emptyClick = { canvas: { width: 800, height: 600,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) },
+  projectSetup: () => ({}), state: { scene: { objects: [] } },
+  clearSelection: () => { clearedEmptySelection++; } };
+vm.runInNewContext(`${assemblyEditor.slice(pickStart, pickEnd)}; this.pick=pick;`, emptyClick);
+emptyClick.pick({ clientX: 12, clientY: 12 });
+assert.equal(clearedEmptySelection, 1, "clicking empty viewport clears the current selection");
 
 function appFunction(name, nextMarker) {
   const start = assemblyEditor.indexOf(`    async function ${name}(`);

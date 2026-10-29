@@ -1017,7 +1017,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           }
         }
       }
-      if (!best) return;
+      if (!best) {clearSelection();return}
       if(state.assemblyFacePickMode){if(best.mesh.instance_path?.length&&(state.assemblyPickKind==='vertex'||Number.isInteger(best.faceIndex)))void pickAssemblyGeometryFace(best.mesh,best.faceIndex,e,best.depth);else setAssemblyStatus('Выберите геометрию B-rep размещённой детали.');return}
       if(best.mesh.instance_path?.length){selectAssemblyOccurrence(best.mesh.object_id,best.mesh.instance_id,e);return}
       const body=state.byId.get(best.mesh.source_body_id||best.mesh.object_id);
