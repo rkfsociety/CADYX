@@ -103,6 +103,7 @@ def _classify(measured: dict[str, Any], required: float, tolerance: float) -> di
             or type(measured.get("inner_solution")) is not bool
             or type(measured.get("solution_count")) is not int or measured["solution_count"] < 1):
         raise ValidationError("OCCT returned invalid assembly-fit metrics.")
+    distance, deflection, volume = float(distance), float(deflection), float(volume)
     witnesses = []
     for field in ("point_on_first", "point_on_second"):
         point = measured.get(field)
