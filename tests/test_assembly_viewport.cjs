@@ -127,6 +127,24 @@ async function testAssemblyDragAndHistory() {
   assert.equal(calls[1][0].type, "apply");
   assert.equal(calls[1][1].historyAction, "redo");
 
+  const mateId = "mate:limits", oldLimits = { angle_min_deg: null, angle_max_deg: null,
+    offset_min_mm: null, offset_max_mm: null }, submitted = [];
+  const limitFields = ["angle_min_deg", "angle_max_deg", "offset_min_mm", "offset_max_mm"];
+  const limitValues = ["-90", "90", "", ""];
+  const limitInputs = limitFields.map((field, index) => ({ dataset: { mateLimit: `${mateId}:${field}` }, value: limitValues[index] }));
+  const limitSandbox = { state: { assembly: { mates: [{ id: mateId, kind: "revolute", angle_deg: 0,
+      offset_mm: 0, orientation: [1, 0, 0, 0], limits: oldLimits }] } },
+    props: { querySelector: () => null,
+      querySelectorAll: selector => selector.includes("data-mate-limit") ? limitInputs : [] },
+    CSS: { escape: value => value }, cloneJson: value => JSON.parse(JSON.stringify(value)),
+    executeAssemblyCommand: async (...args) => submitted.push(args), setAssemblyStatus: () => {} };
+  vm.runInNewContext(`${appFunction("applyAssemblyMate", "    async function removeAssemblyMate")}; this.apply=applyAssemblyMate;`, limitSandbox);
+  await limitSandbox.apply({ id: "instance:a" }, mateId);
+  assert.deepEqual(JSON.parse(JSON.stringify(submitted[0][0].limits)), { angle_min_deg: -90, angle_max_deg: 90,
+    offset_min_mm: null, offset_max_mm: null }, "blank bounds become null in the saved mate command");
+  assert.deepEqual(JSON.parse(JSON.stringify(submitted[0][1].history.undo.limits)), oldLimits,
+    "the mate editor preserves previous bounds for Undo");
+
   const integratedRequests = [], api = { refresh: async () => {} };
   api.request = async (url, options = {}) => {
     integratedRequests.push([url, options]);
