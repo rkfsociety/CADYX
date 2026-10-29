@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import queue
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -107,6 +108,12 @@ class CadyxHTTPServer(ThreadingHTTPServer):
 
     def release_sse_slot(self) -> None:
         self._sse_slots.release()
+
+    def handle_error(self, request: _SOCKET_REQUEST, client_address: tuple[str, int]) -> None:
+        error = sys.exc_info()[1]
+        if isinstance(error, (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
 
     def process_request(self, request: _SOCKET_REQUEST, client_address: tuple[str, int]) -> None:
         if not self.try_acquire_request_slot():

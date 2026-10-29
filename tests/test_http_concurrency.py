@@ -7,7 +7,7 @@ import threading
 import time
 import unittest
 from http.client import HTTPConnection
-from http.server import BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -95,6 +95,22 @@ class HTTPConcurrencyTests(unittest.TestCase):
 
         self.server.release_sse_slot()
         self.server.release_request_slot()
+
+    def test_expected_peer_disconnects_do_not_hide_other_server_errors(self) -> None:
+        with patch.object(ThreadingHTTPServer, "handle_error") as parent_handler:
+            for error in (ConnectionAbortedError(), ConnectionResetError(), BrokenPipeError()):
+                with self.subTest(error=type(error).__name__):
+                    try:
+                        raise error
+                    except type(error):
+                        self.server.handle_error(None, ("127.0.0.1", 0))
+                parent_handler.assert_not_called()
+
+            try:
+                raise RuntimeError("unexpected handler bug")
+            except RuntimeError:
+                self.server.handle_error(None, ("127.0.0.1", 0))
+            parent_handler.assert_called_once_with(None, ("127.0.0.1", 0))
 
         self.assertTrue(self.server.try_acquire_request_slot())
         self.assertTrue(self.server.try_acquire_sse_slot())
