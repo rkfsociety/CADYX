@@ -48,6 +48,26 @@ class WebApiTests(unittest.TestCase):
             with urlopen(request) as response:
                 self.assertIsNone(response.headers["Content-Encoding"])
                 self.assertEqual(json.loads(response.read())["data"], "repeated " * 2000)
+            for encoding, should_compress in (
+                ("gzip;q=0.5", True),
+                ("br, gzip; q=1.0", True),
+                ("*;q=0.5", True),
+                ("gzip;q=0, *;q=1", False),
+                ("gzip;q=bogus", False),
+                ("gzip;q=1.5", False),
+                ("gzip;q=0.0", False),
+                ("br", False),
+            ):
+                with self.subTest(accept_encoding=encoding):
+                    request = Request(self.base_url + "/api/v1/projects",
+                                      headers={"Accept-Encoding": encoding})
+                    with urlopen(request, timeout=3) as response:
+                        compressed = response.headers.get("Content-Encoding") == "gzip"
+                        self.assertEqual(compressed, should_compress)
+                        payload = response.read()
+                        if compressed:
+                            payload = gzip.decompress(payload)
+                        self.assertEqual(json.loads(payload)["data"], "repeated " * 2000)
 
     def test_browser_inspection_omits_history_but_preserves_default_api(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Browser snapshot"})

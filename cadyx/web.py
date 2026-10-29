@@ -64,6 +64,32 @@ def _ui_asset_version() -> str:
         return version
 
 
+def _accepts_gzip(accept_encoding: str) -> bool:
+    """Honor explicit gzip q-values and wildcard fallback."""
+    explicit: bool | None = None
+    wildcard: bool | None = None
+    for encoding in accept_encoding.split(","):
+        name, *parameters = encoding.split(";")
+        coding = name.strip().lower()
+        if coding not in {"gzip", "*"}:
+            continue
+        quality = 1.0
+        for parameter in parameters:
+            key, separator, raw_value = parameter.strip().partition("=")
+            if key.strip().lower() == "q":
+                try:
+                    quality = float(raw_value.strip()) if separator else 0.0
+                except ValueError:
+                    quality = 0.0
+                break
+        allowed = 0.0 < quality <= 1.0
+        if coding == "gzip":
+            explicit = allowed
+        else:
+            wildcard = allowed
+    return explicit if explicit is not None else bool(wildcard)
+
+
 class CadyxHTTPServer(ThreadingHTTPServer):
     """Threaded HTTP server with bounded request/SSE admission and shutdown signaling."""
 
@@ -321,10 +347,7 @@ def make_request_handler(
         ) -> None:
             encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
             compressed = False
-            if len(encoded) >= 4096 and any(
-                item.strip().lower() == "gzip"
-                for item in self.headers.get("Accept-Encoding", "").split(",")
-            ):
+            if len(encoded) >= 4096 and _accepts_gzip(self.headers.get("Accept-Encoding", "")):
                 encoded = gzip.compress(encoded, compresslevel=1, mtime=0)
                 compressed = True
             self.send_response(status)
