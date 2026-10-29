@@ -99,11 +99,11 @@ async function testAssemblyDragAndHistory() {
   assert.equal(calls[1][0].type, "apply");
   assert.equal(calls[1][1].historyAction, "redo");
 
-  async function commandProtocol(commandFails) {
-    const requests = [], api = { refresh: async () => {} };
+  async function commandProtocol({ commandFails = false, revision = 12, lockState = "FREE" } = {}) {
+    const requests = [], api = { refreshCount: 0, refresh: async () => { api.refreshCount++; } };
     api.request = async (url, options = {}) => {
       requests.push([url, options]);
-      if (!options.method) return { document: { revision: 12 }, lock: { state: "FREE" } };
+      if (!options.method) return { document: { revision }, lock: { state: lockState } };
       if (url.endsWith("/leases")) return { lease: { lease_id: "lease:test" } };
       if (url.endsWith("/commands")) {
         if (commandFails) throw new Error("solver rejected movement");
@@ -115,18 +115,25 @@ async function testAssemblyDragAndHistory() {
       crypto: { randomUUID: () => "test-owner" }, assemblyUndo: [], assemblyRedo: [],
       assemblyLastRevision: null, setAssemblyStatus: () => {}, resetAssemblyHistory() {}, };
     vm.runInNewContext(`${appFunction("executeAssemblyCommand", "    async function pickAssemblyGeometryFace")}; this.execute=executeAssemblyCommand;`, sandbox);
-    if (commandFails) await assert.rejects(sandbox.execute({ type: "transform_assembly_instances" }), /solver rejected movement/);
+    const expectedError = commandFails ? /solver rejected movement/ : revision !== 12
+      ? /изменилась в другом сеансе/ : lockState !== "FREE" ? /изменяет сборку/ : null;
+    if (expectedError) await assert.rejects(sandbox.execute({ type: "transform_assembly_instances" }), expectedError);
     else await sandbox.execute({ type: "transform_assembly_instances" });
-    return requests;
+    return { requests, refreshCount: api.refreshCount };
   }
-  const requests = await commandProtocol(false);
+  const { requests } = await commandProtocol();
   assert.match(requests[0][0], /\?view=browser$/);
   assert.equal(JSON.parse(requests[1][1].body).owner_type, "human");
   assert.equal(JSON.parse(requests[2][1].body).expected_revision, 12);
   assert.match(requests[3][0], /\/lease%3Atest\/release$/);
-  const failedRequests = await commandProtocol(true);
+  const { requests: failedRequests } = await commandProtocol({ commandFails: true });
   assert.ok(failedRequests.some(([url]) => url.endsWith("/lease%3Atest/release")),
     "command failure still releases its human lease");
+  const stale = await commandProtocol({ revision: 13 });
+  assert.equal(stale.requests.length, 1, "stale revision is rejected before acquiring a human lease");
+  assert.equal(stale.refreshCount, 1, "stale revision refreshes the saved view");
+  const locked = await commandProtocol({ lockState: "AI_LOCKED" });
+  assert.equal(locked.requests.length, 1, "AI editing blocks mutation before human lease acquisition");
 }
 
 testAssemblyDragAndHistory().catch((error) => { console.error(error); process.exitCode = 1; });
