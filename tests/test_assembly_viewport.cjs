@@ -20,6 +20,12 @@ assert.match(assemblyEditor, /kinematics\.redundant_mate_ids\?\.length/,
   "the assembly inspector exposes solver redundancy diagnostics");
 assert.match(assemblyEditor, /pickAssemblyGeometryFace\(/,
   "viewport face selection resolves against read-only OCCT topology");
+assert.match(assemblyEditor, /assemblyPickKind==='vertex'/,
+  "the editor offers topological vertex picking for point constraints");
+assert.match(assemblyEditor, /entity_kind:'vertex'/,
+  "selected B-rep vertices produce typed persistent references");
+assert.match(assemblyEditor, /data-assembly-pick-kind/,
+  "the geometry picker switches between faces and vertices");
 assert.match(assemblyEditor, /createAssemblyMateFromFaces\(/,
   "two selected geometry references create a persisted assembly mate");
 for (const relation of ["parallel", "perpendicular", "distance", "angle"]) {

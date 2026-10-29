@@ -16,7 +16,6 @@
 #include <GeomAbs_SurfaceType.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
-#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
@@ -258,9 +257,21 @@ char* AgentTopologyImpl(const unsigned char* data, size_t size,
     const TopoDS_Shape shape = OneSolid(ReadBrep(data, size), "Topology input");
     std::ostringstream json;
     json.imbue(std::locale::classic());
-    json << std::setprecision(17) << "{\"edges\":[";
+    json << std::setprecision(17) << "{\"vertices\":[";
 
-    TopTools_IndexedMapOfShape edges;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> vertices;
+    TopExp::MapShapes(shape, TopAbs_VERTEX, vertices);
+    for (int index = 0; index < vertices.Extent(); ++index) {
+      if (index) json << ',';
+      const TopoDS_Vertex vertex = TopoDS::Vertex(vertices.FindKey(index + 1));
+      json << "{\"index\":" << index << ",\"position\":";
+      WritePoint(json, BRep_Tool::Pnt(vertex));
+      json << '}';
+    }
+
+    json << "],\"edges\":[";
+
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
     TopExp::MapShapes(shape, TopAbs_EDGE, edges);
     for (int index = 0; index < edges.Extent(); ++index) {
       if (index) json << ',';
@@ -311,7 +322,7 @@ char* AgentTopologyImpl(const unsigned char* data, size_t size,
     }
 
     json << "],\"faces\":[";
-    TopTools_IndexedMapOfShape faces;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
     TopExp::MapShapes(shape, TopAbs_FACE, faces);
     for (int index = 0; index < faces.Extent(); ++index) {
       if (index) json << ',';

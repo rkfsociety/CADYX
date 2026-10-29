@@ -1721,6 +1721,9 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(len(topology["edges"]), 12)
         self.assertEqual({edge["index"] for edge in topology["edges"]}, set(range(12)))
+        self.assertEqual(len(topology["vertices"]), 8)
+        self.assertEqual({vertex["index"] for vertex in topology["vertices"]}, set(range(8)))
+        self.assertEqual(len({vertex["semantic_key"] for vertex in topology["vertices"]}), 8)
 
     def test_agent_api_serves_read_only_scene_image_without_browser(self) -> None:
         status, created = self.request("/api/v1/agent/projects", {"name": "Server image"})

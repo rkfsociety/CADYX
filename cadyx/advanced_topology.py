@@ -42,6 +42,7 @@ def _signature(kind: str, item: dict[str, Any]) -> str:
         "axis_direction",
         "start",
         "end",
+        "position",
     ):
         if key in item:
             analytic[key] = _rounded(item[key])
@@ -78,11 +79,29 @@ def enrich_topology(geometry: dict[str, Any], result: dict[str, Any]) -> dict[st
 
     details = native.agent_topology(brep)
     if details is None:
-        details = {"edges": [], "faces": []}
+        details = {"vertices": [], "edges": [], "faces": []}
+    vertices = details.get("vertices")
     extra_edges = details.get("edges")
     faces = details.get("faces")
-    if not isinstance(extra_edges, list) or not isinstance(faces, list):
+    if (vertices is not None and not isinstance(vertices, list)
+            or not isinstance(extra_edges, list) or not isinstance(faces, list)):
         raise ValidationError("OCCT returned invalid analytic topology metadata.")
+    if vertices is None:
+        by_position: dict[tuple[float, float, float], dict[str, Any]] = {}
+        for edge in extra_edges:
+            if not isinstance(edge, dict):
+                continue
+            for key in ("start", "end"):
+                point = edge.get(key)
+                if isinstance(point, list) and len(point) == 3:
+                    by_position.setdefault(tuple(float(value) for value in point),
+                                           {"position": point})
+        vertices = [{"index": index, **item}
+                    for index, item in enumerate(by_position.values())]
+    for vertex in vertices:
+        if not isinstance(vertex, dict) or type(vertex.get("index")) is not int:
+            raise ValidationError("OCCT returned invalid vertex topology metadata.")
+        vertex["semantic_key"] = _signature("vertex", vertex)
 
     # New runtimes return complete face metadata together with analytic
     # topology, avoiding a second B-rep parse and face traversal. Keep the
@@ -106,5 +125,6 @@ def enrich_topology(geometry: dict[str, Any], result: dict[str, Any]) -> dict[st
     for face in faces:
         if isinstance(face, dict):
             face["semantic_key"] = _signature("face", face)
+    result["vertices"] = vertices
     result["faces"] = faces
     return result

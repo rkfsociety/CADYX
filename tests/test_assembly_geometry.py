@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import math
 import tempfile
 import unittest
 
-from cadyx.assembly_geometry import face_frame, make_face_reference, refresh_assembly_geometry_references
+from cadyx.assembly_geometry import (
+    face_frame, make_face_reference, make_vertex_reference,
+    refresh_assembly_geometry_references,
+)
 from cadyx.commands import CommandSystem
 from cadyx.core import CadyxCore
 from cadyx.errors import ValidationError
@@ -13,12 +17,14 @@ from cadyx.models import Document
 
 
 class TopologyKernel(PrimitiveKernelAdapter):
-    def __init__(self, faces):
+    def __init__(self, faces, vertices=None):
         self.faces = faces
+        self.vertices = vertices or []
 
     def topology(self, geometry):
         del geometry
-        return {"faces": deepcopy(self.faces), "edges": []}
+        return {"vertices": deepcopy(self.vertices),
+                "faces": deepcopy(self.faces), "edges": []}
 
 
 def plane_face(index, semantic_key, center):
@@ -66,10 +72,53 @@ class AssemblyGeometryReferenceTests(unittest.TestCase):
     def test_selected_face_creates_frames_and_persists_both_references(self):
         mate = self.mate()
         expected = face_frame(self.face)
-        self.assertEqual(mate["reference_a"]["face_key"], "face:top-v1")
+        self.assertEqual(mate["reference_a"]["entity_key"], "face:top-v1")
         self.assertEqual(mate["reference_b"]["body_id"], self.body_id)
         self.assertEqual(mate["frame_a"], expected)
         self.assertEqual(mate["frame_b"], expected)
+
+    def test_vertex_references_use_point_frames_for_coincidence_and_distance(self):
+        self.commands.execute(self.document, {
+            "type": "remove_assembly_mate", "mate_id": self.mate()["id"],
+        })
+        changed_geometry = self.kernel.create_box(width=2, height=1, depth=1)
+        for item in self.document.objects:
+            if item.get("id") in {self.body_id, self.feature_id}:
+                item["geometry"] = changed_geometry
+        vertices = [
+            {"index": 0, "semantic_key": "vertex:first", "position": [0.0, 0.0, 0.0]},
+            {"index": 1, "semantic_key": "vertex:second", "position": [1.0, 0.0, 0.0]},
+        ]
+        self.kernel.vertices = vertices
+        reference_a = make_vertex_reference(self.body_id, vertices[0])
+        reference_b = make_vertex_reference(self.body_id, vertices[1])
+        self.assertEqual(face_frame({"surface": "point", "position": vertices[0]["position"]}),
+                         {"translation": [0.0, 0.0, 0.0], "rotation": [1.0, 0.0, 0.0, 0.0]})
+        coincident = self.commands.execute(self.document, {
+            "type": "add_assembly_mate", "kind": "coincident",
+            "a_instance_id": self.a, "b_instance_id": self.b,
+            "reference_a": reference_a, "reference_b": reference_b,
+        })
+        self.assertEqual(coincident["kinematics"]["internal_dof"], 3)
+        poses = {item["id"]: item for item in self.document.assembly["instances"]}
+        point_a = poses[self.a]["translation"]
+        point_b = [poses[self.b]["translation"][i] + vertices[1]["position"][i]
+                   for i in range(3)]
+        self.assertAlmostEqual(math.dist(point_a, point_b), 0.0)
+        self.commands.execute(self.document, {
+            "type": "remove_assembly_mate", "mate_id": coincident["mate_id"],
+        })
+        separated = self.commands.execute(self.document, {
+            "type": "add_assembly_mate", "kind": "distance",
+            "a_instance_id": self.a, "b_instance_id": self.b,
+            "offset_mm": 5.0, "reference_a": reference_a, "reference_b": reference_b,
+        })
+        poses = {item["id"]: item for item in self.document.assembly["instances"]}
+        point_a = poses[self.a]["translation"]
+        point_b = [poses[self.b]["translation"][i] + vertices[1]["position"][i]
+                   for i in range(3)]
+        self.assertAlmostEqual(math.dist(point_a, point_b), 5.0)
+        self.assertEqual(separated["kinematics"]["internal_dof"], 5)
 
     def test_face_referenced_axis_relation_reaches_solved_saved_pose(self):
         self.commands.execute(self.document, {
@@ -94,7 +143,7 @@ class AssemblyGeometryReferenceTests(unittest.TestCase):
               2 * (qb[2] * qb[3] - qb[0] * qb[1]),
               1 - 2 * (qb[1] ** 2 + qb[2] ** 2)]
         self.assertAlmostEqual(sum(a * b for a, b in zip(za, zb, strict=True)), 0.0)
-        self.assertEqual(self.document.assembly["mates"][0]["reference_a"]["face_key"],
+        self.assertEqual(self.document.assembly["mates"][0]["reference_a"]["entity_key"],
                          "face:top-v1")
 
     def test_axis_relations_reject_faces_without_an_analytic_axis(self):
@@ -108,6 +157,24 @@ class AssemblyGeometryReferenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "require a planar or axial face"):
             refresh_assembly_geometry_references(graph, self.document.objects, self.kernel)
 
+    def test_vertex_rebind_rejects_a_vertex_that_moved_without_mutating_the_graph(self):
+        vertices = [{"index": 0, "semantic_key": "vertex:old", "position": [0.0, 0.0, 0.0]},
+                    {"index": 1, "semantic_key": "vertex:second", "position": [1.0, 0.0, 0.0]}]
+        self.kernel.vertices = vertices
+        graph = deepcopy(self.document.assembly)
+        graph["mates"][0]["reference_a"] = make_vertex_reference(self.body_id, vertices[0])
+        graph["mates"][0]["reference_b"] = make_vertex_reference(self.body_id, vertices[1])
+        self.kernel.vertices = [{"index": 0, "semantic_key": "vertex:moved", "position": [0.01, 0.0, 0.0]},
+                                vertices[1]]
+        changed = self.kernel.create_box(width=2, height=1, depth=1)
+        for item in self.document.objects:
+            if item.get("id") in {self.body_id, self.feature_id}:
+                item["geometry"] = changed
+        before = deepcopy(graph)
+        with self.assertRaisesRegex(ValidationError, "moved beyond the topology rebind tolerance"):
+            refresh_assembly_geometry_references(graph, self.document.objects, self.kernel)
+        self.assertEqual(graph, before)
+
     def test_unique_semantic_rebind_refreshes_frames_after_geometry_change(self):
         self.kernel.faces = [plane_face(1, "face:top-v2", [1.0, 2.0, 4.0])]
         new_geometry = self.kernel.create_box(width=2, height=1, depth=1)
@@ -117,7 +184,7 @@ class AssemblyGeometryReferenceTests(unittest.TestCase):
         result = refresh_assembly_geometry_references(
             self.document.assembly, self.document.objects, self.kernel,
         )
-        self.assertEqual(self.mate()["reference_a"]["face_key"], "face:top-v2")
+        self.assertEqual(self.mate()["reference_a"]["entity_key"], "face:top-v2")
         self.assertEqual(self.mate()["frame_a"]["translation"], [1.0, 2.0, 4.0])
         self.assertEqual(self.mate()["frame_b"], self.mate()["frame_a"])
         poses = {pose["instance_id"]: pose["translation"] for pose in result["instance_poses"]}
@@ -186,7 +253,7 @@ class AssemblyGeometryReferenceTests(unittest.TestCase):
             self.kernel.faces = [plane_face(3, "face:top-v2", [1.0, 2.0, 5.0])]
             execute({"type": "set_parameter", "feature_id": feature, "name": "width", "value": 2})
             saved = core.inspect_project(project_id)
-            self.assertEqual(saved["document"]["assembly"]["mates"][0]["reference_a"]["face_key"],
+            self.assertEqual(saved["document"]["assembly"]["mates"][0]["reference_a"]["entity_key"],
                              "face:top-v2")
             revision = saved["document"]["revision"]
 

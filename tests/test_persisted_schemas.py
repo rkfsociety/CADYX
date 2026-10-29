@@ -138,7 +138,7 @@ class PersistedSchemaTests(unittest.TestCase):
                 }
             elif version >= 11:
                 saved["assembly"]["version"] = {
-                    11: 3, 12: 3, 13: 4, 14: 5, 15: 6, 16: 7,
+                    11: 3, 12: 3, 13: 4, 14: 5, 15: 6, 16: 7, 17: 8,
                 }[version]
             if version == 1:
                 saved["objects"] = [item for item in saved["objects"] if item["type"] != "sketch"]

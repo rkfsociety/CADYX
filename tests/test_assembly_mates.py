@@ -305,7 +305,7 @@ class AssemblyMateTests(unittest.TestCase):
         upgraded = migrate_document(old)
         self.assertEqual(old, before)
         self.assertEqual(upgraded["version"], DOCUMENT_VERSION)
-        self.assertEqual(upgraded["assembly"]["version"], 7)
+        self.assertEqual(upgraded["assembly"]["version"], 8)
         self.assertEqual(upgraded["assembly"]["mates"], [])
         self.assertEqual(Document.from_dict(upgraded).to_dict(), upgraded)
 

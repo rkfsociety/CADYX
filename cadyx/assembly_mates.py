@@ -28,6 +28,7 @@ IDENTITY_FRAME = {"translation": [0.0, 0.0, 0.0],
 DEFAULT_LIMITS = {"angle_min_deg": None, "angle_max_deg": None,
                   "offset_min_mm": None, "offset_max_mm": None}
 FACE_SURFACES = {"plane", "cylinder", "cone", "sphere"}
+REFERENCE_KINDS = {"face", "vertex"}
 
 
 def _number(value: Any, label: str) -> float:
@@ -53,13 +54,20 @@ def _geometry_reference(value: Any, label: str) -> None:
     if value is None:
         return
     if not isinstance(value, dict) or set(value) != {
-        "body_id", "face_key", "face_index", "surface", "origin", "direction"
+        "body_id", "entity_kind", "entity_key", "entity_index", "surface", "origin", "direction"
     }:
-        raise ValidationError(f"{label} requires body_id, semantic face key, index, surface and local axis data.")
+        raise ValidationError(f"{label} requires a body, typed B-rep entity key, index and local frame.")
+    entity_kind = value["entity_kind"]
+    entity_key = value["entity_key"]
+    surface = value["surface"]
+    surface_valid = ((isinstance(surface, str) and surface in FACE_SURFACES)
+                     if entity_kind == "face" else surface == "point")
     if (not isinstance(value["body_id"], str) or not value["body_id"].startswith("body:")
-            or not isinstance(value["face_key"], str) or not value["face_key"].startswith("face:")
-            or type(value["face_index"]) is not int or value["face_index"] < 0
-            or value["surface"] not in FACE_SURFACES):
+            or not isinstance(entity_kind, str) or entity_kind not in REFERENCE_KINDS
+            or not isinstance(entity_key, str)
+            or not entity_key.startswith("face:" if entity_kind == "face" else "vertex:")
+            or type(value["entity_index"]) is not int or value["entity_index"] < 0
+            or not surface_valid):
         raise ValidationError(f"{label} has invalid body or face identity.")
     _vector(value["origin"], f"{label} origin")
     _vector(value["direction"], f"{label} direction")

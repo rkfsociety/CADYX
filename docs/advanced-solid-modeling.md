@@ -14,7 +14,7 @@
 
 ## English reference
 
-These OCCT-backed operations extend the earlier Document v8 feature model; they run in the **current v16 document** and support complex molded housings, machined parts, and similar single-part models. The [work-plane contract](sketch-workplanes.md) identifies which operations accept YZ/custom/face-attached sketches and which still require legacy planes. The browser remains observation-only for these single-part operations; agents author these features through `cadyx_execute_command` / the Agent API.
+These OCCT-backed operations extend the earlier Document v8 feature model; they run in the **current v17 document** and support complex molded housings, machined parts, and similar single-part models. The [work-plane contract](sketch-workplanes.md) identifies which operations accept YZ/custom/face-attached sketches and which still require legacy planes. The browser remains observation-only for these single-part operations; agents author these features through `cadyx_execute_command` / the Agent API.
 
 ## Direct section loft workflow
 

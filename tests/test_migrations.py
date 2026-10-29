@@ -37,7 +37,7 @@ class MigrationTests(unittest.TestCase):
         original = copy.deepcopy(self.legacy)
         expected = copy.deepcopy(original)
         expected["document"]["version"] = DOCUMENT_VERSION
-        expected["document"]["assembly"] = {"version": 7, "units": "mm", "parts": [], "subassemblies": [], "instances": [], "mates": []}
+        expected["document"]["assembly"] = {"version": 8, "units": "mm", "parts": [], "subassemblies": [], "instances": [], "mates": []}
         expected["document"]["model_parameters"] = {}
         expected["document"]["parameter_bindings"] = []
         migrated = migrate_project(self.legacy)
@@ -53,7 +53,7 @@ class MigrationTests(unittest.TestCase):
         migrated = migrate_document(document)
 
         self.assertEqual(migrated["version"], DOCUMENT_VERSION)
-        self.assertEqual(migrated["assembly"]["version"], 7)
+        self.assertEqual(migrated["assembly"]["version"], 8)
         self.assertEqual(migrated["model_parameters"], {})
         self.assertEqual(migrated["parameter_bindings"], [])
         self.assertEqual(document["version"], 7)
@@ -76,7 +76,7 @@ class MigrationTests(unittest.TestCase):
         migrated = migrate_document(legacy)
         self.assertEqual(legacy, original)
         self.assertEqual(migrated["version"], DOCUMENT_VERSION)
-        self.assertEqual(migrated["assembly"]["version"], 7)
+        self.assertEqual(migrated["assembly"]["version"], 8)
         self.assertEqual(migrated["assembly"]["instances"][0]["grounded"], False)
         self.assertEqual(migrated["assembly"]["instances"][0]["visible"], True)
         self.assertEqual(Document.from_dict(migrated).to_dict(), migrated)
@@ -105,7 +105,7 @@ class MigrationTests(unittest.TestCase):
         migrated = migrate_document(legacy)
         self.assertEqual(legacy, original)
         self.assertEqual(migrated["version"], DOCUMENT_VERSION)
-        self.assertEqual(migrated["assembly"]["version"], 7)
+        self.assertEqual(migrated["assembly"]["version"], 8)
         self.assertEqual(migrated["assembly"]["mates"][0]["limits"], {
             "angle_min_deg": None, "angle_max_deg": None,
             "offset_min_mm": None, "offset_max_mm": None,
@@ -135,7 +135,7 @@ class MigrationTests(unittest.TestCase):
         migrated = migrate_document(legacy)
         self.assertEqual(legacy, original)
         self.assertEqual(migrated["version"], DOCUMENT_VERSION)
-        self.assertEqual(migrated["assembly"]["version"], 7)
+        self.assertEqual(migrated["assembly"]["version"], 8)
         self.assertIsNone(migrated["assembly"]["mates"][0]["reference_a"])
         self.assertIsNone(migrated["assembly"]["mates"][0]["reference_b"])
         self.assertEqual(Document.from_dict(migrated).to_dict(), migrated)
@@ -148,7 +148,38 @@ class MigrationTests(unittest.TestCase):
         migrated = migrate_document(legacy)
         self.assertEqual(legacy, original)
         self.assertEqual(migrated["version"], DOCUMENT_VERSION)
-        self.assertEqual(migrated["assembly"]["version"], 7)
+        self.assertEqual(migrated["assembly"]["version"], 8)
+        self.assertEqual(Document.from_dict(migrated).to_dict(), migrated)
+
+    def test_v16_migration_generalizes_persisted_face_reference_keys(self):
+        document = Document.create()
+        commands = CommandSystem(PrimitiveKernelAdapter())
+        body = commands.execute(document, {"type": "create_box", "width": 1,
+                                           "height": 1, "depth": 1})["body_id"]
+        part = commands.execute(document, {"type": "create_assembly_part",
+                                           "body_id": body})["part_id"]
+        first = commands.execute(document, {"type": "add_assembly_instance",
+                                            "target_id": part})["instance_id"]
+        second = commands.execute(document, {"type": "add_assembly_instance",
+                                             "target_id": part})["instance_id"]
+        commands.execute(document, {"type": "add_assembly_mate", "kind": "fixed",
+                                    "a_instance_id": first, "b_instance_id": second})
+        reference = {"body_id": body, "face_key": "face:top-v1", "face_index": 2,
+                     "surface": "plane", "origin": [0.0, 0.0, 1.0],
+                     "direction": [0.0, 0.0, 1.0]}
+        legacy = document.to_dict()
+        legacy["version"] = 16
+        legacy["assembly"]["version"] = 7
+        legacy["assembly"]["mates"][0]["reference_a"] = copy.deepcopy(reference)
+        legacy["assembly"]["mates"][0]["reference_b"] = copy.deepcopy(reference)
+        original = copy.deepcopy(legacy)
+        migrated = migrate_document(legacy)
+        self.assertEqual(legacy, original)
+        saved = migrated["assembly"]["mates"][0]["reference_a"]
+        self.assertEqual(saved["entity_kind"], "face")
+        self.assertEqual(saved["entity_key"], "face:top-v1")
+        self.assertEqual(saved["entity_index"], 2)
+        self.assertEqual(migrated["assembly"]["version"], 8)
         self.assertEqual(Document.from_dict(migrated).to_dict(), migrated)
 
     def test_project_migration_deep_copies_nested_document_once(self):

@@ -13,7 +13,8 @@ from .errors import ValidationError
 _AXIAL_SURFACES = {"cylinder", "cone"}
 _TOPOLOGY_CACHE_MAX_ENTRIES = 64
 _TOPOLOGY_CACHE_MAX_BYTES = 16 * 1024 * 1024
-_TOPOLOGY_CACHE: OrderedDict[tuple[Any, str], tuple[list[dict[str, Any]], int]] = OrderedDict()
+_VERTEX_REFERENCE_TOLERANCE_MM = 1e-6
+_TOPOLOGY_CACHE: OrderedDict[tuple[Any, str], tuple[dict[str, Any], int]] = OrderedDict()
 _TOPOLOGY_CACHE_BYTES = 0
 _TOPOLOGY_CACHE_LOCK = threading.RLock()
 
@@ -22,10 +23,10 @@ def _unit(value: Any, label: str) -> list[float]:
     if (not isinstance(value, list) or len(value) != 3
             or any(type(component) not in (int, float) or not math.isfinite(component)
                    for component in value)):
-        raise ValidationError(f"Assembly face {label} must be a finite XYZ vector.")
+        raise ValidationError(f"Assembly geometry {label} must be a finite XYZ vector.")
     norm = math.sqrt(sum(float(component) ** 2 for component in value))
     if norm <= 1e-12:
-        raise ValidationError(f"Assembly face {label} must be nonzero.")
+        raise ValidationError(f"Assembly geometry {label} must be nonzero.")
     return [float(component) / norm for component in value]
 
 
@@ -36,9 +37,11 @@ def _cross(a: list[float], b: list[float]) -> list[float]:
 
 
 def face_frame(face: dict[str, Any]) -> dict[str, list[float]]:
-    """Build a deterministic frame from the analytic face data returned by OCCT."""
+    """Build a deterministic local frame from analytic B-rep face or vertex data."""
     surface = face.get("surface")
-    if surface == "plane":
+    if surface == "point":
+        origin, direction = face.get("position"), [0.0, 0.0, 1.0]
+    elif surface == "plane":
         origin, direction = face.get("center"), face.get("normal")
     elif surface in _AXIAL_SURFACES:
         origin, direction = face.get("axis_origin"), face.get("axis_direction")
@@ -52,7 +55,10 @@ def face_frame(face: dict[str, Any]) -> dict[str, list[float]]:
     if (not isinstance(origin, list) or len(origin) != 3
             or any(type(component) not in (int, float) or not math.isfinite(component)
                    for component in origin)):
-        raise ValidationError("Assembly face has no finite local frame origin.")
+        raise ValidationError("Assembly geometry reference has no finite local frame origin.")
+    if surface == "point":
+        return {"translation": [float(component) for component in origin],
+                "rotation": [1.0, 0.0, 0.0, 0.0]}
     z_axis = _unit(direction, "axis")
     helper = [1.0, 0.0, 0.0] if abs(z_axis[0]) < 0.8 else [0.0, 1.0, 0.0]
     x_axis = _unit(_cross(helper, z_axis), "tangent axis")
@@ -90,34 +96,49 @@ def make_face_reference(body_id: str, face: dict[str, Any]) -> dict[str, Any]:
     w, x, y, z = direction
     axis = [2 * (x * z + w * y), 2 * (y * z - w * x),
             1 - 2 * (x * x + y * y)]
-    return {"body_id": body_id, "face_key": face["semantic_key"],
-            "face_index": face["index"], "surface": face["surface"],
+    return {"body_id": body_id, "entity_kind": "face",
+            "entity_key": face["semantic_key"], "entity_index": face["index"],
+            "surface": face["surface"],
             "origin": frame["translation"], "direction": axis}
 
 
-def _reference_candidate(reference: dict[str, Any], faces: list[dict[str, Any]], *,
+def make_vertex_reference(body_id: str, vertex: dict[str, Any]) -> dict[str, Any]:
+    position = vertex.get("position")
+    frame = face_frame({"surface": "point", "position": position})
+    return {"body_id": body_id, "entity_kind": "vertex",
+            "entity_key": vertex["semantic_key"], "entity_index": vertex["index"],
+            "surface": "point", "origin": frame["translation"],
+            "direction": [0.0, 0.0, 1.0]}
+
+
+def _reference_candidate(reference: dict[str, Any], topology: dict[str, Any], *,
                          allow_rebind: bool) -> dict[str, Any]:
-    exact = [face for face in faces if face.get("semantic_key") == reference["face_key"]]
+    entity_key = reference["entity_key"]
+    entries = topology.get("faces" if reference["entity_kind"] == "face" else "vertices", [])
+    exact = [item for item in entries if item.get("semantic_key") == entity_key]
     if len(exact) == 1:
         return exact[0]
     if len(exact) > 1:
-        raise ValidationError("Assembly face semantic key resolves to multiple faces.",
+        raise ValidationError("Assembly semantic geometry key resolves to multiple B-rep entities.",
                               code="ASSEMBLY_REFERENCE_AMBIGUOUS")
     if not allow_rebind:
-        raise ValidationError("Assembly face reference is stale or missing.",
+        raise ValidationError("Assembly geometry reference is stale or missing.",
                               code="ASSEMBLY_REFERENCE_INVALID",
-                              diagnostics={"entity_ids": [reference["face_key"]],
-                                           "failed_precondition": "the saved semantic face key must resolve exactly"})
+                              diagnostics={"entity_ids": [entity_key],
+                                           "failed_precondition": "the saved semantic B-rep key must resolve exactly"})
 
     direction = _unit(reference["direction"], "reference direction")
     origin = reference["origin"]
     candidates: list[tuple[float, dict[str, Any]]] = []
-    for face in faces:
-        if face.get("surface") != reference["surface"]:
+    for face in entries:
+        if face.get("surface", "point") != reference["surface"]:
             continue
         try:
-            frame = face_frame(face)
-            current = make_face_reference(reference["body_id"], face)
+            frame = (face_frame(face) if reference["entity_kind"] == "face" else
+                     face_frame({"surface": "point", "position": face.get("position")}))
+            current = (make_face_reference(reference["body_id"], face)
+                       if reference["entity_kind"] == "face" else
+                       make_vertex_reference(reference["body_id"], face))
         except ValidationError:
             continue
         alignment = sum(a * b for a, b in zip(direction, current["direction"], strict=True))
@@ -133,19 +154,26 @@ def _reference_candidate(reference: dict[str, Any], faces: list[dict[str, Any]],
         candidates.append((distance, face))
     candidates.sort(key=lambda item: (item[0], item[1].get("index", -1)))
     if not candidates:
-        raise ValidationError("Assembly face reference cannot be resolved after a geometry change.",
+        raise ValidationError("Assembly geometry reference cannot be resolved after a geometry change.",
                               code="ASSEMBLY_REFERENCE_INVALID",
-                              diagnostics={"entity_ids": [reference["face_key"]],
-                                           "failed_precondition": "a matching analytic face must remain"})
+                              diagnostics={"entity_ids": [entity_key],
+                                           "failed_precondition": "a matching analytic B-rep entity must remain"})
+    if reference["entity_kind"] == "vertex" and candidates[0][0] > _VERTEX_REFERENCE_TOLERANCE_MM:
+        raise ValidationError("Assembly vertex reference moved beyond the topology rebind tolerance.",
+                              code="ASSEMBLY_REFERENCE_INVALID",
+                              diagnostics={"entity_ids": [entity_key],
+                                           "measurements": {"distance_mm": candidates[0][0],
+                                                            "tolerance_mm": _VERTEX_REFERENCE_TOLERANCE_MM},
+                                           "failed_precondition": "the referenced vertex must remain at its saved position"})
     if len(candidates) > 1 and abs(candidates[1][0] - candidates[0][0]) <= 1e-7:
-        raise ValidationError("Assembly face reference became ambiguous after a geometry change.",
+        raise ValidationError("Assembly geometry reference became ambiguous after a geometry change.",
                               code="ASSEMBLY_REFERENCE_AMBIGUOUS",
-                              diagnostics={"entity_ids": [reference["face_key"]],
-                                           "failed_precondition": "one closest analytic face must remain"})
+                              diagnostics={"entity_ids": [entity_key],
+                                           "failed_precondition": "one closest analytic B-rep entity must remain"})
     return candidates[0][1]
 
 
-def _faces_for_body(body: dict[str, Any], kernel: Any) -> list[dict[str, Any]]:
+def _topology_for_body(body: dict[str, Any], kernel: Any) -> dict[str, Any]:
     global _TOPOLOGY_CACHE_BYTES
     # Topology is a kernel result, not just a property of serialized geometry:
     # adapters may implement different topology contracts for the same payload.
@@ -156,11 +184,11 @@ def _faces_for_body(body: dict[str, Any], kernel: Any) -> list[dict[str, Any]]:
             _TOPOLOGY_CACHE.move_to_end(key)
             return cached[0]
     topology = kernel.topology(body["geometry"])
-    faces = topology.get("faces") if isinstance(topology, dict) else None
-    if not isinstance(faces, list):
-        raise ValidationError("The geometry kernel did not return assembly face metadata.",
+    if (not isinstance(topology, dict) or not isinstance(topology.get("faces"), list)
+            or not isinstance(topology.get("vertices", []), list)):
+        raise ValidationError("The geometry kernel did not return assembly topology metadata.",
                               code="ASSEMBLY_REFERENCE_INVALID")
-    size = len(str(faces).encode("utf-8"))
+    size = len(str(topology).encode("utf-8"))
     if size <= _TOPOLOGY_CACHE_MAX_BYTES:
         with _TOPOLOGY_CACHE_LOCK:
             concurrent = _TOPOLOGY_CACHE.get(key)
@@ -172,9 +200,9 @@ def _faces_for_body(body: dict[str, Any], kernel: Any) -> list[dict[str, Any]]:
                     or len(_TOPOLOGY_CACHE) >= _TOPOLOGY_CACHE_MAX_ENTRIES)):
                 _, (_, removed_size) = _TOPOLOGY_CACHE.popitem(last=False)
                 _TOPOLOGY_CACHE_BYTES -= removed_size
-            _TOPOLOGY_CACHE[key] = (faces, size)
+            _TOPOLOGY_CACHE[key] = (topology, size)
             _TOPOLOGY_CACHE_BYTES += size
-    return faces
+    return topology
 
 
 def refresh_assembly_geometry_references(
@@ -190,18 +218,20 @@ def refresh_assembly_geometry_references(
     bodies = {item["id"]: item for item in objects if item.get("type") == "body"}
     parts = {item["id"]: item for item in candidate.get("parts", [])}
     instances = {item["id"]: item for item in candidate.get("instances", [])}
-    topologies: dict[str, list[dict[str, Any]]] = {}
+    topologies: dict[str, dict[str, Any]] = {}
     changed = False
     for mate in referenced:
         kind = mate.get("kind")
         for side in ("a", "b"):
-            surface = mate[f"reference_{side}"].get("surface")
-            if kind == "spherical" and surface != "sphere":
+            reference = mate[f"reference_{side}"]
+            surface = reference.get("surface")
+            entity_kind = reference.get("entity_kind")
+            if kind == "spherical" and (entity_kind != "face" or surface != "sphere"):
                 raise ValidationError("Spherical mates require spherical face references.",
                                       code="ASSEMBLY_REFERENCE_INVALID")
             if kind in {"revolute", "slider", "coaxial", "cylindrical",
                         "parallel", "perpendicular", "angle"} \
-                    and surface not in {"plane", "cylinder", "cone"}:
+                    and (entity_kind != "face" or surface not in {"plane", "cylinder", "cone"}):
                 raise ValidationError(f"{kind} mates require a planar or axial face reference.",
                                       code="ASSEMBLY_REFERENCE_INVALID")
         for side in ("a", "b"):
@@ -212,27 +242,30 @@ def refresh_assembly_geometry_references(
             part = parts.get(instance.get("target_id")) if instance else None
             if part is None or part.get("body_id") != reference["body_id"]:
                 raise ValidationError(
-                    f"Assembly {side.upper()} face reference does not belong to its instance part.",
+                    f"Assembly {side.upper()} geometry reference does not belong to its instance part.",
                     code="ASSEMBLY_REFERENCE_INVALID",
                     diagnostics={"entity_ids": [instance_id, reference["body_id"]]},
                 )
             body = bodies.get(reference["body_id"])
             if body is None or body.get("geometry") is None:
-                raise ValidationError("Assembly face reference body is missing or has no B-rep geometry.",
+                raise ValidationError("Assembly geometry reference body is missing or has no B-rep geometry.",
                                       code="ASSEMBLY_REFERENCE_INVALID",
                                       diagnostics={"entity_ids": [reference["body_id"]]})
-            faces = topologies.get(reference["body_id"])
-            if faces is None:
-                faces = _faces_for_body(body, kernel)
-                topologies[reference["body_id"]] = faces
-            face = _reference_candidate(reference, faces, allow_rebind=allow_rebind)
-            frame = face_frame(face)
-            updated = make_face_reference(reference["body_id"], face)
+            topology = topologies.get(reference["body_id"])
+            if topology is None:
+                topology = _topology_for_body(body, kernel)
+                topologies[reference["body_id"]] = topology
+            entity = _reference_candidate(reference, topology, allow_rebind=allow_rebind)
+            frame = (face_frame(entity) if reference["entity_kind"] == "face" else
+                     face_frame({"surface": "point", "position": entity["position"]}))
+            updated = (make_face_reference(reference["body_id"], entity)
+                       if reference["entity_kind"] == "face" else
+                       make_vertex_reference(reference["body_id"], entity))
             if reference != updated or mate[f"frame_{side}"] != frame:
                 if not allow_rebind:
-                    raise ValidationError("Saved assembly face frame does not match the current B-rep.",
+                    raise ValidationError("Saved assembly reference frame does not match the current B-rep.",
                                           code="ASSEMBLY_REFERENCE_INVALID",
-                                          diagnostics={"entity_ids": [reference["face_key"]]})
+                                          diagnostics={"entity_ids": [reference["entity_key"]]})
                 mate[key] = updated
                 mate[f"frame_{side}"] = frame
                 changed = True

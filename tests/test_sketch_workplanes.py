@@ -24,7 +24,7 @@ class SketchWorkplaneTests(unittest.TestCase):
     def test_old_xy_xz_round_trip(self):
         old = self.document.to_dict()
         old["version"] = DOCUMENT_VERSION - 1
-        old["assembly"]["version"] = 6
+        old["assembly"]["version"] = 7
         old["objects"] = [{
             "id": "sketch:00000000-0000-0000-0000-000000000001", "type": "sketch",
             "name": "Legacy section", "plane": "XZ",

@@ -10,7 +10,7 @@ from typing import Any, Callable
 from .errors import ValidationError
 
 PROJECT_VERSION = 1
-DOCUMENT_VERSION = 16
+DOCUMENT_VERSION = 17
 
 
 def _document_v1_to_v2(value: dict[str, Any]) -> None:
@@ -190,6 +190,33 @@ def _document_v15_to_v16(value: dict[str, Any]) -> None:
     value["version"] = 16
 
 
+def _document_v16_to_v17(value: dict[str, Any]) -> None:
+    graph = value.get("assembly")
+    if (not isinstance(graph, dict) or graph.get("version") != 7
+            or not isinstance(graph.get("mates"), list)):
+        raise ValidationError("Document v16 requires an assembly v7 graph.")
+    mate_fields = {
+        "id", "name", "kind", "a_instance_id", "b_instance_id", "frame_a", "frame_b",
+        "angle_deg", "offset_mm", "orientation", "limits", "reference_a", "reference_b",
+    }
+    reference_fields = {"body_id", "face_key", "face_index", "surface", "origin", "direction"}
+    for mate in graph["mates"]:
+        if not isinstance(mate, dict) or set(mate) != mate_fields:
+            raise ValidationError("Document v16 has an invalid assembly mate.")
+        for side in ("a", "b"):
+            key = f"reference_{side}"
+            reference = mate[key]
+            if reference is None:
+                continue
+            if not isinstance(reference, dict) or set(reference) != reference_fields:
+                raise ValidationError("Document v16 has an invalid assembly face reference.")
+            reference["entity_kind"] = "face"
+            reference["entity_key"] = reference.pop("face_key")
+            reference["entity_index"] = reference.pop("face_index")
+    graph["version"] = 8
+    value["version"] = 17
+
+
 _DOCUMENT_STEPS = {1: _document_v1_to_v2, 2: _document_v2_to_v3,
                    3: _document_v3_to_v4, 4: _document_v4_to_v5,
                    5: _document_v5_to_v6, 6: _document_v6_to_v7,
@@ -197,7 +224,7 @@ _DOCUMENT_STEPS = {1: _document_v1_to_v2, 2: _document_v2_to_v3,
                    9: _document_v9_to_v10, 10: _document_v10_to_v11,
                    11: _document_v11_to_v12, 12: _document_v12_to_v13,
                    13: _document_v13_to_v14, 14: _document_v14_to_v15,
-                   15: _document_v15_to_v16}
+                   15: _document_v15_to_v16, 16: _document_v16_to_v17}
 _PROJECT_STEPS: dict[int, Callable[[dict[str, Any]], None]] = {}
 
 

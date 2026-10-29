@@ -4,7 +4,7 @@
 
 ## English
 
-The current document schema is **v16** and assembly graph is **v7**. The v15 → v16 migration validates existing v6 mate records and advances the graph version without changing their geometry or placements. The project envelope remains v1.
+Document v16 introduced assembly graph v7. The v15 → v16 migration validates existing v6 mate records and advances the graph version without changing their geometry or placements. The current schema is [v17](document-model-v17.md); the project envelope remains v1.
 
 The existing mate graph accepts four additional geometric relations: `parallel` constrains selected face-frame Z axes to parallel while retaining their saved separation; `perpendicular` constrains the axes to 90 degrees; `distance` constrains the Euclidean distance between face-frame origins in millimeters using `offset_mm`; and `angle` constrains the directed angle between face-frame axes in degrees using `angle_deg` (0–180). The desktop editor creates these relations from two selected planar or axial faces. Limits apply to the scalar coordinate where supported.
 
