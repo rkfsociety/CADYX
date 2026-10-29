@@ -20,7 +20,7 @@ assert.match(assemblyEditor, /previewAssemblyTransform\(/,
   "mouse manipulation updates an isolated viewport preview");
 assert.match(assemblyEditor, /canvas\.addEventListener\('pointerdown',e=>\{\s*if\(e\.button!==0\)return;\s*const facePick=state\.assemblyFacePickMode,mesh=facePick\?null:pick\(e\)/,
   "left pointer down selects a viewport occurrence as the start of direct drag manipulation");
-assert.match(assemblyEditor, /mesh=facePick\?null:pick\(e\),instanceId=assemblyCanvasDragAllowed\(\)&&mesh\?\.instance_path/,
+assert.match(assemblyEditor, /mesh=facePick\?null:pick\(e\);\s*let instanceId=assemblyCanvasDragAllowed\(\)&&mesh\?\.instance_path/,
   "occurrence selection remains available while assembly dragging respects edit locks");
 assert.match(assemblyEditor, /const right=\[orientation\[0\],orientation\[1\],orientation\[2\]\],up=\[orientation\[6\],orientation\[7\],orientation\[8\]\]/,
   "direct assembly dragging derives its axes from the camera orientation");
@@ -105,14 +105,28 @@ function appFunction(name, nextMarker) {
 }
 
 async function testAssemblyDragAndHistory() {
-  const editLockSandbox = { state: { lock: { state: "FREE", recovery_required: false } } };
+  let grounded = false;
+  const editLockSandbox = { state: { lock: { state: "FREE", recovery_required: false } },
+    assemblyTransformTargets: () => [{ instance_id: "instance:a" }],
+    assemblyComponentIds: () => new Set(["instance:a"]),
+    assemblyInstance: () => ({ grounded }),
+    instancePose: () => ({ translation: [0,0,0], rotation: [1,0,0,0] }),
+    setAssemblyStatus: message => { editLockSandbox.status = message; } };
   const dragAllowedStart = assemblyEditor.indexOf("    function assemblyCanvasDragAllowed()");
   const dragAllowedEnd = assemblyEditor.indexOf("    canvas.addEventListener('pointerdown'", dragAllowedStart);
   assert.ok(dragAllowedStart >= 0 && dragAllowedEnd > dragAllowedStart);
-  vm.runInNewContext(`${assemblyEditor.slice(dragAllowedStart, dragAllowedEnd)}; this.allowed=assemblyCanvasDragAllowed;`, editLockSandbox);
+  vm.runInNewContext(`${assemblyEditor.slice(dragAllowedStart, dragAllowedEnd)}; this.allowed=assemblyCanvasDragAllowed; this.blockReason=assemblyCanvasDragBlockReason;`, editLockSandbox);
   assert.equal(editLockSandbox.allowed(), true, "human canvas dragging is enabled with a confirmed free lock");
+  assert.equal(editLockSandbox.blockReason({ id: "instance:a" }), null,
+    "an ungrounded component can be moved through its constrained assembly solution");
+  grounded = true;
+  assert.match(editLockSandbox.blockReason({ id: "instance:a" }), /закреплённую деталь/,
+    "a grounded connected component explains why direct rigid dragging is rejected");
+  grounded = false;
   editLockSandbox.state.lock = { state: "AI_LOCKED", recovery_required: false };
   assert.equal(editLockSandbox.allowed(), false, "AI edits block canvas dragging");
+  assert.match(editLockSandbox.blockReason({ id: "instance:a" }), /заблокирована/,
+    "the canvas reports why a drag cannot start during an AI edit");
   editLockSandbox.state.lock = { state: "FREE", recovery_required: true };
   assert.equal(editLockSandbox.allowed(), false, "recovery-required projects block canvas dragging");
 

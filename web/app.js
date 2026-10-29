@@ -1101,9 +1101,17 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     gizmoRoot.addEventListener('pointercancel',event=>void finishAssemblyGizmo(event,false));
     let down=null;
     function assemblyCanvasDragAllowed(){return state.lock?.state==='FREE'&&!state.lock?.recovery_required}
+    function assemblyCanvasDragBlockReason(instance){
+      if(!assemblyCanvasDragAllowed())return 'Сборка сейчас заблокирована для редактирования.';
+      const targets=assemblyTransformTargets(instance,instancePose(instance));
+      if(targets.some(target=>[...assemblyComponentIds(target.instance_id)].some(id=>assemblyInstance(id)?.grounded)))return 'Выбранная группа содержит закреплённую деталь. Измените координату допустимого сопряжения.';
+      return null;
+    }
     canvas.addEventListener('pointerdown',e=>{
       if(e.button!==0)return;
-      const facePick=state.assemblyFacePickMode,mesh=facePick?null:pick(e),instanceId=assemblyCanvasDragAllowed()&&mesh?.instance_path?.length?mesh.instance_id:null,instance=assemblyInstance(instanceId);
+      const facePick=state.assemblyFacePickMode,mesh=facePick?null:pick(e);
+      let instanceId=assemblyCanvasDragAllowed()&&mesh?.instance_path?.length?mesh.instance_id:null,instance=assemblyInstance(instanceId);
+      if(instance){const blocked=assemblyCanvasDragBlockReason(instance);if(blocked){setAssemblyStatus(blocked);instanceId=null;instance=null}}
       down={x:e.clientX,y:e.clientY,pointerId:e.pointerId,instance,mode:state.assemblyCoordinateMode,
         startLocal:instance?instancePose(instance):null,startShown:instance?selectedPose(instance,state.assemblyCoordinateMode):null,
         parent:instance?parentPoseForPath(state.selectedInstancePath):null,projection:instance?projectSetup():null,
