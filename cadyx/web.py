@@ -31,7 +31,7 @@ _SSE_SHUTDOWN_POLL_SECONDS = 0.25
 _SOCKET_REQUEST = socket | tuple[bytes, socket]
 _WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 _UI_ASSETS = (
-    "index.html", "app.js", "style.css", "viewport.js",
+    "index.html", "app.js", "style.css", "viewport.js", "viewport-helpers.js",
     "ply-parser.js", "ply-preview.js", "scan-view.js", "device-settings.js",
     "turntable-controls.js", "scan-preview-worker.js", "browser-state.js", "favicon.svg",
 )
@@ -396,7 +396,7 @@ def make_request_handler(
                 version_meta = f'<meta name="cadyx-ui-version" content="{version}">'.encode("ascii")
                 data = data.replace(b"</head>", version_meta + b"</head>", 1)
                 assets = (
-                    "style.css", "viewport.js", "browser-state.js", "ply-parser.js", "ply-preview.js", "scan-view.js",
+                    "style.css", "viewport.js", "viewport-helpers.js", "browser-state.js", "ply-parser.js", "ply-preview.js", "scan-view.js",
                     "device-settings.js", "turntable-controls.js", "app.js"
                 )
                 for asset in assets:

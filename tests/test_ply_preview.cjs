@@ -3,6 +3,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
+const html = fs.readFileSync(path.join(__dirname, "../web/index.html"), "utf8");
+assert.match(html, /<script src="\/assets\/viewport\.js" defer><\/script>\s*<script src="\/assets\/viewport-helpers\.js" defer><\/script>[\s\S]*?<script src="\/assets\/ply-preview\.js" defer><\/script>/,
+  "the viewport helper defining shared camera presets loads before the project list initializes");
 const parserSandbox = {
   window: {},
   TextDecoder,

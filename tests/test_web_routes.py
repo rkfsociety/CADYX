@@ -78,6 +78,7 @@ class WebRouteTableTests(unittest.TestCase):
             ("DELETE", "/api/v1/agent/projects/p-2/files/input%20part.step", "agent_project_file_delete",
              {"project_id": "p-2", "filename": "input%20part.step"}),
             ("GET", "/assets/viewport.js", "asset_viewport", {}),
+            ("GET", "/assets/viewport-helpers.js", "asset_viewport_helpers", {}),
             ("GET", "/assets/browser-state.js", "asset_browser_state", {}),
             ("GET", "/assets/scan-view.js", "asset_scan_view", {}),
             ("GET", "/assets/scan-preview-worker.js", "asset_scan_preview_worker", {}),

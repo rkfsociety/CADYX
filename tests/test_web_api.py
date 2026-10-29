@@ -1700,6 +1700,7 @@ class WebApiTests(unittest.TestCase):
             index = response.read()
             self.assertIn(b"CADYX", index)
             self.assertLess(index.index(b'/assets/browser-state.js'), index.index(b'/assets/ply-preview.js'))
+            self.assertLess(index.index(b'/assets/viewport-helpers.js'), index.index(b'/assets/ply-preview.js'))
             self.assertIn(b'/assets/turntable-controls.js?v=', index)
             version_match = re.search(rb'<meta name="cadyx-ui-version" content="([a-f0-9]{64})">', index)
             self.assertIsNotNone(version_match)
@@ -1715,6 +1716,9 @@ class WebApiTests(unittest.TestCase):
         with urlopen(self.base_url + "/assets/browser-state.js", timeout=3) as response:
             self.assertEqual(response.status, 200)
             self.assertIn(b"currentProgressWork", response.read())
+        with urlopen(self.base_url + "/assets/viewport-helpers.js", timeout=3) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn(b"CAMERA_PRESETS", response.read())
         with urlopen(self.base_url + "/assets/turntable-controls.js", timeout=3) as response:
             self.assertEqual(response.status, 200)
             self.assertIn(b"CadyxTurntableControls", response.read())
