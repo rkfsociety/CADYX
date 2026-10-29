@@ -1328,16 +1328,32 @@ class Scan360CaptureController:
         alignment_failed = "table-map alignment failed" in log_tail.lower()
         preprocessing = self._preprocessing_payload(
             self._job.project_directory, self._job.run_id, self._job.frame_count, active=True)
-        metadata_warning = (state == "failed" and completed == self._job.frame_count
-                            and capture_sweep_completed and not alignment_failed
-                            and preprocessing["preprocessing_status"] == "completed")
-        if state == "completed" or metadata_warning:
+        run_directory = self._run_directory(self._job.project_directory, self._job.run_id)
+        manifest_path = run_directory / f"{self._job.run_id}_scan_360.json"
+        alignment_status = self._alignment_status(self._job.project_directory, self._job.run_id)
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            manifest = None
+        manifest_ready = (isinstance(manifest, dict)
+                          and manifest.get("frame_count") == self._job.frame_count
+                          and manifest.get("preprocessing_status") == "completed")
+        pipeline_outputs_ready = (completed == self._job.frame_count and capture_sweep_completed
+                                  and not alignment_failed
+                                  and preprocessing["preprocessing_status"] == "completed"
+                                  and manifest_ready
+                                  and alignment_status in {
+                                      "aligned_provisional", "partial", "unavailable", "not_performed",
+                                  })
+        metadata_warning = return_code not in (None, 0) and pipeline_outputs_ready
+        state = "running" if return_code is None else "completed" if pipeline_outputs_ready else "failed"
+        if state == "completed" and not metadata_warning:
             completed = self._job.frame_count
-            state = "completed"
         message = (f"Кадр {completed}/{self._job.frame_count}; очищено {preprocessing['preprocessed_frames']}/{self._job.frame_count}; маркеров стола найдено {preprocessing['detected_table_marker_count']}, точек удалено {preprocessing['removed_table_marker_points']}; ошибок фильтра {preprocessing['preprocessing_failed_frames']}" if state == "running" else
                    f"Съёмка завершилась, но очистка кадров не прошла ({preprocessing['preprocessed_frames']}/{self._job.frame_count}); исходники сохранены." if preprocessing["preprocessing_status"] == "failed" else
                    f"{self._job.frame_count} кадров сохранены, но привязка к центру карты стола не прошла; исходные кадры сохранены." if alignment_failed else
-                   f"{self._job.frame_count} кадров сохранены. Запись манифеста завершилась ошибкой; журнал поз сохранён." if metadata_warning else
+                   f"{self._job.frame_count} кадров сохранены, но привязка или манифест не подтверждены; исходники сохранены." if capture_sweep_completed and state == "failed" else
+                   f"{self._job.frame_count} кадров, очистка, привязка и манифест проверены; процесс вернул код {return_code}." if metadata_warning else
                    "Съёмка 360° завершена; кадры сохранены в проекте." if state == "completed" else
                    f"Съёмка завершилась с ошибкой (код {return_code}); исходные кадры, если они успели сохраниться, оставлены в проекте.")
         snapshot = {
@@ -1353,10 +1369,8 @@ class Scan360CaptureController:
             self._run_directory(self._job.project_directory, self._job.run_id),
             self._job.run_id, completed, self._job.frame_count,
         ))
-        snapshot["table_alignment_status"] = self._alignment_status(
-            self._job.project_directory, self._job.run_id,
-        )
-        if state == "completed":
+        snapshot["table_alignment_status"] = alignment_status
+        if state == "completed" and not metadata_warning:
             message = {
                 "aligned_provisional": "Все кадры привязаны к центру карты стола; физический масштаб остаётся предварительным.",
                 "partial": "Часть кадров привязана к центру карты стола; остальные исходники сохранены для последующей привязки.",

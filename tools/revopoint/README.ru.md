@@ -294,13 +294,13 @@ $project = 'projects\<existing CADYX project folder>'
 
 Необязательная автономная утилита использует очищенные во время съёмки PLY, только если хеши исходников и результатов совпадают с JSON-отчётами. Для старых серий без очищенных файлов она прогоняет `isolation_filter` и `remove_overlaps` на каждом исходном PLY до регистрации; сами исходники не меняются. Только после этого облака прореживаются для поиска соответствий. Регистрация использует геометрию: энкодер стола, его ось и предполагаемый центр не участвуют в преобразованиях. FPFH/RANSAC задаёт начальное соответствие соседних кадров, затем каждый новый кадр устойчивым point-to-plane ICP совмещается с уже накопленным облаком. Граф поз Open3D оптимизирует соседние кадры и замыкания на первый; сильное ограничение последнего кадра с первым добавляется только при достаточной геометрической оценке ICP. Результат остаётся предварительным до проверки перекрытий и замыкания. После сшивки дополнительно остаётся крупнейшая связная компонента. Результат — PLY только с точками; сетка не строится. Документация Open3D: [глобальная регистрация признаков](https://www.open3d.org/docs/latest/tutorial/pipelines/global_registration.html) и [многокадровая регистрация](https://open3d.org/docs/latest/tutorial/pipelines/multiway_registration.html).
 
-Используйте отдельное виртуальное окружение, чтобы не смешивать его со средой приложения:
+Используйте отдельное виртуальное окружение, чтобы не смешивать его со средой приложения. Аргумент скрипта указывает на папку серии `<project>\<runId>`, а не на корень проекта:
 
 ```powershell
 python -m venv .runtime\scan-reconstruction\venv
 & .\.runtime\scan-reconstruction\venv\Scripts\python.exe -m pip install -r tools\revopoint\requirements-point-registration.txt
 $runId = 'revopoint_<YYYYMMDDTHHMMSSZ>'
-$project = 'projects\<existing CADYX project folder>'
+$project = Join-Path 'projects\<existing CADYX project folder>' $runId
 $output = ".runtime\scan-reconstruction\${runId}_first_frame_geometric_candidate.ply"
 & .\.runtime\scan-reconstruction\venv\Scripts\python.exe `
     tools\revopoint\register_point_clouds_first_frame.py $project $runId $output

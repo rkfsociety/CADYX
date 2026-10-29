@@ -290,13 +290,13 @@ The `LC_RT.bin` transform interpretation is empirical: the local 48-byte file is
 
 This optional offline tool reuses during-capture cleaned source PLYs only when their output hashes match the per-frame reports. For legacy series without those artifacts, it applies CADYX `isolation_filter` and `remove_overlaps` in memory before registration and leaves those legacy source files unchanged. Only after per-frame cleanup are the clouds downsampled for registration. Registration uses geometric correspondences and does not use the turntable encoder, table axis or a guessed pivot for transforms. FPFH/RANSAC seeds each adjacent pair. It then aligns each new frame to the accumulated cloud with robust point-to-plane ICP, optimizes adjacent and first-frame loop constraints in an Open3D pose graph, and adds a strong endpoint-closure constraint only when geometric ICP passes its fitness and residual checks. After stitching it keeps the largest connected point-cloud component. The JSON report records adjacent overlap, endpoint closure and local correction metrics; the result remains provisional until inspected. The output is a point-only PLY; no mesh is built. Open3D documents global feature registration and multiway pose-graph registration in its [global registration guide](https://www.open3d.org/docs/latest/tutorial/pipelines/global_registration.html) and [multiway registration guide](https://open3d.org/docs/latest/tutorial/pipelines/multiway_registration.html).
 
-Use an optional virtual environment so the app runtime stays separate from scan processing:
+Use an optional virtual environment so the app runtime stays separate from scan processing. The script's project argument is the series directory `<project>\<runId>`, not the project root:
 
 ```powershell
 python -m venv .runtime\scan-reconstruction\venv
 & .\.runtime\scan-reconstruction\venv\Scripts\python.exe -m pip install -r tools\revopoint\requirements-point-registration.txt
 $runId = 'revopoint_<YYYYMMDDTHHMMSSZ>'
-$project = 'projects\<existing CADYX project folder>'
+$project = Join-Path 'projects\<existing CADYX project folder>' $runId
 $output = ".runtime\scan-reconstruction\${runId}_first_frame_geometric_candidate.ply"
 & .\.runtime\scan-reconstruction\venv\Scripts\python.exe `
     tools\revopoint\register_point_clouds_first_frame.py $project $runId $output

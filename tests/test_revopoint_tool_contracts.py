@@ -39,6 +39,18 @@ class RevopointToolContractTests(unittest.TestCase):
         self.assertLess(zero.index("Math.Abs(tiltBaseline) > MaxSafeTiltDegrees"), zero.index('"+CT,TOZERO;"'))
         self.assertLess(zero.index("Math.Abs(tiltBaseline) > MaxSafeTiltDegrees"), zero.index('"+CR,TOZERO;"'))
 
+    def test_cleanup_exit_code_discrepancy_requires_hash_verified_outputs_before_alignment(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "tools" / "revopoint" / "scan_360.ps1").read_text(
+            encoding="utf-8",
+        )
+
+        self.assertIn("$preprocessingWorker.Refresh()", source)
+        self.assertIn("if ($workerExitCode -ne 0 -and $verifiedCleanupOutputs)", source)
+        self.assertIn("Get-FileHash -LiteralPath $cleanedPath -Algorithm SHA256", source)
+        worker_section = source[source.index("$preprocessingWorker.Refresh()") :]
+        self.assertLess(worker_section.index("if (-not $verifiedCleanupOutputs)"),
+                        worker_section.index("if (-not $SkipTableMarkerAlignment)"))
+
     def test_each_scan_frame_waits_two_seconds_before_the_next_motion(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "tools" / "revopoint" / "turntable.cs").read_text(
             encoding="utf-8",

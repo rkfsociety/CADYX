@@ -7,6 +7,7 @@ import os
 import subprocess
 import struct
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -84,6 +85,83 @@ class Scan360CaptureTests(unittest.TestCase):
     def test_turntable_map_rejects_invalid_record_data(self) -> None:
         with self.assertRaisesRegex(ValidationError, "invalid header or record count"):
             Scan360CaptureController._validate_marker_map(bytes(16))
+
+    def test_failed_post_capture_cleanup_is_not_reported_complete_without_alignment_and_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            project = workspace / "project-id"
+            run_id = "revopoint_20261029T120000Z"
+            run_directory = project / run_id
+            run_directory.mkdir(parents=True)
+            (project / "project.json").write_text(json.dumps({"id": "project-id", "name": "Part"}),
+                                                   encoding="utf-8")
+            log_path = run_directory / ".cadyx-scan360-20261029T120000.log"
+            log_path.write_text("sweep completed: 12 steps\n", encoding="utf-8")
+            frames = []
+            for index in range(12):
+                (run_directory / f"{run_id}_pose_{index:03d}.raw").touch()
+                (run_directory / f"{run_id}_pose_{index:03d}.ply").write_text("ply\n", encoding="ascii")
+                frames.append({"frame_index": index, "state": "completed",
+                               "table_marker_detection": "completed"})
+            (run_directory / f"{run_id}_preprocessing.json").write_text(json.dumps({
+                "state": "completed", "frames": frames, "failed_frames": [],
+                "cleaned_frame_count": 12, "failed_frame_count": 0,
+            }), encoding="utf-8")
+
+            controller = Scan360CaptureController(root, workspace)
+            controller._job = SimpleNamespace(
+                process=SimpleNamespace(poll=lambda: 1), log_path=log_path,
+                project_directory=project, run_id=run_id, frame_count=12,
+                step_degrees=30, started_at="2026-10-29T12:00:00+00:00",
+            )
+            status = controller._snapshot_locked()
+
+        self.assertEqual(status["completed_frames"], 12)
+        self.assertEqual(status["preprocessing_status"], "completed")
+        self.assertEqual(status["table_alignment_status"], "pending")
+        self.assertEqual(status["state"], "failed")
+
+    def test_nonzero_process_exit_is_accepted_only_after_final_artifacts_are_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            project = workspace / "project-id"
+            run_id = "revopoint_20261029T120000Z"
+            run_directory = project / run_id
+            run_directory.mkdir(parents=True)
+            (project / "project.json").write_text(json.dumps({"id": "project-id", "name": "Part"}),
+                                                   encoding="utf-8")
+            log_path = run_directory / ".cadyx-scan360-20261029T120000.log"
+            log_path.write_text("sweep completed: 12 steps\n", encoding="utf-8")
+            frames = []
+            for index in range(12):
+                (run_directory / f"{run_id}_pose_{index:03d}.raw").touch()
+                (run_directory / f"{run_id}_pose_{index:03d}.ply").write_text("ply\n", encoding="ascii")
+                frames.append({"frame_index": index, "state": "completed",
+                               "table_marker_detection": "completed"})
+            (run_directory / f"{run_id}_preprocessing.json").write_text(json.dumps({
+                "state": "completed", "frames": frames, "failed_frames": [],
+                "cleaned_frame_count": 12, "failed_frame_count": 0,
+            }), encoding="utf-8")
+            (run_directory / f"{run_id}_table_alignment.json").write_text(
+                json.dumps({"status": "aligned_provisional"}), encoding="utf-8")
+            (run_directory / f"{run_id}_scan_360.json").write_text(json.dumps({
+                "frame_count": 12, "preprocessing_status": "completed",
+                "table_alignment_status": "aligned_provisional",
+            }), encoding="utf-8")
+
+            controller = Scan360CaptureController(root, workspace)
+            controller._job = SimpleNamespace(
+                process=SimpleNamespace(poll=lambda: 1), log_path=log_path,
+                project_directory=project, run_id=run_id, frame_count=12,
+                step_degrees=30, started_at="2026-10-29T12:00:00+00:00",
+            )
+            status = controller._snapshot_locked()
+
+        self.assertEqual(status["state"], "completed")
+        self.assertEqual(status["table_alignment_status"], "aligned_provisional")
+        self.assertIn("вернул код 1", status["message"])
 
     def test_turntable_monitor_returns_read_only_wrapped_angle_samples(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

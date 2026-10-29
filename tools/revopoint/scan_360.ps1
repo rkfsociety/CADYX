@@ -292,20 +292,59 @@ try {
         $preprocessingWorker.WaitForExit()
         Remove-Item -LiteralPath $workerStopPath -Force -ErrorAction SilentlyContinue
     }
-    if ($preprocessingWorker.ExitCode -ne 0) {
+    $preprocessingWorker.Refresh()
+    $workerExitCode = $preprocessingWorker.ExitCode
+    $preprocessingResult = $null
+    $reportReadError = ''
+    if (Test-Path -LiteralPath $preprocessingReportPath) {
+        try { $preprocessingResult = Get-Content -LiteralPath $preprocessingReportPath -Raw | ConvertFrom-Json }
+        catch { $reportReadError = "Could not read per-frame cleanup details: $($_.Exception.Message)" }
+    }
+    $verifiedCleanupOutputs = $false
+    if ($null -ne $preprocessingResult) {
+        $reportFrames = @($preprocessingResult.frames)
+        $failedFrames = @($preprocessingResult.failed_frames)
+        $verifiedCleanupOutputs = $preprocessingResult.state -eq 'completed' `
+            -and $preprocessingResult.cleaned_frame_count -eq $frameCount `
+            -and $preprocessingResult.failed_frame_count -eq 0 `
+            -and $reportFrames.Count -eq $frameCount `
+            -and $failedFrames.Count -eq 0
+        for ($index = 0; $verifiedCleanupOutputs -and $index -lt $frameCount; $index++) {
+            $frameReport = $reportFrames[$index]
+            $cleanedName = [string]$frameReport.cleaned_file
+            $expectedHash = [string]$frameReport.cleaned_sha256
+            if ($frameReport.state -ne 'completed' -or $frameReport.frame_index -ne $index `
+                    -or [string]::IsNullOrWhiteSpace($cleanedName) `
+                    -or [IO.Path]::GetFileName($cleanedName) -ne $cleanedName `
+                    -or $expectedHash -notmatch '^[0-9a-fA-F]{64}$') {
+                $verifiedCleanupOutputs = $false
+                break
+            }
+            $cleanedPath = Join-Path $runDirectory $cleanedName
+            if (-not (Test-Path -LiteralPath $cleanedPath -PathType Leaf) `
+                    -or (Get-FileHash -LiteralPath $cleanedPath -Algorithm SHA256).Hash -ne $expectedHash) {
+                $verifiedCleanupOutputs = $false
+            }
+        }
+    }
+    if ($workerExitCode -ne 0 -and $verifiedCleanupOutputs) {
+        Write-Warning "Per-frame worker returned exit code $workerExitCode, but all $frameCount cleaned PLY files match its completed SHA-256 report; continuing to table alignment."
+    } elseif ($workerExitCode -ne 0) {
         $workerError = if (Test-Path -LiteralPath $workerStderr) { Get-Content -LiteralPath $workerStderr -Raw } else { '' }
-        if (Test-Path -LiteralPath $preprocessingReportPath) {
-            try {
-                $failedFrames = (Get-Content -LiteralPath $preprocessingReportPath -Raw | ConvertFrom-Json).failed_frames
-                $failureDetails = @($failedFrames | ForEach-Object { "frame $($_.frame_index): $($_.error)" }) -join '; '
-                if (-not [string]::IsNullOrWhiteSpace($failureDetails)) { $workerError = $failureDetails }
-            } catch { $workerError = "Could not read per-frame cleanup details: $($_.Exception.Message)" }
+        if ($null -ne $preprocessingResult -and $reportReadError -eq '') {
+            $failedFrames = @($preprocessingResult.failed_frames)
+            $failureDetails = @($failedFrames | ForEach-Object { "frame $($_.frame_index): $($_.error)" }) -join '; '
+            if (-not [string]::IsNullOrWhiteSpace($failureDetails)) { $workerError = $failureDetails }
+        } elseif (-not [string]::IsNullOrWhiteSpace($reportReadError)) {
+            $workerError = $reportReadError
         }
         throw "Per-frame cleanup failed; RAW files and not-yet-processed PLY frames remain available. Completed PLY frames were cleaned in place. $workerError"
     }
-    $preprocessingResult = Get-Content -LiteralPath $preprocessingReportPath -Raw | ConvertFrom-Json
-    if ($preprocessingResult.state -ne 'completed' -or $preprocessingResult.cleaned_frame_count -ne $frameCount) {
-        throw "Per-frame cleanup completed for $($preprocessingResult.cleaned_frame_count) of $frameCount frames; no stitched result was produced."
+    if ($null -eq $preprocessingResult) {
+        throw "Per-frame cleanup report is unavailable. $reportReadError"
+    }
+    if (-not $verifiedCleanupOutputs) {
+        throw "Per-frame cleanup outputs do not match a complete $frameCount-frame report; no registration or manifest was produced."
     }
     if (-not $SkipTableMarkerAlignment) {
         & $PythonExecutable $alignmentScript --project $runDirectory --run-id $runPrefix `
