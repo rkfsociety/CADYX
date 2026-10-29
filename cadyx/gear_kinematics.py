@@ -44,8 +44,13 @@ def solve_planetary_gearset(
     if len({round(value % 360.0, 10) for value in angles}) != len(angles):
         raise ValidationError("Planet positions must be distinct.")
 
-    sun_planet_center = module_value * (sun + planet) / 2.0
-    ring_planet_center = module_value * (ring - planet) / 2.0
+    try:
+        sun_planet_center = module_value * (sun + planet) / 2.0
+        ring_planet_center = module_value * (ring - planet) / 2.0
+    except OverflowError as exc:
+        raise ValidationError("Gear geometry exceeds the finite numeric range.") from exc
+    if not all(math.isfinite(value) for value in (sun_planet_center, ring_planet_center)):
+        raise ValidationError("Gear geometry exceeds the finite numeric range.")
     pitch_compatible = ring > planet and math.isclose(
         sun_planet_center, ring_planet_center, rel_tol=1e-12, abs_tol=1e-10,
     )
@@ -54,19 +59,29 @@ def solve_planetary_gearset(
     gaps = [ordered[(index + 1) % len(ordered)] - ordered[index]
             for index in range(len(ordered))]
     gaps[-1] += 360.0
-    phase_teeth = [((sun + ring) * gap / 360.0) for gap in gaps]
+    try:
+        phase_teeth = [((sun + ring) * gap / 360.0) for gap in gaps]
+    except OverflowError as exc:
+        raise ValidationError("Gear indexing exceeds the finite numeric range.") from exc
+    if not all(math.isfinite(value) for value in phase_teeth):
+        raise ValidationError("Gear indexing exceeds the finite numeric range.")
     phase_errors = [abs(value - round(value)) for value in phase_teeth]
     indexing_compatible = all(error <= 1e-9 for error in phase_errors)
-    external_phase = [
-        sun * (angle - sun_rotation) / 360.0
-        + planet * (angle + 180.0 - rotation) / 360.0
-        for angle, rotation in zip(angles, rotations, strict=True)
-    ]
-    internal_phase = [
-        ring * (angle - ring_rotation) / 360.0
-        - planet * (angle + 180.0 - rotation) / 360.0
-        for angle, rotation in zip(angles, rotations, strict=True)
-    ]
+    try:
+        external_phase = [
+            sun * (angle - sun_rotation) / 360.0
+            + planet * (angle + 180.0 - rotation) / 360.0
+            for angle, rotation in zip(angles, rotations, strict=True)
+        ]
+        internal_phase = [
+            ring * (angle - ring_rotation) / 360.0
+            - planet * (angle + 180.0 - rotation) / 360.0
+            for angle, rotation in zip(angles, rotations, strict=True)
+        ]
+    except OverflowError as exc:
+        raise ValidationError("Gear tooth phases exceed the finite numeric range.") from exc
+    if not all(math.isfinite(value) for value in (*external_phase, *internal_phase)):
+        raise ValidationError("Gear tooth phases exceed the finite numeric range.")
 
     def half_tooth_phase_error(value: float) -> float:
         distance = abs((value % 1.0) - 0.5)
@@ -78,8 +93,13 @@ def solve_planetary_gearset(
         error <= 1e-9 for error in (*external_phase_errors, *internal_phase_errors)
     )
 
-    carrier_speed = (sun * sun_speed + ring * ring_speed) / (sun + ring)
-    planet_speed = carrier_speed - (sun / planet) * (sun_speed - carrier_speed)
+    try:
+        carrier_speed = (sun * sun_speed + ring * ring_speed) / (sun + ring)
+        planet_speed = carrier_speed - (sun / planet) * (sun_speed - carrier_speed)
+    except OverflowError as exc:
+        raise ValidationError("Gear angular velocities exceed the finite numeric range.") from exc
+    if not math.isfinite(carrier_speed) or not math.isfinite(planet_speed):
+        raise ValidationError("Gear angular velocities exceed the finite numeric range.")
     return {
         "status": "pass" if pitch_compatible and indexing_compatible and rest_mesh_phase_compatible else "fail",
         "pitch_geometry_compatible": pitch_compatible,
@@ -114,7 +134,10 @@ def solve_planetary_gearset(
 def _finite(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValidationError(f"{name} must be a finite number.")
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ValidationError(f"{name} must be a finite number.") from exc
     if not math.isfinite(result):
         raise ValidationError(f"{name} must be a finite number.")
     return result

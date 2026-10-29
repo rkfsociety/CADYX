@@ -46,6 +46,29 @@ class PlanetaryGearKinematicsTests(unittest.TestCase):
         self.assertFalse(result["planet_layout_balanced"])
         self.assertEqual(result["status"], "pass")
 
+    def test_extreme_numeric_inputs_raise_validation_errors(self) -> None:
+        valid = dict(
+            module=2.0,
+            sun_teeth=18,
+            planet_teeth=18,
+            ring_teeth=54,
+            planet_angles_degrees=[0.0, 120.0, 240.0],
+            sun_speed_radians_per_second=1.0,
+            ring_speed_radians_per_second=0.0,
+        )
+        cases = (
+            {"module": 1e308},
+            {"sun_teeth": 10 ** 1000},
+            {"sun_rotation_degrees": 1e308},
+            {"sun_rotation_degrees": 10 ** 1000},
+            {"sun_speed_radians_per_second": 1e308},
+            {"ring_speed_radians_per_second": -1e308},
+        )
+        for overrides in cases:
+            with self.subTest(overrides=overrides):
+                with self.assertRaisesRegex(ValidationError, "finite"):
+                    solve_planetary_gearset(**{**valid, **overrides})
+
     def test_invalid_input_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValidationError, "distinct"):
             self.solve(teeth=(18, 18, 54), angles=[0.0, 0.0, 180.0])
