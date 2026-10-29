@@ -15,7 +15,7 @@
     const spinButton = document.querySelector('#turntable-spin');
     const scanButton = document.querySelector('#viewport-scan-360');
     const livePreviewButton = document.querySelector('#viewport-live-camera');
-    const scanButtonTitle = scanButton?.title || '';
+    let scanButtonTitle = scanButton?.title || '';
     let scanActive = false;
     let spinState = 'idle';
     let tiltAtZero = false;
@@ -32,6 +32,18 @@
     };
     const spinActive = () => spinState === 'starting' || spinState === 'running' || spinState === 'stopping';
     const livePreviewReady = () => livePreviewButton?.getAttribute('aria-pressed') === 'true';
+    const updateScanButtonTitle = () => {
+      if (!scanButton) return;
+      const stepDegrees = Number(step?.value);
+      const frameCount = Number.isInteger(stepDegrees) && stepDegrees > 0 && 360 % stepDegrees === 0
+        ? 360 / stepDegrees : 12;
+      const lastTwo = frameCount % 100;
+      const lastOne = frameCount % 10;
+      const frameWord = lastOne === 1 && lastTwo !== 11 ? 'кадр'
+        : lastOne >= 2 && lastOne <= 4 && (lastTwo < 12 || lastTwo > 14) ? 'кадра' : 'кадров';
+      scanButtonTitle = `Снять ${frameCount} ${frameWord} за полный оборот стола`;
+      if (!spinActive()) scanButton.title = scanButtonTitle;
+    };
     const setBusy = () => {
       const spinning = spinActive();
       for (const selector of ['#turntable-control-refresh', '#turntable-step', '#turntable-speed',
@@ -192,6 +204,8 @@
     panel.querySelector('#turntable-control-refresh').addEventListener('click', () => void command('query'));
     panel.querySelector('#turntable-rotate-left').addEventListener('click', () => void command('rotate', -Number(step.value)));
     panel.querySelector('#turntable-rotate-right').addEventListener('click', () => void command('rotate', Number(step.value)));
+    updateScanButtonTitle();
+    step?.addEventListener('change', updateScanButtonTitle);
     speed.value = String(window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.() || 18);
     speed.addEventListener('change', () => void command('speed', Number(speed.value)));
     tiltTarget.addEventListener('input', () => { tiltTargetValue.textContent = `${tiltTarget.value}°`; });

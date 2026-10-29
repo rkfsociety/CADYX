@@ -549,13 +549,14 @@ const serverModelGeometry = {
 const serverPreview = sandbox.window.CadyxScanView.initialize({
   cloudButton: serverPointCloudButton, meshButton: element(), viewport: element(), viewer,
   getModelGeometry: () => serverModelGeometry,
-  hasPersistentPointCloud: file => file === "merged.ply",
+  hasPersistentPointCloud: (file, scan) => file === "merged.ply"
+    || Boolean(scan?.preview_subfolder && "run-1_table_xy_candidate.ply".startsWith(`${scan.preview_subfolder}_`)),
   meshReady: false,
 }, undefined, fetchPreview);
 serverPreview.showCapture({ ...capture, state: "running" }, { open: true });
 await new Promise(resolve => setImmediate(resolve));
 assert.equal(serverPointCloudButton.attributes["aria-pressed"], "true");
-serverPreview.showCapture({ ...capture, state: "completed", preview_file: "merged.ply" });
+serverPreview.showCapture({ ...capture, state: "completed", preview_file: "frame-2_table_aligned.ply" });
 assert.equal(serverPointCloudButton.disabled, true, "a persisted fusion stays in the CAD model viewer");
 assert.equal(serverPointCloudButton.attributes["aria-pressed"], "false");
 assert.equal(viewerLoads.at(-1).geometry, serverModelGeometry, "completion restores the server-rendered point-cloud body");
@@ -638,7 +639,9 @@ assert.doesNotMatch(appJs, /new MutationObserver\(stopPreviewOutsideScanning\)\.
   "changing the live-preview button state must not synthesize a second toggle click");
 assert.doesNotMatch(appJs, /livePreviewController\?\.stop\(\)|stopPreviewOutsideScanning/,
   "workspace-tab changes do not stop the live camera preview");
-assert.match(appJs, /hasPersistentPointCloud:file=>state\.objects\.some/);
+assert.match(appJs, /hasPersistentPointCloud:\(file,scan\)=>state\.objects\.some/);
+assert.match(appJs, /startsWith\(`\$\{scan\.preview_subfolder\}_`\)/,
+  "a completed capture recognizes the imported fusion from the same scan run");
 assert.match(appJs, /showCapturePreview\(scan,\{open:captureStarted\}\)/);
 assert.match(appJs, /import_point_cloud:\['Облако точек','cloud'\]/);
 assert.match(appJs, /\.model-toolbar \.cad3-tool/);

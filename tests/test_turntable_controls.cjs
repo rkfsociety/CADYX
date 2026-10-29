@@ -97,6 +97,16 @@ const waitUntil = async predicate => {
 (async () => {
   await wait();
   assert.equal(elements['turntable-angle'].textContent, '12.0°');
+  assert.equal(elements['viewport-scan-360'].title, 'Снять 24 кадра за полный оборот стола',
+    'the 15-degree step reports the matching 24-frame capture count');
+  elements['turntable-step'].value = '30';
+  await handlers.get('turntable-step:change')();
+  assert.equal(elements['viewport-scan-360'].title, 'Снять 12 кадров за полный оборот стола');
+  elements['turntable-step'].value = '5';
+  await handlers.get('turntable-step:change')();
+  assert.equal(elements['viewport-scan-360'].title, 'Снять 72 кадра за полный оборот стола');
+  elements['turntable-step'].value = '15';
+  await handlers.get('turntable-step:change')();
   assert.equal(calls.some(call => call.options.method === 'POST'), false,
     'opening the panel reads cached state without contacting or moving hardware');
   assert.equal(elements['turntable-speed'].value, '18', 'the closest safe speed preset remains selected');

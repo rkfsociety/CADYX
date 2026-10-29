@@ -1673,7 +1673,7 @@
       }
       const shouldOpenCapturePreview = ['running', 'completed'].includes(scan?.state)
         && Boolean(scan?.preview_file) && !capturePreviewAutoOpened;
-      if (scan?.state === 'completed' && scan.preview_file && hasPersistentPointCloud(scan.preview_file)) {
+      if (scan?.state === 'completed' && scan.preview_file && hasPersistentPointCloud(scan.preview_file, scan)) {
         serverPointCloudVisible = true;
         if (livePreviewOwned) closeLivePreview();
         else if (cloudPreviewOpen || meshPreviewOpen) { restoreModel(); updateButton(); }
