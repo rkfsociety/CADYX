@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from collections import deque
 from copy import deepcopy
-import json
 import math
 from typing import Any
 
 from .assemblies import _multiply, _rotate, transform_point, validate_transform
 from .errors import ValidationError
+from .numerical import SparseRankAccumulator, solve_sparse_positive_definite
 
 MATE_DOF = {"fixed": 0, "coincident": 3, "coaxial": 2,
             "revolute": 1, "slider": 1, "cylindrical": 2, "spherical": 3,
@@ -21,6 +21,8 @@ MATE_DOF = {"fixed": 0, "coincident": 3, "coaxial": 2,
 AXIS_RELATIONS = {"parallel", "perpendicular", "distance", "angle"}
 POSITION_TOLERANCE_MM = 1e-6
 ROTATION_TOLERANCE_RAD = 1e-6
+CONSTRAINT_RANK_TOLERANCE = 1e-8
+MAX_LOOP_SOLVER_ITERATIONS = 40
 MAX_ASSEMBLY_INSTANCES = 16384
 MAX_ASSEMBLY_MATES = 65536
 IDENTITY_FRAME = {"translation": [0.0, 0.0, 0.0],
@@ -290,34 +292,241 @@ def _relation_matches(a: dict[str, Any], b: dict[str, Any], mate: dict[str, Any]
     return abs(distance - mate["offset_mm"]) <= POSITION_TOLERANCE_MM
 
 
-def _mate_signature(mate: dict[str, Any]) -> str:
-    reverse = mate["a_instance_id"] > mate["b_instance_id"]
-    kind = mate["kind"]
-    if kind in {"coincident", "spherical"} or (kind == "distance" and mate["offset_mm"] == 0):
-        kind = "origin_coincidence"
-    elif kind == "angle" and mate["angle_deg"] in {0, 180}:
-        kind = "parallel"
-    elif kind == "angle" and mate["angle_deg"] == 90:
-        kind = "perpendicular"
-    first = mate["frame_b" if reverse else "frame_a"]
-    second = mate["frame_a" if reverse else "frame_b"]
-    pair = sorted((mate["a_instance_id"], mate["b_instance_id"]))
-    if kind == "origin_coincidence":
-        fields = [pair, kind, first["translation"], second["translation"]]
-    else:
-        fields = [pair, kind, first, second, float(mate["angle_deg"]), float(mate["offset_mm"]),
-                  mate["orientation"],
-                  mate["reference_b" if reverse else "reference_a"],
-                  mate["reference_a" if reverse else "reference_b"]]
-    return json.dumps(fields, sort_keys=True, separators=(",", ":"))
-
-
 def _matches(a: dict[str, Any], b: dict[str, Any]) -> bool:
     distance = math.sqrt(sum((float(x) - float(y)) ** 2 for x, y in
                              zip(a["translation"], b["translation"])))
     dot = abs(sum(float(x) * float(y) for x, y in zip(a["rotation"], b["rotation"])))
     angle = 2 * math.acos(min(1.0, max(-1.0, dot)))
     return distance <= POSITION_TOLERANCE_MM and angle <= ROTATION_TOLERANCE_RAD
+
+
+def _unit_vector(vector: list[float]) -> list[float]:
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm <= 1e-15:
+        raise ValidationError("Assembly constraint frame contains a zero direction.")
+    return [value / norm for value in vector]
+
+
+def _tangent_basis(axis: list[float]) -> tuple[list[float], list[float]]:
+    helper = [1.0, 0.0, 0.0] if abs(axis[0]) < 0.8 else [0.0, 1.0, 0.0]
+    first = _unit_vector(_cross(axis, helper))
+    return first, _cross(axis, first)
+
+
+def _rotation_vector(quaternion: list[float]) -> list[float]:
+    w, x, y, z = quaternion
+    if w < 0:
+        w, x, y, z = -w, -x, -y, -z
+    vector = [x, y, z]
+    length = math.sqrt(sum(value * value for value in vector))
+    if length <= 1e-15:
+        return [0.0, 0.0, 0.0]
+    angle = 2.0 * math.atan2(length, max(0.0, w))
+    return [angle * value / length for value in vector]
+
+
+def _constraint_residuals(mate: dict[str, Any],
+                          poses: dict[str, dict[str, list[float]]], *,
+                          coordinates: bool = True) -> list[float]:
+    world_a = _compose(poses[mate["a_instance_id"]], mate["frame_a"])
+    world_b = _compose(poses[mate["b_instance_id"]], mate["frame_b"])
+    delta = [world_b["translation"][i] - world_a["translation"][i] for i in range(3)]
+    axis_a = _unit_vector(_rotate(world_a["rotation"], [0.0, 0.0, 1.0]))
+    axis_b = _unit_vector(_rotate(world_b["rotation"], [0.0, 0.0, 1.0]))
+    cross = _cross(axis_a, axis_b)
+    tangent_a, tangent_b = _tangent_basis(axis_a)
+    axis_residuals = [sum(cross[i] * tangent[i] for i in range(3))
+                      for tangent in (tangent_a, tangent_b)]
+    point_residuals = [sum(delta[i] * tangent[i] for i in range(3))
+                       for tangent in (tangent_a, tangent_b)]
+    kind = mate["kind"]
+    if kind == "fixed":
+        relative = _compose(_inverse(world_a), world_b)
+        error = _compose(_inverse(_motion(mate)), relative)
+        return [*error["translation"], *_rotation_vector(error["rotation"])]
+    if kind in {"coincident", "spherical"}:
+        return delta
+    if kind in {"coaxial", "cylindrical"}:
+        residuals = [*axis_residuals, *point_residuals]
+        if coordinates:
+            relative = _compose(_inverse(world_a), world_b)
+            error = _compose(_inverse(_motion(mate)), relative)
+            residuals.extend((sum(delta[i] * axis_a[i] for i in range(3)) - mate["offset_mm"],
+                              _rotation_vector(error["rotation"])[2]))
+        return residuals
+    if kind == "revolute":
+        residuals = [*axis_residuals, *point_residuals,
+                     sum(delta[i] * axis_a[i] for i in range(3))]
+        if coordinates:
+            relative = _compose(_inverse(world_a), world_b)
+            error = _compose(_inverse(_motion(mate)), relative)
+            residuals.append(_rotation_vector(error["rotation"])[2])
+        return residuals
+    if kind == "slider":
+        relative_rotation = _multiply(
+            [world_a["rotation"][0], *[-value for value in world_a["rotation"][1:]]],
+            world_b["rotation"],
+        )
+        residuals = [*_rotation_vector(relative_rotation), *point_residuals]
+        if coordinates:
+            residuals.append(sum(delta[i] * axis_a[i] for i in range(3)) - mate["offset_mm"])
+        return residuals
+    if kind == "parallel":
+        return axis_residuals
+    if kind == "perpendicular":
+        return [sum(axis_a[i] * axis_b[i] for i in range(3))]
+    if kind == "distance":
+        if mate["offset_mm"] <= POSITION_TOLERANCE_MM:
+            return delta
+        return [math.dist(world_a["translation"], world_b["translation"]) - mate["offset_mm"]]
+    if kind == "angle":
+        target = math.radians(mate["angle_deg"])
+        if mate["angle_deg"] <= 1e-8 or mate["angle_deg"] >= 180.0 - 1e-8:
+            sign = 1.0 if mate["angle_deg"] <= 1e-8 else -1.0
+            angular_cross = _cross(axis_a, [sign * value for value in axis_b])
+            return [sum(angular_cross[i] * tangent[i] for i in range(3))
+                    for tangent in (tangent_a, tangent_b)]
+        return [sum(axis_a[i] * axis_b[i] for i in range(3)) - math.cos(target)]
+    raise ValidationError("Assembly solver has no residual definition for this mate kind.")
+
+
+def _constraint_rank_count(mate: dict[str, Any]) -> int:
+    kind = mate["kind"]
+    if kind == "fixed":
+        return 6
+    if kind in {"coincident", "spherical"}:
+        return 3
+    if kind in {"coaxial", "cylindrical"}:
+        return 4
+    if kind in {"revolute", "slider"}:
+        return 5
+    if kind == "parallel":
+        return 2
+    if kind == "perpendicular":
+        return 1
+    if kind == "distance":
+        return 3 if mate["offset_mm"] <= POSITION_TOLERANCE_MM else 1
+    if kind == "angle":
+        return 2 if mate["angle_deg"] <= 1e-8 or mate["angle_deg"] >= 180.0 - 1e-8 else 1
+    raise ValidationError("Assembly solver has no rank definition for this mate kind.")
+
+
+def _pose_with_perturbation(pose: dict[str, list[float]], axis: int,
+                            amount: float) -> dict[str, list[float]]:
+    changed = _pose(pose["translation"].copy(), pose["rotation"].copy())
+    if axis < 3:
+        changed["translation"][axis] += amount
+        return changed
+    component = axis - 3
+    half = amount / 2.0
+    delta = [math.cos(half), 0.0, 0.0, 0.0]
+    delta[component + 1] = math.sin(half)
+    changed["rotation"] = _multiply(delta, changed["rotation"])
+    return changed
+
+
+def _mate_jacobian_rows(mate: dict[str, Any], poses: dict[str, dict[str, list[float]]],
+                        columns: dict[tuple[str, int], int], *,
+                        coordinates: bool = True) -> list[dict[int, float]]:
+    base = _constraint_residuals(mate, poses, coordinates=coordinates)
+    rows = [dict() for _ in base]
+    for instance_id in (mate["a_instance_id"], mate["b_instance_id"]):
+        for axis in range(6):
+            column = columns.get((instance_id, axis))
+            if column is None:
+                continue
+            current = (poses[instance_id]["translation"][axis] if axis < 3 else 0.0)
+            step = 1e-6 * max(1.0, abs(current)) if axis < 3 else 1e-6
+            plus, minus = dict(poses), dict(poses)
+            plus[instance_id] = _pose_with_perturbation(poses[instance_id], axis, step)
+            minus[instance_id] = _pose_with_perturbation(poses[instance_id], axis, -step)
+            left = _constraint_residuals(mate, plus, coordinates=coordinates)
+            right = _constraint_residuals(mate, minus, coordinates=coordinates)
+            for index, (low, high) in enumerate(zip(left, right, strict=True)):
+                derivative = (low - high) / (2.0 * step)
+                if abs(derivative) >= 1e-12:
+                    rows[index][column] = derivative
+    return rows
+
+
+def _pose_residuals(mates: list[dict[str, Any]],
+                    poses: dict[str, dict[str, list[float]]]) -> list[float]:
+    return [value for mate in mates for value in _constraint_residuals(mate, poses)]
+
+
+def _optimize_loop_component(mates: list[dict[str, Any]],
+                             poses: dict[str, dict[str, list[float]]],
+                             free_instances: list[str]) -> bool:
+    """Bounded damped least-squares closure solve, preserving grounded poses."""
+    columns = {(ident, axis): index * 6 + axis
+               for index, ident in enumerate(free_instances) for axis in range(6)}
+    size = len(columns)
+    if not size:
+        return max(map(abs, _pose_residuals(mates, poses)), default=0.0) <= POSITION_TOLERANCE_MM
+    damping = 1e-3
+    values = _pose_residuals(mates, poses)
+    score = sum(value * value for value in values)
+    for _ in range(MAX_LOOP_SOLVER_ITERATIONS):
+        if max(map(abs, values), default=0.0) <= POSITION_TOLERANCE_MM:
+            return True
+        sparse_jacobian = [row for mate in mates for row in _mate_jacobian_rows(mate, poses, columns)]
+        normal: dict[int, dict[int, float]] = {}
+        gradient = [0.0] * size
+        for row, residual in zip(sparse_jacobian, values, strict=True):
+            for i, first in row.items():
+                gradient[i] -= first * residual
+                entries = normal.setdefault(i, {})
+                for j, second in row.items():
+                    entries[j] = entries.get(j, 0.0) + first * second
+        for index in range(size):
+            row = normal.setdefault(index, {})
+            row[index] = row.get(index, 0.0) + damping * max(1.0, row.get(index, 0.0))
+        delta = solve_sparse_positive_definite(normal, gradient)
+        if delta is None:
+            return False
+        trial_poses = {ident: _pose(pose["translation"].copy(), pose["rotation"].copy())
+                       for ident, pose in poses.items()}
+        for ident in free_instances:
+            pose = trial_poses[ident]
+            index = columns[(ident, 0)]
+            for axis in range(3):
+                pose["translation"][axis] += delta[index + axis]
+            rotation_delta = [0.0, 0.0, 0.0, 0.0]
+            magnitude = math.sqrt(sum(delta[index + axis] ** 2 for axis in range(3, 6)))
+            if magnitude:
+                half = magnitude / 2.0
+                rotation_delta = [math.cos(half), *(math.sin(half) * delta[index + axis] / magnitude
+                                                     for axis in range(3, 6))]
+                pose["rotation"] = _multiply(rotation_delta, pose["rotation"])
+        trial_values = _pose_residuals(mates, trial_poses)
+        trial_score = sum(value * value for value in trial_values)
+        if math.isfinite(trial_score) and trial_score < score:
+            poses.update(trial_poses)
+            values, score = trial_values, trial_score
+            damping = max(1e-12, damping * 0.3)
+        else:
+            damping = min(1e12, damping * 10.0)
+    return max(map(abs, values), default=0.0) <= POSITION_TOLERANCE_MM
+
+
+def _raise_mate_conflict(mate: dict[str, Any], first: str, second: str,
+                         poses: dict[str, dict[str, list[float]]], *,
+                         grounded: bool = False) -> None:
+    residuals = _constraint_residuals(mate, poses)
+    maximum = max(map(abs, residuals), default=0.0)
+    message = (f"Conflicting grounded instance {second} at mate {mate['id']}; its saved pose "
+               "does not satisfy the assembly connection." if grounded else
+               f"Conflicting assembly mate loop at {mate['id']} between {first} and {second}; "
+               "check frames and joint coordinates.")
+    raise ValidationError(message, code="ASSEMBLY_CONSTRAINT_CONFLICT",
+                          diagnostics={"category": "constraint_solver",
+                                       "entity_ids": [mate["id"], first, second],
+                                       "failed_precondition": "all assembly mate residuals must be satisfied",
+                                       "measurements": {"residuals": residuals,
+                                                        "maximum_absolute_residual": maximum,
+                                                        "translation_tolerance_mm": POSITION_TOLERANCE_MM,
+                                                        "rotation_tolerance_rad": ROTATION_TOLERANCE_RAD},
+                                       "correction_hint": "Inspect the mate frames, joint coordinates and grounded poses."})
 
 
 def solve_assembly_mates(graph: dict[str, Any], *,
@@ -352,6 +561,7 @@ def solve_assembly_mates(graph: dict[str, Any], *,
     solutions: dict[str, dict[str, list[float]]] = {}
     anchors: list[str] = []
     redundant: set[str] = set()
+    loop_components: set[str] = set()
     component_for: dict[str, str] = {}
     grounded = sorted(ident for ident, item in instances.items() if item["grounded"])
     preferred = [anchor_instance_id] if anchor_instance_id is not None else []
@@ -385,9 +595,7 @@ def solve_assembly_mates(graph: dict[str, Any], *,
                                      else _matches(solutions[other], _next_pose(
                                          solutions[current], mate, forward, initial)))
                         if not satisfied:
-                            raise ValidationError(
-                                f"Conflicting assembly mate loop at {mate['id']} between "
-                                f"{current} and {other}; check frames and joint coordinates.")
+                            loop_components.add(root)
                     continue
 
                 mate, forward = relations[0]
@@ -405,9 +613,7 @@ def solve_assembly_mates(graph: dict[str, Any], *,
                         exact = _next_pose(solutions[current], additional,
                                            additional_forward, initial)
                         if not _matches(candidate, exact):
-                            raise ValidationError(
-                                f"Conflicting assembly mate loop at {additional['id']} between "
-                                f"{current} and {other}; check frames and joint coordinates.")
+                            loop_components.add(root)
 
                 grounded_pose = initial[other]
                 for mate, forward in relations:
@@ -422,16 +628,25 @@ def solve_assembly_mates(graph: dict[str, Any], *,
                                      else _matches(grounded_pose, _next_pose(
                                          solutions[current], mate, forward, initial)))
                     if not satisfied:
-                        if instances[other]["grounded"]:
-                            raise ValidationError(
-                                f"Conflicting grounded instance {other} at mate {mate['id']}; "
-                                "its saved pose does not satisfy the assembly connection.")
-                        raise ValidationError(
-                            f"Conflicting assembly mate loop at {mate['id']} between "
-                            f"{current} and {other}; check frames and joint coordinates.")
+                        loop_components.add(root)
                 solutions[other] = grounded_pose if instances[other]["grounded"] else candidate
                 queue.append(other)
                 component_for[other] = root
+
+        if root in loop_components:
+            members = {ident for ident, component in component_for.items() if component == root}
+            anchored = {ident for ident in members if instances[ident]["grounded"]}
+            free_instances = sorted(members - anchored) if anchored else sorted(members - {root})
+            component_mates = [mate for mate in graph["mates"]
+                               if component_for.get(mate["a_instance_id"]) == root]
+            component_poses = {ident: solutions[ident] for ident in members}
+            if not _optimize_loop_component(component_mates, component_poses, free_instances):
+                failing = max(component_mates, key=lambda mate: max(map(
+                    abs, _constraint_residuals(mate, component_poses)), default=0.0))
+                first, second = failing["a_instance_id"], failing["b_instance_id"]
+                _raise_mate_conflict(failing, first, second, component_poses,
+                                     grounded=instances[first]["grounded"] or instances[second]["grounded"])
+            solutions.update(component_poses)
 
         if require_unfixed_anchor and root != anchor_instance_id:
             if anchor_instance_id in solutions and any(
@@ -445,25 +660,43 @@ def solve_assembly_mates(graph: dict[str, Any], *,
                 )
 
     internal_dof = 0
+    constraint_rank = 0
+    constraint_equation_count = 0
+    rank_methods: set[str] = set()
     mates_by_component: dict[str, list[dict[str, Any]]] = {root: [] for root in anchors}
     for mate in graph["mates"]:
         mates_by_component[component_for[mate["a_instance_id"]]].append(mate)
     for root in anchors:
         members = {ident for ident, component in component_for.items() if component == root}
-        budget = 6 * max(0, len(members) - 1)
-        used_constraints = 0
-        signatures: set[str] = set()
-        component_mates = sorted(mates_by_component[root],
-                                 key=lambda mate: (-(6 - MATE_DOF[mate["kind"]]), mate["id"]))
+        anchored = {ident for ident in members if instances[ident]["grounded"]}
+        free_instances = sorted(members - anchored) if anchored else sorted(members - {root})
+        columns = {(ident, axis): index * 6 + axis
+                   for index, ident in enumerate(free_instances) for axis in range(6)}
+        component_poses = {ident: solutions[ident] for ident in members}
+        component_mates = sorted(mates_by_component[root], key=lambda mate: mate["id"])
+        if (len(component_mates) == len(members) - 1
+                and len(free_instances) == len(members) - 1):
+            # A tree adds one previously unconstrained body per edge, so the
+            # local rank of each mate sums exactly without building a global Jacobian.
+            rank = sum(_constraint_rank_count(mate) for mate in component_mates)
+            rank_methods.add("tree_constraint_rank")
+            equations = sum(len(_constraint_residuals(mate, component_poses, coordinates=False))
+                            for mate in component_mates)
+            constraint_rank += rank
+            constraint_equation_count += equations
+            internal_dof += max(0, len(columns) - rank)
+            continue
+
+        rank_methods.add("finite_difference_pose_jacobian")
+        rank_tracker = SparseRankAccumulator(tolerance=CONSTRAINT_RANK_TOLERANCE)
         for mate in component_mates:
-            signature = _mate_signature(mate)
-            contribution = 6 - MATE_DOF[mate["kind"]]
-            if signature in signatures or used_constraints + contribution > budget:
+            rows = _mate_jacobian_rows(mate, component_poses, columns, coordinates=False)
+            independent_rows = sum(rank_tracker.add_row(row) for row in rows)
+            constraint_equation_count += len(rows)
+            if independent_rows < len(rows):
                 redundant.add(mate["id"])
-                continue
-            signatures.add(signature)
-            used_constraints += contribution
-        internal_dof += max(0, budget - used_constraints)
+        constraint_rank += rank_tracker.rank
+        internal_dof += max(0, len(columns) - rank_tracker.rank)
 
     # Only commit placements when every closure is verified.
     for ident, pose in solutions.items():
@@ -476,6 +709,10 @@ def solve_assembly_mates(graph: dict[str, Any], *,
         "component_count": len(anchors),
         "global_dof": sum(0 if instances[root]["grounded"] else 6 for root in anchors),
         "internal_dof": internal_dof,
+        "constraint_rank": constraint_rank,
+        "constraint_equation_count": constraint_equation_count,
+        "rank_method": "+".join(sorted(rank_methods)) or "no_constraints",
+        "rank_tolerance": CONSTRAINT_RANK_TOLERANCE,
         "grounded_instance_ids": sorted(
             ident for ident, item in instances.items() if item["grounded"]
         ),

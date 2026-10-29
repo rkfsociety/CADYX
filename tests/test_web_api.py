@@ -878,6 +878,8 @@ class WebApiTests(unittest.TestCase):
         status, capabilities = self.request("/api/v1/agent/capabilities")
         self.assertEqual(status, 200)
         self.assertTrue(capabilities["read_only"])
+        self.assertIn("ASSEMBLY_CONSTRAINT_CONFLICT",
+                      {item["code"] for item in capabilities["errors"]})
         self.assertTrue(any(route["path"] == "/api/v1/agent/projects/{id}/commands" for route in capabilities["routes"]))
         self.assertTrue(any(route["path"] == "/api/v1/agent/projects/{id}/capabilities" for route in capabilities["routes"]))
         advertised = {item["type"] for item in capabilities["commands"]}
@@ -1128,6 +1130,35 @@ class WebApiTests(unittest.TestCase):
             if lease is not None:
                 self.core.release_lease(project_id, lease["lease_id"])
             self.core.events.unsubscribe(subscriber_id)
+
+    def test_assembly_snapshot_stays_readable_until_agent_edit_lease_releases(self) -> None:
+        _, created = self.request("/api/v1/projects", {
+            "name": "Assembly lock scenario", "project_type": "assembly",
+        })
+        project_id = created["project"]["id"]
+        base = f"/api/v1/agent/projects/{project_id}"
+        _, agent = self.request(base + "/leases", {"owner_id": "assembly-ai"})
+        lease_id = agent["lease"]["lease_id"]
+        status, snapshot = self.request(f"/api/v1/projects/{project_id}?view=browser")
+        self.assertEqual(status, 200)
+        self.assertEqual(snapshot["lock"]["state"], "AI_LOCKED")
+        self.assertEqual(snapshot["document"]["revision"], 0)
+
+        status, error = self.request(f"/api/v1/projects/{project_id}/leases", {
+            "owner_type": "human", "owner_id": "assembly-editor",
+        })
+        self.assertEqual((status, error["error"]), (409, "PROJECT_LOCKED"))
+        self.assertEqual(self.core.inspect_project(project_id)["lock"]["state"], "AI_LOCKED")
+
+        status, released = self.request(base + f"/leases/{lease_id}/release", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(released["lock"]["state"], "FREE")
+        status, human = self.request(f"/api/v1/projects/{project_id}/leases", {
+            "owner_type": "human", "owner_id": "assembly-editor",
+        })
+        self.assertEqual(status, 201)
+        self.core.release_lease(project_id, human["lease"]["lease_id"])
+        self.assertEqual(self.core.inspect_project(project_id)["document"]["revision"], 0)
 
     def test_project_file_api_lists_and_serves_only_direct_user_files(self) -> None:
         _, created = self.request("/api/v1/projects", {"name": "Files API"})

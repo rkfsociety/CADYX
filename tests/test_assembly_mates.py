@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from cadyx.assembly_mates import inspect_assembly_mates, solve_assembly_mates
+from cadyx.assembly_mates import DEFAULT_LIMITS, IDENTITY_FRAME, inspect_assembly_mates, solve_assembly_mates
 from cadyx.migrations import DOCUMENT_VERSION
 from cadyx.commands import CommandSystem
 from cadyx.core import CadyxCore
@@ -115,9 +115,11 @@ class AssemblyMateTests(unittest.TestCase):
                          a_instance_id=self.a, b_instance_id=self.b)
         result = inspect_assembly_mates(self.document.assembly)
         self.assertEqual(len(result["redundant_mate_ids"]), 1)
-        with self.assertRaisesRegex(ValidationError, "Conflicting assembly mate loop"):
+        with self.assertRaisesRegex(ValidationError, "Conflicting assembly mate loop") as failure:
             self.run_command("add_assembly_mate", kind="perpendicular",
                              a_instance_id=self.a, b_instance_id=self.b)
+        self.assertEqual(failure.exception.code, "ASSEMBLY_CONSTRAINT_CONFLICT")
+        self.assertIn("maximum_absolute_residual", failure.exception.diagnostics["measurements"])
 
     def test_independent_relations_reduce_dof_and_equivalent_relations_are_redundant(self):
         self.run_command("add_assembly_mate", kind="parallel",
@@ -136,11 +138,93 @@ class AssemblyMateTests(unittest.TestCase):
         self.assertEqual(equivalent["internal_dof"], 4)
         self.assertEqual(len(equivalent["redundant_mate_ids"]), 1)
 
+    def test_jacobian_rank_detects_a_relation_subsumed_by_coaxiality(self):
+        self.run_command("add_assembly_mate", kind="coaxial",
+                         a_instance_id=self.a, b_instance_id=self.b)
+        self.run_command("add_assembly_mate", kind="parallel",
+                         a_instance_id=self.a, b_instance_id=self.b)
+        result = inspect_assembly_mates(self.document.assembly)
+        self.assertEqual(result["internal_dof"], 2)
+        self.assertEqual(result["constraint_rank"], 4)
+        self.assertEqual(result["constraint_equation_count"], 6)
+        self.assertEqual(len(result["redundant_mate_ids"]), 1)
+
+    def test_zero_angle_relation_reports_its_singular_pose_rank(self):
+        self.run_command("add_assembly_mate", kind="angle", angle_deg=0,
+                         a_instance_id=self.a, b_instance_id=self.b)
+        result = inspect_assembly_mates(self.document.assembly)
+        self.assertEqual(result["constraint_rank"], 2)
+        self.assertEqual(result["internal_dof"], 4)
+
+    def test_jacobian_rank_treats_links_between_grounded_instances_as_redundant(self):
+        for instance in self.document.assembly["instances"]:
+            if instance["id"] in {self.a, self.b}:
+                instance["grounded"] = True
+                instance["translation"] = [0.0, 0.0, 0.0]
+        mate_id = self.run_command("add_assembly_mate", kind="fixed",
+                                   a_instance_id=self.a, b_instance_id=self.b)["mate_id"]
+        result = inspect_assembly_mates(self.document.assembly)
+        self.assertEqual(result["constraint_rank"], 0)
+        self.assertEqual(result["internal_dof"], 0)
+        self.assertIn(mate_id, result["redundant_mate_ids"])
+
     def test_solver_fails_closed_above_configured_graph_budgets(self):
         with patch("cadyx.assembly_mates.MAX_ASSEMBLY_INSTANCES", 2):
             with self.assertRaisesRegex(ValidationError, "instance limit") as failure:
                 solve_assembly_mates(self.document.assembly)
         self.assertEqual(failure.exception.code, "RESOURCE_LIMIT")
+
+    def test_large_tree_uses_linear_rank_accounting(self):
+        count = 1024
+        instances = [{"id": f"instance:{index}", "parent_id": None,
+                      "translation": [float(index), 0.0, 0.0],
+                      "rotation": [1.0, 0.0, 0.0, 0.0], "grounded": False}
+                     for index in range(count)]
+        mates = [{"id": f"mate:{index}", "name": "Fixed link", "kind": "fixed",
+                  "a_instance_id": f"instance:{index}",
+                  "b_instance_id": f"instance:{index + 1}",
+                  "frame_a": copy.deepcopy(IDENTITY_FRAME),
+                  "frame_b": copy.deepcopy(IDENTITY_FRAME),
+                  "angle_deg": 0.0, "offset_mm": 0.0,
+                  "orientation": [1.0, 0.0, 0.0, 0.0],
+                  "limits": copy.deepcopy(DEFAULT_LIMITS),
+                  "reference_a": None, "reference_b": None}
+                 for index in range(count - 1)]
+        graph = {"instances": instances, "mates": mates}
+        result = solve_assembly_mates(graph)
+        self.assertEqual(result["internal_dof"], 0)
+        self.assertEqual(result["constraint_rank"], 6 * (count - 1))
+        self.assertEqual(result["rank_method"], "tree_constraint_rank")
+
+    def test_sparse_loop_solver_handles_more_than_192_pose_variables(self):
+        count = 34
+        radius = 1 / (2 * math.sin(math.pi / count))
+        instances = []
+        for index in range(count):
+            angle = 2 * math.pi * index / count
+            x, y = radius * math.cos(angle), radius * math.sin(angle)
+            if index == count - 1:
+                x += 0.15
+            instances.append({"id": f"instance:{index}", "parent_id": None,
+                              "translation": [x, y, 0.0],
+                              "rotation": [1.0, 0.0, 0.0, 0.0], "grounded": False})
+        side = 2 * radius * math.sin(math.pi / count)
+        mates = [{"id": f"mate:{index:02d}", "name": "Loop distance",
+                  "kind": "distance", "a_instance_id": f"instance:{index}",
+                  "b_instance_id": f"instance:{(index + 1) % count}",
+                  "frame_a": copy.deepcopy(IDENTITY_FRAME),
+                  "frame_b": copy.deepcopy(IDENTITY_FRAME),
+                  "angle_deg": 0.0, "offset_mm": side,
+                  "orientation": [1.0, 0.0, 0.0, 0.0],
+                  "limits": copy.deepcopy(DEFAULT_LIMITS),
+                  "reference_a": None, "reference_b": None}
+                 for index in range(count)]
+        graph = {"instances": instances, "mates": mates}
+        solve_assembly_mates(graph, anchor_instance_id="instance:0")
+        poses = {entry["id"]: entry["translation"] for entry in graph["instances"]}
+        for mate in mates:
+            self.assertAlmostEqual(math.dist(poses[mate["a_instance_id"]],
+                                             poses[mate["b_instance_id"]]), side, places=5)
 
     def test_group_transform_preserves_parallel_and_distance_relations(self):
         self.run_command("add_assembly_mate", kind="parallel",
@@ -242,11 +326,30 @@ class AssemblyMateTests(unittest.TestCase):
         self.run_command("add_assembly_mate", kind="fixed", a_instance_id=self.b,
                          b_instance_id=self.c)
         before = copy.deepcopy(self.document.assembly)
-        with self.assertRaisesRegex(ValidationError, "Conflicting assembly mate loop"):
+        with self.assertRaisesRegex(ValidationError, "Conflicting assembly mate loop") as failure:
             self.run_command("add_assembly_mate", kind="slider", a_instance_id=self.a,
                              b_instance_id=self.c, offset_mm=10)
+        self.assertEqual(failure.exception.code, "ASSEMBLY_CONSTRAINT_CONFLICT")
         self.document.assembly = before
         self.document.validate()
+
+    def test_solver_closes_a_nonlinear_distance_loop(self):
+        self.run_command("add_assembly_mate", kind="fixed", a_instance_id=self.a,
+                         b_instance_id=self.b)
+        self.run_command("add_assembly_mate", kind="distance", a_instance_id=self.a,
+                         b_instance_id=self.c, offset_mm=5)
+        self.run_command("add_assembly_mate", kind="distance", a_instance_id=self.b,
+                         b_instance_id=self.c, offset_mm=5)
+        self.assertAlmostEqual(math.dist(self.placement(self.a)["translation"],
+                                         self.placement(self.c)["translation"]), 5, places=5)
+        self.assertAlmostEqual(math.dist(self.placement(self.b)["translation"],
+                                         self.placement(self.c)["translation"]), 5, places=5)
+        self.run_command("transform_assembly_instance", instance_id=self.a,
+                         translation=[12, -4, 2])
+        self.assertAlmostEqual(math.dist(self.placement(self.a)["translation"],
+                                         self.placement(self.c)["translation"]), 5, places=5)
+        self.assertAlmostEqual(math.dist(self.placement(self.b)["translation"],
+                                         self.placement(self.c)["translation"]), 5, places=5)
 
     def test_transform_anchors_part_and_removal_requires_detach(self):
         mate_id = self.run_command("add_assembly_mate", kind="fixed", a_instance_id=self.a,

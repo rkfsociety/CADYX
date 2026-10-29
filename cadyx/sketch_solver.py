@@ -5,6 +5,7 @@ import math
 from typing import Any
 
 from .errors import ValidationError
+from .numerical import matrix_rank
 
 _TOLERANCE = 1e-7
 _MAX_VARIABLES = 128
@@ -254,8 +255,8 @@ def solve_sketch(
                                                    "iterations": iterations, "maximum_iterations": _MAX_ITERATIONS},
                                   "correction_hint": "Review the listed constraint IDs and residuals; change the intended constraints or their references."})
     jac = jacobian(values, final)
-    rank = _matrix_rank([[row[index] for index in free_indices] for row in jac])
-    full_rank = _matrix_rank(jac)
+    rank = matrix_rank([[row[index] for index in free_indices] for row in jac])
+    full_rank = matrix_rank(jac)
     set_values(values)
     equation_count = len(final)
     under_constrained = rank < len(free_indices)
@@ -277,29 +278,3 @@ def _residual_ranges(constraints: list[dict[str, Any]], by_id: dict[str, dict[st
         ranges.append((item, offset, count))
         offset += count
     return ranges
-
-
-def _matrix_rank(rows: list[list[float]]) -> int:
-    if not rows:
-        return 0
-    matrix = [row[:] for row in rows]
-    row_count, columns = len(matrix), len(matrix[0])
-    rank = 0
-    for column in range(columns):
-        pivot = max(range(rank, row_count), key=lambda row: abs(matrix[row][column]), default=rank)
-        if rank >= row_count or abs(matrix[pivot][column]) < 1e-8:
-            continue
-        matrix[rank], matrix[pivot] = matrix[pivot], matrix[rank]
-        scale = matrix[rank][column]
-        for index in range(column, columns):
-            matrix[rank][index] /= scale
-        for row in range(row_count):
-            if row == rank:
-                continue
-            factor = matrix[row][column]
-            for index in range(column, columns):
-                matrix[row][index] -= factor * matrix[rank][index]
-        rank += 1
-        if rank == row_count:
-            break
-    return rank

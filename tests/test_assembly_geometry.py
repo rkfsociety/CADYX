@@ -269,6 +269,51 @@ class AssemblyGeometryReferenceTests(unittest.TestCase):
             self.assertEqual(saved_feature["parameters"]["width"], 2)
             core.release_lease(project_id, lease_id)
 
+    def test_core_roundtrips_vertex_mates_and_preserves_them_when_vertex_moves(self):
+        with tempfile.TemporaryDirectory() as directory:
+            core = CadyxCore(directory, kernel=self.kernel)
+            project_id = core.create_project("Assembly vertex references")["project"]["id"]
+            lease_id = core.acquire_lease(project_id, "human", "assembly-vertex-test")["lease_id"]
+
+            def execute(command):
+                return core.execute_command(project_id, lease_id, command)["history_entry"]["result"]
+
+            body = execute({"type": "create_box", "width": 3, "height": 1, "depth": 1})["body_id"]
+            feature = next(item["id"] for item in core.inspect_project(project_id)["document"]["objects"]
+                           if item.get("type") == "feature" and item.get("operation") == "create_box")
+            part = execute({"type": "create_assembly_part", "body_id": body})["part_id"]
+            a = execute({"type": "add_assembly_instance", "target_id": part})["instance_id"]
+            b = execute({"type": "add_assembly_instance", "target_id": part})["instance_id"]
+            vertices = [
+                {"index": 0, "semantic_key": "vertex:stable-a", "position": [0.0, 0.0, 0.0]},
+                {"index": 1, "semantic_key": "vertex:stable-b", "position": [1.0, 0.0, 0.0]},
+            ]
+            self.kernel.vertices = vertices
+            reference_a, reference_b = (make_vertex_reference(body, vertex) for vertex in vertices)
+            execute({"type": "add_assembly_mate", "kind": "coincident",
+                     "a_instance_id": a, "b_instance_id": b,
+                     "reference_a": reference_a, "reference_b": reference_b})
+            saved = core.inspect_project(project_id)
+            mate = saved["document"]["assembly"]["mates"][0]
+            self.assertEqual(mate["reference_a"]["entity_kind"], "vertex")
+            self.assertEqual(mate["reference_b"]["entity_key"], "vertex:stable-b")
+            revision = saved["document"]["revision"]
+
+            self.kernel.vertices = [
+                {"index": 0, "semantic_key": "vertex:moved-a", "position": [0.01, 0.0, 0.0]},
+                vertices[1],
+            ]
+            with self.assertRaisesRegex(ValidationError, "moved beyond the topology rebind tolerance"):
+                execute({"type": "set_parameter", "feature_id": feature,
+                         "name": "width", "value": 4})
+            self.kernel.vertices = vertices
+            after = core.inspect_project(project_id)
+            self.assertEqual(after["document"]["revision"], revision)
+            stored = next(item for item in after["document"]["assembly"]["mates"]
+                          if item["id"] == mate["id"])
+            self.assertEqual(stored["reference_a"]["entity_key"], "vertex:stable-a")
+            core.release_lease(project_id, lease_id)
+
 
 if __name__ == "__main__":
     unittest.main()
