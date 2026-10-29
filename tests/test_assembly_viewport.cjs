@@ -94,6 +94,18 @@ async function testAssemblyDragAndHistory() {
   moveSandbox.move({ pointerId: 7, clientX: 20, clientY: 0, preventDefault() {} });
   moveDrag.nextLocal.rotation.forEach((value, index) => assert.ok(Math.abs(value - firstRotation[index]) < 1e-12,
     "repeated pointermove coordinates do not accumulate the same rotation twice"));
+  moveDrag.mode = "global";
+  const half = Math.SQRT1_2;
+  moveDrag.startShownPose.rotation = [half, half, 0, 0];
+  moveDrag.shownPose.rotation = moveDrag.startShownPose.rotation.slice();
+  moveSandbox.move({ pointerId: 7, clientX: 40, clientY: 0, preventDefault() {} });
+  const globalHalfAngle = 10 * Math.PI / 180;
+  const expectedGlobalRotation = [Math.cos(globalHalfAngle) * half,
+    Math.cos(globalHalfAngle) * half, Math.sin(globalHalfAngle) * half,
+    Math.sin(globalHalfAngle) * half];
+  moveDrag.nextLocal.rotation.forEach((value, index) => assert.ok(
+    Math.abs(value - expectedGlobalRotation[index]) < 1e-12,
+    "global rotation is applied in world coordinates from the gesture-start pose"));
 
   const undo = [{ undo: { type: "restore" }, redo: { type: "apply" } }], redo = [], calls = [];
   const historySandbox = { assemblyUndo: undo, assemblyRedo: redo,
