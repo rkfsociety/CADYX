@@ -6,7 +6,7 @@
 
 ## Русский
 
-Документ v12 добавляет сохраняемые рабочие плоскости эскизов YZ, CUSTOM и FACE. Текущая версия документа — **v13**; её краткое описание находится в [контракте v13](document-model-v13.ru.md).
+Документ v12 добавляет сохраняемые рабочие плоскости эскизов YZ, CUSTOM и FACE. Текущая версия документа — **v14**; её краткое описание находится в [контракте v14](document-model-v14.ru.md).
 
 v12 добавляет сохраняемые рабочие плоскости эскизов YZ, CUSTOM и FACE, сохраняя прежние XY/XZ, локальные координаты и смещения. Каноническое описание полей, правил привязки к грани, миграции v11→v12 и ограничений операций находится в [контракте рабочих плоскостей](../../docs/sketch-workplanes.md). Эта страница — входная точка текущей версии, не копия схемы.
 
@@ -21,9 +21,9 @@ v12 добавляет сохраняемые рабочие плоскости 
 
 ## English
 
-Document v12 introduced persisted work-plane frames. The current document version is **v13**, the project envelope remains **v1**, and the assembly graph is **v4**. A schema version is distinct from a project revision: `expected_revision` must match that project's saved revision.
+Document v12 introduced persisted work-plane frames. The current document version is **v14**, the project envelope remains **v1**, and the assembly graph is **v5**. A schema version is distinct from a project revision: `expected_revision` must match that project's saved revision.
 
-v12 adds persisted YZ, CUSTOM and FACE sketch work planes while preserving legacy XY/XZ sketches, local coordinates and offsets. The authoritative field definitions, face-attachment rules, v11→v12 migration and operation limitations live in the [work-plane contract](../../docs/sketch-workplanes.md). The current document version is **v13**; see the [v13 entry point](document-model-v13.md).
+v12 adds persisted YZ, CUSTOM and FACE sketch work planes while preserving legacy XY/XZ sketches, local coordinates and offsets. The authoritative field definitions, face-attachment rules, v11→v12 migration and operation limitations live in the [work-plane contract](../../docs/sketch-workplanes.md). The current document version is **v14**; see the [v14 entry point](document-model-v14.md).
 
 Other applicable contracts:
 

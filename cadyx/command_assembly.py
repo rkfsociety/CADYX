@@ -6,7 +6,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from .assemblies import IDENTITY_ROTATION, IDENTITY_TRANSLATION, validate_assembly
-from .assembly_mates import IDENTITY_FRAME, solve_assembly_mates
+from .assembly_mates import DEFAULT_LIMITS, IDENTITY_FRAME, solve_assembly_mates
 from .errors import NotFoundError, ValidationError
 from .models import Document
 
@@ -157,7 +157,7 @@ class AssemblyCommands:
     @staticmethod
     def _add_assembly_mate(document: Document, command: dict[str, Any]) -> dict[str, Any]:
         _fields(command, {"kind", "a_instance_id", "b_instance_id"},
-                {"name", "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation"})
+                {"name", "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation", "limits"})
         mate = {
             "id": f"mate:{uuid4()}",
             "name": _text(command.get("name", command["kind"]), "Mate name"),
@@ -169,6 +169,7 @@ class AssemblyCommands:
             "angle_deg": command.get("angle_deg", 0.0),
             "offset_mm": command.get("offset_mm", 0.0),
             "orientation": deepcopy(command.get("orientation", IDENTITY_ROTATION)),
+            "limits": deepcopy(command.get("limits", DEFAULT_LIMITS)),
         }
         document.assembly["mates"].append(mate)
         diagnostics = solve_assembly_mates(document.assembly, anchor_instance_id=mate["a_instance_id"])
@@ -178,14 +179,14 @@ class AssemblyCommands:
     @staticmethod
     def _set_assembly_mate(document: Document, command: dict[str, Any]) -> dict[str, Any]:
         _fields(command, {"mate_id"},
-                {"name", "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation"})
+                {"name", "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation", "limits"})
         if len(command) == 2:
             raise ValidationError("Mate update requires at least one changed field.")
         mate = next((item for item in document.assembly["mates"]
                      if item["id"] == command["mate_id"]), None)
         if mate is None:
             raise NotFoundError("Assembly mate does not exist.")
-        for key in ("frame_a", "frame_b", "orientation", "angle_deg", "offset_mm"):
+        for key in ("frame_a", "frame_b", "orientation", "angle_deg", "offset_mm", "limits"):
             if key in command:
                 mate[key] = deepcopy(command[key])
         if "name" in command:

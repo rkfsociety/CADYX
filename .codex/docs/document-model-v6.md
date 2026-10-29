@@ -6,13 +6,13 @@
 
 ### Исторический контракт документа v6
 
-Контракт v6 описывает этап развития документа, эскизов и геометрии. Для текущего поведения учитывайте последующие версии и реализацию: сейчас схема документа v13. Этот текст не доказывает, что все старые ограничения действуют, и не подтверждает фактического прохождения нативных тестов. Имена команд и JSON-полей сохранены в исходном виде; полный исторический контракт приведён ниже.
+Контракт v6 описывает этап развития документа, эскизов и геометрии. Для текущего поведения учитывайте последующие версии и реализацию: сейчас схема документа v14. Этот текст не доказывает, что все старые ограничения действуют, и не подтверждает фактического прохождения нативных тестов. Имена команд и JSON-полей сохранены в исходном виде; полный исторический контракт приведён ниже.
 
 Это обзор, не полный перевод. Полные схемы, примеры и подробности контракта приведены на английском ниже.
 
 ## English reference
 
-> **Versioned contract (6), not the current schema.** This document records the behavior introduced with Document v6. Current saved documents use **v13**; the project envelope remains v1. Read the [current documentation map](../../docs/README.md) and subsequent version contracts before interpreting introduction-era limits as current restrictions. The historical command/schema examples below are retained for migration and compatibility work.
+> **Versioned contract (6), not the current schema.** This document records the behavior introduced with Document v6. Current saved documents use **v14**; the project envelope remains v1. Read the [current documentation map](../../docs/README.md) and subsequent version contracts before interpreting introduction-era limits as current restrictions. The historical command/schema examples below are retained for migration and compatibility work.
 
 
 The project envelope remains `cadyx-project` version 1. New documents use version

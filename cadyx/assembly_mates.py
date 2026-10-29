@@ -15,11 +15,13 @@ from .assemblies import _multiply, _rotate, transform_point, validate_transform
 from .errors import ValidationError
 
 MATE_DOF = {"fixed": 0, "coincident": 3, "coaxial": 2,
-            "revolute": 1, "slider": 1, "cylindrical": 2}
+            "revolute": 1, "slider": 1, "cylindrical": 2, "spherical": 3}
 POSITION_TOLERANCE_MM = 1e-6
 ROTATION_TOLERANCE_RAD = 1e-6
 IDENTITY_FRAME = {"translation": [0.0, 0.0, 0.0],
                   "rotation": [1.0, 0.0, 0.0, 0.0]}
+DEFAULT_LIMITS = {"angle_min_deg": None, "angle_max_deg": None,
+                  "offset_min_mm": None, "offset_max_mm": None}
 
 
 def _number(value: Any, label: str) -> float:
@@ -34,6 +36,40 @@ def _frame(value: Any, label: str) -> None:
     validate_transform(value["translation"], value["rotation"])
 
 
+def _limits(value: Any, kind: str, angle: float, offset: float) -> None:
+    if not isinstance(value, dict) or set(value) != set(DEFAULT_LIMITS):
+        raise ValidationError("Mate limits require angle and offset minimum/maximum fields.")
+    parsed: dict[str, float | None] = {}
+    for key in DEFAULT_LIMITS:
+        number = value[key]
+        if number is None:
+            parsed[key] = None
+        else:
+            parsed[key] = _number(number, f"Mate limit {key}")
+    pairs = (("angle_min_deg", "angle_max_deg"),
+             ("offset_min_mm", "offset_max_mm"))
+    for minimum, maximum in pairs:
+        low, high = parsed[minimum], parsed[maximum]
+        if low is not None and high is not None and low > high:
+            raise ValidationError(f"Mate limit {minimum} must not exceed {maximum}.")
+    angle_allowed = kind in {"revolute", "coaxial", "cylindrical"}
+    offset_allowed = kind in {"slider", "coaxial", "cylindrical"}
+    if not angle_allowed and any(parsed[key] is not None
+                                 for key in ("angle_min_deg", "angle_max_deg")):
+        raise ValidationError(f"{kind} mates do not accept angular limits.")
+    if not offset_allowed and any(parsed[key] is not None
+                                  for key in ("offset_min_mm", "offset_max_mm")):
+        raise ValidationError(f"{kind} mates do not accept axial limits.")
+    if parsed["angle_min_deg"] is not None and angle < parsed["angle_min_deg"]:
+        raise ValidationError("Mate angle is below its configured minimum.")
+    if parsed["angle_max_deg"] is not None and angle > parsed["angle_max_deg"]:
+        raise ValidationError("Mate angle is above its configured maximum.")
+    if parsed["offset_min_mm"] is not None and offset < parsed["offset_min_mm"]:
+        raise ValidationError("Mate offset is below its configured minimum.")
+    if parsed["offset_max_mm"] is not None and offset > parsed["offset_max_mm"]:
+        raise ValidationError("Mate offset is above its configured maximum.")
+
+
 def validate_mate_records(graph: dict[str, Any]) -> None:
     """Validate all mate references and parameters without solving positions."""
     mates = graph.get("mates")
@@ -44,7 +80,7 @@ def validate_mate_records(graph: dict[str, Any]) -> None:
     for mate in mates:
         if not isinstance(mate, dict) or set(mate) != {
             "id", "name", "kind", "a_instance_id", "b_instance_id",
-            "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation"
+            "frame_a", "frame_b", "angle_deg", "offset_mm", "orientation", "limits"
         }:
             raise ValidationError("Assembly mate record has invalid fields.")
         ident = mate["id"]
@@ -71,14 +107,15 @@ def validate_mate_records(graph: dict[str, Any]) -> None:
         if not isinstance(orientation, list) or len(orientation) != 4:
             raise ValidationError("Mate orientation must be a unit quaternion.")
         validate_transform([0.0, 0.0, 0.0], orientation)
-        if kind in ("fixed", "coincident") and (angle != 0 or offset != 0):
-            raise ValidationError("Fixed/coincident mates do not allow joint angle or offset.")
+        if kind in ("fixed", "coincident", "spherical") and (angle != 0 or offset != 0):
+            raise ValidationError("Fixed/coincident/spherical mates do not allow angle or offset values.")
         if kind == "revolute" and offset != 0:
             raise ValidationError("Revolute mates do not allow axial offset.")
         if kind == "slider" and angle != 0:
             raise ValidationError("Slider mates do not allow axial rotation.")
-        if kind != "coincident" and orientation != [1.0, 0.0, 0.0, 0.0]:
-            raise ValidationError("Only coincident mates accept free relative orientation.")
+        if kind not in {"coincident", "spherical"} and orientation != [1.0, 0.0, 0.0, 0.0]:
+            raise ValidationError("Only coincident and spherical mates accept free relative orientation.")
+        _limits(mate["limits"], kind, angle, offset)
 
 
 def _pose(translation: list[float], rotation: list[float]) -> dict[str, list[float]]:
@@ -99,7 +136,7 @@ def _inverse(p: dict[str, Any]) -> dict[str, list[float]]:
 
 def _motion(mate: dict[str, Any]) -> dict[str, list[float]]:
     kind = mate["kind"]
-    if kind == "coincident":
+    if kind in {"coincident", "spherical"}:
         rotation = mate["orientation"].copy()
     elif kind in ("coaxial", "cylindrical", "revolute"):
         half = math.radians(mate["angle_deg"]) / 2

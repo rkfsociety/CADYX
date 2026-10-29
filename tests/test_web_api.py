@@ -884,6 +884,11 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(len(advertised), len(capabilities["commands"]))
         self.assertIn("import_project_point_cloud", advertised)
         self.assertIn("set_assembly_instance_properties", advertised)
+        self.assertIn("add_assembly_mate", advertised)
+        mate_contract = next(item for item in capabilities["commands"]
+                             if item["type"] == "add_assembly_mate")
+        self.assertIn("limits", mate_contract["optional"])
+        self.assertIn("spherical", mate_contract["constraints"][0])
 
         self.assertIn("add_sketch_circle_tangent_to_line", advertised)
         self.assertIn("add_sketch_circle_tangent_to_two_lines", advertised)

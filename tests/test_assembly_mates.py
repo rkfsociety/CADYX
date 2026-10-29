@@ -77,6 +77,52 @@ class AssemblyMateTests(unittest.TestCase):
                          a_instance_id=self.a, b_instance_id=self.b, offset_mm=-2)
         self.assertAlmostEqual(self.placement(self.b)["translation"][2], -2)
 
+    def test_spherical_orientation_and_joint_limits(self):
+        spherical = self.run_command(
+            "add_assembly_mate", kind="spherical", a_instance_id=self.a,
+            b_instance_id=self.b, orientation=[0, 0, 0, 1],
+        )["mate_id"]
+        self.assertEqual(inspect_assembly_mates(self.document.assembly)["internal_dof"], 3)
+        self.assertEqual(self.placement(self.b)["rotation"], [0, 0, 0, 1])
+        self.run_command("remove_assembly_mate", mate_id=spherical)
+
+        limits = {"angle_min_deg": -30, "angle_max_deg": 45,
+                  "offset_min_mm": None, "offset_max_mm": None}
+        revolute = self.run_command(
+            "add_assembly_mate", kind="revolute", a_instance_id=self.a,
+            b_instance_id=self.b, limits=limits,
+        )["mate_id"]
+        self.run_command("set_assembly_mate", mate_id=revolute, angle_deg=45)
+        before_invalid_update = copy.deepcopy(self.document.assembly)
+        with self.assertRaisesRegex(ValidationError, "above its configured maximum"):
+            self.run_command("set_assembly_mate", mate_id=revolute, angle_deg=46)
+        self.document.assembly = before_invalid_update
+        self.assertEqual(self.document.assembly["mates"][0]["angle_deg"], 45)
+        self.run_command("remove_assembly_mate", mate_id=revolute)
+
+        slider_limits = {"angle_min_deg": None, "angle_max_deg": None,
+                         "offset_min_mm": -4, "offset_max_mm": 8}
+        slider = self.run_command(
+            "add_assembly_mate", kind="slider", a_instance_id=self.a,
+            b_instance_id=self.b, limits=slider_limits,
+        )["mate_id"]
+        self.run_command("set_assembly_mate", mate_id=slider, offset_mm=8)
+        with self.assertRaisesRegex(ValidationError, "above its configured maximum"):
+            self.run_command("set_assembly_mate", mate_id=slider, offset_mm=9)
+
+    def test_invalid_joint_limits_are_rejected(self):
+        with self.assertRaisesRegex(ValidationError, "must not exceed"):
+            self.run_command("add_assembly_mate", kind="revolute",
+                             a_instance_id=self.a, b_instance_id=self.b,
+                             limits={"angle_min_deg": 10, "angle_max_deg": 0,
+                                     "offset_min_mm": None, "offset_max_mm": None})
+        self.document.assembly["mates"].clear()
+        with self.assertRaisesRegex(ValidationError, "do not accept angular limits"):
+            self.run_command("add_assembly_mate", kind="slider",
+                             a_instance_id=self.a, b_instance_id=self.b,
+                             limits={"angle_min_deg": -1, "angle_max_deg": None,
+                                     "offset_min_mm": None, "offset_max_mm": None})
+
     def test_local_frames_and_coincident_orientation(self):
         local_frame = {"translation": [1, 0, 0], "rotation": [1, 0, 0, 0]}
         self.run_command("add_assembly_mate", kind="coincident", a_instance_id=self.a,
@@ -146,7 +192,7 @@ class AssemblyMateTests(unittest.TestCase):
         upgraded = migrate_document(old)
         self.assertEqual(old, before)
         self.assertEqual(upgraded["version"], DOCUMENT_VERSION)
-        self.assertEqual(upgraded["assembly"]["version"], 4)
+        self.assertEqual(upgraded["assembly"]["version"], 5)
         self.assertEqual(upgraded["assembly"]["mates"], [])
         self.assertEqual(Document.from_dict(upgraded).to_dict(), upgraded)
 

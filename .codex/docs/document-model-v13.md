@@ -4,7 +4,7 @@
 
 ## English
 
-The current document version is **v13**, defined in [`cadyx/migrations.py`](../../cadyx/migrations.py). The project envelope remains v1. Assembly graph v4 adds two booleans to every placed instance:
+Document v13 introduced saved per-instance grounding and visibility. The current document schema is v14; see the [v14 contract](document-model-v14.md) for the current mate and graph schema.
 
 - `grounded`: keeps this occurrence at its saved pose during mate solving. A connection that would move a grounded occurrence fails atomically. Rigid transforms of a grounded occurrence or a connected group containing one are rejected; use a joint coordinate to exercise an allowed relative degree of freedom.
 - `visible`: controls display per occurrence. Hiding a subassembly occurrence hides its complete nested branch without changing source body visibility or geometry.
