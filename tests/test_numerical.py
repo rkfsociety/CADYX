@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import unittest
 
 from cadyx.numerical import SparseRankAccumulator, matrix_rank, solve_sparse_positive_definite
@@ -29,6 +30,25 @@ class NumericalRankTests(unittest.TestCase):
         self.assertAlmostEqual(result[0], 1 / 11)
         self.assertAlmostEqual(result[1], 7 / 11)
         self.assertIsNone(solve_sparse_positive_definite({0: {0: 0.0}}, [1.0]))
+
+    def test_sparse_solver_rejects_out_of_range_indices(self):
+        for matrix in (
+            {0: {0: 2.0, -1: 1.0}, 1: {1: 2.0}},
+            {0: {0: 2.0, 2: 1.0}, 1: {1: 2.0}},
+            {0: {0: 2.0}, 1: {1: 2.0}, 2: {0: 1.0}},
+        ):
+            with self.subTest(matrix=matrix):
+                self.assertIsNone(solve_sparse_positive_definite(matrix, [1.0, 1.0]))
+
+    def test_sparse_solver_rejects_nonfinite_inputs_and_invalid_limits(self):
+        matrix = {0: {0: 2.0}}
+        for rhs in ([math.nan], [math.inf], [-math.inf]):
+            with self.subTest(rhs=rhs):
+                self.assertIsNone(solve_sparse_positive_definite(matrix, rhs))
+        self.assertIsNone(solve_sparse_positive_definite({0: {0: 2.0, 1: math.nan}}, [1.0]))
+        self.assertIsNone(solve_sparse_positive_definite(matrix, [1.0], tolerance=math.nan))
+        self.assertIsNone(solve_sparse_positive_definite(matrix, [1.0], tolerance=0.0))
+        self.assertIsNone(solve_sparse_positive_definite(matrix, [1.0], max_iterations=0))
 
 
 if __name__ == "__main__":

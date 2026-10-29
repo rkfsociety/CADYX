@@ -76,6 +76,18 @@ def solve_sparse_positive_definite(
     size = len(right_hand_side)
     if not size:
         return []
+    if (not math.isfinite(tolerance) or tolerance <= 0.0
+            or (max_iterations is not None and (type(max_iterations) is not int or max_iterations < 1))
+            or any(not math.isfinite(value) for value in right_hand_side)):
+        return None
+    # Invalid sparse indices must not wrap through Python's negative indexing or
+    # crash the solver during a matrix-vector product.
+    for row_index, row in matrix.items():
+        if type(row_index) is not int or not 0 <= row_index < size:
+            return None
+        if any(type(column) is not int or not 0 <= column < size or not math.isfinite(value)
+               for column, value in row.items()):
+            return None
     diagonal = [matrix.get(index, {}).get(index, 0.0) for index in range(size)]
     if any(value <= 0.0 or not math.isfinite(value) for value in diagonal):
         return None
@@ -85,8 +97,10 @@ def solve_sparse_positive_definite(
     preconditioned = [residual[i] / diagonal[i] for i in range(size)]
     direction = preconditioned.copy()
     product = sum(residual[i] * preconditioned[i] for i in range(size))
-    initial_norm = max(1.0, sum(value * value for value in right_hand_side) ** 0.5)
-    if sum(value * value for value in residual) ** 0.5 <= tolerance * initial_norm:
+    if not math.isfinite(product):
+        return None
+    initial_norm = max(1.0, math.hypot(*right_hand_side))
+    if math.hypot(*residual) <= tolerance * initial_norm:
         return solution
     for _ in range(limit):
         applied = [sum(value * direction[column] for column, value in row.items())
@@ -97,7 +111,10 @@ def solve_sparse_positive_definite(
         step = product / denominator
         solution = [solution[i] + step * direction[i] for i in range(size)]
         residual = [residual[i] - step * applied[i] for i in range(size)]
-        if sum(value * value for value in residual) ** 0.5 <= tolerance * initial_norm:
+        if (any(not math.isfinite(value) for value in solution)
+                or any(not math.isfinite(value) for value in residual)):
+            return None
+        if math.hypot(*residual) <= tolerance * initial_norm:
             return solution
         next_preconditioned = [residual[i] / diagonal[i] for i in range(size)]
         next_product = sum(residual[i] * next_preconditioned[i] for i in range(size))
