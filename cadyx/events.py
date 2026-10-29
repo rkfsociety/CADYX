@@ -30,7 +30,7 @@ class ProjectEvent:
             "id": self.id,
             "event": self.event,
             "project_id": self.project_id,
-            "data": self.data,
+            "data": copy.deepcopy(self.data),
             "occurred_at": self.occurred_at,
         }
 
@@ -447,7 +447,14 @@ class EventBroker:
         for subscriber in self._subscribers.values():
             if not subscriber.accepts(item):
                 continue
-            self._offer_drop_oldest(subscriber.queue, item)
+            # Each consumer may mutate its event; never share a live payload.
+            self._offer_drop_oldest(subscriber.queue, ProjectEvent(
+                id=item.id,
+                event=item.event,
+                project_id=item.project_id,
+                data=copy.deepcopy(item.data),
+                occurred_at=item.occurred_at,
+            ))
 
     def _emit_locked(
         self,

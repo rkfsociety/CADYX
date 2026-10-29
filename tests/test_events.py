@@ -328,6 +328,40 @@ class EventBrokerTests(unittest.TestCase):
         finally:
             broker.unsubscribe(subscriber_id)
 
+    def test_live_subscribers_and_publish_result_have_independent_payloads(self):
+        broker = EventBroker()
+        first_id, first_events = broker.subscribe("a")
+        second_id, second_events = broker.subscribe("a")
+        try:
+            expected = {"child": {"n": 1}, "values": [1]}
+            published = broker.publish("probe", "a", expected)
+            first = first_events.get_nowait()
+            second = second_events.get_nowait()
+            self.assertIsNot(first, second)
+            self.assertIsNot(first, published)
+
+            first.data["child"]["n"] = 10
+            first.data["values"].append(2)
+            self.assertEqual(second.data, expected)
+            self.assertEqual(published.data, expected)
+
+            published.data["child"]["n"] = 20
+            self.assertEqual(second.data, expected)
+            serialized = second.as_dict()
+            serialized["data"]["child"]["n"] = 30
+            self.assertEqual(second.data, expected)
+
+            replay_id, replay = broker.subscribe(
+                "a", last_event_id=broker.event_cursor(0),
+            )
+            try:
+                self.assertEqual(replay.get_nowait().data, expected)
+            finally:
+                broker.unsubscribe(replay_id)
+        finally:
+            broker.unsubscribe(first_id)
+            broker.unsubscribe(second_id)
+
     def test_replay_keeps_immutable_encoded_event_data(self):
         broker = EventBroker()
         source = {"child": {"n": 1}}
