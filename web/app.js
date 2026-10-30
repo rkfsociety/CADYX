@@ -209,6 +209,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const collapsedClouds=new Set();
     const scanTreeExpanded=new Set();
     let scanTreeEntries=[];
+    let projectScanCloudFiles=[];
     let scanTreeLoadedProject=null;
     let scanTreeRequest=0;
     let scanTreePreviewSelection=null;
@@ -267,12 +268,12 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     }
     async function loadScanTree(projectId,force=false){
       const request=++scanTreeRequest;
-      if(!projectId){scanTreeEntries=[];scanTreeLoadedProject=null;renderScanTree();return}
+      if(!projectId){scanTreeEntries=[];projectScanCloudFiles=[];scanTreeLoadedProject=null;renderScanTree();return}
       const sameProject=scanTreeLoadedProject===projectId;
       if(sameProject&&!force)return;
       scanTreeLoadedProject=projectId;
       const previousRuns=new Map(sameProject?scanTreeEntries.map(run=>[run.id,run]):[]);
-      if(!force){scanTreeEntries=[];renderScanTree('Загружаю серии сканирования…')}
+      if(!force){scanTreeEntries=[];projectScanCloudFiles=[];renderScanTree('Загружаю серии сканирования…')}
       try{
         const root=await semanticJson(`/api/v1/projects/${encodeURIComponent(projectId)}/files`);
         const runs=new Map();
@@ -287,6 +288,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           runs.get(id).files.push(file);runs.get(id).rootFiles.push(file);
         }
         if(request!==scanTreeRequest||state.project!==projectId)return;
+        projectScanCloudFiles=(root.files||[]).filter(file=>/\.ply$/i.test(file.name)&&!scanFileRunId(file.name))
+          .sort((a,b)=>a.name.localeCompare(b.name));
         scanTreeEntries=[...runs.values()].map(run=>({...run,files:[...new Map(run.files.map(file=>[file.name,file])).values()].sort((a,b)=>a.name.localeCompare(b.name)),rootFiles:[...new Map((run.rootFiles||[]).map(file=>[file.name,file])).values()]}))
           .sort((a,b)=>b.id.localeCompare(a.id));
         const saved=JSON.parse(localStorage.getItem(`cadyx-scan-tree:${projectId}`)||'[]');
@@ -305,6 +308,15 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       list.replaceChildren();
       const query=(search?.value||'').toLowerCase().trim();
       let shown=0;
+      for(const file of projectScanCloudFiles){
+        if(query&&!file.name.toLowerCase().includes(query)&&!'сшитое облако'.includes(query))continue;
+        const leaf=document.createElement('button');leaf.type='button';leaf.className='cad3-model-note cad3-scan-file cad3-scan-file-button';
+        leaf.setAttribute('aria-pressed',String(scanTreePreviewSelection===`project-clouds/${file.name}`));
+        leaf.textContent=`Сшитое облако · ${scanFileLabel(file,'project-clouds')}`;
+        leaf.setAttribute('aria-label',`Показать облако точек проекта · ${file.name}`);
+        leaf.onclick=()=>previewScanFile({id:'project-clouds',folderName:null},file,leaf);
+        list.append(leaf);shown++;
+      }
       for(const run of scanTreeEntries){
         const title=scanRunTitle(run.id);
         const files=(run.files||[]).filter(file=>/\.ply$/i.test(file.name));
