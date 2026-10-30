@@ -95,6 +95,15 @@ def solve_sparse_positive_definite(
         if any(type(column) is not int or not 0 <= column < size or not math.isfinite(value)
                for column, value in row.items()):
             return None
+    # PCG requires a symmetric operator. Compare explicit entries against
+    # their transposes, including implicitly zero entries in sparse rows.
+    # Allow only insignificant differences from floating-point accumulation.
+    for row_index, row in matrix.items():
+        for column, value in row.items():
+            if column != row_index and not math.isclose(
+                    value, matrix.get(column, {}).get(row_index, 0.0),
+                    rel_tol=1e-12, abs_tol=1e-15):
+                return None
     diagonal = [matrix.get(index, {}).get(index, 0.0) for index in range(size)]
     if any(value <= 0.0 or not math.isfinite(value) for value in diagonal):
         return None

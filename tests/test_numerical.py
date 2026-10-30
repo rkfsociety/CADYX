@@ -67,6 +67,25 @@ class NumericalRankTests(unittest.TestCase):
         self.assertAlmostEqual(result[1], 7 / 11)
         self.assertIsNone(solve_sparse_positive_definite({0: {0: 0.0}}, [1.0]))
 
+    def test_sparse_solver_rejects_asymmetric_matrices(self):
+        # A triangular matrix can previously return an apparently converged
+        # solution even though conjugate gradients requires symmetry.
+        matrices = (
+            {0: {0: 4.0, 1: 1.0}, 1: {1: 3.0}},
+            {0: {0: 4.0, 1: 2.0}, 1: {0: 1.0, 1: 3.0}},
+            {0: {0: 4.0}, 1: {0: 1.0, 1: 3.0}},
+        )
+        for matrix in matrices:
+            with self.subTest(matrix=matrix):
+                self.assertIsNone(solve_sparse_positive_definite(matrix, [1.0, 0.0]))
+
+    def test_sparse_solver_accepts_symmetric_roundoff(self):
+        matrix = {0: {0: 4.0, 1: 1.0 + 1e-13}, 1: {0: 1.0, 1: 3.0}}
+        solution = solve_sparse_positive_definite(matrix, [1.0, 2.0])
+        self.assertIsNotNone(solution)
+        self.assertAlmostEqual(solution[0], 1 / 11)
+        self.assertAlmostEqual(solution[1], 7 / 11)
+
     def test_sparse_solver_rejects_out_of_range_indices(self):
         for matrix in (
             {0: {0: 2.0, -1: 1.0}, 1: {1: 2.0}},
