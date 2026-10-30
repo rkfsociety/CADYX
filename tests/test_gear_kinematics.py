@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import unittest
 
 from cadyx.errors import ValidationError
@@ -103,6 +104,32 @@ class PlanetaryGearKinematicsTests(unittest.TestCase):
                     result["planet_spin_speed_radians_per_second"] / 1e308,
                     expected / 1e308, places=12,
                 )
+
+    def test_large_absolute_phase_preserves_half_tooth_alignment(self) -> None:
+        result = solve_planetary_gearset(
+            module=2.0, sun_teeth=18, planet_teeth=18, ring_teeth=54,
+            planet_angles_degrees=[0.0, 180.0],
+            sun_rotation_degrees=float(20 * 2**53),
+            planet_rotation_degrees=[170.0, 350.0],
+            sun_speed_radians_per_second=1.0,
+            ring_speed_radians_per_second=0.0,
+        )
+        self.assertTrue(result["rest_mesh_phase_compatible"])
+        self.assertEqual(result["sun_planet_phase_error_teeth"], [0.0, 0.0])
+        self.assertEqual(result["ring_planet_phase_error_teeth"], [0.0, 0.0])
+
+    def test_cancelling_extreme_rotation_terms_remain_finite(self) -> None:
+        result = solve_planetary_gearset(
+            module=2.0, sun_teeth=18, planet_teeth=18, ring_teeth=54,
+            planet_angles_degrees=[0.0, 180.0],
+            sun_rotation_degrees=1e308,
+            planet_rotation_degrees=[-1e308, -1e308],
+            sun_speed_radians_per_second=1.0,
+            ring_speed_radians_per_second=0.0,
+        )
+        self.assertEqual(result["sun_planet_phase_teeth"], [9.0, 27.0])
+        self.assertTrue(all(math.isfinite(value) for value in
+                            result["ring_planet_phase_teeth"]))
 
     def test_unrepresentable_planet_speed_still_raises(self) -> None:
         with self.assertRaisesRegex(ValidationError, "angular velocities"):

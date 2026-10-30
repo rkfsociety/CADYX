@@ -69,27 +69,30 @@ def solve_planetary_gearset(
     phase_errors = [abs(value - round(value)) for value in phase_teeth]
     indexing_compatible = all(error <= 1e-9 for error in phase_errors)
     try:
-        external_phase = [
-            sun * (angle - sun_rotation) / 360.0
-            + planet * (angle + 180.0 - rotation) / 360.0
-            for angle, rotation in zip(angles, rotations, strict=True)
-        ]
-        internal_phase = [
-            ring * (angle - ring_rotation) / 360.0
-            - planet * (angle + 180.0 - rotation) / 360.0
-            for angle, rotation in zip(angles, rotations, strict=True)
-        ]
+        # Exact tooth-pitch fractions preserve half-tooth offsets that would
+        # vanish when large absolute phases are rounded to binary floats.
+        external_phase_exact: list[Fraction] = []
+        internal_phase_exact: list[Fraction] = []
+        for angle, rotation in zip(angles, rotations, strict=True):
+            planet_term = planet * (Fraction(angle) + 180 - Fraction(rotation)) / 360
+            external_phase_exact.append(
+                sun * (Fraction(angle) - Fraction(sun_rotation)) / 360 + planet_term
+            )
+            internal_phase_exact.append(
+                ring * (Fraction(angle) - Fraction(ring_rotation)) / 360 - planet_term
+            )
+        external_phase = [float(value) for value in external_phase_exact]
+        internal_phase = [float(value) for value in internal_phase_exact]
     except OverflowError as exc:
         raise ValidationError("Gear tooth phases exceed the finite numeric range.") from exc
     if not all(math.isfinite(value) for value in (*external_phase, *internal_phase)):
         raise ValidationError("Gear tooth phases exceed the finite numeric range.")
 
-    def half_tooth_phase_error(value: float) -> float:
-        distance = abs((value % 1.0) - 0.5)
-        return min(distance, 1.0 - distance)
+    def half_tooth_phase_error(value: Fraction) -> float:
+        return float(abs(value % 1 - Fraction(1, 2)))
 
-    external_phase_errors = [half_tooth_phase_error(value) for value in external_phase]
-    internal_phase_errors = [half_tooth_phase_error(value) for value in internal_phase]
+    external_phase_errors = [half_tooth_phase_error(value) for value in external_phase_exact]
+    internal_phase_errors = [half_tooth_phase_error(value) for value in internal_phase_exact]
     rest_mesh_phase_compatible = all(
         error <= 1e-9 for error in (*external_phase_errors, *internal_phase_errors)
     )
