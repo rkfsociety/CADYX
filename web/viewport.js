@@ -462,7 +462,9 @@
       };
       const pointDepthVisible = point => point >= 0 && point < screenX.length
         && depthVisibleAt(screenX[point], screenY[point], camera[point * 3 + 2]);
+      const preserveShadedInteractive = geometry.preserveShadedInteractive === true;
       const denseInteractiveFallback = Boolean(drag || transition || bodyMotion) && shaded
+        && !preserveShadedInteractive
         && triangles.length / 3 > MAX_INTERACTIVE_SHADED_FACES;
       const renderWireframe = wireframe || denseInteractiveFallback;
       const renderShaded = shaded && !denseInteractiveFallback;

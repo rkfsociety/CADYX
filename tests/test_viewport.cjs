@@ -736,6 +736,24 @@ events.pointerup({});
 assert.ok(rasterUploads > denseUploadsBeforeDrag,
   'dense models return to shaded rendering when camera movement ends');
 
+const persistentSurfaceViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
+  showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false,
+  wireframe: false, shaded: true,
+});
+persistentSurfaceViewer.load({ positions: [0, 0, 0, 1, 0, 0, 2, 0, 0],
+  triangles: denseTriangles, lines: [0, 1], points: [], preserveShadedInteractive: true,
+  bounds: { min: [0, 0, 0], max: [2, 0, 0] } });
+const persistentSurfaceUploadsBeforeDrag = rasterUploads;
+const persistentSurfaceFrameOffset = animationFrames.length;
+events.pointerdown({ button: 2, clientX: 300, clientY: 200, pointerId: 9 });
+events.pointermove({ clientX: 320, clientY: 215 });
+const persistentSurfaceFrame = animationFrames.splice(persistentSurfaceFrameOffset, 1)[0];
+assert.equal(typeof persistentSurfaceFrame, 'function');
+persistentSurfaceFrame();
+assert.ok(rasterUploads > persistentSurfaceUploadsBeforeDrag,
+  'the turntable scene keeps its opaque shaded surface visible during camera rotation');
+events.pointerup({});
+
 animationTime = 2000;
 const denseSweepViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
   showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false,
