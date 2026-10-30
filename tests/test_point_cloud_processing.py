@@ -209,6 +209,14 @@ class PointCloudProcessingTests(unittest.TestCase):
         self.assertEqual(process_points(points, "radius_filter",
                                         {"radius": 1e-308, "min_neighbors": 2}), points)
 
+    def test_voxel_boundaries_do_not_round_into_adjacent_cells(self):
+        # 0.5 / 0.1 rounds to 5.0, but the exact binary quotient is below 5.
+        # Both positive cell boundaries must distinguish their adjacent points.
+        near_half = math.nextafter(.5, math.inf)
+        near_one = math.nextafter(1., math.inf)
+        points = [(x, 0., 0.) for x in (.5, near_half, 1., near_one)]
+        self.assertEqual(process_points(points, "voxel_downsample", {"voxel_size": .1}), points)
+
     def test_voxel_centroids_preserve_subnormal_coordinates(self):
         # Dividing each subnormal sample before summing rounds it to zero.
         tiny = math.ulp(0.0)

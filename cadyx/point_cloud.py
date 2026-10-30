@@ -17,9 +17,12 @@ def _mean_coordinate(values: list[float]) -> float:
 
 
 def _voxel_index(value: float, size: float) -> int:
-    """Keep finite coordinates addressable when their float quotient overflows."""
+    """Map finite coordinates to exact world-origin-aligned voxel cells."""
     quotient = value / size
-    if math.isfinite(quotient):
+    # Float division may round an exact quotient just below a cell boundary
+    # to an integer (e.g. 0.5 / 0.1 == 5.0). Check integer results against
+    # exact binary-float ratios, just as for overflowing quotients.
+    if math.isfinite(quotient) and not quotient.is_integer():
         return math.floor(quotient)
     if not math.isfinite(value):
         raise ValueError("Non-finite point coordinate.")
