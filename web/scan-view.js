@@ -306,14 +306,14 @@
     return [...edgesByRoot.keys()];
   };
   const hasClosedTriangleTopology = triangles => closedTriangleComponents(triangles).length > 0;
-  const buildTurntableDisplayModel = () => {
+  const buildTurntableDisplayModel = (tableMap = null) => {
     const fixed = createMeshBuilder(), moving = createMeshBuilder();
-    const addTopPort = (centerX, centerY, radius, colors) => {
-      const innerRadius = radius * 0.56;
-      addAnnularCylinder(moving, radius, innerRadius, -0.12, 0.09, 24,
-        { top: colors.rim, side: colors.side, inner: colors.inner, bottom: colors.bottom }, centerX, centerY);
-      addEllipticalCylinder(moving, innerRadius - 0.08, innerRadius - 0.08, -0.14, 0.025, 24,
-        { top: colors.center, side: colors.inner, bottom: colors.bottom }, centerX, centerY);
+    const addTableMapMarker = (centerX, centerY) => {
+      addAnnularCylinder(moving, 1.55, 1.27, -0.08, 0.055, 24,
+        { top: [72, 80, 84], side: [48, 54, 58], inner: [42, 48, 52], bottom: [35, 40, 44] },
+        centerX, centerY);
+      addEllipticalCylinder(moving, 1.22, 1.22, -0.08, 0.09, 24,
+        { top: [192, 200, 204], side: [121, 129, 133], bottom: [39, 45, 49] }, centerX, centerY);
     };
     const dark = { top: index => {
       const brushed = Math.round(1.5 * Math.sin(index * 2.399) + 0.8 * Math.sin(index * 0.173));
@@ -358,23 +358,13 @@
       { top: [58, 64, 68], side: [45, 51, 55], bottom: [36, 41, 45] });
     addRibbedCylinder(moving, TURNTABLE_RADIUS_MM, -TURNTABLE_THICKNESS_MM, 0,
       480, 120, dark);
-    const perforationRings = [[18, 6, 0], [34, 8, 22.5], [50, 10, 0], [66, 12, 15]];
-    let tableTopPortCount = 0;
-    for (const [radius, count, offsetDegrees] of perforationRings) {
-      for (let index = 0; index < count; index += 1) {
-        const angle = (offsetDegrees + index * 360 / count) * Math.PI / 180;
-        addTopPort(radius * Math.cos(angle), radius * Math.sin(angle), 1.8,
-          { rim: [143, 150, 154], side: [57, 64, 68], inner: [37, 43, 46],
-            bottom: [34, 39, 43], center: [40, 45, 48] });
-        tableTopPortCount += 1;
-      }
-    }
-    for (let index = 0; index < 4; index += 1) {
-      const angle = (45 + index * 90) * Math.PI / 180;
-      addTopPort(76 * Math.cos(angle), 76 * Math.sin(angle), 3.1,
-        { rim: [91, 98, 102], side: [49, 56, 60], inner: [28, 33, 36],
-          bottom: [31, 36, 40], center: [15, 19, 21] });
-      tableTopPortCount += 1;
+    const tableMapPoints = Array.isArray(tableMap?.points) ? tableMap.points
+      .filter(point => Array.isArray(point) && point.length >= 2 && point.slice(0, 2).every(Number.isFinite)) : [];
+    const maximumMapRadius = tableMapPoints.reduce((maximum, point) =>
+      Math.max(maximum, Math.hypot(point[0], point[1])), 0);
+    const tableMapMarkerScale = maximumMapRadius > 93 ? 93 / maximumMapRadius : 1;
+    for (const point of tableMapPoints) {
+      addTableMapMarker(point[0] * tableMapMarkerScale, point[1] * tableMapMarkerScale);
     }
     const fixedModel = finishMesh(fixed);
     for (let index = 0; index < fixedModel.positions.length; index += 3) {
@@ -439,7 +429,8 @@
       degreeTickCount,
       bakedDegreeLabelCount,
       bakedDegreeLabels,
-      tableTopPortCount,
+      tableMapMarkerCount: tableMapPoints.length,
+      tableMapMarkerScale,
       pivotCoverCount: 2,
       supportBracketCount: supportBracketOffsets.length,
       supportBracketProfile: 'rounded-rectangle',
@@ -454,7 +445,7 @@
       fitRadius: 120,
     };
   };
-  const turntableDisplayModel = buildTurntableDisplayModel();
+  let turntableDisplayModel = buildTurntableDisplayModel();
   const transformTableDisplayPoint = (point, angleDegrees, tiltDegrees, pivotZ = TURNTABLE_TILT_PIVOT_Z_MM) => {
     const yaw = Number.isFinite(angleDegrees) ? angleDegrees * Math.PI / 180 : 0;
     const tilt = Number.isFinite(tiltDegrees) ? tiltDegrees * Math.PI / 180 : 0;
@@ -761,9 +752,12 @@
     let liveTableFrame = null;
     let liveTableMap = null;
     let liveTableOverlay = null;
+    let turntableMapCache = null;
+    let turntableMapCacheKey = null;
+    let turntableMapPromise = null;
+    let turntableMapPromiseKey = null;
     let lastMapAlignedFrame = null;
     let liveMapTransform = null;
-    let liveCameraRestored = false;
     let lastRenderedTurntableDisplayPose = null;
     let lastTurntableTelemetryAngle = null;
     let unwrappedTurntableAngle = 0;
@@ -774,9 +768,6 @@
     let liveMarkerTracks = [];
     let liveMarkerTrackSequence = 0;
     let lastMapRansacSequence = 0;
-    let liveFitRadius = null;
-    let liveRawCameraCenter = null;
-    let liveRawFitRadius = null;
     let liveViewportInitialized = false;
     let emptyFramePollDelay = 25;
     let lastLiveFrameMtimeNs = 0;
@@ -1338,14 +1329,53 @@
       };
       turntableDisplayFrame = requestAnimationFrame(renderInterpolatedFrame);
     };
+    const loadTurntableMarkerMap = () => {
+      const query = new URLSearchParams();
+      const deviceId = window.CadyxDeviceSettings?.turntableDeviceId?.();
+      const profileId = window.CadyxDeviceSettings?.turntableProfileId?.();
+      if (deviceId) query.set('device_id', deviceId);
+      if (profileId) query.set('profile_id', profileId);
+      const queryString = query.toString();
+      if (turntableMapCache && turntableMapCacheKey === queryString) {
+        return Promise.resolve(turntableMapCache);
+      }
+      if (turntableMapPromise && turntableMapPromiseKey === queryString) return turntableMapPromise;
+      turntableMapPromiseKey = queryString;
+      const request = (async () => {
+        const response = await fetcher(`/api/v1/scanner/turntable/map${queryString ? `?${queryString}` : ''}`,
+          { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Карта стола недоступна (HTTP ${response.status}).`);
+        const tableMap = parseTableMarkerMap(await response.arrayBuffer());
+        if (turntableMapPromiseKey === queryString) {
+          turntableMapCache = tableMap;
+          turntableMapCacheKey = queryString;
+          turntableDisplayModel = buildTurntableDisplayModel(tableMap);
+        }
+        return tableMap;
+      })();
+      turntableMapPromise = request.catch(error => {
+        if (turntableMapPromiseKey === queryString) {
+          turntableMapPromise = null;
+          turntableMapPromiseKey = null;
+        }
+        throw error;
+      });
+      return turntableMapPromise;
+    };
     const showTurntable = () => {
       if (livePreviewOwned || cloudPreviewOpen || meshPreviewOpen || serverPointCloudVisible
           || viewport.dataset.scanTreePreview === 'true'
           || document.querySelector?.('#primary-grid')?.dataset.view !== 'scanning') return false;
-      if (staticTurntableVisible) return true;
-      staticTurntableVisible = true;
-      updateButton();
-      renderTurntableScene({ aligned: false, reset: false });
+      if (!staticTurntableVisible) {
+        staticTurntableVisible = true;
+        updateButton();
+        renderTurntableScene({ aligned: false, reset: false });
+      }
+      void loadTurntableMarkerMap().then(() => {
+        if (staticTurntableVisible && !livePreviewOwned) renderTurntableScene({ aligned: false, reset: false });
+      }).catch(error => {
+        if (liveMapAlignmentIndicator) liveMapAlignmentIndicator.dataset.mapError = error.message;
+      });
       syncTurntableDisplayAnimation();
       return true;
     };
@@ -1450,6 +1480,7 @@
     };
     const showLivePreview = ({ open = false } = {}) => {
       if (!open) return;
+      const cameraBeforeLiveScene = window.cadyxUiReloadCamera || viewer.getCamera?.();
       staticTurntableVisible = false;
       if (!livePreviewOwned) modelGeometry = getModelGeometry();
       liveClientWindowStartedAt = 0;
@@ -1476,9 +1507,6 @@
       lastMapRansacSequence = 0;
       lastMapAlignedFrame = null;
       lastRenderedTurntableDisplayPose = null;
-      liveFitRadius = null;
-      liveRawCameraCenter = null;
-      liveRawFitRadius = null;
       liveViewportInitialized = false;
       emptyFramePollDelay = 25;
       lastLiveFrameMtimeNs = 0;
@@ -1487,6 +1515,18 @@
       cloudPreviewOpen = false;
       meshPreviewOpen = false;
       livePreviewOwned = true;
+      renderTurntableScene({ aligned: false, reset: true });
+      if (cameraBeforeLiveScene) {
+        viewer.setCamera(cameraBeforeLiveScene);
+        if (window.cadyxUiReloadCamera === cameraBeforeLiveScene) {
+          window.setTimeout(() => {
+            if (window.cadyxUiReloadCamera !== cameraBeforeLiveScene || !livePreviewOwned) return;
+            viewer.setCamera(cameraBeforeLiveScene);
+            window.cadyxUiReloadCamera = null;
+            window.cadyxUiReloadCameraAppliedToModel = false;
+          }, 650);
+        }
+      }
       syncTurntableDisplayAnimation();
       const request = ++liveRequest;
       updateButton();
@@ -1497,31 +1537,10 @@
         let renderedFrame = false;
         try {
           if (!liveTableMap) {
-            const tableId = window.CadyxDeviceSettings?.turntableDeviceId?.();
-            const profileId = window.CadyxDeviceSettings?.turntableProfileId?.();
-            const query = new URLSearchParams();
-            if (tableId) query.set('device_id', tableId);
-            if (profileId) query.set('profile_id', profileId);
-            const queryString = query.toString();
-            const mapResponse = await fetcher(`/api/v1/scanner/turntable/map${queryString ? `?${queryString}` : ''}`, { cache: 'no-store' });
-            if (!mapResponse.ok) throw new Error(`Карта стола недоступна (HTTP ${mapResponse.status}).`);
-            liveTableMap = parseTableMarkerMap(await mapResponse.arrayBuffer());
+            liveTableMap = await loadTurntableMarkerMap();
+            if (request !== liveRequest || !livePreviewOwned) return;
             liveTableOverlay = buildTableMapOverlay(liveTableMap);
-            const cameraBeforeLiveScene = window.cadyxUiReloadCamera || viewer.getCamera?.();
-            renderTurntableScene({ aligned: false, reset: !liveViewportInitialized });
-            if (cameraBeforeLiveScene) {
-              const cameraToRestore = cameraBeforeLiveScene;
-              liveCameraRestored = true;
-              viewer.setCamera(cameraToRestore);
-              if (window.cadyxUiReloadCamera === cameraToRestore) {
-                window.setTimeout(() => {
-                  if (window.cadyxUiReloadCamera !== cameraToRestore || !livePreviewOwned) return;
-                  viewer.setCamera(cameraToRestore);
-                  window.cadyxUiReloadCamera = null;
-                  window.cadyxUiReloadCameraAppliedToModel = false;
-                }, 650);
-              }
-            }
+            renderTurntableScene({ aligned: false, reset: false });
           }
           if (!liveCalibration) {
             const scannerId = window.CadyxDeviceSettings?.scannerDeviceId?.();
@@ -1692,7 +1711,6 @@
               if (count >= 3) {
                 const hadTableAlignment = Boolean(liveTableFrame && liveMapTransform);
                 let tableAligned = false;
-                let resetAfterAlignment = false;
                 let matchedMapIndices = [];
                 const priorMarkerMatches = trackTableMarkerMatches(markerCenterPixelPositions, frameSequence);
                 const canRegisterFromTracks = hadTableAlignment && priorMarkerMatches.length >= 4;
@@ -1720,7 +1738,6 @@
                     matchedMapIndices = mapTransform.matches.map(match => match.targetIndex);
                     liveMarkerTrackSequence = frameSequence;
                     tableAligned = true;
-                    resetAfterAlignment = !hadTableAlignment && liveViewportInitialized && !liveCameraRestored;
                     liveMapAlignmentSummary = `Карта ${mapTransform.matches.length}/${liveTableMap.points.length}`
                       + ` · остаток ${mapTransform.medianResidual.toFixed(1)} ед.`;
                     setMapAlignmentStatus(liveMapAlignmentSummary, 'aligned');
@@ -1743,97 +1760,72 @@
                 if (!tableAligned && liveTableMap) {
                   setMapAlignmentStatus(`Карта: ${regions}/${liveTableMap.points.length} маркеров; нужно 4`, 'waiting');
                 }
-                let bounds = rawBounds;
-                let markerIndices = [];
-                let displayPositions = positions;
-                let orbitCenter = null;
-                let fitRadius = null;
-                if (tableAligned) {
-                  const tablePositions = liveFrameScratch.tablePositions;
-                  tablePositions.set(positions.subarray(0, count * 3));
-                  const transformed = transformLiveToTableFrame(tablePositions.subarray(0, count * 3), liveTableFrame,
-                    liveMapTransform, markerFlags);
-                  if (transformed.count >= LIVE_MIN_OBJECT_PREVIEW_POINTS || liveTableMap?.points?.length >= 4) {
-                    count = transformed.count >= LIVE_MIN_OBJECT_PREVIEW_POINTS ? transformed.count : 0;
-                    bounds = transformed.bounds;
-                    markerIndices = count ? transformed.markerIndices : [];
-                    displayPositions = tablePositions;
-                    liveFitRadius ||= turntableDisplayModel.fitRadius;
-                    orbitCenter = [0, 0, 0];
-                    fitRadius = liveFitRadius;
-                    lastMapAlignedFrame = { positions: new Float32Array(tablePositions.subarray(0, count * 3)),
-                      count, markerIndices: [...markerIndices], matchedMapIndices: [...matchedMapIndices], aligned: true };
-                    if (count === 0) {
-                      setMapAlignmentStatus(`${liveMapAlignmentSummary} · только маркеры карты`, 'aligned');
-                    }
-                  } else {
-                    liveFrameSequence = frameSequence;
-                    setMapAlignmentStatus(liveMapAlignmentSummary
-                      ? `${liveMapAlignmentSummary} · последний кадр`
-                      : 'Карта: мало точек · последний кадр', 'stale');
-                    if (lastMapAlignedFrame && turntableDisplayPoseChanged()) {
-                      renderLiveFrame({ ...lastMapAlignedFrame, reset: false });
-                    }
-                    return;
-                  }
-                }
-                if (!tableAligned && !liveRawCameraCenter) {
-                  liveRawCameraCenter = bounds.min.map((minimum, axis) =>
-                    minimum / 2 + bounds.max[axis] / 2);
-                  liveRawFitRadius = Math.max(Math.hypot(
-                    bounds.max[0] - bounds.min[0],
-                    bounds.max[1] - bounds.min[1],
-                    bounds.max[2] - bounds.min[2],
-                  ) / 2, 0.001);
-                }
                 if (!tableAligned) {
-                  orbitCenter = liveRawCameraCenter;
-                  fitRadius = liveRawFitRadius;
+                  liveFrameSequence = frameSequence;
+                  return;
                 }
-                if (!tableAligned) {
-                  for (let index = 0; index < count; index += 1) {
-                    if (markerFlags[index]) markerIndices.push(index);
+                const tablePositions = liveFrameScratch.tablePositions;
+                tablePositions.set(positions.subarray(0, count * 3));
+                const transformed = transformLiveToTableFrame(tablePositions.subarray(0, count * 3), liveTableFrame,
+                  liveMapTransform, markerFlags);
+                if (transformed.count >= LIVE_MIN_OBJECT_PREVIEW_POINTS || liveTableMap.points.length >= 4) {
+                  count = transformed.count >= LIVE_MIN_OBJECT_PREVIEW_POINTS ? transformed.count : 0;
+                  const markerIndices = count ? transformed.markerIndices : [];
+                  const displayPositions = tablePositions;
+                  const bounds = transformed.bounds;
+                  lastMapAlignedFrame = { positions: new Float32Array(tablePositions.subarray(0, count * 3)),
+                    count, markerIndices: [...markerIndices], matchedMapIndices: [...matchedMapIndices], aligned: true };
+                  if (count === 0) {
+                    setMapAlignmentStatus(`${liveMapAlignmentSummary} · только маркеры карты`, 'aligned');
                   }
+                  const processMs = Math.max(0, clock() - processStartedAt);
+                  const renderStartedAt = clock();
+                  renderLiveFrame({ positions: displayPositions, count, bounds, markerIndices, matchedMapIndices,
+                    aligned: true, reset: false });
+                  const renderMs = Math.max(0, clock() - renderStartedAt);
+                  const now = clock();
+                  if (!liveClientWindowStartedAt) liveClientWindowStartedAt = now;
+                  liveClientWindowFrames += 1;
+                  liveClientWindowSums.request += requestMs;
+                  liveClientWindowSums.process += processMs;
+                  liveClientWindowSums.render += renderMs;
+                  liveClientWindowSums.total += requestMs + processMs + renderMs;
+                  liveClientWindowSums.points += count;
+                  liveClientWindowMax.request = Math.max(liveClientWindowMax.request, requestMs);
+                  liveClientWindowMax.process = Math.max(liveClientWindowMax.process, processMs);
+                  liveClientWindowMax.render = Math.max(liveClientWindowMax.render, renderMs);
+                  liveClientWindowMax.total = Math.max(liveClientWindowMax.total, requestMs + processMs + renderMs);
+                  const windowSeconds = (now - liveClientWindowStartedAt) / 1000;
+                  if (windowSeconds >= 1 && liveClientWindowFrames > 0) {
+                    const frames = liveClientWindowFrames;
+                    const averages = liveClientWindowSums;
+                    const maxima = liveClientWindowMax;
+                    liveClientWindowStartedAt = now;
+                    liveClientWindowFrames = 0;
+                    liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
+                    liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
+                    void fetcher('/api/v1/scanner/live-preview/client-metrics', { method: 'POST',
+                      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metrics: {
+                        window_seconds: windowSeconds, frames,
+                        request_avg_ms: averages.request / frames, request_max_ms: maxima.request,
+                        process_avg_ms: averages.process / frames, process_max_ms: maxima.process,
+                        render_avg_ms: averages.render / frames, render_max_ms: maxima.render,
+                        total_avg_ms: averages.total / frames, total_max_ms: maxima.total,
+                        points_avg: averages.points / frames,
+                      } }) }).catch(() => {});
+                  }
+                  liveFrameSequence = frameSequence;
+                  renderedFrame = true;
+                } else {
+                  liveFrameSequence = frameSequence;
+                  setMapAlignmentStatus(liveMapAlignmentSummary
+                    ? `${liveMapAlignmentSummary} · последний кадр`
+                    : 'Карта: мало точек · последний кадр', 'stale');
+                  if (lastMapAlignedFrame && turntableDisplayPoseChanged()) {
+                    renderLiveFrame({ ...lastMapAlignedFrame, reset: false });
+                  }
+                  return;
                 }
-                const processMs = Math.max(0, clock() - processStartedAt);
-                const renderStartedAt = clock();
-                renderLiveFrame({ positions: displayPositions, count, bounds, markerIndices, matchedMapIndices,
-                  aligned: tableAligned,
-                  orbitCenter, fitRadius, reset: resetAfterAlignment });
-                const renderMs = Math.max(0, clock() - renderStartedAt);
-                const now = clock();
-                if (!liveClientWindowStartedAt) liveClientWindowStartedAt = now;
-                liveClientWindowFrames += 1;
-                liveClientWindowSums.request += requestMs;
-                liveClientWindowSums.process += processMs;
-                liveClientWindowSums.render += renderMs;
-                liveClientWindowSums.total += requestMs + processMs + renderMs;
-                liveClientWindowSums.points += count;
-                liveClientWindowMax.request = Math.max(liveClientWindowMax.request, requestMs);
-                liveClientWindowMax.process = Math.max(liveClientWindowMax.process, processMs);
-                liveClientWindowMax.render = Math.max(liveClientWindowMax.render, renderMs);
-                liveClientWindowMax.total = Math.max(liveClientWindowMax.total, requestMs + processMs + renderMs);
-                const windowSeconds = (now - liveClientWindowStartedAt) / 1000;
-                if (windowSeconds >= 1 && liveClientWindowFrames > 0) {
-                  const frames = liveClientWindowFrames;
-                  const averages = liveClientWindowSums;
-                  const maxima = liveClientWindowMax;
-                  liveClientWindowStartedAt = now;
-                  liveClientWindowFrames = 0;
-                  liveClientWindowSums = { request: 0, process: 0, render: 0, total: 0, points: 0 };
-                  liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
-                  void fetcher('/api/v1/scanner/live-preview/client-metrics', { method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ metrics: {
-                      window_seconds: windowSeconds, frames,
-                      request_avg_ms: averages.request / frames, request_max_ms: maxima.request,
-                      process_avg_ms: averages.process / frames, process_max_ms: maxima.process,
-                      render_avg_ms: averages.render / frames, render_max_ms: maxima.render,
-                      total_avg_ms: averages.total / frames, total_max_ms: maxima.total,
-                      points_avg: averages.points / frames,
-                    } }) }).catch(() => {});
-                }
-                liveFrameSequence = frameSequence;
-                renderedFrame = true;
               } else {
                 liveFrameSequence = frameSequence;
                 renderedFrame = true;
@@ -1889,9 +1881,6 @@
         liveMarkerTrackSequence = 0;
         lastMapRansacSequence = 0;
         lastRenderedTurntableDisplayPose = null;
-        liveFitRadius = null;
-        liveRawCameraCenter = null;
-        liveRawFitRadius = null;
         lastLiveFrameMtimeNs = 0;
         liveFrameIntervalMs = 0;
         liveViewportInitialized = false;

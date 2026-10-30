@@ -60,7 +60,8 @@ assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(7, 16, 8, 34),
   "a partial marker subset periodically searches the full map for a better global fit");
 assert.equal(sandbox.window.CadyxScanView.shouldRunTableMapRansac(34, 16, 8, 34), false,
   "a complete map match needs no periodic global search");
-const turntableModel = sandbox.window.CadyxScanView.buildTurntableDisplayModel();
+const displayMapPoints = [[18, 0], [0, 34], [-46, 12], [-27, -38], [52, 16]];
+const turntableModel = sandbox.window.CadyxScanView.buildTurntableDisplayModel({ points: displayMapPoints });
 assert.equal(turntableModel.diameterMm, 200, "the display tabletop uses the user-provided 200 mm diameter");
 assert.equal(turntableModel.thicknessMm, 10, "the display tabletop uses the user-provided 10 mm thickness");
 assert.equal(turntableModel.supportRotationDegrees, -90,
@@ -116,12 +117,13 @@ for (let index = 0; index < turntableModel.fixed.positions.length; index += 3) {
 assert.ok(Math.abs(lowerFlangeRadius - 96) < 1e-4, "the lower flange keeps its circular 192 mm footprint");
 assert.equal(turntableModel.ribCount, 120, "the moving plate has fine circumferential grip ribs");
 assert.equal(turntableModel.mountingRecessCount, 4, "the lower flange has four closed mounting recess details");
-assert.equal(turntableModel.tableTopPortCount, 40, "the tabletop has a closed radial pattern of 40 fixture ports");
+assert.equal(turntableModel.tableMapMarkerCount, displayMapPoints.length,
+  "the tabletop marker count comes from the actual marker map");
 assert.ok(Array.from({ length: turntableModel.moving.positions.length / 3 }, (_, index) => index)
   .some(index => Math.abs(turntableModel.moving.positions[index * 3] - 18) < 1e-4
     && Math.abs(turntableModel.moving.positions[index * 3 + 1]) < 1e-4
-    && Math.abs(turntableModel.moving.positions[index * 3 + 2] - 0.025) < 1e-4),
-"fixture ports have closed inset floors rather than open mesh boundaries");
+    && Math.abs(turntableModel.moving.positions[index * 3 + 2] - 0.09) < 1e-4),
+"the first fixture marker uses its exact table-map XY coordinates on the top surface");
 const ribRingRadii = new Set();
 for (let index = 0; index < turntableModel.moving.positions.length; index += 3) {
   if (Math.abs(turntableModel.moving.positions[index + 2] + 0.9) < 1e-4) {
@@ -388,13 +390,13 @@ const mapAlignedView = sandbox.window.CadyxScanView.initialize({
 }, undefined, fetchPreview);
 const mapAlignedStart = viewerLoads.length;
 mapAlignedView.showLivePreview({ open: true });
-await waitUntil(() => viewerLoads.length >= mapAlignedStart + 3
+await waitUntil(() => viewerLoads.length >= mapAlignedStart + 4
   && liveFrameSequence >= 2);
 assert.ok(viewerCameraUpdates.includes(savedReloadCamera),
-  "the saved camera is restored after the first table-map scene load");
+  "the saved camera is restored after the immediate table scene load");
 assert.equal(viewerLoads[mapAlignedStart + 1].options.reset, false,
-  "first marker alignment does not replace the restored user camera");
-const mapAlignedGeometries = [viewerLoads[mapAlignedStart + 1].geometry, viewerLoads[mapAlignedStart + 2].geometry];
+  "loading the table map does not replace the restored user camera");
+const mapAlignedGeometries = [viewerLoads[mapAlignedStart + 2].geometry, viewerLoads[mapAlignedStart + 3].geometry];
 const mappedMarkerCoordinates = mapAlignedGeometries.map(geometry => {
   const layer = geometry.pointLayers.find(item => item.style.color === "#d4f6ff");
   const matchedLayer = geometry.pointLayers.find(item => item.style.color === "#00d8ff");
@@ -410,7 +412,7 @@ assert.match(mapAlignmentOutput.textContent, /Карта \d+\/5/,
   "the live preview reports its current table-map correspondence quality");
 await waitUntil(() => liveFrameSequence >= 3);
 await new Promise(resolve => setTimeout(resolve, 30));
-assert.equal(viewerLoads.length, mapAlignedStart + 3,
+assert.equal(viewerLoads.length, mapAlignedStart + 4,
   "a frame without enough table markers does not replace the last map-aligned cloud with unaligned points");
 assert.match(mapAlignmentOutput.textContent, /последний кадр/,
   "the map status explains when the preview is retaining its last aligned frame");
@@ -473,23 +475,27 @@ const unalignedView = sandbox.window.CadyxScanView.initialize({
 }, undefined, fetchPreview);
 const unalignedStart = viewerLoads.length;
 unalignedView.showLivePreview({ open: true });
-await waitUntil(() => viewerLoads.length >= unalignedStart + 3);
-const firstUnaligned = viewerLoads[unalignedStart + 1].geometry;
-const secondUnaligned = viewerLoads[unalignedStart + 2].geometry;
+assert.equal(viewerLoads.length, unalignedStart + 1,
+  "enabling live preview renders the opaque table before the asynchronous marker-map request completes");
+assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0,
+  "the table remains visible immediately while preview startup is waiting on scanner APIs");
+await waitUntil(() => liveFrameSequence >= 2 && viewerLoads.length > unalignedStart);
+const firstUnaligned = viewerLoads.at(-1).geometry;
 assert.equal(displayedLiveCloudCount(firstUnaligned), 0,
-  "unmatched marker candidates are hidden until they can be placed on the table map");
+  "unaligned camera points are hidden until they can be placed on the table map");
 assert.equal(firstUnaligned.pointLayers.find(layer => layer.style.color === "#d4f6ff").points.length, centers.length,
   "the saved marker map remains visible while live detections wait for enough correspondences");
-assert.deepEqual([...secondUnaligned.orbitCenter], [...firstUnaligned.orbitCenter],
-  "unregistered live frames retain the first valid frame camera center");
-assert.equal(secondUnaligned.fitRadius, firstUnaligned.fitRadius,
-  "unregistered live frames retain the first valid frame camera scale");
-assert.deepEqual([...secondUnaligned.bounds.min], [...firstUnaligned.bounds.min],
-  "unmatched detections cannot move the mapped table or marker display");
+assert.ok(firstUnaligned.triangles.length > 0,
+  "the display-only table remains in the viewport while a scan frame awaits map alignment");
+assert.deepEqual([...firstUnaligned.orbitCenter], [0, 0, 0],
+  "an unaligned frame cannot move the camera away from the display-only table");
+assert.equal(firstUnaligned.fitRadius, turntableModel.fitRadius,
+  "an unaligned frame cannot zoom the camera away from the display-only table");
+const firstUnalignedLoadCount = viewerLoads.length;
 await waitUntil(() => liveFrameSequence >= 4);
 await new Promise(resolve => setTimeout(resolve, 20));
-assert.equal(viewerLoads.length, unalignedStart + 3,
-  "empty sensor frames do not create synthetic or blended point clouds");
+assert.equal(viewerLoads.length, firstUnalignedLoadCount,
+  "repeated unaligned frames keep the table and map markers visible without replacing the scene");
 unalignedView.closeLivePreview();
 
 liveRawFrameSource = [
@@ -503,18 +509,20 @@ const movingView = sandbox.window.CadyxScanView.initialize({
 }, undefined, fetchPreview);
 const movingStart = viewerLoads.length;
 movingView.showLivePreview({ open: true });
-await waitUntil(() => viewerLoads.length >= movingStart + 3);
-const movingSecondGeometry = viewerLoads[movingStart + 2].geometry;
+await waitUntil(() => liveFrameSequence >= 2 && viewerLoads.length > movingStart);
+const movingSecondGeometry = viewerLoads.at(-1).geometry;
 assert.equal(displayedLiveCloudCount(movingSecondGeometry), 0,
   "live detections outside reliable map correspondences are not shown as table markers");
+assert.ok(movingSecondGeometry.triangles.length > 0,
+  "misaligned frames leave the opaque table model visible in the same viewport");
 assert.equal(movingSecondGeometry.pointLayers.some(layer => layer.style.color === "#00d8ff"), false,
   "a moving unmatched set never paints false marker highlights");
 movingView.closeLivePreview();
 
-const denseFrame = new Uint8Array(640 * 400 * 2);
-for (let y = 50; y < 350; y += 1) for (let x = 100; x < 300; x += 1) {
+const denseFrame = makeMapAlignedFrame();
+for (let y = 40; y < 170; y += 1) for (let x = 80; x < 300; x += 1) {
   const pixel = y * 640 + x;
-  denseFrame[pixel * 2] = 150;
+  denseFrame[pixel * 2] = 100;
 }
 liveRawFrameSource = [denseFrame, denseFrame];
 liveFrameSequence = 0;
@@ -523,17 +531,19 @@ const denseView = sandbox.window.CadyxScanView.initialize({
 }, undefined, fetchPreview);
 const denseStart = viewerLoads.length;
 denseView.showLivePreview({ open: true });
-await waitUntil(() => viewerLoads.length >= denseStart + 3
-  && displayedLiveCloudCount(viewerLoads.at(-1)?.geometry || {}) > 0);
-const firstDenseGeometry = viewerLoads[denseStart + 1].geometry;
-const secondDenseGeometry = viewerLoads[denseStart + 2].geometry;
+const denseGeometries = () => viewerLoads.slice(denseStart).map(load => load.geometry)
+  .filter(geometry => displayedLiveCloudCount(geometry) > 0);
+await waitUntil(() => denseGeometries().length >= 2);
+const [firstDenseGeometry, secondDenseGeometry] = denseGeometries();
 const denseDisplayedCount = displayedLiveCloudCount(secondDenseGeometry);
 assert.ok(denseDisplayedCount <= 8_000, "dense scanner frames respect the preview point ceiling");
-assert.ok(denseDisplayedCount >= 7_000,
-  `stable density sampling uses nearly the full point budget: ${denseDisplayedCount}`);
+assert.ok(denseDisplayedCount >= 6_000,
+  `map-aligned dense sampling retains thousands of object points after table-plane returns are removed: ${denseDisplayedCount}`);
+const firstDenseRange = firstDenseGeometry.pointCloudVertexRange;
+const secondDenseRange = secondDenseGeometry.pointCloudVertexRange;
 assert.deepEqual(
-  [...secondDenseGeometry.positions.slice(0, denseDisplayedCount * 3)],
-  [...firstDenseGeometry.positions.slice(0, denseDisplayedCount * 3)],
+  [...secondDenseGeometry.positions.slice(secondDenseRange[0] * 3, secondDenseRange[1] * 3)],
+  [...firstDenseGeometry.positions.slice(firstDenseRange[0] * 3, firstDenseRange[1] * 3)],
   "dense-frame sampling keeps the same pixels selected across identical frames",
 );
 denseView.closeLivePreview();
