@@ -17,6 +17,18 @@ class NumericalRankTests(unittest.TestCase):
         self.assertEqual(dense_rank, 2)
         self.assertEqual(sparse.rank, dense_rank)
 
+    def test_dense_rank_preserves_extreme_finite_coefficients(self):
+        # Normalizing the 1e-8 pivot by division creates an infinite 1e309
+        # coefficient, then NaN, and falsely reports a second independent row.
+        dependent = [[1e-8, 1e301], [2e-8, 2e301]]
+        independent = [0.0, 1e301]
+        for rows, expected in ((dependent, 1), (dependent + [independent], 2)):
+            for ordered in itertools.permutations(rows):
+                for columns in itertools.permutations(range(2)):
+                    with self.subTest(rows=ordered, columns=columns):
+                        permuted = [[row[column] for column in columns] for row in ordered]
+                        self.assertEqual(matrix_rank(permuted), expected)
+
     def test_sparse_accumulator_reports_each_added_independent_row(self):
         sparse = SparseRankAccumulator()
         self.assertTrue(sparse.add_row({0: 1.0, 1: 1.0}))

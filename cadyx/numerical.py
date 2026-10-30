@@ -24,14 +24,14 @@ def matrix_rank(rows: list[list[float]], *, tolerance: float = 1e-8) -> int:
             continue
         matrix[rank], matrix[pivot] = matrix[pivot], matrix[rank]
         scale = matrix[rank][column]
-        for index in range(column, columns):
-            matrix[rank][index] /= scale
-        for row in range(row_count):
-            if row == rank:
-                continue
-            factor = matrix[row][column]
+        # Forward elimination needs no normalized pivot row. Dividing a small
+        # pivot into a large finite coefficient can overflow to infinity and
+        # falsely increase the rank of dependent constraints.
+        for row in range(rank + 1, row_count):
+            factor = matrix[row][column] / scale
+            matrix[row][column] = 0.0
             if factor:
-                for index in range(column, columns):
+                for index in range(column + 1, columns):
                     matrix[row][index] -= factor * matrix[rank][index]
         rank += 1
     return rank
