@@ -1978,6 +1978,20 @@
       }
       if (open) { void showCloud(true); return; }
     };
+    const showFileCloud = (geometry, { reset = true } = {}) => {
+      cloudRequest += 1;
+      liveRequest += 1;
+      clearTimeout(liveTimer);
+      liveTimer = null;
+      livePreviewOwned = false;
+      meshPreviewOpen = false;
+      cloudPreviewOpen = true;
+      cloudPreviewPositions = geometry.positions;
+      cloudPreviewPointCount = geometry.previewVertexCount ?? geometry.positions.length / 3;
+      staticTurntableVisible = true;
+      updateButton();
+      renderTurntableScene({ reset });
+    };
     const updateLivePreviewStatus = preview => {
       const captureFps = preview?.metrics?.capture_fps;
       if (liveFpsIndicator) liveFpsIndicator.textContent = Number.isFinite(captureFps)
@@ -1999,7 +2013,7 @@
     updateButton();
     if (new URLSearchParams(location.search).get('live_scan') === '1') setOpen(true);
     return { setOpen, setMode, showCapture, showLivePreview, closeLivePreview,
-      showTurntable, hideTurntable, updateLivePreviewStatus };
+      showTurntable, hideTurntable, showFileCloud, updateLivePreviewStatus };
   };
 
   const initializeLivePreview = ({ button, view, captureButton }, location = window.location, fetcher = fetch) => {

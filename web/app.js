@@ -368,7 +368,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       if(liveCamera?.getAttribute('aria-pressed')==='true')return 'live';
       if(scanMesh?.getAttribute('aria-pressed')==='true')return 'mesh';
       if(liveScan?.getAttribute('aria-pressed')==='true')return 'cloud';
-      if(latestScanPreview?.projectId===state.project)return 'capture';
+      if(latestScanPreview?.projectId===state.project&&latestScanPreview.scan?.state==='running')return 'capture';
       return null;
     }
     function clearScanTreePreview({restorePrevious=false,preserveMode=false}={}){
@@ -415,9 +415,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         });
         if(request!==scanTreePreviewRequest||projectId!==state.project)return;
         const pointCount=geometry.previewVertexCount??geometry.positions.length/3;
-        const referenceOrigin=geometry.bounds.min.map((value,axis)=>(value+geometry.bounds.max[axis])/2);
-        modelViewer?.load({...geometry,triangles:new Uint32Array(0),lines:[],
-          pointCloudVertexCount:pointCount,referenceOrigin},{reset:true});
+        scanView?.showFileCloud(geometry,{reset:true});
         if(status)status.textContent=`Предпросмотр ${scanFileLabel(file,run.id)} · ${new Intl.NumberFormat('ru-RU').format(pointCount)} точек`;
       }catch(error){
         if(request!==scanTreePreviewRequest)return;
@@ -1191,6 +1189,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           const scan=payload.scan;
           if(scan?.preview_file)latestScanPreview={projectId:id,scan};
           const captureStarted=scan.state==='running'&&!scanWasRunning;
+          const captureFinished=scan.state!=='running'&&scanWasRunning;
           scanWasRunning=scan.state==='running';
           if(!scanTreePreviewSelection)scanStatus.textContent=scan.state==='idle'||scan.state==='completed'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;
           setCaptureBusy(scan.state==='running'||scan.state==='busy');
@@ -1198,10 +1197,10 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
             showCapturePreview(scan,{open:captureStarted});
             pollTimer=setTimeout(()=>pollScan(id),1200);
           }else if(scan.state==='completed'){
-            showCapturePreview(scan);
+            if(captureFinished&&!scanTreePreviewSelection)scanView?.setOpen(false);
             pollTimer=setTimeout(()=>pollScan(id),4000);
           }else if(scan.state==='failed'){
-            if(scan.completed_frames>0)showCapturePreview(scan);
+            if(captureFinished&&!scanTreePreviewSelection)scanView?.setOpen(false);
             pollTimer=setTimeout(()=>pollScan(id),4000);
           }else{
             pollTimer=setTimeout(()=>pollScan(id),2500);
