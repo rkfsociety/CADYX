@@ -61,12 +61,15 @@ def solve_planetary_gearset(
             for index in range(len(ordered))]
     gaps[-1] += 360.0
     try:
-        phase_teeth = [((sun + ring) * gap / 360.0) for gap in gaps]
+        # Keep fractional tooth offsets exact: float rounding at large tooth
+        # counts can otherwise turn an incompatible layout into a false pass.
+        phase_teeth_exact = [Fraction(gap) * (sun + ring) / 360 for gap in gaps]
+        phase_teeth = [float(value) for value in phase_teeth_exact]
     except OverflowError as exc:
         raise ValidationError("Gear indexing exceeds the finite numeric range.") from exc
     if not all(math.isfinite(value) for value in phase_teeth):
         raise ValidationError("Gear indexing exceeds the finite numeric range.")
-    phase_errors = [abs(value - round(value)) for value in phase_teeth]
+    phase_errors = [float(abs(value - round(value))) for value in phase_teeth_exact]
     indexing_compatible = all(error <= 1e-9 for error in phase_errors)
     try:
         # Exact tooth-pitch fractions preserve half-tooth offsets that would

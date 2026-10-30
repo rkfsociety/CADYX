@@ -60,13 +60,31 @@ class PlanetaryGearKinematicsTests(unittest.TestCase):
         cases = (
             {"module": 1e308},
             {"sun_teeth": 10 ** 1000},
-            {"sun_rotation_degrees": 1e308},
             {"sun_rotation_degrees": 10 ** 1000},
         )
         for overrides in cases:
             with self.subTest(overrides=overrides):
                 with self.assertRaisesRegex(ValidationError, "finite"):
                     solve_planetary_gearset(**{**valid, **overrides})
+
+    def test_large_tooth_counts_retain_fractional_indexing_error(self) -> None:
+        result = self.solve(
+            teeth=(10**17, 10**17, 3 * 10**17),
+            angles=[0.0, 120.0, 240.0],
+        )
+        self.assertTrue(result["pitch_geometry_compatible"])
+        self.assertFalse(result["tooth_indexing_compatible"])
+        self.assertEqual(result["indexing_phase_error_teeth_per_gap"], [1 / 3] * 3)
+
+    def test_large_finite_sun_rotation_is_accepted(self) -> None:
+        result = solve_planetary_gearset(
+            module=2.0, sun_teeth=18, planet_teeth=18, ring_teeth=54,
+            planet_angles_degrees=[0.0, 120.0, 240.0],
+            sun_rotation_degrees=1e308,
+            sun_speed_radians_per_second=1.0,
+            ring_speed_radians_per_second=0.0,
+        )
+        self.assertTrue(math.isfinite(result["sun_planet_phase_teeth"][0]))
 
     def test_finite_extreme_speeds_do_not_overflow_weighted_average(self) -> None:
         base = dict(module=2.0, sun_teeth=18, planet_teeth=18, ring_teeth=54,
