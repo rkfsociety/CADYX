@@ -16,6 +16,20 @@ def _mean_coordinate(values: list[float]) -> float:
         return math.fsum(value / len(values) for value in values)
 
 
+def _voxel_index(value: float, size: float) -> int:
+    """Keep finite coordinates addressable when their float quotient overflows."""
+    quotient = value / size
+    if math.isfinite(quotient):
+        return math.floor(quotient)
+    if not math.isfinite(value):
+        raise ValueError("Non-finite point coordinate.")
+    # Float division can overflow even though both operands are finite.
+    # Exact integer ratios preserve the world-origin-aligned voxel boundary.
+    numerator, denominator = value.as_integer_ratio()
+    size_numerator, size_denominator = size.as_integer_ratio()
+    return (numerator * size_denominator) // (denominator * size_numerator)
+
+
 def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
     if method == "simplify":
         defaults = {"strategy": "uniform", "ratio": 40.}
@@ -124,7 +138,7 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
         buckets: dict[tuple[int, ...], list[int]] = {}
         for index, point in enumerate(points):
             try:
-                key = tuple(math.floor(v / size) for v in point)
+                key = tuple(_voxel_index(v, size) for v in point)
             except (OverflowError, ValueError) as exc:
                 raise ValidationError("Point-cloud distance is too small for these source coordinates.") from exc
             buckets.setdefault(key, []).append(index)
@@ -138,7 +152,7 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
             # until the explicit deduplication operation is requested.
             comparisons = 0
             for index, point in enumerate(points):
-                key = tuple(math.floor(v / size) for v in point)
+                key = tuple(_voxel_index(v, size) for v in point)
                 count = 0
                 for offset in offsets:
                     for other in buckets.get(tuple(a + b for a, b in zip(key, offset)), ()):

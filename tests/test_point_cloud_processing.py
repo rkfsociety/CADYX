@@ -201,6 +201,14 @@ class PointCloudProcessingTests(unittest.TestCase):
         self.assertTrue(all(math.isfinite(value) for point in result for value in point))
         self.assertTrue(all(-1e308 <= value <= 1e308 for point in result for value in point[:2]))
 
+    def test_voxel_and_radius_filters_accept_overflowing_finite_grid_indices(self):
+        # A tiny positive cell size can overflow float division of valid XYZ.
+        points = [(x, 0., 0.) for x in (-1e308, 0., 1e308) for _ in range(3)]
+        expected = [(-1e308, 0., 0.), (0., 0., 0.), (1e308, 0., 0.)]
+        self.assertEqual(process_points(points, "voxel_downsample", {"voxel_size": 1e-308}), expected)
+        self.assertEqual(process_points(points, "radius_filter",
+                                        {"radius": 1e-308, "min_neighbors": 2}), points)
+
     def test_voxel_centroids_preserve_subnormal_coordinates(self):
         # Dividing each subnormal sample before summing rounds it to zero.
         tiny = math.ulp(0.0)
