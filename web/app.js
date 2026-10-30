@@ -897,7 +897,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       overlay.width=Math.round(rect.width*dpr);overlay.height=Math.round(rect.height*dpr);
       const ctx=overlay.getContext('2d');ctx.clearRect(0,0,overlay.width,overlay.height);
       const o=state.byId.get(state.selected),P=projectSetup();
-      if(P){
+      if(P&&document.querySelector('#primary-grid')?.dataset.view!=='scanning'){
         ctx.save();ctx.font=`600 ${11*dpr}px "Segoe UI Variable", "Segoe UI", Arial, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
         for(const {body} of modelGroups()){
           const mesh=sceneBody(body.id);if(!mesh?.positions?.length)continue;

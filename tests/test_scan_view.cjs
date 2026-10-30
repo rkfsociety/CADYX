@@ -617,6 +617,8 @@ assert.match(styleCss, /\.scanner-map-alignment\s*\{[^}]*left:\s*82px;[^}]*botto
 assert.match(styleCss, /\.primary-grid:not\(\[data-view="scanning"\]\) #viewport-live-camera,[\s\S]*?#scanner-map-alignment \{ display: none !important; \}/,
   "scanner controls and overlays are hidden outside the Scanning tab");
 const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
+assert.match(appJs, /if\(P&&document\.querySelector\('#primary-grid'\)\?\.dataset\.view!=='scanning'\)\{/,
+  "selected-body name badges do not cover the scanner turntable preview");
 assert.doesNotMatch(scanViewSource, /interactiveRenderScale/,
   "the live turntable keeps full-resolution rendering while rotating");
 assert.match(appJs, /grid\?\.dataset\.view==='scanning'\)scanView\?\.showTurntable\(\)/,
