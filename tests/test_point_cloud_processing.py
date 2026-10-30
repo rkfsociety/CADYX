@@ -191,6 +191,13 @@ class PointCloudProcessingTests(unittest.TestCase):
         self.assertLess(len(result), len(points))
         self.assertTrue(all(math.isfinite(value) for point in result for value in point))
 
+    def test_voxel_centroids_preserve_subnormal_coordinates(self):
+        # Dividing each subnormal sample before summing rounds it to zero.
+        tiny = math.ulp(0.0)
+        points = [(tiny, 0., 0.)] * 3 + [(-tiny, 0., 0.)] * 3 + [(2., 0., 0.)] * 3
+        result = process_points(points, "voxel_downsample", {"voxel_size": 1.})
+        self.assertEqual(result, [(tiny, 0., 0.), (-tiny, 0., 0.), (2., 0., 0.)])
+
     def test_voxel_centroids_do_not_overflow_finite_coordinates(self):
         # Summing a voxel before dividing would overflow for either outer cluster.
         points = [(x, 0., 0.) for x in (-1e308, 0., 1e308) for _ in range(3)]

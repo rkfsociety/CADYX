@@ -8,6 +8,14 @@ from typing import Any
 from .errors import ValidationError
 
 
+def _mean_coordinate(values: list[float]) -> float:
+    """Preserve subnormal centroids; scale first only if the sum overflows."""
+    try:
+        return math.fsum(values) / len(values)
+    except OverflowError:
+        return math.fsum(value / len(values) for value in values)
+
+
 def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
     if method == "simplify":
         defaults = {"strategy": "uniform", "ratio": 40.}
@@ -83,7 +91,7 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
                 for point in points:
                     key = tuple(math.floor(value / size) for value in point)
                     buckets.setdefault(key, []).append(point)
-                candidate = [tuple(math.fsum(point[a] / len(group) for point in group) for a in range(3))
+                candidate = [tuple(_mean_coordinate([point[a] for point in group]) for a in range(3))
                              for group in buckets.values()]
                 if len(candidate) >= 3 and abs(len(candidate) - target) < best_gap:
                     best, best_gap = candidate, abs(len(candidate) - target)
@@ -112,7 +120,7 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
                 raise ValidationError("Point-cloud distance is too small for these source coordinates.") from exc
             buckets.setdefault(key, []).append(index)
         if method == "voxel_downsample":
-            result = [tuple(math.fsum(points[i][axis] / len(indices) for i in indices) for axis in range(3))
+            result = [tuple(_mean_coordinate([points[i][axis] for i in indices]) for axis in range(3))
                       for indices in buckets.values()]
         else:
             result = []
