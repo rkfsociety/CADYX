@@ -53,6 +53,28 @@
       [0, 4, 7], [0, 7, 3], [1, 2, 6], [1, 6, 5],
     ]) addTriangle(mesh, ...triangle.map(index => index + offset), color);
   };
+  const addBakedDegreeNumber = (mesh, text, centerX, centerY, angle, color) => {
+    const digitWidth = 3.1, digitHeight = 5, thickness = 0.72, gap = 0.55;
+    const horizontal = [[0,digitHeight-thickness,digitWidth,digitHeight],
+      [0,(digitHeight-thickness)/2,digitWidth,(digitHeight+thickness)/2],
+      [0,0,digitWidth,thickness]];
+    const vertical = [[0,digitHeight/2,thickness,digitHeight],
+      [digitWidth-thickness,digitHeight/2,digitWidth,digitHeight],
+      [0,0,thickness,digitHeight/2],
+      [digitWidth-thickness,0,digitWidth,digitHeight/2]];
+    const segments = {0:[0,2,3,4,5,6],3:[0,1,2,4,6]};
+    const digits = [...text].map(Number), width = digits.length*digitWidth+(digits.length-1)*gap;
+    for(let digitIndex=0;digitIndex<digits.length;digitIndex++) for(const segment of segments[digits[digitIndex]]||[]){
+      const [minX,minY,maxX,maxY]=segment<3?horizontal[segment]:vertical[segment-3];
+      const start=mesh.positions.length/3,shift=digitIndex*(digitWidth+gap)-width/2;
+      addClosedBox(mesh,[minX+shift,minY-digitHeight/2,0.08],[maxX+shift,maxY-digitHeight/2,0.32],color);
+      for(let vertex=start;vertex<mesh.positions.length/3;vertex++){
+        const offset=vertex*3,x=mesh.positions[offset],y=mesh.positions[offset+1];
+        mesh.positions[offset]=centerX+x*Math.cos(angle)-y*Math.sin(angle);
+        mesh.positions[offset+1]=centerY+x*Math.sin(angle)+y*Math.cos(angle);
+      }
+    }
+  };
   const addClosedPrism = (mesh, points, bottomZ, topZ, color) => {
     const bottom = points.map(point => {
       const index = mesh.positions.length / 3;
@@ -169,8 +191,7 @@
       min: [fixedModel.bounds.min[1], -fixedModel.bounds.max[0], fixedModel.bounds.min[2]],
       max: [fixedModel.bounds.max[1], -fixedModel.bounds.min[0], fixedModel.bounds.max[2]],
     };
-    const degreeLabelPositions = [], degreeTextLabels = [];
-    let degreeTickCount = 0;
+    let degreeTickCount = 0, bakedDegreeLabelCount = 0;
     for (let degrees = 0; degrees < 360; degrees += 5) {
       const radians = (degrees + TURNTABLE_DEGREE_SCALE_ZERO_DEGREES) * Math.PI / 180;
       const cosine = Math.cos(radians), sine = Math.sin(radians);
@@ -208,11 +229,8 @@
         sideBottom, sideTop, tickColor);
       degreeTickCount += 1;
       if (major) {
-        const topPointIndex = degreeLabelPositions.length / 3;
-        degreeLabelPositions.push(cosine * (TURNTABLE_RADIUS_MM + 10),
-          sine * (TURNTABLE_RADIUS_MM + 10), 0.35);
-        degreeTextLabels.push({ pointIndex: topPointIndex, text: `${degrees}°`, size: 8, color: '#f3f7f8',
-          minViewDepthZ: 0.75 });
+        addBakedDegreeNumber(moving,String(degrees),82*cosine,82*sine,radians+Math.PI/2,[242,247,249]);
+        bakedDegreeLabelCount += 1;
       }
     }
     return {
@@ -220,8 +238,9 @@
       moving: finishMesh(moving),
       supportRotationDegrees: -90,
       degreeTickCount,
-      degreeLabelPositions: Float32Array.from(degreeLabelPositions),
-      degreeTextLabels,
+      bakedDegreeLabelCount,
+      degreeLabelPositions: new Float32Array(0),
+      degreeTextLabels: [],
       pivotZ: TURNTABLE_TILT_PIVOT_Z_MM,
       diameterMm: TURNTABLE_DIAMETER_MM,
       thicknessMm: TURNTABLE_THICKNESS_MM,

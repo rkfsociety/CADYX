@@ -83,15 +83,14 @@ assert.ok(Array.from({ length: turntableModel.fixed.positions.length / 3 }, (_, 
 "the front-facing turntable button is fixed on the zero-degree side of the support");
 assert.equal(turntableModel.fitRadius, 120, "the outer degree labels have clearance from the viewport edge");
 assert.equal(turntableModel.degreeTickCount, 72, "the turntable scale has 5 degree ticks through 360 degrees");
-assert.deepEqual(Array.from(turntableModel.degreeTextLabels.filter(label => Number.isFinite(label.minViewDepthZ)), label => label.text),
-  ["0°", "30°", "60°", "90°", "120°", "150°", "180°", "210°", "240°", "270°", "300°", "330°"],
-  "the top-face scale labels each 30 degree major division");
-assert.equal(turntableModel.degreeTextLabels.length, 12,
-  "each major degree appears once, avoiding overlapping duplicate labels in isometric view");
-const zeroDegreePosition = Array.from(turntableModel.degreeLabelPositions.slice(0, 3));
-assert.ok(Math.abs(zeroDegreePosition[0]) < 0.1
-  && Math.abs(zeroDegreePosition[1] - 110) < 0.1,
-"the top-face zero-degree label is outside the table at the bottom in top view");
+assert.equal(turntableModel.bakedDegreeLabelCount, 12,
+  "all twelve 30-degree values are baked into the tabletop mesh");
+assert.equal(turntableModel.degreeTextLabels.length, 0,
+  "degree markings do not depend on a flickering viewport text overlay");
+assert.equal(turntableModel.degreeLabelPositions.length, 0,
+  "baked degree markings do not add floating text anchor points");
+assert.deepEqual(Array.from(turntableModel.degreeTextLabels), [],
+  "degree labels are geometry, not conditional text overlays");
 assert.ok(turntableModel.fixed.triangles.length > 0 && turntableModel.moving.triangles.length > 0,
   "the preview includes a shaded table base and a separately movable tabletop");
 assert.equal(sandbox.window.CadyxScanView.hasClosedTriangleTopology(turntableModel.fixed.triangles), true,
