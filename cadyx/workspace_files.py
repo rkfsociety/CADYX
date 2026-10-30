@@ -139,7 +139,18 @@ class WorkspaceArtifactStore:
         if any(not isinstance(name, str) for name in file_names) or len(set(file_names)) != len(file_names):
             raise ValidationError("Project file names must be unique strings.")
 
-        sources = [self.resolve_project_file(directory, name) for name in file_names]
+        sources = []
+        for name in file_names:
+            parts = name.split("/")
+            if len(parts) == 1:
+                sources.append(self.resolve_project_file(directory, name))
+            elif len(parts) == 2:
+                sources.append(self.resolve_project_subfolder_file(directory, parts[0], parts[1]))
+            else:
+                raise ValidationError("Source file must be direct or one project folder/file.")
+        destination_names = [path.name for path in sources]
+        if len(set(destination_names)) != len(destination_names):
+            raise ValidationError("Source files must have unique destination names.")
         target = directory / folder_name
         created = False
         if target.exists() or target.is_symlink():
@@ -148,7 +159,7 @@ class WorkspaceArtifactStore:
         else:
             target.mkdir()
             created = True
-        destinations = [target / name for name in file_names]
+        destinations = [target / name for name in destination_names]
         if any(path.exists() or path.is_symlink() for path in destinations):
             if created:
                 target.rmdir()

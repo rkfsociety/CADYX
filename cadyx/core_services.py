@@ -312,7 +312,8 @@ class ProjectLifecycleService(_CoreService):
             )
             project = self.workspace.load(project_id, include_history=False)
             document = Document.from_validated_dict(project["document"])
-            if any(item.get("type") == "feature" and item.get("source", {}).get("file") in filenames
+            source_names = {name.rsplit("/", 1)[-1] for name in filenames if isinstance(name, str)}
+            if any(item.get("type") == "feature" and item.get("source", {}).get("file") in source_names
                    for item in document.objects):
                 raise ConflictError("A project file is still used by a model feature and cannot be moved.",
                                     code="FILE_IN_USE")
