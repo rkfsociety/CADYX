@@ -73,16 +73,13 @@ const fixedSupportHasPoint = (x, y, z) => {
   }
   return false;
 };
-assert.ok(fixedSupportHasPoint(0, 55, -25) && fixedSupportHasPoint(0, -55, -25),
-  "the fixed pivot axle rotates with the lower support");
-assert.ok(Array.from({ length: turntableModel.fixed.positions.length / 3 }, (_, index) => index)
-  .some(index => Math.abs(turntableModel.fixed.positions[index * 3]) < 4.01
-    && turntableModel.fixed.positions[index * 3 + 1] > 57.1
-    && turntableModel.fixed.positions[index * 3 + 2] >= -29
-    && turntableModel.fixed.positions[index * 3 + 2] <= -21),
-"the front-facing turntable button is fixed on the zero-degree side of the support");
-assert.ok(fixedSupportHasPoint(0, 99, -22.5),
-  "the front bolt reaches the platter's front edge below the plate");
+assert.ok(fixedSupportHasPoint(55, 0, -25) && fixedSupportHasPoint(-55, 0, -25),
+  "the fixed pivot axle aligns with the table tilt axis");
+assert.ok(fixedSupportHasPoint(46, 0, -32),
+  "the curved support has a closed circular pivot cover on each side");
+assert.equal(turntableModel.pivotCoverCount, 2, "the turntable has matching side pivot covers");
+assert.ok(fixedSupportHasPoint(0, 63.4, -32),
+  "the front support has a concentric circular bearing cover");
 assert.equal(turntableModel.fitRadius, 120, "the outer degree labels have clearance from the viewport edge");
 assert.equal(turntableModel.degreeTickCount, 72, "the turntable scale has 5 degree ticks through 360 degrees");
 assert.equal(turntableModel.bakedDegreeLabelCount, 12,
@@ -116,6 +113,12 @@ for (let index = 0; index < turntableModel.fixed.positions.length; index += 3) {
 assert.ok(Math.abs(lowerFlangeRadius - 96) < 1e-4, "the lower flange keeps its circular 192 mm footprint");
 assert.equal(turntableModel.ribCount, 120, "the moving plate has fine circumferential grip ribs");
 assert.equal(turntableModel.mountingRecessCount, 4, "the lower flange has four closed mounting recess details");
+assert.equal(turntableModel.tableTopPortCount, 40, "the tabletop has a closed radial pattern of 40 fixture ports");
+assert.ok(Array.from({ length: turntableModel.moving.positions.length / 3 }, (_, index) => index)
+  .some(index => Math.abs(turntableModel.moving.positions[index * 3] - 18) < 1e-4
+    && Math.abs(turntableModel.moving.positions[index * 3 + 1]) < 1e-4
+    && Math.abs(turntableModel.moving.positions[index * 3 + 2] - 0.025) < 1e-4),
+"fixture ports have closed inset floors rather than open mesh boundaries");
 const ribRingRadii = new Set();
 for (let index = 0; index < turntableModel.moving.positions.length; index += 3) {
   if (Math.abs(turntableModel.moving.positions[index + 2] + 0.9) < 1e-4) {
