@@ -110,6 +110,28 @@ class PointCloudProcessingTests(unittest.TestCase):
             with self.subTest(rate=rate), self.assertRaises(ValidationError):
                 normalize_cloud_parameters("isolation_filter", {"rate": rate})
 
+    def test_huge_numeric_parameters_raise_validation_error(self):
+        # JSON integers have no size limit; math.isfinite(10**400) raises
+        # OverflowError instead of the API's expected ValidationError.
+        huge = 10**400
+        cases = [
+            ("simplify", {"ratio": huge}),
+            ("isolation_filter", {"rate": huge}),
+            ("isolation_filter", {"component_factor": huge}),
+            ("smooth", {"strength": huge}),
+            ("smooth", {"radius": huge}),
+            ("remove_overlaps", {"distance": huge}),
+            ("remove_overlaps", {"tangential_distance": huge}),
+            ("radius_filter", {"radius": huge, "min_neighbors": 1}),
+            ("voxel_downsample", {"voxel_size": huge}),
+            ("crop", {"min": [0, 0, 0], "max": [huge, 1, 1]}),
+            ("crop", {"min": [-huge, 0, 0], "max": [1, 1, 1]}),
+        ]
+        for method, parameters in cases:
+            with self.subTest(method=method, parameters=parameters):
+                with self.assertRaises(ValidationError):
+                    normalize_cloud_parameters(method, parameters)
+
     def test_isolation_rate_caps_removals_and_preserves_uniform_surface(self):
         surface = [(float(x), float(y), 0.) for x in range(10) for y in range(10)]
         isolated = [(30. + i * 3, 30., 30.) for i in range(10)]

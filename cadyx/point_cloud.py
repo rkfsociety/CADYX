@@ -33,6 +33,16 @@ def _voxel_index(value: float, size: float) -> int:
     return (numerator * size_denominator) // (denominator * size_numerator)
 
 
+def _finite_numeric(value: Any) -> bool:
+    """Validate JSON numeric inputs without overflowing on huge Python integers."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
+
+
 def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
     if method == "simplify":
         defaults = {"strategy": "uniform", "ratio": 40.}
@@ -41,17 +51,17 @@ def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
         p = {**defaults, **parameters}
         if not isinstance(p["strategy"], str) or p["strategy"] not in {"uniform", "geometric"}:
             raise ValidationError("Simplification strategy must be uniform or geometric.")
-        if type(p["ratio"]) not in (int, float) or not math.isfinite(p["ratio"]) or not 0 < p["ratio"] <= 95:
+        if not _finite_numeric(p["ratio"]) or not 0 < p["ratio"] <= 95:
             raise ValidationError("Simplification ratio must be in (0,95].")
         return p
     if method == "isolation_filter":
         if not isinstance(parameters, dict) or set(parameters) - {"rate", "component_factor"}:
             raise ValidationError("Isolation filtering accepts only rate and component_factor.")
         rate = parameters.get("rate", 15.)
-        if type(rate) not in (int, float) or not math.isfinite(rate) or not 0 < rate <= 50:
+        if not _finite_numeric(rate) or not 0 < rate <= 50:
             raise ValidationError("Isolation rate must be a positive percentage at most 50.")
         component_factor = parameters.get("component_factor", 3.)
-        if (type(component_factor) not in (int, float) or not math.isfinite(component_factor)
+        if (not _finite_numeric(component_factor)
                 or not 2 <= component_factor <= 12):
             raise ValidationError("Isolation component_factor must be between 2 and 12 median neighbor spacings.")
         return {"rate": rate, "component_factor": component_factor}
@@ -62,7 +72,7 @@ def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
             raise ValidationError("Unknown local-surface point-cloud parameters.")
         p = {**defaults, **parameters}
         for key, value in p.items():
-            if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            if not _finite_numeric(value) or value <= 0:
                 raise ValidationError("Surface parameters must be positive finite numbers.")
         if method == "smooth":
             if type(p["iterations"]) is not int or not 1 <= p["iterations"] <= 100 or p["strength"] > 100:
@@ -76,13 +86,13 @@ def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
         raise ValidationError("Point-cloud method and its exact parameters are required.")
     p = dict(parameters)
     for key in ("radius", "voxel_size"):
-        if key in p and (type(p[key]) not in (int, float) or not math.isfinite(p[key]) or p[key] <= 0):
+        if key in p and (not _finite_numeric(p[key]) or p[key] <= 0):
             raise ValidationError("Point-cloud distance must be positive and finite.")
     if method == "radius_filter" and (type(p["min_neighbors"]) is not int or not 1 <= p["min_neighbors"] <= 100):
         raise ValidationError("min_neighbors must be an integer from 1 to 100, excluding the point itself.")
     if method == "crop":
         for key in ("min", "max"):
-            if not isinstance(p[key], list) or len(p[key]) != 3 or any(type(v) not in (int, float) or not math.isfinite(v) for v in p[key]):
+            if not isinstance(p[key], list) or len(p[key]) != 3 or any(not _finite_numeric(v) for v in p[key]):
                 raise ValidationError("Crop bounds must contain three finite source coordinates.")
         if any(a >= b for a, b in zip(p["min"], p["max"])):
             raise ValidationError("Crop minimum must be below maximum on every axis.")
