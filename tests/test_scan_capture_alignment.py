@@ -49,6 +49,27 @@ class TableMarkerAlignmentTests(unittest.TestCase):
         self.assertAlmostEqual(transform["ty"], 3.0, places=7)
         self.assertLess(transform["median_residual"], 1e-8)
 
+    def test_alignment_reads_raw_from_separate_support_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_id = "revopoint_20261021T120000Z"
+            series, support = root / run_id, root / f"scan_support_{run_id}"
+            series.mkdir()
+            support.mkdir()
+            map_path = support / "map.mkf"
+            map_path.write_bytes(self._map_bytes([(0.0, 0.0, 0.0), (-50.0, 50.0, 0.0),
+                                                  (50.0, 50.0, 0.0), (-50.0, -50.0, 0.0),
+                                                  (70.0, -20.0, 0.0)]))
+            q_path = support / "Q.bin"
+            q_path.write_bytes(struct.pack("<16f", 1, 0, 0, 0, 0, 1, 0, 0,
+                                           0, 0, 1, 0, 0, 0, 0, 1))
+            (support / f"{run_id}_pose_000.raw").write_bytes(self._raw_frame(markers=False))
+            self._write_ply(series / f"{run_id}_pose_000.ply")
+            result = align_run(series, run_id, map_path, q_path, 0.005, frame_count=1)
+            self.assertEqual(result["status"], "unavailable")
+            self.assertTrue((support / f"{run_id}_table_alignment.json").is_file())
+            self.assertEqual([path.name for path in series.iterdir()], [f"{run_id}_pose_000.ply"])
+
     def test_capture_aligns_frames_with_markers_and_defers_occluded_frames(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary) / "project"

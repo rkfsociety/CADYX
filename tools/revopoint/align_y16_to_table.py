@@ -408,6 +408,9 @@ def align_run(project: Path, run_id: str, marker_map: Path, calibration_file: Pa
     if not math.isfinite(depth_scale) or depth_scale <= 0:
         raise ValueError("depth scale must be positive and finite")
     project = project.resolve(strict=True)
+    support = project.parent / f"scan_support_{run_id}" if project.name == run_id else project
+    if not support.is_dir():
+        support = project
     marker_map, calibration_file = marker_map.resolve(strict=True), calibration_file.resolve(strict=True)
     q_data = calibration_file.read_bytes()
     if len(q_data) != 64:
@@ -417,8 +420,8 @@ def align_run(project: Path, run_id: str, marker_map: Path, calibration_file: Pa
         raise ValueError("scanner calibration contains non-finite values")
     map_data = marker_map.read_bytes()
     table = _map_frame(map_data)
-    stage = project / f".cadyx-{run_id}-table-alignment"
-    result_path = project / f"{run_id}_table_alignment.json"
+    stage = support / f".cadyx-{run_id}-table-alignment"
+    result_path = support / f"{run_id}_table_alignment.json"
     if stage.exists() or result_path.exists():
         raise FileExistsError("table-alignment outputs already exist; refusing to overwrite")
     stage.mkdir()
@@ -427,11 +430,11 @@ def align_run(project: Path, run_id: str, marker_map: Path, calibration_file: Pa
     try:
         for index in range(frame_count):
             source_stem = f"{run_id}_pose_{index:03d}"
-            raw_path = project / f"{source_stem}.raw"
+            raw_path = support / f"{source_stem}.raw"
             ply_path = project / f"{source_stem}.ply"
             if not raw_path.is_file() or not ply_path.is_file():
                 legacy_stem = f"{run_id}_pose_pose_{index:03d}"
-                raw_path = project / f"{legacy_stem}.raw"
+                raw_path = support / f"{legacy_stem}.raw"
                 ply_path = project / f"{legacy_stem}.ply"
             if not raw_path.is_file() or not ply_path.is_file():
                 raise FileNotFoundError(f"capture frame {index} is missing its source RAW or PLY")
@@ -465,7 +468,7 @@ def align_run(project: Path, run_id: str, marker_map: Path, calibration_file: Pa
                 aligned_points.append((mapped_x, mapped_y, max(0.0, mapped_z)))
             output_name = f"{source_stem}_table_aligned.ply"
             _write_aligned_ply(stage / output_name, aligned_points, registration_ply.name)
-            run_files.append((stage / output_name, project / output_name))
+            run_files.append((stage / output_name, support / output_name))
             frames.append({"index": index, "source_ply": registration_ply.name,
                            "original_source_ply": ply_path.name, "source_raw": raw_path.name,
                            "status": "aligned",
