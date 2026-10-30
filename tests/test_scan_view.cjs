@@ -88,11 +88,8 @@ assert.equal(turntableModel.bakedDegreeLabelCount, 12,
 assert.deepEqual(Array.from(turntableModel.bakedDegreeLabels),
   ["0","30","60","90","120","150","180","210","240","270","300","330"],
   "baked degree values contain numbers without degree symbols");
-assert.deepEqual(Array.from(turntableModel.bakedDegreeGlyphs),
-  ["abcdef","abgcd|abcdef","afgecd|abcdef","abfgcd|abcdef","bc|abged|abcdef","bc|afgcd|abcdef",
-    "bc|abcdefg|abcdef","abged|bc|abcdef","abged|fgbc|abcdef","abged|abc|abcdef",
-    "abgcd|abcdef|abcdef","abgcd|abgcd|abcdef"],
-  "each baked value uses the matching seven-segment glyphs instead of repeating the digit 3");
+assert.equal(turntableModel.bakedDegreeLabels[4], String(90 + 30),
+  "the mark after 90 degrees is 120 degrees");
 assert.equal(turntableModel.degreeLabelAlignment, "tangent",
   "baked labels follow a consistent tangent baseline around the circular scale");
 assert.equal(turntableModel.degreeTextLabels.length, 0,

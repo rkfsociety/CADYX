@@ -75,18 +75,23 @@
     }
   };
   const addPlanarDegreeLabel = (mesh, degrees, centerX, centerY, angle, color) => {
-    const stroke=0.58, digitAdvance=4.25, height=5.8, gap=0.45;
+    const stroke=0.74, digitAdvance=4.7, height=5.8, gap=0.4;
     const text=String(degrees), width=text.length*digitAdvance+(text.length-1)*gap;
     const rotate=(x,y)=>[centerX+x*Math.cos(angle)-y*Math.sin(angle),centerY+x*Math.sin(angle)+y*Math.cos(angle)];
-    const segmentNames={
-      0:'abcdef', 1:'bc', 2:'abged', 3:'abgcd', 4:'fgbc',
-      5:'afgcd', 6:'afgecd', 7:'abc', 8:'abcdefg', 9:'abfgcd',
-    };
-    const segmentEndpoints={
-      a:[[0.55,0],[3.7,0]], b:[[4.25,0.55],[4.25,2.45]],
-      c:[[4.25,3.35],[4.25,height-0.55]], d:[[0.55,height],[3.7,height]],
-      e:[[0,3.35],[0,height-0.55]], f:[[0,0.55],[0,2.45]],
-      g:[[0.55,2.9],[3.7,2.9]],
+    const glyphPaths={
+      0:[[[0.85,0.25],[3.35,0.25],[3.9,0.8],[3.9,5],[3.35,5.55],[0.85,5.55],[0.3,5],[0.3,0.8],[0.85,0.25]]],
+      1:[[[1.15,1],[2.1,0.25],[2.1,5.55]],[[0.65,5.55],[3.55,5.55]]],
+      2:[[[0.35,0.8],[0.9,0.25],[3.35,0.25],[3.9,0.8],[3.9,2.05],[0.35,4.4],[0.35,5.55],[3.9,5.55]]],
+      3:[[[0.45,0.55],[0.95,0.2],[3.25,0.2],[3.7,0.35],[3.95,0.75],[3.95,2],[3.7,2.4],
+        [3.2,2.65],[1.85,2.9],[3.2,3.15],[3.7,3.4],[3.95,3.8],[3.95,5],[3.7,5.4],
+        [3.25,5.55],[0.95,5.55],[0.45,5.2]]],
+      4:[[[0.4,0.25],[0.4,2.85],[3.85,2.85]],[[3.1,0.25],[3.1,5.55]]],
+      5:[[[3.85,0.25],[0.35,0.25],[0.35,2.7],[3.25,2.7],[3.9,3.35],[3.9,5],[3.35,5.55],[0.35,5.55]]],
+      6:[[[3.75,0.25],[0.85,0.25],[0.35,0.8],[0.35,5],[0.9,5.55],[3.35,5.55],[3.9,5],[3.9,3.65],[3.35,3.1],[0.35,3.1]]],
+      7:[[[0.35,0.25],[3.9,0.25],[1.2,5.55]]],
+      8:[[[0.9,0.25],[3.35,0.25],[3.9,0.8],[3.9,2.25],[3.35,2.85],[0.9,2.85],[0.35,2.25],[0.35,0.8],[0.9,0.25]],
+        [[0.9,3],[3.35,3],[3.9,3.55],[3.9,5],[3.35,5.55],[0.9,5.55],[0.35,5],[0.35,3.55],[0.9,3]]],
+      9:[[[3.9,5.55],[3.9,0.8],[3.35,0.25],[0.9,0.25],[0.35,0.8],[0.35,2.25],[0.9,2.85],[3.35,2.85],[3.9,2.25]]],
     };
     const addStroke=(a,b)=>{
       const dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy);if(length<1e-6)return;
@@ -95,17 +100,27 @@
         .map(([x,y])=>rotate(x-width/2,y-height/2));
       addClosedPrism(mesh,points,0.002,0.025,color);
     };
+    const addRoundJoin=(x,y)=>{
+      const radius=stroke/2;
+      const points=Array.from({length:8},(_,index)=>[
+        x+radius*Math.cos(index*Math.PI/4),y+radius*Math.sin(index*Math.PI/4),
+      ]).map(([pointX,pointY])=>rotate(pointX-width/2,pointY-height/2));
+      addClosedPrism(mesh,points,0.002,0.025,color);
+    };
     let x=0;
     for(const character of text){
-      const segments=segmentNames[character];
-      if(!segments)throw new Error(`Unsupported turntable degree digit: ${character}`);
-      for(const segment of segments){
-        const [first,second]=segmentEndpoints[segment];
-        addStroke([first[0]+x,first[1]],[second[0]+x,second[1]]);
+      const paths=glyphPaths[character];
+      if(!paths)throw new Error(`Unsupported turntable degree digit: ${character}`);
+      for(const path of paths){
+        for(let index=0;index<path.length;index+=1){
+          const point=[path[index][0]+x,path[index][1]];
+          addRoundJoin(point[0],point[1]);
+          if(index>0)addStroke([path[index-1][0]+x,path[index-1][1]],point);
+        }
       }
       x+=digitAdvance+gap;
     }
-    return [...text].map(character=>segmentNames[character]).join('|');
+    return [...text].join('');
   };
   const addCylinderAlongX = (mesh, length, radius, centerZ, segments, color) => {
     const leftCenter = mesh.positions.length / 3;
@@ -204,7 +219,7 @@
     };
     const degreeLabelPositions = [], degreeTextLabels = [];
     let degreeTickCount = 0, bakedDegreeLabelCount = 0;
-    const bakedDegreeLabels=[], bakedDegreeGlyphs=[];
+    const bakedDegreeLabels=[];
     for (let degrees = 0; degrees < 360; degrees += 5) {
       const radians = (degrees + TURNTABLE_DEGREE_SCALE_ZERO_DEGREES) * Math.PI / 180;
       const cosine = Math.cos(radians), sine = Math.sin(radians);
@@ -242,8 +257,8 @@
         sideBottom, sideTop, tickColor);
       degreeTickCount += 1;
       if (major) {
-        bakedDegreeGlyphs.push(addPlanarDegreeLabel(moving,String(degrees),82*cosine,82*sine,
-          radians+Math.PI/2,[242,247,249]));
+        addPlanarDegreeLabel(moving,String(degrees),82*cosine,82*sine,
+          radians+Math.PI/2,[242,247,249]);
         bakedDegreeLabelCount += 1;
         bakedDegreeLabels.push(String(degrees));
       }
@@ -255,7 +270,6 @@
       degreeTickCount,
       bakedDegreeLabelCount,
       bakedDegreeLabels,
-      bakedDegreeGlyphs,
       degreeLabelAlignment: 'tangent',
       degreeLabelPositions: Float32Array.from(degreeLabelPositions),
       degreeTextLabels,
