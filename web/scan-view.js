@@ -272,39 +272,39 @@
     const fixed = createMeshBuilder(), moving = createMeshBuilder();
     const dark = { top: index => {
       const brushed = Math.round(1.5 * Math.sin(index * 2.399) + 0.8 * Math.sin(index * 0.173));
-      return [47 + brushed, 53 + brushed, 58 + brushed];
-    }, side: [34, 40, 44], bottom: [25, 30, 33] };
+      return [53 + brushed, 59 + brushed, 64 + brushed];
+    }, side: [49, 55, 59], bottom: [34, 39, 43] };
     addEllipticalCylinder(fixed, 96, 96, -80, -66, 112,
-      { top: [48, 54, 58], side: [29, 34, 37], bottom: [21, 25, 28] });
+      { top: [54, 60, 64], side: [45, 51, 55], bottom: [33, 38, 42] });
     addAnnularCylinder(fixed, 94.8, 84, -66.15, -65.45, 112,
-      { top: [68, 75, 79], side: [35, 41, 44], inner: [42, 48, 51], bottom: [34, 40, 43] }, 0, 0);
+      { top: [72, 79, 83], side: [47, 53, 57], inner: [50, 56, 60], bottom: [43, 49, 53] }, 0, 0);
     addEllipticalCylinder(fixed, 42, 42, -66, -42, 80,
-      { top: [48, 54, 58], side: [28, 33, 36], bottom: [23, 27, 30] });
+      { top: [56, 62, 66], side: [43, 49, 53], bottom: [34, 39, 43] });
     addEllipticalCylinder(fixed, 35, 35, -51, -30, 72,
-      { top: [40, 46, 50], side: [25, 30, 33], bottom: [21, 26, 29] });
-    addClosedBox(fixed, [-55, -18, -56], [-38, 18, -25], [34, 40, 44]);
-    addClosedBox(fixed, [38, -18, -56], [55, 18, -25], [34, 40, 44]);
-    addCylinderAlongX(fixed, 110, 11, TURNTABLE_TILT_PIVOT_Z_MM, 64, [39, 45, 49]);
+      { top: [49, 55, 59], side: [40, 46, 50], bottom: [33, 38, 42] });
+    addClosedBox(fixed, [-55, -18, -56], [-38, 18, -25], [47, 53, 57]);
+    addClosedBox(fixed, [38, -18, -56], [55, 18, -25], [47, 53, 57]);
+    addCylinderAlongX(fixed, 110, 11, TURNTABLE_TILT_PIVOT_Z_MM, 64, [47, 53, 57]);
     for (const centerX of [-45, 45]) {
       addCylinderAlongX(fixed, 19, 15, TURNTABLE_TILT_PIVOT_Z_MM, 64,
-        [47, 53, 57], centerX);
+        [56, 62, 66], centerX);
       addCylinderAlongX(fixed, 3.2, 13.2, TURNTABLE_TILT_PIVOT_Z_MM, 64,
-        [78, 85, 89], centerX < 0 ? centerX - 8.5 : centerX + 8.5);
+        [86, 92, 96], centerX < 0 ? centerX - 8.5 : centerX + 8.5);
     }
     addCylinderAlongX(fixed, 3, 7.5, TURNTABLE_TILT_PIVOT_Z_MM, 48, [104, 111, 114], -56.5);
-    addCylinderAlongX(fixed, 7, 12.5, TURNTABLE_TILT_PIVOT_Z_MM, 64, [59, 66, 70], -55);
-    addCylinderAlongX(fixed, 3.4, 9.7, TURNTABLE_TILT_PIVOT_Z_MM, 64, [111, 119, 122], -59.1);
-    addHexSocketAlongX(fixed, -60.45, TURNTABLE_TILT_PIVOT_Z_MM, 3.7, [24, 29, 32]);
+    addCylinderAlongX(fixed, 44, 12.5, -22.5, 64, [68, 74, 78], -76);
+    addCylinderAlongX(fixed, 4, 9.7, -22.5, 64, [120, 128, 132], -97);
+    addHexSocketAlongX(fixed, -98.65, -22.5, 3.7, [27, 32, 35]);
     for (const x of [-57, 57]) for (const y of [-57, 57]) {
       addAnnularCylinder(fixed, 4.1, 2.15, -65.8, -65.35, 32,
-        { top: [100, 107, 110], side: [54, 61, 64], inner: [33, 39, 42], bottom: [39, 45, 48] }, x, y);
+        { top: [106, 113, 117], side: [60, 66, 70], inner: [43, 49, 53], bottom: [45, 51, 55] }, x, y);
       addEllipticalCylinder(fixed, 2.12, 2.12, -65.7, -65.28, 32,
-        { top: [17, 21, 23], side: [23, 28, 30], bottom: [20, 24, 26] }, x, y);
+        { top: [22, 27, 30], side: [30, 35, 38], bottom: [26, 31, 34] }, x, y);
     }
     addClosedPrism(fixed, [[-95.3, -2.6], [-91.8, -2.6], [-91.8, 2.6]], -11.4, -10.1,
       [214, 221, 224]);
     addEllipticalCylinder(moving, 27, 27, -25, -10, 48,
-      { top: [49, 56, 60], side: [34, 40, 44], bottom: [27, 32, 35] });
+      { top: [58, 64, 68], side: [45, 51, 55], bottom: [36, 41, 45] });
     addRibbedCylinder(moving, TURNTABLE_RADIUS_MM, -TURNTABLE_THICKNESS_MM, 0,
       480, 120, dark);
     const fixedModel = finishMesh(fixed);

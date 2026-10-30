@@ -81,6 +81,8 @@ assert.ok(Array.from({ length: turntableModel.fixed.positions.length / 3 }, (_, 
     && turntableModel.fixed.positions[index * 3 + 2] >= -29
     && turntableModel.fixed.positions[index * 3 + 2] <= -21),
 "the front-facing turntable button is fixed on the zero-degree side of the support");
+assert.ok(fixedSupportHasPoint(0, 99, -22.5),
+  "the front bolt reaches the platter's front edge below the plate");
 assert.equal(turntableModel.fitRadius, 120, "the outer degree labels have clearance from the viewport edge");
 assert.equal(turntableModel.degreeTickCount, 72, "the turntable scale has 5 degree ticks through 360 degrees");
 assert.equal(turntableModel.bakedDegreeLabelCount, 12,
@@ -104,8 +106,14 @@ assert.equal(sandbox.window.CadyxScanView.hasClosedTriangleTopology(turntableMod
   "the moving tabletop, degree ticks and side marks are closed solids");
 assert.equal(sandbox.window.CadyxScanView.hasClosedTriangleTopology(new Uint32Array([0, 1, 2])), false,
   "open preview surfaces are not classified as solid");
-assert.ok(Math.abs(turntableModel.fixed.bounds.max[0] - turntableModel.fixed.bounds.max[1]) < 1e-4,
-  "the illustrated lower support has a circular footprint");
+let lowerFlangeRadius = 0;
+for (let index = 0; index < turntableModel.fixed.positions.length; index += 3) {
+  if (Math.abs(turntableModel.fixed.positions[index + 2] + 80) < 1e-4) {
+    lowerFlangeRadius = Math.max(lowerFlangeRadius,
+      Math.hypot(turntableModel.fixed.positions[index], turntableModel.fixed.positions[index + 1]));
+  }
+}
+assert.ok(Math.abs(lowerFlangeRadius - 96) < 1e-4, "the lower flange keeps its circular 192 mm footprint");
 assert.equal(turntableModel.ribCount, 120, "the moving plate has fine circumferential grip ribs");
 assert.equal(turntableModel.mountingRecessCount, 4, "the lower flange has four closed mounting recess details");
 const ribRingRadii = new Set();
