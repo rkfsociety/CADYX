@@ -462,9 +462,9 @@
       };
       const pointDepthVisible = point => point >= 0 && point < screenX.length
         && depthVisibleAt(screenX[point], screenY[point], camera[point * 3 + 2]);
-      const preserveShadedInteractive = geometry.preserveShadedInteractive === true;
+      const cullBackfacesDuringOrbit = Boolean(drag && geometry.cullBackfacesDuringOrbit);
       const denseInteractiveFallback = Boolean(drag || transition || bodyMotion) && shaded
-        && !preserveShadedInteractive
+        && !cullBackfacesDuringOrbit
         && triangles.length / 3 > MAX_INTERACTIVE_SHADED_FACES;
       const renderWireframe = wireframe || denseInteractiveFallback;
       const renderShaded = shaded && !denseInteractiveFallback;
@@ -481,7 +481,7 @@
           : selectedFaceIds.size
             ? geometry.faceTriangleRanges?.filter((range) => selectedFaceIds.has(`${range.objectId}:${range.faceIndex}`)) || []
             : geometry.bodyTriangleRanges?.filter((range) => selectedBodyIds.has(range.objectId)) || [],
-        geometry.overlayTriangleRanges || [],
+        geometry.overlayTriangleRanges || [], cullBackfacesDuringOrbit,
       );
       else if (geometry.pointCloudVertexCount != null || !geometry.lines) {
         renderPoints(geometry.pointCloudVertexCount ?? positions.length / 3, camera, screenX, screenY, scale,
@@ -1174,7 +1174,8 @@
     function renderMesh(triangles, camera, screenX, screenY, progress, sweepProgress, loftProgress, motionAngles,
       vertexNormals, orientation, faceNormals, featureEdges, featureEdgeFaces, silhouetteCandidates, colors, triangleColors,
       showWireframe, shaded, interactive,
-      wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = [], overlayRanges = []) {
+      wireframeColor, wireframeOpacity, dpr, depthTolerance, selectedRanges = [], overlayRanges = [],
+      cullBackfaces = false) {
       const faceTotal = triangles.length / 3;
       const light = [0.34, 0.68, 0.65];
       // A broad key and weaker fill keep both sides readable without a flat glow.
@@ -1209,6 +1210,13 @@
         const b = second * 3;
         const c = third * 3;
         const az = camera[a + 2], bz = camera[b + 2], cz = camera[c + 2];
+        const x0 = screenX[first], y0 = screenY[first];
+        const x1 = screenX[second], y1 = screenY[second];
+        const x2 = screenX[third], y2 = screenY[third];
+        if (cullBackfaces) {
+          const area = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+          if (area >= -1e-9) continue;
+        }
         let brightness;
         if (smooth) {
           brightness = (vertexLight[first] + vertexLight[second] + vertexLight[third]) / 3;
@@ -1232,12 +1240,12 @@
           brightness = studioLight(nx / normalLength, ny / normalLength, nz / normalLength);
         }
         const offset = face * 8;
-        faceRecords[offset] = screenX[first];
-        faceRecords[offset + 1] = screenY[first];
-        faceRecords[offset + 2] = screenX[second];
-        faceRecords[offset + 3] = screenY[second];
-        faceRecords[offset + 4] = screenX[third];
-        faceRecords[offset + 5] = screenY[third];
+        faceRecords[offset] = x0;
+        faceRecords[offset + 1] = y0;
+        faceRecords[offset + 2] = x1;
+        faceRecords[offset + 3] = y1;
+        faceRecords[offset + 4] = x2;
+        faceRecords[offset + 5] = y2;
         faceRecords[offset + 6] = (az + bz + cz) / 3;
         faceRecords[offset + 7] = brightness;
         faceOrder[visibleCount] = face;

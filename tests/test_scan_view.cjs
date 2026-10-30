@@ -273,6 +273,8 @@ assert.equal(viewport.dataset.scanPreview, "false");
 assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0,
   "closing the cloud leaves the static turntable in the same canvas");
 assert.equal(viewport.dataset.scanPreviewMode, "turntable");
+assert.equal(viewerLoads.at(-1).geometry.cullBackfacesDuringOrbit, true,
+  "the opaque turntable scene enables backface culling only during camera orbit");
 view.setOpen(true);
 await new Promise(resolve => setImmediate(resolve));
 assert.equal(viewerLoads.at(-1).options.reset, false, "reopening the same cloud preserves the shared viewer orbit");

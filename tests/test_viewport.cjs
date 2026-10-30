@@ -740,9 +740,17 @@ const persistentSurfaceViewer = sandbox.window.CadyxViewport.createViewer(canvas
   showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false,
   wireframe: false, shaded: true,
 });
-persistentSurfaceViewer.load({ positions: [0, 0, 0, 1, 0, 0, 2, 0, 0],
-  triangles: denseTriangles, lines: [0, 1], points: [], preserveShadedInteractive: true,
-  bounds: { min: [0, 0, 0], max: [2, 0, 0] } });
+const doubleSidedDenseTriangles = new Uint32Array(10_000 * 3);
+for (let face = 0; face < 5_000; face += 1) {
+  const visibleOffset = face * 6, hiddenOffset = visibleOffset + 3;
+  doubleSidedDenseTriangles.set([3, 4, 5], visibleOffset);
+  doubleSidedDenseTriangles.set([0, 2, 1], hiddenOffset);
+}
+persistentSurfaceViewer.load({
+  positions: [-4, -4, -0.2, 4, -4, -0.2, 0, 4, -0.2, -4, -4, 0.2, 4, -4, 0.2, 0, 4, 0.2],
+  triangles: doubleSidedDenseTriangles, lines: [], points: [], cullBackfacesDuringOrbit: true,
+  fitRadius: 100, bounds: { min: [-4, -4, -0.2], max: [4, 4, 0.2] },
+});
 const persistentSurfaceUploadsBeforeDrag = rasterUploads;
 const persistentSurfaceFrameOffset = animationFrames.length;
 events.pointerdown({ button: 2, clientX: 300, clientY: 200, pointerId: 9 });
@@ -751,7 +759,11 @@ const persistentSurfaceFrame = animationFrames.splice(persistentSurfaceFrameOffs
 assert.equal(typeof persistentSurfaceFrame, 'function');
 persistentSurfaceFrame();
 assert.ok(rasterUploads > persistentSurfaceUploadsBeforeDrag,
-  'the turntable scene keeps its opaque shaded surface visible during camera rotation');
+  'dense closed scanner geometry stays shaded instead of switching to an empty wireframe');
+assert.ok(rasterizedPixels > 0,
+  'backface culling keeps front surfaces visible while skipping hidden surfaces');
+assert.equal(canvas.width, 600, 'backface culling preserves full-resolution camera orbit rendering');
+assert.equal(canvas.height, 400);
 events.pointerup({});
 
 animationTime = 2000;

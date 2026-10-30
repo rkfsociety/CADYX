@@ -1296,7 +1296,7 @@
         bounds, points: previewMarkerPoints,
         pointStyle: { size: 3.5, opacity: 1, color: '#59d9ff' }, pointLayers,
         lineStyle: overlay ? { color: '#668994', opacity: 0.16, width: 0.8, dash: [5, 6] } : undefined,
-        preserveShadedInteractive: true,
+        cullBackfacesDuringOrbit: true,
         orbitCenter: [0, 0, 0], fitRadius: turntableDisplayModel.fitRadius },
       { reset: reset || !liveViewportInitialized && !staticTurntableVisible });
       lastRenderedTurntableDisplayPose = pose;
