@@ -52,9 +52,10 @@ def solve_planetary_gearset(
         raise ValidationError("Gear geometry exceeds the finite numeric range.") from exc
     if not all(math.isfinite(value) for value in (sun_planet_center, ring_planet_center)):
         raise ValidationError("Gear geometry exceeds the finite numeric range.")
-    pitch_compatible = ring > planet and math.isclose(
-        sun_planet_center, ring_planet_center, rel_tol=1e-12, abs_tol=1e-10,
-    )
+    # For a common module, pitch-center equality is exactly ring = sun + 2*planet.
+    # Floating-point isclose can accept mismatched teeth at tiny modules or
+    # large tooth counts, even when the centers are physically different.
+    pitch_compatible = ring == sun + 2 * planet
 
     ordered = sorted(value % 360.0 for value in angles)
     gaps = [ordered[(index + 1) % len(ordered)] - ordered[index]
