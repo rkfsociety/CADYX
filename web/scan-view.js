@@ -737,6 +737,8 @@
     let cloudSource = null;
     let cloudOriginSource = null;
     let cloudTableFrame = null;
+    let cloudPreviewPositions = null;
+    let cloudPreviewPointCount = 0;
     let renderedCloudSource = null;
     let capturePreviewRun = null;
     let capturePreviewAutoOpened = false;
@@ -1202,10 +1204,12 @@
     const renderTurntableScene = ({ positions = null, count = 0, markerIndices = [], matchedMapIndices = [],
       aligned = false, reset = false }) => {
       const pose = currentTurntableDisplayPose();
-      const pointStep = positions ? Math.max(1, Math.ceil(count / LIVE_PREVIEW_POINT_LIMIT)) : 1;
+      const displayedPositions = positions || (cloudPreviewOpen ? cloudPreviewPositions : null);
+      const displayedCount = positions ? count : cloudPreviewPointCount;
+      const pointStep = displayedPositions ? Math.max(1, Math.ceil(displayedCount / LIVE_PREVIEW_POINT_LIMIT)) : 1;
       const overlay = staticTurntableVisible ? null : liveTableOverlay;
-      const cloudPointIndices = positions
-        ? buildPreviewCloudPointIndices(count, pointStep, markerIndices, Boolean(overlay)) : new Uint32Array(0);
+      const cloudPointIndices = displayedPositions
+        ? buildPreviewCloudPointIndices(displayedCount, pointStep, markerIndices, Boolean(overlay)) : new Uint32Array(0);
       const cloudPointCount = cloudPointIndices.length;
       let extraMarkerCount = 0;
       if (!overlay) {
@@ -1229,7 +1233,7 @@
       let output = fixed.positions.length;
       const firstCloudVertex = fixedVertexCount;
       for (const index of cloudPointIndices) {
-        const point = [positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]];
+        const point = [displayedPositions[index * 3], displayedPositions[index * 3 + 1], displayedPositions[index * 3 + 2]];
         const transformed = aligned
           ? transformTableDisplayPoint(point, pose.angle, pose.tilt) : point;
         combinedPositions[output++] = transformed[0];
@@ -1242,7 +1246,7 @@
         const index = markerIndices[markerIndex];
         if (index % pointStep === 0) previewMarkerPoints[markerIndex] = firstCloudVertex + index / pointStep;
         else {
-          const point = [positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]];
+          const point = [displayedPositions[index * 3], displayedPositions[index * 3 + 1], displayedPositions[index * 3 + 2]];
           const transformed = aligned
             ? transformTableDisplayPoint(point, pose.angle, pose.tilt) : point;
           const vertex = firstCloudVertex + extraMarkerIndex++;
@@ -1364,8 +1368,7 @@
       return turntableMapPromise;
     };
     const showTurntable = () => {
-      if (livePreviewOwned || cloudPreviewOpen || meshPreviewOpen || serverPointCloudVisible
-          || viewport.dataset.scanTreePreview === 'true'
+      if (livePreviewOwned || meshPreviewOpen || viewport.dataset.scanTreePreview === 'true'
           || document.querySelector?.('#primary-grid')?.dataset.view !== 'scanning') return false;
       if (!staticTurntableVisible) {
         staticTurntableVisible = true;
@@ -1410,7 +1413,13 @@
         const request = ++cloudRequest;
         const loaded = await loadProjectPointCloud();
         if (request !== cloudRequest || !cloudPreviewOpen) return;
-        viewer.load(loaded.geometry, { reset: renderedCloudSource !== loaded.source });
+        cloudPreviewPositions = loaded.geometry.positions || null;
+        cloudPreviewPointCount = cloudPreviewPositions
+          ? loaded.geometry.previewVertexCount ?? cloudPreviewPositions.length / 3 : 0;
+        if (document.querySelector?.('#primary-grid')?.dataset.view === 'scanning') {
+          staticTurntableVisible = true;
+          renderTurntableScene({ reset: renderedCloudSource !== loaded.source });
+        } else viewer.load(loaded.geometry, { reset: renderedCloudSource !== loaded.source });
         renderedCloudSource = loaded.source;
         return;
       }
@@ -1420,7 +1429,12 @@
       const sourceFile = new URL(cloudSource, location.href).searchParams.get('file') || '';
       if (sourceFile.toLowerCase().endsWith('_table_aligned.ply')) {
         if (request !== cloudRequest || !cloudPreviewOpen) return;
-        viewer.load({ positions: cloud.positions, triangles: new Uint32Array(0), lines: null, bounds: cloud.bounds }, { reset });
+        cloudPreviewPositions = cloud.positions;
+        cloudPreviewPointCount = cloud.positions.length / 3;
+        if (document.querySelector?.('#primary-grid')?.dataset.view === 'scanning') {
+          staticTurntableVisible = true;
+          renderTurntableScene({ reset });
+        } else viewer.load({ positions: cloud.positions, triangles: new Uint32Array(0), lines: null, bounds: cloud.bounds }, { reset });
         renderedCloudSource = cloudSource;
         return;
       }
@@ -1439,12 +1453,17 @@
       if (request !== cloudRequest || !cloudPreviewOpen) return;
       const bounds = transformToTableFrame(cloud.positions, frame);
       cloudTableFrame ||= frame;
-      viewer.load({ positions: cloud.positions, triangles: new Uint32Array(0), lines: null, bounds }, { reset });
+      cloudPreviewPositions = cloud.positions;
+      cloudPreviewPointCount = cloud.positions.length / 3;
+      if (document.querySelector?.('#primary-grid')?.dataset.view === 'scanning') {
+        staticTurntableVisible = true;
+        renderTurntableScene({ reset });
+      } else viewer.load({ positions: cloud.positions, triangles: new Uint32Array(0), lines: null, bounds }, { reset });
       renderedCloudSource = cloudSource;
     };
     const showCloud = async (open = true) => {
       livePreviewOwned = false;
-      staticTurntableVisible = false;
+      staticTurntableVisible = document.querySelector?.('#primary-grid')?.dataset.view === 'scanning';
       clearTimeout(liveTimer);
       liveTimer = null;
       if (open && !cloudPreviewOpen) modelGeometry = getModelGeometry();
@@ -1895,6 +1914,12 @@
       else updateButton();
     };
     const showCapture = (scan, { open = false } = {}) => {
+      if (document.querySelector?.('#primary-grid')?.dataset.view === 'scanning'
+          && !livePreviewOwned && !meshPreviewOpen && !staticTurntableVisible) {
+        staticTurntableVisible = true;
+        updateButton();
+        renderTurntableScene({ reset: false });
+      }
       const captureRun = scan?.preview_subfolder || (scan?.state === 'running' ? scan.preview_file : null);
       if (scan?.state === 'running' && captureRun && captureRun !== capturePreviewRun) {
         capturePreviewRun = captureRun;
@@ -1905,8 +1930,17 @@
       if (scan?.state === 'completed' && scan.preview_file && hasPersistentPointCloud(scan.preview_file, scan)) {
         serverPointCloudVisible = true;
         if (livePreviewOwned) closeLivePreview();
-        else if (cloudPreviewOpen || meshPreviewOpen) { restoreModel(); updateButton(); }
-        else updateButton();
+        cloudPreviewOpen = true;
+        meshPreviewOpen = false;
+        const geometry = getModelGeometry();
+        if (geometry?.positions) {
+          cloudPreviewPositions = geometry.positions;
+          cloudPreviewPointCount = geometry.pointCloudVertexCount
+            ?? geometry.previewVertexCount ?? geometry.positions.length / 3;
+        }
+        staticTurntableVisible = document.querySelector?.('#primary-grid')?.dataset.view === 'scanning';
+        updateButton();
+        if (staticTurntableVisible && cloudPreviewPositions) renderTurntableScene({ reset: false });
         return;
       }
       if (serverPointCloudVisible) {
