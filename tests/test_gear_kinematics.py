@@ -67,6 +67,17 @@ class PlanetaryGearKinematicsTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValidationError, "finite"):
                     solve_planetary_gearset(**{**valid, **overrides})
 
+    def test_finite_pitch_centers_survive_intermediate_overflow(self) -> None:
+        result = solve_planetary_gearset(
+            module=1e308, sun_teeth=1, planet_teeth=1, ring_teeth=3,
+            planet_angles_degrees=[0.0, 180.0],
+            sun_speed_radians_per_second=1.0,
+            ring_speed_radians_per_second=0.0,
+        )
+        self.assertEqual(result["center_distance_sun_planet"], 1e308)
+        self.assertEqual(result["center_distance_ring_planet"], 1e308)
+        self.assertEqual(result["status"], "pass")
+
     def test_pitch_geometry_rejects_tooth_mismatch_at_extreme_scales(self) -> None:
         for module, sun, planet, ring in (
             (1e-12, 18, 18, 56),

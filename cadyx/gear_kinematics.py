@@ -46,8 +46,10 @@ def solve_planetary_gearset(
         raise ValidationError("Planet positions must be distinct.")
 
     try:
-        sun_planet_center = module_value * (sun + planet) / 2.0
-        ring_planet_center = module_value * (ring - planet) / 2.0
+        # Keep the factor of 1/2 exact until conversion: multiplying first
+        # can overflow even when the final pitch-center distance is finite.
+        sun_planet_center = float(Fraction(module_value) * (sun + planet) / 2)
+        ring_planet_center = float(Fraction(module_value) * (ring - planet) / 2)
     except OverflowError as exc:
         raise ValidationError("Gear geometry exceeds the finite numeric range.") from exc
     if not all(math.isfinite(value) for value in (sun_planet_center, ring_planet_center)):
