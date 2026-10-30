@@ -133,6 +133,36 @@ class PointCloudProcessingTests(unittest.TestCase):
                                 for axis, value in enumerate(candidate)) for candidate in geometric))
         self.assertEqual(points[0], (0., 0., 0.))
 
+    def test_kd_tree_bounds_and_queries_match_brute_force(self):
+        from cadyx.point_cloud_surface import _build_kd_tree, _nearest_points, _points_in_box
+
+        points = [(float((i * 37) % 17), float((i * 19) % 23), float((i * 11) % 13))
+                  for i in range(128)] + [(0., 0., 0.)] * 4
+        tree = _build_kd_tree(points, list(range(len(points))))
+
+        def check_bounds(node):
+            indices = (node[3] if node[3] is not None
+                       else check_bounds(node[4]) + check_bounds(node[5]))
+            for axis in range(3):
+                self.assertEqual(node[0][axis], min(points[i][axis] for i in indices))
+                self.assertEqual(node[1][axis], max(points[i][axis] for i in indices))
+            return indices
+
+        self.assertEqual(sorted(check_bounds(tree)), list(range(len(points))))
+        for query, radius in [((0., 0., 0.), math.inf), ((5., 10., 6.), 8.),
+                              ((100., 100., 100.), 4.)]:
+            with self.subTest(query=query, radius=radius):
+                expected = sorted((math.dist(query, point), index)
+                                  for index, point in enumerate(points)
+                                  if math.dist(query, point) <= radius)[:7]
+                actual = _nearest_points(points, tree, query, radius, 7, [0],
+                                         budget_message="budget exceeded")
+                self.assertEqual(actual, expected)
+        minimum, maximum = (3., 4., 2.), (8., 12., 9.)
+        expected = {index for index, point in enumerate(points)
+                    if all(minimum[axis] <= point[axis] <= maximum[axis] for axis in range(3))}
+        self.assertEqual(set(_points_in_box(points, tree, minimum, maximum)), expected)
+
     def test_nearest_neighbors_handle_large_and_subnormal_distances(self):
         from cadyx.point_cloud_surface import _build_kd_tree, _nearest_points
 

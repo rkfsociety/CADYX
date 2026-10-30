@@ -18,8 +18,20 @@ _KDNode = tuple[
 
 
 def _build_kd_tree(points: list[tuple[float, float, float]], indices: list[int]) -> _KDNode:
-    minimum = tuple(min(points[index][axis] for index in indices) for axis in range(3))
-    maximum = tuple(max(points[index][axis] for index in indices) for axis in range(3))
+    if not indices:
+        raise ValueError("min() arg is an empty sequence")
+    # One pass over each node's points avoids six generator scans per level.
+    minimum = list(points[indices[0]])
+    maximum = minimum.copy()
+    for index in indices:
+        point = points[index]
+        for axis in range(3):
+            if point[axis] < minimum[axis]:
+                minimum[axis] = point[axis]
+            if point[axis] > maximum[axis]:
+                maximum[axis] = point[axis]
+    minimum = tuple(minimum)
+    maximum = tuple(maximum)
     if len(indices) <= _KD_LEAF_SIZE:
         return minimum, maximum, -1, indices, None, None
     axis = max(range(3), key=lambda value: maximum[value] - minimum[value])
