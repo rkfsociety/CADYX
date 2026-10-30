@@ -619,6 +619,8 @@ assert.match(styleCss, /\.primary-grid:not\(\[data-view="scanning"\]\) #viewport
 const scanViewSource = fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8");
 assert.match(appJs, /if\(P&&document\.querySelector\('#primary-grid'\)\?\.dataset\.view!=='scanning'\)\{/,
   "selected-body name badges do not cover the scanner turntable preview");
+assert.match(appJs, /style\.textContent \+= '\.primary-grid\[data-view="scanning"\] \.cad3-overlay\{display:none!important\}'/,
+  "the viewport selection canvas is hidden over the scanner turntable");
 assert.doesNotMatch(scanViewSource, /interactiveRenderScale/,
   "the live turntable keeps full-resolution rendering while rotating");
 assert.match(appJs, /grid\?\.dataset\.view==='scanning'\)scanView\?\.showTurntable\(\)/,
