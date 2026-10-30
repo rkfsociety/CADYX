@@ -8,7 +8,7 @@
 
 ### Обработка облаков точек и история
 
-`process_point_cloud` работает с полным сохранённым PLY, проверяя SHA-256. Методы: `deduplicate` убирает одинаковые XYZ; `radius_filter` фильтрует по соседям; `crop` оставляет точки внутри включённых границ; `voxel_downsample` заменяет точки вокселя центроидом. Максимум 2 млн входных точек, минимум три выходные; радиусный фильтр ограничен 20 млн сравнений. Каждая операция добавляет этап истории того же тела и отдельный XYZ PLY. Исходники сохраняются, цвета и нормали в выходной XYZ не переносятся. До 125000 точек документа служат только отображению; масштаб и точность скана этим не подтверждаются.
+`process_point_cloud` работает с полным сохранённым PLY, проверяя SHA-256. Методы: `deduplicate` убирает одинаковые XYZ; `radius_filter` фильтрует по соседям; `crop` оставляет точки внутри включённых границ; `voxel_downsample` заменяет точки вокселя центроидом. На выходе должно оставаться минимум три точки. Каждая операция добавляет этап истории того же тела и отдельный XYZ PLY. Исходники сохраняются, цвета и нормали в выходной XYZ не переносятся. До 125000 точек документа служат только отображению; масштаб и точность скана этим не подтверждаются.
 
 Для ИИ-агента добавлены `simplify` (равномерная или геометрическая выборка с отношением 40% по умолчанию), `isolation_filter` (процент изолированных точек, по умолчанию 15%), `remove_overlaps` (близкие совпадающие слои по нормали к локальной поверхности) и `smooth` (сила в процентах и число проходов). `cadyx_analyze_point_cloud` анализирует результат без записи; применение через `process_point_cloud` добавляет этап в дерево модели. Расстояния заданы в исходных координатах, миллиметры не подтверждены.
 
@@ -36,7 +36,7 @@ it does not expose a catalog or controls for unused processing tools.
 
 ### Local-surface tools and detection
 
-`isolation_filter` uses exact spatial-grid nearest-neighbor and connected-component searches. The component radius is `component_factor` times the cloud's median nearest-neighbor spacing; the largest component is the main scan. Points in detached components and points whose nearest-neighbor distance exceeds 1.5 times the median are removal candidates, subject to the selected rate cap. Analysis reports the main-component size, detached point count, radius and total candidate count. The 20-million candidate-comparison budget covers both searches. The two surface tools use radius neighborhoods and a local PCA plane fitted to
+`isolation_filter` uses exact spatial-grid nearest-neighbor and connected-component searches. The component radius is `component_factor` times the cloud's median nearest-neighbor spacing; the largest component is the main scan. Points in detached components and points whose nearest-neighbor distance exceeds 1.5 times the median are removal candidates, subject to the selected rate cap. Analysis reports the main-component size, detached point count, radius and total candidate count. The two surface tools use radius neighborhoods and a local PCA plane fitted to
 the nearest 48 samples. At least six samples and a two-dimensional neighborhood
 are required. Collinear regions and patches whose smallest covariance eigenvalue
 exceeds one quarter of the middle eigenvalue remain unchanged. Radius must be
@@ -47,8 +47,7 @@ coincident group; it does not remove an entire supported surface. The tangential
 tolerance limits lateral thinning. Without per-frame labels it cannot distinguish
 intentional nearby sheets from redundant scan layers; inspect before applying.
 Smoothing moves points without meshing or merging disconnected components and
-can remove small details. Both operations share a budget of 20 million candidate
-neighbor comparisons across all passes; budget exhaustion saves no model stage.
+can remove small details.
 
 Use the read-only MCP tool `cadyx_analyze_point_cloud` or
 `POST /api/v1/agent/projects/{id}/validations/cloud-processing` with
@@ -74,9 +73,8 @@ For agent cleanup runs, analyze `isolation_filter` and `remove_overlaps`, apply
 each result with nonzero `removed_points`, and repeat the analysis against the
 new saved stage while varying that operation's parameters. Stop each operation
 when analysis reports zero removable points. Keep simplification and smoothing
-for explicit user requests. If varied valid parameters cannot clear candidates,
-or analysis hits its comparison budget, leave the remaining points intact and
-report the unresolved count and limit; do not describe the cloud as clean.
+for explicit user requests. If varied valid parameters cannot clear candidates, leave the remaining points intact and
+report the unresolved count; do not describe the cloud as clean.
 
 This cleanup is a required preprocessing step before scan-to-mesh reconstruction.
 Import the source PLY as a point-only reference first, complete the alternating
@@ -85,8 +83,7 @@ full-resolution stage. Never reconstruct directly from the untouched source PLY.
 
 Distances use the original coordinates. Physical scale and units remain
 unverified. Processing does not reconstruct a mesh or certify scan accuracy.
-It accepts at most 2 million input points, requires at least three output points,
-and limits radius filtering to 20 million candidate comparisons. A failed
+It requires at least three output points. A failed
 filter leaves the saved document unchanged.
 
 Every command reads the **full** previous PLY, verifies its SHA-256, and appends

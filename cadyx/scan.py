@@ -216,8 +216,6 @@ def read_point_cloud_ply(path: str | Path, *, full_resolution: bool = False) -> 
             _, vertex_count, properties = elements[0]
             if vertex_count < 3:
                 raise ValidationError("Point cloud must contain at least 3 vertices.")
-            if full_resolution and vertex_count > _MAX_PLY_VERTICES:
-                raise ValidationError("Point-cloud processing exceeds the 2M point resource limit.", code="RESOURCE_LIMIT")
             names = [name for name, _ in properties]
             if len(names) != len(set(names)) or not all(name in names for name in ("x", "y", "z")):
                 raise ValidationError("Point-cloud PLY must contain unique x, y and z properties.")

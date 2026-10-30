@@ -8,7 +8,6 @@ from typing import Any
 from .errors import ValidationError
 from .scan_reverse_alignment import _jacobi_eigenvectors
 
-MAX_SURFACE_COMPARISONS = 20_000_000
 _KD_LEAF_SIZE = 8
 
 _KDNode = tuple[
@@ -51,8 +50,7 @@ def _box_distance(node: _KDNode, point: tuple[float, float, float]) -> float:
 
 
 def _nearest_points(points: list[tuple[float, float, float]], tree: _KDNode,
-                    point: tuple[float, float, float], radius: float, limit: int,
-                    comparisons: list[int], *, budget_message: str) -> list[tuple[float, int]]:
+                    point: tuple[float, float, float], radius: float, limit: int) -> list[tuple[float, int]]:
     nearest: list[tuple[float, int]] = []
     pending = [(_box_distance(tree, point), 0, tree)]
     sequence = 1
@@ -64,12 +62,6 @@ def _nearest_points(points: list[tuple[float, float, float]], tree: _KDNode,
         _, _, _, indices, left, right = node
         if indices is not None:
             for index in indices:
-                comparisons[0] += 1
-                if comparisons[0] > MAX_SURFACE_COMPARISONS:
-                    raise ValidationError(
-                        budget_message,
-                        code="RESOURCE_LIMIT",
-                    )
                 distance = math.dist(point, points[index])
                 if distance <= radius:
                     entry = (-distance, -index)
@@ -124,7 +116,6 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
     """
     current = list(points)
     radius = parameters["radius"]
-    comparisons = [0]
     for _ in range(parameters.get("iterations", 1)):
         tree = _build_kd_tree(current, list(range(len(current))))
         removed: set[int] = set()
@@ -133,8 +124,7 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
             if i in removed:
                 continue
             nearest = _nearest_points(
-                current, tree, point, radius, 48, comparisons,
-                budget_message="Surface processing exceeds its 20M comparison budget; reduce radius or iterations.",
+                current, tree, point, radius, 48,
             )
             neighbors = [j for _, j in nearest]
             if len(neighbors) < 6:
@@ -164,12 +154,6 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
                 for j in candidates:
                     if j <= i or j in removed:
                         continue
-                    comparisons[0] += 1
-                    if comparisons[0] > MAX_SURFACE_COMPARISONS:
-                        raise ValidationError(
-                            "Surface processing exceeds its 20M comparison budget; reduce radius or iterations.",
-                            code="RESOURCE_LIMIT",
-                        )
                     delta = [current[j][a] - point[a] for a in range(3)]
                     vertical = sum(delta[a] * normal[a] for a in range(3))
                     lateral = math.hypot(*(delta[a] - vertical * normal[a] for a in range(3)))
@@ -185,11 +169,9 @@ def isolation_points(points: list[tuple[float, float, float]], rate: float,
     """Keep the largest scan component and remove sparse points within the rate cap."""
     tree = _build_kd_tree(points, list(range(len(points))))
     nearest = [math.inf] * len(points)
-    comparisons = [0]
     for i, point in enumerate(points):
         candidates = _nearest_points(
-            points, tree, point, math.inf, 2, comparisons,
-            budget_message="Isolation detection exceeds its 20M comparison budget; downsample first.",
+            points, tree, point, math.inf, 2,
         )
         nearest[i] = next((distance for distance, index in candidates if index != i), math.inf)
     finite = sorted(distance for distance in nearest if math.isfinite(distance))
@@ -218,16 +200,12 @@ def isolation_points(points: list[tuple[float, float, float]], rate: float,
         parent[second_root] = first_root
         sizes[first_root] += sizes[second_root]
 
-    component_comparisons = [0]
     for index, point in enumerate(points):
         minimum = tuple(value - component_radius for value in point)
         maximum = tuple(value + component_radius for value in point)
         for other in _points_in_box(points, tree, minimum, maximum):
             if other <= index:
                 continue
-            component_comparisons[0] += 1
-            if comparisons[0] + component_comparisons[0] > MAX_SURFACE_COMPARISONS:
-                raise ValidationError("Isolation detection exceeds its 20M comparison budget; downsample first.", code="RESOURCE_LIMIT")
             if math.dist(point, points[other]) <= component_radius:
                 union(index, other)
 

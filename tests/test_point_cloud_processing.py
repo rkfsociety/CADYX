@@ -155,8 +155,7 @@ class PointCloudProcessingTests(unittest.TestCase):
                 expected = sorted((math.dist(query, point), index)
                                   for index, point in enumerate(points)
                                   if math.dist(query, point) <= radius)[:7]
-                actual = _nearest_points(points, tree, query, radius, 7, [0],
-                                         budget_message="budget exceeded")
+                actual = _nearest_points(points, tree, query, radius, 7)
                 self.assertEqual(actual, expected)
         minimum, maximum = (3., 4., 2.), (8., 12., 9.)
         expected = {index for index, point in enumerate(points)
@@ -171,8 +170,7 @@ class PointCloudProcessingTests(unittest.TestCase):
                 points = [(0., 0., 0.), (scale, 0., 0.),
                           (0., scale, 0.), (scale, scale, 0.)]
                 tree = _build_kd_tree(points, list(range(len(points))))
-                neighbors = _nearest_points(points, tree, points[0], scale * 1.1, 4, [0],
-                                            budget_message="budget exceeded")
+                neighbors = _nearest_points(points, tree, points[0], scale * 1.1, 4)
                 self.assertEqual([index for _, index in neighbors], [0, 1, 2])
                 self.assertEqual([distance for distance, _ in neighbors], [0., scale, scale])
 
@@ -247,15 +245,21 @@ class PointCloudProcessingTests(unittest.TestCase):
         result = process_points(points, "voxel_downsample", {"voxel_size": 1e308})
         self.assertEqual(result, [(-1e308, 0., 0.), (0., 0., 0.), (1e308, 0., 0.)])
 
-    def test_surface_budget_fails_without_mutating_input(self):
-        from unittest.mock import patch
+    def test_surface_processing_does_not_mutate_input(self):
         points = [(float(x), float(y), 0.) for x in range(4) for y in range(4)]
         before = list(points)
-        with patch("cadyx.point_cloud_surface.MAX_SURFACE_COMPARISONS", 1):
-            with self.assertRaises(ValidationError) as caught:
-                process_points(points, "smooth", {"radius": 2.})
-        self.assertEqual(caught.exception.code, "RESOURCE_LIMIT")
+        result = process_points(points, "smooth", {"radius": 2.})
         self.assertEqual(points, before)
+        self.assertEqual(len(result), len(points))
+
+    def test_full_resolution_reader_validates_large_cloud_instead_of_rejecting_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "large.ply"
+            source.write_text("ply\nformat ascii 1.0\nelement vertex 2000001\n"
+                              "property float x\nproperty float y\nproperty float z\nend_header\n",
+                              encoding="ascii")
+            with self.assertRaisesRegex(ValidationError, "ended after 0 of 2000001"):
+                read_point_cloud_ply(source, full_resolution=True)
 
     def test_analysis_does_not_publish_or_change_history(self):
         with tempfile.TemporaryDirectory() as directory:

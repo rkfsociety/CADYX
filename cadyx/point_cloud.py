@@ -159,15 +159,11 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
             offsets = list(product((-1, 0, 1), repeat=3))
             # Radius membership excludes the query point; duplicates remain distinct
             # until the explicit deduplication operation is requested.
-            comparisons = 0
             for index, point in enumerate(points):
                 key = tuple(_voxel_index(v, size) for v in point)
                 count = 0
                 for offset in offsets:
                     for other in buckets.get(tuple(a + b for a, b in zip(key, offset)), ()):
-                        comparisons += 1
-                        if comparisons > 20_000_000:
-                            raise ValidationError("Radius filtering exceeds its 20M comparison budget; reduce the radius or downsample first.", code="RESOURCE_LIMIT")
                         if other != index and math.dist(point, points[other]) <= size:
                             count += 1
                             if count >= p["min_neighbors"]:
