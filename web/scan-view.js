@@ -213,11 +213,6 @@
           sine * (TURNTABLE_RADIUS_MM + 10), 0.35);
         degreeTextLabels.push({ pointIndex: topPointIndex, text: `${degrees}°`, size: 8, color: '#f3f7f8',
           minViewDepthZ: 0.75 });
-        const sidePointIndex = degreeLabelPositions.length / 3;
-        degreeLabelPositions.push(cosine * (TURNTABLE_RADIUS_MM + 10),
-          sine * (TURNTABLE_RADIUS_MM + 10), 3);
-        degreeTextLabels.push({ pointIndex: sidePointIndex, text: `${degrees}°`, size: 8, color: '#f3f7f8',
-          maxViewDepthZ: 0.75 });
       }
     }
     return {

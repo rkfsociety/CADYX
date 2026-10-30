@@ -86,17 +86,12 @@ assert.equal(turntableModel.degreeTickCount, 72, "the turntable scale has 5 degr
 assert.deepEqual(Array.from(turntableModel.degreeTextLabels.filter(label => Number.isFinite(label.minViewDepthZ)), label => label.text),
   ["0°", "30°", "60°", "90°", "120°", "150°", "180°", "210°", "240°", "270°", "300°", "330°"],
   "the top-face scale labels each 30 degree major division");
+assert.equal(turntableModel.degreeTextLabels.length, 12,
+  "each major degree appears once, avoiding overlapping duplicate labels in isometric view");
 const zeroDegreePosition = Array.from(turntableModel.degreeLabelPositions.slice(0, 3));
 assert.ok(Math.abs(zeroDegreePosition[0]) < 0.1
   && Math.abs(zeroDegreePosition[1] - 110) < 0.1,
 "the top-face zero-degree label is outside the table at the bottom in top view");
-const zeroDegreeSidePosition = Array.from(turntableModel.degreeLabelPositions.slice(3, 6));
-assert.ok(Math.abs(zeroDegreeSidePosition[0]) < 0.1
-  && Math.abs(zeroDegreeSidePosition[1] - 110) < 0.1
-  && Math.abs(zeroDegreeSidePosition[2] - 3) < 0.1,
-"the front-facing zero-degree label is centered above the fixed support button");
-assert.equal(turntableModel.degreeTextLabels.filter(label => Number.isFinite(label.maxViewDepthZ)).length, 12,
-  "side-face degree labels are provided for front and isometric views");
 assert.ok(turntableModel.fixed.triangles.length > 0 && turntableModel.moving.triangles.length > 0,
   "the preview includes a shaded table base and a separately movable tabletop");
 assert.equal(sandbox.window.CadyxScanView.hasClosedTriangleTopology(turntableModel.fixed.triangles), true,
