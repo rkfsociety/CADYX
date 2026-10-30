@@ -631,10 +631,12 @@ def _dispatch_files(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         handler._binary_file(core.workspace.resolve_project_subfolder_file(
             project_id, unquote(route.params["folder_name"]), filename))
     elif name == "agent_project_files":
-        handler._json(200, {"files": core.workspace.list_project_files(project_id)})
+        handler._json(200, {"files": core.workspace.list_project_files(project_id),
+                            "folders": core.workspace.list_project_folders(project_id)})
     elif name == "agent_project_subfolder_files":
         folder_name = unquote(route.params["folder_name"])
-        handler._json(200, {"files": core.workspace.list_project_subfolder_files(project_id, folder_name)})
+        handler._json(200, {"files": core.workspace.list_project_subfolder_files(project_id, folder_name),
+                            "folders": core.workspace.list_project_subfolders(project_id, folder_name)})
     elif name == "agent_project_subfolder_file":
         handler._binary_file(core.workspace.resolve_project_subfolder_file(
             project_id, unquote(route.params["folder_name"]), filename))

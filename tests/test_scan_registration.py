@@ -235,6 +235,31 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
             self.assertIsNotNone(verified_preprocessed_frame(published))
             self.assertEqual([path.name for path in series.iterdir()], [source.name])
 
+    def test_capture_worker_preserves_existing_frame_on_publication_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_id = "revopoint_20261023T091300Z"
+            support, series = root / f"scan_support_{run_id}", root / run_id
+            support.mkdir()
+            series.mkdir()
+            source = support / f"{run_id}_pose_000.ply"
+            source.write_bytes(self._source_ply())
+            destination = series / source.name
+            destination.write_bytes(b"previous frame")
+            pose_log = support / f"{run_id}_poses.csv"
+            with pose_log.open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=["step_index", "event", "command"])
+                writer.writeheader()
+                writer.writerow({"step_index": 0, "event": "capture_completed", "command": str(source.with_suffix(""))})
+            stop = support / "stop.signal"
+            stop.touch()
+            report = watch_capture(pose_log, support, run_id, 1, stop, support / "aggregate.json",
+                                   output_directory=series)
+            self.assertEqual(report["state"], "failed")
+            self.assertEqual(report["failed_frame_count"], 1)
+            self.assertEqual(destination.read_bytes(), b"previous frame")
+            self.assertIsNotNone(verified_preprocessed_frame(source))
+
     def test_capture_worker_rejects_parallel_processing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             run_directory = Path(temporary)
