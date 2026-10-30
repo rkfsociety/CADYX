@@ -49,3 +49,5 @@
 - Before pushing, fetch `main` and compare it with local `HEAD`. If remote `main` has advanced, pull and merge those commits locally, resolve and verify the merge, then push. Do not push while local `main` is behind its remote.
 
 - Scanning uses one shared preview scene for the turntable and selected cloud. Selecting a saved series file or a project-level merged cloud must keep the turntable visible. With no saved-cloud selection and no active capture/live preview, show the turntable only; status polling must not reopen clouds from completed or failed captures.
+
+- In the Scanning tree, series show only individual processed capture-frame PLY files (`_pose_<number>.ply`); keep RAW and processing reports available on disk, and do not display intermediate or merged clouds as series frames.

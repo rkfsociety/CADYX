@@ -319,7 +319,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       }
       for(const run of scanTreeEntries){
         const title=scanRunTitle(run.id);
-        const files=(run.files||[]).filter(file=>/\.ply$/i.test(file.name));
+        const files=(run.files||[]).filter(file=>file.name.startsWith(`${run.id}_`)
+          && /_pose_\d+\.ply$/i.test(file.name));
         const matchingFiles=files.filter(file=>!query||file.name.toLowerCase().includes(query));
         if(query&&!title.toLowerCase().includes(query)&&!matchingFiles.length)continue;
         const container=document.createElement('div');container.className='cad3-tree-node';
