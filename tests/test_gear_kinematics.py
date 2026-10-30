@@ -184,6 +184,15 @@ class PlanetaryGearKinematicsTests(unittest.TestCase):
                 ring_speed_radians_per_second=1.5e308,
             )
 
+    def test_nearly_coincident_positions_across_full_turn_are_rejected(self) -> None:
+        # Float modulo rounds a negative subnormal angle to exactly 360.0.
+        # Both that case and a near-full-turn gap must reject overlapping planets.
+        for angles in ([0.0, -5e-324], [0.0, 360.0 - 1e-11],
+                       [10.0, 10.0 + 5e-11]):
+            with self.subTest(angles=angles):
+                with self.assertRaisesRegex(ValidationError, "distinct"):
+                    self.solve(teeth=(18, 18, 54), angles=angles)
+
     def test_invalid_input_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValidationError, "distinct"):
             self.solve(teeth=(18, 18, 54), angles=[0.0, 0.0, 180.0])

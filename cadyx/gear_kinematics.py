@@ -42,8 +42,15 @@ def solve_planetary_gearset(
 
     if len(angles) < 2:
         raise ValidationError("A planetary gearset needs at least two planet positions.")
-    if len({round(value % 360.0, 10) for value in angles}) != len(angles):
+    # Compare circular gaps rather than rounded absolute angles: modulo on
+    # negative subnormal angles can round to 360.0 and hide an overlap at 0.
+    ordered_exact = sorted(Fraction(value) % 360 for value in angles)
+    gaps_exact = [ordered_exact[(index + 1) % len(ordered_exact)] - ordered_exact[index]
+                  for index in range(len(ordered_exact))]
+    gaps_exact[-1] += 360
+    if any(gap < Fraction(1, 10**10) for gap in gaps_exact):
         raise ValidationError("Planet positions must be distinct.")
+    gaps = [float(gap) for gap in gaps_exact]
 
     try:
         # Keep the factor of 1/2 exact until conversion: multiplying first
@@ -59,14 +66,10 @@ def solve_planetary_gearset(
     # large tooth counts, even when the centers are physically different.
     pitch_compatible = ring == sun + 2 * planet
 
-    ordered = sorted(value % 360.0 for value in angles)
-    gaps = [ordered[(index + 1) % len(ordered)] - ordered[index]
-            for index in range(len(ordered))]
-    gaps[-1] += 360.0
     try:
         # Keep fractional tooth offsets exact: float rounding at large tooth
         # counts can otherwise turn an incompatible layout into a false pass.
-        phase_teeth_exact = [Fraction(gap) * (sun + ring) / 360 for gap in gaps]
+        phase_teeth_exact = [gap * (sun + ring) / 360 for gap in gaps_exact]
         phase_teeth = [float(value) for value in phase_teeth_exact]
     except OverflowError as exc:
         raise ValidationError("Gear indexing exceeds the finite numeric range.") from exc
