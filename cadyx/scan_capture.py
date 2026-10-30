@@ -1329,7 +1329,7 @@ class Scan360CaptureController:
         preprocessing = self._preprocessing_payload(
             self._job.project_directory, self._job.run_id, self._job.frame_count, active=True)
         run_directory = self._run_directory(self._job.project_directory, self._job.run_id)
-        manifest_path = run_directory / f"{self._job.run_id}_scan_360.json"
+        manifest_path = self._support_directory(self._job.project_directory, self._job.run_id) / f"{self._job.run_id}_scan_360.json"
         alignment_status = self._alignment_status(self._job.project_directory, self._job.run_id)
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1388,7 +1388,7 @@ class Scan360CaptureController:
     @staticmethod
     def _preprocessing_payload(project_directory: Path, run_id: str,
                                frame_count: int, *, active: bool = False) -> dict[str, Any]:
-        report_path = (Scan360CaptureController._run_directory(project_directory, run_id)
+        report_path = (Scan360CaptureController._support_directory(project_directory, run_id)
                        / f"{run_id}_preprocessing.json")
         try:
             report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -1437,7 +1437,7 @@ class Scan360CaptureController:
 
     @staticmethod
     def _alignment_status(project_directory: Path, run_id: str) -> str:
-        run_directory = Scan360CaptureController._run_directory(project_directory, run_id)
+        run_directory = Scan360CaptureController._support_directory(project_directory, run_id)
         result_path = run_directory / f"{run_id}_table_alignment.json"
         try:
             result = json.loads(result_path.read_text(encoding="utf-8"))
@@ -1454,7 +1454,7 @@ class Scan360CaptureController:
 
     @staticmethod
     def _manifest_frame_count(project_directory: Path, run_id: str) -> int:
-        manifest = Scan360CaptureController._run_directory(project_directory, run_id) / f"{run_id}_scan_360.json"
+        manifest = Scan360CaptureController._support_directory(project_directory, run_id) / f"{run_id}_scan_360.json"
         try:
             count = json.loads(manifest.read_text(encoding="utf-8")).get("frame_count")
         except (OSError, ValueError, TypeError, json.JSONDecodeError, AttributeError):
@@ -1463,7 +1463,7 @@ class Scan360CaptureController:
 
     @staticmethod
     def _count_run_frames(project_directory: Path, run_id: str, frame_count: int | None = None) -> int:
-        run_directory = Scan360CaptureController._run_directory(project_directory, run_id)
+        run_directory = Scan360CaptureController._support_directory(project_directory, run_id)
         count = frame_count or Scan360CaptureController._manifest_frame_count(project_directory, run_id)
         return sum(1 for index in range(count)
                    if (run_directory / f"{run_id}_pose_{index:03d}.raw").is_file()
@@ -1474,11 +1474,20 @@ class Scan360CaptureController:
         run_directory = project_directory / run_id
         return run_directory if run_directory.is_dir() else project_directory
 
+    @staticmethod
+    def _support_directory(project_directory: Path, run_id: str) -> Path:
+        root = project_directory.parent if project_directory.name == run_id else project_directory
+        support = root / f"scan_support_{run_id}"
+        if support.is_dir() and not support.is_symlink():
+            return support
+        return Scan360CaptureController._run_directory(project_directory, run_id)
+
     @classmethod
     def _latest_completed_snapshot(cls, project_directory: Path) -> dict[str, Any]:
         captures = sorted(
             (*project_directory.glob("revopoint_*_poses.csv"),
-             *project_directory.glob("revopoint_*/revopoint_*_poses.csv")),
+             *project_directory.glob("revopoint_*/revopoint_*_poses.csv"),
+             *project_directory.glob("scan_support_revopoint_*/revopoint_*_poses.csv")),
             key=lambda path: path.stat().st_mtime_ns,
             reverse=True,
         )
@@ -1487,12 +1496,12 @@ class Scan360CaptureController:
             if not match:
                 continue
             run_id = match.group(1)
-            run_directory = pose_log.parent
+            run_directory = (project_directory / run_id if pose_log.parent.name == f"scan_support_{run_id}"
+                             else pose_log.parent)
             frame_count = cls._manifest_frame_count(run_directory, run_id)
             completed = cls._count_run_frames(run_directory, run_id, frame_count)
             stamp = run_id.removeprefix("revopoint_")
-            run_directory = pose_log.parent
-            scan_log = run_directory / f".cadyx-scan360-{stamp}.log"
+            scan_log = cls._support_directory(run_directory, run_id) / f".cadyx-scan360-{stamp}.log"
             if not scan_log.is_file():
                 scan_log = project_directory / f".cadyx-scan360-{stamp}.log"
             try:
@@ -1500,7 +1509,7 @@ class Scan360CaptureController:
             except OSError:
                 completed_turn = False
             if completed == frame_count and completed_turn:
-                manifest = run_directory / f"{run_id}_scan_360.json"
+                manifest = cls._support_directory(run_directory, run_id) / f"{run_id}_scan_360.json"
                 preprocessing = cls._preprocessing_payload(run_directory, run_id, frame_count)
                 alignment_status = cls._alignment_status(run_directory, run_id)
                 try:
@@ -1543,7 +1552,7 @@ class Scan360CaptureController:
 
     @staticmethod
     def _manifest_step_degrees(project_directory: Path, run_id: str) -> int:
-        manifest = Scan360CaptureController._run_directory(project_directory, run_id) / f"{run_id}_scan_360.json"
+        manifest = Scan360CaptureController._support_directory(project_directory, run_id) / f"{run_id}_scan_360.json"
         try:
             step = json.loads(manifest.read_text(encoding="utf-8")).get("step_degrees")
         except (OSError, ValueError, TypeError, json.JSONDecodeError, AttributeError):
