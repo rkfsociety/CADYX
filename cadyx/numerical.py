@@ -57,11 +57,16 @@ class SparseRankAccumulator:
             pivot = min(row)
             basis = self._basis.get(pivot)
             if basis is None:
-                scale = row[pivot]
-                self._basis[pivot] = {column: value / scale for column, value in row.items()}
+                # Preserve the source scale: dividing by a tiny pivot can
+                # overflow other finite coefficients and invent a new rank.
+                self._basis[pivot] = row
                 return True
-            factor = row[pivot]
+            # Remove the pivot exactly, rather than leaving roundoff that
+            # could repeatedly eliminate the same column.
+            factor = row.pop(pivot) / basis[pivot]
             for column, value in basis.items():
+                if column == pivot:
+                    continue
                 adjusted = row.get(column, 0.0) - factor * value
                 if abs(adjusted) < self.tolerance:
                     row.pop(column, None)

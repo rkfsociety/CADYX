@@ -37,6 +37,16 @@ class NumericalRankTests(unittest.TestCase):
                                     if row[column]})
                 self.assertEqual(sparse.rank, 2, (ordered_rows, columns))
 
+    def test_sparse_accumulator_preserves_rank_with_extreme_finite_scales(self):
+        first = {0: 1e-8, 1: 1e301}
+        dependent = {0: 2e-8, 1: 2e301}
+        for rows in ((first, dependent), (dependent, first)):
+            with self.subTest(rows=rows):
+                sparse = SparseRankAccumulator()
+                self.assertTrue(sparse.add_row(rows[0]))
+                self.assertFalse(sparse.add_row(rows[1]))
+                self.assertEqual(sparse.rank, 1)
+
     def test_sparse_positive_definite_solver(self):
         matrix = {0: {0: 4.0, 1: 1.0}, 1: {0: 1.0, 1: 3.0}}
         result = solve_sparse_positive_definite(matrix, [1.0, 2.0])
