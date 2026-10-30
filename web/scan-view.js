@@ -78,22 +78,34 @@
     const stroke=0.58, digitAdvance=4.25, height=5.8, gap=0.45;
     const text=String(degrees), width=text.length*digitAdvance+(text.length-1)*gap;
     const rotate=(x,y)=>[centerX+x*Math.cos(angle)-y*Math.sin(angle),centerY+x*Math.sin(angle)+y*Math.cos(angle)];
-    const pathsForDigit=(digit,ox)=>digit==='0'
-      ? [[[ox+0.65,0],[ox+3.6,0],[ox+4.1,0.55],[ox+4.1,height-0.55],[ox+3.6,height],[ox+0.65,height],[ox, height-0.55],[ox,0.55],[ox+0.65,0]]]
-      : [[[ox+0.2,0.42],[ox+3.0,0.42],[ox+4.0,1.0],[ox+4.0,2.2],[ox+3.1,2.9]],
-         [[ox+0.75,2.9],[ox+3.1,2.9],[ox+4.0,3.55],[ox+4.0,4.75],[ox+3.0,5.38],[ox+0.2,5.38]]];
+    const segmentNames={
+      0:'abcdef', 1:'bc', 2:'abged', 3:'abgcd', 4:'fgbc',
+      5:'afgcd', 6:'afgecd', 7:'abc', 8:'abcdefg', 9:'abfgcd',
+    };
+    const segmentEndpoints={
+      a:[[0.55,0],[3.7,0]], b:[[4.25,0.55],[4.25,2.45]],
+      c:[[4.25,3.35],[4.25,height-0.55]], d:[[0.55,height],[3.7,height]],
+      e:[[0,3.35],[0,height-0.55]], f:[[0,0.55],[0,2.45]],
+      g:[[0.55,2.9],[3.7,2.9]],
+    };
     const addStroke=(a,b)=>{
       const dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy);if(length<1e-6)return;
       const nx=-dy/length*stroke/2,ny=dx/length*stroke/2;
-      const points=[[a[0]+nx,a[1]+ny],[b[0]+nx,b[1]+ny],[b[0]-nx,b[1]-ny],[a[0]-nx,a[1]-ny]]
+      const points=[[a[0]-nx,a[1]-ny],[b[0]-nx,b[1]-ny],[b[0]+nx,b[1]+ny],[a[0]+nx,a[1]+ny]]
         .map(([x,y])=>rotate(x-width/2,y-height/2));
       addClosedPrism(mesh,points,0.002,0.025,color);
     };
     let x=0;
     for(const character of text){
-      for(const path of pathsForDigit(character,x))for(let i=0;i<path.length-1;i++)addStroke(path[i],path[i+1]);
+      const segments=segmentNames[character];
+      if(!segments)throw new Error(`Unsupported turntable degree digit: ${character}`);
+      for(const segment of segments){
+        const [first,second]=segmentEndpoints[segment];
+        addStroke([first[0]+x,first[1]],[second[0]+x,second[1]]);
+      }
       x+=digitAdvance+gap;
     }
+    return [...text].map(character=>segmentNames[character]).join('|');
   };
   const addCylinderAlongX = (mesh, length, radius, centerZ, segments, color) => {
     const leftCenter = mesh.positions.length / 3;
@@ -192,7 +204,7 @@
     };
     const degreeLabelPositions = [], degreeTextLabels = [];
     let degreeTickCount = 0, bakedDegreeLabelCount = 0;
-    const bakedDegreeLabels=[];
+    const bakedDegreeLabels=[], bakedDegreeGlyphs=[];
     for (let degrees = 0; degrees < 360; degrees += 5) {
       const radians = (degrees + TURNTABLE_DEGREE_SCALE_ZERO_DEGREES) * Math.PI / 180;
       const cosine = Math.cos(radians), sine = Math.sin(radians);
@@ -230,7 +242,8 @@
         sideBottom, sideTop, tickColor);
       degreeTickCount += 1;
       if (major) {
-        addPlanarDegreeLabel(moving,String(degrees),82*cosine,82*sine,radians+Math.PI/2,[242,247,249]);
+        bakedDegreeGlyphs.push(addPlanarDegreeLabel(moving,String(degrees),82*cosine,82*sine,
+          radians+Math.PI/2,[242,247,249]));
         bakedDegreeLabelCount += 1;
         bakedDegreeLabels.push(String(degrees));
       }
@@ -242,6 +255,7 @@
       degreeTickCount,
       bakedDegreeLabelCount,
       bakedDegreeLabels,
+      bakedDegreeGlyphs,
       degreeLabelAlignment: 'tangent',
       degreeLabelPositions: Float32Array.from(degreeLabelPositions),
       degreeTextLabels,
