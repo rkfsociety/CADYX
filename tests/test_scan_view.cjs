@@ -84,13 +84,16 @@ assert.ok(Array.from({ length: turntableModel.fixed.positions.length / 3 }, (_, 
 assert.equal(turntableModel.fitRadius, 120, "the outer degree labels have clearance from the viewport edge");
 assert.equal(turntableModel.degreeTickCount, 72, "the turntable scale has 5 degree ticks through 360 degrees");
 assert.equal(turntableModel.bakedDegreeLabelCount, 12,
-  "all twelve 30-degree values are baked into the tabletop mesh");
+  "twelve readable 30-degree labels are baked into the tabletop surface");
+assert.deepEqual(Array.from(turntableModel.bakedDegreeLabels),
+  ["0","30","60","90","120","150","180","210","240","270","300","330"],
+  "baked degree values contain numbers without degree symbols");
+assert.equal(turntableModel.degreeLabelAlignment, "tangent",
+  "baked labels follow a consistent tangent baseline around the circular scale");
 assert.equal(turntableModel.degreeTextLabels.length, 0,
-  "degree markings do not depend on a flickering viewport text overlay");
+  "degree numerals do not depend on camera-gated canvas text");
 assert.equal(turntableModel.degreeLabelPositions.length, 0,
-  "baked degree markings do not add floating text anchor points");
-assert.deepEqual(Array.from(turntableModel.degreeTextLabels), [],
-  "degree labels are geometry, not conditional text overlays");
+  "baked numerals have no floating text anchors");
 assert.ok(turntableModel.fixed.triangles.length > 0 && turntableModel.moving.triangles.length > 0,
   "the preview includes a shaded table base and a separately movable tabletop");
 assert.equal(sandbox.window.CadyxScanView.hasClosedTriangleTopology(turntableModel.fixed.triangles), true,
