@@ -113,9 +113,13 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
             best_gap = math.inf
             for _ in range(18):
                 size = low + (high - low) / 2
+                # A subnormal extent can round the midpoint to zero.
+                # Keep a representable cell and avoid overflowing float ratios.
+                if size == 0.0:
+                    size = high
                 buckets: dict[tuple[int, int, int], list[tuple[float, float, float]]] = {}
                 for point, bucket_point in zip(points, bucket_points):
-                    key = tuple(math.floor(value / size) for value in bucket_point)
+                    key = tuple(_voxel_index(value, size) for value in bucket_point)
                     buckets.setdefault(key, []).append(point)
                 candidate = [tuple(_mean_coordinate([point[a] for point in group]) for a in range(3))
                              for group in buckets.values()]
@@ -125,6 +129,8 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
                     low = size
                 else:
                     high = size
+                if low == high:
+                    break
             if best is None:
                 raise ValidationError("Geometric simplification must retain at least three voxels.")
             result = best

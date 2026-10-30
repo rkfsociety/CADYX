@@ -182,6 +182,23 @@ class PointCloudProcessingTests(unittest.TestCase):
                   (scale, scale, 0.), (3.5 * scale, 3.5 * scale, 0.)]
         self.assertEqual(process_points(points, "isolation_filter", {"rate": 20}), points[:4])
 
+    def test_geometric_simplification_handles_subnormal_extents(self):
+        # The midpoint of the smallest positive extent rounds to zero.
+        tiny = math.ulp(0.0)
+        points = [(0., 0., 0.), (tiny, 0., 0.),
+                  (0., tiny, 0.), (tiny, tiny, 0.)]
+        result = process_points(points, "simplify", {"strategy": "geometric", "ratio": 40})
+        self.assertEqual(result, points)
+
+    def test_geometric_simplification_handles_large_offset_and_tiny_extent(self):
+        # World-origin voxel keys must not overflow when one axis is huge
+        # but another axis controls the small voxel size.
+        points = [(1e308, i * 1e-308, 0.) for i in range(6)]
+        result = process_points(points, "simplify", {"strategy": "geometric", "ratio": 40})
+        self.assertEqual(len(result), 3)
+        self.assertTrue(all(point[0] == 1e308 and math.isfinite(point[1])
+                            for point in result))
+
     def test_geometric_simplification_handles_large_finite_coordinates(self):
         # Squaring these finite bounds overflows, although the cloud is valid.
         points = [(float(x) * 1e154, float(y) * 1e154, 0.)
