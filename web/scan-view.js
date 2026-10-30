@@ -1405,8 +1405,9 @@
                 const py = matrix[4] * x + matrix[5] * y + matrix[6] * depth + matrix[7];
                 const pz = matrix[8] * x + matrix[9] * y + matrix[10] * depth + matrix[11];
                 if (!Number.isFinite(pz) || Math.abs(pz) < 1e-12) return false;
-                const pointX = px * depth / pz, pointY = -py * depth / pz, pointZ = -depth;
-                if (!Number.isFinite(pointX) || !Number.isFinite(pointY) || !Number.isFinite(pointZ)) return false;
+                const pointX = (px / pz) * depth, pointY = -(py / pz) * depth, pointZ = -depth;
+                if (!Number.isFinite(Math.fround(pointX)) || !Number.isFinite(Math.fround(pointY))
+                    || !Number.isFinite(Math.fround(pointZ))) return false;
                 projectedPoint[0] = pointX;
                 projectedPoint[1] = pointY;
                 projectedPoint[2] = pointZ;

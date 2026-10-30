@@ -38,4 +38,34 @@ assert.ok(message.result.markerFlags.every(flag => flag === 1));
 assert.equal(transfer.length, 4, "large numeric results transfer their buffers back without cloning");
 assert.deepEqual(Array.from(message.result.rawBounds.min), [40, -319, -150]);
 assert.deepEqual(Array.from(message.result.rawBounds.max), [559, -40, -150]);
+
+messages.length = 0;
+sandbox.self.onmessage({ data: {
+  requestId: 18,
+  rawBuffer: raw.buffer,
+  matrix: [0, 0, 0, 1e308, 0, 0, 0, 1e308, 0, 0, 0, 1e308, 0, 0, 0, 1],
+  scale: 1,
+} });
+const scaledProjection = messages[0].message;
+assert.equal(scaledProjection.error, undefined);
+assert.equal(scaledProjection.result.count, 3 * 20 * 20,
+  "homogeneously scaled calibration retains valid projected points");
+assert.deepEqual(Array.from(scaledProjection.result.positions.slice(0, 3)), [150, -150, -150]);
+assert.equal(scaledProjection.result.markerPositions.length, 3 * 20 * 20 * 3);
+assert.ok(scaledProjection.result.positions.every(Number.isFinite));
+
+messages.length = 0;
+sandbox.self.onmessage({ data: {
+  requestId: 19,
+  rawBuffer: raw.buffer,
+  matrix: [0, 0, 0, 1e40, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1],
+  scale: 1,
+} });
+const unrenderableProjection = messages[0].message;
+assert.equal(unrenderableProjection.error, undefined);
+assert.equal(unrenderableProjection.result.count, 0,
+  "points outside Float32 range must not reach the GPU");
+assert.equal(unrenderableProjection.result.markerPositions.length, 0,
+  "unrenderable marker points must not enter table fitting");
+
 console.log("Scan preview worker: depth filtering, marker regions and calibrated projection passed.");
