@@ -87,6 +87,32 @@ class PlanetaryGearKinematicsTests(unittest.TestCase):
                 self.assertAlmostEqual(result["planet_spin_speed_radians_per_second"] / 1e308,
                                        expected_planet / 1e308, places=12)
 
+    def test_finite_planet_speed_survives_overflowing_difference(self) -> None:
+        base = dict(module=2.0, sun_teeth=10, planet_teeth=100, ring_teeth=210,
+                    planet_angles_degrees=[0.0, 180.0])
+        for sun_speed, ring_speed, expected in (
+            (-1.7e308, 1.5e308, 1.66e308),
+            (1.7e308, -1.5e308, -1.66e308),
+        ):
+            with self.subTest(sun_speed=sun_speed, ring_speed=ring_speed):
+                result = solve_planetary_gearset(
+                    **base, sun_speed_radians_per_second=sun_speed,
+                    ring_speed_radians_per_second=ring_speed,
+                )
+                self.assertAlmostEqual(
+                    result["planet_spin_speed_radians_per_second"] / 1e308,
+                    expected / 1e308, places=12,
+                )
+
+    def test_unrepresentable_planet_speed_still_raises(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "angular velocities"):
+            solve_planetary_gearset(
+                module=2.0, sun_teeth=18, planet_teeth=18, ring_teeth=54,
+                planet_angles_degrees=[0.0, 120.0, 240.0],
+                sun_speed_radians_per_second=-1.7e308,
+                ring_speed_radians_per_second=1.5e308,
+            )
+
     def test_invalid_input_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValidationError, "distinct"):
             self.solve(teeth=(18, 18, 54), angles=[0.0, 0.0, 180.0])

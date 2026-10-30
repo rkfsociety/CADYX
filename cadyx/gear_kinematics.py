@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 from typing import Any
 
 from .errors import ValidationError
@@ -100,6 +101,13 @@ def solve_planetary_gearset(
         carrier_speed = math.fsum((sun_speed * (sun / total_teeth),
                                   ring_speed * (ring / total_teeth)))
         planet_speed = carrier_speed - (sun / planet) * (sun_speed - carrier_speed)
+        if not math.isfinite(planet_speed) and math.isfinite(carrier_speed):
+            # A finite planet speed can survive an overflowing speed difference.
+            # Recompute only this exceptional path with exact float ratios.
+            planet_speed = float((
+                Fraction(sun_speed) * sun * (planet - ring)
+                + Fraction(ring_speed) * ring * (sun + planet)
+            ) / (planet * total_teeth))
     except OverflowError as exc:
         raise ValidationError("Gear angular velocities exceed the finite numeric range.") from exc
     if not math.isfinite(carrier_speed) or not math.isfinite(planet_speed):
