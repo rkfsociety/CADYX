@@ -277,6 +277,8 @@ def verified_preprocessed_frame(source_path: Path) -> tuple[Path, dict[str, Any]
     source_path = source_path.resolve(strict=True)
     cleaned_path = source_path.with_name(source_path.stem + "_cleaned.ply")
     report_path = source_path.with_name(source_path.stem + "_cleaned.json")
+    if not report_path.exists() and re.fullmatch(r"revopoint_\d{8}T\d{6}Z", source_path.parent.name):
+        report_path = source_path.parent.parent / f"scan_support_{source_path.parent.name}" / report_path.name
     if not report_path.exists() and not cleaned_path.exists():
         return None
     if not report_path.is_file():

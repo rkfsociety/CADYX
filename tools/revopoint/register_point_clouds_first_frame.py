@@ -65,8 +65,11 @@ def preprocess_frame_points(points: np.ndarray, frame_index: int) -> tuple[np.nd
 def source_paths(project: Path, run_id: str) -> list[Path]:
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError("run id must be revopoint_YYYYMMDDTHHMMSSZ")
+    manifest_path = project / f"{run_id}_scan_360.json"
+    if not manifest_path.exists() and project.name == run_id:
+        manifest_path = project.parent / f"scan_support_{run_id}" / manifest_path.name
     try:
-        manifest = json.loads((project / f"{run_id}_scan_360.json").read_text(encoding="utf-8"))
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         frame_count = manifest.get("frame_count", 12)
     except (OSError, ValueError, TypeError, json.JSONDecodeError, AttributeError):
         frame_count = 12

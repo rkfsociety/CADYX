@@ -231,6 +231,26 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
         self.assertEqual(paths[0].name, f"{run_id}_pose_pose_000.ply")
         self.assertEqual(paths[-1].name, f"{run_id}_pose_pose_011.ply")
 
+    def test_separate_scan_support_preserves_verified_frames_and_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_id = "revopoint_20261020T103638Z"
+            series = root / run_id
+            support = root / f"scan_support_{run_id}"
+            series.mkdir()
+            support.mkdir()
+            source = series / f"{run_id}_pose_000.ply"
+            source.write_bytes(self._source_ply())
+            report = series / f"{run_id}_pose_000_cleaned.json"
+            preprocess_frame_file(source, source, report, 0, in_place=True)
+            report.rename(support / report.name)
+            (support / f"{run_id}_scan_360.json").write_text('{"frame_count": 1}', encoding="utf-8")
+            self.assertEqual(source_paths(series, run_id), [source])
+            self.assertEqual(verified_preprocessed_frame(source)[0], source.resolve())
+            source.write_bytes(source.read_bytes() + b"tampered")
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                verified_preprocessed_frame(source)
+
     def test_refuses_incomplete_frame_sets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
