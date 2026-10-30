@@ -67,6 +67,21 @@ class PlanetaryGearKinematicsTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValidationError, "finite"):
                     solve_planetary_gearset(**{**valid, **overrides})
 
+    def test_pitch_geometry_rejects_tooth_mismatch_at_extreme_scales(self) -> None:
+        for module, sun, planet, ring in (
+            (1e-12, 18, 18, 56),
+            (2.0, 10**13, 10**13, 3 * 10**13 + 2),
+        ):
+            with self.subTest(module=module, ring=ring):
+                result = solve_planetary_gearset(
+                    module=module, sun_teeth=sun, planet_teeth=planet,
+                    ring_teeth=ring, planet_angles_degrees=[0.0, 180.0],
+                    sun_speed_radians_per_second=1.0,
+                    ring_speed_radians_per_second=0.0,
+                )
+                self.assertFalse(result["pitch_geometry_compatible"])
+                self.assertEqual(result["status"], "fail")
+
     def test_large_tooth_counts_retain_fractional_indexing_error(self) -> None:
         result = self.solve(
             teeth=(10**17, 10**17, 3 * 10**17),
