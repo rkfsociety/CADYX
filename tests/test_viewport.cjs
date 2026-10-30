@@ -648,6 +648,10 @@ assert.equal(arcs, 1, 'map marker point layers can render as clear circular symb
 const tablePreviewViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
   showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: true,
 });
+tablePreviewViewer.load({ positions: [0,0,0, 1,0,0, 0,1,0, 0,0,2], triangles: [], lines: [], points: [],
+  pointCloudVertexCount: null, pointLayers: [{ points: [3], style: { size: 2, color: '#cloud' } }],
+  bounds: { min: [0,0,0], max: [1,1,2] }, hideWorldAxes: true, hideWorldGrid: true });
+assert.deepEqual(drawnPointColors, ['#cloud'], 'a hidden table does not render its retained vertices as cloud points');
 tablePreviewViewer.load({ positions: [0, 0, 0, 100, 0, 0, 0, 100, 0], triangles: [0, 1, 2],
   lines: [], points: [], bounds: { min: [-100, -100, -10], max: [100, 100, 0] },
   hideWorldGrid: true, hideWorldAxes: true });

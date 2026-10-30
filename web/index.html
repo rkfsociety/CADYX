@@ -562,10 +562,12 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .model-toolbar #viewport-scan-mesh { display: none !important; }
 .model-toolbar #viewport-scan-360,
 .model-toolbar #viewport-live-camera,
+.model-toolbar #viewport-toggle-turntable,
 .model-toolbar #scanning-devices,
 .model-toolbar #viewport-scan-360-status { display: none !important; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-scan-360,
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-live-camera,
+.primary-grid[data-view="scanning"] .model-toolbar #viewport-toggle-turntable,
 .primary-grid[data-view="scanning"] .model-toolbar #scanning-devices { display: inline-flex !important; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-scan-360-status { display: inline-flex !important; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-four-views,
@@ -711,6 +713,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                     <button id="viewport-scan-mesh" class="button viewport-scan-mode-button viewport-scan-mesh-button" type="button" aria-label="Сетка скана" aria-pressed="false">Сетка</button>
                     <button id="viewport-scan-360" class="button" type="button">Сканировать 360°</button>
                     <button id="viewport-live-camera" class="button viewport-scan-mode-button viewport-live-camera-button" type="button" aria-label="Предпросмотр сканера в реальном времени" aria-pressed="false">Предпросмотр</button>
+                    <button id="viewport-toggle-turntable" class="button" type="button" aria-label="Скрыть стол" aria-pressed="true">Скрыть стол</button>
                     <button id="scanning-devices" class="button" type="button">Устройства</button><span id="viewport-scan-360-status" role="status" aria-live="polite"></span>
                   </div>
                 </div>

@@ -700,7 +700,7 @@
     return { ...transform, matches: pairs, medianResidual };
   };
 
-  const initialize = ({ cloudButton, meshButton, viewport, viewer, getModelGeometry = () => null,
+  const initialize = ({ cloudButton, meshButton, tableButton = null, viewport, viewer, getModelGeometry = () => null,
     getProjectId = () => null,
     hasPersistentPointCloud = () => false, meshReady = false }, location = window.location, fetcher = fetch) => {
     const liveFpsIndicator = typeof document !== 'undefined' ? document.getElementById('scanner-preview-fps') : null;
@@ -714,6 +714,8 @@
     };
     let livePreviewOwned = false;
     let staticTurntableVisible = false;
+    let tableVisible = true;
+    let lastTurntableSceneOptions = {};
     let serverPointCloudVisible = false;
     let cloudPreviewOpen = false;
     let meshPreviewOpen = false;
@@ -819,6 +821,12 @@
       const meshDisabled = !meshReady;
       if (meshButton.disabled !== meshDisabled) meshButton.disabled = meshDisabled;
       setAttribute(meshButton, 'aria-pressed', String(meshSelected));
+      if (tableButton) {
+        const label = tableVisible ? 'Скрыть стол' : 'Показать стол';
+        tableButton.textContent = label;
+        setAttribute(tableButton, 'aria-label', label);
+        setAttribute(tableButton, 'aria-pressed', String(tableVisible));
+      }
     };
     const restoreModel = () => {
       cloudRequest += 1;
@@ -1184,8 +1192,10 @@
         || Math.abs(pose.angle - lastRenderedTurntableDisplayPose.angle) > 0.1
         || Math.abs(pose.tilt - lastRenderedTurntableDisplayPose.tilt) > 0.1;
     };
-    const renderTurntableScene = ({ positions = null, count = 0, markerIndices = [], matchedMapIndices = [],
-      aligned = false, reset = false }) => {
+    const renderTurntableScene = (options = {}) => {
+      const { positions = null, count = 0, markerIndices = [], matchedMapIndices = [],
+        aligned = false, reset = false } = options;
+      lastTurntableSceneOptions = { ...options, reset: false };
       const pose = currentTurntableDisplayPose();
       const displayedPositions = positions || (cloudPreviewOpen ? cloudPreviewPositions : null);
       const displayedCount = positions ? count : cloudPreviewPointCount;
@@ -1240,24 +1250,24 @@
       combinedPositions.set(moving, movingOffset * 3);
       if (overlay) combinedPositions.set(overlayPositions, overlayOffset * 3);
       combinedPositions.set(degreeLabelPositions, degreeLabelOffset * 3);
-      const triangles = new Uint32Array(fixed.triangles.length + turntableDisplayModel.moving.triangles.length);
-      triangles.set(fixed.triangles);
-      for (let index = 0; index < turntableDisplayModel.moving.triangles.length; index += 1) {
+      const triangles = new Uint32Array(tableVisible ? fixed.triangles.length + turntableDisplayModel.moving.triangles.length : 0);
+      if (tableVisible) triangles.set(fixed.triangles);
+      for (let index = 0; tableVisible && index < turntableDisplayModel.moving.triangles.length; index += 1) {
         triangles[fixed.triangles.length + index] = turntableDisplayModel.moving.triangles[index] + movingOffset;
       }
-      const triangleColors = new Uint8Array(fixed.triangleColors.length
-        + turntableDisplayModel.moving.triangleColors.length);
-      triangleColors.set(fixed.triangleColors);
-      triangleColors.set(turntableDisplayModel.moving.triangleColors, fixed.triangleColors.length);
-      const mapMarkerPoints = overlay
+      const triangleColors = new Uint8Array(tableVisible ? fixed.triangleColors.length
+        + turntableDisplayModel.moving.triangleColors.length : 0);
+      if (tableVisible) triangleColors.set(fixed.triangleColors);
+      if (tableVisible) triangleColors.set(turntableDisplayModel.moving.triangleColors, fixed.triangleColors.length);
+      const mapMarkerPoints = overlay && tableVisible
         ? Uint32Array.from(overlay.markerPoints, index => index + overlayOffset) : new Uint32Array(0);
-      const matchedMapMarkerPoints = overlay
+      const matchedMapMarkerPoints = overlay && tableVisible
         ? Uint32Array.from(buildMatchedMapMarkerPointIndices(overlay, matchedMapIndices), index => index + overlayOffset)
         : new Uint32Array(0);
       const degreeTextLabels = turntableDisplayModel.degreeTextLabels.map(label => ({
         ...label, pointIndex: degreeLabelOffset + label.pointIndex,
       }));
-      const trajectoryLines = overlay
+      const trajectoryLines = overlay && tableVisible
         ? Uint32Array.from(overlay.lines, index => index + overlayOffset) : new Uint32Array(0);
       const cloudPoints = Uint32Array.from({ length: cloudPointCount }, (_, index) => firstCloudVertex + index);
       const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
@@ -1270,13 +1280,13 @@
       const pointLayers = [];
       if (cloudPoints.length) pointLayers.push({ points: cloudPoints,
         style: { size: 1.25, opacity: 0.78, color: '#ff9d54' } });
-      if (overlay) pointLayers.push({ points: mapMarkerPoints,
+      if (overlay && tableVisible) pointLayers.push({ points: mapMarkerPoints,
         style: { size: 6, opacity: 1, color: '#d4f6ff', shape: 'circle' } });
       if (matchedMapMarkerPoints.length) pointLayers.push({ points: matchedMapMarkerPoints,
         style: { size: 12, opacity: 1, color: '#00d8ff', shape: 'circle' } });
       viewer.load({ positions: combinedPositions, triangles, triangleColors,
         surfaceTriangleRanges: [{ start: 0, end: triangles.length / 3 }],
-        lines: trajectoryLines, textLabels: degreeTextLabels, pointCloudVertexCount: cloudPointCount,
+        lines: trajectoryLines, textLabels: degreeTextLabels, pointCloudVertexCount: tableVisible ? cloudPointCount : null,
         pointPreviewLimit: LIVE_PREVIEW_POINT_LIMIT,
         pointCloudVertexRange: [firstCloudVertex, firstCloudVertex + cloudPointCount],
         hideWorldAxes: true, hideWorldGrid: true,
@@ -1289,6 +1299,13 @@
       lastRenderedTurntableDisplayPose = pose;
       liveViewportInitialized = true;
     };
+    tableButton?.addEventListener('click', () => {
+      tableVisible = !tableVisible;
+      updateButton();
+      if (livePreviewOwned || staticTurntableVisible || cloudPreviewOpen) {
+        renderTurntableScene(lastTurntableSceneOptions);
+      }
+    });
     const renderLiveFrame = options => renderTurntableScene(options);
     const turntableSpinIsActive = () => document.getElementById?.('turntable-spin')
       ?.getAttribute('aria-pressed') === 'true';

@@ -111,7 +111,9 @@ and during camera movement. Outward faces toward the camera have positive
 screen-space winding (right/depth/up camera rows, inverted screen Y); near faces
 write fully opaque depth and hide interior or rear points. The display-only
 scanner table uses a beveled circular base, flared pivot yokes and a seamed
-platter; its tabletop datum and marker-map coordinates are unchanged.
+platter; its tabletop datum and marker-map coordinates are unchanged. The Scanning
+toolbar can hide or restore the table without changing the cloud or camera; the
+table is shown by default.
 Triangle tessellation seams are never treated as feature edges. Triangle-mesh
 bodies have no B-rep feature edges and therefore show only their view-dependent,
 depth-tested silhouette. Active sketch lines and points remain overlays and are

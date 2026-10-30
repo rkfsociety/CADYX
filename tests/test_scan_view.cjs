@@ -246,15 +246,26 @@ const fetchPreview = async url => {
 async function verifyScanView() {
 const cloudButton = element();
 const meshButton = element();
+const tableButton = element();
 const viewport = element();
-const view = sandbox.window.CadyxScanView.initialize({ cloudButton, meshButton, viewport, viewer, getModelGeometry, meshReady: true }, undefined, fetchPreview);
+const view = sandbox.window.CadyxScanView.initialize({ cloudButton, meshButton, tableButton, viewport, viewer, getModelGeometry, meshReady: true }, undefined, fetchPreview);
 const selectedCloud = { positions: new Float32Array([0,0,2,1,0,2,0,1,2]), previewVertexCount: 3 };
 view.showFileCloud(selectedCloud);
 assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0, "selected scan file retains table triangles in the shared viewer");
 assert.equal(viewerLoads.at(-1).geometry.pointCloudVertexCount, 3);
+tableButton.click();
+assert.equal(tableButton.attributes['aria-pressed'], 'false');
+assert.equal(tableButton.textContent, 'Показать стол');
+assert.equal(viewerLoads.at(-1).geometry.triangles.length, 0, 'hiding the table removes its surface');
+assert.equal(viewerLoads.at(-1).geometry.pointLayers[0].points.length, 3, 'hiding the table preserves the selected cloud');
+assert.equal(viewerLoads.at(-1).options.reset, false, 'toggling the table preserves the camera');
 view.showFileCloud({ positions: new Float32Array([0,0,3,1,0,3,0,1,3]), previewVertexCount: 3 });
 const fileScene = viewerLoads.at(-1).geometry;
+assert.equal(fileScene.triangles.length, 0, 'the table stays hidden when another cloud is selected');
 assert.ok([...fileScene.pointLayers[0].points].every(index => fileScene.positions[index * 3 + 2] === 3), "file selection replaces the old cloud in the same table scene");
+tableButton.click();
+assert.equal(tableButton.attributes['aria-pressed'], 'true');
+assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0, 'the same cloud can be shown with the table again');
 view.setOpen(false);
 cloudButton.click();
 await new Promise(resolve => setImmediate(resolve));
@@ -321,6 +332,13 @@ assert.equal(matchedMarkerLayer.points.length, centers.length, "only map-confirm
 assert.equal(matchedMarkerLayer.style.size, 12);
 assert.equal(mappedMarkerLayer.style.shape, "circle");
 assert.equal(matchedMarkerLayer.style.shape, "circle");
+tableButton.click();
+assert.equal(viewport.dataset.scanPreviewMode, 'live', 'hiding the table does not stop live preview');
+assert.equal(viewerLoads.at(-1).geometry.triangles.length, 0);
+assert.ok(!viewerLoads.at(-1).geometry.pointLayers.some(layer => layer.style.color === '#d4f6ff'),
+  'the table marker overlay is hidden with the table');
+tableButton.click();
+assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0, 'the live table can be restored');
 const markerPositions = emptyTableGeometry.positions;
 for (const pointIndex of [...mappedMarkerLayer.points, ...matchedMarkerLayer.points]) {
   const index = pointIndex * 3;
