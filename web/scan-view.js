@@ -92,6 +92,60 @@
       }
     }
   };
+  // Lathed base silhouette with beveled shoulders.
+  const addRevolvedHousing = (mesh, profile, segments, colors) => {
+    const rings = profile.map(([radius, z]) => Array.from({ length: segments }, (_, index) => {
+      const vertex = mesh.positions.length / 3, angle = index * Math.PI * 2 / segments;
+      mesh.positions.push(radius * Math.cos(angle), radius * Math.sin(angle), z);
+      return vertex;
+    }));
+    const bottom = mesh.positions.length / 3;
+    mesh.positions.push(0, 0, profile[0][1]);
+    const top = mesh.positions.length / 3;
+    mesh.positions.push(0, 0, profile.at(-1)[1]);
+    for (let index = 0; index < segments; index += 1) {
+      const next = (index + 1) % segments;
+      addTriangle(mesh, bottom, rings[0][next], rings[0][index], colors.bottom);
+      const topColor = typeof colors.top === 'function' ? colors.top(index) : colors.top;
+      addTriangle(mesh, top, rings.at(-1)[index], rings.at(-1)[next], topColor);
+      for (let ring = 0; ring < rings.length - 1; ring += 1) {
+        const color = colors.bands?.[ring] || colors.side;
+        addTriangle(mesh, rings[ring][index], rings[ring][next], rings[ring + 1][next], color);
+        addTriangle(mesh, rings[ring][index], rings[ring + 1][next], rings[ring + 1][index], color);
+      }
+    }
+  };
+  const addFlaredPivotSupport = (mesh, centerY) => {
+    // Closed strip sections triangulate the concave foot without a polygon fan crossing the profile.
+    const sections = 64, rows = [];
+    for (let index = 0; index <= sections; index += 1) {
+      const x = -58 + 116 * index / sections;
+      const crown = Math.exp(-((x / 30) ** 2));
+      const top = -66 + 55 * crown, bottom = -69 + 4 * crown;
+      const halfWidth = 7 + 3 * (1 - crown);
+      const row = [];
+      for (const [y, z] of [[centerY - halfWidth, bottom], [centerY + halfWidth, bottom],
+        [centerY + halfWidth, top - 1.2], [centerY + halfWidth - 1.2, top],
+        [centerY - halfWidth + 1.2, top], [centerY - halfWidth, top - 1.2]]) {
+        row.push(mesh.positions.length / 3);
+        mesh.positions.push(x, y, z);
+      }
+      rows.push(row);
+    }
+    const color = [49, 53, 57];
+    for (let index = 0; index < sections; index += 1) {
+      for (let side = 0; side < 6; side += 1) {
+        const next = (side + 1) % 6, a = rows[index], b = rows[index + 1];
+        const shade = side === 3 ? [66, 70, 74] : color;
+        addTriangle(mesh, a[side], a[next], b[next], shade);
+        addTriangle(mesh, a[side], b[next], b[side], shade);
+      }
+    }
+    for (let side = 1; side < 5; side += 1) {
+      addTriangle(mesh, rows[0][0], rows[0][side + 1], rows[0][side], color);
+      addTriangle(mesh, rows.at(-1)[0], rows.at(-1)[side], rows.at(-1)[side + 1], color);
+    }
+  };
   const addClosedPrism = (mesh, points, bottomZ, topZ, color) => {
     const bottom = points.map(point => {
       const index = mesh.positions.length / 3;
@@ -161,29 +215,6 @@
     }
     return [...text].join('');
   };
-  const addCylinderAlongX = (mesh, length, radius, centerZ, segments, color, centerX = 0, centerY = 0) => {
-    const leftCenter = mesh.positions.length / 3;
-    mesh.positions.push(centerX - length / 2, centerY, centerZ);
-    const leftRing = mesh.positions.length / 3;
-    for (let index = 0; index < segments; index += 1) {
-      const angle = 2 * Math.PI * index / segments;
-      mesh.positions.push(centerX - length / 2, centerY + radius * Math.cos(angle), centerZ + radius * Math.sin(angle));
-    }
-    const rightCenter = mesh.positions.length / 3;
-    mesh.positions.push(centerX + length / 2, centerY, centerZ);
-    const rightRing = mesh.positions.length / 3;
-    for (let index = 0; index < segments; index += 1) {
-      const angle = 2 * Math.PI * index / segments;
-      mesh.positions.push(centerX + length / 2, centerY + radius * Math.cos(angle), centerZ + radius * Math.sin(angle));
-    }
-    for (let index = 0; index < segments; index += 1) {
-      const next = (index + 1) % segments;
-      addTriangle(mesh, leftCenter, leftRing + next, leftRing + index, color);
-      addTriangle(mesh, rightCenter, rightRing + index, rightRing + next, color);
-      addTriangle(mesh, leftRing + index, leftRing + next, rightRing + next, color);
-      addTriangle(mesh, leftRing + index, rightRing + next, rightRing + index, color);
-    }
-  };
   const addCylinderAlongY = (mesh, length, radius, centerZ, segments, color, centerX = 0, centerY = 0) => {
     const leftCenter = mesh.positions.length / 3;
     mesh.positions.push(centerX, centerY - length / 2, centerZ);
@@ -207,57 +238,6 @@
       addTriangle(mesh, rightCenter, rightRing + index, rightRing + next, color);
       addTriangle(mesh, leftRing + index, leftRing + next, rightRing + next, color);
       addTriangle(mesh, leftRing + index, rightRing + next, rightRing + index, color);
-    }
-  };
-  const addCurvedSupportBracket = (mesh, start, control1, control2, end, centerY, color,
-    curveSegments = 20) => {
-    const centerAt = t => {
-      const inverse = 1 - t;
-      return [
-        inverse ** 3 * start[0] + 3 * inverse ** 2 * t * control1[0]
-          + 3 * inverse * t ** 2 * control2[0] + t ** 3 * end[0],
-        inverse ** 3 * start[1] + 3 * inverse ** 2 * t * control1[1]
-          + 3 * inverse * t ** 2 * control2[1] + t ** 3 * end[1],
-      ];
-    };
-    const rings = Array.from({ length: curveSegments + 1 }, (_, segment) => {
-      const t = segment / curveSegments;
-      const center = centerAt(t), before = centerAt(Math.max(0, t - 1 / curveSegments));
-      const after = centerAt(Math.min(1, t + 1 / curveSegments));
-      const tangentLength = Math.hypot(after[0] - before[0], after[1] - before[1]);
-      const tangentX = (after[0] - before[0]) / tangentLength;
-      const tangentZ = (after[1] - before[1]) / tangentLength;
-      const normalX = -tangentZ, normalZ = tangentX;
-      const halfWidth = 10.5 + 5 * (1 - t);
-      const halfDepth = 7.5 + 2.5 * (1 - t);
-      const corner = Math.min(2.5, halfWidth / 3, halfDepth / 2);
-      const section = [
-        [-halfWidth + corner, -halfDepth], [halfWidth - corner, -halfDepth],
-        [halfWidth, -halfDepth + corner], [halfWidth, halfDepth - corner],
-        [halfWidth - corner, halfDepth], [-halfWidth + corner, halfDepth],
-        [-halfWidth, halfDepth - corner], [-halfWidth, -halfDepth + corner],
-      ];
-      return section.map(([widthOffset, depthOffset]) => {
-        const vertex = mesh.positions.length / 3;
-        mesh.positions.push(center[0] + normalX * depthOffset,
-          centerY + widthOffset, center[1] + normalZ * depthOffset);
-        return vertex;
-      });
-    });
-    const startCenter = mesh.positions.length / 3;
-    mesh.positions.push(start[0], centerY, start[1]);
-    const endCenter = mesh.positions.length / 3;
-    mesh.positions.push(end[0], centerY, end[1]);
-    const sectionSegments = rings[0].length;
-    for (let side = 0; side < sectionSegments; side += 1) {
-      const nextSide = (side + 1) % sectionSegments;
-      addTriangle(mesh, startCenter, rings[0][nextSide], rings[0][side], color);
-      addTriangle(mesh, endCenter, rings[curveSegments][side], rings[curveSegments][nextSide], color);
-      for (let segment = 0; segment < curveSegments; segment += 1) {
-        const current = rings[segment], next = rings[segment + 1];
-        addTriangle(mesh, current[side], current[nextSide], next[nextSide], color);
-        addTriangle(mesh, current[side], next[nextSide], next[side], color);
-      }
     }
   };
   const finishMesh = mesh => {
@@ -319,33 +299,26 @@
       const brushed = Math.round(1.5 * Math.sin(index * 2.399) + 0.8 * Math.sin(index * 0.173));
       return [53 + brushed, 59 + brushed, 64 + brushed];
     }, side: [49, 55, 59], bottom: [34, 39, 43] };
-    addEllipticalCylinder(fixed, 96, 96, -80, -66, 112,
-      { top: [54, 60, 64], side: [45, 51, 55], bottom: [33, 38, 42] });
-    addAnnularCylinder(fixed, 94.8, 84, -66.15, -65.45, 112,
-      { top: [72, 79, 83], side: [47, 53, 57], inner: [50, 56, 60], bottom: [43, 49, 53] }, 0, 0);
+    addRevolvedHousing(fixed, [[96, -80], [97, -78.5], [97, -75], [95.7, -73.2],
+      [93.5, -69.5], [89, -66.5], [80, -65.5]], 160,
+    { top: [47, 51, 55], side: [48, 52, 56], bottom: [29, 32, 35],
+      bands: [[58, 62, 66], [36, 39, 42], [75, 79, 83], [56, 60, 64], [51, 55, 59], [48, 52, 56]] });
     addEllipticalCylinder(fixed, 42, 42, -66, -42, 80,
       { top: [56, 62, 66], side: [43, 49, 53], bottom: [34, 39, 43] });
     addEllipticalCylinder(fixed, 35, 35, -51, -30, 72,
       { top: [49, 55, 59], side: [40, 46, 50], bottom: [33, 38, 42] });
-    const supportBracketOffsets = [-42, 42];
+    const supportBracketOffsets = [-60, 60];
     for (const centerY of supportBracketOffsets) {
-      addCurvedSupportBracket(fixed, [-56, -60], [-55, -49], [-43, -34], [-23, -24],
-        centerY, [54, 60, 64]);
+      addFlaredPivotSupport(fixed, centerY);
     }
-    addCylinderAlongY(fixed, 110, 11, TURNTABLE_TILT_PIVOT_Z_MM, 64, [47, 53, 57]);
+    addCylinderAlongY(fixed, 120, 11, TURNTABLE_TILT_PIVOT_Z_MM, 64, [47, 53, 57]);
     for (const side of [-1, 1]) {
-      addCylinderAlongY(fixed, 6, 21, -32, 64, [41, 47, 51], 0, side * 43);
-      addCylinderAlongY(fixed, 2, 18.6, -32, 64, [91, 98, 102], 0, side * 46);
-      addCylinderAlongY(fixed, 1.4, 15.3, -32, 64, [59, 65, 69], 0, side * 47.7);
-      addCylinderAlongY(fixed, 1.2, 3.8, -55, 40, [88, 95, 99], 0, side * 46.2);
-      addCylinderAlongY(fixed, 1.5, 2.4, -55, 40, [19, 23, 25], 0, side * 47.4);
+      addCylinderAlongY(fixed, 2, 14, -25, 96, [25, 28, 31], 0, side * 67);
+      addCylinderAlongY(fixed, 1.2, 12.8, -25, 96, [100, 104, 108], 0, side * 68.4);
+      addCylinderAlongY(fixed, 1.2, 11.6, -25, 96, [52, 56, 60], 0, side * 69.4);
+      addCylinderAlongY(fixed, 1.2, 3.4, -57, 40, [85, 89, 93], 0, side * 68);
+      addCylinderAlongY(fixed, 1.5, 2.3, -57, 40, [15, 18, 21], 0, side * 69);
     }
-    addCylinderAlongX(fixed, 27, 20, -32, 72, [42, 48, 52], -47.5);
-    addCylinderAlongX(fixed, 2.4, 18.5, -32, 72, [91, 98, 102], -62.2);
-    addCylinderAlongX(fixed, 1.2, 15.5, -32, 72, [60, 66, 70], -63.8);
-    addCylinderAlongX(fixed, 1, 14.2, -32, 72, [46, 52, 56], -64.8);
-    addCylinderAlongX(fixed, 2.4, 3.8, -58.5, 40, [88, 95, 99], -64.5);
-    addCylinderAlongX(fixed, 1.5, 2.4, -58.5, 40, [19, 23, 25], -65.9);
     for (const x of [-57, 57]) for (const y of [-57, 57]) {
       addAnnularCylinder(fixed, 4.1, 2.15, -65.8, -65.35, 32,
         { top: [106, 113, 117], side: [60, 66, 70], inner: [43, 49, 53], bottom: [45, 51, 55] }, x, y);
@@ -358,6 +331,16 @@
       { top: [58, 64, 68], side: [45, 51, 55], bottom: [36, 41, 45] });
     addRibbedCylinder(moving, TURNTABLE_RADIUS_MM, -TURNTABLE_THICKNESS_MM, 0,
       480, 120, dark);
+    addAnnularCylinder(moving, 100, 99.4, -3.1, -2.3, 240,
+      { top: [19, 22, 25], side: [16, 19, 22], inner: [19, 22, 25], bottom: [19, 22, 25] }, 0, 0);
+    for (let index = 0; index < 4; index += 1) {
+      const angle = (index * 90 + 45) * Math.PI / 180;
+      const x = 68 * Math.cos(angle), y = 68 * Math.sin(angle);
+      addAnnularCylinder(moving, 2.5, 1.8, 0.005, 0.04, 40,
+        { top: [95, 99, 103], side: [45, 49, 53], inner: [20, 23, 26], bottom: [20, 23, 26] }, x, y);
+      addEllipticalCylinder(moving, 1.8, 1.8, 0.002, 0.008, 40,
+        { top: [12, 15, 18], side: [12, 15, 18], bottom: [12, 15, 18] }, x, y);
+    }
     const tableMapPoints = Array.isArray(tableMap?.points) ? tableMap.points
       .filter(point => Array.isArray(point) && point.length >= 2 && point.slice(0, 2).every(Number.isFinite)) : [];
     const maximumMapRadius = tableMapPoints.reduce((maximum, point) =>
@@ -433,7 +416,7 @@
       tableMapMarkerScale,
       pivotCoverCount: 2,
       supportBracketCount: supportBracketOffsets.length,
-      supportBracketProfile: 'rounded-rectangle',
+      supportBracketProfile: 'flared-pivot-yoke',
       degreeLabelAlignment: 'tangent',
       degreeLabelPositions: Float32Array.from(degreeLabelPositions),
       degreeTextLabels,

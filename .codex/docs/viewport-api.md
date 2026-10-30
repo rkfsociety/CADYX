@@ -107,7 +107,11 @@ orbit and pan use the same canvas resolution, shaded surfaces and edge-detail
 threshold as stationary frames. Camera movement does not trigger the dense-mesh
 wireframe fallback; geometry transitions and body animation retain their separate
 rendering budget. Closed scanner surfaces use consistent backface culling at rest
-and during camera movement.
+and during camera movement. Outward faces toward the camera have positive
+screen-space winding (right/depth/up camera rows, inverted screen Y); near faces
+write fully opaque depth and hide interior or rear points. The display-only
+scanner table uses a beveled circular base, flared pivot yokes and a seamed
+platter; its tabletop datum and marker-map coordinates are unchanged.
 Triangle tessellation seams are never treated as feature edges. Triangle-mesh
 bodies have no B-rep feature edges and therefore show only their view-dependent,
 depth-tested silhouette. Active sketch lines and points remain overlays and are

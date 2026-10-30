@@ -17,6 +17,7 @@ let animationTime = 0;
 let renderCalls = 0;
 let rasterizedPixels = 0;
 let rasterUploads = 0;
+let lastRasterImage = null;
 let rasterizedBounds = null;
 const animationFrames = [];
 const context = {
@@ -41,6 +42,7 @@ const context = {
   measureText(value) { return { width: String(value).length * 7 }; },
   createImageData(width, height) { return { width, height, data: new Uint8ClampedArray(width * height * 4) }; },
   putImageData(image) {
+    lastRasterImage = image;
     rasterUploads += 1;
     let minX = image.width, maxX = -1, minY = image.height, maxY = -1;
     for (let y = 0; y < image.height; y += 1) {
@@ -708,6 +710,30 @@ tablePreviewViewer.load({
 }, { reset: false });
 assert.deepEqual(drawnPointColors, ['#front-point'],
   'opaque table surfaces hide map and cloud points behind them');
+
+// A closed outward-wound plate must show its near cap, never its far cap/interior.
+tablePreviewViewer.setCamera({ yaw: 0, pitch: Math.PI / 2, zoom: 1, projection: 'orthographic' });
+tablePreviewViewer.load({
+  positions: [-1,-1,-0.2, 1,-1,-0.2, 1,1,-0.2, -1,1,-0.2,
+    -1,-1,0.2, 1,-1,0.2, 1,1,0.2, -1,1,0.2, 0,0,0],
+  triangles: [0,2,1, 0,3,2, 4,5,6, 4,6,7,
+    0,1,5, 0,5,4, 1,2,6, 1,6,5, 2,3,7, 2,7,6, 3,0,4, 3,4,7],
+  triangleColors: [0,0,255, 0,0,255, 255,0,0, 255,0,0,
+    ...Array(8).fill([80,80,80]).flat()],
+  lines: [], points: [], cullBackfacesDuringOrbit: true,
+  pointLayers: [{ points: [8], style: { size: 2, color: '#interior-point' } }],
+  bounds: { min: [-1,-1,-0.2], max: [1,1,0.2] }, hideWorldAxes: true,
+}, { reset: true });
+const capPixel = ((Math.floor(lastRasterImage.height / 2) * lastRasterImage.width)
+  + Math.floor(lastRasterImage.width / 2)) * 4;
+assert.ok(lastRasterImage.data[capPixel] > 0 && lastRasterImage.data[capPixel + 2] === 0,
+  'backface culling retains the outward top cap rather than the far underside');
+assert.equal(lastRasterImage.data[capPixel + 3], 255, 'the near cap is fully opaque');
+assert.deepEqual(drawnPointColors, [], 'a point inside the closed plate is occluded by its near cap');
+tablePreviewViewer.setCamera({ yaw: 0, pitch: -Math.PI / 2, zoom: 1, projection: 'orthographic' });
+assert.ok(lastRasterImage.data[capPixel] === 0 && lastRasterImage.data[capPixel + 2] > 0,
+  'viewing the plate from below retains the outward bottom cap');
+assert.deepEqual(drawnPointColors, [], 'the underside also hides interior points');
 
 const denseTriangles = new Uint32Array(30_001 * 3);
 for (let face = 0; face < denseTriangles.length; face += 3) {

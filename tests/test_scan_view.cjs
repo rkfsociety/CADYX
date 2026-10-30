@@ -74,16 +74,16 @@ const fixedSupportHasPoint = (x, y, z) => {
   }
   return false;
 };
-assert.ok(fixedSupportHasPoint(55, 0, -25) && fixedSupportHasPoint(-55, 0, -25),
+assert.ok(fixedSupportHasPoint(60, 0, -25) && fixedSupportHasPoint(-60, 0, -25),
   "the fixed pivot axle aligns with the table tilt axis");
-assert.ok(fixedSupportHasPoint(46, 0, -32),
+assert.ok(fixedSupportHasPoint(68, 0, -25),
   "the curved support has a closed circular pivot cover on each side");
 assert.equal(turntableModel.pivotCoverCount, 2, "the turntable has matching side pivot covers");
 assert.equal(turntableModel.supportBracketCount, 2, "the fixed stand uses two separate curved support brackets");
-assert.equal(turntableModel.supportBracketProfile, "rounded-rectangle",
-  "support brackets use broad flat sides instead of round tube sections");
-assert.ok(fixedSupportHasPoint(0, 63.4, -32),
-  "the front support has a concentric circular bearing cover");
+assert.equal(turntableModel.supportBracketProfile, "flared-pivot-yoke",
+  "support yokes flare continuously into the base beneath their circular covers");
+assert.ok(fixedSupportHasPoint(70, 0, -25),
+  "the outer bearing cap stays concentric with the physical tilt axle");
 assert.equal(turntableModel.fitRadius, 120, "the outer degree labels have clearance from the viewport edge");
 assert.equal(turntableModel.degreeTickCount, 72, "the turntable scale has 5 degree ticks through 360 degrees");
 assert.equal(turntableModel.bakedDegreeLabelCount, 12,

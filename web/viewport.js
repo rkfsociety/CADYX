@@ -1215,7 +1215,9 @@
         const x2 = screenX[third], y2 = screenY[third];
         if (cullBackfaces) {
           const area = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
-          if (area >= -1e-9) continue;
+          // Camera rows are right/depth/up; screen Y reverses up. Outward faces
+          // toward the camera therefore have positive screen-space winding.
+          if (area <= 1e-9) continue;
         }
         let brightness;
         if (smooth) {
