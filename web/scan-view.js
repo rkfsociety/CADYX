@@ -341,25 +341,13 @@
   const buildTableMapOverlay = tableMap => {
     const positions = [];
     const markerPoints = [];
-    const lines = [];
     for (const point of tableMap.points) {
       markerPoints.push(positions.length / 3);
       positions.push(point[0], point[1], 0);
     }
-    const segments = 48;
-    for (const [x, y] of tableMap.points) {
-      const radius = Math.hypot(x, y);
-      if (radius < 1e-6) continue;
-      const start = positions.length / 3;
-      for (let step = 0; step <= segments; step += 1) {
-        const angle = 2 * Math.PI * step / segments;
-        positions.push(radius * Math.cos(angle), radius * Math.sin(angle), 0);
-      }
-      for (let step = 0; step < segments; step += 1) lines.push(start + step, start + step + 1);
-    }
     const maxRadius = tableMap.points.reduce((maximum, point) => Math.max(maximum, Math.hypot(...point)), 0);
     return { positions: new Float32Array(positions), markerPoints: new Uint32Array(markerPoints),
-      lines: new Uint32Array(lines), maxRadius };
+      lines: new Uint32Array(0), maxRadius };
   };
 
   const buildPreviewCloudPointIndices = (count, pointStep, markerIndices = [], hideMarkers = false) => {
