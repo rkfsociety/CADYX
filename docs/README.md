@@ -26,7 +26,7 @@
 | Проверка геометрии | [Инженерные проверки EN](engineering-validation.md) · [RU](engineering-validation.ru.md), [спецификации модели EN](../.codex/docs/model-specifications.md) · [RU](../.codex/docs/model-specifications.ru.md), [проверка проекта EN](../.codex/docs/project-checks.md) · [RU](../.codex/docs/project-checks.ru.md) |
 | История ревизий | [Сравнение моделей EN](revision-comparison.md) · [RU](revision-comparison.ru.md) |
 | Реконструкция по сканам | [Сетка → CAD EN](../.codex/docs/scan-reverse-engineering.md) · [RU](../.codex/docs/scan-reverse-engineering.ru.md), [STL-референсы EN](../.codex/docs/stl-reference.md) · [RU](../.codex/docs/stl-reference.ru.md) |
-| Облака точек | [Обработка EN](point-cloud-processing.md) · [RU](point-cloud-processing.ru.md) |
+| Облака точек | [Обработка EN](point-cloud-processing.md) · [RU](point-cloud-processing.ru.md) · [Принципы пользователя](point-cloud-quality-principles.ru.md) |
 | Треугольные сетки | [Обработка EN](mesh-processing.md) · [RU](mesh-processing.ru.md) |
 | Опоры для реконструкции | [Распознавание EN](mesh-recognition.md) · [RU](mesh-recognition.ru.md) |
 | Стандартные детали | [Каталог EN](standard-part-catalog.md) · [RU](standard-part-catalog.ru.md) |

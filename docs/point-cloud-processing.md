@@ -69,17 +69,13 @@ The model tree renders each point-cloud body as one expandable parent and nests
 all import/processing stages beneath it. A stage with no children has no
 disclosure control.
 
-For agent cleanup runs, analyze `isolation_filter` and `remove_overlaps`, apply
-each result with nonzero `removed_points`, and repeat the analysis against the
-new saved stage while varying that operation's parameters. Stop each operation
-when analysis reports zero removable points. Keep simplification and smoothing
-for explicit user requests. If varied valid parameters cannot clear candidates, leave the remaining points intact and
-report the unresolved count; do not describe the cloud as clean.
-
-This cleanup is a required preprocessing step before scan-to-mesh reconstruction.
-Import the source PLY as a point-only reference first, complete the alternating
-overlap/removal cycle, then run mesh reconstruction on the latest cleaned
-full-resolution stage. Never reconstruct directly from the untouched source PLY.
+For agent cleanup runs, analyze `isolation_filter` and `remove_overlaps` before
+applying them. Review candidates for thin walls, edges, small features and real
+disconnected regions; low density alone does not prove noise. Preserve source
+measurements and report unresolved candidates instead of forcing removals to zero.
+Simplification and smoothing require a direct user request. Follow the
+[user-provided quality instruction](point-cloud-quality-principles.ru.md) before
+reconstruction; avoid inventing surfaces without explicit permission.
 
 Distances use the original coordinates. Physical scale and units remain
 unverified. Processing does not reconstruct a mesh or certify scan accuracy.
