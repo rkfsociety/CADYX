@@ -94,7 +94,11 @@ def solve_planetary_gearset(
     )
 
     try:
-        carrier_speed = (sun * sun_speed + ring * ring_speed) / (sun + ring)
+        # Weighted terms avoid overflowing intermediate tooth-count products
+        # when the resulting carrier velocity is still representable.
+        total_teeth = sun + ring
+        carrier_speed = math.fsum((sun_speed * (sun / total_teeth),
+                                  ring_speed * (ring / total_teeth)))
         planet_speed = carrier_speed - (sun / planet) * (sun_speed - carrier_speed)
     except OverflowError as exc:
         raise ValidationError("Gear angular velocities exceed the finite numeric range.") from exc

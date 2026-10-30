@@ -61,13 +61,31 @@ class PlanetaryGearKinematicsTests(unittest.TestCase):
             {"sun_teeth": 10 ** 1000},
             {"sun_rotation_degrees": 1e308},
             {"sun_rotation_degrees": 10 ** 1000},
-            {"sun_speed_radians_per_second": 1e308},
-            {"ring_speed_radians_per_second": -1e308},
         )
         for overrides in cases:
             with self.subTest(overrides=overrides):
                 with self.assertRaisesRegex(ValidationError, "finite"):
                     solve_planetary_gearset(**{**valid, **overrides})
+
+    def test_finite_extreme_speeds_do_not_overflow_weighted_average(self) -> None:
+        base = dict(module=2.0, sun_teeth=18, planet_teeth=18, ring_teeth=54,
+                    planet_angles_degrees=[0.0, 120.0, 240.0])
+        cases = (
+            (1e308, 0.0, 2.5e307, -5e307),
+            (0.0, 1e308, 7.5e307, 1.5e308),
+            (1e308, 1e308, 1e308, 1e308),
+            (1.0, -1e308, -7.5e307, -1.5e308),
+        )
+        for sun_speed, ring_speed, expected_carrier, expected_planet in cases:
+            with self.subTest(sun_speed=sun_speed, ring_speed=ring_speed):
+                result = solve_planetary_gearset(
+                    **base, sun_speed_radians_per_second=sun_speed,
+                    ring_speed_radians_per_second=ring_speed,
+                )
+                self.assertAlmostEqual(result["carrier_speed_radians_per_second"] / 1e308,
+                                       expected_carrier / 1e308, places=12)
+                self.assertAlmostEqual(result["planet_spin_speed_radians_per_second"] / 1e308,
+                                       expected_planet / 1e308, places=12)
 
     def test_invalid_input_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValidationError, "distinct"):
