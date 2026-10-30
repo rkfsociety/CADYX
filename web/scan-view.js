@@ -18,27 +18,78 @@
     mesh.triangles.push(first, second, third);
     mesh.triangleColors.push(...color);
   };
-  const addEllipticalCylinder = (mesh, radiusX, radiusY, bottomZ, topZ, segments, colors) => {
+  const addEllipticalCylinder = (mesh, radiusX, radiusY, bottomZ, topZ, segments, colors,
+    centerX = 0, centerY = 0) => {
     const topRing = mesh.positions.length / 3;
     for (let index = 0; index < segments; index += 1) {
       const angle = 2 * Math.PI * index / segments;
-      mesh.positions.push(radiusX * Math.cos(angle), radiusY * Math.sin(angle), topZ);
+      mesh.positions.push(centerX + radiusX * Math.cos(angle), centerY + radiusY * Math.sin(angle), topZ);
     }
     const bottomRing = mesh.positions.length / 3;
     for (let index = 0; index < segments; index += 1) {
       const angle = 2 * Math.PI * index / segments;
-      mesh.positions.push(radiusX * Math.cos(angle), radiusY * Math.sin(angle), bottomZ);
+      mesh.positions.push(centerX + radiusX * Math.cos(angle), centerY + radiusY * Math.sin(angle), bottomZ);
     }
+    const topCenter = mesh.positions.length / 3;
+    mesh.positions.push(centerX, centerY, topZ);
+    const bottomCenter = mesh.positions.length / 3;
+    mesh.positions.push(centerX, centerY, bottomZ);
+    for (let index = 0; index < segments; index += 1) {
+      const next = (index + 1) % segments;
+      const topColor = typeof colors.top === 'function' ? colors.top(index) : colors.top;
+      addTriangle(mesh, topCenter, topRing + index, topRing + next, topColor);
+      addTriangle(mesh, bottomCenter, bottomRing + next, bottomRing + index, colors.bottom);
+      addTriangle(mesh, topRing + index, bottomRing + index, bottomRing + next, colors.side);
+      addTriangle(mesh, topRing + index, bottomRing + next, topRing + next, colors.side);
+    }
+  };
+  const addAnnularCylinder = (mesh, outerRadius, innerRadius, bottomZ, topZ, segments, colors, centerX, centerY) => {
+    const ring = (radius, z) => Array.from({ length: segments }, (_, index) => {
+      const angle = 2 * Math.PI * index / segments;
+      const vertex = mesh.positions.length / 3;
+      mesh.positions.push(centerX + radius * Math.cos(angle), centerY + radius * Math.sin(angle), z);
+      return vertex;
+    });
+    const topOuter = ring(outerRadius, topZ), topInner = ring(innerRadius, topZ);
+    const bottomOuter = ring(outerRadius, bottomZ), bottomInner = ring(innerRadius, bottomZ);
+    for (let index = 0; index < segments; index += 1) {
+      const next = (index + 1) % segments;
+      addTriangle(mesh, topOuter[index], topOuter[next], topInner[next], colors.top);
+      addTriangle(mesh, topOuter[index], topInner[next], topInner[index], colors.top);
+      addTriangle(mesh, bottomOuter[next], bottomOuter[index], bottomInner[index], colors.bottom);
+      addTriangle(mesh, bottomOuter[next], bottomInner[index], bottomInner[next], colors.bottom);
+      addTriangle(mesh, topOuter[index], bottomOuter[index], bottomOuter[next], colors.side);
+      addTriangle(mesh, topOuter[index], bottomOuter[next], topOuter[next], colors.side);
+      addTriangle(mesh, topInner[index], topInner[next], bottomInner[next], colors.inner);
+      addTriangle(mesh, topInner[index], bottomInner[next], bottomInner[index], colors.inner);
+    }
+  };
+  const addRibbedCylinder = (mesh, radius, bottomZ, topZ, segments, ribCount, colors) => {
+    const radialRing = (z, ribbed = false) => Array.from({ length: segments }, (_, index) => {
+      const angle = 2 * Math.PI * index / segments;
+      const ribPhase = index / segments * ribCount * Math.PI * 2;
+      const ringRadius = ribbed ? radius - 0.22 + 0.22 * Math.cos(ribPhase) : radius;
+      const vertex = mesh.positions.length / 3;
+      mesh.positions.push(ringRadius * Math.cos(angle), ringRadius * Math.sin(angle), z);
+      return vertex;
+    });
+    const topRing = radialRing(topZ), upperRibs = radialRing(topZ - 0.9, true);
+    const lowerRibs = radialRing(bottomZ + 0.9, true), bottomRing = radialRing(bottomZ);
     const topCenter = mesh.positions.length / 3;
     mesh.positions.push(0, 0, topZ);
     const bottomCenter = mesh.positions.length / 3;
     mesh.positions.push(0, 0, bottomZ);
     for (let index = 0; index < segments; index += 1) {
       const next = (index + 1) % segments;
-      addTriangle(mesh, topCenter, topRing + index, topRing + next, colors.top);
-      addTriangle(mesh, bottomCenter, bottomRing + next, bottomRing + index, colors.bottom);
-      addTriangle(mesh, topRing + index, bottomRing + index, bottomRing + next, colors.side);
-      addTriangle(mesh, topRing + index, bottomRing + next, topRing + next, colors.side);
+      const topColor = typeof colors.top === 'function' ? colors.top(index) : colors.top;
+      const ribShade = Math.round((1 - Math.cos(index / segments * ribCount * Math.PI * 2)) * 2);
+      const sideColor = colors.side.map(value => Math.max(0, value - ribShade));
+      addTriangle(mesh, topCenter, topRing[index], topRing[next], topColor);
+      addTriangle(mesh, bottomCenter, bottomRing[next], bottomRing[index], colors.bottom);
+      for (const [upper, lower] of [[topRing, upperRibs], [upperRibs, lowerRibs], [lowerRibs, bottomRing]]) {
+        addTriangle(mesh, upper[index], lower[index], lower[next], sideColor);
+        addTriangle(mesh, upper[index], lower[next], upper[next], sideColor);
+      }
     }
   };
   const addClosedBox = (mesh, min, max, color) => {
@@ -122,20 +173,20 @@
     }
     return [...text].join('');
   };
-  const addCylinderAlongX = (mesh, length, radius, centerZ, segments, color) => {
+  const addCylinderAlongX = (mesh, length, radius, centerZ, segments, color, centerX = 0, centerY = 0) => {
     const leftCenter = mesh.positions.length / 3;
-    mesh.positions.push(-length / 2, 0, centerZ);
+    mesh.positions.push(centerX - length / 2, centerY, centerZ);
     const leftRing = mesh.positions.length / 3;
     for (let index = 0; index < segments; index += 1) {
       const angle = 2 * Math.PI * index / segments;
-      mesh.positions.push(-length / 2, radius * Math.cos(angle), centerZ + radius * Math.sin(angle));
+      mesh.positions.push(centerX - length / 2, centerY + radius * Math.cos(angle), centerZ + radius * Math.sin(angle));
     }
     const rightCenter = mesh.positions.length / 3;
-    mesh.positions.push(length / 2, 0, centerZ);
+    mesh.positions.push(centerX + length / 2, centerY, centerZ);
     const rightRing = mesh.positions.length / 3;
     for (let index = 0; index < segments; index += 1) {
       const angle = 2 * Math.PI * index / segments;
-      mesh.positions.push(length / 2, radius * Math.cos(angle), centerZ + radius * Math.sin(angle));
+      mesh.positions.push(centerX + length / 2, centerY + radius * Math.cos(angle), centerZ + radius * Math.sin(angle));
     }
     for (let index = 0; index < segments; index += 1) {
       const next = (index + 1) % segments;
@@ -143,6 +194,32 @@
       addTriangle(mesh, rightCenter, rightRing + index, rightRing + next, color);
       addTriangle(mesh, leftRing + index, leftRing + next, rightRing + next, color);
       addTriangle(mesh, leftRing + index, rightRing + next, rightRing + index, color);
+    }
+  };
+  const addHexSocketAlongX = (mesh, centerX, centerZ, radius, color) => {
+    const points = Array.from({ length: 6 }, (_, index) => {
+      const angle = Math.PI / 6 + index * Math.PI / 3;
+      return [radius * Math.cos(angle), centerZ + radius * Math.sin(angle)];
+    });
+    const leftX = centerX - 0.35, rightX = centerX + 0.35;
+    const left = points.map(([y, z]) => {
+      const index = mesh.positions.length / 3;
+      mesh.positions.push(leftX, y, z);
+      return index;
+    });
+    const right = points.map(([y, z]) => {
+      const index = mesh.positions.length / 3;
+      mesh.positions.push(rightX, y, z);
+      return index;
+    });
+    for (let index = 1; index < points.length - 1; index += 1) {
+      addTriangle(mesh, right[0], right[index], right[index + 1], color);
+      addTriangle(mesh, left[0], left[index + 1], left[index], color);
+    }
+    for (let index = 0; index < points.length; index += 1) {
+      const next = (index + 1) % points.length;
+      addTriangle(mesh, left[index], left[next], right[next], color);
+      addTriangle(mesh, left[index], right[next], right[index], color);
     }
   };
   const finishMesh = mesh => {
@@ -193,20 +270,43 @@
   const hasClosedTriangleTopology = triangles => closedTriangleComponents(triangles).length > 0;
   const buildTurntableDisplayModel = () => {
     const fixed = createMeshBuilder(), moving = createMeshBuilder();
-    const dark = { top: [68, 76, 81], side: [42, 49, 54], bottom: [33, 39, 43] };
-    addEllipticalCylinder(fixed, 86, 86, -70, -55, 72,
-      { top: [55, 63, 68], side: [31, 38, 42], bottom: [25, 31, 35] });
-    addEllipticalCylinder(fixed, 43, 43, -55, -30, 56,
-      { top: [54, 62, 67], side: [36, 43, 47], bottom: [31, 37, 41] });
-    addClosedBox(fixed, [-55, -18, -55], [-38, 18, -25], [39, 46, 50]);
-    addClosedBox(fixed, [38, -18, -55], [55, 18, -25], [39, 46, 50]);
-    addCylinderAlongX(fixed, 110, 13, TURNTABLE_TILT_PIVOT_Z_MM, 48, [55, 63, 68]);
-    addClosedBox(fixed, [-57, -6.5, -31.5], [-55, 6.5, -18.5], [92, 103, 108]);
-    addClosedBox(fixed, [-58.5, -4, -29], [-57, 4, -21], [19, 26, 29]);
+    const dark = { top: index => {
+      const brushed = Math.round(1.5 * Math.sin(index * 2.399) + 0.8 * Math.sin(index * 0.173));
+      return [47 + brushed, 53 + brushed, 58 + brushed];
+    }, side: [34, 40, 44], bottom: [25, 30, 33] };
+    addEllipticalCylinder(fixed, 96, 96, -80, -66, 112,
+      { top: [48, 54, 58], side: [29, 34, 37], bottom: [21, 25, 28] });
+    addAnnularCylinder(fixed, 94.8, 84, -66.15, -65.45, 112,
+      { top: [68, 75, 79], side: [35, 41, 44], inner: [42, 48, 51], bottom: [34, 40, 43] }, 0, 0);
+    addEllipticalCylinder(fixed, 42, 42, -66, -42, 80,
+      { top: [48, 54, 58], side: [28, 33, 36], bottom: [23, 27, 30] });
+    addEllipticalCylinder(fixed, 35, 35, -51, -30, 72,
+      { top: [40, 46, 50], side: [25, 30, 33], bottom: [21, 26, 29] });
+    addClosedBox(fixed, [-55, -18, -56], [-38, 18, -25], [34, 40, 44]);
+    addClosedBox(fixed, [38, -18, -56], [55, 18, -25], [34, 40, 44]);
+    addCylinderAlongX(fixed, 110, 11, TURNTABLE_TILT_PIVOT_Z_MM, 64, [39, 45, 49]);
+    for (const centerX of [-45, 45]) {
+      addCylinderAlongX(fixed, 19, 15, TURNTABLE_TILT_PIVOT_Z_MM, 64,
+        [47, 53, 57], centerX);
+      addCylinderAlongX(fixed, 3.2, 13.2, TURNTABLE_TILT_PIVOT_Z_MM, 64,
+        [78, 85, 89], centerX < 0 ? centerX - 8.5 : centerX + 8.5);
+    }
+    addCylinderAlongX(fixed, 3, 7.5, TURNTABLE_TILT_PIVOT_Z_MM, 48, [104, 111, 114], -56.5);
+    addCylinderAlongX(fixed, 7, 12.5, TURNTABLE_TILT_PIVOT_Z_MM, 64, [59, 66, 70], -55);
+    addCylinderAlongX(fixed, 3.4, 9.7, TURNTABLE_TILT_PIVOT_Z_MM, 64, [111, 119, 122], -59.1);
+    addHexSocketAlongX(fixed, -60.45, TURNTABLE_TILT_PIVOT_Z_MM, 3.7, [24, 29, 32]);
+    for (const x of [-57, 57]) for (const y of [-57, 57]) {
+      addAnnularCylinder(fixed, 4.1, 2.15, -65.8, -65.35, 32,
+        { top: [100, 107, 110], side: [54, 61, 64], inner: [33, 39, 42], bottom: [39, 45, 48] }, x, y);
+      addEllipticalCylinder(fixed, 2.12, 2.12, -65.7, -65.28, 32,
+        { top: [17, 21, 23], side: [23, 28, 30], bottom: [20, 24, 26] }, x, y);
+    }
+    addClosedPrism(fixed, [[-95.3, -2.6], [-91.8, -2.6], [-91.8, 2.6]], -11.4, -10.1,
+      [214, 221, 224]);
     addEllipticalCylinder(moving, 27, 27, -25, -10, 48,
-      { top: [71, 80, 85], side: [46, 54, 59], bottom: [35, 42, 47] });
-    addEllipticalCylinder(moving, TURNTABLE_RADIUS_MM, TURNTABLE_RADIUS_MM,
-      -TURNTABLE_THICKNESS_MM, 0, 96, dark);
+      { top: [49, 56, 60], side: [34, 40, 44], bottom: [27, 32, 35] });
+    addRibbedCylinder(moving, TURNTABLE_RADIUS_MM, -TURNTABLE_THICKNESS_MM, 0,
+      480, 120, dark);
     const fixedModel = finishMesh(fixed);
     for (let index = 0; index < fixedModel.positions.length; index += 3) {
       const x = fixedModel.positions[index], y = fixedModel.positions[index + 1];
@@ -276,6 +376,8 @@
       pivotZ: TURNTABLE_TILT_PIVOT_Z_MM,
       diameterMm: TURNTABLE_DIAMETER_MM,
       thicknessMm: TURNTABLE_THICKNESS_MM,
+      ribCount: 120,
+      mountingRecessCount: 4,
       fitRadius: 120,
     };
   };

@@ -106,6 +106,16 @@ assert.equal(sandbox.window.CadyxScanView.hasClosedTriangleTopology(new Uint32Ar
   "open preview surfaces are not classified as solid");
 assert.ok(Math.abs(turntableModel.fixed.bounds.max[0] - turntableModel.fixed.bounds.max[1]) < 1e-4,
   "the illustrated lower support has a circular footprint");
+assert.equal(turntableModel.ribCount, 120, "the moving plate has fine circumferential grip ribs");
+assert.equal(turntableModel.mountingRecessCount, 4, "the lower flange has four closed mounting recess details");
+const ribRingRadii = new Set();
+for (let index = 0; index < turntableModel.moving.positions.length; index += 3) {
+  if (Math.abs(turntableModel.moving.positions[index + 2] + 0.9) < 1e-4) {
+    const x = turntableModel.moving.positions[index], y = turntableModel.moving.positions[index + 1];
+    ribRingRadii.add(Math.hypot(x, y).toFixed(3));
+  }
+}
+assert.ok(ribRingRadii.size > 2, "the platter edge has visible radial variation instead of a smooth cylinder");
 let maximumTopRadius = 0;
 for (let index = 0; index < turntableModel.moving.positions.length; index += 3) {
   const x = turntableModel.moving.positions[index], y = turntableModel.moving.positions[index + 1];
