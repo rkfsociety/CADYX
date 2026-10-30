@@ -51,3 +51,5 @@
 - Scanning uses one shared preview scene for the turntable and selected cloud. Selecting a saved series file or a project-level merged cloud must keep the turntable visible. With no saved-cloud selection and no active capture/live preview, show the turntable only; status polling must not reopen clouds from completed or failed captures.
 
 - In the Scanning tree, series show only individual processed capture-frame PLY files (`_pose_<number>.ply`); keep RAW and processing reports available on disk, and do not display intermediate or merged clouds as series frames.
+
+- Store stitched clouds for individual capture series in the project folder `Сшитые серии`; the combined cloud across those series belongs at project root. Show the series-cloud folder as a separate group in the Scanning tree, with all clouds using the shared table preview. Preserve prior intermediate outputs outside the root.

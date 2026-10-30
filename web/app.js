@@ -210,6 +210,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     const scanTreeExpanded=new Set();
     let scanTreeEntries=[];
     let projectScanCloudFiles=[];
+    let stitchedSeriesFiles=[];
     let scanTreeLoadedProject=null;
     let scanTreeRequest=0;
     let scanTreePreviewSelection=null;
@@ -268,14 +269,16 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     }
     async function loadScanTree(projectId,force=false){
       const request=++scanTreeRequest;
-      if(!projectId){scanTreeEntries=[];projectScanCloudFiles=[];scanTreeLoadedProject=null;renderScanTree();return}
+      if(!projectId){scanTreeEntries=[];projectScanCloudFiles=[];stitchedSeriesFiles=[];scanTreeLoadedProject=null;renderScanTree();return}
       const sameProject=scanTreeLoadedProject===projectId;
       if(sameProject&&!force)return;
       scanTreeLoadedProject=projectId;
       const previousRuns=new Map(sameProject?scanTreeEntries.map(run=>[run.id,run]):[]);
-      if(!force){scanTreeEntries=[];projectScanCloudFiles=[];renderScanTree('Загружаю серии сканирования…')}
+      if(!force){scanTreeEntries=[];projectScanCloudFiles=[];stitchedSeriesFiles=[];renderScanTree('Загружаю серии сканирования…')}
       try{
         const root=await semanticJson(`/api/v1/projects/${encodeURIComponent(projectId)}/files`);
+        const stitchedFolder=(root.folders||[]).some(folder=>folder.name==='Сшитые серии');
+        const stitched=stitchedFolder?await semanticJson(`/api/v1/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent('Сшитые серии')}/files`):{files:[]};
         const runs=new Map();
         for(const folder of root.folders||[]){
           if(!scanRunPattern.test(folder.name))continue;
@@ -290,11 +293,12 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         if(request!==scanTreeRequest||state.project!==projectId)return;
         projectScanCloudFiles=(root.files||[]).filter(file=>/\.ply$/i.test(file.name)&&!scanFileRunId(file.name))
           .sort((a,b)=>a.name.localeCompare(b.name));
+        stitchedSeriesFiles=(stitched.files||[]).filter(file=>/\.ply$/i.test(file.name)).sort((a,b)=>a.name.localeCompare(b.name,'ru',{numeric:true}));
         scanTreeEntries=[...runs.values()].map(run=>({...run,files:[...new Map(run.files.map(file=>[file.name,file])).values()].sort((a,b)=>a.name.localeCompare(b.name)),rootFiles:[...new Map((run.rootFiles||[]).map(file=>[file.name,file])).values()]}))
           .sort((a,b)=>b.id.localeCompare(a.id));
         const saved=JSON.parse(localStorage.getItem(`cadyx-scan-tree:${projectId}`)||'[]');
         scanTreeExpanded.clear();
-        if(Array.isArray(saved))for(const id of saved)if(scanTreeEntries.some(run=>run.id===id))scanTreeExpanded.add(id);
+        if(Array.isArray(saved))for(const id of saved)if(id==='stitched-series'||scanTreeEntries.some(run=>run.id===id))scanTreeExpanded.add(id);
         renderScanTree();
         await Promise.all(scanTreeEntries.filter(run=>scanTreeExpanded.has(run.id)&&run.folderName).map(run=>loadScanRunFiles(run,projectId)));
       }catch(error){
@@ -316,6 +320,29 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         leaf.setAttribute('aria-label',`Показать облако точек проекта · ${file.name}`);
         leaf.onclick=()=>previewScanFile({id:'project-clouds',folderName:null},file,leaf);
         list.append(leaf);shown++;
+      }
+      if(stitchedSeriesFiles.length){
+        const files=stitchedSeriesFiles.filter(file=>!query||'сшитые серии'.includes(query)||file.name.toLowerCase().includes(query));
+        if(!query||'сшитые серии'.includes(query)||files.length){
+          const container=document.createElement('div');container.className='cad3-tree-node';
+          const row=document.createElement('div');row.className='cad3-tree-parent-row';
+          const expanded=scanTreeExpanded.has('stitched-series')||Boolean(query&&files.length);
+          const disclosure=document.createElement('button');disclosure.type='button';disclosure.className='cad3-tree-disclosure';
+          disclosure.setAttribute('aria-label',expanded?'Свернуть сшитые серии':'Показать сшитые серии');
+          disclosure.setAttribute('aria-expanded',String(expanded));disclosure.setAttribute('aria-controls','stitched-series-files');
+          disclosure.innerHTML=`<span class="cad-tree-chevron">${expanded?'−':'+'}</span>`;
+          disclosure.onclick=()=>{if(scanTreeExpanded.has('stitched-series'))scanTreeExpanded.delete('stitched-series');else scanTreeExpanded.add('stitched-series');try{localStorage.setItem(`cadyx-scan-tree:${state.project}`,JSON.stringify([...scanTreeExpanded]))}catch{}renderScanTree()};
+          const title=document.createElement('button');title.type='button';title.className='cad-tree-feature';title.textContent=`Сшитые серии · ${stitchedSeriesFiles.length}`;title.onclick=()=>disclosure.click();
+          row.append(disclosure,title);container.append(row);
+          const children=document.createElement('div');children.id='stitched-series-files';children.className='cad3-tree-children';children.hidden=!expanded;
+          for(const file of files){
+            const leaf=document.createElement('button');leaf.type='button';leaf.className='cad3-model-note cad3-scan-file cad3-scan-file-button';
+            leaf.setAttribute('aria-pressed',String(scanTreePreviewSelection===`stitched-series/${file.name}`));
+            leaf.textContent=scanFileLabel(file,'stitched-series');leaf.setAttribute('aria-label',`Показать сшитую серию · ${file.name}`);
+            leaf.onclick=()=>previewScanFile({id:'stitched-series',folderName:'Сшитые серии'},file,leaf);children.append(leaf);
+          }
+          container.append(children);list.append(container);shown++;
+        }
       }
       for(const run of scanTreeEntries){
         const title=scanRunTitle(run.id);
