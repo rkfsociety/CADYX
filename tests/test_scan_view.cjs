@@ -78,6 +78,9 @@ assert.ok(fixedSupportHasPoint(55, 0, -25) && fixedSupportHasPoint(-55, 0, -25),
 assert.ok(fixedSupportHasPoint(46, 0, -32),
   "the curved support has a closed circular pivot cover on each side");
 assert.equal(turntableModel.pivotCoverCount, 2, "the turntable has matching side pivot covers");
+assert.equal(turntableModel.supportBracketCount, 2, "the fixed stand uses two separate curved support brackets");
+assert.equal(turntableModel.supportBracketProfile, "rounded-rectangle",
+  "support brackets use broad flat sides instead of round tube sections");
 assert.ok(fixedSupportHasPoint(0, 63.4, -32),
   "the front support has a concentric circular bearing cover");
 assert.equal(turntableModel.fitRadius, 120, "the outer degree labels have clearance from the viewport edge");

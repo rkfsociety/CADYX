@@ -209,8 +209,8 @@
       addTriangle(mesh, leftRing + index, rightRing + next, rightRing + index, color);
     }
   };
-  const addBentSupport = (mesh, start, control1, control2, end, centerY, radius, color,
-    curveSegments = 20, ringSegments = 24) => {
+  const addCurvedSupportBracket = (mesh, start, control1, control2, end, centerY, color,
+    curveSegments = 20) => {
     const centerAt = t => {
       const inverse = 1 - t;
       return [
@@ -228,12 +228,19 @@
       const tangentX = (after[0] - before[0]) / tangentLength;
       const tangentZ = (after[1] - before[1]) / tangentLength;
       const normalX = -tangentZ, normalZ = tangentX;
-      return Array.from({ length: ringSegments }, (_, side) => {
-        const angle = 2 * Math.PI * side / ringSegments;
-        const offset = radius * Math.sin(angle);
+      const halfWidth = 10.5 + 5 * (1 - t);
+      const halfDepth = 7.5 + 2.5 * (1 - t);
+      const corner = Math.min(2.5, halfWidth / 3, halfDepth / 2);
+      const section = [
+        [-halfWidth + corner, -halfDepth], [halfWidth - corner, -halfDepth],
+        [halfWidth, -halfDepth + corner], [halfWidth, halfDepth - corner],
+        [halfWidth - corner, halfDepth], [-halfWidth + corner, halfDepth],
+        [-halfWidth, halfDepth - corner], [-halfWidth, -halfDepth + corner],
+      ];
+      return section.map(([widthOffset, depthOffset]) => {
         const vertex = mesh.positions.length / 3;
-        mesh.positions.push(center[0] + normalX * offset,
-          centerY + radius * Math.cos(angle), center[1] + normalZ * offset);
+        mesh.positions.push(center[0] + normalX * depthOffset,
+          centerY + widthOffset, center[1] + normalZ * depthOffset);
         return vertex;
       });
     });
@@ -241,8 +248,9 @@
     mesh.positions.push(start[0], centerY, start[1]);
     const endCenter = mesh.positions.length / 3;
     mesh.positions.push(end[0], centerY, end[1]);
-    for (let side = 0; side < ringSegments; side += 1) {
-      const nextSide = (side + 1) % ringSegments;
+    const sectionSegments = rings[0].length;
+    for (let side = 0; side < sectionSegments; side += 1) {
+      const nextSide = (side + 1) % sectionSegments;
       addTriangle(mesh, startCenter, rings[0][nextSide], rings[0][side], color);
       addTriangle(mesh, endCenter, rings[curveSegments][side], rings[curveSegments][nextSide], color);
       for (let segment = 0; segment < curveSegments; segment += 1) {
@@ -319,9 +327,10 @@
       { top: [56, 62, 66], side: [43, 49, 53], bottom: [34, 39, 43] });
     addEllipticalCylinder(fixed, 35, 35, -51, -30, 72,
       { top: [49, 55, 59], side: [40, 46, 50], bottom: [33, 38, 42] });
-    for (const centerY of [-42, 42]) {
-      addBentSupport(fixed, [-56, -60], [-55, -49], [-43, -34], [-23, -24],
-        centerY, 9.5, [47, 53, 57]);
+    const supportBracketOffsets = [-42, 42];
+    for (const centerY of supportBracketOffsets) {
+      addCurvedSupportBracket(fixed, [-56, -60], [-55, -49], [-43, -34], [-23, -24],
+        centerY, [54, 60, 64]);
     }
     addCylinderAlongY(fixed, 110, 11, TURNTABLE_TILT_PIVOT_Z_MM, 64, [47, 53, 57]);
     for (const side of [-1, 1]) {
@@ -432,6 +441,8 @@
       bakedDegreeLabels,
       tableTopPortCount,
       pivotCoverCount: 2,
+      supportBracketCount: supportBracketOffsets.length,
+      supportBracketProfile: 'rounded-rectangle',
       degreeLabelAlignment: 'tangent',
       degreeLabelPositions: Float32Array.from(degreeLabelPositions),
       degreeTextLabels,
