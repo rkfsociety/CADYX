@@ -332,7 +332,12 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           disclosure.setAttribute('aria-expanded',String(expanded));disclosure.setAttribute('aria-controls','stitched-series-files');
           disclosure.innerHTML=`<span class="cad-tree-chevron">${expanded?'−':'+'}</span>`;
           disclosure.onclick=()=>{if(scanTreeExpanded.has('stitched-series'))scanTreeExpanded.delete('stitched-series');else scanTreeExpanded.add('stitched-series');try{localStorage.setItem(`cadyx-scan-tree:${state.project}`,JSON.stringify([...scanTreeExpanded]))}catch{}renderScanTree()};
-          const title=document.createElement('button');title.type='button';title.className='cad-tree-feature';title.textContent=`Сшитые серии · ${stitchedSeriesFiles.length}`;title.onclick=()=>disclosure.click();
+          const title=document.createElement('button');title.type='button';title.className='cad-tree-feature';
+          title.setAttribute('aria-expanded',String(expanded));title.setAttribute('aria-controls','stitched-series-files');
+          const icon=document.createElement('span');icon.className='cad3-icon';icon.innerHTML=I.cloud;
+          const label=document.createElement('span');label.className='cad-tree-label';label.textContent='Сшитые серии';
+          const count=document.createElement('small');count.textContent=String(stitchedSeriesFiles.length);
+          title.append(icon,label,count);title.onclick=()=>disclosure.click();
           row.append(disclosure,title);container.append(row);
           const children=document.createElement('div');children.id='stitched-series-files';children.className='cad3-tree-children';children.hidden=!expanded;
           for(const file of files){
