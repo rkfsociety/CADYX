@@ -89,8 +89,18 @@ if ([string]::IsNullOrWhiteSpace($RunId)) {
 } else {
     throw 'RunId must use the CADYX revopoint_YYYYMMDDTHHMMSSZ identifier format.'
 }
-$runDirectory = Join-Path $ProjectPath $runPrefix
+$seriesDirectory = Join-Path $ProjectPath $runPrefix
+$runDirectory = if ($ManifestOnly) { $seriesDirectory } else { Join-Path $ProjectPath "scan_support_$runPrefix" }
 if (-not $ManifestOnly) {
+    if (Test-Path -LiteralPath $seriesDirectory) {
+        $seriesItem = Get-Item -LiteralPath $seriesDirectory -Force
+        if (-not $seriesItem.PSIsContainer -or ($seriesItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            @(Get-ChildItem -LiteralPath $seriesDirectory -Force).Count -ne 0) {
+            throw "Scan series folder is not empty and safe: $seriesDirectory"
+        }
+    } else {
+        New-Item -ItemType Directory -Path $seriesDirectory | Out-Null
+    }
     if (Test-Path -LiteralPath $runDirectory) {
         $expectedLog = ".cadyx-scan360-$runId.log"
         $existingEntries = @(Get-ChildItem -LiteralPath $runDirectory -Force)
@@ -271,6 +281,7 @@ try {
     $workerArguments = @(
         $framePreprocessor, '--watch-pose-log', $poseLog,
         '--run-directory', $runDirectory, '--run-id', $runPrefix,
+        '--output-directory', $seriesDirectory,
         '--expected-frame-count', [string]$frameCount,
         '--stop-signal', $workerStopPath, '--report-file', $preprocessingReportPath,
         '--calibration-file', $projectCalibration, '--depth-scale', $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture),

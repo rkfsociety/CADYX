@@ -334,7 +334,8 @@ def _write_aggregate_report(path: Path, payload: dict[str, Any]) -> None:
 def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_frame_count: int,
                   stop_signal: Path, report_path: Path, *, max_workers: int = 1,
                   poll_seconds: float = 0.1, calibration_path: Path | None = None,
-                  depth_scale: float | None = None, in_place: bool = True) -> dict[str, Any]:
+                  depth_scale: float | None = None, in_place: bool = True,
+                  output_directory: Path | None = None) -> dict[str, Any]:
     """Launch frame cleanup as soon as each capture-completed row is flushed."""
     run_directory = run_directory.resolve(strict=True)
     pose_log = pose_log.resolve()
@@ -342,6 +343,12 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
     report_path = report_path.resolve()
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError("run id must use revopoint_YYYYMMDDTHHMMSSZ")
+    if output_directory is not None:
+        if run_directory.name != f"scan_support_{run_id}" or output_directory.is_symlink():
+            raise ValueError("split capture requires a safe support and frame directory")
+        output_directory = output_directory.resolve(strict=True)
+        if output_directory != run_directory.parent / run_id or not output_directory.is_dir() or not in_place:
+            raise ValueError("split capture output must be the series folder and use in-place cleanup")
     if not 1 <= expected_frame_count <= 360:
         raise ValueError("expected frame count is invalid")
     if max_workers != 1:
@@ -403,6 +410,15 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
                     frame_report = json.loads(source_path.read_text(encoding="utf-8"))
                     if frame_report.get("frame_index") != index or frame_report.get("state") != "completed":
                         raise ValueError("cleanup report does not match its frame index or state")
+                    if output_directory is not None:
+                        name = frame_report.get("cleaned_file")
+                        if name not in {f"{run_id}_pose_{index:03d}.ply", f"{run_id}_pose_pose_{index:03d}.ply"}:
+                            raise ValueError("cleanup report names an unexpected frame")
+                        cleaned = run_directory / name
+                        verified = verified_preprocessed_frame(cleaned)
+                        if verified is None or verified[0] != cleaned:
+                            raise ValueError("cleaned frame has not been verified")
+                        os.link(cleaned, output_directory / cleaned.name)
                     reports[index] = frame_report
                 except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                     errors[index] = f"invalid cleanup report: {exc}"
@@ -448,6 +464,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--watch-pose-log", type=Path)
     parser.add_argument("--run-directory", type=Path)
+    parser.add_argument("--output-directory", type=Path)
     parser.add_argument("--run-id")
     parser.add_argument("--expected-frame-count", type=int)
     parser.add_argument("--stop-signal", type=Path)
@@ -471,7 +488,8 @@ def main() -> int:
             report = watch_capture(args.watch_pose_log, args.run_directory, args.run_id,
                                    args.expected_frame_count, args.stop_signal, args.report_file,
                                    max_workers=args.max_workers, calibration_path=args.calibration_file,
-                                   depth_scale=args.depth_scale, in_place=True)
+                                   depth_scale=args.depth_scale, in_place=True,
+                                   output_directory=args.output_directory)
         except (OSError, ValueError, RuntimeError) as exc:
             print(f"capture preprocessing worker failed: {exc}", file=sys.stderr)
             return 2

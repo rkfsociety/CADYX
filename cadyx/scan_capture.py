@@ -1058,7 +1058,13 @@ class Scan360CaptureController:
                 run_directory.mkdir()
             except FileExistsError as exc:
                 raise ConflictError("A scan series folder already exists; no files were replaced.", code="SCAN_LOG_EXISTS") from exc
-            log_path = run_directory / f".cadyx-scan360-{stamp}.log"
+            support_directory = project_directory / f"scan_support_{run_id}"
+            try:
+                support_directory.mkdir()
+            except FileExistsError as exc:
+                run_directory.rmdir()
+                raise ConflictError("A scan support folder already exists; no files were replaced.", code="SCAN_LOG_EXISTS") from exc
+            log_path = support_directory / f".cadyx-scan360-{stamp}.log"
             startup_info = subprocess.STARTUPINFO()
             startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startup_info.wShowWindow = subprocess.SW_HIDE
@@ -1612,15 +1618,16 @@ class Scan360CaptureController:
             }
         if completed > 0:
             index = min(completed, frame_count) - 1
-            for name in (f"{run_id}_pose_{index:03d}.ply", f"{run_id}_pose_pose_{index:03d}.ply"):
-                if (project_directory / name).is_file():
-                    return {
-                        "preview_folder": preview_folder,
-                        **project_context,
-                        **({"preview_subfolder": relative_series} if relative_series else {}),
-                        "preview_file": name,
-                        "preview_kind": "single",
-                        "preview_frame_count": frame_count,
-                        "origin_file": name,
-                    }
+            for index in range(index, -1, -1):
+                for name in (f"{run_id}_pose_{index:03d}.ply", f"{run_id}_pose_pose_{index:03d}.ply"):
+                    if (project_directory / name).is_file():
+                        return {
+                            "preview_folder": preview_folder,
+                            **project_context,
+                            **({"preview_subfolder": relative_series} if relative_series else {}),
+                            "preview_file": name,
+                            "preview_kind": "single",
+                            "preview_frame_count": frame_count,
+                            "origin_file": name,
+                        }
         return {}

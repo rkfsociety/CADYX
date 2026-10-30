@@ -583,6 +583,11 @@ class Scan360CaptureTests(unittest.TestCase):
                     patch("cadyx.scan_capture.subprocess.Popen", return_value=FakeProcess()) as popen:
                 controller.start("part", project, scanner_device_id="scanner-1", turntable_device_id="table-1")
                 command = popen.call_args.args[0]
+                run_id = command[command.index("-RunId") + 1]
+                series = project / run_id
+                support = project / f"scan_support_{run_id}"
+                self.assertEqual(list(series.iterdir()), [])
+                self.assertTrue((support / f".cadyx-scan360-{run_id.removeprefix('revopoint_')}.log").is_file())
 
         self.assertEqual(command[command.index("-TurntableMarkerMap") + 1], str(marker_map))
         expected_python = Path(sys.executable)
