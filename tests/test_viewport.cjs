@@ -493,8 +493,8 @@ assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 1
 events.pointerdown({ button: 2, clientX: 300, clientY: 200, pointerId: 4 });
 events.pointermove({ clientX: 320, clientY: 200 });
 animationFrames.shift()(animationTime);
-assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 0,
-  "Interactive orbit suppresses isolated short edge marks in its reduced-resolution frame");
+assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 1,
+  "Camera orbit preserves the same small-edge detail as the stationary frame");
 events.pointerup();
 assert.equal(strokedPaths.reduce((count, path) => count + path.length / 2, 0), 1,
   "The complete B-rep edge returns in the crisp frame when orbit ends");
@@ -729,12 +729,12 @@ events.pointermove({ clientX: 320, clientY: 215 });
 const denseInteractiveFrame = animationFrames.splice(denseFrameOffset, 1)[0];
 assert.equal(typeof denseInteractiveFrame, 'function');
 denseInteractiveFrame();
-assert.equal(rasterUploads, denseUploadsBeforeDrag,
-  'dense camera drags use the temporary wireframe fallback instead of full shaded rasterization');
-assert.ok(segments > 0, 'the dense fallback continues to draw the model wireframe');
-events.pointerup({});
 assert.ok(rasterUploads > denseUploadsBeforeDrag,
-  'dense models return to shaded rendering when camera movement ends');
+  'dense camera drags keep shaded rasterization active');
+const denseUploadsDuringDrag = rasterUploads;
+events.pointerup({});
+assert.ok(rasterUploads > denseUploadsDuringDrag,
+  'dense models retain shaded rendering after camera movement ends');
 
 const persistentSurfaceViewer = sandbox.window.CadyxViewport.createViewer(canvas, {
   showCoordinateGizmo: false, showRotationAxes: false, showWorldAxes: false,

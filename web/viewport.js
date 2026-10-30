@@ -462,8 +462,8 @@
       };
       const pointDepthVisible = point => point >= 0 && point < screenX.length
         && depthVisibleAt(screenX[point], screenY[point], camera[point * 3 + 2]);
-      const cullBackfacesDuringOrbit = Boolean(drag && geometry.cullBackfacesDuringOrbit);
-      const denseInteractiveFallback = Boolean(drag || transition || bodyMotion) && shaded
+      const cullBackfacesDuringOrbit = Boolean(geometry.cullBackfacesDuringOrbit);
+      const denseInteractiveFallback = Boolean(transition || bodyMotion) && shaded
         && !cullBackfacesDuringOrbit
         && triangles.length / 3 > MAX_INTERACTIVE_SHADED_FACES;
       const renderWireframe = wireframe || denseInteractiveFallback;
@@ -1407,7 +1407,7 @@
         for (let start = 0; start < featureEdges.length; start += edgesPerPath * 2) {
           context.beginPath();
           const end = Math.min(featureEdges.length, start + edgesPerPath * 2);
-          // The reduced-resolution drag frame otherwise turns short edge runs into specks.
+          // Use the same screen-space detail threshold while moving and at rest.
           for (let index = start; index < end; index += 2) {
             const faceIndex = index;
             const edgeStart = featureEdges[index], edgeEnd = featureEdges[index + 1];
@@ -1415,7 +1415,7 @@
             if (!edgeProgress) continue;
             drawEdge(edgeStart, edgeEnd,
               featureEdgeFaces?.[faceIndex] ?? -1, featureEdgeFaces?.[faceIndex + 1] ?? -1,
-              interactive ? 3 * dpr : 1.5 * dpr, edgeProgress[0], edgeProgress[1]);
+              1.5 * dpr, edgeProgress[0], edgeProgress[1]);
           }
           context.stroke();
         }
@@ -1451,7 +1451,7 @@
           const edgeProgress = edgeProgressRange(start, end);
           if (!edgeProgress) continue;
           drawEdge(start, end, silhouetteCandidates[index + 2], silhouetteCandidates[index + 3],
-            interactive ? 3 * dpr : 1.5 * dpr, edgeProgress[0], edgeProgress[1]);
+            1.5 * dpr, edgeProgress[0], edgeProgress[1]);
         }
         context.stroke();
         context.restore();

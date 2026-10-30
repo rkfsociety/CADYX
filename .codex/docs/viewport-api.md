@@ -102,10 +102,12 @@ interpolated on the nearest rasterized triangles covering each line
 sample, including nearby pixel samples when the line falls on a raster coverage
 boundary. The edge's incident triangles are excluded from occlusion so they do
 not break their own contour; all other covering faces remain depth-tested.
-Runs shorter than 1.5 screen pixels are omitted to avoid isolated marks. During
-pointer orbit, the reduced-resolution frame raises that threshold to three
-screen pixels; the full-resolution frame restores additional detail when the
-pointer is released.
+Runs shorter than 1.5 screen pixels are omitted to avoid isolated marks. Camera
+orbit and pan use the same canvas resolution, shaded surfaces and edge-detail
+threshold as stationary frames. Camera movement does not trigger the dense-mesh
+wireframe fallback; geometry transitions and body animation retain their separate
+rendering budget. Closed scanner surfaces use consistent backface culling at rest
+and during camera movement.
 Triangle tessellation seams are never treated as feature edges. Triangle-mesh
 bodies have no B-rep feature edges and therefore show only their view-dependent,
 depth-tested silhouette. Active sketch lines and points remain overlays and are
