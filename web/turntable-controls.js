@@ -13,12 +13,15 @@
     const tiltTargetValue = document.querySelector('#turntable-tilt-target-value');
     const status = document.querySelector('#turntable-control-status');
     const spinButton = document.querySelector('#turntable-spin');
+    const spinLabel = spinButton.querySelector('.turntable-spin-label');
     const scanButton = document.querySelector('#viewport-scan-360');
     const livePreviewButton = document.querySelector('#viewport-live-camera');
     let scanActive = false;
     let spinState = 'idle';
     let tiltAtZero = false;
     let pending = false;
+    let automaticQueryPending = false;
+    let lastAutomaticQueryAt = 0;
     let pollTimer = null;
 
     const selection = () => ({
@@ -30,11 +33,19 @@
       if (status.dataset.state !== state) status.dataset.state = state;
       status.hidden = !message;
     };
+    const syncTiltTargetDisplay = () => {
+      const min = Number(tiltTarget.min), max = Number(tiltTarget.max), value = Number(tiltTarget.value);
+      const progress = Number.isFinite(value) && max > min
+        ? `${Math.max(0, Math.min(100, (value - min) / (max - min) * 100))}%` : '50%';
+      tiltTarget.style.setProperty('--turntable-tilt-progress', progress);
+      const nextLabel = `${tiltTarget.value}°`;
+      if (tiltTargetValue.textContent !== nextLabel) tiltTargetValue.textContent = nextLabel;
+    };
     const spinActive = () => spinState === 'starting' || spinState === 'running' || spinState === 'stopping';
     const livePreviewReady = () => livePreviewButton?.getAttribute('aria-pressed') === 'true';
     const setBusy = () => {
       const spinning = spinActive();
-      for (const selector of ['#turntable-control-refresh', '#turntable-step', '#turntable-speed',
+      for (const selector of ['#turntable-step', '#turntable-speed',
         '#turntable-rotate-left', '#turntable-rotate-right', '#turntable-tilt-target',
         '#turntable-tilt-apply', '#turntable-zero', '#turntable-spin']) {
         const control = panel.querySelector(selector);
@@ -44,17 +55,20 @@
         }
       }
       const stopButton = panel.querySelector('#turntable-stop');
-      if (stopButton.disabled !== pending) stopButton.disabled = pending;
+      const stopDisabled = pending || spinState !== 'running';
+      if (stopButton.disabled !== stopDisabled) stopButton.disabled = stopDisabled;
+      const stopActive = String(spinState === 'running');
+      if (stopButton.dataset.active !== stopActive) stopButton.dataset.active = stopActive;
       const spinDisabled = pending || scanActive && !spinning
         || !spinning && (!tiltAtZero || !livePreviewReady());
       if (spinButton.disabled !== spinDisabled) spinButton.disabled = spinDisabled;
       if (spinButton.getAttribute('aria-pressed') !== String(spinning)) {
         spinButton.setAttribute('aria-pressed', String(spinning));
       }
-      const spinLabel = spinState === 'starting' ? 'ПОДКЛЮЧЕНИЕ…'
-        : spinState === 'stopping' ? 'ОСТАНОВКА…'
-          : spinning ? '■ ОСТАНОВИТЬ ВРАЩЕНИЕ' : '▶ ПОСТОЯННОЕ ВРАЩЕНИЕ';
-      if (spinButton.textContent !== spinLabel) spinButton.textContent = spinLabel;
+      const spinText = spinState === 'starting' ? 'Подключение…'
+        : spinState === 'stopping' ? 'Остановка…'
+          : spinning ? 'Остановить вращение' : 'Постоянное вращение';
+      if (spinLabel.textContent !== spinText) spinLabel.textContent = spinText;
       if (scanButton) {
         const busyValue = String(spinning);
         if (scanButton.dataset.turntableBusy !== busyValue) scanButton.dataset.turntableBusy = busyValue;
@@ -81,8 +95,7 @@
         if (tilt.textContent !== nextTilt) tilt.textContent = nextTilt;
         const nextTarget = String(Math.max(-10, Math.min(10, Math.round(position.tilt_degrees))));
         if (tiltTarget.value !== nextTarget) tiltTarget.value = nextTarget;
-        const nextTargetLabel = `${nextTarget}°`;
-        if (tiltTargetValue.textContent !== nextTargetLabel) tiltTargetValue.textContent = nextTargetLabel;
+        syncTiltTargetDisplay();
       }
       if (Number.isFinite(position.rotation_period_seconds)) {
         const presets = [18, 30, 45, 60, 90];
@@ -97,6 +110,23 @@
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error?.message || payload.message || 'Команда стола не выполнена.');
       return payload;
+    };
+    const queryHardwarePosition = async () => {
+      if (automaticQueryPending || pending) return;
+      automaticQueryPending = true;
+      try {
+        const payload = await fetchJson('/api/v1/scanner/turntable/control', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: 'query', ...selection() }),
+        });
+        readPosition(payload.result || {});
+      } catch (error) {
+        setStatus(error.message, 'error');
+      } finally {
+        automaticQueryPending = false;
+        clearTimeout(pollTimer);
+        pollTimer = setTimeout(() => void refresh({ quiet: true }), 250);
+      }
     };
     const refresh = async ({ quiet = false } = {}) => {
       if (pending) return;
@@ -121,6 +151,13 @@
         if (spinState === 'failed') setStatus(control.spin.message || 'Драйвер остановил вращение с ошибкой.', 'error');
         else setStatus();
         setBusy();
+        const positionAge = Number(control.position?.age_seconds);
+        const positionNeedsQuery = !control.position || !Number.isFinite(positionAge) || positionAge >= 5;
+        if (!scanActive && spinState === 'idle' && positionNeedsQuery
+            && Date.now() - lastAutomaticQueryAt >= 7000) {
+          lastAutomaticQueryAt = Date.now();
+          void queryHardwarePosition();
+        }
       } catch (error) {
         if (!quiet) setStatus(error.message, 'error');
       } finally {
@@ -170,21 +207,21 @@
       }
     };
 
-    panel.querySelector('#turntable-control-refresh').addEventListener('click', () => void command('query'));
     panel.querySelector('#turntable-rotate-left').addEventListener('click', () => void command('rotate', -Number(step.value)));
     panel.querySelector('#turntable-rotate-right').addEventListener('click', () => void command('rotate', Number(step.value)));
     speed.value = String(window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.() || 18);
     speed.addEventListener('change', () => void command('speed', Number(speed.value)));
-    tiltTarget.addEventListener('input', () => { tiltTargetValue.textContent = `${tiltTarget.value}°`; });
+    tiltTarget.addEventListener('input', syncTiltTargetDisplay);
     panel.querySelector('#turntable-tilt-apply').addEventListener('click', () => void command('tilt', Number(tiltTarget.value)));
     panel.querySelector('#turntable-zero').addEventListener('click', () => void command('zero'));
     panel.querySelector('#turntable-stop').addEventListener('click', () => {
-      void command(spinActive() ? 'spin-stop' : 'stop');
+      if (spinState === 'running') void command('spin-stop');
     });
     spinButton.addEventListener('click', () => {
       void command(spinActive() ? 'spin-stop' : 'spin-start');
     });
-    // Hydrate from server state; hardware queries are explicit user actions.
+    syncTiltTargetDisplay();
+    // Keep device position fresh while this view is visible; status reads alone use cached values.
     void refresh({ quiet: true });
   };
 
