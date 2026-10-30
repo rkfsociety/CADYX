@@ -82,14 +82,23 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
         else:
             bounds = [max(point[a] for point in points) - min(point[a] for point in points) for a in range(3)]
             high = math.hypot(*bounds) or 1.
+            # Finite coordinates can span more than the float range. Normalize
+            # only the voxel keys, retaining original coordinates for centroids.
+            bucket_points = points
+            if not math.isfinite(high):
+                scale = max(abs(value) for point in points for value in point)
+                bucket_points = [tuple(value / scale for value in point) for point in points]
+                bounds = [max(point[a] for point in bucket_points) - min(point[a] for point in bucket_points)
+                          for a in range(3)]
+                high = math.hypot(*bounds) or 1.
             low = high / (len(points) ** (1 / 3) * 4)
             best: list[tuple[float, float, float]] | None = None
             best_gap = math.inf
             for _ in range(18):
                 size = low + (high - low) / 2
                 buckets: dict[tuple[int, int, int], list[tuple[float, float, float]]] = {}
-                for point in points:
-                    key = tuple(math.floor(value / size) for value in point)
+                for point, bucket_point in zip(points, bucket_points):
+                    key = tuple(math.floor(value / size) for value in bucket_point)
                     buckets.setdefault(key, []).append(point)
                 candidate = [tuple(_mean_coordinate([point[a] for point in group]) for a in range(3))
                              for group in buckets.values()]

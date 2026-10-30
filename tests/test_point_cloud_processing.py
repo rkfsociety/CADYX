@@ -191,6 +191,16 @@ class PointCloudProcessingTests(unittest.TestCase):
         self.assertLess(len(result), len(points))
         self.assertTrue(all(math.isfinite(value) for point in result for value in point))
 
+    def test_geometric_simplification_handles_overflowing_cloud_extent(self):
+        # Opposite finite extremes overflow the raw bounding-box span.
+        points = [(x, y, 0.) for x in (-1e308, 0., 1e308)
+                  for y in (-1e308, 0., 1e308)]
+        result = process_points(points, "simplify", {"strategy": "geometric", "ratio": 40})
+        self.assertGreaterEqual(len(result), 3)
+        self.assertLess(len(result), len(points))
+        self.assertTrue(all(math.isfinite(value) for point in result for value in point))
+        self.assertTrue(all(-1e308 <= value <= 1e308 for point in result for value in point[:2]))
+
     def test_voxel_centroids_preserve_subnormal_coordinates(self):
         # Dividing each subnormal sample before summing rounds it to zero.
         tiny = math.ulp(0.0)
