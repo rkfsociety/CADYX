@@ -6,6 +6,15 @@ const path = require('node:path');
 const html = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
 const style = fs.readFileSync(path.join(__dirname, '../web/style.css'), 'utf8');
 const workspaceSource = fs.readFileSync(path.join(__dirname, '../web/ply-preview.js'), 'utf8');
+const turntableSource = fs.readFileSync(path.join(__dirname, '../web/turntable-controls.js'), 'utf8');
+assert.match(html, /id="turntable-control-status"[^>]*hidden/,
+  'the turntable status output starts hidden instead of showing helper copy');
+assert.doesNotMatch(html, /\stitle=/i,
+  'the panel markup has no native hover tooltips');
+assert.doesNotMatch(turntableSource, /Положение устарело|нажмите ↻|Нажмите ↻|Стол подключён/,
+  'the turntable does not show stale-state prompts or routine status chatter');
+assert.doesNotMatch(html, /folder-preview-hint|Перетаскивайте для поворота|Меньше секунд — быстрее/,
+  'the panel does not display generic preview or device tips');
 assert.match(html, /id="turntable-control-panel"[^>]*aria-labelledby="turntable-control-title"/);
 assert.match(style, /\.turntable-control-panel\s*\{[^}]*top:\s*12px;[^}]*right:\s*12px;[^}]*aspect-ratio:\s*1;/,
   'the square turntable controls are overlaid in the viewport upper-right corner');
@@ -22,7 +31,7 @@ const calls = [];
 const makeElement = () => {
   let text = '';
   return {
-    dataset: {}, value: '', disabled: false, attributes: {}, attributeWrites: {}, textWrites: 0,
+    dataset: {}, value: '', disabled: false, hidden: false, attributes: {}, attributeWrites: {}, textWrites: 0,
     get textContent() { return text; },
     set textContent(value) { this.textWrites += 1; text = value; },
     addEventListener(name, handler) { handlers.set(`${this.id || ''}:${name}`, handler); },
@@ -97,16 +106,8 @@ const waitUntil = async predicate => {
 (async () => {
   await wait();
   assert.equal(elements['turntable-angle'].textContent, '12.0°');
-  assert.equal(elements['viewport-scan-360'].title, 'Снять 24 кадра за полный оборот стола',
-    'the 15-degree step reports the matching 24-frame capture count');
-  elements['turntable-step'].value = '30';
-  await handlers.get('turntable-step:change')();
-  assert.equal(elements['viewport-scan-360'].title, 'Снять 12 кадров за полный оборот стола');
-  elements['turntable-step'].value = '5';
-  await handlers.get('turntable-step:change')();
-  assert.equal(elements['viewport-scan-360'].title, 'Снять 72 кадра за полный оборот стола');
-  elements['turntable-step'].value = '15';
-  await handlers.get('turntable-step:change')();
+  assert.equal(elements['turntable-control-status'].hidden, true,
+    'idle turntable state does not show helper text');
   assert.equal(calls.some(call => call.options.method === 'POST'), false,
     'opening the panel reads cached state without contacting or moving hardware');
   assert.equal(elements['turntable-speed'].value, '18', 'the closest safe speed preset remains selected');
@@ -150,6 +151,8 @@ const waitUntil = async predicate => {
   currentSpinState = 'running';
   await scheduledTimers.filter(timer => timer.delay === 250).at(-1).callback();
   await waitUntil(() => elements['turntable-spin'].textContent === '■ ОСТАНОВИТЬ ВРАЩЕНИЕ');
+  assert.equal(elements['turntable-control-status'].hidden, true,
+    'active rotation is represented by the control state, without redundant status copy');
   await handlers.get('turntable-control-refresh:click')();
   await waitUntil(() => JSON.parse(calls.filter(call => call.options.method === 'POST').at(-1).options.body).command === 'query');
   const spinTextWrites = elements['turntable-spin'].textWrites;

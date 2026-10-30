@@ -15,7 +15,6 @@
     const spinButton = document.querySelector('#turntable-spin');
     const scanButton = document.querySelector('#viewport-scan-360');
     const livePreviewButton = document.querySelector('#viewport-live-camera');
-    let scanButtonTitle = scanButton?.title || '';
     let scanActive = false;
     let spinState = 'idle';
     let tiltAtZero = false;
@@ -26,24 +25,13 @@
       device_id: window.CadyxDeviceSettings?.turntableDeviceId?.() || undefined,
       profile_id: window.CadyxDeviceSettings?.turntableProfileId?.() || undefined,
     });
-    const setStatus = (message, state = 'idle') => {
+    const setStatus = (message = '', state = 'idle') => {
       if (status.textContent !== message) status.textContent = message;
       if (status.dataset.state !== state) status.dataset.state = state;
+      status.hidden = !message;
     };
     const spinActive = () => spinState === 'starting' || spinState === 'running' || spinState === 'stopping';
     const livePreviewReady = () => livePreviewButton?.getAttribute('aria-pressed') === 'true';
-    const updateScanButtonTitle = () => {
-      if (!scanButton) return;
-      const stepDegrees = Number(step?.value);
-      const frameCount = Number.isInteger(stepDegrees) && stepDegrees > 0 && 360 % stepDegrees === 0
-        ? 360 / stepDegrees : 12;
-      const lastTwo = frameCount % 100;
-      const lastOne = frameCount % 10;
-      const frameWord = lastOne === 1 && lastTwo !== 11 ? 'кадр'
-        : lastOne >= 2 && lastOne <= 4 && (lastTwo < 12 || lastTwo > 14) ? 'кадра' : 'кадров';
-      scanButtonTitle = `Снять ${frameCount} ${frameWord} за полный оборот стола`;
-      if (!spinActive()) scanButton.title = scanButtonTitle;
-    };
     const setBusy = () => {
       const spinning = spinActive();
       for (const selector of ['#turntable-control-refresh', '#turntable-step', '#turntable-speed',
@@ -67,9 +55,6 @@
         : spinState === 'stopping' ? 'ОСТАНОВКА…'
           : spinning ? '■ ОСТАНОВИТЬ ВРАЩЕНИЕ' : '▶ ПОСТОЯННОЕ ВРАЩЕНИЕ';
       if (spinButton.textContent !== spinLabel) spinButton.textContent = spinLabel;
-      const spinTitle = !spinning && !livePreviewReady()
-        ? 'Сначала включите предпросмотр сканера' : '';
-      if (spinButton.title !== spinTitle) spinButton.title = spinTitle;
       if (scanButton) {
         const busyValue = String(spinning);
         if (scanButton.dataset.turntableBusy !== busyValue) scanButton.dataset.turntableBusy = busyValue;
@@ -81,8 +66,6 @@
         if (scanButton.getAttribute('aria-disabled') !== captureLocked) {
           scanButton.setAttribute('aria-disabled', captureLocked);
         }
-        const captureTitle = spinning ? 'Остановите постоянное вращение перед 360°-сканированием' : scanButtonTitle;
-        if (scanButton.title !== captureTitle) scanButton.title = captureTitle;
         if (lockChanged) window.cadyxSyncCaptureButton?.();
       }
     };
@@ -135,17 +118,8 @@
         spinState = control.spin?.state || 'idle';
         readPosition(control.spin);
         readPosition(control.position);
-        if (scanActive) setStatus('Сканирование активно · управление заблокировано', 'error');
-        else if (spinState === 'starting') setStatus(control.spin?.message || 'Подключаюсь к столу…', 'running');
-        else if (spinState === 'running') setStatus('Стол вращается · нажмите «Стоп»', 'running');
-        else if (spinState === 'stopping') setStatus('Остановка вращения…', 'running');
-        else if (spinState === 'failed') setStatus(control.spin.message || 'Драйвер остановил вращение с ошибкой.', 'error');
-        else if (!tiltAtZero) setStatus('Для постоянного вращения установите наклон 0°');
-        else if (Number.isFinite(control.position?.age_seconds) && control.position.age_seconds > 6)
-          setStatus('Положение устарело · нажмите ↻ для обновления');
-        else if (control.position?.command === 'query') setStatus('Стол подключён');
-        else if (!control.position) setStatus('Нажмите ↻ для чтения положения стола');
-        else setStatus('Положение стола недоступно', 'error');
+        if (spinState === 'failed') setStatus(control.spin.message || 'Драйвер остановил вращение с ошибкой.', 'error');
+        else setStatus();
         setBusy();
       } catch (error) {
         if (!quiet) setStatus(error.message, 'error');
@@ -161,7 +135,7 @@
       if (pending) return null;
       pending = true;
       setBusy();
-      setStatus(action === 'spin-start' ? 'Запускаю постоянное вращение…' : 'Выполняю команду…');
+      setStatus();
       try {
         const payload = await fetchJson('/api/v1/scanner/turntable/control', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -182,13 +156,8 @@
         readPosition(result);
         if (action === 'spin-start') spinState = result.state || 'failed';
         if (action === 'spin-stop') spinState = result.state || 'idle';
-        if (action === 'spin-start' && spinState === 'starting') setStatus('Подключаюсь к столу…', 'running');
-        else if (action === 'spin-start' && spinState === 'running') setStatus('Стол вращается · нажмите «Стоп»', 'running');
-        else if (action === 'spin-stop' && spinState === 'stopping') setStatus('Остановка вращения…', 'running');
-        else if (action === 'spin-stop') setStatus('Вращение остановлено');
-        else if (result.command === 'query') setStatus('Стол подключён');
-        else if (action === 'speed') setStatus(`Скорость задана: один оборот за ${value} с`);
-        else setStatus(result.output?.split(/\r?\n/).filter(Boolean).at(-1) || 'Команда выполнена');
+        if (spinState === 'failed') setStatus(result.message || result.output || 'Драйвер остановил вращение с ошибкой.', 'error');
+        else setStatus();
         return result;
       } catch (error) {
         setStatus(error.message, 'error');
@@ -204,8 +173,6 @@
     panel.querySelector('#turntable-control-refresh').addEventListener('click', () => void command('query'));
     panel.querySelector('#turntable-rotate-left').addEventListener('click', () => void command('rotate', -Number(step.value)));
     panel.querySelector('#turntable-rotate-right').addEventListener('click', () => void command('rotate', Number(step.value)));
-    updateScanButtonTitle();
-    step?.addEventListener('change', updateScanButtonTitle);
     speed.value = String(window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.() || 18);
     speed.addEventListener('change', () => void command('speed', Number(speed.value)));
     tiltTarget.addEventListener('input', () => { tiltTargetValue.textContent = `${tiltTarget.value}°`; });

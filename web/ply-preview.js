@@ -429,11 +429,6 @@ function updateWorkspaceControls() {
     const workspaceNavigation = Boolean(button.dataset.workspaceView);
     const projectNavigation = button.dataset.projectNavigation === "true";
     button.disabled = (!projectsNavigation && !projectNavigation && !workspaceNavigation && !available) || filesUnavailable;
-    if (button.dataset.workspaceView) {
-      button.title = projectsNavigation ? ""
-        : lockReason || (filesUnavailable
-        ? "Доступно, когда агент освободит панель и завершит текущую работу" : "");
-    }
   });
   projectFileUploadButton.disabled = !canOpenFilesView() || primaryGrid.dataset.view !== "files"
     || Boolean(selectedProjectFileFolderName || selectedProjectScanRunId);
@@ -618,7 +613,6 @@ function renderValidationRecords(records) {
     if (Number.isFinite(createdAt.getTime())) {
       time.dateTime = createdAt.toISOString();
       time.textContent = formatActivityTimestamp(record.created_at);
-      time.title = createdAt.toLocaleString("ru-RU");
     } else {
       time.textContent = "Время неизвестно";
     }
@@ -773,7 +767,6 @@ function renderCurrentProgress(dashboard, value, lock = null) {
         : completedWorkflowWithoutJournal ? "ЗАВЕРШЁННЫЙ ОТЧЁТ" : "ПОСЛЕДНЕЕ ДЕЙСТВИЕ";
   const actionElement = $("#activity-title");
   actionElement.textContent = actionText;
-  actionElement.title = actionText;
 
   const capabilityDetail = $("#workflow-capability-detail");
   const capability = activity?.detail;
@@ -802,7 +795,6 @@ function renderCurrentProgress(dashboard, value, lock = null) {
   const taskState = $("#workflow-current-task-state");
   if (shownTask) {
     taskElement.textContent = shownTask.title;
-    taskElement.title = shownTask.title;
     const isTask = tasks.includes(shownTask);
     const isProgress = shownTask === progressTask;
     const shownState = shownTask.state;
@@ -817,7 +809,6 @@ function renderCurrentProgress(dashboard, value, lock = null) {
     taskRow.hidden = normalizedTask === normalizedAction;
   } else {
     taskElement.textContent = isWorking ? "Текущая задача не указана" : "Нет выполняемой задачи";
-    taskElement.title = "";
     taskState.textContent = "";
     taskState.dataset.state = "idle";
     $("#workflow-task-label").textContent = "ТЕКУЩАЯ ЗАДАЧА";
@@ -849,7 +840,6 @@ function renderWorkflowHistory(value) {
     const title = document.createElement("span");
     title.className = "workflow-history-title";
     title.textContent = item.title;
-    title.title = item.title;
     const time = document.createElement("time");
     time.className = "workflow-history-time";
     if (item.completedAt) {
@@ -857,10 +847,6 @@ function renderWorkflowHistory(value) {
       if (Number.isFinite(completedAt.getTime())) {
         time.dateTime = completedAt.toISOString();
         time.textContent = formatActivityTimestamp(item.completedAt);
-        time.title = completedAt.toLocaleString("ru-RU", {
-          year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
-          hourCycle: "h23",
-        });
       }
     }
     row.append(state, title, time);
@@ -1176,7 +1162,6 @@ function renderProjectCard(entry) {
   heading.className = "workspace-project-card-heading";
   const name = document.createElement("h3");
   name.textContent = project.name;
-  name.title = project.name;
   heading.append(name);
 
   const more = document.createElement("details");
@@ -1184,7 +1169,6 @@ function renderProjectCard(entry) {
   const moreButton = document.createElement("summary");
   moreButton.textContent = "⋮";
   moreButton.setAttribute("aria-label", `Действия с проектом «${project.name}»`);
-  moreButton.title = "Действия с проектом";
   const morePopover = document.createElement("div");
   morePopover.className = "workspace-project-menu-popover";
   const remove = document.createElement("button");
@@ -1248,7 +1232,6 @@ function renderProjectCard(entry) {
   const folderButton = document.createElement("summary");
   folderButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
   folderButton.setAttribute("aria-label", `Переместить проект «${project.name}» в папку`);
-  folderButton.title = "Папка проекта";
   const folderPopover = document.createElement("div");
   folderPopover.className = "workspace-project-folder-popover";
   const folderLabel = document.createElement("label");
@@ -1619,10 +1602,10 @@ async function loadFiles(context) {
     updateFolderInspector();
     const hasScanRuns = context.type === "project" && !context.folderName && !context.scanRunId
       && (projectFileFolders.length > 0 || folderFiles.some((file) => scanRunIdForFile(file.name)));
-    $("#folder-preview-title").textContent = hasScanRuns ? "Выберите папку серии сканирования" : "3D-файлов нет";
+    $("#folder-preview-title").textContent = hasScanRuns ? "Серия сканирования" : "3D-файлов нет";
     $("#folder-preview-info").textContent = "";
     folderPreviewPlaceholder.hidden = false;
-    folderPreviewPlaceholder.textContent = hasScanRuns ? "Откройте папку серии, чтобы увидеть файлы 3D-моделей."
+    folderPreviewPlaceholder.textContent = hasScanRuns ? "Нет файла для предпросмотра."
       : context.type === "folder" ? "В этой папке пока нет файлов 3D-моделей."
         : "В этом проекте пока нет файлов 3D-моделей.";
   }
@@ -1724,7 +1707,6 @@ function renderFolderFiles() {
       copy.className = "folder-file-copy";
       copy.dataset.copyFileName = file.name;
       copy.setAttribute("aria-label", `Скопировать имя файла ${file.name}`);
-      copy.title = "Копировать имя файла с расширением";
       copy.disabled = !canOpenFilesView(selectedProjectId);
       copy.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>';
       row.append(copy);
@@ -1733,7 +1715,6 @@ function renderFolderFiles() {
       rename.className = "folder-file-rename";
       rename.dataset.renameFileName = file.name;
       rename.setAttribute("aria-label", `Переименовать ${file.name}`);
-      rename.title = "Переименовать файл";
       rename.disabled = !canOpenFilesView(selectedProjectId);
       rename.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="m16.5 3.5 4 4L8 20l-5 1 1-5Z"/></svg>';
       row.append(rename);
@@ -1779,16 +1760,10 @@ function updateProjectModelFileImportButton() {
 
   if (projectModelFileImportInFlight) {
     button.textContent = "Импортирую…";
-    button.title = "Добавляю 3D-файл в дерево модели и историю проекта.";
   } else if (alreadyImported) {
     button.textContent = "Уже в дереве";
-    button.title = "Этот файл уже импортирован в дерево модели.";
   } else {
     button.textContent = "Добавить в дерево";
-    button.title = !eligible ? "Дождитесь загрузки PLY для определения типа геометрии."
-      : geometry && geometry.vertexCount < 3 ? "В PLY должно быть не менее 3 вершин."
-      : !canOpenFilesView(selectedProjectId) ? "Дождитесь освобождения проекта."
-      : "Исходный файл сохранится; импорт появится в дереве модели и истории.";
   }
 }
 
@@ -2660,7 +2635,6 @@ function renderObjectTree(objects) {
         input.dataset.featureId = feature.id;
         input.dataset.parameter = field.name;
         input.dataset.originalValue = String(field.value);
-        input.title = field.label;
         label.append(input);
         fields.append(label);
       }
@@ -2676,7 +2650,6 @@ function renderObjectTree(objects) {
       inputCell.className = "geometry-not-editable";
     }
     tr.append(nameCell, currentCell, inputCell);
-    tr.title = body.id;
     root.append(tr);
   }
   const hasBodies = root.children.length > 0;

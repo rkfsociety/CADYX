@@ -224,7 +224,7 @@ const viewport = element();
 const view = sandbox.window.CadyxScanView.initialize({ cloudButton, meshButton, viewport, viewer, getModelGeometry, meshReady: true }, undefined, fetchPreview);
 cloudButton.click();
 await new Promise(resolve => setImmediate(resolve));
-assert.equal(cloudButton.attributes["aria-pressed"], "true", cloudButton.title);
+assert.equal(cloudButton.attributes["aria-pressed"], "true");
 assert.equal(viewport.dataset.scanPreview, "false");
 assert.equal(viewport.dataset.scanPreviewMode, "cloud");
 assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
@@ -241,7 +241,7 @@ assert.equal(viewerLoads.at(-1).geometry, baseGeometry);
 cloudButton.click();
 await new Promise(resolve => setImmediate(resolve));
 assert.equal(viewerLoads.at(-1).geometry.positions.length, 9);
-assert.match(cloudButton.title, /Скрыть/);
+assert.equal(cloudButton.title, "", "preview state does not add a tooltip");
 view.setOpen(false);
 assert.equal(viewport.dataset.scanPreview, "false");
 assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0,

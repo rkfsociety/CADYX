@@ -650,7 +650,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
         <a id="brand-link" class="brand" href="/" aria-label="CADYX — проекты"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.7 21 7.8v8.4l-9 5.1-9-5.1V7.8l9-5.1Z M3 7.8l9 5.1 9-5.1M12 12.9v8.4"/></svg><span>CADYX</span></a>
       </div>
       <div class="topbar-sync">
-        <span id="api-light" class="project-light" role="status" aria-label="Состояние подключения не подтверждено" title="Состояние подключения не подтверждено"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 18h10a4 4 0 0 0 .4-8A6 6 0 0 0 6.1 8.5 4.5 4.5 0 0 0 7 18Z"></path></svg></span>
+        <span id="api-light" class="project-light" role="status" aria-label="Состояние подключения не подтверждено"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 18h10a4 4 0 0 0 .4-8A6 6 0 0 0 6.1 8.5 4.5 4.5 0 0 0 7 18Z"></path></svg></span>
         <div class="topbar-project-copy">
           <span id="api-status-label" class="topbar-label">СВЯЗЬ С СЕРВЕРОМ…</span>
           <strong id="api-sync-time" class="document-title">—</strong>
@@ -661,7 +661,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
         <div class="topbar-project-copy">
           <span id="document-kind" class="topbar-label">ПРОЕКТ</span>
           <strong id="document-title" class="document-title">Выберите проект</strong>
-          <div class="project-id-copy-row"><small id="project-short-id" class="project-short-id">—</small><button id="copy-project-id" class="copy-project-id" type="button" disabled title="Скопировать UUID проекта" aria-label="Скопировать UUID проекта">Копировать UUID</button></div>
+          <div class="project-id-copy-row"><small id="project-short-id" class="project-short-id">—</small><button id="copy-project-id" class="copy-project-id" type="button" disabled aria-label="Скопировать UUID проекта">Копировать UUID</button></div>
         </div>
         <div class="header-revision"><span class="topbar-label">РЕВИЗИЯ</span><strong id="document-revision">—</strong></div>
       </div>
@@ -672,8 +672,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
       <main class="workspace">
         <section id="no-selection" class="empty-workspace" hidden>
           <div class="empty-mark" aria-hidden="true">◇</div>
-          <h1>Ожидание модели</h1>
-          <p>Выберите проект, чтобы открыть его модель.</p>
+          <h1>Модель не выбрана</h1>
           <button id="open-projects" class="button" type="button">ВЫБРАТЬ ПРОЕКТ</button>
         </section>
 
@@ -687,8 +686,8 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
               <button class="nav-item" type="button" data-workspace-view="manufacturing"><span class="nav-index">04</span><span class="nav-copy"><strong>Производство</strong><small>Подготовка производства</small></span></button>
               <button class="nav-item" type="button" data-workspace-view="scanning"><span class="nav-index">05</span><span class="nav-copy"><strong>Сканирование</strong><small>Съёмка и просмотр скана</small></span></button>
               <button class="nav-item" type="button" data-workspace-view="activity"><span class="nav-index">06</span><span class="nav-copy"><strong>Активность</strong><small>Состояние агента</small></span></button>
-              <button id="files-nav" class="nav-item" type="button" data-workspace-view="files" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">07</span><span class="nav-copy"><strong>Файлы</strong><small>Файлы проекта</small></span></button>
-              <button id="projects-nav" class="nav-item" type="button" data-workspace-view="projects" disabled title="Доступно, когда агент освободит панель"><span class="nav-index">08</span><span class="nav-copy"><strong>Проекты</strong><small>Сохранённые проекты</small></span></button>
+              <button id="files-nav" class="nav-item" type="button" data-workspace-view="files" disabled><span class="nav-index">07</span><span class="nav-copy"><strong>Файлы</strong><small>Файлы проекта</small></span></button>
+              <button id="projects-nav" class="nav-item" type="button" data-workspace-view="projects" disabled><span class="nav-index">08</span><span class="nav-copy"><strong>Проекты</strong><small>Сохранённые проекты</small></span></button>
             </nav>
             <div class="sidebar-project"><span class="section-label">АКТИВНЫЙ РЕСУРС</span><strong id="sidebar-project-name">—</strong></div>
           </aside>
@@ -700,18 +699,18 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                   <div><h2 id="model-title">3D-МОДЕЛЬ</h2><span class="viewport-mode">ОРТОГОНАЛЬНАЯ ПРОЕКЦИЯ</span></div>
                   <div class="model-toolbar" aria-label="Инструменты просмотра 3D-модели">
                     <div id="viewport-camera-presets" class="viewport-camera-presets" role="group" aria-label="Стандартные ракурсы">
-                      <button class="viewport-icon-button" type="button" data-camera-preset="isometric" aria-label="Изометрический вид" title="Изометрический вид" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 8 4.5v9.3l-8 4.6-8-4.6V7.3l8-4.5Z M4.2 7.4 12 12l7.8-4.6M12 12v9"/></svg></button>
-                      <button class="viewport-icon-button" type="button" data-camera-preset="front" aria-label="Вид спереди" title="Вид спереди" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h14v15H5z M8 7.5h8v9H8z"/></svg></button>
-                      <button class="viewport-icon-button" type="button" data-camera-preset="right" aria-label="Вид справа" title="Вид справа" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 4.5 12 2v13L7 17.5v-13Z M7 4.5 4 6v13l3-1.5M19 6.5l-3 1.7v12.1"/></svg></button>
-                      <button class="viewport-icon-button" type="button" data-camera-preset="top" aria-label="Вид сверху" title="Вид сверху" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Z M3 8v8l9 5 9-5V8M12 13v8"/></svg></button>
+                      <button class="viewport-icon-button" type="button" data-camera-preset="isometric" aria-label="Изометрический вид" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 8 4.5v9.3l-8 4.6-8-4.6V7.3l8-4.5Z M4.2 7.4 12 12l7.8-4.6M12 12v9"/></svg></button>
+                      <button class="viewport-icon-button" type="button" data-camera-preset="front" aria-label="Вид спереди" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h14v15H5z M8 7.5h8v9H8z"/></svg></button>
+                      <button class="viewport-icon-button" type="button" data-camera-preset="right" aria-label="Вид справа" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 4.5 12 2v13L7 17.5v-13Z M7 4.5 4 6v13l3-1.5M19 6.5l-3 1.7v12.1"/></svg></button>
+                      <button class="viewport-icon-button" type="button" data-camera-preset="top" aria-label="Вид сверху" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Z M3 8v8l9 5 9-5V8M12 13v8"/></svg></button>
                     </div>
                     <span class="viewport-toolbar-divider" aria-hidden="true"></span>
-                    <button id="viewport-four-views" class="button viewport-four-views-button" type="button" aria-label="Показать четыре вида" title="Показать четыре вида" aria-pressed="false"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></span><span class="toolbar-label">4 ВИДА</span></button>
-                    <button id="viewport-fit" class="button viewport-fit-button" type="button" aria-label="Вписать модель в область просмотра" title="Вписать модель в область просмотра"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 4H4v4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 9 4 4M15 9l5-5M15 15l5 5M9 15l-5 5"/></svg></span><span class="toolbar-label">ВПИСАТЬ МОДЕЛЬ</span></button>
-                    <button id="viewport-live-scan" class="button viewport-scan-mode-button viewport-live-scan-button" type="button" aria-label="Облако точек" title="Показать облако точек" aria-pressed="false">Облако точек</button>
-                    <button id="viewport-scan-mesh" class="button viewport-scan-mode-button viewport-scan-mesh-button" type="button" aria-label="Сетка скана" title="Сетка станет доступна после обработки облака точек" aria-pressed="false">Сетка</button>
-                    <button id="viewport-scan-360" class="button" type="button" title="Снять 24 кадра за полный оборот стола">Сканировать 360°</button>
-                    <button id="viewport-live-camera" class="button viewport-scan-mode-button viewport-live-camera-button" type="button" aria-label="Предпросмотр сканера в реальном времени" title="Показать сканер в реальном времени" aria-pressed="false">Предпросмотр</button>
+                    <button id="viewport-four-views" class="button viewport-four-views-button" type="button" aria-label="Показать четыре вида" aria-pressed="false"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></span><span class="toolbar-label">4 ВИДА</span></button>
+                    <button id="viewport-fit" class="button viewport-fit-button" type="button" aria-label="Вписать модель в область просмотра"><span class="viewport-mode-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 4H4v4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 9 4 4M15 9l5-5M15 15l5 5M9 15l-5 5"/></svg></span><span class="toolbar-label">ВПИСАТЬ МОДЕЛЬ</span></button>
+                    <button id="viewport-live-scan" class="button viewport-scan-mode-button viewport-live-scan-button" type="button" aria-label="Облако точек" aria-pressed="false">Облако точек</button>
+                    <button id="viewport-scan-mesh" class="button viewport-scan-mode-button viewport-scan-mesh-button" type="button" aria-label="Сетка скана" aria-pressed="false">Сетка</button>
+                    <button id="viewport-scan-360" class="button" type="button">Сканировать 360°</button>
+                    <button id="viewport-live-camera" class="button viewport-scan-mode-button viewport-live-camera-button" type="button" aria-label="Предпросмотр сканера в реальном времени" aria-pressed="false">Предпросмотр</button>
                     <button id="scanning-devices" class="button" type="button">Устройства</button><span id="viewport-scan-360-status" role="status" aria-live="polite"></span>
                   </div>
                 </div>
@@ -720,14 +719,14 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                   <output id="scanner-map-alignment" class="scanner-map-alignment" aria-label="Сопоставление точек с картой стола" hidden>Карта: —</output>
                   <output id="scanner-preview-fps" class="scanner-preview-fps" aria-label="Частота кадров сенсора" hidden>FPS —</output>
                   <aside id="turntable-control-panel" class="turntable-control-panel" aria-labelledby="turntable-control-title">
-                    <header class="turntable-control-heading"><h2 id="turntable-control-title">ПОВОРОТНЫЙ СТОЛ</h2><button id="turntable-control-refresh" class="turntable-icon-button" type="button" aria-label="Обновить положение стола" title="Обновить положение">↻</button></header>
+                    <header class="turntable-control-heading"><h2 id="turntable-control-title">ПОВОРОТНЫЙ СТОЛ</h2><button id="turntable-control-refresh" class="turntable-icon-button" type="button" aria-label="Обновить положение стола">↻</button></header>
                     <div class="turntable-control-position"><span>ПОВОРОТ <strong id="turntable-angle">—</strong></span><span>НАКЛОН <strong id="turntable-tilt">—</strong></span></div>
                     <div class="turntable-control-row"><label for="turntable-step">ШАГ</label><select id="turntable-step" aria-label="Угол поворота"><option value="5">5°</option><option value="15" selected>15°</option><option value="30">30°</option></select><button id="turntable-rotate-left" class="button turntable-motion-button" type="button" aria-label="Повернуть против часовой стрелки">−</button><button id="turntable-rotate-right" class="button turntable-motion-button" type="button" aria-label="Повернуть по часовой стрелке">+</button></div>
-                    <div class="turntable-control-row"><label for="turntable-speed">ОБОРОТ</label><select id="turntable-speed" aria-label="Скорость вращения"><option value="18">18 с · быстро</option><option value="30">30 с</option><option value="45">45 с</option><option value="60">60 с</option><option value="90">90 с · медленно</option></select></div>
+                    <div class="turntable-control-row"><label for="turntable-speed">ОБОРОТ</label><select id="turntable-speed" aria-label="Скорость вращения"><option value="18">18 с</option><option value="30">30 с</option><option value="45">45 с</option><option value="60">60 с</option><option value="90">90 с</option></select></div>
                     <div class="turntable-control-tilt"><label for="turntable-tilt-target">НАКЛОН <output id="turntable-tilt-target-value">0°</output></label><input id="turntable-tilt-target" type="range" min="-10" max="10" step="1" value="0" aria-label="Целевой наклон стола"><button id="turntable-tilt-apply" class="button" type="button">ЗАДАТЬ</button></div>
                     <div class="turntable-control-actions"><button id="turntable-zero" class="button" type="button">В НОЛЬ</button><button id="turntable-stop" class="button turntable-stop-button" type="button">СТОП</button></div>
                     <button id="turntable-spin" class="button turntable-spin-button" type="button" aria-pressed="false">▶ ПОСТОЯННОЕ ВРАЩЕНИЕ</button>
-                    <output id="turntable-control-status" class="turntable-control-status" role="status" aria-live="polite">Проверка стола…</output>
+                    <output id="turntable-control-status" class="turntable-control-status" role="status" aria-live="polite" hidden></output>
                   </aside>
                 </div>
                 <footer class="viewport-footer" aria-label="Сводка модели">
@@ -739,13 +738,12 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                 <section class="panel folder-files-panel" aria-labelledby="folder-files-title">
                   <div class="folder-files-layout">
                     <div class="folder-files-left">
-                      <div class="panel-heading"><div><span class="panel-index">01</span><h2 id="folder-files-title">Содержимое папки</h2></div><div class="folder-files-actions"><span id="folder-file-count" class="subtle-count">0</span><input id="project-file-input" type="file" multiple hidden><button id="project-file-upload" class="button" type="button" disabled title="До 64 МиБ на файл; загрузка доступна в корень свободного проекта">Добавить файлы</button></div></div>
+                      <div class="panel-heading"><div><span class="panel-index">01</span><h2 id="folder-files-title">Содержимое папки</h2></div><div class="folder-files-actions"><span id="folder-file-count" class="subtle-count">0</span><input id="project-file-input" type="file" multiple hidden><button id="project-file-upload" class="button" type="button" disabled>Добавить файлы</button></div></div>
                       <nav id="folder-file-list" class="folder-file-list" aria-label="Список файлов"></nav>
                     </div>
                     <div class="folder-preview-area">
-                      <div class="folder-preview-heading"><div class="folder-preview-heading-copy"><strong id="folder-preview-title">Предпросмотр</strong><small id="folder-preview-info">Выберите файл проекта</small></div><button id="folder-import-model-file" class="button folder-import-model-file" type="button" hidden disabled>Добавить в дерево</button></div>
-                      <div class="folder-preview-stage"><canvas id="ply-preview-canvas" class="ply-preview-canvas" aria-label="3D-предпросмотр файла PLY" hidden></canvas><p id="folder-preview-placeholder" class="folder-preview-placeholder">Здесь появится предпросмотр файла</p></div>
-                      <p class="folder-preview-hint">Перетаскивайте для поворота · колесо для масштаба · двойной щелчок сбрасывает ракурс.</p>
+                      <div class="folder-preview-heading"><div class="folder-preview-heading-copy"><strong id="folder-preview-title">Предпросмотр</strong><small id="folder-preview-info"></small></div><button id="folder-import-model-file" class="button folder-import-model-file" type="button" hidden disabled>Добавить в дерево</button></div>
+                      <div class="folder-preview-stage"><canvas id="ply-preview-canvas" class="ply-preview-canvas" aria-label="3D-предпросмотр файла PLY" hidden></canvas><p id="folder-preview-placeholder" class="folder-preview-placeholder" hidden></p></div>
                     </div>
                   </div>
                 </section>
@@ -759,7 +757,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                   <p id="geometry-status" class="geometry-status" role="status" aria-live="polite" hidden></p>
                 </section>
                 <section id="workflow-panel" class="panel workflow-panel" aria-labelledby="workflow-title" tabindex="-1">
-                  <div class="panel-heading"><h2 id="workflow-title">ПРОГРЕСС</h2><div class="workflow-heading-actions"><span id="workflow-name" class="panel-note">РАБОТА НЕ НАЧАТА</span><button id="workflow-toggle" class="workflow-collapse-button" type="button" aria-expanded="false" aria-controls="workflow-current workflow-history" title="Развернуть прогресс" aria-label="Развернуть прогресс">+</button></div></div>
+                  <div class="panel-heading"><h2 id="workflow-title">ПРОГРЕСС</h2><div class="workflow-heading-actions"><span id="workflow-name" class="panel-note">РАБОТА НЕ НАЧАТА</span><button id="workflow-toggle" class="workflow-collapse-button" type="button" aria-expanded="false" aria-controls="workflow-current workflow-history" aria-label="Развернуть прогресс">+</button></div></div>
                   <div class="workflow-summary"><strong id="workflow-percent" class="workflow-percent">—</strong><div id="workflow-progress" class="workflow-progress" role="progressbar" aria-label="Прогресс выполнения" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" data-available="false"><i id="workflow-progress-bar"></i></div><span id="workflow-eta" class="workflow-eta">ПРОШЛО —</span></div>
                   <div id="workflow-current" class="workflow-current" data-state="idle" aria-live="polite"><div class="workflow-agent-state"><span id="agent-state" class="agent-state" data-state="idle">ОЖИДАЕТ</span><span id="workflow-action-label" class="workflow-current-label">ПОСЛЕДНЕЕ ДЕЙСТВИЕ</span></div><strong id="activity-title" class="workflow-action">Действий пока нет</strong><div id="workflow-capability-detail" class="workflow-capability-detail" hidden></div><div id="workflow-task-row" class="workflow-task" hidden><span id="workflow-task-label" class="workflow-current-label">ТЕКУЩАЯ ЗАДАЧА</span><strong id="workflow-current-task">Нет выполняемой задачи</strong><span id="workflow-current-task-state" class="workflow-task-state"></span></div></div>
                   <div id="workflow-history" class="workflow-history"><div class="workflow-history-heading"><span>ИСТОРИЯ ДЕЙСТВИЙ</span><span id="workflow-history-count" class="workflow-current-label">0</span></div><ol id="workflow-history-list" class="workflow-history-list"></ol><p id="workflow-history-empty" class="workflow-history-empty">Завершённые действия появятся здесь.</p></div>
@@ -776,7 +774,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                   <div class="projects-toolbar">
                     <label class="visually-hidden" for="projects-search">Поиск проектов</label><input id="projects-search" type="search" placeholder="Поиск проектов…" autocomplete="off">
                     <label for="projects-sort">Сортировка:</label><select id="projects-sort" aria-label="Сортировка проектов"><option value="name">Имя</option><option value="modified-desc" selected>Изменение ↓</option><option value="modified-asc">Изменение ↑</option></select>
-                    <div class="projects-layout-toggle" role="group" aria-label="Вид проектов"><button id="projects-grid-view" class="projects-layout-button" type="button" aria-label="Показать сеткой" aria-pressed="true" title="Сетка"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></button><button id="projects-list-view" class="projects-layout-button" type="button" aria-label="Показать списком" aria-pressed="false" title="Список"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h11M9 12h11M9 19h11M4 5h.01M4 12h.01M4 19h.01"/></svg></button></div>
+                    <div class="projects-layout-toggle" role="group" aria-label="Вид проектов"><button id="projects-grid-view" class="projects-layout-button" type="button" aria-label="Показать сеткой" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></button><button id="projects-list-view" class="projects-layout-button" type="button" aria-label="Показать списком" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h11M9 12h11M9 19h11M4 5h.01M4 12h.01M4 19h.01"/></svg></button></div>
                     <button id="create-project" class="button" type="button" data-project-navigation="true">Новый проект</button>
                     <button id="create-project-group" class="button projects-create-group" type="button">Новая папка</button>
                   </div>
@@ -831,20 +829,19 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
         </div>
         <section id="device-panel-scanner" class="device-settings-panel" role="tabpanel" aria-labelledby="device-tab-scanner" data-device-panel="scanner">
           <label class="device-settings-field" for="scanner-device-select">Подключённый USB-сканер</label>
-          <select id="scanner-device-select" class="device-settings-select"><option value="">Нажмите «Обновить список»</option></select>
-          <p class="device-settings-note">Для разных сканеров требуется отдельная калибровка Q.bin и масштаба глубины.</p>
-          <p id="scanner-calibration-status" class="device-settings-note" role="status" aria-live="polite">Калибровка ещё не загружена.</p>
+          <select id="scanner-device-select" class="device-settings-select"><option value="">—</option></select>
+          <p id="scanner-calibration-status" class="device-settings-note" role="status" aria-live="polite"></p>
           <span class="device-settings-field">Файл калибровки Q.bin</span>
           <button id="scanner-q-matrix-replace" class="button" type="button">ВЫБРАТЬ ДРУГОЙ Q.BIN</button>
           <input id="scanner-q-matrix" class="device-settings-file" type="file" accept=".bin,application/octet-stream" hidden>
           <label class="device-settings-field" for="scanner-depth-scale">Масштаб глубины (мм на единицу Y16)</label>
-          <input id="scanner-depth-scale" class="device-settings-number" type="number" min="0.0000001" step="any" inputmode="decimal" placeholder="Введите значение из калибровки">
+          <input id="scanner-depth-scale" class="device-settings-number" type="number" min="0.0000001" step="any" inputmode="decimal">
         </section>
         <section id="device-panel-turntable" class="device-settings-panel" role="tabpanel" aria-labelledby="device-tab-turntable" data-device-panel="turntable" hidden>
           <label class="device-settings-field" for="turntable-device-select">Подключённый стол Bluetooth LE</label>
-          <select id="turntable-device-select" class="device-settings-select"><option value="">Нажмите «Обновить список»</option></select>
+          <select id="turntable-device-select" class="device-settings-select"><option value="">—</option></select>
           <label class="device-settings-field" for="turntable-rotation-period">Период полного оборота</label>
-          <div class="device-settings-control"><select id="turntable-rotation-period"><option value="18">18 с · максимум</option><option value="30">30 с</option><option value="45">45 с</option><option value="60">60 с</option><option value="90">90 с · минимум</option></select><span>Меньше секунд — быстрее вращение.</span></div>
+          <div class="device-settings-control"><select id="turntable-rotation-period"><option value="18">18 с</option><option value="30">30 с</option><option value="45">45 с</option><option value="60">60 с</option><option value="90">90 с</option></select></div>
         </section>
         <footer class="device-settings-footer"><span id="device-settings-status" role="status" aria-live="polite"></span><div><button id="device-settings-refresh" class="button" type="button">ОБНОВИТЬ СПИСОК</button><button id="device-settings-save" class="button" type="button">СОХРАНИТЬ</button></div></footer>
       </div>
@@ -903,7 +900,7 @@ window.addEventListener("DOMContentLoaded", () => {
   tree.innerHTML = `
     <div class="cad-tree-heading">
       <strong id="cad-tree-title">Дерево модели</strong>
-      <button class="cad-tree-collapse" type="button" title="Свернуть дерево модели" aria-label="Свернуть дерево модели">‹</button>
+      <button class="cad-tree-collapse" type="button" aria-label="Свернуть дерево модели">‹</button>
     </div>
     <div class="cad-tree-search"><input type="search" placeholder="Поиск по элементам…" aria-label="Поиск по дереву модели"></div>
     <div class="cad-tree-scroll">
@@ -979,8 +976,7 @@ window.addEventListener("DOMContentLoaded", () => {
     detail.dataset.treeCollapsed = String(collapsed);
     collapseTree.textContent = collapsed ? "›" : "‹";
     const treeKind = document.querySelector("#primary-grid")?.dataset.view === "scanning" ? "дерево сканирования" : "дерево модели";
-    collapseTree.title = `${collapsed ? "Развернуть" : "Свернуть"} ${treeKind}`;
-    collapseTree.setAttribute("aria-label", collapseTree.title);
+    collapseTree.setAttribute("aria-label", `${collapsed ? "Развернуть" : "Свернуть"} ${treeKind}`);
     requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
   });
 
@@ -1036,8 +1032,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const renderWorkflowToggle = () => {
     const collapsed = workflow.dataset.collapsed !== "false";
     workflowToggle.textContent = collapsed ? "+" : "−";
-    workflowToggle.title = collapsed ? "Развернуть прогресс" : "Свернуть прогресс";
-    workflowToggle.setAttribute("aria-label", workflowToggle.title);
+    workflowToggle.setAttribute("aria-label", collapsed ? "Развернуть прогресс" : "Свернуть прогресс");
     workflowToggle.setAttribute("aria-expanded", String(!collapsed));
   };
   const setWorkflowCollapsed = (collapsed) => { workflow.dataset.collapsed = String(Boolean(collapsed)); renderWorkflowToggle(); };
@@ -1049,8 +1044,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const next = Boolean(enabled) && grid.dataset.view === "overview";
     grid.dataset.fourViews = String(next);
     fourViewsButton.setAttribute("aria-pressed", String(next));
-    fourViewsButton.title = next ? "Вернуться к одному 3D-виду" : "Показать четыре вида";
-    fourViewsButton.setAttribute("aria-label", fourViewsButton.title);
+    fourViewsButton.setAttribute("aria-label", next ? "Вернуться к одному 3D-виду" : "Показать четыре вида");
     if (next) grid.appendChild(orthographic);
     else if (orthographic.parentElement !== inspector) inspector.appendChild(orthographic);
     requestViewerLayout();

@@ -51,8 +51,8 @@
       panel.hidden = panel.dataset.devicePanel !== activeDevice;
     }
   };
-  const options = (select, list, selectedId, placeholder) => {
-    select.replaceChildren(new Option(placeholder, ''));
+  const options = (select, list, selectedId) => {
+    select.replaceChildren(new Option('—', ''));
     const profileCounts = new Map();
     for (const device of list) {
       profileCounts.set(device.profile_name, (profileCounts.get(device.profile_name) || 0) + 1);
@@ -73,12 +73,8 @@
     const scanner = devices.scanners.find(item => item.device_id === scannerSelect.value);
     depthScale.value = '';
     depthScale.readOnly = false;
-    if (!scanner) {
-      calibrationStatus.textContent = 'Выберите подключённый сканер.';
-      return;
-    }
-    if (!scanner.calibrated) {
-      calibrationStatus.textContent = 'Для этого сканера загрузите его Q.bin и укажите масштаб глубины.';
+    if (!scanner || !scanner.calibrated) {
+      calibrationStatus.textContent = '';
       return;
     }
     try {
@@ -88,7 +84,7 @@
       if (!response.ok) throw new Error(payload.message || payload.error || 'Не удалось загрузить калибровку.');
       depthScale.value = String(payload.depth_scale_mm_per_raw_unit);
       depthScale.readOnly = true;
-      calibrationStatus.textContent = `Q.bin уже выбрана и будет использована · масштаб ${depthScale.value} мм/единицу Y16.`;
+      calibrationStatus.textContent = `Q.bin · масштаб ${depthScale.value} мм/единицу Y16`;
     } catch (error) {
       if (request !== calibrationRequest) return;
       calibrationStatus.textContent = error.message;
@@ -153,8 +149,8 @@
       if (!response.ok) throw new Error(payload.message || payload.error || 'Не удалось найти устройства.');
       devices = { scanners: payload.scanners || [], turntables: payload.turntables || [] };
       const saved = read();
-      options(scannerSelect, devices.scanners, saved.scannerDeviceId, 'Выберите подключённый сканер');
-      options(tableSelect, devices.turntables, saved.turntableDeviceId, 'Выберите подключённый стол');
+      options(scannerSelect, devices.scanners, saved.scannerDeviceId);
+      options(tableSelect, devices.turntables, saved.turntableDeviceId);
       status.textContent = `Найдено: сканеров ${devices.scanners.length}, столов ${devices.turntables.length}.`;
       await updateCalibrationStatus();
       await updateTurntableSettings();
@@ -177,7 +173,7 @@
     calibrationRequest += 1;
     depthScale.value = '';
     depthScale.readOnly = false;
-    if (qFile.files?.length) calibrationStatus.textContent = `Выбран файл ${qFile.files[0].name}. Укажите масштаб глубины.`;
+    if (qFile.files?.length) calibrationStatus.textContent = `Q.bin: ${qFile.files[0].name}`;
     else updateCalibrationStatus();
   });
   open.addEventListener('click', () => {

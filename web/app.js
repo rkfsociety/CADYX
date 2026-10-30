@@ -181,13 +181,13 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     style.textContent += '.primary-grid[data-view="scanning"] .cad3-overlay{display:none!important}';
     document.head.appendChild(style);
     if(!$('.cad3-headrail')){const h=document.createElement('div');h.className='cad3-headrail';h.innerHTML=I.model;$('.topbar')?.prepend(h)}
-    if(!$('.cad3-rail')){const r=document.createElement('nav');r.className='cad3-rail';r.setAttribute('aria-label','Основная навигация');r.innerHTML=`<button data-view="geometry" title="Геометрия">${I.model}</button><button data-view="files" title="Файлы">${I.files}</button><button data-view="projects" title="Проекты">${I.projects}</button><button data-view="activity" title="Активность">${I.activity}</button>`;detail.prepend(r);const syncRail=()=>{$$('[data-view]',r).forEach(b=>{const view=b.dataset.view,src=nav.querySelector(`[data-workspace-view="${view}"]`),active=view===(grid.dataset.view||'overview');b.setAttribute('aria-label',b.title);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');b.dataset.on=String(active);b.disabled=!src||src.disabled})};r.addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b||b.disabled)return;nav.querySelector(`[data-workspace-view="${b.dataset.view}"]`)?.click()});new MutationObserver(syncRail).observe(grid,{attributes:true,attributeFilter:['data-view']});new MutationObserver(syncRail).observe(nav,{subtree:true,attributes:true,attributeFilter:['disabled','aria-current']});syncRail()}
+    if(!$('.cad3-rail')){const r=document.createElement('nav');r.className='cad3-rail';r.setAttribute('aria-label','Основная навигация');r.innerHTML=`<button data-view="geometry" aria-label="Геометрия">${I.model}</button><button data-view="files" aria-label="Файлы">${I.files}</button><button data-view="projects" aria-label="Проекты">${I.projects}</button><button data-view="activity" aria-label="Активность">${I.activity}</button>`;detail.prepend(r);const syncRail=()=>{$$('[data-view]',r).forEach(b=>{const view=b.dataset.view,src=nav.querySelector(`[data-workspace-view="${view}"]`),active=view===(grid.dataset.view||'overview');if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');b.dataset.on=String(active);b.disabled=!src||src.disabled})};r.addEventListener('click',e=>{const b=e.target.closest('[data-view]');if(!b||b.disabled)return;nav.querySelector(`[data-workspace-view="${b.dataset.view}"]`)?.click()});new MutationObserver(syncRail).observe(grid,{attributes:true,attributeFilter:['data-view']});new MutationObserver(syncRail).observe(nav,{subtree:true,attributes:true,attributeFilter:['disabled','aria-current']});syncRail()}
 
     const oldList=$('#cad-tree-features'),oldSearch=$('.cad-tree-search input');let list=oldList,search=oldSearch,modelTabs;if(oldList){modelTabs=document.createElement('div');modelTabs.className='cad3-model-tabs';modelTabs.setAttribute('role','tablist');modelTabs.setAttribute('aria-label','Модели');oldList.before(modelTabs);list=oldList.cloneNode(false);list.classList.add('cad3-model-tree');oldList.replaceWith(list)}if(oldSearch){search=oldSearch.cloneNode(true);oldSearch.replaceWith(search)}
     let props=$('.cad3-props');if(!props){props=document.createElement('section');props.className='cad3-props cad-inspector-pane';inspector.append(props)}
     const overlay=document.createElement('canvas');overlay.className='cad3-overlay';panel.append(overlay);
     const gizmoRoot=document.createElement('div');gizmoRoot.className='cad3-gizmo-root';gizmoRoot.hidden=true;
-    for(const axis of ['X','Y','Z']){const move=document.createElement('button');move.type='button';move.dataset.gizmoKind='translate';move.dataset.axis=axis;move.title=`Переместить по ${axis}`;move.textContent=axis;gizmoRoot.append(move);const rotate=document.createElement('button');rotate.type='button';rotate.dataset.gizmoKind='rotate';rotate.dataset.axis=axis;rotate.title=`Повернуть вокруг ${axis}`;rotate.textContent=`↻${axis}`;gizmoRoot.append(rotate)}
+    for(const axis of ['X','Y','Z']){const move=document.createElement('button');move.type='button';move.dataset.gizmoKind='translate';move.dataset.axis=axis;move.setAttribute("aria-label",`Переместить по ${axis}`);move.textContent=axis;gizmoRoot.append(move);const rotate=document.createElement('button');rotate.type='button';rotate.dataset.gizmoKind='rotate';rotate.dataset.axis=axis;rotate.setAttribute("aria-label",`Повернуть вокруг ${axis}`);rotate.textContent=`↻${axis}`;gizmoRoot.append(rotate)}
     panel.append(gizmoRoot);
     const state={objects:[],byId:new Map(),scene:null,labels:new Map(),selected:null,selectedInstanceId:null,selectedInstancePath:[],selectedOccurrenceId:null,selectedOccurrenceIds:new Set(),assemblyFacePickMode:false,assemblyPickKind:'face',assemblyFacePicks:[],selectionCleared:false,rev:null,project:null,parameters:{},bindings:[],assembly:null,lock:null,kinematics:null,assemblyCoordinateMode:'local',assemblyStep:1,assemblyAngleStep:5,snapEnabled:true,activeModelBodyId:null};
     const assemblyUndo=[],assemblyRedo=[];let assemblyLastRevision=null;
@@ -333,7 +333,6 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         button.querySelector('.cad-tree-label').textContent=title;
         const remove=document.createElement('button');remove.type='button';remove.className='cad3-scan-delete';remove.setAttribute('aria-label',`Удалить серию ${title}`);
         const canDelete=typeof canOpenFilesView==='function'&&canOpenFilesView(state.project);
-        remove.title=canDelete?`Удалить серию «${title}»`:'Удаление доступно, когда проект свободен и состояние подтверждено';
         remove.disabled=!canDelete;
         remove.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-.8 13H6.8L6 7m4 3v7m4-7v7"/></svg>';
         remove.onclick=event=>{event.stopPropagation();deleteScanRun(run)};
@@ -344,7 +343,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         for(const file of matchingFiles){
           const leaf=document.createElement('button');leaf.type='button';leaf.className='cad3-model-note cad3-scan-file cad3-scan-file-button';
           leaf.setAttribute('aria-pressed',String(scanTreePreviewSelection===`${run.id}/${file.name}`));
-          leaf.textContent=scanFileLabel(file,run.id);leaf.title=`Показать облако точек · ${file.name}`;leaf.setAttribute('aria-label',leaf.title);
+          leaf.textContent=scanFileLabel(file,run.id);leaf.setAttribute('aria-label',`Показать облако точек · ${file.name}`);
           leaf.onclick=()=>previewScanFile(run,file,leaf);children.append(leaf);
         }
         if(expanded&&!run.loading&&!run.loadError&&!files.length){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=run.folderName?'В серии нет облаков точек для предпросмотра.':'В серии нет облаков точек для предпросмотра.';children.append(leaf)}
@@ -384,7 +383,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const status=$('#scanning-status');
       if(scanTreePreviewSelection===selection){const restored=clearScanTreePreview({restorePrevious:true});if(status)status.textContent=restored?'Предыдущий предпросмотр восстановлен':'Готово к съёмке';return}
       const projectId=state.project;
-      if(!projectId){notify('Сначала выберите проект.',true);return}
+      if(!projectId){notify('Проект не выбран.',true);return}
       if(!scanTreePreviewSelection)scanTreePreviewRestoreMode=activeScanPreviewMode();
       clearScanTreePreview({preserveMode:true});
       scanTreePreviewSelection=selection;
@@ -462,12 +461,10 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         const linked=mates.filter(mate=>mate.a_instance_id===instance.id||mate.b_instance_id===instance.id).length;
         const joint=document.createElement('small');joint.className='cad3-assembly-joint-count';joint.textContent=linked?`${linked} сопр.`:'';
         const visibility=document.createElement('button');visibility.type='button';visibility.className='cad3-assembly-state';
-        visibility.textContent=instance.visible?'◉':'○';visibility.title=instance.visible?'Скрыть экземпляр':'Показать экземпляр';
-        visibility.setAttribute('aria-label',visibility.title);visibility.disabled=!canEdit;
+        visibility.textContent=instance.visible?'◉':'○';visibility.setAttribute('aria-label',instance.visible?'Скрыть экземпляр':'Показать экземпляр');visibility.disabled=!canEdit;
         visibility.onclick=event=>{event.stopPropagation();void editAssemblyProperties(instance,{visible:!instance.visible})};
         const grounded=document.createElement('button');grounded.type='button';grounded.className='cad3-assembly-state';
-        grounded.textContent=instance.grounded?'⚓':'◇';grounded.title=instance.grounded?'Снять закрепление':'Закрепить экземпляр';
-        grounded.setAttribute('aria-label',grounded.title);grounded.disabled=!canEdit;
+        grounded.textContent=instance.grounded?'⚓':'◇';grounded.setAttribute('aria-label',instance.grounded?'Снять закрепление':'Закрепить экземпляр');grounded.disabled=!canEdit;
         grounded.onclick=event=>{event.stopPropagation();void editAssemblyProperties(instance,{grounded:!instance.grounded})};
         row.append(button,joint,visibility,grounded);section.append(row);
         for(const child of children.get(instance.target_id)||[])addInstance(child,fullPath,depth+1);
@@ -482,7 +479,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const treeTitle=$('#cad-tree-title');
       if(treeTitle)treeTitle.textContent=scanning?'Дерево сканирования':'Дерево модели';
       const treeCollapse=$('.cad-tree-collapse');
-      if(treeCollapse){const verb=$('.section-sidebar')?.dataset.collapsed==='true'?'Развернуть':'Свернуть';const label=`${verb} дерево ${scanning?'сканирования':'модели'}`;treeCollapse.title=label;treeCollapse.setAttribute('aria-label',label)}
+      if(treeCollapse){const verb=$('.section-sidebar')?.dataset.collapsed==='true'?'Развернуть':'Свернуть';const label=`${verb} дерево ${scanning?'сканирования':'модели'}`;treeCollapse.setAttribute('aria-label',label)}
       if(search){search.placeholder=scanning?'Поиск по сериям и файлам…':'Поиск по элементам…';search.setAttribute('aria-label',scanning?'Поиск по дереву сканирования':'Поиск по дереву модели')}
       if(scanning){modelTabs?.setAttribute('hidden','');if(scanTreeLoadedProject!==state.project)loadScanTree(state.project);else renderScanTree();return}
       modelTabs?.removeAttribute('hidden');
@@ -1207,7 +1204,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       scan360.addEventListener('click',async()=>{
         if(scan360.dataset.captureLocked==='true')return;
         const id=projectId();
-        if(!id){scanStatus.textContent='Сначала выберите проект.';return}
+        if(!id){scanStatus.textContent='Проект не выбран.';return}
         if(scanTreePreviewSelection)clearScanTreePreview();
         scan360.dataset.scanCapturePending='true';syncCaptureButton();scanStatus.textContent='Запускаю съёмку…';
         try{

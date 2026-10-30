@@ -665,17 +665,9 @@
       cloudButton.disabled = serverPointCloudVisible;
       setAttribute(cloudButton, 'aria-label', 'Облако точек');
       setAttribute(cloudButton, 'aria-pressed', String(cloudSelected));
-      const cloudTitle = serverPointCloudVisible ? 'Объединённое облако уже показано как тело CAD-проекта'
-        : cloudSelected ? 'Скрыть предпросмотр скана'
-        : meshSelected ? 'Переключить на облако точек' : 'Показать облако точек';
-      if (cloudButton.title !== cloudTitle) cloudButton.title = cloudTitle;
       const meshDisabled = !meshReady;
       if (meshButton.disabled !== meshDisabled) meshButton.disabled = meshDisabled;
       setAttribute(meshButton, 'aria-pressed', String(meshSelected));
-      const meshTitle = meshReady
-        ? meshSelected ? 'Скрыть предпросмотр скана' : cloudSelected ? 'Переключить на сетку' : 'Показать сетку скана'
-        : 'Сетка станет доступна после обработки облака точек';
-      if (meshButton.title !== meshTitle) meshButton.title = meshTitle;
     };
     const restoreModel = () => {
       cloudRequest += 1;
@@ -724,7 +716,7 @@
     };
     const projectPointCloudUrl = async () => {
       const projectId = getProjectId();
-      if (!projectId) throw new Error('Сначала выберите проект с файлом облака точек.');
+      if (!projectId) throw new Error('Нет выбранного проекта или файла облака точек.');
       const filesResponse = await fetcher(`/api/v1/projects/${encodeURIComponent(projectId)}/files`, { cache: 'no-store' });
       if (!filesResponse.ok) throw new Error(`Не удалось получить файлы проекта (HTTP ${filesResponse.status}).`);
       const filesPayload = await filesResponse.json();
@@ -762,7 +754,6 @@
           const percent = Math.min(99, Math.floor(bytesRead / total * 100));
           if (percent > lastProgress) {
             lastProgress = percent;
-            cloudButton.title = `Чтение облака точек: ${percent}%`;
           }
         },
       });
@@ -1559,7 +1550,6 @@
                       + ` · остаток ${mapTransform.medianResidual.toFixed(1)} ед.`;
                     setMapAlignmentStatus(liveMapAlignmentSummary, 'aligned');
                   } catch (error) {
-                    cloudButton.title = `Ожидание привязки к карте стола: ${error.message}`;
                     setMapAlignmentStatus(hadTableAlignment && liveMapAlignmentSummary
                       ? `${liveMapAlignmentSummary} · нужна повторная привязка`
                       : 'Карта: соответствие неоднозначно', hadTableAlignment ? 'stale' : 'waiting');
@@ -1567,7 +1557,6 @@
                 }
                 if (!tableAligned && hadTableAlignment) {
                   liveFrameSequence = frameSequence;
-                  cloudButton.title = 'Недостаточно совпавших маркеров; сохраняется последний кадр в координатах карты стола.';
                   setMapAlignmentStatus(liveMapAlignmentSummary
                     ? `${liveMapAlignmentSummary} · последний кадр`
                     : 'Карта: мало маркеров · последний кадр', 'stale');
@@ -1604,7 +1593,6 @@
                     }
                   } else {
                     liveFrameSequence = frameSequence;
-                    cloudButton.title = 'В текущем кадре нет надёжных точек над плоскостью стола; сохраняется последний выровненный кадр.';
                     setMapAlignmentStatus(liveMapAlignmentSummary
                       ? `${liveMapAlignmentSummary} · последний кадр`
                       : 'Карта: мало точек · последний кадр', 'stale');
@@ -1680,7 +1668,6 @@
                 if (lastMapAlignedFrame && turntableDisplayPoseChanged()) {
                   renderLiveFrame({ ...lastMapAlignedFrame, reset: false });
                 }
-                if (!liveViewportInitialized) cloudButton.title = 'Ожидание валидных точек глубины.';
               }
           } else if (response.status === 404) {
             // Keep the measured capture cadence as the next idle poll delay.
@@ -1782,7 +1769,6 @@
         if (geometry && viewer) viewer.load(geometry, { reset: false });
         cloudTableFrame = null;
         renderedCloudSource = null;
-        cloudButton.title = 'Ожидание первого кадра сканирования';
       }
       if (shouldOpenCapturePreview && source && !cloudPreviewOpen) {
         capturePreviewAutoOpened = true;
@@ -1854,9 +1840,8 @@
       }
       previouslyVisible = nowVisible;
       button.setAttribute('aria-pressed', String(active()));
-      button.title = active() ? 'Остановить предпросмотр сканера'
-        : state === 'failed' ? preview.message || 'Сканер остановил поток'
-          : 'Показать сканер в реальном времени';
+      if (state === 'failed') button.title = preview?.message || 'Сканер остановил поток';
+      else if (button.title) button.removeAttribute('title');
       syncCaptureButton();
       if (state === 'failed') view.closeLivePreview();
     };
@@ -1878,7 +1863,7 @@
         updateButton(payload.preview);
       } catch (error) {
         if (active()) {
-          button.title = `Предпросмотр работает, статус временно недоступен: ${error.message}`;
+          button.title = `Предпросмотр: ${error.message}`;
           syncCaptureButton();
         } else updateButton({ state: 'failed', message: error.message });
       } finally { polling = false; }
