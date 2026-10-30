@@ -99,6 +99,12 @@ assert.equal(turntableModel.degreeTextLabels.filter(label => Number.isFinite(lab
   "side-face degree labels are provided for front and isometric views");
 assert.ok(turntableModel.fixed.triangles.length > 0 && turntableModel.moving.triangles.length > 0,
   "the preview includes a shaded table base and a separately movable tabletop");
+assert.equal(sandbox.window.CadyxScanView.hasClosedTriangleTopology(turntableModel.fixed.triangles), true,
+  "the stationary turntable support is a closed, opaque triangle surface");
+assert.equal(sandbox.window.CadyxScanView.hasClosedTriangleTopology(turntableModel.moving.triangles), true,
+  "the moving tabletop, degree ticks and side marks are closed solids");
+assert.equal(sandbox.window.CadyxScanView.hasClosedTriangleTopology(new Uint32Array([0, 1, 2])), false,
+  "open preview surfaces are not classified as solid");
 assert.ok(Math.abs(turntableModel.fixed.bounds.max[0] - turntableModel.fixed.bounds.max[1]) < 1e-4,
   "the illustrated lower support has a circular footprint");
 let maximumTopRadius = 0;

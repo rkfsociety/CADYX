@@ -18,7 +18,30 @@
     mesh.triangles.push(first, second, third);
     mesh.triangleColors.push(...color);
   };
-  const addColoredBox = (mesh, min, max, color) => {
+  const addEllipticalCylinder = (mesh, radiusX, radiusY, bottomZ, topZ, segments, colors) => {
+    const topRing = mesh.positions.length / 3;
+    for (let index = 0; index < segments; index += 1) {
+      const angle = 2 * Math.PI * index / segments;
+      mesh.positions.push(radiusX * Math.cos(angle), radiusY * Math.sin(angle), topZ);
+    }
+    const bottomRing = mesh.positions.length / 3;
+    for (let index = 0; index < segments; index += 1) {
+      const angle = 2 * Math.PI * index / segments;
+      mesh.positions.push(radiusX * Math.cos(angle), radiusY * Math.sin(angle), bottomZ);
+    }
+    const topCenter = mesh.positions.length / 3;
+    mesh.positions.push(0, 0, topZ);
+    const bottomCenter = mesh.positions.length / 3;
+    mesh.positions.push(0, 0, bottomZ);
+    for (let index = 0; index < segments; index += 1) {
+      const next = (index + 1) % segments;
+      addTriangle(mesh, topCenter, topRing + index, topRing + next, colors.top);
+      addTriangle(mesh, bottomCenter, bottomRing + next, bottomRing + index, colors.bottom);
+      addTriangle(mesh, topRing + index, bottomRing + index, bottomRing + next, colors.side);
+      addTriangle(mesh, topRing + index, bottomRing + next, topRing + next, colors.side);
+    }
+  };
+  const addClosedBox = (mesh, min, max, color) => {
     const offset = mesh.positions.length / 3;
     mesh.positions.push(
       min[0], min[1], min[2], max[0], min[1], min[2], max[0], max[1], min[2], min[0], max[1], min[2],
@@ -30,27 +53,25 @@
       [0, 4, 7], [0, 7, 3], [1, 2, 6], [1, 6, 5],
     ]) addTriangle(mesh, ...triangle.map(index => index + offset), color);
   };
-  const addEllipticalCylinder = (mesh, radiusX, radiusY, bottomZ, topZ, segments, colors) => {
-    const topCenter = mesh.positions.length / 3;
-    mesh.positions.push(0, 0, topZ);
-    const topRing = mesh.positions.length / 3;
-    for (let index = 0; index < segments; index += 1) {
-      const angle = 2 * Math.PI * index / segments;
-      mesh.positions.push(radiusX * Math.cos(angle), radiusY * Math.sin(angle), topZ);
+  const addClosedPrism = (mesh, points, bottomZ, topZ, color) => {
+    const bottom = points.map(point => {
+      const index = mesh.positions.length / 3;
+      mesh.positions.push(point[0], point[1], bottomZ);
+      return index;
+    });
+    const top = points.map(point => {
+      const index = mesh.positions.length / 3;
+      mesh.positions.push(point[0], point[1], topZ);
+      return index;
+    });
+    for (let index = 1; index < points.length - 1; index += 1) {
+      addTriangle(mesh, top[0], top[index], top[index + 1], color);
+      addTriangle(mesh, bottom[0], bottom[index + 1], bottom[index], color);
     }
-    const bottomCenter = mesh.positions.length / 3;
-    mesh.positions.push(0, 0, bottomZ);
-    const bottomRing = mesh.positions.length / 3;
-    for (let index = 0; index < segments; index += 1) {
-      const angle = 2 * Math.PI * index / segments;
-      mesh.positions.push(radiusX * Math.cos(angle), radiusY * Math.sin(angle), bottomZ);
-    }
-    for (let index = 0; index < segments; index += 1) {
-      const next = (index + 1) % segments;
-      addTriangle(mesh, topCenter, topRing + index, topRing + next, colors.top);
-      addTriangle(mesh, bottomCenter, bottomRing + next, bottomRing + index, colors.bottom);
-      addTriangle(mesh, topRing + index, bottomRing + index, bottomRing + next, colors.side);
-      addTriangle(mesh, topRing + index, bottomRing + next, topRing + next, colors.side);
+    for (let index = 0; index < points.length; index += 1) {
+      const next = (index + 1) % points.length;
+      addTriangle(mesh, bottom[index], bottom[next], top[next], color);
+      addTriangle(mesh, bottom[index], top[next], top[index], color);
     }
   };
   const addCylinderAlongX = (mesh, length, radius, centerZ, segments, color) => {
@@ -88,6 +109,40 @@
     return { positions, triangles: Uint32Array.from(mesh.triangles),
       triangleColors: Uint8Array.from(mesh.triangleColors), bounds: { min, max } };
   };
+  const closedTriangleComponents = triangles => {
+    if (!triangles?.length || triangles.length % 3 !== 0) return false;
+    const parent = new Map();
+    const find = value => {
+      if (!parent.has(value)) parent.set(value, value);
+      if (parent.get(value) !== value) parent.set(value, find(parent.get(value)));
+      return parent.get(value);
+    };
+    const edgesByRoot = new Map();
+    for (let index = 0; index < triangles.length; index += 3) {
+      const vertices = [triangles[index], triangles[index + 1], triangles[index + 2]];
+      const root = find(vertices[0]);
+      for (const vertex of vertices.slice(1)) {
+        const other = find(vertex);
+        parent.set(other, root);
+      }
+    }
+    const edges = new Map();
+    for (let index = 0; index < triangles.length; index += 3) {
+      const root = find(triangles[index]);
+      for (const [first, second] of [[triangles[index], triangles[index + 1]],
+        [triangles[index + 1], triangles[index + 2]], [triangles[index + 2], triangles[index]]]) {
+        const key = first < second ? `${first}:${second}` : `${second}:${first}`;
+        const edge = edges.get(`${root}|${key}`) || { count: 0, orientation: 0 };
+        edge.count += 1;
+        edge.orientation += first < second ? 1 : -1;
+        edges.set(`${root}|${key}`, edge);
+        edgesByRoot.set(root, true);
+      }
+    }
+    if ([...edges.values()].some(edge => edge.count !== 2 || edge.orientation !== 0)) return [];
+    return [...edgesByRoot.keys()];
+  };
+  const hasClosedTriangleTopology = triangles => closedTriangleComponents(triangles).length > 0;
   const buildTurntableDisplayModel = () => {
     const fixed = createMeshBuilder(), moving = createMeshBuilder();
     const dark = { top: [68, 76, 81], side: [42, 49, 54], bottom: [33, 39, 43] };
@@ -95,11 +150,11 @@
       { top: [55, 63, 68], side: [31, 38, 42], bottom: [25, 31, 35] });
     addEllipticalCylinder(fixed, 43, 43, -55, -30, 56,
       { top: [54, 62, 67], side: [36, 43, 47], bottom: [31, 37, 41] });
-    addColoredBox(fixed, [-55, -18, -55], [-38, 18, -25], [39, 46, 50]);
-    addColoredBox(fixed, [38, -18, -55], [55, 18, -25], [39, 46, 50]);
+    addClosedBox(fixed, [-55, -18, -55], [-38, 18, -25], [39, 46, 50]);
+    addClosedBox(fixed, [38, -18, -55], [55, 18, -25], [39, 46, 50]);
     addCylinderAlongX(fixed, 110, 13, TURNTABLE_TILT_PIVOT_Z_MM, 48, [55, 63, 68]);
-    addColoredBox(fixed, [-57, -6.5, -31.5], [-55, 6.5, -18.5], [92, 103, 108]);
-    addColoredBox(fixed, [-58.5, -4, -29], [-57, 4, -21], [19, 26, 29]);
+    addClosedBox(fixed, [-57, -6.5, -31.5], [-55, 6.5, -18.5], [92, 103, 108]);
+    addClosedBox(fixed, [-58.5, -4, -29], [-57, 4, -21], [19, 26, 29]);
     addEllipticalCylinder(moving, 27, 27, -25, -10, 48,
       { top: [71, 80, 85], side: [46, 54, 59], bottom: [35, 42, 47] });
     addEllipticalCylinder(moving, TURNTABLE_RADIUS_MM, TURNTABLE_RADIUS_MM,
@@ -132,16 +187,8 @@
       const outerLeft = point(outerRadius, -halfWidth), outerRight = point(outerRadius, halfWidth);
       const innerLeft = point(innerRadius, -halfWidth), innerRight = point(innerRadius, halfWidth);
       const tickColor = major ? [220, 228, 232] : [142, 158, 164];
-      addTriangle(moving, ...[outerLeft, outerRight, innerRight].map(vertex => {
-        const index = moving.positions.length / 3;
-        moving.positions.push(...vertex);
-        return index;
-      }), tickColor);
-      addTriangle(moving, ...[outerLeft, innerRight, innerLeft].map(vertex => {
-        const index = moving.positions.length / 3;
-        moving.positions.push(...vertex);
-        return index;
-      }), tickColor);
+      addClosedPrism(moving, [[outerLeft[0], outerLeft[1]], [outerRight[0], outerRight[1]],
+        [innerRight[0], innerRight[1]], [innerLeft[0], innerLeft[1]]], 0.08, 0.28, tickColor);
       const sideHalfWidth = (major ? 0.58 : 0.28) / TURNTABLE_RADIUS_MM;
       const sideTop = major ? -2.1 : -4.1;
       const sideBottom = major ? -7.9 : -5.9;
@@ -150,20 +197,15 @@
         (TURNTABLE_RADIUS_MM + 0.03) * Math.sin(angle),
         z,
       ];
-      const sideQuad = [
-        sidePoint(radians - sideHalfWidth, sideTop), sidePoint(radians + sideHalfWidth, sideTop),
-        sidePoint(radians + sideHalfWidth, sideBottom), sidePoint(radians - sideHalfWidth, sideBottom),
-      ];
-      addTriangle(moving, ...sideQuad.slice(0, 3).map(vertex => {
-        const index = moving.positions.length / 3;
-        moving.positions.push(...vertex);
-        return index;
-      }), tickColor);
-      addTriangle(moving, ...[sideQuad[0], sideQuad[2], sideQuad[3]].map(vertex => {
-        const index = moving.positions.length / 3;
-        moving.positions.push(...vertex);
-        return index;
-      }), tickColor);
+      const sideInnerRadius = TURNTABLE_RADIUS_MM - (major ? 2.4 : 4.4);
+      const sideOuterFirst = sidePoint(radians - sideHalfWidth, sideTop);
+      const sideOuterSecond = sidePoint(radians + sideHalfWidth, sideTop);
+      const sideInnerFirst = [sideInnerRadius * Math.cos(radians - sideHalfWidth),
+        sideInnerRadius * Math.sin(radians - sideHalfWidth), sideTop];
+      const sideInnerSecond = [sideInnerRadius * Math.cos(radians + sideHalfWidth),
+        sideInnerRadius * Math.sin(radians + sideHalfWidth), sideTop];
+      addClosedPrism(moving, [sideOuterFirst, sideOuterSecond, sideInnerSecond, sideInnerFirst],
+        sideBottom, sideTop, tickColor);
       degreeTickCount += 1;
       if (major) {
         const topPointIndex = degreeLabelPositions.length / 3;
@@ -1849,6 +1891,6 @@
   };
 
   window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers,
-    shouldRunTableMapRansac, buildTurntableDisplayModel, transformTableDisplayPoint,
+    shouldRunTableMapRansac, buildTurntableDisplayModel, hasClosedTriangleTopology, transformTableDisplayPoint,
     livePreviewSampleIndex, isScanDepthValid, buildPreviewCloudPointIndices, buildMatchedMapMarkerPointIndices };
 })();
