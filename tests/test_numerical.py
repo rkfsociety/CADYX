@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import math
 import unittest
 
@@ -22,6 +23,19 @@ class NumericalRankTests(unittest.TestCase):
         self.assertFalse(sparse.add_row({0: 2.0, 1: 2.0}))
         self.assertTrue(sparse.add_row({0: 1.0, 1: -1.0}))
         self.assertEqual(sparse.rank, 2)
+
+    def test_sparse_accumulator_reduces_dependent_rows_in_any_order(self):
+        # The third row is minus half the first row minus the second row.
+        # A magnitude-selected pivot incorrectly reported rank three.
+        rows = [[-2.0, -2.0, 0.0], [1.0, 2.0, 2.0], [0.0, -1.0, -2.0]]
+        self.assertEqual(matrix_rank(rows), 2)
+        for ordered_rows in itertools.permutations(rows):
+            for columns in itertools.permutations(range(3)):
+                sparse = SparseRankAccumulator()
+                for row in ordered_rows:
+                    sparse.add_row({index: row[column] for index, column in enumerate(columns)
+                                    if row[column]})
+                self.assertEqual(sparse.rank, 2, (ordered_rows, columns))
 
     def test_sparse_positive_definite_solver(self):
         matrix = {0: {0: 4.0, 1: 1.0}, 1: {0: 1.0, 1: 3.0}}

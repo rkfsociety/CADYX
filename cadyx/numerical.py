@@ -52,7 +52,9 @@ class SparseRankAccumulator:
         row = {column: float(value) for column, value in source.items()
                if abs(float(value)) >= self.tolerance}
         while row:
-            pivot = max(row, key=lambda column: (abs(row[column]), -column))
+            # Use column-echelon order: a largest-magnitude pivot can skip an
+            # existing pivot and count a dependent constraint as independent.
+            pivot = min(row)
             basis = self._basis.get(pivot)
             if basis is None:
                 scale = row[pivot]
