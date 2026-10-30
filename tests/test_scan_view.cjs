@@ -313,6 +313,9 @@ assert.equal(viewport.dataset.scanPreviewMode, "turntable",
   "the table remains visible after the scanner preview is stopped");
 assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0,
   "the idle Scanning view renders the display-only table");
+assert.deepEqual(Array.from(viewerLoads.at(-1).geometry.surfaceTriangleRanges, range => [range.start, range.end]),
+  [[0, viewerLoads.at(-1).geometry.triangles.length / 3]],
+  "the scanner table uses opaque shaded faces without internal feature-edge overlays");
 assert.equal(viewerLoads.at(-1).geometry.pointLayers.length, 0,
   "the idle table view does not fabricate live markers");
 assert.equal(viewerLoads.at(-1).options.reset, false,
