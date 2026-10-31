@@ -10,6 +10,7 @@ from pathlib import Path
 
 _MIN_TOKEN_LENGTH = 32
 _MAX_TOKEN_FILE_BYTES = 8 * 1024
+_MAX_AUTHORIZATION_HEADER_LENGTH = 16 * 1024
 
 
 class AuthenticationConfigError(ValueError):
@@ -40,9 +41,11 @@ def normalize_auth_token(token: str | None) -> str | None:
             f"CADYX authentication tokens must be at least {_MIN_TOKEN_LENGTH} characters long."
         )
     try:
-        token.encode("utf-8")
+        token_bytes = token.encode("utf-8")
     except UnicodeEncodeError as exc:
         raise AuthenticationConfigError("CADYX authentication tokens must be valid UTF-8.") from exc
+    if len(token_bytes) > _MAX_TOKEN_FILE_BYTES:
+        raise AuthenticationConfigError("CADYX authentication tokens must not exceed 8 KiB.")
     if any(ord(character) < 32 or ord(character) == 127 for character in token):
         raise AuthenticationConfigError("CADYX authentication tokens must not contain control characters.")
     return token
@@ -94,7 +97,7 @@ def authorization_matches(header_value: str | None, auth_token: str | None) -> b
     """Validate Bearer or browser-friendly Basic credentials for one configured token."""
     if auth_token is None:
         return True
-    if not header_value:
+    if not header_value or len(header_value) > _MAX_AUTHORIZATION_HEADER_LENGTH:
         return False
 
     scheme, separator, credentials = header_value.partition(" ")

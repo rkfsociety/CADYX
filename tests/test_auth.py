@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import tempfile
 import threading
@@ -62,6 +63,10 @@ class AuthenticationConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(AuthenticationConfigError, "exceeds 8 KiB"):
                 load_auth_token(None, str(token_file))
 
+    def test_environment_token_size_limit(self) -> None:
+        with self.assertRaisesRegex(AuthenticationConfigError, "exceed 8 KiB"):
+            load_auth_token("x" * (8 * 1024 + 1), None)
+
     def test_token_file_rejects_invalid_encoding_and_extra_newlines(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             token_file = Path(directory) / "token.txt"
@@ -92,6 +97,14 @@ class AuthenticationConfigTests(unittest.TestCase):
         self.assertFalse(authorization_matches("Basic !!!", _TOKEN))
         self.assertFalse(authorization_matches(None, _TOKEN))
         self.assertTrue(authorization_matches(None, None))
+
+    def test_authorization_header_length_limit(self) -> None:
+        maximum_token = "x" * (8 * 1024)
+        basic = base64.b64encode(f"cadyx:{maximum_token}".encode("utf-8")).decode("ascii")
+        self.assertTrue(authorization_matches(f"Bearer {maximum_token}", maximum_token))
+        self.assertTrue(authorization_matches(f"Basic {basic}", maximum_token))
+        self.assertFalse(authorization_matches("Bearer " + "x" * (16 * 1024), _TOKEN))
+        self.assertFalse(authorization_matches("Basic " + "A" * (16 * 1024), _TOKEN))
 
     def test_non_ascii_basic_credentials_are_rejected(self) -> None:
         # HTTP headers may contain Latin-1 text; b64decode raises ValueError
@@ -161,6 +174,29 @@ class AuthenticatedWebApiTests(unittest.TestCase):
         except HTTPError as error:
             with error:
                 return error.code, error.read(), error.headers
+
+    def test_duplicate_authorization_headers_are_rejected(self) -> None:
+        valid = f"Bearer {_TOKEN}"
+        for first, second in ((valid, "Bearer invalid"), ("Bearer invalid", valid), (valid, valid)):
+            with self.subTest(first=first, second=second):
+                connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=3)
+                try:
+                    connection.putrequest("GET", "/api/v1/projects")
+                    connection.putheader("Authorization", first)
+                    connection.putheader("Authorization", second)
+                    connection.endheaders()
+                    response = connection.getresponse()
+                    self.assertEqual(response.status, 401)
+                    self.assertEqual(json.loads(response.read())["error"], "AUTHENTICATION_REQUIRED")
+                finally:
+                    connection.close()
+
+    def test_oversized_authorization_header_is_rejected(self) -> None:
+        status, body, _ = self.request(
+            "/api/v1/projects", authorization="Bearer " + "x" * (16 * 1024)
+        )
+        self.assertEqual(status, 401)
+        self.assertEqual(json.loads(body)["error"], "AUTHENTICATION_REQUIRED")
 
     def test_health_is_public_but_application_routes_are_protected(self) -> None:
         status, body, _ = self.request("/api/v1/health")

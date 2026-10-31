@@ -294,7 +294,14 @@ def make_request_handler(
             return _ui_asset_version()
 
         def _require_auth(self) -> bool:
-            if authorization_matches(self.headers.get("Authorization"), auth_token):
+            authorization_headers = self.headers.get_all("Authorization", [])
+            # Reject ambiguous duplicate credentials before selecting a header value.
+            if auth_token is None or (
+                len(authorization_headers) <= 1
+                and authorization_matches(
+                    authorization_headers[0] if authorization_headers else None, auth_token
+                )
+            ):
                 return True
             # Do not reuse a connection whose unauthenticated request body was not read.
             self.close_connection = True
