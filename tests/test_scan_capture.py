@@ -12,7 +12,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cadyx.errors import ConflictError, ValidationError
-from cadyx.scan_capture import Scan360CaptureController, _capture_log_progress
+from cadyx.scan_capture import (Scan360CaptureController, _capture_log_progress,
+                                _read_log_tail, _scan_capture_log_markers)
 
 
 class Scan360CaptureTests(unittest.TestCase):
@@ -29,6 +30,44 @@ class Scan360CaptureTests(unittest.TestCase):
     def test_capture_log_progress_accepts_last_valid_pose(self) -> None:
         self.assertEqual(_capture_log_progress("captured pose 0/12\ncaptured pose 11/12", 12), 12)
         self.assertEqual(_capture_log_progress("captured pose 359/360", 360), 360)
+
+    def test_device_log_tail_reads_only_requested_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "large.log"
+            log.write_bytes(b"x" * (1024 * 1024) + b"last line")
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file log read")):
+                self.assertEqual(_read_log_tail(log, 9), "last line")
+                self.assertEqual(_read_log_tail(log, 4), "line")
+                self.assertEqual(_read_log_tail(log.with_name("missing.log"), 4), "")
+
+    def test_capture_log_markers_stream_across_chunk_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "large.log"
+            log.write_bytes(b"x" * (64 * 1024 - 8) + b"SWEEP COMPLETED: 12 STEPS\n"
+                            + b"y" * (64 * 1024 + 1) + b"TABLE-MAP ALIGNMENT FAILED\n")
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file log read")):
+                self.assertEqual(_scan_capture_log_markers(log, 12), (True, True))
+                self.assertEqual(_scan_capture_log_markers(log, 24), (False, True))
+                self.assertEqual(_scan_capture_log_markers(log.with_name("missing.log"), 12),
+                                 (False, False))
+
+    def test_restart_large_capture_log_preserves_completion_and_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261031T120000Z"
+            (project / f"{run_id}_poses.csv").write_text("poses", encoding="utf-8")
+            for index in range(12):
+                (project / f"{run_id}_pose_{index:03d}.raw").touch()
+            log = project / ".cadyx-scan360-20261031T120000Z.log"
+            log.write_bytes(b"SWEEP COMPLETED: 12 STEPS\n" + b"x" * (1024 * 1024))
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file log read")):
+                self.assertEqual(Scan360CaptureController._latest_completed_snapshot(project)["state"],
+                                 "completed")
+            with log.open("ab") as stream:
+                stream.write(b"\nTABLE-MAP ALIGNMENT FAILED\n")
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("whole-file log read")):
+                self.assertEqual(Scan360CaptureController._latest_completed_snapshot(project)["state"],
+                                 "failed")
 
     @staticmethod
     def _marker_map(point_count: int = 4) -> bytes:

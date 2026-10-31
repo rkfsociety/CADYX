@@ -49,6 +49,38 @@ def _capture_log_progress(log_tail: str, frame_count: int) -> int:
     return completed
 
 
+def _read_log_tail(log_path: Path, limit: int) -> str:
+    """Read only the newest bytes of a potentially long-lived device log."""
+    try:
+        with log_path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - limit))
+            return stream.read(limit).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _scan_capture_log_markers(log_path: Path, frame_count: int) -> tuple[bool, bool]:
+    """Search the full capture log with bounded memory, including split markers."""
+    completion = f"sweep completed: {frame_count} steps".encode("ascii")
+    failure = b"table-map alignment failed"
+    overlap = max(len(completion), len(failure)) - 1
+    completed = failed = False
+    try:
+        with log_path.open("rb") as stream:
+            suffix = b""
+            while chunk := stream.read(64 * 1024):
+                text = (suffix + chunk).lower()
+                completed = completed or completion in text
+                failed = failed or failure in text
+                if completed and failed:
+                    break
+                suffix = text[-overlap:]
+    except OSError:
+        return False, False
+    return completed, failed
+
+
 def _read_live_preview_metrics(log_path: Path) -> dict[str, Any] | None:
     try:
         with log_path.open("rb") as stream:
@@ -495,10 +527,7 @@ class Scan360CaptureController:
         if job is None:
             return {"state": "idle"}
         return_code = job.process.poll()
-        try:
-            output = job.log_path.read_bytes()[-4096:].decode("utf-8", errors="replace").strip()
-        except OSError:
-            output = ""
+        output = _read_log_tail(job.log_path, 4096).strip()
         spin_started = any(line.startswith("CADYX_SPIN\t") for line in output.splitlines())
         if return_code is None:
             if (not spin_started and not job.stop_path.exists()
@@ -749,11 +778,8 @@ class Scan360CaptureController:
                     job.process.kill()
                     job.process.wait(timeout=2)
                 log_started = False
-                try:
-                    log_started = any(line.startswith("CADYX_SPIN\t") for line in
-                                      job.log_path.read_bytes()[-4096:].decode("utf-8", errors="replace").splitlines())
-                except OSError:
-                    pass
+                log_started = any(line.startswith("CADYX_SPIN\t") for line in
+                                  _read_log_tail(job.log_path, 4096).splitlines())
                 self._turntable_spin_snapshot_locked()
                 if not log_started:
                     return {"state": "failed", "message": "The turntable driver did not confirm movement before it was stopped during startup.",
@@ -1251,10 +1277,7 @@ class Scan360CaptureController:
         job = self._live_preview
         return_code = job.process.poll()
         if return_code is not None:
-            try:
-                message = job.log_path.read_bytes()[-4096:].decode("utf-8", errors="replace").strip()
-            except OSError:
-                message = ""
+            message = _read_log_tail(job.log_path, 4096).strip()
             self._live_preview = None
             for path in (job.raw_path, job.stop_path, job.ready_path):
                 try:
@@ -1333,10 +1356,7 @@ class Scan360CaptureController:
         assert self._job is not None
         return_code = self._job.process.poll()
         state = "running" if return_code is None else "completed" if return_code == 0 else "failed"
-        try:
-            log_tail = self._job.log_path.read_bytes()[-64 * 1024:].decode("utf-8", errors="replace")
-        except OSError:
-            log_tail = ""
+        log_tail = _read_log_tail(self._job.log_path, 64 * 1024)
         completed = _capture_log_progress(log_tail, self._job.frame_count)
         completed = max(completed, self._count_run_frames(
             self._job.project_directory, self._job.run_id, self._job.frame_count))
@@ -1532,19 +1552,11 @@ class Scan360CaptureController:
             scan_log = cls._support_directory(run_directory, run_id) / f".cadyx-scan360-{stamp}.log"
             if not scan_log.is_file():
                 scan_log = project_directory / f".cadyx-scan360-{stamp}.log"
-            try:
-                completed_turn = f"sweep completed: {frame_count} steps" in scan_log.read_bytes().decode("utf-8", errors="replace").lower()
-            except OSError:
-                completed_turn = False
+            completed_turn, alignment_failed = _scan_capture_log_markers(scan_log, frame_count)
             if completed == frame_count and completed_turn:
                 manifest = cls._support_directory(run_directory, run_id) / f"{run_id}_scan_360.json"
                 preprocessing = cls._preprocessing_payload(run_directory, run_id, frame_count)
                 alignment_status = cls._alignment_status(run_directory, run_id)
-                try:
-                    log_text = scan_log.read_bytes().decode("utf-8", errors="replace").lower()
-                except OSError:
-                    log_text = ""
-                alignment_failed = "table-map alignment failed" in log_text
                 # Legacy sweeps predate JSON reports. New captures must verify
                 # the same final artifacts after restart as while running.
                 legacy_capture = (not manifest.is_file()
