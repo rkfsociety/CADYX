@@ -6,6 +6,7 @@ import hashlib
 import gzip
 import json
 import mimetypes
+import math
 import os
 import queue
 import sys
@@ -89,6 +90,14 @@ def _accepts_gzip(accept_encoding: str) -> bool:
         else:
             wildcard = allowed
     return explicit if explicit is not None else bool(wildcard)
+
+
+def _finite_json_float(value: str) -> float:
+    """Reject non-standard JSON constants and finite-literal overflow."""
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValidationError("JSON numbers must be finite.")
+    return number
 
 
 class CadyxHTTPServer(ThreadingHTTPServer):
@@ -341,7 +350,11 @@ def make_request_handler(
                 raise ValidationError("Request body was incomplete.")
             if not raw:
                 return None
-            value = json.loads(raw.decode("utf-8"))
+            value = json.loads(
+                raw.decode("utf-8"),
+                parse_float=_finite_json_float,
+                parse_constant=_finite_json_float,
+            )
             if not isinstance(value, dict):
                 raise ValidationError("Request JSON must be an object.")
             return value
