@@ -503,6 +503,11 @@ class Scan360CaptureTests(unittest.TestCase):
             {"state": "completed", "cleaned_frame_count": 5},
             {"state": "completed", "cleaned_frame_count": 3, "failed_frame_count": 2},
             {"state": "completed", "cleaned_frame_count": 3, "failed_frame_count": 0},
+            {"state": "completed", "cleaned_frame_count": 4, "failed_frame_count": 0,
+             "frames": []},
+            {"state": "completed", "cleaned_frame_count": 4, "failed_frame_count": 0,
+             "frames": [{}, {}, {}, {}], "failed_frames": [{"frame_index": 0}]},
+            {"state": "unknown", "cleaned_frame_count": 0},
             {"state": "running", "cleaned_frame_count": "2"},
             {"state": "running", "cleaned_frame_count": 2, "failed_frame_count": -1},
         ]
@@ -519,6 +524,42 @@ class Scan360CaptureTests(unittest.TestCase):
                     self.assertEqual(status["preprocessing_status"], "failed")
                     self.assertEqual(status["preprocessed_frames"], 0)
                     self.assertEqual(status["preprocessing_failed_frames"], 4)
+
+    def test_versioned_preprocessing_rejects_duplicate_or_inconsistent_frames(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261023T091320Z"
+            run_directory = project / run_id
+            run_directory.mkdir()
+            report_path = run_directory / f"{run_id}_preprocessing.json"
+            valid = {
+                "format": "cadyx-scan-preprocessing-v1",
+                "state": "completed",
+                "cleaned_frame_count": 4,
+                "failed_frame_count": 0,
+                "frames": [{"frame_index": index, "state": "completed",
+                            "table_marker_detection": "completed"} for index in range(4)],
+                "failed_frames": [],
+            }
+            report_path.write_text(json.dumps(valid), encoding="utf-8")
+            self.assertEqual(Scan360CaptureController._preprocessing_payload(
+                project, run_id, 4)["preprocessing_status"], "completed")
+
+            invalid = (
+                {"frames": valid["frames"][:-1]},
+                {"frames": [*valid["frames"][:-1], valid["frames"][0]]},
+                {"frames": [{**valid["frames"][0], "frame_index": True}, *valid["frames"][1:]]},
+                {"frames": [{**valid["frames"][0], "state": "failed"}, *valid["frames"][1:]]},
+                {"frames": valid["frames"][:-1], "cleaned_frame_count": 3,
+                 "failed_frames": [{"frame_index": 0}], "failed_frame_count": 1,
+                 "state": "running"},
+            )
+            for change in invalid:
+                with self.subTest(change=change):
+                    report_path.write_text(json.dumps({**valid, **change}), encoding="utf-8")
+                    result = Scan360CaptureController._preprocessing_payload(project, run_id, 4)
+                    self.assertEqual(result["preprocessing_status"], "failed")
+                    self.assertEqual(result["preprocessed_frames"], 0)
 
     def test_preprocessing_rejects_invalid_table_marker_counters(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

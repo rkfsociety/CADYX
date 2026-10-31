@@ -1502,12 +1502,33 @@ class Scan360CaptureController:
                 raise ValueError("invalid per-frame cleanup rows")
             cleaned_count = report.get("cleaned_frame_count", len(frames))
             failed_count = report.get("failed_frame_count", len(failed))
-            if (any(isinstance(count, bool) or not isinstance(count, int)
-                    or not 0 <= count <= frame_count for count in (cleaned_count, failed_count))
+            state = report.get("state")
+            if (state not in ("running", "partial", "completed", "failed")
+                    or any(isinstance(count, bool) or not isinstance(count, int)
+                           or not 0 <= count <= frame_count for count in (cleaned_count, failed_count))
                     or cleaned_count + failed_count > frame_count
-                    or (report.get("state") == "completed"
-                        and (cleaned_count != frame_count or failed_count != 0))):
-                raise ValueError("invalid preprocessing frame counters")
+                    or (state == "completed"
+                        and (cleaned_count != frame_count or failed_count != 0
+                             or len(frames) != frame_count or failed
+                             or any(not isinstance(frame, dict) for frame in frames)))):
+                raise ValueError("invalid preprocessing state or frame counters")
+            # The v1 worker writes one indexed row per processed or failed frame.
+            # Reject duplicate/missing indices before claiming a valid summary;
+            # older unversioned reports retain their historical compatibility.
+            if report.get("format") == "cadyx-scan-preprocessing-v1":
+                if len(frames) != cleaned_count or len(failed) != failed_count:
+                    raise ValueError("preprocessing frame inventory does not match its counters")
+                seen: set[int] = set()
+                for row in (*frames, *failed):
+                    if not isinstance(row, dict):
+                        raise ValueError("invalid preprocessing frame inventory row")
+                    index = row.get("frame_index")
+                    if (type(index) is not int or not 0 <= index < frame_count
+                            or index in seen):
+                        raise ValueError("duplicate or invalid preprocessing frame index")
+                    seen.add(index)
+                if any(frame.get("state") != "completed" for frame in frames):
+                    raise ValueError("invalid cleaned preprocessing frame state")
             marker_detection_count = sum(
                 frame.get("table_marker_detection") == "completed" for frame in frames
                 if isinstance(frame, dict)
