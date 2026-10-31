@@ -51,6 +51,39 @@ class WebRouteTableTests(unittest.TestCase):
                     dispatch_route(SimpleNamespace(), SimpleNamespace(), route, parsed)
                 self.assertEqual(str(caught.exception), message)
 
+    def test_validation_record_limit_rejects_invalid_queries(self) -> None:
+        invalid_values = ("0", "201", "-1", "+1", "1.5", "", "９", "9" * 4301)
+        for value in invalid_values:
+            with self.subTest(value=value[:32]):
+                parsed = urlsplit("/api/v1/agent/projects/p-1/validations?limit=" + value)
+                route = match_route("GET", parsed.path)
+                self.assertIsNotNone(route)
+                assert route is not None
+                with self.assertRaisesRegex(ValidationError, "Validation record limit must be"):
+                    dispatch_route(SimpleNamespace(), SimpleNamespace(), route, parsed)
+        for query in ("limit=1&limit=2", "limit=1&extra=2"):
+            with self.subTest(query=query):
+                parsed = urlsplit("/api/v1/agent/projects/p-1/validations?" + query)
+                route = match_route("GET", parsed.path)
+                assert route is not None
+                with self.assertRaisesRegex(ValidationError, "only one limit"):
+                    dispatch_route(SimpleNamespace(), SimpleNamespace(), route, parsed)
+
+    def test_validation_record_limit_accepts_default_and_bounds(self) -> None:
+        for query, expected in (("", 50), ("?limit=1", 1), ("?limit=200", 200),
+                                ("?limit=00050", 50)):
+            with self.subTest(query=query):
+                parsed = urlsplit("/api/v1/agent/projects/p-1/validations" + query)
+                route = match_route("GET", parsed.path)
+                assert route is not None
+                responses = []
+                core = SimpleNamespace(list_validation_records=lambda project_id, *, limit: {
+                    "project_id": project_id, "limit": limit,
+                })
+                handler = SimpleNamespace(_json=lambda status, body: responses.append((status, body)))
+                dispatch_route(handler, core, route, parsed)
+                self.assertEqual(responses, [(200, {"project_id": "p-1", "limit": expected})])
+
     def test_route_inventory_has_unique_method_templates_and_names(self) -> None:
         specs = route_specs()
         self.assertEqual(len({(spec.method, spec.template) for spec in specs}), len(specs))

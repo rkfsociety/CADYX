@@ -1010,11 +1010,13 @@ def _dispatch_validation(handler: Any, core: CadyxCore, route: RouteMatch, parse
     name = route.spec.name
     project_id = route.params["project_id"]
     if name == "agent_validations":
-        query = parse_qs(parsed.query)
-        try:
-            limit = int(query.get("limit", ["50"])[0])
-        except ValueError as exc:
-            raise ValidationError("Validation record limit must be an integer from 1 to 200.") from exc
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if set(query) - {"limit"} or len(query.get("limit", [])) > 1:
+            raise ValidationError("Validation records accept only one limit query parameter.")
+        message = "Validation record limit must be an integer from 1 to 200."
+        limit = _query_nonnegative_integer(query.get("limit", ["50"])[0], message)
+        if not 1 <= limit <= 200:
+            raise ValidationError(message)
         handler._json(200, core.list_validation_records(project_id, limit=limit))
         return
     body = handler._read_json()
