@@ -24,6 +24,7 @@ from .errors import CadyxError, NotFoundError, ValidationError
 from .web_routes import dispatch_route, match_route
 
 _MAX_BODY_BYTES = 1_000_000
+_MAX_JSON_INTEGER_DIGITS = 4300
 _MAX_PROJECT_SOURCE_UPLOAD_BYTES = 64 * 1024 * 1024
 _MAX_VIEWPORT_SNAPSHOT_BYTES = 16 * 1024 * 1024
 _DEFAULT_MAX_HTTP_REQUESTS = 64
@@ -98,6 +99,16 @@ def _finite_json_float(value: str) -> float:
     if not math.isfinite(number):
         raise ValidationError("JSON numbers must be finite.")
     return number
+
+
+def _bounded_json_int(value: str) -> int:
+    """Reject huge JSON integers as validation errors, not internal failures."""
+    if len(value.lstrip("-")) > _MAX_JSON_INTEGER_DIGITS:
+        raise ValidationError("JSON integer exceeds the supported digit limit.")
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValidationError("JSON integer exceeds the supported digit limit.") from exc
 
 
 class CadyxHTTPServer(ThreadingHTTPServer):
@@ -353,6 +364,7 @@ def make_request_handler(
             value = json.loads(
                 raw.decode("utf-8"),
                 parse_float=_finite_json_float,
+                parse_int=_bounded_json_int,
                 parse_constant=_finite_json_float,
             )
             if not isinstance(value, dict):

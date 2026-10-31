@@ -133,6 +133,29 @@ class HTTPConcurrencyTests(unittest.TestCase):
         with caught.exception as response:
             self.assertEqual(response.code, 404)
 
+    def test_oversized_json_integers_are_rejected_before_routing(self) -> None:
+        server, _, base_url = self._start_live_server(max_http_requests=1)
+        for body in (
+            b'{"value":' + b"9" * 4301 + b"}",
+            b'{"value":-' + b"9" * 4301 + b"}",
+            b'{"nested":{"value":' + b"9" * 4301 + b"}}",
+        ):
+            with self.subTest(body_length=len(body), nested=b"nested" in body):
+                self.assertTrue(self._wait_for_http_capacity(server))
+                request = Request(base_url + "/api/v1/unknown", data=body, method="POST")
+                with self.assertRaises(HTTPError) as caught:
+                    urlopen(request, timeout=2)
+                with caught.exception as response:
+                    self.assertEqual(response.code, 400)
+                    self.assertEqual(json.loads(response.read())["error"], "VALIDATION_ERROR")
+
+        self.assertTrue(self._wait_for_http_capacity(server))
+        request = Request(base_url + "/api/v1/unknown", data=b'{"value":12345678901234567890}', method="POST")
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(request, timeout=2)
+        with caught.exception as response:
+            self.assertEqual(response.code, 404)
+
     def test_request_and_sse_budgets_are_independent(self) -> None:
         self.assertTrue(self.server.try_acquire_request_slot())
         self.assertFalse(self.server.try_acquire_request_slot())
