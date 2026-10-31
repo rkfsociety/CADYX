@@ -53,6 +53,15 @@ class AuthenticationConfigTests(unittest.TestCase):
         with self.assertRaises(AuthenticationConfigError):
             load_auth_token("x" * 31 + " ", None)
 
+    def test_token_file_size_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            token_file = Path(directory) / "token.txt"
+            token_file.write_bytes(b"x" * (8 * 1024))
+            self.assertEqual(load_auth_token(None, str(token_file)), "x" * (8 * 1024))
+            token_file.write_bytes(b"x" * (8 * 1024 + 1))
+            with self.assertRaisesRegex(AuthenticationConfigError, "exceeds 8 KiB"):
+                load_auth_token(None, str(token_file))
+
     def test_token_file_rejects_invalid_encoding_and_extra_newlines(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             token_file = Path(directory) / "token.txt"

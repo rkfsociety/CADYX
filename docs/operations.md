@@ -27,7 +27,7 @@ Checkboxes in the project cards support bulk deletion. The bulk action bar appea
 
 ## Authentication and LAN access
 
-CADYX treats LAN exposure as an explicit authenticated mode. Configure one reusable token of at least 32 non-whitespace characters through `CADYX_AUTH_TOKEN`, or store it in a UTF-8 file and pass `--auth-token-file` (or set `CADYX_AUTH_TOKEN_FILE`). Do not configure both sources. For example, in PowerShell:
+CADYX treats LAN exposure as an explicit authenticated mode. Configure one reusable token of at least 32 non-whitespace characters through `CADYX_AUTH_TOKEN`, or store it in a UTF-8 file and pass `--auth-token-file` (or set `CADYX_AUTH_TOKEN_FILE`). Do not configure both sources. Token files are limited to 8 KiB and rejected before decoding if larger. For example, in PowerShell:
 
 ```powershell
 $env:CADYX_AUTH_TOKEN = & .\.runtime\python\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"

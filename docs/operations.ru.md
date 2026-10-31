@@ -25,7 +25,7 @@
 
 ## Аутентификация и локальная сеть
 
-Для адреса вне loopback обязателен токен не короче 32 непробельных символов. Используйте один источник: `CADYX_AUTH_TOKEN` либо UTF-8-файл через `--auth-token-file` / `CADYX_AUTH_TOKEN_FILE`.
+Для адреса вне loopback обязателен токен не короче 32 непробельных символов. Используйте один источник: `CADYX_AUTH_TOKEN` либо UTF-8-файл через `--auth-token-file` / `CADYX_AUTH_TOKEN_FILE`. Размер файла токена ограничен 8 КиБ; более крупные файлы отклоняются до декодирования.
 
 ```powershell
 $env:CADYX_AUTH_TOKEN = & .\.runtime\python\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"

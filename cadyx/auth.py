@@ -9,6 +9,7 @@ import secrets
 from pathlib import Path
 
 _MIN_TOKEN_LENGTH = 32
+_MAX_TOKEN_FILE_BYTES = 8 * 1024
 
 
 class AuthenticationConfigError(ValueError):
@@ -55,7 +56,13 @@ def load_auth_token(environment_token: str | None, token_file: str | None) -> st
         )
     if token_file:
         try:
-            token = Path(token_file).read_text(encoding="utf-8")
+            # Reject oversized files before decoding; a malformed credential must
+            # never cause an unbounded allocation during HTTP host startup.
+            with Path(token_file).open("rb") as stream:
+                raw = stream.read(_MAX_TOKEN_FILE_BYTES + 1)
+            if len(raw) > _MAX_TOKEN_FILE_BYTES:
+                raise AuthenticationConfigError("CADYX authentication token file exceeds 8 KiB.")
+            token = raw.decode("utf-8")
         except (OSError, UnicodeError) as exc:
             raise AuthenticationConfigError(
                 f"Could not read CADYX authentication token file: {token_file}"
