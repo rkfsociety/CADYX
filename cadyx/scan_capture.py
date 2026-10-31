@@ -1554,11 +1554,38 @@ class Scan360CaptureController:
                     manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
                 except (OSError, ValueError, TypeError, json.JSONDecodeError):
                     manifest_data = None
+                # Manifest-only repair predates preprocessing fields. Accept its
+                # explicit, complete frame inventory, but never treat a damaged
+                # modern manifest or a failed preprocessing report as completed.
+                repaired_manifest = (
+                    isinstance(manifest_data, dict)
+                    and manifest_data.get("format") == "revopoint-y16-turntable-capture-v2"
+                    and "preprocessing_status" not in manifest_data
+                    and "preprocessing_report" not in manifest_data
+                    and manifest_data.get("table_alignment_status") == alignment_status
+                    and isinstance(manifest_data.get("frames"), list)
+                    and len(manifest_data["frames"]) == frame_count
+                    and all(
+                        isinstance(frame, dict)
+                        and type(frame.get("index")) is int
+                        and frame["index"] == index
+                        and frame.get("raw_file") in (
+                            f"{run_id}_pose_{index:03d}.raw",
+                            f"{run_id}_pose_pose_{index:03d}.raw",
+                        )
+                        and frame.get("ply_file") == frame["raw_file"][:-4] + ".ply"
+                        and frame.get("metadata_file") == frame["raw_file"][:-4] + ".json"
+                        for index, frame in enumerate(manifest_data["frames"])
+                    )
+                )
                 manifest_ready = (isinstance(manifest_data, dict)
                                   and type(manifest_data.get("frame_count")) is int
                                   and manifest_data["frame_count"] == frame_count
-                                  and manifest_data.get("preprocessing_status") == "completed")
-                reports_ready = (preprocessing["preprocessing_status"] == "completed"
+                                  and (manifest_data.get("preprocessing_status") == "completed"
+                                       or repaired_manifest))
+                reports_ready = ((preprocessing["preprocessing_status"] == "completed"
+                                  or (repaired_manifest
+                                      and preprocessing["preprocessing_status"] == "not_available"))
                                  and alignment_status in {
                                      "aligned_provisional", "partial", "unavailable", "not_performed",
                                  })
