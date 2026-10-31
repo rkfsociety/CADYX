@@ -16,14 +16,9 @@ class ProjectGroupStore:
 
     def __init__(self, root: Path) -> None:
         self.database_path = root / ".cadyx-project-groups.sqlite3"
-
-    @contextmanager
-    def connection(self) -> Iterator[sqlite3.Connection]:
-        if self.database_path.is_symlink():
-            raise ValidationError("Project group database must not be a symbolic link.")
-        connection = sqlite3.connect(self.database_path, timeout=5)
-        try:
-            connection.execute("PRAGMA foreign_keys = ON")
+        # Initialize once before serving requests. Re-running DDL for every
+        # read takes SQLite schema locks and delays concurrent HTTP readers.
+        with self.connection() as connection:
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS project_group (
                     id TEXT PRIMARY KEY,
@@ -37,7 +32,14 @@ class ProjectGroupStore:
                     group_id TEXT REFERENCES project_group(id) ON DELETE SET NULL
                 )"""
             )
-            connection.commit()
+
+    @contextmanager
+    def connection(self) -> Iterator[sqlite3.Connection]:
+        if self.database_path.is_symlink():
+            raise ValidationError("Project group database must not be a symbolic link.")
+        connection = sqlite3.connect(self.database_path, timeout=5)
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
             yield connection
             connection.commit()
         except Exception:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from cadyx.errors import NotFoundError
 from cadyx.workspace_files import WorkspaceArtifactStore
@@ -39,6 +41,27 @@ class WorkspaceServiceTests(unittest.TestCase):
         self.assertEqual(store.list_groups(), [group])
         self.assertEqual(store.assignments(), {project_id: group["id"]})
         self.assertTrue(store.database_path.is_file())
+
+    def test_group_reads_do_not_acquire_schema_write_locks(self) -> None:
+        store = ProjectGroupStore(self.root)
+        self.assertTrue(store.database_path.is_file(), "schema is initialized at startup")
+        statements: list[str] = []
+
+        class TracedConnection(sqlite3.Connection):
+            def execute(self, sql, parameters=()):
+                statements.append(sql)
+                return super().execute(sql, parameters)
+
+        original_connect = sqlite3.connect
+
+        def traced_connect(*args, **kwargs):
+            return original_connect(*args, **kwargs, factory=TracedConnection)
+
+        with patch("cadyx.workspace_groups.sqlite3.connect", side_effect=traced_connect):
+            self.assertEqual(store.list_groups(), [])
+            self.assertEqual(store.assignments(), {})
+        self.assertFalse(any("CREATE TABLE" in sql for sql in statements))
+        self.assertEqual(sum("SELECT" in sql for sql in statements), 2)
 
     def test_validation_store_owns_per_project_database(self) -> None:
         directory = self.root / "project"
