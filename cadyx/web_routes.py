@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 
 _SCANNER_LIVE_FRAME_READ_LOCK = threading.Lock()
+_MAX_QUERY_INTEGER_DIGITS = 4300
 
 
 @dataclass(frozen=True)
@@ -233,6 +234,17 @@ def _require_json(handler: Any) -> dict[str, Any]:
     if body is None:
         raise ValidationError("A JSON request body is required.")
     return body
+
+
+def _query_nonnegative_integer(value: str, message: str, *, ascii_only: bool = True) -> int:
+    """Reject invalid or oversized query integers before dispatching to Core."""
+    if (not value.isdecimal() or (ascii_only and not value.isascii())
+            or len(value) > _MAX_QUERY_INTEGER_DIGITS):
+        raise ValidationError(message)
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValidationError(message) from exc
 
 
 def _dispatch_system(handler: Any, core: CadyxCore, route: RouteMatch, parsed: SplitResult) -> None:
@@ -514,10 +526,10 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
         with _SCANNER_LIVE_FRAME_READ_LOCK:
             after_sequence: int | None = None
             if after_values:
-                after_text = after_values[0]
-                if not after_text.isdecimal():
-                    raise ValidationError("The live-frame after value must be a non-negative integer.")
-                after_sequence = int(after_text)
+                after_sequence = _query_nonnegative_integer(
+                    after_values[0], "The live-frame after value must be a non-negative integer.",
+                    ascii_only=False,
+                )
             frames_path = core.workspace.state_root / ".revopoint-live.raw.frames"
             raw_path = core.workspace.state_root / ".revopoint-live.raw"
             if after_sequence is None and not latest_mode and raw_path.is_file():
@@ -803,10 +815,9 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
                 options[key] = query[key][0]
         for key in ("expected_revision", "since_revision", "offset", "limit"):
             if key in query:
-                value = query[key][0]
-                if not value.isascii() or not value.isdecimal():
-                    raise ValidationError(f"{key} must be a nonnegative decimal integer.")
-                options[key] = int(value)
+                options[key] = _query_nonnegative_integer(
+                    query[key][0], f"{key} must be a nonnegative decimal integer.",
+                )
         if "include_metrics" in query:
             value = query["include_metrics"][0]
             if value not in ("0", "1"):
@@ -823,10 +834,9 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         values = {}
         for key in ("offset", "limit"):
             if key in query:
-                raw = query[key][0]
-                if not raw.isascii() or not raw.isdecimal():
-                    raise ValidationError(f"{key} must be a nonnegative decimal integer.")
-                values[key] = int(raw)
+                values[key] = _query_nonnegative_integer(
+                    query[key][0], f"{key} must be a nonnegative decimal integer.",
+                )
         handler._json(200, core.list_revision_checkpoints(project_id, **values))
     elif name == "agent_revision_compare":
         body = _require_json(handler)

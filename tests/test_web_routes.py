@@ -10,10 +10,11 @@ from io import BytesIO
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 from cadyx.errors import ValidationError
 from cadyx.web import CadyxHTTPServer, make_request_handler
-from cadyx.web_routes import _scanner_point_cloud_vertex_count, match_route, route_specs
+from cadyx.web_routes import _scanner_point_cloud_vertex_count, dispatch_route, match_route, route_specs
 
 
 class WebRouteTableTests(unittest.TestCase):
@@ -29,6 +30,26 @@ class WebRouteTableTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValidationError, "ASCII point-only PLY"):
             _scanner_point_cloud_vertex_count(header.replace(b"format ascii", b"format binary_little_endian"))
+
+    def test_oversized_numeric_query_parameters_are_validation_errors(self) -> None:
+        oversized = "9" * 4301
+        cases = (
+            (f"/api/v1/agent/projects/p-1/inspection?expected_revision={oversized}",
+             "expected_revision must be a nonnegative decimal integer."),
+            (f"/api/v1/agent/projects/p-1/revisions?offset={oversized}",
+             "offset must be a nonnegative decimal integer."),
+            (f"/api/v1/scanner/live-frame?after={oversized}",
+             "The live-frame after value must be a non-negative integer."),
+        )
+        for path, message in cases:
+            with self.subTest(route=path.split("?")[0]):
+                parsed = urlsplit(path)
+                route = match_route("GET", parsed.path)
+                self.assertIsNotNone(route)
+                assert route is not None
+                with self.assertRaises(ValidationError) as caught:
+                    dispatch_route(SimpleNamespace(), SimpleNamespace(), route, parsed)
+                self.assertEqual(str(caught.exception), message)
 
     def test_route_inventory_has_unique_method_templates_and_names(self) -> None:
         specs = route_specs()
