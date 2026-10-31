@@ -930,6 +930,51 @@ class Scan360CaptureTests(unittest.TestCase):
         self.assertEqual(status["state"], "completed")
         self.assertEqual(status["preview_file"], f"{older_run}_pose_011.ply")
 
+    def test_latest_capture_discovery_skips_series_removed_during_report_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            older = "revopoint_20261020T103638Z"
+            old_pose_log = project / f"{older}_poses.csv"
+            old_pose_log.write_text("poses", encoding="utf-8")
+            (project / ".cadyx-scan360-20261020T103638Z.log").write_text(
+                "sweep completed: 12 steps", encoding="utf-8",
+            )
+            for index in range(12):
+                (project / f"{older}_pose_{index:03d}.raw").touch()
+            (project / f"{older}_pose_011.ply").touch()
+
+            newest = "revopoint_20261031T120000Z"
+            series = project / newest
+            series.mkdir()
+            new_pose_log = series / f"{newest}_poses.csv"
+            new_pose_log.write_text("poses", encoding="utf-8")
+            (series / ".cadyx-scan360-20261031T120000Z.log").write_text(
+                "sweep completed: 12 steps", encoding="utf-8",
+            )
+            for index in range(12):
+                (series / f"{newest}_pose_{index:03d}.raw").touch()
+            os.utime(old_pose_log, (1, 1))
+            os.utime(new_pose_log, (2, 2))
+
+            original = Scan360CaptureController._preprocessing_payload
+            removed = False
+
+            def remove_during_report_read(directory: Path, run_id: str, frame_count: int,
+                                          *, active: bool = False) -> dict:
+                nonlocal removed
+                if run_id == newest and not removed:
+                    removed = True
+                    series.rename(project / "removed_series")
+                return original(directory, run_id, frame_count, active=active)
+
+            with patch.object(Scan360CaptureController, "_preprocessing_payload",
+                              side_effect=remove_during_report_read):
+                status = Scan360CaptureController._latest_completed_snapshot(project)
+
+        self.assertTrue(removed)
+        self.assertEqual(status["state"], "completed")
+        self.assertEqual(status["preview_file"], f"{older}_pose_011.ply")
+
     def test_latest_complete_capture_survives_host_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

@@ -1722,6 +1722,11 @@ class Scan360CaptureController:
                                "манифест не подтверждены; исходники сохранены.")
                 elif preprocessing["preprocessing_status"] == "not_available":
                     message += " Отчёта очистки исходных кадров до сшивки для этой серии нет."
+                # A capture directory or its raw frames can disappear while
+                # reports are inspected. Never return a stale completed snapshot.
+                if (not pose_log.is_file()
+                        or cls._count_run_frames(run_directory, run_id, frame_count) != frame_count):
+                    continue
                 return {
                     "state": "completed" if verified else "failed",
                     "completed_frames": completed,
