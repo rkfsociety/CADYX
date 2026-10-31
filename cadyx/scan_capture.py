@@ -17,6 +17,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -61,23 +62,33 @@ def _read_log_tail(log_path: Path, limit: int) -> str:
 
 
 def _scan_capture_log_markers(log_path: Path, frame_count: int) -> tuple[bool, bool]:
-    """Search the full capture log with bounded memory, including split markers."""
+    """Reuse marker scans for unchanged logs without caching transient read failures."""
+    try:
+        info = log_path.stat()
+        identity = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        return _scan_capture_log_markers_cached(log_path, frame_count, identity)
+    except OSError:
+        return False, False
+
+
+@lru_cache(maxsize=64)
+def _scan_capture_log_markers_cached(
+    log_path: Path, frame_count: int, _identity: tuple[int, int, int, int, int],
+) -> tuple[bool, bool]:
+    """Scan a version of the log once, retaining only two marker flags."""
     completion = f"sweep completed: {frame_count} steps".encode("ascii")
     failure = b"table-map alignment failed"
     overlap = max(len(completion), len(failure)) - 1
     completed = failed = False
-    try:
-        with log_path.open("rb") as stream:
-            suffix = b""
-            while chunk := stream.read(64 * 1024):
-                text = (suffix + chunk).lower()
-                completed = completed or completion in text
-                failed = failed or failure in text
-                if completed and failed:
-                    break
-                suffix = text[-overlap:]
-    except OSError:
-        return False, False
+    with log_path.open("rb") as stream:
+        suffix = b""
+        while chunk := stream.read(64 * 1024):
+            text = (suffix + chunk).lower()
+            completed = completed or completion in text
+            failed = failed or failure in text
+            if completed and failed:
+                break
+            suffix = text[-overlap:]
     return completed, failed
 
 

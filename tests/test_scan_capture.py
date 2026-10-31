@@ -51,6 +51,29 @@ class Scan360CaptureTests(unittest.TestCase):
                 self.assertEqual(_scan_capture_log_markers(log.with_name("missing.log"), 12),
                                  (False, False))
 
+    def test_capture_log_markers_cache_unchanged_logs_and_invalidate_on_append(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "archive.log"
+            log.write_bytes(b"SWEEP COMPLETED: 12 STEPS\n")
+            self.assertEqual(_scan_capture_log_markers(log, 12), (True, False))
+            with patch.object(Path, "open", side_effect=AssertionError("unchanged log reread")):
+                self.assertEqual(_scan_capture_log_markers(log, 12), (True, False))
+            with log.open("ab") as stream:
+                stream.write(b"TABLE-MAP ALIGNMENT FAILED\n")
+            self.assertEqual(_scan_capture_log_markers(log, 12), (True, True))
+            log.unlink()
+            self.assertEqual(_scan_capture_log_markers(log, 12), (False, False))
+
+    def test_capture_log_markers_cache_invalidates_on_same_size_rewrite(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "archive.log"
+            log.write_bytes(b"SWEEP COMPLETED: 12 STEPS")
+            self.assertEqual(_scan_capture_log_markers(log, 12), (True, False))
+            previous = log.stat()
+            log.write_bytes(b"x" * previous.st_size)
+            os.utime(log, ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000_000))
+            self.assertEqual(_scan_capture_log_markers(log, 12), (False, False))
+
     def test_restart_large_capture_log_preserves_completion_and_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
