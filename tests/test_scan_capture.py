@@ -860,6 +860,35 @@ class Scan360CaptureTests(unittest.TestCase):
             self.assertEqual(Scan360CaptureController._latest_completed_snapshot(project)["state"],
                              "failed")
 
+    def test_latest_capture_discovery_skips_pose_log_removed_during_listing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            missing_run = "revopoint_20261031T120000Z"
+            missing_pose_log = project / f"{missing_run}_poses.csv"
+            missing_pose_log.write_text("poses", encoding="utf-8")
+
+            older_run = "revopoint_20261020T103638Z"
+            (project / f"{older_run}_poses.csv").write_text("poses", encoding="utf-8")
+            (project / ".cadyx-scan360-20261020T103638Z.log").write_text(
+                "sweep completed: 12 steps", encoding="utf-8",
+            )
+            for index in range(12):
+                (project / f"{older_run}_pose_{index:03d}.raw").touch()
+            (project / f"{older_run}_pose_011.ply").touch()
+
+            original_stat = Path.stat
+
+            def disappearing_stat(path: Path, *args: object, **kwargs: object):
+                if path == missing_pose_log:
+                    raise FileNotFoundError("poses file removed during discovery")
+                return original_stat(path, *args, **kwargs)
+
+            with patch.object(Path, "stat", disappearing_stat):
+                status = Scan360CaptureController._latest_completed_snapshot(project)
+
+        self.assertEqual(status["state"], "completed")
+        self.assertEqual(status["preview_file"], f"{older_run}_pose_011.ply")
+
     def test_latest_complete_capture_survives_host_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

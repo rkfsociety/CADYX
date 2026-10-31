@@ -1598,14 +1598,21 @@ class Scan360CaptureController:
 
     @classmethod
     def _latest_completed_snapshot(cls, project_directory: Path) -> dict[str, Any]:
-        captures = sorted(
-            (*project_directory.glob("revopoint_*_poses.csv"),
-             *project_directory.glob("revopoint_*/revopoint_*_poses.csv"),
-             *project_directory.glob("scan_support_revopoint_*/revopoint_*_poses.csv")),
-            key=lambda path: path.stat().st_mtime_ns,
-            reverse=True,
-        )
-        for pose_log in captures:
+        # Capture directories can be removed while the status endpoint lists them.
+        # Do not let one disappearing poses file break discovery of older runs.
+        captures: list[tuple[int, Path]] = []
+        for pose_log in (
+            *project_directory.glob("revopoint_*_poses.csv"),
+            *project_directory.glob("revopoint_*/revopoint_*_poses.csv"),
+            *project_directory.glob("scan_support_revopoint_*/revopoint_*_poses.csv"),
+        ):
+            try:
+                captures.append((pose_log.stat().st_mtime_ns, pose_log))
+            except OSError:
+                continue
+        for _, pose_log in sorted(captures, key=lambda item: item[0], reverse=True):
+            if not pose_log.is_file():
+                continue
             match = re.fullmatch(r"(revopoint_\d{8}T\d{6}Z)_poses\.csv", pose_log.name)
             if not match:
                 continue
