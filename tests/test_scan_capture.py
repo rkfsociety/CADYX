@@ -500,6 +500,41 @@ class Scan360CaptureTests(unittest.TestCase):
                     self.assertEqual(status["preprocessed_frames"], 0)
                     self.assertEqual(status["preprocessing_failed_frames"], 4)
 
+    def test_preprocessing_rejects_invalid_table_marker_counters(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261023T091325Z"
+            run_directory = project / run_id
+            run_directory.mkdir()
+            report_path = run_directory / f"{run_id}_preprocessing.json"
+            baseline = {
+                "state": "running", "cleaned_frame_count": 1, "failed_frame_count": 0,
+                "frames": [{"table_marker_detection": "completed",
+                            "detected_table_markers": 2, "removed_table_marker_points": 8}],
+            }
+            invalid = (
+                {"detected_table_marker_count": -1},
+                {"detected_table_marker_count": True},
+                {"detected_table_marker_count": "2"},
+                {"removed_table_marker_points": -3},
+                {"removed_table_marker_points": None},
+                {"removed_table_marker_points": 1.5},
+                {"frames": [{"detected_table_markers": "invalid"}]},
+                {"frames": [{"removed_table_marker_points": -1}]},
+            )
+            for change in invalid:
+                with self.subTest(change=change):
+                    report_path.write_text(json.dumps({**baseline, **change}), encoding="utf-8")
+                    result = Scan360CaptureController._preprocessing_payload(project, run_id, 4)
+                    self.assertEqual(result["preprocessing_status"], "failed")
+                    self.assertEqual(result["detected_table_marker_count"], 0)
+                    self.assertEqual(result["removed_table_marker_points"], 0)
+
+            report_path.write_text(json.dumps(baseline), encoding="utf-8")
+            result = Scan360CaptureController._preprocessing_payload(project, run_id, 4)
+            self.assertEqual(result["detected_table_marker_count"], 2)
+            self.assertEqual(result["removed_table_marker_points"], 8)
+
     def test_preprocessing_status_cache_reuses_unchanged_report_and_invalidates(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

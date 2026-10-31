@@ -1486,6 +1486,16 @@ class Scan360CaptureController:
                              and cleaned_count == frame_count == marker_detection_count else
                              "failed" if report.get("state") == "failed" else
                              "running" if report.get("state") == "running" else "not_available")
+            marker_counts = {}
+            for summary_key, frame_key in (
+                ("detected_table_marker_count", "detected_table_markers"),
+                ("removed_table_marker_points", "removed_table_marker_points"),
+            ):
+                values = ([report[summary_key]] if summary_key in report else
+                          [frame.get(frame_key, 0) for frame in frames if isinstance(frame, dict)])
+                if any(type(value) is not int or value < 0 for value in values):
+                    raise ValueError("invalid table marker counters")
+                marker_counts[summary_key] = sum(values)
             return {
                 "preprocessing_status": report.get("state", "failed"),
                 "preprocessed_frames": cleaned_count,
@@ -1495,14 +1505,7 @@ class Scan360CaptureController:
                     0, frame_count - cleaned_count
                     - failed_count),
                 "table_marker_detection_status": marker_status,
-                "detected_table_marker_count": report.get(
-                    "detected_table_marker_count",
-                    sum(frame.get("detected_table_markers", 0) for frame in frames
-                        if isinstance(frame, dict))),
-                "removed_table_marker_points": report.get(
-                    "removed_table_marker_points",
-                    sum(frame.get("removed_table_marker_points", 0) for frame in frames
-                        if isinstance(frame, dict))),
+                **marker_counts,
             }
         except FileNotFoundError:
             return {"preprocessing_status": "starting" if active else "not_available", "preprocessed_frames": 0,
