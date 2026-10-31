@@ -635,6 +635,54 @@ class Scan360CaptureTests(unittest.TestCase):
             expected_python = expected_python.with_name("python.exe")
         self.assertEqual(command[command.index("-PythonExecutable") + 1], str(expected_python))
 
+    def test_restart_rejects_unverified_capture_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261031T100000Z"
+            series = project / run_id
+            series.mkdir()
+            (series / f"{run_id}_poses.csv").write_text("poses", encoding="utf-8")
+            log_path = series / ".cadyx-scan360-20261031T100000Z.log"
+            log_path.write_text("sweep completed: 4 steps", encoding="utf-8")
+            for index in range(4):
+                (series / f"{run_id}_pose_{index:03d}.raw").touch()
+
+            manifest_path = series / f"{run_id}_scan_360.json"
+            preprocessing_path = series / f"{run_id}_preprocessing.json"
+            alignment_path = series / f"{run_id}_table_alignment.json"
+            manifest = {"frame_count": 4, "preprocessing_status": "completed",
+                        "table_alignment_status": "partial"}
+            preprocessing = {
+                "state": "completed", "cleaned_frame_count": 4, "failed_frame_count": 0,
+                "frames": [{"frame_index": index, "state": "completed",
+                            "table_marker_detection": "completed"} for index in range(4)],
+                "failed_frames": [],
+            }
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            preprocessing_path.write_text(json.dumps(preprocessing), encoding="utf-8")
+            alignment_path.write_text(json.dumps({"status": "partial"}), encoding="utf-8")
+            self.assertEqual(Scan360CaptureController._latest_completed_snapshot(project)["state"],
+                             "completed")
+
+            corrupted = [
+                (manifest_path, "{"),
+                (manifest_path, json.dumps({**manifest, "frame_count": 3})),
+                (preprocessing_path, json.dumps({**preprocessing, "state": "failed"})),
+                (alignment_path, json.dumps({"status": "unknown"})),
+            ]
+            for path, invalid_content in corrupted:
+                with self.subTest(path=path.name, content=invalid_content):
+                    original = path.read_text(encoding="utf-8")
+                    path.write_text(invalid_content, encoding="utf-8")
+                    snapshot = Scan360CaptureController._latest_completed_snapshot(project)
+                    self.assertNotEqual(snapshot["state"], "completed")
+                    self.assertLessEqual(snapshot["completed_frames"], 4)
+                    path.write_text(original, encoding="utf-8")
+
+            alignment_path.unlink()
+            self.assertEqual(Scan360CaptureController._latest_completed_snapshot(project)["state"],
+                             "failed")
+
     def test_latest_complete_capture_survives_host_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

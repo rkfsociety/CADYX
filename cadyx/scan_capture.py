@@ -1545,6 +1545,26 @@ class Scan360CaptureController:
                 except OSError:
                     log_text = ""
                 alignment_failed = "table-map alignment failed" in log_text
+                # Legacy sweeps predate JSON reports. New captures must verify
+                # the same final artifacts after restart as while running.
+                legacy_capture = (not manifest.is_file()
+                                  and preprocessing["preprocessing_status"] == "not_available"
+                                  and alignment_status == "pending")
+                try:
+                    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+                except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    manifest_data = None
+                manifest_ready = (isinstance(manifest_data, dict)
+                                  and type(manifest_data.get("frame_count")) is int
+                                  and manifest_data["frame_count"] == frame_count
+                                  and manifest_data.get("preprocessing_status") == "completed")
+                reports_ready = (preprocessing["preprocessing_status"] == "completed"
+                                 and alignment_status in {
+                                     "aligned_provisional", "partial", "unavailable", "not_performed",
+                                 })
+                verified = not alignment_failed and (
+                    legacy_capture or (manifest_ready and reports_ready)
+                )
                 message = (
                     f"{frame_count} кадров сохранены, но привязка к центру карты стола не прошла; исходные кадры сохранены."
                     if alignment_failed else
@@ -1564,10 +1584,13 @@ class Scan360CaptureController:
                     if not manifest.is_file()
                     else f"Последний 360°-захват завершён; все {frame_count} кадров и манифест сохранены."
                 )
-                if preprocessing["preprocessing_status"] == "not_available":
+                if not verified:
+                    message = ("Кадры сохранены, но отчёты очистки, привязки или итоговый "
+                               "манифест не подтверждены; исходники сохранены.")
+                elif preprocessing["preprocessing_status"] == "not_available":
                     message += " Отчёта очистки исходных кадров до сшивки для этой серии нет."
                 return {
-                    "state": "completed",
+                    "state": "completed" if verified else "failed",
                     "completed_frames": completed,
                     "frame_count": frame_count,
                     "step_degrees": cls._manifest_step_degrees(run_directory, run_id),
