@@ -74,6 +74,26 @@ class Scan360CaptureTests(unittest.TestCase):
             os.utime(log, ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000_000))
             self.assertEqual(_scan_capture_log_markers(log, 12), (False, False))
 
+    def test_capture_log_markers_retry_after_concurrent_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "changing.log"
+            log.write_bytes(b"SWEEP COMPLETED: 12 STEPS\n")
+            original_stat = Path.stat
+            replaced = False
+
+            def racing_stat(path, *args, **kwargs):
+                nonlocal replaced
+                before = original_stat(path, *args, **kwargs)
+                if path == log and not replaced:
+                    replaced = True
+                    log.write_bytes(b"TABLE-MAP ALIGNMENT FAILED\n")
+                return before
+
+            with patch.object(Path, "stat", racing_stat):
+                self.assertEqual(_scan_capture_log_markers(log, 12), (False, True))
+            self.assertTrue(replaced)
+            self.assertEqual(_scan_capture_log_markers(log, 12), (False, True))
+
     def test_restart_large_capture_log_preserves_completion_and_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -563,6 +583,37 @@ class Scan360CaptureTests(unittest.TestCase):
                 project, run_id, 4)["preprocessing_status"], "not_available")
             self.assertEqual(Scan360CaptureController._preprocessing_payload(
                 project, run_id, 4, active=True)["preprocessing_status"], "starting")
+
+    def test_preprocessing_cache_retries_report_replaced_during_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261031T150000Z"
+            run_directory = project / run_id
+            run_directory.mkdir()
+            report_path = run_directory / f"{run_id}_preprocessing.json"
+            report_path.write_text(json.dumps({
+                "state": "running", "cleaned_frame_count": 1, "failed_frame_count": 0,
+            }), encoding="utf-8")
+            original_read_text = Path.read_text
+            replaced = False
+
+            def racing_read(path, *args, **kwargs):
+                nonlocal replaced
+                before = original_read_text(path, *args, **kwargs)
+                if path == report_path and not replaced:
+                    replaced = True
+                    report_path.write_text(json.dumps({
+                        "state": "running", "cleaned_frame_count": 2, "failed_frame_count": 0,
+                    }) + "\n", encoding="utf-8")
+                return before
+
+            with patch.object(Path, "read_text", racing_read):
+                result = Scan360CaptureController._preprocessing_payload(project, run_id, 4)
+            self.assertTrue(replaced)
+            self.assertEqual(result["preprocessed_frames"], 2)
+            with patch.object(Path, "read_text", side_effect=AssertionError("new report reread")):
+                self.assertEqual(Scan360CaptureController._preprocessing_payload(
+                    project, run_id, 4)["preprocessed_frames"], 2)
 
     def test_legacy_capture_without_preprocessing_report_is_not_pending(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -33,6 +33,15 @@ _LIVE_PREVIEW_CLIENT_METRIC_FIELDS = frozenset({
 })
 
 
+class _ScanFileChanged(Exception):
+    """The file changed while its cache entry was being calculated."""
+
+
+def _scan_file_identity(path: Path) -> tuple[int, int, int, int, int]:
+    info = path.stat()
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
 def _normalize_turntable_angle(angle_degrees: float) -> float:
     """Return the equivalent signed table orientation in [-180, 180)."""
     return (angle_degrees + 180.0) % 360.0 - 180.0
@@ -62,13 +71,16 @@ def _read_log_tail(log_path: Path, limit: int) -> str:
 
 
 def _scan_capture_log_markers(log_path: Path, frame_count: int) -> tuple[bool, bool]:
-    """Reuse marker scans for unchanged logs without caching transient read failures."""
-    try:
-        info = log_path.stat()
-        identity = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
-        return _scan_capture_log_markers_cached(log_path, frame_count, identity)
-    except OSError:
-        return False, False
+    """Cache only stable log scans; fail closed if a writer keeps changing the file."""
+    for _ in range(2):
+        try:
+            identity = _scan_file_identity(log_path)
+            return _scan_capture_log_markers_cached(log_path, frame_count, identity)
+        except _ScanFileChanged:
+            continue
+        except OSError:
+            return False, False
+    return False, False
 
 
 @lru_cache(maxsize=64)
@@ -89,7 +101,16 @@ def _scan_capture_log_markers_cached(
             if completed and failed:
                 break
             suffix = text[-overlap:]
+    if _scan_file_identity(log_path) != _identity:
+        raise _ScanFileChanged
     return completed, failed
+
+
+def _failed_preprocessing_payload(frame_count: int) -> dict[str, Any]:
+    return {"preprocessing_status": "failed", "preprocessed_frames": 0,
+            "preprocessing_failed_frames": frame_count, "preprocessing_frame_count": frame_count,
+            "preprocessing_pending_frames": 0, "table_marker_detection_status": "failed",
+            "detected_table_marker_count": 0, "removed_table_marker_points": 0}
 
 
 @lru_cache(maxsize=64)
@@ -97,9 +118,14 @@ def _cached_preprocessing_payload(
     project_directory: Path, run_id: str, frame_count: int,
     _identity: tuple[int, int, int, int, int],
 ) -> dict[str, Any]:
-    """Cache only the compact status summary, never the per-frame report."""
-    return Scan360CaptureController._preprocessing_payload_uncached(
+    """Cache only compact summaries read from a stable report version."""
+    payload = Scan360CaptureController._preprocessing_payload_uncached(
         project_directory, run_id, frame_count)
+    report_path = (Scan360CaptureController._support_directory(project_directory, run_id)
+                   / f"{run_id}_preprocessing.json")
+    if _scan_file_identity(report_path) != _identity:
+        raise _ScanFileChanged
+    return payload
 
 
 def _read_live_preview_metrics(log_path: Path) -> dict[str, Any] | None:
@@ -1447,15 +1473,19 @@ class Scan360CaptureController:
                                frame_count: int, *, active: bool = False) -> dict[str, Any]:
         report_path = (Scan360CaptureController._support_directory(project_directory, run_id)
                        / f"{run_id}_preprocessing.json")
-        try:
-            info = report_path.stat()
-        except OSError:
-            # Missing reports distinguish active captures from archived scans;
-            # inaccessible reports must still fail closed.
-            return Scan360CaptureController._preprocessing_payload_uncached(
-                project_directory, run_id, frame_count, active=active)
-        identity = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
-        return dict(_cached_preprocessing_payload(project_directory, run_id, frame_count, identity))
+        for _ in range(2):
+            try:
+                identity = _scan_file_identity(report_path)
+            except OSError:
+                # Preserve the active/archived distinction for absent reports.
+                return Scan360CaptureController._preprocessing_payload_uncached(
+                    project_directory, run_id, frame_count, active=active)
+            try:
+                return dict(_cached_preprocessing_payload(project_directory, run_id, frame_count, identity))
+            except (_ScanFileChanged, OSError):
+                continue
+        # Never expose a successful summary from a report that changed during both reads.
+        return _failed_preprocessing_payload(frame_count)
 
     @staticmethod
     def _preprocessing_payload_uncached(project_directory: Path, run_id: str,
@@ -1514,10 +1544,7 @@ class Scan360CaptureController:
                     "table_marker_detection_status": "starting" if active else "not_available",
                     "detected_table_marker_count": 0, "removed_table_marker_points": 0}
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return {"preprocessing_status": "failed", "preprocessed_frames": 0,
-                    "preprocessing_failed_frames": frame_count, "preprocessing_frame_count": frame_count,
-                    "preprocessing_pending_frames": 0, "table_marker_detection_status": "failed",
-                    "detected_table_marker_count": 0, "removed_table_marker_points": 0}
+            return _failed_preprocessing_payload(frame_count)
 
     @staticmethod
     def _alignment_status(project_directory: Path, run_id: str) -> str:
