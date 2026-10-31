@@ -12,10 +12,24 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cadyx.errors import ConflictError, ValidationError
-from cadyx.scan_capture import Scan360CaptureController
+from cadyx.scan_capture import Scan360CaptureController, _capture_log_progress
 
 
 class Scan360CaptureTests(unittest.TestCase):
+    def test_capture_log_progress_ignores_oversized_and_unrelated_counts(self) -> None:
+        huge = "9" * 5000
+        log = (f"captured pose {huge}/12\n"
+               f"captured pose 3/{huge}\n"
+               "captured pose 99/12\n"
+               "captured pose 5/24\n"
+               "captured pose 12/12\n"
+               "captured pose 1/12\n")
+        self.assertEqual(_capture_log_progress(log, 12), 2)
+
+    def test_capture_log_progress_accepts_last_valid_pose(self) -> None:
+        self.assertEqual(_capture_log_progress("captured pose 0/12\ncaptured pose 11/12", 12), 12)
+        self.assertEqual(_capture_log_progress("captured pose 359/360", 360), 360)
+
     @staticmethod
     def _marker_map(point_count: int = 4) -> bytes:
         records = [struct.pack("<2i2f6d", 0, -1, 1.0, 0.0, float(index), 0.0, 0.0, 0.0, 0.0, 1.0)

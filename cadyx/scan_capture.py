@@ -37,6 +37,18 @@ def _normalize_turntable_angle(angle_degrees: float) -> float:
     return (angle_degrees + 180.0) % 360.0 - 180.0
 
 
+def _capture_log_progress(log_tail: str, frame_count: int) -> int:
+    """Count only bounded, in-range pose reports for this capture."""
+    completed = 0
+    for pose, total in re.findall(
+        r"captured pose ([0-9]{1,3})/([0-9]{1,3})(?![0-9])",
+        log_tail, flags=re.IGNORECASE,
+    ):
+        if int(total) == frame_count and int(pose) < frame_count:
+            completed = max(completed, int(pose) + 1)
+    return completed
+
+
 def _read_live_preview_metrics(log_path: Path) -> dict[str, Any] | None:
     try:
         with log_path.open("rb") as stream:
@@ -1325,9 +1337,7 @@ class Scan360CaptureController:
             log_tail = self._job.log_path.read_bytes()[-64 * 1024:].decode("utf-8", errors="replace")
         except OSError:
             log_tail = ""
-        completed = 0
-        for value in re.findall(r"captured pose (\d+)/(\d+)", log_tail, flags=re.IGNORECASE):
-            completed = max(completed, int(value[0]) + 1)
+        completed = _capture_log_progress(log_tail, self._job.frame_count)
         completed = max(completed, self._count_run_frames(
             self._job.project_directory, self._job.run_id, self._job.frame_count))
         capture_sweep_completed = f"sweep completed: {self._job.frame_count} steps" in log_tail.lower()
