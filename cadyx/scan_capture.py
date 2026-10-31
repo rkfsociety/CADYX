@@ -92,6 +92,16 @@ def _scan_capture_log_markers_cached(
     return completed, failed
 
 
+@lru_cache(maxsize=64)
+def _cached_preprocessing_payload(
+    project_directory: Path, run_id: str, frame_count: int,
+    _identity: tuple[int, int, int, int, int],
+) -> dict[str, Any]:
+    """Cache only the compact status summary, never the per-frame report."""
+    return Scan360CaptureController._preprocessing_payload_uncached(
+        project_directory, run_id, frame_count)
+
+
 def _read_live_preview_metrics(log_path: Path) -> dict[str, Any] | None:
     try:
         with log_path.open("rb") as stream:
@@ -1435,6 +1445,21 @@ class Scan360CaptureController:
     @staticmethod
     def _preprocessing_payload(project_directory: Path, run_id: str,
                                frame_count: int, *, active: bool = False) -> dict[str, Any]:
+        report_path = (Scan360CaptureController._support_directory(project_directory, run_id)
+                       / f"{run_id}_preprocessing.json")
+        try:
+            info = report_path.stat()
+        except OSError:
+            # Missing reports distinguish active captures from archived scans;
+            # inaccessible reports must still fail closed.
+            return Scan360CaptureController._preprocessing_payload_uncached(
+                project_directory, run_id, frame_count, active=active)
+        identity = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        return dict(_cached_preprocessing_payload(project_directory, run_id, frame_count, identity))
+
+    @staticmethod
+    def _preprocessing_payload_uncached(project_directory: Path, run_id: str,
+                                        frame_count: int, *, active: bool = False) -> dict[str, Any]:
         report_path = (Scan360CaptureController._support_directory(project_directory, run_id)
                        / f"{run_id}_preprocessing.json")
         try:

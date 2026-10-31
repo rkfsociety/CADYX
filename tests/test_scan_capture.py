@@ -500,6 +500,35 @@ class Scan360CaptureTests(unittest.TestCase):
                     self.assertEqual(status["preprocessed_frames"], 0)
                     self.assertEqual(status["preprocessing_failed_frames"], 4)
 
+    def test_preprocessing_status_cache_reuses_unchanged_report_and_invalidates(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261023T091350Z"
+            run_directory = project / run_id
+            run_directory.mkdir()
+            report_path = run_directory / f"{run_id}_preprocessing.json"
+            report_path.write_text(json.dumps({
+                "state": "running", "cleaned_frame_count": 1, "failed_frame_count": 0,
+            }), encoding="utf-8")
+
+            first = Scan360CaptureController._preprocessing_payload(project, run_id, 4)
+            self.assertEqual(first["preprocessed_frames"], 1)
+            first["preprocessed_frames"] = 99
+            with patch.object(Path, "read_text", side_effect=AssertionError("unchanged report reread")):
+                cached = Scan360CaptureController._preprocessing_payload(project, run_id, 4)
+            self.assertEqual(cached["preprocessed_frames"], 1)
+
+            report_path.write_text(json.dumps({
+                "state": "running", "cleaned_frame_count": 2, "failed_frame_count": 0,
+            }) + "\n", encoding="utf-8")
+            refreshed = Scan360CaptureController._preprocessing_payload(project, run_id, 4)
+            self.assertEqual(refreshed["preprocessed_frames"], 2)
+            report_path.unlink()
+            self.assertEqual(Scan360CaptureController._preprocessing_payload(
+                project, run_id, 4)["preprocessing_status"], "not_available")
+            self.assertEqual(Scan360CaptureController._preprocessing_payload(
+                project, run_id, 4, active=True)["preprocessing_status"], "starting")
+
     def test_legacy_capture_without_preprocessing_report_is_not_pending(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
