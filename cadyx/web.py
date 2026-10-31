@@ -27,6 +27,7 @@ _MAX_PROJECT_SOURCE_UPLOAD_BYTES = 64 * 1024 * 1024
 _MAX_VIEWPORT_SNAPSHOT_BYTES = 16 * 1024 * 1024
 _DEFAULT_MAX_HTTP_REQUESTS = 64
 _DEFAULT_MAX_SSE_STREAMS = 8
+_HTTP_SOCKET_TIMEOUT_SECONDS = 30.0
 _SSE_KEEPALIVE_SECONDS = 15.0
 _SSE_SHUTDOWN_POLL_SECONDS = 0.25
 _SOCKET_REQUEST = socket | tuple[bytes, socket]
@@ -115,6 +116,13 @@ class CadyxHTTPServer(ThreadingHTTPServer):
         self._sse_slots = threading.BoundedSemaphore(max_sse_streams)
         self._request_slot_state = threading.local()
         super().__init__(server_address, request_handler_class)
+
+    def get_request(self) -> tuple[socket, tuple[str, int]]:
+        connection, client_address = super().get_request()
+        # Idle keep-alive clients and incomplete headers/bodies must not hold
+        # a bounded request slot indefinitely.
+        connection.settimeout(_HTTP_SOCKET_TIMEOUT_SECONDS)
+        return connection, client_address
 
     def try_acquire_request_slot(self) -> bool:
         return self._request_slots.acquire(blocking=False)

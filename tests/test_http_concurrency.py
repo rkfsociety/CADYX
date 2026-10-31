@@ -87,6 +87,27 @@ class HTTPConcurrencyTests(unittest.TestCase):
             time.sleep(0.01)
         return False
 
+    def test_incomplete_headers_cannot_hold_http_slot_indefinitely(self) -> None:
+        with patch.object(web_module, "_HTTP_SOCKET_TIMEOUT_SECONDS", 0.2):
+            server, _, base_url = self._start_live_server(max_http_requests=1)
+            accepted = threading.Event()
+            original_process_request = server.process_request
+
+            def record_request(request: socket.socket, address: tuple[str, int]) -> None:
+                original_process_request(request, address)
+                accepted.set()
+
+            with patch.object(server, "process_request", side_effect=record_request):
+                stalled = socket.create_connection(("127.0.0.1", server.server_port), timeout=5)
+                try:
+                    stalled.sendall(b"GET /api/v1/health HTTP/1.1\r\nHost: localhost\r\n")
+                    self.assertTrue(accepted.wait(5), "stalled request was not accepted")
+                    self.assertTrue(self._wait_for_http_capacity(server, timeout=5))
+                    with urlopen(base_url + "/api/v1/health", timeout=5) as response:
+                        self.assertEqual(response.status, 200)
+                finally:
+                    stalled.close()
+
     def test_request_and_sse_budgets_are_independent(self) -> None:
         self.assertTrue(self.server.try_acquire_request_slot())
         self.assertFalse(self.server.try_acquire_request_slot())
