@@ -1475,7 +1475,10 @@ class Scan360CaptureController:
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 return "pending"
             return "not_performed" if isinstance(manifest, dict) and manifest.get("table_alignment_status") == "not_performed" else "pending"
-        return result.get("status", "failed") if isinstance(result, dict) else "failed"
+        status = result.get("status") if isinstance(result, dict) else None
+        return status if isinstance(status, str) and status in {
+            "aligned_provisional", "partial", "unavailable", "not_performed", "pending", "failed",
+        } else "failed"
 
     @staticmethod
     def _manifest_frame_count(project_directory: Path, run_id: str) -> int:
@@ -1602,12 +1605,7 @@ class Scan360CaptureController:
         preview_folder = project_name if series_name and isinstance(project_name, str) else project_root.name
         if completed > 0:
             index = min(completed, frame_count) - 1
-            alignment = project_directory / f"{run_id}_table_alignment.json"
-            try:
-                alignment_data = json.loads(alignment.read_text(encoding="utf-8"))
-            except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                alignment_data = {}
-            if alignment_data.get("status") in ("aligned_provisional", "partial"):
+            if cls._alignment_status(project_directory, run_id) in ("aligned_provisional", "partial"):
                 for aligned_index in range(index, -1, -1):
                     aligned_name = f"{run_id}_pose_{aligned_index:03d}_table_aligned.ply"
                     if (project_directory / aligned_name).is_file():

@@ -707,6 +707,37 @@ class Scan360CaptureTests(unittest.TestCase):
         self.assertEqual(preview["preview_coordinate_frame"], "table_marker_map_center_xy")
         self.assertEqual(preview["preview_frame_index"], 10)
 
+    def test_malformed_table_alignment_reports_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261020T103638Z"
+            alignment = project / f"{run_id}_table_alignment.json"
+            for report in ([], {"status": []}, {"status": {"value": "partial"}},
+                           {"status": 12}, {"status": None}, {"status": "unexpected"}):
+                with self.subTest(report=report):
+                    alignment.write_text(json.dumps(report), encoding="utf-8")
+                    self.assertEqual(
+                        Scan360CaptureController._alignment_status(project, run_id), "failed",
+                    )
+            for status in ("aligned_provisional", "partial", "unavailable", "not_performed"):
+                with self.subTest(status=status):
+                    alignment.write_text(json.dumps({"status": status}), encoding="utf-8")
+                    self.assertEqual(
+                        Scan360CaptureController._alignment_status(project, run_id), status,
+                    )
+
+    def test_malformed_table_alignment_does_not_break_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261020T103638Z"
+            (project / f"{run_id}_table_alignment.json").write_text("[]", encoding="utf-8")
+            (project / f"{run_id}_pose_011.ply").touch()
+
+            preview = Scan360CaptureController._preview_payload(project, run_id, 12)
+
+        self.assertEqual(preview["preview_file"], f"{run_id}_pose_011.ply")
+        self.assertEqual(preview["origin_file"], f"{run_id}_pose_011.ply")
+
     def test_unaligned_capture_preview_keeps_the_current_frame_coordinate_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
