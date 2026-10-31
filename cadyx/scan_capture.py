@@ -1408,11 +1408,20 @@ class Scan360CaptureController:
                        / f"{run_id}_preprocessing.json")
         try:
             report = json.loads(report_path.read_text(encoding="utf-8"))
+            if not isinstance(report, dict):
+                raise ValueError("invalid preprocessing report")
             frames = report.get("frames", [])
             failed = report.get("failed_frames", [])
             if not isinstance(frames, list) or not isinstance(failed, list):
                 raise ValueError("invalid per-frame cleanup rows")
             cleaned_count = report.get("cleaned_frame_count", len(frames))
+            failed_count = report.get("failed_frame_count", len(failed))
+            if (any(isinstance(count, bool) or not isinstance(count, int)
+                    or not 0 <= count <= frame_count for count in (cleaned_count, failed_count))
+                    or cleaned_count + failed_count > frame_count
+                    or (report.get("state") == "completed"
+                        and (cleaned_count != frame_count or failed_count != 0))):
+                raise ValueError("invalid preprocessing frame counters")
             marker_detection_count = sum(
                 frame.get("table_marker_detection") == "completed" for frame in frames
                 if isinstance(frame, dict)
@@ -1424,11 +1433,11 @@ class Scan360CaptureController:
             return {
                 "preprocessing_status": report.get("state", "failed"),
                 "preprocessed_frames": cleaned_count,
-                "preprocessing_failed_frames": report.get("failed_frame_count", len(failed)),
+                "preprocessing_failed_frames": failed_count,
                 "preprocessing_frame_count": frame_count,
                 "preprocessing_pending_frames": max(
                     0, frame_count - cleaned_count
-                    - report.get("failed_frame_count", len(failed))),
+                    - failed_count),
                 "table_marker_detection_status": marker_status,
                 "detected_table_marker_count": report.get(
                     "detected_table_marker_count",

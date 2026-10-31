@@ -412,6 +412,32 @@ class Scan360CaptureTests(unittest.TestCase):
         self.assertEqual(status["detected_table_marker_count"], 5)
         self.assertEqual(status["removed_table_marker_points"], 91)
 
+    def test_malformed_preprocessing_reports_fail_closed(self) -> None:
+        reports = [
+            None,
+            [],
+            {"state": "completed", "cleaned_frame_count": -1},
+            {"state": "completed", "cleaned_frame_count": True},
+            {"state": "completed", "cleaned_frame_count": 5},
+            {"state": "completed", "cleaned_frame_count": 3, "failed_frame_count": 2},
+            {"state": "completed", "cleaned_frame_count": 3, "failed_frame_count": 0},
+            {"state": "running", "cleaned_frame_count": "2"},
+            {"state": "running", "cleaned_frame_count": 2, "failed_frame_count": -1},
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261023T091300Z"
+            run_directory = project / run_id
+            run_directory.mkdir()
+            report_path = run_directory / f"{run_id}_preprocessing.json"
+            for report in reports:
+                with self.subTest(report=report):
+                    report_path.write_text(json.dumps(report), encoding="utf-8")
+                    status = Scan360CaptureController._preprocessing_payload(project, run_id, 4)
+                    self.assertEqual(status["preprocessing_status"], "failed")
+                    self.assertEqual(status["preprocessed_frames"], 0)
+                    self.assertEqual(status["preprocessing_failed_frames"], 4)
+
     def test_legacy_capture_without_preprocessing_report_is_not_pending(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
