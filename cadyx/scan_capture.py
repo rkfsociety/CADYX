@@ -59,6 +59,29 @@ def _capture_log_progress(log_tail: str, frame_count: int) -> int:
     return completed
 
 
+def _capture_manifest_frames_valid(manifest: dict[str, Any], run_id: str, frame_count: int) -> bool:
+    """Check the complete, ordered frame inventory in a versioned capture manifest."""
+    if manifest.get("format") != "revopoint-y16-turntable-capture-v2":
+        # Older unversioned reports did not require a frame inventory.
+        return True
+    frames = manifest.get("frames")
+    if not isinstance(frames, list) or len(frames) != frame_count:
+        return False
+    for index, frame in enumerate(frames):
+        if not isinstance(frame, dict) or type(frame.get("index")) is not int or frame["index"] != index:
+            return False
+        raw_file = frame.get("raw_file")
+        if raw_file not in (
+            f"{run_id}_pose_{index:03d}.raw",
+            f"{run_id}_pose_pose_{index:03d}.raw",
+        ):
+            return False
+        if (frame.get("ply_file") != raw_file[:-4] + ".ply"
+                or frame.get("metadata_file") != raw_file[:-4] + ".json"):
+            return False
+    return True
+
+
 def _read_log_tail(log_path: Path, limit: int) -> str:
     """Read only the newest bytes of a potentially long-lived device log."""
     try:
@@ -1420,7 +1443,10 @@ class Scan360CaptureController:
             manifest = None
         manifest_ready = (isinstance(manifest, dict)
                           and manifest.get("frame_count") == self._job.frame_count
-                          and manifest.get("preprocessing_status") == "completed")
+                          and manifest.get("preprocessing_status") == "completed"
+                          and _capture_manifest_frames_valid(manifest, self._job.run_id, self._job.frame_count)
+                          and (manifest.get("format") != "revopoint-y16-turntable-capture-v2"
+                               or manifest.get("table_alignment_status") == alignment_status))
         pipeline_outputs_ready = (completed == self._job.frame_count and capture_sweep_completed
                                   and not alignment_failed
                                   and preprocessing["preprocessing_status"] == "completed"
@@ -1669,24 +1695,14 @@ class Scan360CaptureController:
                     and "preprocessing_status" not in manifest_data
                     and "preprocessing_report" not in manifest_data
                     and manifest_data.get("table_alignment_status") == alignment_status
-                    and isinstance(manifest_data.get("frames"), list)
-                    and len(manifest_data["frames"]) == frame_count
-                    and all(
-                        isinstance(frame, dict)
-                        and type(frame.get("index")) is int
-                        and frame["index"] == index
-                        and frame.get("raw_file") in (
-                            f"{run_id}_pose_{index:03d}.raw",
-                            f"{run_id}_pose_pose_{index:03d}.raw",
-                        )
-                        and frame.get("ply_file") == frame["raw_file"][:-4] + ".ply"
-                        and frame.get("metadata_file") == frame["raw_file"][:-4] + ".json"
-                        for index, frame in enumerate(manifest_data["frames"])
-                    )
+                    and _capture_manifest_frames_valid(manifest_data, run_id, frame_count)
                 )
                 manifest_ready = (isinstance(manifest_data, dict)
                                   and type(manifest_data.get("frame_count")) is int
                                   and manifest_data["frame_count"] == frame_count
+                                  and _capture_manifest_frames_valid(manifest_data, run_id, frame_count)
+                                  and (manifest_data.get("format") != "revopoint-y16-turntable-capture-v2"
+                                       or manifest_data.get("table_alignment_status") == alignment_status)
                                   and (manifest_data.get("preprocessing_status") == "completed"
                                        or repaired_manifest))
                 reports_ready = ((preprocessing["preprocessing_status"] == "completed"

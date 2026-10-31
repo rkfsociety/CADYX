@@ -242,10 +242,19 @@ class Scan360CaptureTests(unittest.TestCase):
             }), encoding="utf-8")
             (run_directory / f"{run_id}_table_alignment.json").write_text(
                 json.dumps({"status": "aligned_provisional"}), encoding="utf-8")
-            (run_directory / f"{run_id}_scan_360.json").write_text(json.dumps({
+            manifest_path = run_directory / f"{run_id}_scan_360.json"
+            manifest = {
+                "format": "revopoint-y16-turntable-capture-v2",
                 "frame_count": 12, "preprocessing_status": "completed",
                 "table_alignment_status": "aligned_provisional",
-            }), encoding="utf-8")
+                "frames": [
+                    {"index": index, "raw_file": f"{run_id}_pose_{index:03d}.raw",
+                     "ply_file": f"{run_id}_pose_{index:03d}.ply",
+                     "metadata_file": f"{run_id}_pose_{index:03d}.json"}
+                    for index in range(12)
+                ],
+            }
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
             controller = Scan360CaptureController(root, workspace)
             controller._job = SimpleNamespace(
@@ -254,8 +263,14 @@ class Scan360CaptureTests(unittest.TestCase):
                 step_degrees=30, started_at="2026-10-29T12:00:00+00:00",
             )
             status = controller._snapshot_locked()
+            manifest_path.write_text(json.dumps({**manifest, "frames": [
+                {**frame, "index": 0} if index == 1 else frame
+                for index, frame in enumerate(manifest["frames"])
+            ]}), encoding="utf-8")
+            invalid_status = controller._snapshot_locked()
 
         self.assertEqual(status["state"], "completed")
+        self.assertEqual(invalid_status["state"], "failed")
         self.assertEqual(status["table_alignment_status"], "aligned_provisional")
         self.assertIn("вернул код 1", status["message"])
 
@@ -868,8 +883,17 @@ class Scan360CaptureTests(unittest.TestCase):
             manifest_path = series / f"{run_id}_scan_360.json"
             preprocessing_path = series / f"{run_id}_preprocessing.json"
             alignment_path = series / f"{run_id}_table_alignment.json"
-            manifest = {"frame_count": 4, "preprocessing_status": "completed",
-                        "table_alignment_status": "partial"}
+            manifest = {
+                "format": "revopoint-y16-turntable-capture-v2",
+                "frame_count": 4, "preprocessing_status": "completed",
+                "table_alignment_status": "partial",
+                "frames": [
+                    {"index": index, "raw_file": f"{run_id}_pose_{index:03d}.raw",
+                     "ply_file": f"{run_id}_pose_{index:03d}.ply",
+                     "metadata_file": f"{run_id}_pose_{index:03d}.json"}
+                    for index in range(4)
+                ],
+            }
             preprocessing = {
                 "state": "completed", "cleaned_frame_count": 4, "failed_frame_count": 0,
                 "frames": [{"frame_index": index, "state": "completed",
@@ -887,6 +911,15 @@ class Scan360CaptureTests(unittest.TestCase):
                 (manifest_path, json.dumps({**manifest, "frame_count": 3})),
                 (preprocessing_path, json.dumps({**preprocessing, "state": "failed"})),
                 (alignment_path, json.dumps({"status": "unknown"})),
+                (manifest_path, json.dumps({**manifest, "frames": manifest["frames"][:-1]})),
+                (manifest_path, json.dumps({**manifest, "frames": [
+                    *manifest["frames"][:-1], {**manifest["frames"][-1], "index": 0},
+                ]})),
+                (manifest_path, json.dumps({**manifest, "frames": [
+                    *manifest["frames"][:-1], {**manifest["frames"][-1],
+                                                "raw_file": f"{run_id}_pose_000.raw"},
+                ]})),
+                (manifest_path, json.dumps({**manifest, "table_alignment_status": "unavailable"})),
             ]
             for path, invalid_content in corrupted:
                 with self.subTest(path=path.name, content=invalid_content):
