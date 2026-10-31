@@ -105,6 +105,32 @@ class CoreServiceCompositionTests(unittest.TestCase):
             self.assertNotIn("_scene_cache", core.__dict__)
             core._invalidate_project_runtime_caches("missing")
 
+    def test_long_command_refreshes_admitted_lease(self) -> None:
+        from cadyx.errors import ConflictError
+
+        with tempfile.TemporaryDirectory() as root:
+            core = CadyxCore(root, kernel=object())
+            project_id = core.create_project("Slow command")["project"]["id"]
+            clock = [1000.0]
+            core.leases._clock = lambda: clock[0]
+            lease = core.acquire_lease(project_id, "agent", "slow-command")
+
+            def execute_slowly(*args: object, **kwargs: object) -> dict[str, object]:
+                clock[0] += core.leases.timeout_seconds + 1.0
+                return {}
+
+            with patch.object(core.commands, "execute", side_effect=execute_slowly):
+                core.execute_command(
+                    project_id, lease["lease_id"], {"type": "create_sketch"},
+                    expected_revision=0,
+                )
+            self.assertFalse(core.leases.snapshot(project_id)["recovery_required"])
+            core.leases.require(project_id, lease["lease_id"])
+            with core._project_guard(project_id):
+                with self.assertRaises(ConflictError):
+                    core.leases.refresh_after_command(project_id, "wrong-lease")
+            core.release_lease(project_id, lease["lease_id"])
+
     def test_command_completed_event_is_versioned_bounded_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             core = CadyxCore(root, kernel=object())

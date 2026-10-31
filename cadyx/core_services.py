@@ -1049,6 +1049,9 @@ class CommandActivityService(_CoreService):
             if isinstance(result.get("feature_id"), str):
                 receipt["feature_id"] = result["feature_id"]
             self.events.publish("command.completed", project_id, receipt)
+            # The command held the SQLite lease transaction, preventing the
+            # background heartbeat from renewing it until this guard exits.
+            self.leases.refresh_after_command(project_id, lease.lease_id)
             if compact_receipt:
                 object_counts: dict[str, int] = {}
                 for item in document.objects:

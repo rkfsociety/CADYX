@@ -259,6 +259,22 @@ class EditLeaseManager:
             )
             return updated
 
+    def refresh_after_command(self, project_id: str, lease_id: str) -> None:
+        """Renew a previously admitted command without rechecking its expiry.
+
+        The command owns the project transaction from lease validation through
+        completion, so an independent heartbeat cannot run during a long edit.
+        Only the same lease may be refreshed, and callers must hold its guard.
+        """
+        connection = self._local.connections[project_id]
+        updated = connection.execute(
+            "UPDATE lease SET heartbeat_at = MAX(heartbeat_at, ?) "
+            "WHERE singleton = 1 AND lease_id = ?",
+            (self._clock(), lease_id),
+        )
+        if updated.rowcount != 1:
+            raise ConflictError("The supplied lease does not own this project.", code="PROJECT_LOCKED")
+
     def extend_timeout(self, project_id: str, lease_id: str, minimum_seconds: float) -> EditLease:
         if not math.isfinite(minimum_seconds) or minimum_seconds <= 0:
             raise ValidationError("Lease timeout extension must be finite and positive.")
