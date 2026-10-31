@@ -640,6 +640,30 @@ class Scan360CaptureTests(unittest.TestCase):
             self.assertEqual(Scan360CaptureController._preprocessing_payload(
                 project, run_id, 4, active=True)["preprocessing_status"], "starting")
 
+    def test_preprocessing_cache_invalidates_same_size_rewrite_with_unchanged_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261031T210000Z"
+            run_directory = project / run_id
+            run_directory.mkdir()
+            report_path = run_directory / f"{run_id}_preprocessing.json"
+            valid = {
+                "format": "cadyx-scan-preprocessing-v1", "state": "completed",
+                "cleaned_frame_count": 4, "failed_frame_count": 0,
+                "frames": [{"frame_index": index, "state": "completed"} for index in range(4)],
+                "failed_frames": [],
+            }
+            duplicate = {**valid, "frames": [*valid["frames"][:-1], valid["frames"][0]]}
+            self.assertEqual(len(json.dumps(valid)), len(json.dumps(duplicate)))
+            # Simulate Windows returning identical file metadata for rapid rewrites.
+            with patch("cadyx.scan_capture._scan_file_identity", return_value=(1, 2, 3, 4, 5)):
+                report_path.write_text(json.dumps(valid), encoding="utf-8")
+                self.assertEqual(Scan360CaptureController._preprocessing_payload(
+                    project, run_id, 4)["preprocessing_status"], "completed")
+                report_path.write_text(json.dumps(duplicate), encoding="utf-8")
+                self.assertEqual(Scan360CaptureController._preprocessing_payload(
+                    project, run_id, 4)["preprocessing_status"], "failed")
+
     def test_preprocessing_cache_retries_report_replaced_during_read(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

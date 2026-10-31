@@ -42,6 +42,18 @@ def _scan_file_identity(path: Path) -> tuple[int, int, int, int, int]:
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
+def _preprocessing_report_identity(path: Path) -> tuple[tuple[int, int, int, int, int], bytes]:
+    """Fingerprint report bytes because rapid same-size rewrites can share Windows timestamps."""
+    before = _scan_file_identity(path)
+    digest = hashlib.blake2b(digest_size=16)
+    with path.open("rb") as stream:
+        while chunk := stream.read(64 * 1024):
+            digest.update(chunk)
+    if _scan_file_identity(path) != before:
+        raise _ScanFileChanged
+    return before, digest.digest()
+
+
 def _normalize_turntable_angle(angle_degrees: float) -> float:
     """Return the equivalent signed table orientation in [-180, 180)."""
     return (angle_degrees + 180.0) % 360.0 - 180.0
@@ -139,14 +151,14 @@ def _failed_preprocessing_payload(frame_count: int) -> dict[str, Any]:
 @lru_cache(maxsize=64)
 def _cached_preprocessing_payload(
     project_directory: Path, run_id: str, frame_count: int,
-    _identity: tuple[int, int, int, int, int],
+    _identity: tuple[tuple[int, int, int, int, int], bytes],
 ) -> dict[str, Any]:
     """Cache only compact summaries read from a stable report version."""
     payload = Scan360CaptureController._preprocessing_payload_uncached(
         project_directory, run_id, frame_count)
     report_path = (Scan360CaptureController._support_directory(project_directory, run_id)
                    / f"{run_id}_preprocessing.json")
-    if _scan_file_identity(report_path) != _identity:
+    if _preprocessing_report_identity(report_path) != _identity:
         raise _ScanFileChanged
     return payload
 
@@ -1501,13 +1513,18 @@ class Scan360CaptureController:
                        / f"{run_id}_preprocessing.json")
         for _ in range(2):
             try:
-                identity = _scan_file_identity(report_path)
+                identity = _preprocessing_report_identity(report_path)
+            except _ScanFileChanged:
+                continue
             except OSError:
                 # Preserve the active/archived distinction for absent reports.
                 return Scan360CaptureController._preprocessing_payload_uncached(
                     project_directory, run_id, frame_count, active=active)
             try:
-                return dict(_cached_preprocessing_payload(project_directory, run_id, frame_count, identity))
+                payload = _cached_preprocessing_payload(project_directory, run_id, frame_count, identity)
+                if _preprocessing_report_identity(report_path) != identity:
+                    continue
+                return dict(payload)
             except (_ScanFileChanged, OSError):
                 continue
         # Never expose a successful summary from a report that changed during both reads.
