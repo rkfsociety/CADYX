@@ -285,6 +285,8 @@ def verified_preprocessed_frame(source_path: Path) -> tuple[Path, dict[str, Any]
         raise ValueError(f"{source_path.name} has no cleanup report")
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError("cleanup report must be a JSON object")
         source_hash = _sha256(source_path.read_bytes())
         in_place = report.get("processing_mode") == "in_place" and report.get("cleaned_file") == source_path.name
         if in_place:

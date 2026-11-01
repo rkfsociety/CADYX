@@ -320,6 +320,18 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "does not match"):
                 verified_preprocessed_frame(source)
 
+    def test_verified_frame_rejects_nonobject_cleanup_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source = folder / "frame.ply"
+            source.write_bytes(self._source_ply())
+            report = folder / "frame_cleaned.json"
+            for invalid in ("null", "[]", '"unexpected"', "0"):
+                with self.subTest(invalid=invalid):
+                    report.write_text(invalid, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "unreadable cleanup report"):
+                        verified_preprocessed_frame(source)
+
     def test_refuses_incomplete_frame_sets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
