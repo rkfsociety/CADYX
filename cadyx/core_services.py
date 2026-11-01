@@ -522,7 +522,7 @@ class CommandActivityService(_CoreService):
         lease_id: str | None = None,
     ) -> dict[str, Any]:
         """Run one agent command under a server-managed, single-request lease."""
-        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+        with self._project_lifecycle_lock(project_id):
             lease = (self.acquire_lease(project_id, "agent", owner_id) if lease_id is None
                      else self.leases.require(project_id, lease_id).as_dict())
             if lease.get("owner_id") != owner_id or lease.get("owner_type") != OwnerType.AGENT.value:
@@ -884,6 +884,33 @@ class CommandActivityService(_CoreService):
             detail["lock"] = lock
             return {"resumed": True, "lease": lease.as_dict(), **detail}
 
+    @contextmanager
+    def _admitted_command_guard(
+        self, project_id: str, lease_id: str | None,
+    ) -> Iterator[Callable[[], None]]:
+        """Renew a failed command's lease only after its transaction has rolled back."""
+        admitted = False
+
+        def mark_admitted() -> None:
+            nonlocal admitted
+            admitted = True
+
+        try:
+            with self._project_guard(project_id):
+                yield mark_admitted
+        except Exception as command_error:
+            if admitted and isinstance(lease_id, str):
+                try:
+                    # The failing transaction is gone; this renewal is durable.
+                    with self._project_guard(project_id):
+                        self.leases.refresh_after_command(project_id, lease_id)
+                except Exception as renewal_error:
+                    command_error.add_note(
+                        "Edit lease renewal after command failure also failed: "
+                        f"{type(renewal_error).__name__}"
+                    )
+            raise
+
     def execute_command(
         self,
         project_id: str,
@@ -894,7 +921,7 @@ class CommandActivityService(_CoreService):
         expected_revision: int | None = None,
         compact_receipt: bool = False,
     ) -> dict[str, Any]:
-        with self._project_guard(project_id):
+        with self._admitted_command_guard(project_id, lease_id) as admit:
             command_name = command.get("type") if isinstance(command, dict) else None
             lease = self.leases.require(project_id, lease_id)
             if expected_owner_type is not None and lease.owner_type is not expected_owner_type:
@@ -922,6 +949,7 @@ class CommandActivityService(_CoreService):
                 # normal lease window; the project transaction prevents
                 # concurrent heartbeats, so grant them a wider expiry.
                 self.leases.extend_timeout(project_id, lease.lease_id, 300.0)
+            admit()
             operation_id = str(uuid4())
             source = self._scan_source(command, project["document"])
             activity = {

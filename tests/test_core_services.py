@@ -131,6 +131,67 @@ class CoreServiceCompositionTests(unittest.TestCase):
                     core.leases.refresh_after_command(project_id, "wrong-lease")
             core.release_lease(project_id, lease["lease_id"])
 
+    def test_failed_long_command_renews_lease_after_rollback(self) -> None:
+        from cadyx.errors import ValidationError
+
+        with tempfile.TemporaryDirectory() as root:
+            core = CadyxCore(root, kernel=object())
+            project_id = core.create_project("Failed slow command")["project"]["id"]
+            clock = [1000.0]
+            core.leases._clock = lambda: clock[0]
+            lease = core.acquire_lease(project_id, "agent", "slow-failure")
+
+            def fail_slowly(*args: object, **kwargs: object) -> dict[str, object]:
+                clock[0] += core.leases.timeout_seconds + 1.0
+                raise ValidationError("Invalid command geometry.")
+
+            with patch.object(core.commands, "execute", side_effect=fail_slowly):
+                with self.assertRaises(ValidationError):
+                    core.execute_command(
+                        project_id, lease["lease_id"], {"type": "create_sketch"},
+                        expected_revision=0,
+                    )
+            self.assertEqual(core.workspace.load(project_id)["document"]["revision"], 0)
+            self.assertFalse(core.leases.snapshot(project_id)["recovery_required"])
+            core.leases.require(project_id, lease["lease_id"])
+            core.release_lease(project_id, lease["lease_id"])
+
+    def test_failed_server_managed_long_command_releases_lease(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            core = CadyxCore(root, kernel=object())
+            project_id = core.create_project("Failed managed command")["project"]["id"]
+            clock = [1000.0]
+            core.leases._clock = lambda: clock[0]
+
+            def fail_slowly(*args: object, **kwargs: object) -> dict[str, object]:
+                clock[0] += core.leases.timeout_seconds + 1.0
+                raise RuntimeError("Kernel failed.")
+
+            with patch.object(core.commands, "execute", side_effect=fail_slowly):
+                with self.assertRaises(RuntimeError):
+                    core.execute_agent_command(
+                        project_id, "managed-agent", 0, {"type": "create_sketch"},
+                    )
+            self.assertEqual(core.leases.snapshot(project_id)["state"], "FREE")
+
+    def test_expired_lease_is_not_renewed_before_command_admission(self) -> None:
+        from cadyx.errors import ConflictError
+
+        with tempfile.TemporaryDirectory() as root:
+            core = CadyxCore(root, kernel=object())
+            project_id = core.create_project("Expired precondition")["project"]["id"]
+            clock = [1000.0]
+            core.leases._clock = lambda: clock[0]
+            lease = core.acquire_lease(project_id, "agent", "expired")
+            clock[0] += core.leases.timeout_seconds + 1.0
+            with self.assertRaises(ConflictError):
+                core.execute_command(
+                    project_id, lease["lease_id"], {"type": "create_sketch"},
+                    expected_revision=0,
+                )
+            self.assertTrue(core.leases.snapshot(project_id)["recovery_required"])
+            core.leases.release_expired(project_id)
+
     def test_command_completed_event_is_versioned_bounded_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             core = CadyxCore(root, kernel=object())
