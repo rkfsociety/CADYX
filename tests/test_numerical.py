@@ -71,6 +71,49 @@ class NumericalRankTests(unittest.TestCase):
                 self.assertFalse(sparse.add_row(rows[1]))
                 self.assertEqual(sparse.rank, 1)
 
+    def test_rank_rejects_invalid_tolerances_and_unrepresentable_entries(self):
+        for tolerance in (0.0, -1.0, math.nan, math.inf):
+            with self.subTest(tolerance=tolerance):
+                with self.assertRaisesRegex(ValueError, "tolerance"):
+                    matrix_rank([[1.0]], tolerance=tolerance)
+                with self.assertRaisesRegex(ValueError, "tolerance"):
+                    SparseRankAccumulator(tolerance=tolerance)
+        for value in ("invalid", 10**400):
+            with self.subTest(value=type(value)):
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    matrix_rank([[value]])
+
+    def test_dense_rank_rejects_elimination_overflow(self):
+        # Every source entry is finite, but subtracting opposite extremes
+        # would produce infinity and an unreliable pivot.
+        with self.assertRaisesRegex(ValueError, "non-finite"):
+            matrix_rank([[1e308, 1e308], [-1e308, 1e308]])
+
+    def test_sparse_rank_rejects_invalid_columns_without_changing_basis(self):
+        sparse = SparseRankAccumulator()
+        for row in ({-1: 1.0}, {"0": 1.0}, {True: 1.0}):
+            with self.subTest(row=row):
+                with self.assertRaisesRegex(ValueError, "columns"):
+                    sparse.add_row(row)
+        self.assertEqual(sparse.rank, 0)
+
+    def test_sparse_rank_rejects_overflow_without_corrupting_basis(self):
+        sparse = SparseRankAccumulator(tolerance=1e-310)
+        first = {0: 1e-300, 1: 1e308}
+        self.assertTrue(sparse.add_row(first))
+        with self.assertRaisesRegex(ValueError, "non-finite"):
+            sparse.add_row({0: 1e308, 1: 1e308})
+        self.assertEqual(sparse.rank, 1)
+        self.assertFalse(sparse.add_row(first))
+        self.assertEqual(sparse.rank, 1)
+
+        # A finite elimination factor can still overflow its subtraction.
+        second = SparseRankAccumulator()
+        self.assertTrue(second.add_row({0: 1.0, 1: -1e308}))
+        with self.assertRaisesRegex(ValueError, "non-finite"):
+            second.add_row({0: 1.0, 1: 1e308})
+        self.assertEqual(second.rank, 1)
+
     def test_sparse_positive_definite_solver(self):
         matrix = {0: {0: 4.0, 1: 1.0}, 1: {0: 1.0, 1: 3.0}}
         result = solve_sparse_positive_definite(matrix, [1.0, 2.0])

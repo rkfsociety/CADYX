@@ -6,6 +6,8 @@ import math
 
 def matrix_rank(rows: list[list[float]], *, tolerance: float = 1e-8) -> int:
     """Return the pivoted Gaussian-elimination rank of a dense row matrix."""
+    if not math.isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError("Matrix rank tolerance must be positive and finite.")
     if not rows:
         return 0
     columns = len(rows[0])
@@ -13,9 +15,12 @@ def matrix_rank(rows: list[list[float]], *, tolerance: float = 1e-8) -> int:
         raise ValueError("Matrix rows must have a consistent number of columns.")
     if not columns:
         return 0
-    if any(not math.isfinite(value) for row in rows for value in row):
+    try:
+        matrix = [[float(value) for value in row] for row in rows]
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Matrix entries must be finite.") from exc
+    if any(not math.isfinite(value) for row in matrix for value in row):
         raise ValueError("Matrix entries must be finite.")
-    matrix = [row[:] for row in rows]
     row_count = len(matrix)
     rank = 0
     for column in range(columns):
@@ -34,7 +39,10 @@ def matrix_rank(rows: list[list[float]], *, tolerance: float = 1e-8) -> int:
             matrix[row][column] = 0.0
             if factor:
                 for index in range(column + 1, columns):
-                    matrix[row][index] -= factor * matrix[rank][index]
+                    adjusted = matrix[row][index] - factor * matrix[rank][index]
+                    if not math.isfinite(adjusted):
+                        raise ValueError("Matrix elimination produced non-finite coefficients.")
+                    matrix[row][index] = adjusted
         rank += 1
     return rank
 
@@ -43,6 +51,8 @@ class SparseRankAccumulator:
     """Incremental sparse row-echelon rank tracker for rigid constraint Jacobians."""
 
     def __init__(self, *, tolerance: float = 1e-8) -> None:
+        if not math.isfinite(tolerance) or tolerance <= 0.0:
+            raise ValueError("Sparse rank tolerance must be positive and finite.")
         self.tolerance = tolerance
         self._basis: dict[int, dict[int, float]] = {}
 
@@ -51,9 +61,11 @@ class SparseRankAccumulator:
         return len(self._basis)
 
     def add_row(self, source: dict[int, float]) -> bool:
+        if any(type(column) is not int or column < 0 for column in source):
+            raise ValueError("Sparse rank columns must be nonnegative integers.")
         try:
             coefficients = {column: float(value) for column, value in source.items()}
-        except (OverflowError, ValueError) as exc:
+        except (TypeError, OverflowError, ValueError) as exc:
             raise ValueError("Sparse rank rows must contain finite coefficients.") from exc
         if any(not math.isfinite(value) for value in coefficients.values()):
             raise ValueError("Sparse rank rows must contain finite coefficients.")
@@ -72,10 +84,14 @@ class SparseRankAccumulator:
             # Remove the pivot exactly, rather than leaving roundoff that
             # could repeatedly eliminate the same column.
             factor = row.pop(pivot) / basis[pivot]
+            if not math.isfinite(factor):
+                raise ValueError("Sparse rank elimination produced non-finite coefficients.")
             for column, value in basis.items():
                 if column == pivot:
                     continue
                 adjusted = row.get(column, 0.0) - factor * value
+                if not math.isfinite(adjusted):
+                    raise ValueError("Sparse rank elimination produced non-finite coefficients.")
                 if abs(adjusted) < self.tolerance:
                     row.pop(column, None)
                 else:
