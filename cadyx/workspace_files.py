@@ -785,5 +785,11 @@ def _is_single_path_segment(value: str) -> bool:
         and ":" not in value
         and "/" not in value
         and "\\" not in value
+        and value.rstrip(" .") == value
+        and all(ord(character) >= 32 for character in value)
+        and not re.match(
+            r"(?i)^(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)",
+            value,
+        )
         and Path(value).name == value
     )

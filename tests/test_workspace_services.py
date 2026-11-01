@@ -278,6 +278,24 @@ class WorkspaceServiceTests(unittest.TestCase):
             store.rename_project_file(directory, "visible.txt", "PROJECT.JSON")
         self.assertEqual((directory / "visible.txt").read_bytes(), b"user")
 
+    def test_artifact_rejects_windows_device_and_path_alias_names(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+        unsafe = (
+            "CON", "con.txt", "NUL.log", "AUX.txt", "COM1.txt",
+            "LPT9.txt", "COM¹.txt", "CONIN$.txt", "project.json.",
+            "PROJECT.JSON ", ".CADYX-LEASES.SQLITE3.", "file.txt ",
+            "bad\nname.txt",
+        )
+        for filename in unsafe:
+            with self.subTest(filename=filename):
+                with self.assertRaises(ValidationError):
+                    store.publish_project_file(directory, filename, b"data")
+                with self.assertRaises(NotFoundError):
+                    store.resolve_project_file(directory, filename)
+        self.assertEqual(list(directory.iterdir()), [])
+
     def test_artifact_upload_rejects_reserved_metadata_and_invalid_names(self) -> None:
         directory = self.root / "project"
         directory.mkdir()
