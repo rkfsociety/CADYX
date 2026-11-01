@@ -83,9 +83,9 @@ class ProjectWorkspaceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             directory = Path(root)
             history = directory / ".cadyx-history.jsonl"
-            history.write_bytes(b"committed\\n")
+            history.write_bytes(b"committed\n")
             outside = directory / "outside.jsonl"
-            outside.write_bytes(b"outside\\n")
+            outside.write_bytes(b"outside\n")
             probe = directory / ".symlink-probe"
             try:
                 probe.symlink_to(outside)
@@ -105,8 +105,8 @@ class ProjectWorkspaceTests(unittest.TestCase):
                 with self.assertRaises((OSError, ValidationError)):
                     with _open_regular_file(history, append=True) as stream:
                         stream.truncate(0)
-                        stream.write(b"overwritten\\n")
-            self.assertEqual(outside.read_bytes(), b"outside\\n")
+                        stream.write(b"overwritten\n")
+            self.assertEqual(outside.read_bytes(), b"outside\n")
 
     def test_project_storage_rejects_invalid_utf8_as_validation_error(self) -> None:
         from cadyx.workspace_projects import _unpack_project_geometries
