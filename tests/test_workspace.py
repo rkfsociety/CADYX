@@ -77,6 +77,37 @@ class ProjectWorkspaceTests(unittest.TestCase):
                     ProjectRecordStore().load(directory, project["id"])
             self.assertEqual(outside.read_bytes(), original)
 
+    def test_history_append_rejects_symlink_swapped_during_open(self) -> None:
+        from cadyx.workspace_projects import _open_regular_file
+
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root)
+            history = directory / ".cadyx-history.jsonl"
+            history.write_bytes(b"committed\\n")
+            outside = directory / "outside.jsonl"
+            outside.write_bytes(b"outside\\n")
+            probe = directory / ".symlink-probe"
+            try:
+                probe.symlink_to(outside)
+            except (OSError, NotImplementedError):
+                self.skipTest("Creating symbolic links requires privileges on this host.")
+            probe.unlink()
+
+            real_open = os.open
+
+            def swap_to_link(path, flags, *args, **kwargs):
+                if Path(path) == history:
+                    history.unlink()
+                    history.symlink_to(outside)
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch("cadyx.workspace_projects.os.open", side_effect=swap_to_link):
+                with self.assertRaises((OSError, ValidationError)):
+                    with _open_regular_file(history, append=True) as stream:
+                        stream.truncate(0)
+                        stream.write(b"overwritten\\n")
+            self.assertEqual(outside.read_bytes(), b"outside\\n")
+
     def test_project_storage_rejects_invalid_utf8_as_validation_error(self) -> None:
         from cadyx.workspace_projects import _unpack_project_geometries
 

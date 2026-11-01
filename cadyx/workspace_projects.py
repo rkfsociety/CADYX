@@ -46,20 +46,23 @@ def _parse_finite_float(value: str) -> float:
     return parsed
 
 
-def _open_regular_file(path: Path, *, binary: bool = False):
-    """Read a storage file without following a link swapped in after validation.
+def _open_regular_file(path: Path, *, binary: bool = False, append: bool = False):
+    """Open a storage file without following a link swapped in after validation.
 
     O_NOFOLLOW protects POSIX opens; the descriptor/path identity check also
     detects redirected or replaced files on Windows, where that flag is absent.
     """
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
+    flags = (os.O_RDWR | os.O_CREAT | os.O_APPEND) if append else os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o666)
     try:
         opened = os.fstat(descriptor)
         current = path.stat(follow_symlinks=False)
         if (not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(current.st_mode)
                 or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)):
             raise ValidationError("Project storage file is not regular or changed while opening.")
+        if append:
+            return os.fdopen(descriptor, "a+b")
         if binary:
             return os.fdopen(descriptor, "rb")
         return os.fdopen(descriptor, "r", encoding="utf-8")
@@ -350,7 +353,7 @@ class ProjectRecordStore:
             history_path = directory / _HISTORY_FILE
             if history_path.is_symlink() or (history_path.exists() and not history_path.is_file()):
                 raise ValidationError("Project history log path is not a regular file.")
-            with history_path.open("a+b") as stream:
+            with _open_regular_file(history_path, append=True) as stream:
                 stream.seek(committed_offset)
                 stream.truncate()
                 stream.write(appended)
