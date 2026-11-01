@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import stat
 import tempfile
 import time
 from pathlib import Path
@@ -43,6 +44,28 @@ def _parse_finite_float(value: str) -> float:
     if not math.isfinite(parsed):
         raise ValueError("Non-finite JSON number is invalid.")
     return parsed
+
+
+def _open_regular_file(path: Path, *, binary: bool = False):
+    """Read a storage file without following a link swapped in after validation.
+
+    O_NOFOLLOW protects POSIX opens; the descriptor/path identity check also
+    detects redirected or replaced files on Windows, where that flag is absent.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        current = path.stat(follow_symlinks=False)
+        if (not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(current.st_mode)
+                or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)):
+            raise ValidationError("Project storage file is not regular or changed while opening.")
+        if binary:
+            return os.fdopen(descriptor, "rb")
+        return os.fdopen(descriptor, "r", encoding="utf-8")
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 def _brep_key(geometry: dict[str, Any]) -> str:
@@ -122,7 +145,7 @@ def _unpack_project_geometries(project: dict[str, Any], directory: Path) -> dict
                     if blob_path.is_symlink():
                         raise ValidationError("Project geometry blob path cannot be a symbolic link.")
                     try:
-                        with blob_path.open("r", encoding="utf-8") as stream:
+                        with _open_regular_file(blob_path) as stream:
                             geometry = json.load(
                                 stream, parse_constant=_reject_nonfinite_json,
                                 parse_float=_parse_finite_float,
@@ -161,7 +184,7 @@ def _read_history_log(directory: Path, pointer: Any) -> tuple[list[dict[str, Any
     entries: list[dict[str, Any]] = []
     consumed = 0
     try:
-        with path.open("rb") as stream:
+        with _open_regular_file(path, binary=True) as stream:
             while consumed < committed_bytes:
                 line = stream.readline(committed_bytes - consumed + 1)
                 if not line or not line.endswith(b"\n") or consumed + len(line) > committed_bytes:
@@ -221,7 +244,7 @@ class ProjectRecordStore:
         if project_file.exists() and not project_file.is_file():
             raise ValidationError("Project file must be a regular file.")
         try:
-            with project_file.open("r", encoding="utf-8") as stream:
+            with _open_regular_file(project_file) as stream:
                 project = json.load(
                     stream, parse_constant=_reject_nonfinite_json, parse_float=_parse_finite_float,
                 )

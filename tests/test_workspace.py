@@ -47,6 +47,36 @@ class ProjectWorkspaceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValidationError, "regular file"):
                 ProjectRecordStore().load(project_directory, str(uuid4()))
 
+    def test_project_record_rejects_symlink_swapped_during_open(self) -> None:
+        project = self.workspace.create("Storage open race")
+        directory = self.workspace._project_dir(project["id"])
+        record = directory / "project.json"
+        original = record.read_bytes()
+        with tempfile.TemporaryDirectory() as external_root:
+            outside = Path(external_root) / "outside.json"
+            outside.write_bytes(original)
+            probe = directory / ".symlink-probe"
+            try:
+                probe.symlink_to(outside)
+            except (OSError, NotImplementedError):
+                self.skipTest("Creating symbolic links requires privileges on this host.")
+            probe.unlink()
+
+            real_open = os.open
+
+            def swap_to_link(path, flags, *args, **kwargs):
+                if Path(path) == record:
+                    record.unlink()
+                    record.symlink_to(outside)
+                return real_open(path, flags, *args, **kwargs)
+
+            # The preliminary is_symlink check sees the original regular file.
+            # A replacement immediately before os.open must still be rejected.
+            with patch("cadyx.workspace_projects.os.open", side_effect=swap_to_link):
+                with self.assertRaises(ValidationError):
+                    ProjectRecordStore().load(directory, project["id"])
+            self.assertEqual(outside.read_bytes(), original)
+
     def test_project_storage_rejects_invalid_utf8_as_validation_error(self) -> None:
         from cadyx.workspace_projects import _unpack_project_geometries
 
