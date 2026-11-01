@@ -39,6 +39,8 @@ class RuntimeCachePolicy:
 def trim_lru_entries(cache: OrderedDict[KeyT, ValueT], max_entries: int) -> None:
     """Evict oldest entries until an LRU cache satisfies its entry budget."""
 
+    if type(max_entries) is not int or max_entries < 0:
+        raise ValueError("Cache entry budget must be a non-negative integer.")
     while len(cache) > max_entries:
         cache.popitem(last=False)
 
@@ -55,9 +57,16 @@ def remember_bounded_bytes(
 ) -> int:
     """Store one LRU value and return exact retained-byte accounting."""
 
+    if any(type(amount) is not int or amount < 0
+           for amount in (current_bytes, max_entries, max_bytes)):
+        raise ValueError("Cache budgets and byte accounting must be non-negative integers.")
     value_bytes = size_of(value)
+    if type(value_bytes) is not int or value_bytes < 0:
+        raise ValueError("Cache item size must be a non-negative integer.")
     had_previous = key in cache
     previous_bytes = size_of(cache[key]) if had_previous else 0
+    if type(previous_bytes) is not int or previous_bytes < 0:
+        raise ValueError("Cache item size must be a non-negative integer.")
     if had_previous:
         del cache[key]
         current_bytes -= previous_bytes

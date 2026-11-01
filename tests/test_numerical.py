@@ -83,6 +83,17 @@ class NumericalRankTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "finite"):
                     matrix_rank([[value]])
 
+    def test_rank_tolerance_rejects_invalid_types_and_huge_integers(self):
+        for tolerance in (None, "1e-8", True, 10**400):
+            with self.subTest(tolerance=repr(tolerance)):
+                with self.assertRaisesRegex(ValueError, "tolerance"):
+                    matrix_rank([[1.0]], tolerance=tolerance)
+                with self.assertRaisesRegex(ValueError, "tolerance"):
+                    SparseRankAccumulator(tolerance=tolerance)
+                self.assertIsNone(
+                    solve_sparse_positive_definite({0: {0: 2.0}}, [1.0], tolerance=tolerance)
+                )
+
     def test_dense_rank_rejects_elimination_overflow(self):
         # Every source entry is finite, but subtracting opposite extremes
         # would produce infinity and an unreliable pivot.

@@ -143,6 +143,19 @@ class PointCloudProcessingTests(unittest.TestCase):
         self.assertEqual(low[:len(surface)], surface)
         self.assertEqual(process_points(surface, "isolation_filter", {"rate": 15}), surface)
 
+    def test_processing_rejects_nonfinite_and_malformed_source_points(self):
+        valid = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]
+        invalid_points = (
+            (math.nan, 0.0, 0.0), (math.inf, 0.0, 0.0),
+            (-math.inf, 0.0, 0.0), (10**400, 0.0, 0.0),
+            ("1", 0.0, 0.0), (0.0,), [0.0, 0.0, 0.0],
+        )
+        for point in invalid_points:
+            with self.subTest(point=point):
+                for method, parameters in (("deduplicate", {}), ("simplify", {"ratio": 40})):
+                    with self.assertRaisesRegex(ValidationError, "finite XYZ triples"):
+                        process_points(valid + [point], method, parameters)
+
     def test_processing_rejects_too_few_source_points(self):
         methods = (("simplify", {"ratio": 40}), ("deduplicate", {}),
                    ("voxel_downsample", {"voxel_size": 1.0}))

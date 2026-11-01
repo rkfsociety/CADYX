@@ -6,7 +6,13 @@ import math
 
 def matrix_rank(rows: list[list[float]], *, tolerance: float = 1e-8) -> int:
     """Return the pivoted Gaussian-elimination rank of a dense row matrix."""
-    if not math.isfinite(tolerance) or tolerance <= 0.0:
+    if type(tolerance) not in (int, float):
+        raise ValueError("Matrix rank tolerance must be positive and finite.")
+    try:
+        valid_tolerance = math.isfinite(tolerance) and tolerance > 0.0
+    except OverflowError:
+        valid_tolerance = False
+    if not valid_tolerance:
         raise ValueError("Matrix rank tolerance must be positive and finite.")
     if not rows:
         return 0
@@ -51,7 +57,13 @@ class SparseRankAccumulator:
     """Incremental sparse row-echelon rank tracker for rigid constraint Jacobians."""
 
     def __init__(self, *, tolerance: float = 1e-8) -> None:
-        if not math.isfinite(tolerance) or tolerance <= 0.0:
+        if type(tolerance) not in (int, float):
+            raise ValueError("Sparse rank tolerance must be positive and finite.")
+        try:
+            valid_tolerance = math.isfinite(tolerance) and tolerance > 0.0
+        except OverflowError:
+            valid_tolerance = False
+        if not valid_tolerance:
             raise ValueError("Sparse rank tolerance must be positive and finite.")
         self.tolerance = tolerance
         self._basis: dict[int, dict[int, float]] = {}
@@ -108,7 +120,8 @@ def solve_sparse_positive_definite(
     if not size:
         return []
     try:
-        if (not math.isfinite(tolerance) or tolerance <= 0.0
+        if (type(tolerance) not in (int, float)
+                or not math.isfinite(tolerance) or tolerance <= 0.0
                 or (max_iterations is not None and (type(max_iterations) is not int or max_iterations < 1))
                 or any(not math.isfinite(value) for value in right_hand_side)):
             return None

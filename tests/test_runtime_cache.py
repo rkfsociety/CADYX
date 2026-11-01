@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 
 from cadyx.core import CadyxCore
 from cadyx.models import Document
-from cadyx.runtime_cache import RuntimeCachePolicy, remember_bounded_bytes
+from cadyx.runtime_cache import RuntimeCachePolicy, remember_bounded_bytes, trim_lru_entries
 
 
 class _KernelStub:
@@ -78,6 +78,28 @@ class RuntimeCacheTests(unittest.TestCase):
                 max_entries=2, max_bytes=5, size_of=failing_size,
             )
         self.assertEqual(list(cache.items()), [("data", b"12"), ("empty", b"3")])
+
+    def test_invalid_cache_budgets_and_sizes_leave_existing_entries_intact(self):
+        cache = OrderedDict([("a", b"12")])
+        for field, value in (("current_bytes", -1), ("max_entries", -1),
+                             ("max_entries", True), ("max_bytes", -1)):
+            with self.subTest(field=field, value=value):
+                options = {"current_bytes": 2, "max_entries": 2, "max_bytes": 5}
+                options[field] = value
+                with self.assertRaisesRegex(ValueError, "non-negative integer"):
+                    remember_bounded_bytes(cache, "b", b"3", size_of=len, **options)
+                self.assertEqual(cache, OrderedDict([("a", b"12")]))
+        for invalid_size in (-1, 1.5, True):
+            with self.subTest(invalid_size=invalid_size):
+                with self.assertRaisesRegex(ValueError, "Cache item size"):
+                    remember_bounded_bytes(
+                        cache, "b", b"3", current_bytes=2,
+                        max_entries=2, max_bytes=5, size_of=lambda _: invalid_size,
+                    )
+                self.assertEqual(cache, OrderedDict([("a", b"12")]))
+        with self.assertRaisesRegex(ValueError, "entry budget"):
+            trim_lru_entries(cache, -1)
+        self.assertEqual(cache, OrderedDict([("a", b"12")]))
 
     def test_policy_budgets_are_validated_in_one_object(self):
         policy = RuntimeCachePolicy(

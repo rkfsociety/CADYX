@@ -104,6 +104,14 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
     p = normalize_cloud_parameters(method, parameters)
     if len(points) < 3:
         raise ValidationError("Point-cloud processing requires at least three source points.")
+    # Validate every source point before a method can silently retain NaN,
+    # infinity, or malformed coordinates in a saved processing stage.
+    if any(
+        not isinstance(point, tuple) or len(point) != 3
+        or any(not _finite_numeric(coordinate) for coordinate in point)
+        for point in points
+    ):
+        raise ValidationError("Point-cloud source points must be finite XYZ triples.")
     if method == "simplify":
         target = max(3, math.floor(len(points) * (100 - p["ratio"]) / 100))
         if p["strategy"] == "uniform":
