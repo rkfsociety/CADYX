@@ -202,6 +202,36 @@ class WorkspaceServiceTests(unittest.TestCase):
         marker.unlink()
         self.assertEqual(len(store.list(directory)), 1)
 
+    def test_artifact_paths_accept_noncanonical_parent_aliases(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        (directory / "alias").mkdir()
+        (directory / "visible.txt").write_bytes(b"user")
+        (directory / "samples").mkdir()
+        (directory / "samples" / "frame.ply").write_bytes(b"scan")
+        aliased = directory / "alias" / ".."
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+
+        self.assertEqual(
+            [item["name"] for item in store.list_project_files(aliased)], ["visible.txt"]
+        )
+        self.assertEqual(
+            [item["name"] for item in store.list_folder_files(aliased)], ["visible.txt"]
+        )
+        self.assertEqual(
+            [item["name"] for item in store.list_project_folders(aliased)],
+            ["alias", "samples"],
+        )
+        self.assertEqual(store.resolve_project_file(aliased, "visible.txt").read_bytes(), b"user")
+        self.assertEqual(
+            [item["name"] for item in store.list_project_subfolder_files(aliased, "samples")],
+            ["frame.ply"],
+        )
+        self.assertEqual(
+            store.resolve_project_subfolder_file(aliased, "samples", "frame.ply").read_bytes(),
+            b"scan",
+        )
+
     def test_artifact_batch_operations_reject_casefold_collisions(self) -> None:
         directory = self.root / "project"
         directory.mkdir()

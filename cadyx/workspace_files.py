@@ -21,6 +21,7 @@ class WorkspaceArtifactStore:
         self._is_internal_file = is_internal_file
 
     def list_folder_files(self, folder: Path) -> list[dict[str, Any]]:
+        canonical_folder = folder.resolve(strict=True)
         files: list[dict[str, Any]] = []
         for entry in folder.iterdir():
             if (
@@ -32,7 +33,7 @@ class WorkspaceArtifactStore:
                 continue
             try:
                 resolved = entry.resolve(strict=True)
-                if resolved.parent != folder:
+                if resolved.parent != canonical_folder:
                     continue
                 stat = resolved.stat()
             except OSError:
@@ -51,6 +52,7 @@ class WorkspaceArtifactStore:
 
     @staticmethod
     def list_project_files(directory: Path) -> list[dict[str, Any]]:
+        canonical_directory = directory.resolve(strict=True)
         files: list[dict[str, Any]] = []
         for entry in directory.iterdir():
             if (
@@ -62,7 +64,7 @@ class WorkspaceArtifactStore:
                 continue
             try:
                 resolved = entry.resolve(strict=True)
-                if resolved.parent != directory:
+                if resolved.parent != canonical_directory:
                     continue
                 stat = resolved.stat()
             except OSError:
@@ -81,13 +83,14 @@ class WorkspaceArtifactStore:
 
     @staticmethod
     def list_project_folders(directory: Path) -> list[dict[str, Any]]:
+        canonical_directory = directory.resolve(strict=True)
         folders: list[dict[str, Any]] = []
         for entry in directory.iterdir():
             if entry.name.startswith(".") or entry.is_symlink() or not entry.is_dir():
                 continue
             try:
                 resolved = entry.resolve(strict=True)
-                if resolved.parent != directory:
+                if resolved.parent != canonical_directory:
                     continue
                 stat = resolved.stat()
             except OSError:
@@ -103,7 +106,7 @@ class WorkspaceArtifactStore:
         parts = folder_name.replace("\\", "/").split("/")
         if not parts or any(part in {"", ".", ".."} or part.startswith(".") for part in parts):
             raise NotFoundError("Project folder was not found.")
-        current = directory
+        current = directory.resolve(strict=True)
         for part in parts:
             if not _is_single_path_segment(part):
                 raise NotFoundError("Project folder was not found.")
@@ -315,6 +318,7 @@ class WorkspaceArtifactStore:
         if source_project_id == target_project_id:
             raise ValidationError("Source and target projects must be different.")
         files: list[tuple[Path, Path, int]] = []
+        canonical_source_root = source_root.resolve(strict=True)
         for source in sorted(source_root.rglob("*"), key=lambda item: item.as_posix().casefold()):
             relative = source.relative_to(source_root)
             if any(part.casefold().startswith(".cadyx-") for part in relative.parts) or relative.as_posix().casefold() == "project.json":
@@ -328,7 +332,7 @@ class WorkspaceArtifactStore:
             if not source.is_file():
                 continue
             resolved = source.resolve(strict=True)
-            if source_root not in resolved.parents:
+            if canonical_source_root not in resolved.parents:
                 raise ValidationError(
                     f"Project file escapes its source directory: {relative.as_posix()}."
                 )
@@ -420,6 +424,7 @@ class WorkspaceArtifactStore:
         if len({name.casefold() for name in keep_files}) != len(keep_files):
             raise ValidationError("keep_files must not contain duplicates.")
         keep = set(keep_files)
+        canonical_root = root.resolve(strict=True)
         entries = sorted(root.rglob("*"), key=lambda item: item.as_posix().casefold())
         for name in keep:
             retained = root / name
@@ -442,7 +447,7 @@ class WorkspaceArtifactStore:
             if relative.parts == (entry.name,) and entry.name in keep:
                 continue
             resolved = entry.resolve(strict=True)
-            if root not in resolved.parents:
+            if canonical_root not in resolved.parents:
                 raise ValidationError(
                     f"Project file escapes its directory: {relative.as_posix()}."
                 )
@@ -578,9 +583,10 @@ class WorkspaceArtifactStore:
             raise NotFoundError("Project file was not found.")
         try:
             resolved = path.resolve(strict=True)
+            canonical_directory = directory.resolve(strict=True)
         except OSError as exc:
             raise NotFoundError("Project file was not found.") from exc
-        if resolved.parent != directory:
+        if resolved.parent != canonical_directory:
             raise NotFoundError("Project file was not found.")
         return resolved
 
@@ -594,9 +600,10 @@ class WorkspaceArtifactStore:
             raise NotFoundError("Project file was not found.")
         try:
             resolved = path.resolve(strict=True)
+            canonical_folder = folder.resolve(strict=True)
         except OSError as exc:
             raise NotFoundError("Project file was not found.") from exc
-        if resolved.parent != folder:
+        if resolved.parent != canonical_folder:
             raise NotFoundError("Project file was not found.")
         return resolved
 
