@@ -79,6 +79,10 @@ class EditLeaseManager:
                 raise NotFoundError("Project is being deleted.")
             connections[project_id] = connection
             yield connection
+            # Deletion may start while the caller holds this transaction.
+            # Do not publish lease changes after the project was fenced.
+            if (project_directory / ".cadyx-deleting").exists():
+                raise NotFoundError("Project is being deleted.")
             connection.execute("COMMIT")
         except BaseException as exc:
             if connection is not None and connection.in_transaction:

@@ -174,6 +174,22 @@ class LeaseSnapshotJournalTests(unittest.TestCase):
                     "SELECT stopped FROM control WHERE lease_id = 'lease'"
                 ).fetchone())
 
+    def test_deletion_during_guard_rolls_back_lease_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            marker = project_dir / ".cadyx-deleting"
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            lease = manager.acquire("project", "agent", "worker")
+
+            with self.assertRaises(NotFoundError):
+                with manager.guard("project") as connection:
+                    connection.execute("DELETE FROM lease")
+                    marker.touch()
+
+            marker.unlink()
+            self.assertEqual(manager.get("project").lease_id, lease.lease_id)
+
     def test_heartbeat_remains_monotonic_after_wall_clock_moves_backwards(self):
         with tempfile.TemporaryDirectory() as directory:
             project_dir = Path(directory)
