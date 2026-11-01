@@ -57,8 +57,9 @@ class EditLeaseManager:
             raise NotFoundError("Project was not found.")
         if path.is_symlink():
             raise ValidationError("Lease database must not be a symbolic link.")
-        connection = sqlite3.connect(path, timeout=5, isolation_level=None)
+        connection: sqlite3.Connection | None = None
         try:
+            connection = sqlite3.connect(path, timeout=5, isolation_level=None)
             connection.execute("BEGIN IMMEDIATE")
             connection.execute("""CREATE TABLE IF NOT EXISTS lease (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -72,8 +73,12 @@ class EditLeaseManager:
             yield connection
             connection.execute("COMMIT")
         except BaseException as exc:
-            if connection.in_transaction:
-                connection.execute("ROLLBACK")
+            if connection is not None and connection.in_transaction:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    # Closing the connection still rolls back; preserve the original failure.
+                    pass
             if isinstance(exc, sqlite3.OperationalError) and _sqlite_contention(exc):
                 raise ConflictError(
                     "Project has an operation in progress; retry later.", code="PROJECT_BUSY",
@@ -81,7 +86,8 @@ class EditLeaseManager:
             raise
         finally:
             connections.pop(project_id, None)
-            connection.close()
+            if connection is not None:
+                connection.close()
 
     def _read(self, project_id: str) -> EditLease | None:
         row = self._local.connections[project_id].execute(
@@ -97,8 +103,9 @@ class EditLeaseManager:
             raise NotFoundError("Project was not found.")
         if path.is_symlink():
             raise ValidationError("Agent control database must not be a symbolic link.")
-        connection = sqlite3.connect(path, timeout=5)
+        connection: sqlite3.Connection | None = None
         try:
+            connection = sqlite3.connect(path, timeout=5)
             with connection:
                 connection.execute("""CREATE TABLE IF NOT EXISTS control (
                     lease_id TEXT PRIMARY KEY, stopped INTEGER NOT NULL,
@@ -110,7 +117,8 @@ class EditLeaseManager:
                 raise ConflictError("Agent control is busy; retry later.", code="PROJECT_BUSY") from exc
             raise
         finally:
-            connection.close()
+            if connection is not None:
+                connection.close()
 
     def request_agent_stop(self, project_id: str, lease_id: str) -> None:
         try:

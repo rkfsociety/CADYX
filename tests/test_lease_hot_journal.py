@@ -99,6 +99,65 @@ class LeaseSnapshotJournalTests(unittest.TestCase):
                         self.assertEqual(caught.exception.code, "PROJECT_BUSY")
                         connection.close.assert_called_once()
 
+    def test_connect_contention_is_retryable_for_both_lease_databases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            for context in ("guard", "agent_control"):
+                for code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED_SHAREDCACHE):
+                    with self.subTest(context=context, code=code):
+                        error = sqlite3.OperationalError("database is locked")
+                        error.sqlite_errorcode = code
+                        with patch("cadyx.lease.sqlite3.connect", side_effect=error):
+                            with self.assertRaises(ConflictError) as caught:
+                                with getattr(manager, context)("project"):
+                                    pass
+                        self.assertEqual(caught.exception.code, "PROJECT_BUSY")
+
+    def test_connect_non_contention_failure_is_not_masked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            for context in ("guard", "agent_control"):
+                with self.subTest(context=context):
+                    error = sqlite3.OperationalError("unable to open database file")
+                    error.sqlite_errorcode = sqlite3.SQLITE_CANTOPEN
+                    with patch("cadyx.lease.sqlite3.connect", side_effect=error):
+                        with self.assertRaises(sqlite3.OperationalError) as caught:
+                            with getattr(manager, context)("project"):
+                                pass
+                    self.assertIs(caught.exception, error)
+
+    def test_failed_rollback_preserves_original_sqlite_contention(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            error = sqlite3.OperationalError("database is locked")
+            error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+            rollback_error = sqlite3.OperationalError("disk I/O error")
+            connection = MagicMock()
+            connection.in_transaction = True
+
+            def execute(statement, *args):
+                if statement == "BEGIN IMMEDIATE":
+                    raise error
+                if statement == "ROLLBACK":
+                    raise rollback_error
+                self.fail(f"Unexpected SQL: {statement}")
+
+            connection.execute.side_effect = execute
+            with patch("cadyx.lease.sqlite3.connect", return_value=connection):
+                with self.assertRaises(ConflictError) as caught:
+                    with manager.guard("project"):
+                        pass
+            self.assertEqual(caught.exception.code, "PROJECT_BUSY")
+            self.assertIs(caught.exception.__cause__, error)
+            connection.execute.assert_any_call("ROLLBACK")
+            connection.close.assert_called_once()
+
     def test_non_contention_sqlite_errors_are_not_masked(self):
         with tempfile.TemporaryDirectory() as directory:
             project_dir = Path(directory)
