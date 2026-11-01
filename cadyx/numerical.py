@@ -107,17 +107,23 @@ def solve_sparse_positive_definite(
     size = len(right_hand_side)
     if not size:
         return []
-    if (not math.isfinite(tolerance) or tolerance <= 0.0
-            or (max_iterations is not None and (type(max_iterations) is not int or max_iterations < 1))
-            or any(not math.isfinite(value) for value in right_hand_side)):
+    try:
+        if (not math.isfinite(tolerance) or tolerance <= 0.0
+                or (max_iterations is not None and (type(max_iterations) is not int or max_iterations < 1))
+                or any(not math.isfinite(value) for value in right_hand_side)):
+            return None
+    except (OverflowError, TypeError, ValueError):
         return None
     # Invalid sparse indices must not wrap through Python's negative indexing or
     # crash the solver during a matrix-vector product.
     for row_index, row in matrix.items():
-        if type(row_index) is not int or not 0 <= row_index < size:
+        if type(row_index) is not int or not 0 <= row_index < size or not isinstance(row, dict):
             return None
-        if any(type(column) is not int or not 0 <= column < size or not math.isfinite(value)
-               for column, value in row.items()):
+        try:
+            if any(type(column) is not int or not 0 <= column < size or not math.isfinite(value)
+                   for column, value in row.items()):
+                return None
+        except (OverflowError, TypeError, ValueError):
             return None
     # PCG requires a symmetric operator. Compare explicit entries against
     # their transposes, including implicitly zero entries in sparse rows.

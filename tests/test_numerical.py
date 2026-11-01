@@ -160,6 +160,21 @@ class NumericalRankTests(unittest.TestCase):
         self.assertIsNone(solve_sparse_positive_definite(matrix, [1.0], tolerance=0.0))
         self.assertIsNone(solve_sparse_positive_definite(matrix, [1.0], max_iterations=0))
 
+    def test_sparse_solver_rejects_oversized_or_malformed_coefficients(self):
+        # Python integers are unbounded, but math.isfinite(10**400)
+        # raises OverflowError; malformed solver input must fail closed.
+        huge = 10**400
+        cases = (
+            ({0: {0: huge}}, [1.0], 1e-10),
+            ({0: {0: 2.0}}, [huge], 1e-10),
+            ({0: {0: 2.0}}, [1.0], huge),
+            ({0: {0: 2.0}}, ["invalid"], 1e-10),
+            ({0: None}, [1.0], 1e-10),
+        )
+        for matrix, rhs, tolerance in cases:
+            with self.subTest(matrix=matrix, rhs=rhs, tolerance=tolerance):
+                self.assertIsNone(solve_sparse_positive_definite(matrix, rhs, tolerance=tolerance))
+
 
 if __name__ == "__main__":
     unittest.main()
