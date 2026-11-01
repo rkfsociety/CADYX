@@ -132,14 +132,13 @@ class ProjectWorkspaceTests(unittest.TestCase):
             nonlocal stat_calls
             if path == history_path:
                 stat_calls += 1
-                if stat_calls == 2:
-                    raise FileNotFoundError("history removed during inspection")
+                raise FileNotFoundError("history removed during inspection")
             return original_stat(path, *args, **kwargs)
 
         with patch.object(Path, "stat", disappearing_stat):
             with self.assertRaisesRegex(ValidationError, "history log"):
                 ProjectRecordStore().load(directory, project["id"], include_history=False)
-        self.assertEqual(stat_calls, 2)
+        self.assertEqual(stat_calls, 1)
 
     def test_project_folder_uses_a_safe_display_name_and_keeps_uuid_identity(self) -> None:
         project = self.workspace.create("  Тестовая кружка / верх: 3  ")

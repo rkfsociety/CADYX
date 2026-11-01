@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -100,12 +101,12 @@ class WorkspaceServiceTests(unittest.TestCase):
         )
         for payload in payloads:
             with self.subTest(payload=payload):
-                with sqlite3.connect(database) as connection:
+                with closing(sqlite3.connect(database)) as connection, connection:
                     connection.execute("UPDATE validation_record SET result_json = ?", (payload,))
                 with self.assertRaisesRegex(ValidationError, "could not be read"):
                     store.list(directory)
 
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             connection.execute(
                 "UPDATE validation_record SET result_json = ?, revision = -1",
                 (prefix + "}",),
