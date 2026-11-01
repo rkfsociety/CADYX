@@ -60,7 +60,7 @@ class ProjectWorkspaceTests(unittest.TestCase):
         project_file.write_bytes(saved)
 
         record = json.loads(saved)
-        record["$cadyx_storage"]["history"] = {
+        record.setdefault("$cadyx_storage", {})["history"] = {
             "file": ".cadyx-history.jsonl", "count": 1, "bytes": 2,
         }
         project_file.write_text(json.dumps(record), encoding="utf-8")
@@ -93,9 +93,9 @@ class ProjectWorkspaceTests(unittest.TestCase):
                     ProjectRecordStore().load(directory, project["id"])
 
                 record = dict(original)
-                record["$cadyx_storage"] = dict(record["$cadyx_storage"])
+                record["$cadyx_storage"] = dict(record.get("$cadyx_storage", {}))
                 history_bytes = ('{"value":' + constant + '}\n').encode("ascii")
-                record["$cadyx_storage"]["history"] = {
+                record.setdefault("$cadyx_storage", {})["history"] = {
                     "file": ".cadyx-history.jsonl", "count": 1, "bytes": len(history_bytes),
                 }
                 project_file.write_text(json.dumps(record), encoding="utf-8")
@@ -119,7 +119,7 @@ class ProjectWorkspaceTests(unittest.TestCase):
         directory = self.workspace._project_dir(project["id"])
         project_file = directory / "project.json"
         record = json.loads(project_file.read_text(encoding="utf-8"))
-        record["$cadyx_storage"]["history"] = {
+        record.setdefault("$cadyx_storage", {})["history"] = {
             "file": ".cadyx-history.jsonl", "count": 1, "bytes": 2,
         }
         project_file.write_text(json.dumps(record), encoding="utf-8")

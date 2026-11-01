@@ -80,6 +80,52 @@ class WorkspaceServiceTests(unittest.TestCase):
         self.assertEqual(listed[0]["result"], result)
         self.assertTrue(store.database_path(directory).is_file())
 
+    def test_validation_listing_rejects_corrupt_persisted_results(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        store = ValidationRecordStore()
+        store.record(directory, "body_dimensions", {
+            "revision": 1, "geometry_sha256": "a" * 64,
+        })
+        database = store.database_path(directory)
+        prefix = '{"revision":1,"geometry_sha256":"' + "a" * 64 + '"'
+        payloads = (
+            prefix + ',"value":NaN}',
+            prefix + ',"value":Infinity}',
+            prefix + ',"value":-Infinity}',
+            prefix + ',"value":1e999}',
+            '{"revision":2,"geometry_sha256":"' + "a" * 64 + '"}',
+            '{"revision":1,"geometry_sha256":"' + "b" * 64 + '"}',
+            "[]",
+        )
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                with sqlite3.connect(database) as connection:
+                    connection.execute("UPDATE validation_record SET result_json = ?", (payload,))
+                with self.assertRaisesRegex(ValidationError, "could not be read"):
+                    store.list(directory)
+
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "UPDATE validation_record SET result_json = ?, revision = -1",
+                (prefix + "}",),
+            )
+        with self.assertRaisesRegex(ValidationError, "could not be read"):
+            store.list(directory)
+
+    def test_validation_record_rejects_excessive_json_nesting(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        store = ValidationRecordStore()
+        result = {"revision": 1, "geometry_sha256": "a" * 64, "nested": {}}
+        cursor = result["nested"]
+        for _ in range(1500):
+            cursor["child"] = {}
+            cursor = cursor["child"]
+        with self.assertRaisesRegex(ValidationError, "cannot be serialized"):
+            store.record(directory, "body_dimensions", result)
+        self.assertFalse(store.database_path(directory).exists())
+
     def test_validation_record_rejects_invalid_revisions_before_sqlite_open(self) -> None:
         directory = self.root / "project"
         directory.mkdir()

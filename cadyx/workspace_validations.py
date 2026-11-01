@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -11,6 +12,18 @@ from typing import Any
 from uuid import uuid4
 
 from .errors import NotFoundError, ValidationError
+
+
+def _reject_nonfinite_json(value: str) -> None:
+    raise ValueError(f"Non-finite validation result number {value} is invalid.")
+
+
+def _parse_finite_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("Non-finite validation result number is invalid.")
+    return parsed
+
 
 _SUPPORTED_VALIDATION_KINDS = {
     "body_dimensions",
@@ -56,7 +69,7 @@ class ValidationRecordStore:
                 sort_keys=True,
                 separators=(",", ":"),
             )
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, RecursionError) as exc:
             raise ValidationError("Validation result cannot be serialized.") from exc
 
         database_path = self.database_path(project_dir)
@@ -129,18 +142,35 @@ class ValidationRecordStore:
                 self._ensure_project_available(project_dir)
             finally:
                 connection.close()
-            return [
-                {
+            records = []
+            for row in rows:
+                if not isinstance(row[5], str):
+                    raise ValueError("Validation result JSON is invalid.")
+                result = json.loads(
+                    row[5], parse_constant=_reject_nonfinite_json, parse_float=_parse_finite_float,
+                )
+                if (not isinstance(row[0], str) or not row[0]
+                        or row[1] not in _SUPPORTED_VALIDATION_KINDS
+                        or type(row[2]) is not int or not 0 <= row[2] <= (1 << 63) - 1
+                        or not isinstance(row[3], str)
+                        or re.fullmatch(r"[0-9a-f]{64}", row[3]) is None
+                        or not isinstance(row[4], str)
+                        or not isinstance(result, dict)
+                        or type(result.get("revision")) is not int
+                        or result["revision"] != row[2]
+                        or result.get("geometry_sha256") != row[3]):
+                    raise ValueError("Validation record metadata is inconsistent.")
+                records.append({
                     "record_id": row[0],
                     "kind": row[1],
                     "revision": row[2],
                     "geometry_sha256": row[3],
                     "created_at": row[4],
-                    "result": json.loads(row[5]),
-                }
-                for row in rows
-            ]
-        except (sqlite3.Error, json.JSONDecodeError) as exc:
+                    "result": result,
+                })
+            self._ensure_project_available(project_dir)
+            return records
+        except (sqlite3.Error, ValueError, TypeError, RecursionError) as exc:
             raise ValidationError(f"Validation records could not be read: {exc}.") from exc
 
     @staticmethod
