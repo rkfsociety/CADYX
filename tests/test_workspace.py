@@ -76,14 +76,14 @@ class ProjectWorkspaceTests(unittest.TestCase):
                 "geometry": {"$cadyx_geometry_ref": key},
             }, directory)
 
-    def test_project_storage_rejects_nonfinite_json_constants(self) -> None:
+    def test_project_storage_rejects_nonfinite_json_numbers(self) -> None:
         from cadyx.workspace_projects import _unpack_project_geometries
 
         project = self.workspace.create("Nonfinite storage")
         directory = self.workspace._project_dir(project["id"])
         project_file = directory / "project.json"
         original = json.loads(project_file.read_text(encoding="utf-8"))
-        for constant in ("NaN", "Infinity", "-Infinity"):
+        for constant in ("NaN", "Infinity", "-Infinity", "1e999", "-1e999"):
             with self.subTest(constant=constant):
                 project_file.write_text(
                     json.dumps(original)[:-1] + ', "invalid": ' + constant + '}',

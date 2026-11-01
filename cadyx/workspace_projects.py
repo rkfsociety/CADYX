@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import tempfile
@@ -34,6 +35,14 @@ PROJECT_TYPES = frozenset({"single_model", "assembly"})
 def _reject_nonfinite_json(value: str) -> None:
     """Reject NaN and Infinity in persisted JSON instead of accepting Python extensions."""
     raise ValueError(f"Non-finite JSON number {value} is invalid.")
+
+
+def _parse_finite_float(value: str) -> float:
+    """Reject finite-looking JSON exponents that overflow the host float."""
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("Non-finite JSON number is invalid.")
+    return parsed
 
 
 def _brep_key(geometry: dict[str, Any]) -> str:
@@ -114,7 +123,10 @@ def _unpack_project_geometries(project: dict[str, Any], directory: Path) -> dict
                         raise ValidationError("Project geometry blob path cannot be a symbolic link.")
                     try:
                         with blob_path.open("r", encoding="utf-8") as stream:
-                            geometry = json.load(stream, parse_constant=_reject_nonfinite_json)
+                            geometry = json.load(
+                                stream, parse_constant=_reject_nonfinite_json,
+                                parse_float=_parse_finite_float,
+                            )
                     except (ValueError, OSError) as exc:
                         raise ValidationError("Project geometry blob is missing or invalid.") from exc
                 if not isinstance(geometry, dict) or geometry.get("kind") != "imported_brep":
@@ -154,7 +166,9 @@ def _read_history_log(directory: Path, pointer: Any) -> tuple[list[dict[str, Any
                 line = stream.readline(committed_bytes - consumed + 1)
                 if not line or not line.endswith(b"\n") or consumed + len(line) > committed_bytes:
                     raise ValidationError("Project history log is truncated before its committed offset.")
-                entry = json.loads(line, parse_constant=_reject_nonfinite_json)
+                entry = json.loads(
+                    line, parse_constant=_reject_nonfinite_json, parse_float=_parse_finite_float,
+                )
                 if not isinstance(entry, dict):
                     raise ValidationError("Project history log entry must be an object.")
                 entries.append(entry)
@@ -208,7 +222,9 @@ class ProjectRecordStore:
             raise ValidationError("Project file must be a regular file.")
         try:
             with project_file.open("r", encoding="utf-8") as stream:
-                project = json.load(stream, parse_constant=_reject_nonfinite_json)
+                project = json.load(
+                    stream, parse_constant=_reject_nonfinite_json, parse_float=_parse_finite_float,
+                )
         except FileNotFoundError as exc:
             raise NotFoundError("Project was not found.") from exc
         except (ValueError, OSError) as exc:
