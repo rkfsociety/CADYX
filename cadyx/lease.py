@@ -16,6 +16,14 @@ from .errors import ConflictError, LeaseRequiredError, NotFoundError, Validation
 from .models import EditLease, OwnerType, lock_state_for
 
 
+def _sqlite_contention(exc: sqlite3.OperationalError) -> bool:
+    """Recognize base and extended SQLite BUSY/LOCKED result codes."""
+    code = getattr(exc, "sqlite_errorcode", None)
+    return isinstance(code, int) and (code & 0xFF) in {
+        sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED,
+    }
+
+
 class EditLeaseManager:
     def __init__(
         self, project_directory: Callable[[str], Path], *,
@@ -51,14 +59,7 @@ class EditLeaseManager:
             raise ValidationError("Lease database must not be a symbolic link.")
         connection = sqlite3.connect(path, timeout=5, isolation_level=None)
         try:
-            try:
-                connection.execute("BEGIN IMMEDIATE")
-            except sqlite3.OperationalError as exc:
-                if exc.sqlite_errorcode == sqlite3.SQLITE_BUSY:
-                    raise ConflictError(
-                        "Project has an operation in progress; retry later.", code="PROJECT_BUSY",
-                    ) from exc
-                raise
+            connection.execute("BEGIN IMMEDIATE")
             connection.execute("""CREATE TABLE IF NOT EXISTS lease (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                 owner_type TEXT NOT NULL, owner_id TEXT NOT NULL,
@@ -70,9 +71,13 @@ class EditLeaseManager:
             connections[project_id] = connection
             yield connection
             connection.execute("COMMIT")
-        except BaseException:
+        except BaseException as exc:
             if connection.in_transaction:
                 connection.execute("ROLLBACK")
+            if isinstance(exc, sqlite3.OperationalError) and _sqlite_contention(exc):
+                raise ConflictError(
+                    "Project has an operation in progress; retry later.", code="PROJECT_BUSY",
+                ) from exc
             raise
         finally:
             connections.pop(project_id, None)
@@ -101,7 +106,7 @@ class EditLeaseManager:
                 )""")
                 yield connection
         except sqlite3.OperationalError as exc:
-            if exc.sqlite_errorcode == sqlite3.SQLITE_BUSY:
+            if _sqlite_contention(exc):
                 raise ConflictError("Agent control is busy; retry later.", code="PROJECT_BUSY") from exc
             raise
         finally:
@@ -183,8 +188,7 @@ class EditLeaseManager:
                 "FROM lease WHERE singleton = 1"
             ).fetchone()
         except sqlite3.OperationalError as exc:
-            error_code = exc.sqlite_errorcode or 0
-            if error_code & 0xFF in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+            if _sqlite_contention(exc):
                 return {"state": "BUSY", "lease": None, "recovery_required": False}
             raise
         finally:

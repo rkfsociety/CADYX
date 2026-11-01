@@ -4,7 +4,9 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
+from cadyx.errors import ConflictError
 from cadyx.lease import EditLeaseManager
 
 
@@ -59,3 +61,41 @@ class LeaseSnapshotJournalTests(unittest.TestCase):
             self.assertEqual(snapshot["lease"]["lease_id"], "committed")
             self.assertEqual(snapshot["lease"]["owner_id"], "committed")
             self.assertFalse(snapshot["recovery_required"])
+
+    def test_extended_sqlite_contention_returns_retryable_project_busy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            for context in ("guard", "agent_control"):
+                for code in (sqlite3.SQLITE_BUSY_SNAPSHOT, sqlite3.SQLITE_LOCKED_SHAREDCACHE):
+                    with self.subTest(context=context, code=code):
+                        error = sqlite3.OperationalError("database is locked")
+                        error.sqlite_errorcode = code
+                        connection = MagicMock()
+                        connection.in_transaction = False
+                        connection.execute.side_effect = error
+                        with patch("cadyx.lease.sqlite3.connect", return_value=connection):
+                            with self.assertRaises(ConflictError) as caught:
+                                with getattr(manager, context)("project"):
+                                    pass
+                        self.assertEqual(caught.exception.code, "PROJECT_BUSY")
+                        connection.close.assert_called_once()
+
+    def test_non_contention_sqlite_errors_are_not_masked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            for context in ("guard", "agent_control"):
+                with self.subTest(context=context):
+                    error = sqlite3.OperationalError("database is corrupt")
+                    error.sqlite_errorcode = sqlite3.SQLITE_CORRUPT
+                    connection = MagicMock()
+                    connection.in_transaction = False
+                    connection.execute.side_effect = error
+                    with patch("cadyx.lease.sqlite3.connect", return_value=connection):
+                        with self.assertRaises(sqlite3.OperationalError):
+                            with getattr(manager, context)("project"):
+                                pass
+                    connection.close.assert_called_once()
