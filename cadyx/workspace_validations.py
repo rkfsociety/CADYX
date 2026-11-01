@@ -100,7 +100,11 @@ class ValidationRecordStore:
         if not database_path.exists():
             return []
         try:
-            connection = sqlite3.connect(database_path, timeout=5)
+            # Read-only listing must not recreate a database removed between
+            # the existence check and open; rw permits hot-journal recovery.
+            connection = sqlite3.connect(
+                f"{database_path.absolute().as_uri()}?mode=rw", uri=True, timeout=5,
+            )
             try:
                 rows = connection.execute(
                     "SELECT id, kind, revision, geometry_sha256, created_at, result_json "

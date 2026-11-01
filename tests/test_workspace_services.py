@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from cadyx.errors import NotFoundError
+from cadyx.errors import NotFoundError, ValidationError
 from cadyx.workspace_files import WorkspaceArtifactStore
 from cadyx.workspace_groups import ProjectGroupStore
 from cadyx.workspace_projects import ProjectRecordStore
@@ -79,6 +79,27 @@ class WorkspaceServiceTests(unittest.TestCase):
         self.assertEqual(listed[0]["record_id"], record["record_id"])
         self.assertEqual(listed[0]["result"], result)
         self.assertTrue(store.database_path(directory).is_file())
+
+    def test_validation_listing_does_not_recreate_database_deleted_during_open(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        store = ValidationRecordStore()
+        database_path = store.database_path(directory)
+        self.assertEqual(store.list(directory), [])
+        store.record(
+            directory, "body_dimensions",
+            {"revision": 1, "geometry_sha256": "a" * 64},
+        )
+        original_connect = sqlite3.connect
+
+        def remove_before_open(*args, **kwargs):
+            database_path.unlink()
+            return original_connect(*args, **kwargs)
+
+        with patch("cadyx.workspace_validations.sqlite3.connect", side_effect=remove_before_open):
+            with self.assertRaisesRegex(ValidationError, "could not be read"):
+                store.list(directory)
+        self.assertFalse(database_path.exists())
 
     def test_artifact_store_lists_only_direct_user_files(self) -> None:
         directory = self.root / "project"
