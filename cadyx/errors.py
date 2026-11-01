@@ -9,7 +9,15 @@ from typing import Any
 _WINDOWS_PATH = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\[^\s\"'<>|]+")
 _UNIX_PATH = re.compile(r"(?<![\w])/(?:Users|Volumes|home|tmp|var|etc|opt|root|workspace|mnt|data|app|private|srv|run|media|proc|sys)/[^\s\"'<>]+")
 _URL_CREDENTIALS = re.compile(r"(?i)(https?://)[^/\s:@]+:[^/@\s]+@")
-_BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
+_BEARER = re.compile(r"(?i)\bBearer[ \t]+\S+")
+_JSON_SECRET = re.compile(
+    r'(?i)("(?:access[_-]?token|refresh[_-]?token|token|api[_-]?key|password|secret)"\s*:\s*")'
+    r'(?:\\.|[^"\\])*(")'
+)
+_SENSITIVE_KEY = re.compile(
+    r"(?i)^(?:access[_-]?token|refresh[_-]?token|auth[_-]?token|token|"
+    r"api[_-]?key|password|secret|client[_-]?secret|authorization)$"
+)
 _SECRET = re.compile(r"(?i)\b(access[_-]?token|refresh[_-]?token|token|api[_-]?key|password|secret)(\s*[:=]\s*)[^\s,;]+")
 
 
@@ -17,6 +25,7 @@ def public_text(value: str) -> str:
     """Remove credentials and absolute host paths before crossing a public boundary."""
     value = _URL_CREDENTIALS.sub(r"\1[redacted]@", value)
     value = _BEARER.sub("Bearer [redacted]", value)
+    value = _JSON_SECRET.sub(r"\1[redacted]\2", value)
     value = _SECRET.sub(r"\1\2[redacted]", value)
     value = _WINDOWS_PATH.sub("[host path]", value)
     return _UNIX_PATH.sub("[host path]", value)
@@ -73,7 +82,10 @@ def _safe_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_safe_value(item) for item in value]
     if isinstance(value, dict):
-        return {public_text(str(key)): _safe_value(item) for key, item in value.items()}
+        return {
+            public_text(str(key)): ("[redacted]" if _SENSITIVE_KEY.fullmatch(str(key)) else _safe_value(item))
+            for key, item in value.items()
+        }
     if type(value) is float:
         return value if math.isfinite(value) else None
     if value is None or type(value) in {bool, int}:

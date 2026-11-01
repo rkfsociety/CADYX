@@ -101,6 +101,39 @@ class RuntimeCacheTests(unittest.TestCase):
             trim_lru_entries(cache, -1)
         self.assertEqual(cache, OrderedDict([("a", b"12")]))
 
+    def test_failed_eviction_size_preserves_cache_and_accounting(self):
+        cache = OrderedDict([("old", b"bad"), ("keep", b"ok")])
+        snapshot = cache.copy()
+
+        def failing_size(value):
+            if value == b"bad":
+                raise RuntimeError("cannot measure evicted item")
+            return len(value)
+
+        with self.assertRaisesRegex(RuntimeError, "cannot measure"):
+            remember_bounded_bytes(
+                cache, "new", b"xyz", current_bytes=5,
+                max_entries=2, max_bytes=5, size_of=failing_size,
+            )
+        self.assertEqual(cache, snapshot)
+
+        with self.assertRaisesRegex(ValueError, "Cache item size"):
+            remember_bounded_bytes(
+                cache, "new", b"xyz", current_bytes=5,
+                max_entries=2, max_bytes=5,
+                size_of=lambda value: -1 if value == b"bad" else len(value),
+            )
+        self.assertEqual(cache, snapshot)
+
+    def test_inconsistent_cache_byte_accounting_is_rejected_without_mutation(self):
+        cache = OrderedDict([("old", b"123")])
+        with self.assertRaisesRegex(ValueError, "byte accounting"):
+            remember_bounded_bytes(
+                cache, "old", b"4", current_bytes=2,
+                max_entries=2, max_bytes=5, size_of=len,
+            )
+        self.assertEqual(cache, OrderedDict([("old", b"123")]))
+
     def test_policy_budgets_are_validated_in_one_object(self):
         policy = RuntimeCachePolicy(
             validated_document_entries=1,

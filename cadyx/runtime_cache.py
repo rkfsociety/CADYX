@@ -67,18 +67,40 @@ def remember_bounded_bytes(
     previous_bytes = size_of(cache[key]) if had_previous else 0
     if type(previous_bytes) is not int or previous_bytes < 0:
         raise ValueError("Cache item size must be a non-negative integer.")
-    if had_previous:
-        del cache[key]
-        current_bytes -= previous_bytes
+    if previous_bytes > current_bytes:
+        raise ValueError("Cache byte accounting is smaller than the replaced item.")
+    retained_bytes = current_bytes - previous_bytes
     if max_entries == 0:
         cache.clear()
         return 0
-    # Do not evict reusable entries to make room for a value that cannot fit.
+    # An oversized replacement removes only its old entry; other entries remain.
     if value_bytes > max_bytes:
-        return current_bytes
+        if had_previous:
+            del cache[key]
+        return retained_bytes
+
+    # Measure every required eviction before mutating the cache. A failed or
+    # invalid size callback must not leave a half-evicted LRU or stale accounting.
+    retained_bytes += value_bytes
+    retained_entries = len(cache) + (0 if had_previous else 1)
+    evictions: list[KeyT] = []
+    for old_key, old_value in cache.items():
+        if retained_entries <= max_entries and retained_bytes <= max_bytes:
+            break
+        if old_key == key:
+            continue  # The replacement moves to the newest LRU position.
+        old_bytes = size_of(old_value)
+        if type(old_bytes) is not int or old_bytes < 0:
+            raise ValueError("Cache item size must be a non-negative integer.")
+        if old_bytes > retained_bytes - value_bytes:
+            raise ValueError("Cache byte accounting is smaller than the evicted items.")
+        evictions.append(old_key)
+        retained_bytes -= old_bytes
+        retained_entries -= 1
+
+    if had_previous:
+        del cache[key]
     cache[key] = value
-    current_bytes += value_bytes
-    while cache and (len(cache) > max_entries or current_bytes > max_bytes):
-        _, evicted = cache.popitem(last=False)
-        current_bytes -= size_of(evicted)
-    return current_bytes
+    for old_key in evictions:
+        del cache[old_key]
+    return retained_bytes

@@ -59,6 +59,37 @@ class ErrorDiagnosticsTests(unittest.TestCase):
         for secret in ("abc123", "xyz789", r"C:\\Users\\private"):
             self.assertNotIn(secret, encoded_error)
 
+    def test_unicode_bearer_and_json_quoted_credentials_are_redacted(self) -> None:
+        bearer = "é" * 32
+        payload = json.dumps({
+            "token": "abc123",
+            "password": 'quoted"secret',
+            "api_key": "xyz987",
+        })
+        sanitized = public_text(f"Bearer {bearer} {payload}")
+        for secret in (bearer, "abc123", "quoted", "xyz987"):
+            self.assertNotIn(secret, sanitized)
+        self.assertIn('"token": "[redacted]"', sanitized)
+        self.assertIn('"password": "[redacted]"', sanitized)
+        self.assertIn('"api_key": "[redacted]"', sanitized)
+
+    def test_sensitive_diagnostic_mapping_values_are_redacted(self) -> None:
+        diagnostics = {
+            "token": "plain-secret",
+            "nested": {"api_key": "another-secret", "revision": 3},
+            "authorization": "Basic Zm9vOmJhcg==",
+            "safe": "keep",
+        }
+        sanitized = public_data(diagnostics)
+        self.assertEqual(sanitized["token"], "[redacted]")
+        self.assertEqual(sanitized["nested"]["api_key"], "[redacted]")
+        self.assertEqual(sanitized["nested"]["revision"], 3)
+        self.assertEqual(sanitized["authorization"], "[redacted]")
+        self.assertEqual(sanitized["safe"], "keep")
+        serialized = json.dumps(ValidationError("Invalid input", diagnostics=diagnostics).as_dict())
+        for secret in ("plain-secret", "another-secret", "Zm9vOmJhcg=="):
+            self.assertNotIn(secret, serialized)
+
     def test_unexpected_mcp_failure_does_not_disclose_exception_details(self) -> None:
         app = MCPApplication()
         with patch.object(app, "_dispatch", side_effect=RuntimeError(r"failed C:\private\token=abc123")):
