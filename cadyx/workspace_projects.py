@@ -31,6 +31,11 @@ _HISTORY_FILE = ".cadyx-history.jsonl"
 PROJECT_TYPES = frozenset({"single_model", "assembly"})
 
 
+def _reject_nonfinite_json(value: str) -> None:
+    """Reject NaN and Infinity in persisted JSON instead of accepting Python extensions."""
+    raise ValueError(f"Non-finite JSON number {value} is invalid.")
+
+
 def _brep_key(geometry: dict[str, Any]) -> str:
     digest = hashlib.sha256(geometry["data"].encode("ascii"))
     metadata = {key: value for key, value in geometry.items() if key != "data"}
@@ -109,8 +114,8 @@ def _unpack_project_geometries(project: dict[str, Any], directory: Path) -> dict
                         raise ValidationError("Project geometry blob path cannot be a symbolic link.")
                     try:
                         with blob_path.open("r", encoding="utf-8") as stream:
-                            geometry = json.load(stream)
-                    except (FileNotFoundError, json.JSONDecodeError, UnicodeError, OSError) as exc:
+                            geometry = json.load(stream, parse_constant=_reject_nonfinite_json)
+                    except (ValueError, OSError) as exc:
                         raise ValidationError("Project geometry blob is missing or invalid.") from exc
                 if not isinstance(geometry, dict) or geometry.get("kind") != "imported_brep":
                     raise ValidationError("Project geometry reference is invalid.")
@@ -149,14 +154,14 @@ def _read_history_log(directory: Path, pointer: Any) -> tuple[list[dict[str, Any
                 line = stream.readline(committed_bytes - consumed + 1)
                 if not line or not line.endswith(b"\n") or consumed + len(line) > committed_bytes:
                     raise ValidationError("Project history log is truncated before its committed offset.")
-                entry = json.loads(line)
+                entry = json.loads(line, parse_constant=_reject_nonfinite_json)
                 if not isinstance(entry, dict):
                     raise ValidationError("Project history log entry must be an object.")
                 entries.append(entry)
                 consumed += len(line)
     except FileNotFoundError as exc:
         raise ValidationError("Project history log is missing.") from exc
-    except (json.JSONDecodeError, UnicodeError, OSError) as exc:
+    except (ValueError, OSError) as exc:
         raise ValidationError(f"Project history log could not be read: {exc}.") from exc
     if consumed != committed_bytes or len(entries) != count:
         raise ValidationError("Project history log does not match its committed count and offset.")
@@ -203,10 +208,10 @@ class ProjectRecordStore:
             raise ValidationError("Project file must be a regular file.")
         try:
             with project_file.open("r", encoding="utf-8") as stream:
-                project = json.load(stream)
+                project = json.load(stream, parse_constant=_reject_nonfinite_json)
         except FileNotFoundError as exc:
             raise NotFoundError("Project was not found.") from exc
-        except (json.JSONDecodeError, UnicodeError, OSError) as exc:
+        except (ValueError, OSError) as exc:
             raise ValidationError(f"Project file could not be read: {exc}.") from exc
         if not isinstance(project, dict):
             raise ValidationError("Project file must contain a JSON object.")

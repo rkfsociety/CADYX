@@ -76,6 +76,44 @@ class ProjectWorkspaceTests(unittest.TestCase):
                 "geometry": {"$cadyx_geometry_ref": key},
             }, directory)
 
+    def test_project_storage_rejects_nonfinite_json_constants(self) -> None:
+        from cadyx.workspace_projects import _unpack_project_geometries
+
+        project = self.workspace.create("Nonfinite storage")
+        directory = self.workspace._project_dir(project["id"])
+        project_file = directory / "project.json"
+        original = json.loads(project_file.read_text(encoding="utf-8"))
+        for constant in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(constant=constant):
+                project_file.write_text(
+                    json.dumps(original)[:-1] + ', "invalid": ' + constant + '}',
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(ValidationError, "Project file could not be read"):
+                    ProjectRecordStore().load(directory, project["id"])
+
+                record = dict(original)
+                record["$cadyx_storage"] = dict(record["$cadyx_storage"])
+                history_bytes = ('{"value":' + constant + '}\n').encode("ascii")
+                record["$cadyx_storage"]["history"] = {
+                    "file": ".cadyx-history.jsonl", "count": 1, "bytes": len(history_bytes),
+                }
+                project_file.write_text(json.dumps(record), encoding="utf-8")
+                (directory / ".cadyx-history.jsonl").write_bytes(history_bytes)
+                with self.assertRaisesRegex(ValidationError, "Project history log could not be read"):
+                    ProjectRecordStore().load(directory, project["id"])
+
+                key = "0" * 64
+                (directory / f".cadyx-brep-{key}.json").write_text(
+                    '{"kind":"imported_brep","data":"A","value":' + constant + '}',
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(ValidationError, "Project geometry blob is missing or invalid"):
+                    _unpack_project_geometries({
+                        "$cadyx_storage": {},
+                        "geometry": {"$cadyx_geometry_ref": key},
+                    }, directory)
+
     def test_history_stat_race_returns_validation_error(self) -> None:
         project = self.workspace.create("History race")
         directory = self.workspace._project_dir(project["id"])
