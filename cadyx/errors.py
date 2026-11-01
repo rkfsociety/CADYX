@@ -11,21 +11,33 @@ _UNIX_PATH = re.compile(r"(?<![\w])/(?:Users|Volumes|home|tmp|var|etc|opt|root|w
 _URL_CREDENTIALS = re.compile(r"(?i)(https?://)[^/\s:@]+:[^/@\s]+@")
 _BEARER = re.compile(r"(?i)\bBearer[ \t]+\S+")
 _JSON_SECRET = re.compile(
-    r'(?i)("(?:access[_-]?token|refresh[_-]?token|token|api[_-]?key|password|secret)"\s*:\s*")'
+    r'(?i)("(?:access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?token|'
+    r'token|api[_-]?key|private[_-]?key|password|secret|client[_-]?secret|'
+    r'authorization|proxy[_-]?authorization)"\s*:\s*")'
     r'(?:\\.|[^"\\])*(")'
 )
 _SENSITIVE_KEY = re.compile(
-    r"(?i)^(?:access[_-]?token|refresh[_-]?token|auth[_-]?token|token|"
-    r"api[_-]?key|password|secret|client[_-]?secret|authorization)$"
+    r"(?i)^(?:access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?token|"
+    r"token|api[_-]?key|private[_-]?key|password|secret|client[_-]?secret|"
+    r"authorization|proxy[_-]?authorization)$"
 )
-_SECRET = re.compile(r"(?i)\b(access[_-]?token|refresh[_-]?token|token|api[_-]?key|password|secret)(\s*[:=]\s*)[^\s,;]+")
-
+_AUTH_HEADER = re.compile(
+    r"(?i)\b((?:proxy[_-]?)?authorization)(\s*[:=]\s*)"
+    r"(?:Basic|Bearer|Digest|Token|ApiKey)[ \t]+\S+"
+)
+_SECRET = re.compile(
+    r"(?i)\b(access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?token|"
+    r"token|api[_-]?key|private[_-]?key|password|secret|client[_-]?secret|"
+    r"authorization|proxy[_-]?authorization)(\s*[:=]\s*)"
+    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;]+)"
+)
 
 def public_text(value: str) -> str:
     """Remove credentials and absolute host paths before crossing a public boundary."""
     value = _URL_CREDENTIALS.sub(r"\1[redacted]@", value)
     value = _BEARER.sub("Bearer [redacted]", value)
     value = _JSON_SECRET.sub(r"\1[redacted]\2", value)
+    value = _AUTH_HEADER.sub(r"\1\2[redacted]", value)
     value = _SECRET.sub(r"\1\2[redacted]", value)
     value = _WINDOWS_PATH.sub("[host path]", value)
     return _UNIX_PATH.sub("[host path]", value)
@@ -74,24 +86,35 @@ def _classification(code: str, message: str, diagnostics: dict[str, Any]) -> tup
     return category, failed, hint
 
 
-def _safe_value(value: Any) -> Any:
+def _safe_value(value: Any, _active: set[int] | None = None, _depth: int = 0) -> Any:
     if isinstance(value, str):
         return public_text(value)
-    if isinstance(value, list):
-        return [_safe_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [_safe_value(item) for item in value]
-    if isinstance(value, dict):
-        return {
-            public_text(str(key)): ("[redacted]" if _SENSITIVE_KEY.fullmatch(str(key)) else _safe_value(item))
-            for key, item in value.items()
-        }
+    if isinstance(value, (list, tuple, dict)):
+        if _depth >= 64:
+            return "[truncated]"
+        if _active is None:
+            _active = set()
+        identity = id(value)
+        if identity in _active:
+            return "[circular]"
+        _active.add(identity)
+        try:
+            if isinstance(value, dict):
+                return {
+                    public_text(str(key)): (
+                        "[redacted]" if _SENSITIVE_KEY.fullmatch(str(key))
+                        else _safe_value(item, _active, _depth + 1)
+                    )
+                    for key, item in value.items()
+                }
+            return [_safe_value(item, _active, _depth + 1) for item in value]
+        finally:
+            _active.remove(identity)
     if type(value) is float:
         return value if math.isfinite(value) else None
     if value is None or type(value) in {bool, int}:
         return value
     return None
-
 
 def public_data(value: Any) -> Any:
     """Return a recursively sanitized copy of data crossing an agent boundary."""

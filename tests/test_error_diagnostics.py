@@ -90,6 +90,53 @@ class ErrorDiagnosticsTests(unittest.TestCase):
         for secret in ("plain-secret", "another-secret", "Zm9vOmJhcg=="):
             self.assertNotIn(secret, serialized)
 
+    def test_public_text_redacts_authorization_headers_and_quoted_values(self) -> None:
+        examples = [
+            ("Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
+            ("Proxy-Authorization: Digest digest-secret", "digest-secret"),
+            ('client_secret="two words secret"', "two words secret"),
+            ("auth_token='single quoted secret'", "single quoted secret"),
+            ("private_key=KEYXYZ", "KEYXYZ"),
+        ]
+        for original, secret in examples:
+            with self.subTest(original=original):
+                self.assertNotIn(secret, public_text(original))
+
+        sanitized = public_text(json.dumps({
+            "authorization": "Basic json-secret",
+            "session_token": "session-secret",
+            "client_secret": 'quoted"secret',
+        }))
+        for secret in ("json-secret", "session-secret", 'quoted"secret'):
+            self.assertNotIn(secret, sanitized)
+        self.assertIn('"authorization": "[redacted]"', sanitized)
+
+    def test_public_data_handles_cycles_and_bounded_nesting(self) -> None:
+        mapping = {}
+        mapping["self"] = mapping
+        sequence = []
+        sequence.append(sequence)
+        shared = {"safe": "kept"}
+        diagnostics = {
+            "mapping": mapping, "sequence": sequence,
+            "first": shared, "second": shared,
+        }
+        sanitized = public_data(diagnostics)
+        self.assertEqual(sanitized["mapping"]["self"], "[circular]")
+        self.assertEqual(sanitized["sequence"][0], "[circular]")
+        self.assertEqual(sanitized["first"], sanitized["second"])
+        self.assertIn("[circular]", json.dumps(
+            ValidationError("Invalid input", diagnostics=diagnostics).as_dict()
+        ))
+
+        nested = {}
+        cursor = nested
+        for _ in range(70):
+            child = {}
+            cursor["child"] = child
+            cursor = child
+        self.assertIn("[truncated]", json.dumps(public_data(nested)))
+
     def test_unexpected_mcp_failure_does_not_disclose_exception_details(self) -> None:
         app = MCPApplication()
         with patch.object(app, "_dispatch", side_effect=RuntimeError(r"failed C:\private\token=abc123")):
