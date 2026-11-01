@@ -101,6 +101,96 @@ class WorkspaceServiceTests(unittest.TestCase):
                 store.list(directory)
         self.assertFalse(database_path.exists())
 
+    def test_validation_record_rejects_deleting_project_without_creating_database(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        marker = directory / ".cadyx-deleting"
+        marker.touch()
+        store = ValidationRecordStore()
+        with self.assertRaises(NotFoundError):
+            store.record(
+                directory, "body_dimensions",
+                {"revision": 1, "geometry_sha256": "a" * 64},
+            )
+        with self.assertRaises(NotFoundError):
+            store.list(directory)
+        self.assertFalse(store.database_path(directory).exists())
+
+    def test_validation_record_rolls_back_if_deletion_starts_during_insert(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        store = ValidationRecordStore()
+        result = {"revision": 1, "geometry_sha256": "a" * 64}
+        first = store.record(directory, "body_dimensions", result)
+        marker = directory / ".cadyx-deleting"
+        original_connect = sqlite3.connect
+
+        class DeletingConnection(sqlite3.Connection):
+            def execute(self, sql, parameters=()):
+                cursor = super().execute(sql, parameters)
+                if sql.startswith("INSERT INTO validation_record "):
+                    marker.touch()
+                return cursor
+
+        def connect_during_deletion(*args, **kwargs):
+            return original_connect(*args, **kwargs, factory=DeletingConnection)
+
+        with patch("cadyx.workspace_validations.sqlite3.connect", side_effect=connect_during_deletion):
+            with self.assertRaises(NotFoundError):
+                store.record(directory, "body_dimensions", result)
+        marker.unlink()
+        self.assertEqual([item["record_id"] for item in store.list(directory)], [first["record_id"]])
+
+    def test_validation_record_does_not_recreate_database_deleted_during_open(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        store = ValidationRecordStore()
+        database_path = store.database_path(directory)
+        store.record(
+            directory, "body_dimensions",
+            {"revision": 1, "geometry_sha256": "a" * 64},
+        )
+        original_connect = sqlite3.connect
+
+        def remove_before_open(*args, **kwargs):
+            database_path.unlink()
+            return original_connect(*args, **kwargs)
+
+        with patch("cadyx.workspace_validations.sqlite3.connect", side_effect=remove_before_open):
+            with self.assertRaisesRegex(ValidationError, "could not be recorded"):
+                store.record(
+                    directory, "body_dimensions",
+                    {"revision": 2, "geometry_sha256": "b" * 64},
+                )
+        self.assertFalse(database_path.exists())
+
+    def test_validation_listing_rejects_deletion_during_query(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        store = ValidationRecordStore()
+        store.record(
+            directory, "body_dimensions",
+            {"revision": 1, "geometry_sha256": "a" * 64},
+        )
+        marker = directory / ".cadyx-deleting"
+        original_connect = sqlite3.connect
+
+        class DeletingConnection(sqlite3.Connection):
+            def execute(self, sql, parameters=()):
+                cursor = super().execute(sql, parameters)
+                if sql.startswith("SELECT id, kind"):
+                    marker.touch()
+                return cursor
+
+        def connect_during_deletion(*args, **kwargs):
+            return original_connect(*args, **kwargs, factory=DeletingConnection)
+
+        with patch("cadyx.workspace_validations.sqlite3.connect", side_effect=connect_during_deletion):
+            with self.assertRaises(NotFoundError):
+                store.list(directory)
+        marker.unlink()
+        self.assertEqual(len(store.list(directory)), 1)
+
     def test_artifact_store_lists_only_direct_user_files(self) -> None:
         directory = self.root / "project"
         directory.mkdir()

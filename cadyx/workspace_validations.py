@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .errors import ValidationError
+from .errors import NotFoundError, ValidationError
 
 _SUPPORTED_VALIDATION_KINDS = {
     "body_dimensions",
@@ -60,12 +60,21 @@ class ValidationRecordStore:
 
         database_path = self.database_path(project_dir)
         self._validate_database_path(database_path)
+        self._ensure_project_available(project_dir)
         record_id = str(uuid4())
         created_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         try:
-            connection = sqlite3.connect(database_path, timeout=5)
+            # Existing databases must not be recreated if deletion removes the
+            # file between checking its existence and opening it.
+            mode = "rw" if database_path.exists() else "rwc"
+            connection = sqlite3.connect(
+                f"{database_path.absolute().as_uri()}?mode={mode}", uri=True, timeout=5,
+            )
             try:
                 with connection:
+                    # Make schema initialization part of the same rollbackable write.
+                    connection.execute("BEGIN IMMEDIATE")
+                    self._ensure_project_available(project_dir)
                     self._ensure_schema(connection)
                     connection.execute(
                         "INSERT INTO validation_record "
@@ -80,6 +89,9 @@ class ValidationRecordStore:
                             result_json,
                         ),
                     )
+                    # A concurrent deletion may have fenced this project while
+                    # the validation was running. Do not commit a late result.
+                    self._ensure_project_available(project_dir)
             finally:
                 connection.close()
         except sqlite3.Error as exc:
@@ -97,6 +109,7 @@ class ValidationRecordStore:
             raise ValidationError("Validation record limit must be an integer from 1 to 200.")
         database_path = self.database_path(project_dir)
         self._validate_database_path(database_path)
+        self._ensure_project_available(project_dir)
         if not database_path.exists():
             return []
         try:
@@ -111,6 +124,7 @@ class ValidationRecordStore:
                     "FROM validation_record ORDER BY created_at DESC, id DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
+                self._ensure_project_available(project_dir)
             finally:
                 connection.close()
             return [
@@ -131,6 +145,11 @@ class ValidationRecordStore:
     def _validate_database_path(database_path: Path) -> None:
         if database_path.is_symlink():
             raise ValidationError("Validation record database must not be a symbolic link.")
+
+    @staticmethod
+    def _ensure_project_available(project_dir: Path) -> None:
+        if not project_dir.is_dir() or (project_dir / ".cadyx-deleting").exists():
+            raise NotFoundError("Project is being deleted or was not found.")
 
     @staticmethod
     def _ensure_schema(connection: sqlite3.Connection) -> None:
