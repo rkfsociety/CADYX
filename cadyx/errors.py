@@ -23,8 +23,7 @@ _SENSITIVE_KEY = re.compile(
     r"authorization|proxy[_-]?authorization)$"
 )
 _AUTH_HEADER = re.compile(
-    r"(?i)\b((?:proxy[_-]?)?authorization)(\s*[:=]\s*)"
-    r"(?:Basic|Bearer|Digest|Token|ApiKey)[ \t]+\S+"
+    r"(?im)\b((?:proxy[_-]?)?authorization)([ \t]*[:=][ \t]*)[^\r\n]+"
 )
 _SECRET = re.compile(
     r"(?i)\b(access[_-]?token|refresh[_-]?token|auth[_-]?token|session[_-]?token|"

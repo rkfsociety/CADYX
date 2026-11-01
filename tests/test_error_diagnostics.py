@@ -94,6 +94,8 @@ class ErrorDiagnosticsTests(unittest.TestCase):
         examples = [
             ("Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
             ("Proxy-Authorization: Digest digest-secret", "digest-secret"),
+            ("Authorization: Negotiate ntlm-secret", "ntlm-secret"),
+            ('Authorization: Digest username="alice", response="digest-secret"', "digest-secret"),
             ('client_secret="two words secret"', "two words secret"),
             ("auth_token='single quoted secret'", "single quoted secret"),
             ("private_key=KEYXYZ", "KEYXYZ"),
@@ -110,6 +112,10 @@ class ErrorDiagnosticsTests(unittest.TestCase):
         for secret in ("json-secret", "session-secret", 'quoted"secret'):
             self.assertNotIn(secret, sanitized)
         self.assertIn('"authorization": "[redacted]"', sanitized)
+
+        multiline = public_text("Authorization: Negotiate secret-value\\nstatus=ok")
+        self.assertNotIn("secret-value", multiline)
+        self.assertIn("status=ok", multiline)
 
     def test_public_text_redacts_windows_slash_and_network_paths(self) -> None:
         paths = (
