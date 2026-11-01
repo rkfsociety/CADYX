@@ -106,7 +106,7 @@ class PointCloudProcessingTests(unittest.TestCase):
                   (0., 1e307, 0.), (0., -1e307, 0.),
                   (0., 0., 1e307), (0., 0., -1e307),
                   (0., 1e307, 1e307)]
-        result = process_points(points, "smooth", {"radius": 1.5e308})
+        result = process_points(points, "smooth", {"radius": 1.5e308, "iterations": 1})
         self.assertEqual(len(result), len(points))
         self.assertTrue(all(math.isfinite(value) for point in result for value in point))
 
