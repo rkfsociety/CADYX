@@ -76,6 +76,31 @@ class ProjectWorkspaceTests(unittest.TestCase):
                 "geometry": {"$cadyx_geometry_ref": key},
             }, directory)
 
+    def test_project_storage_decoder_recursion_is_a_validation_error(self) -> None:
+        from cadyx.workspace_projects import _read_history_log, _unpack_project_geometries
+
+        project = self.workspace.create("Recursive storage")
+        directory = self.workspace._project_dir(project["id"])
+        with patch("cadyx.workspace_projects.json.load", side_effect=RecursionError("too deep")):
+            with self.assertRaisesRegex(ValidationError, "Project file could not be read"):
+                ProjectRecordStore().load(directory, project["id"])
+
+        history = b"{}\\n"
+        (directory / ".cadyx-history.jsonl").write_bytes(history)
+        pointer = {"file": ".cadyx-history.jsonl", "count": 1, "bytes": len(history)}
+        with patch("cadyx.workspace_projects.json.loads", side_effect=RecursionError("too deep")):
+            with self.assertRaisesRegex(ValidationError, "Project history log could not be read"):
+                _read_history_log(directory, pointer)
+
+        key = "0" * 64
+        (directory / f".cadyx-brep-{key}.json").write_text("{}", encoding="utf-8")
+        with patch("cadyx.workspace_projects.json.load", side_effect=RecursionError("too deep")):
+            with self.assertRaisesRegex(ValidationError, "Project geometry blob is missing or invalid"):
+                _unpack_project_geometries({
+                    "$cadyx_storage": {},
+                    "geometry": {"$cadyx_geometry_ref": key},
+                }, directory)
+
     def test_project_storage_rejects_nonfinite_json_numbers(self) -> None:
         from cadyx.workspace_projects import _unpack_project_geometries
 

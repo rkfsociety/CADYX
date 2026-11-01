@@ -127,7 +127,7 @@ def _unpack_project_geometries(project: dict[str, Any], directory: Path) -> dict
                                 stream, parse_constant=_reject_nonfinite_json,
                                 parse_float=_parse_finite_float,
                             )
-                    except (ValueError, OSError) as exc:
+                    except (ValueError, OSError, RecursionError) as exc:
                         raise ValidationError("Project geometry blob is missing or invalid.") from exc
                 if not isinstance(geometry, dict) or geometry.get("kind") != "imported_brep":
                     raise ValidationError("Project geometry reference is invalid.")
@@ -175,7 +175,7 @@ def _read_history_log(directory: Path, pointer: Any) -> tuple[list[dict[str, Any
                 consumed += len(line)
     except FileNotFoundError as exc:
         raise ValidationError("Project history log is missing.") from exc
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, RecursionError) as exc:
         raise ValidationError(f"Project history log could not be read: {exc}.") from exc
     if consumed != committed_bytes or len(entries) != count:
         raise ValidationError("Project history log does not match its committed count and offset.")
@@ -227,7 +227,7 @@ class ProjectRecordStore:
                 )
         except FileNotFoundError as exc:
             raise NotFoundError("Project was not found.") from exc
-        except (ValueError, OSError) as exc:
+        except (ValueError, OSError, RecursionError) as exc:
             raise ValidationError(f"Project file could not be read: {exc}.") from exc
         if not isinstance(project, dict):
             raise ValidationError("Project file must contain a JSON object.")
