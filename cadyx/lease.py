@@ -43,7 +43,7 @@ class EditLeaseManager:
         self._local = threading.local()
 
     @contextmanager
-    def guard(self, project_id: str) -> Iterator[sqlite3.Connection]:
+    def guard(self, project_id: str, *, allow_deleting: bool = False) -> Iterator[sqlite3.Connection]:
         """Hold the same transaction through lease validation and the complete command.
 
         Nested calls on this thread reuse it. SQLite releases the OS lock on a
@@ -81,7 +81,7 @@ class EditLeaseManager:
             yield connection
             # Deletion may start while the caller holds this transaction.
             # Do not publish lease changes after the project was fenced.
-            if (project_directory / ".cadyx-deleting").exists():
+            if not allow_deleting and (project_directory / ".cadyx-deleting").exists():
                 raise NotFoundError("Project is being deleted.")
             connection.execute("COMMIT")
         except BaseException as exc:

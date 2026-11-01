@@ -85,8 +85,8 @@ class CadyxCore:
         self._proposal_guard = threading.RLock()
 
     @contextmanager
-    def _project_guard(self, project_id: str) -> Iterator[None]:
-        with self.leases.guard(project_id):
+    def _project_guard(self, project_id: str, *, allow_deleting: bool = False) -> Iterator[None]:
+        with self.leases.guard(project_id, allow_deleting=allow_deleting):
             yield
 
     def _project_availability(

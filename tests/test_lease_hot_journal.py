@@ -190,6 +190,18 @@ class LeaseSnapshotJournalTests(unittest.TestCase):
             marker.unlink()
             self.assertEqual(manager.get("project").lease_id, lease.lease_id)
 
+    def test_deletion_guard_can_commit_its_own_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            marker = project_dir / ".cadyx-deleting"
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+
+            with manager.guard("project", allow_deleting=True):
+                marker.touch()
+
+            self.assertTrue(marker.exists())
+
     def test_heartbeat_remains_monotonic_after_wall_clock_moves_backwards(self):
         with tempfile.TemporaryDirectory() as directory:
             project_dir = Path(directory)

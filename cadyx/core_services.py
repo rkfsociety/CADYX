@@ -386,7 +386,8 @@ class ProjectLifecycleService(_CoreService):
 
     def delete_project(self, project_id: str) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id):
-            with self._project_guard(project_id):
+            # Only deletion may create its own marker before the guard commits.
+            with self._project_guard(project_id, allow_deleting=True):
                 self._require_project_policy(
                     project_id,
                     "destructive",
