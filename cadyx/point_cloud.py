@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from numbers import Real
 from itertools import product
 from typing import Any
 
@@ -40,6 +41,16 @@ def _finite_numeric(value: Any) -> bool:
     try:
         return math.isfinite(float(value))
     except (OverflowError, ValueError):
+        return False
+
+
+def _finite_point_coordinate(value: Any) -> bool:
+    """Accept real scanner scalars, keeping JSON parameter validation strict."""
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError, TypeError):
         return False
 
 
@@ -108,10 +119,14 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
     # infinity, or malformed coordinates in a saved processing stage.
     if any(
         not isinstance(point, tuple) or len(point) != 3
-        or any(not _finite_numeric(coordinate) for coordinate in point)
+        or any(not _finite_point_coordinate(coordinate) for coordinate in point)
         for point in points
     ):
         raise ValidationError("Point-cloud source points must be finite XYZ triples.")
+    # Scanner arrays yield NumPy scalar values; canonicalize them once so all
+    # downstream operations (including exact voxel ratios) use Python numerics.
+    if any(type(coordinate) not in (int, float) for point in points for coordinate in point):
+        points = [tuple(float(coordinate) for coordinate in point) for point in points]
     if method == "simplify":
         target = max(3, math.floor(len(points) * (100 - p["ratio"]) / 100))
         if p["strategy"] == "uniform":

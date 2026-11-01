@@ -13,6 +13,9 @@ from unittest.mock import patch
 
 import numpy as np
 
+from cadyx.errors import ValidationError
+from cadyx.point_cloud import process_points
+
 from tools.revopoint.preprocess_scan_frame import (
     _write_aggregate_report, preprocess_frame_file, preprocess_points,
     verified_preprocessed_frame, watch_capture,
@@ -52,6 +55,23 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
         self.assertEqual(clipped, 1)
         np.testing.assert_allclose(aligned, [[10.0, -5.0, 0.0], [14.0, 1.0, 8.0],
                                              [10.0, -5.0, 0.0]])
+
+    def test_processing_accepts_numpy_real_scalars_and_rejects_nonfinite(self) -> None:
+        for dtype in (np.float32, np.float64, np.int64):
+            with self.subTest(dtype=dtype):
+                source = np.asarray([(0, 0, 0), (1, 0, 0), (2, 0, 0)], dtype=dtype)
+                points = [tuple(point) for point in source]
+                self.assertEqual(
+                    process_points(points, "voxel_downsample", {"voxel_size": 0.5}),
+                    [(0., 0., 0.), (1., 0., 0.), (2., 0., 0.)],
+                )
+        for dtype in (np.float32, np.float64):
+            for invalid in (np.nan, np.inf, -np.inf):
+                with self.subTest(dtype=dtype, invalid=invalid):
+                    source = np.asarray([(0., 0., 0.), (1., 0., 0.),
+                                         (invalid, 2., 0.)], dtype=dtype)
+                    with self.assertRaisesRegex(ValidationError, "finite XYZ triples"):
+                        process_points([tuple(point) for point in source], "deduplicate", {})
 
     def test_source_frame_is_cleaned_before_registration(self) -> None:
         surface = np.array([(x, y, 0.0) for x in range(12) for y in range(12)], dtype=np.float64)

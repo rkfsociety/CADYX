@@ -148,7 +148,8 @@ class PointCloudProcessingTests(unittest.TestCase):
         invalid_points = (
             (math.nan, 0.0, 0.0), (math.inf, 0.0, 0.0),
             (-math.inf, 0.0, 0.0), (10**400, 0.0, 0.0),
-            ("1", 0.0, 0.0), (0.0,), [0.0, 0.0, 0.0],
+            ("1", 0.0, 0.0), (True, 0.0, 0.0), (1+0j, 0.0, 0.0),
+            (0.0,), [0.0, 0.0, 0.0],
         )
         for point in invalid_points:
             with self.subTest(point=point):
