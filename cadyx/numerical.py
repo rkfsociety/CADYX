@@ -13,6 +13,8 @@ def matrix_rank(rows: list[list[float]], *, tolerance: float = 1e-8) -> int:
         raise ValueError("Matrix rows must have a consistent number of columns.")
     if not columns:
         return 0
+    if any(not math.isfinite(value) for row in rows for value in row):
+        raise ValueError("Matrix entries must be finite.")
     matrix = [row[:] for row in rows]
     row_count = len(matrix)
     rank = 0
@@ -49,8 +51,14 @@ class SparseRankAccumulator:
         return len(self._basis)
 
     def add_row(self, source: dict[int, float]) -> bool:
-        row = {column: float(value) for column, value in source.items()
-               if abs(float(value)) >= self.tolerance}
+        try:
+            coefficients = {column: float(value) for column, value in source.items()}
+        except (OverflowError, ValueError) as exc:
+            raise ValueError("Sparse rank rows must contain finite coefficients.") from exc
+        if any(not math.isfinite(value) for value in coefficients.values()):
+            raise ValueError("Sparse rank rows must contain finite coefficients.")
+        row = {column: value for column, value in coefficients.items()
+               if abs(value) >= self.tolerance}
         while row:
             # Use column-echelon order: a largest-magnitude pivot can skip an
             # existing pivot and count a dependent constraint as independent.

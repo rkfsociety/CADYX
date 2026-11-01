@@ -102,6 +102,8 @@ def normalize_cloud_parameters(method: str, parameters: Any) -> dict[str, Any]:
 def process_points(points: list[tuple[float, float, float]], method: str, parameters: dict[str, Any],
                    *, diagnostics: dict[str, Any] | None = None) -> list[tuple[float, float, float]]:
     p = normalize_cloud_parameters(method, parameters)
+    if len(points) < 3:
+        raise ValidationError("Point-cloud processing requires at least three source points.")
     if method == "simplify":
         target = max(3, math.floor(len(points) * (100 - p["ratio"]) / 100))
         if p["strategy"] == "uniform":

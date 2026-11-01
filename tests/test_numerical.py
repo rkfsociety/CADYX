@@ -29,6 +29,18 @@ class NumericalRankTests(unittest.TestCase):
                         permuted = [[row[column] for column in columns] for row in ordered]
                         self.assertEqual(matrix_rank(permuted), expected)
 
+    def test_rank_rejects_nonfinite_coefficients(self):
+        for invalid in (math.nan, math.inf, -math.inf):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    matrix_rank([[1.0, invalid]])
+                sparse = SparseRankAccumulator()
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    sparse.add_row({0: 1.0, 1: invalid})
+                self.assertEqual(sparse.rank, 0)
+        with self.assertRaisesRegex(ValueError, "finite"):
+            SparseRankAccumulator().add_row({0: 10**400})
+
     def test_sparse_accumulator_reports_each_added_independent_row(self):
         sparse = SparseRankAccumulator()
         self.assertTrue(sparse.add_row({0: 1.0, 1: 1.0}))

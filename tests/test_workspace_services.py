@@ -80,6 +80,17 @@ class WorkspaceServiceTests(unittest.TestCase):
         self.assertEqual(listed[0]["result"], result)
         self.assertTrue(store.database_path(directory).is_file())
 
+    def test_validation_record_rejects_invalid_revisions_before_sqlite_open(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        store = ValidationRecordStore()
+        for revision in (-1, True, 1 << 63, 10**400):
+            with self.subTest(revision=revision):
+                with self.assertRaises(ValidationError):
+                    store.record(directory, "body_dimensions",
+                                 {"revision": revision, "geometry_sha256": "a" * 64})
+                self.assertFalse(store.database_path(directory).exists())
+
     def test_validation_listing_does_not_recreate_database_deleted_during_open(self) -> None:
         directory = self.root / "project"
         directory.mkdir()

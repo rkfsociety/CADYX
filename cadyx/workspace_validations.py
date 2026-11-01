@@ -42,7 +42,8 @@ class ValidationRecordStore:
             raise ValidationError("Validation record kind is invalid.")
         if kind not in _SUPPORTED_VALIDATION_KINDS:
             raise ValidationError("Validation record kind is unsupported.")
-        if not isinstance(result, dict) or type(result.get("revision")) is not int:
+        if (not isinstance(result, dict) or type(result.get("revision")) is not int
+                or not 0 <= result["revision"] <= (1 << 63) - 1):
             raise ValidationError("Validation result cannot be recorded.")
         geometry_hash = result.get("geometry_sha256")
         if not isinstance(geometry_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", geometry_hash):

@@ -143,6 +143,16 @@ class PointCloudProcessingTests(unittest.TestCase):
         self.assertEqual(low[:len(surface)], surface)
         self.assertEqual(process_points(surface, "isolation_filter", {"rate": 15}), surface)
 
+    def test_processing_rejects_too_few_source_points(self):
+        methods = (("simplify", {"ratio": 40}), ("deduplicate", {}),
+                   ("voxel_downsample", {"voxel_size": 1.0}))
+        for count in range(3):
+            points = [(float(i), 0.0, 0.0) for i in range(count)]
+            for method, parameters in methods:
+                with self.subTest(count=count, method=method):
+                    with self.assertRaisesRegex(ValidationError, "at least three source points"):
+                        process_points(points, method, parameters)
+
     def test_uniform_and_geometric_simplification_respect_ratio_and_geometry(self):
         points = [(float(x), float(y), .1 * ((x * y) % 3)) for x in range(20) for y in range(15)]
         uniform = process_points(points, "simplify", {"strategy": "uniform", "ratio": 40})
