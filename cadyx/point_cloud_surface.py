@@ -6,6 +6,7 @@ import heapq
 from typing import Any
 
 from .errors import ValidationError
+from .point_cloud import _mean_coordinate
 from .scan_reverse_alignment import _jacobi_eigenvectors
 
 _KD_LEAF_SIZE = 8
@@ -129,7 +130,9 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
             neighbors = [j for _, j in nearest]
             if len(neighbors) < 6:
                 continue
-            center = [point[a] + math.fsum(current[j][a] - point[a] for j in neighbors) / len(neighbors) for a in range(3)]
+            # Neighbor deltas can overflow when many finite, widely spaced
+            # points are still within a very large finite search radius.
+            center = [_mean_coordinate([current[j][a] for j in neighbors]) for a in range(3)]
             covariance = [[math.fsum(((current[j][a] - center[a]) / radius) * ((current[j][b] - center[b]) / radius)
                                     for j in neighbors) / len(neighbors)
                            for b in range(3)] for a in range(3)]

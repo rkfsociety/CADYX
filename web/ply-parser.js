@@ -439,7 +439,16 @@
     const data = new DataView(buffer);
     const { dataOffset, vertex, face, elementsBeforeFace, littleEndian, format } = parseHeader(bytes);
     if (vertex.count === 0) throw new Error("В PLY нет вершин для предпросмотра.");
-    if (format === "ascii") return parseAsciiPly(bytes, dataOffset, vertex, face, elementsBeforeFace, maxPreviewPoints);
+    if (format === "ascii") {
+      // A declared vertex needs at least one character per scalar property
+      // and separators. Reject impossible counts before allocating full
+      // vertex buffers for mesh previews from an untrusted ASCII header.
+      const minimumRecordBytes = Math.max(1, vertex.properties.length * 2 - 1);
+      if (vertex.count > Math.floor((bytes.length - dataOffset) / minimumRecordBytes)) {
+        throw new Error("Данные вершин PLY обрезаны.");
+      }
+      return parseAsciiPly(bytes, dataOffset, vertex, face, elementsBeforeFace, maxPreviewPoints);
+    }
     const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
     const offsets = { x: null, y: null, z: null };
     const colorOffsets = { red: null, r: null, green: null, g: null, blue: null, b: null };

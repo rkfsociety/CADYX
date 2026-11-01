@@ -30,6 +30,26 @@ function mesh(faceCount = 3) {
   return { buffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), headerSize: header.length };
 }
 
+// A malformed ASCII mesh header must not allocate a near-unbounded vertex
+// array before discovering that the payload contains no vertex records.
+const impossibleAsciiMesh = Buffer.from(
+  "ply\nformat ascii 1.0\nelement vertex 9007199254740991\n"
+  + "property float x\nproperty float y\nproperty float z\n"
+  + "element face 1\nproperty list uchar int vertex_indices\nend_header\n"
+);
+assert.throws(() => parse(impossibleAsciiMesh.buffer.slice(
+  impossibleAsciiMesh.byteOffset, impossibleAsciiMesh.byteOffset + impossibleAsciiMesh.byteLength,
+)), /Данные вершин PLY обрезаны/);
+const validAsciiMesh = Buffer.from(
+  "ply\nformat ascii 1.0\nelement vertex 3\n"
+  + "property float x\nproperty float y\nproperty float z\n"
+  + "element face 1\nproperty list uchar int vertex_indices\nend_header\n"
+  + "0 0 0\n1 0 0\n0 1 0\n3 0 1 2\n"
+);
+assert.deepEqual(Array.from(parse(validAsciiMesh.buffer.slice(
+  validAsciiMesh.byteOffset, validAsciiMesh.byteOffset + validAsciiMesh.byteLength,
+)).triangles), [0, 1, 2]);
+
 const small = mesh();
 const result = parse(small.buffer);
 assert.deepEqual(Array.from(result.triangles), [0, 1, 2, 0, 1, 2, 0, 1, 2]);

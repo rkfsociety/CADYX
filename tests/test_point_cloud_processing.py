@@ -3,7 +3,7 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from cadyx.command_scan import ScanCommands
 from cadyx.errors import ValidationError
@@ -98,6 +98,28 @@ class PointCloudProcessingTests(unittest.TestCase):
         for method in ("smooth", "remove_overlaps"):
             self.assertEqual(process_points(points, method, {"radius": 3.}), points)
             self.assertEqual(process_points(points, method, {"radius": 1.}), points)
+
+    def test_surface_centroid_does_not_overflow_on_finite_wide_cloud(self):
+        # Six valid neighbors at distance ~1e308 make the old sum of
+        # (neighbor - point) overflow before division by the neighbor count.
+        points = [(-1e308, 0., 0.), (0., 0., 0.),
+                  (0., 1e307, 0.), (0., -1e307, 0.),
+                  (0., 0., 1e307), (0., 0., -1e307),
+                  (0., 1e307, 1e307)]
+        result = process_points(points, "smooth", {"radius": 1.5e308})
+        self.assertEqual(len(result), len(points))
+        self.assertTrue(all(math.isfinite(value) for point in result for value in point))
+
+    def test_surface_processing_rejects_numeric_overflow_and_nonfinite_results(self):
+        points = [(float(i), 0., 0.) for i in range(7)]
+        with patch("cadyx.point_cloud_surface.surface_points",
+                   side_effect=OverflowError("intermediate overflow")):
+            with self.assertRaisesRegex(ValidationError, "numeric range"):
+                process_points(points, "smooth", {})
+        with patch("cadyx.point_cloud_surface.surface_points",
+                   return_value=[(math.inf, 0., 0.)] * 3):
+            with self.assertRaisesRegex(ValidationError, "non-finite coordinates"):
+                process_points(points, "smooth", {})
 
     def test_surface_parameter_validation(self):
         for method, parameters in [("smooth", {"strength": True}), ("smooth", {"iterations": 1.5}),

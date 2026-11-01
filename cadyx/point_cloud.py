@@ -171,8 +171,11 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
             result = best
     elif method in {"remove_overlaps", "smooth", "isolation_filter"}:
         from .point_cloud_surface import isolation_points, surface_points
-        result = (isolation_points(points, p["rate"], p["component_factor"], diagnostics)
-                  if method == "isolation_filter" else surface_points(points, method, p))
+        try:
+            result = (isolation_points(points, p["rate"], p["component_factor"], diagnostics)
+                      if method == "isolation_filter" else surface_points(points, method, p))
+        except (OverflowError, ValueError, ZeroDivisionError) as exc:
+            raise ValidationError("Point-cloud surface calculations exceeded numeric range; no change was saved.") from exc
     elif method == "deduplicate":
         result = list(dict.fromkeys(points))
     elif method == "crop":
@@ -209,4 +212,6 @@ def process_points(points: list[tuple[float, float, float]], method: str, parame
                     result.append(point)
     if len(result) < 3:
         raise ValidationError("Point-cloud processing must retain at least three points; no change was saved.")
+    if any(not math.isfinite(value) for point in result for value in point):
+        raise ValidationError("Point-cloud processing produced non-finite coordinates; no change was saved.")
     return result
