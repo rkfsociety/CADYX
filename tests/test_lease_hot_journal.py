@@ -77,6 +77,33 @@ class LeaseSnapshotJournalTests(unittest.TestCase):
             self.assertFalse((project_dir / ".cadyx-agent.sqlite3").exists())
             self.assertFalse((project_dir / ".cadyx-leases.sqlite3").exists())
 
+    def test_existing_lease_databases_are_not_recreated_if_removed_before_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            manager.acquire("project", "agent", "worker")
+            with manager.agent_control("project"):
+                pass
+            original_connect = sqlite3.connect
+
+            for context, filename in (
+                ("guard", ".cadyx-leases.sqlite3"),
+                ("agent_control", ".cadyx-agent.sqlite3"),
+            ):
+                with self.subTest(context=context):
+                    database = project_dir / filename
+
+                    def remove_before_connect(*args, **kwargs):
+                        database.unlink()
+                        return original_connect(*args, **kwargs)
+
+                    with patch("cadyx.lease.sqlite3.connect", side_effect=remove_before_connect):
+                        with self.assertRaises(sqlite3.OperationalError):
+                            with getattr(manager, context)("project"):
+                                pass
+                    self.assertFalse(database.exists(), "An existing database must not be recreated")
+
     def test_listing_does_not_recreate_database_removed_during_open(self):
         with tempfile.TemporaryDirectory() as directory:
             project_dir = Path(directory)
@@ -119,7 +146,7 @@ class LeaseSnapshotJournalTests(unittest.TestCase):
 
     def test_listing_uri_handles_reserved_path_characters(self):
         with tempfile.TemporaryDirectory() as directory:
-            project_dir = Path(directory) / "project ?# unicode ä"
+            project_dir = Path(directory) / "project # percent% unicode ä"
             project_dir.mkdir()
             (project_dir / "project.json").write_text("{}", encoding="utf-8")
             manager = EditLeaseManager(lambda _project_id: project_dir)

@@ -24,6 +24,12 @@ def _sqlite_contention(exc: sqlite3.OperationalError) -> bool:
     }
 
 
+def _project_database_uri(path: Path) -> str:
+    """Do not recreate a database deleted between the existence check and open."""
+    mode = "rw" if path.exists() else "rwc"
+    return f"{path.absolute().as_uri()}?mode={mode}"
+
+
 class EditLeaseManager:
     def __init__(
         self, project_directory: Callable[[str], Path], *,
@@ -59,7 +65,9 @@ class EditLeaseManager:
             raise ValidationError("Lease database must not be a symbolic link.")
         connection: sqlite3.Connection | None = None
         try:
-            connection = sqlite3.connect(path, timeout=5, isolation_level=None)
+            connection = sqlite3.connect(
+                _project_database_uri(path), uri=True, timeout=5, isolation_level=None,
+            )
             connection.execute("BEGIN IMMEDIATE")
             connection.execute("""CREATE TABLE IF NOT EXISTS lease (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -108,7 +116,7 @@ class EditLeaseManager:
             raise ValidationError("Agent control database must not be a symbolic link.")
         connection: sqlite3.Connection | None = None
         try:
-            connection = sqlite3.connect(path, timeout=5)
+            connection = sqlite3.connect(_project_database_uri(path), uri=True, timeout=5)
             with connection:
                 connection.execute("""CREATE TABLE IF NOT EXISTS control (
                     lease_id TEXT PRIMARY KEY, stopped INTEGER NOT NULL,
