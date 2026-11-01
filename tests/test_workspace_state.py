@@ -34,6 +34,23 @@ class WorkspaceStateTests(unittest.TestCase):
             self.assertEqual((workspace.state_root / frames.name / "frame.raw").read_bytes(), b"capture")
             self.assertEqual(prepare_workspace_state(root), workspace.state_root)
 
+    def test_migrates_case_variant_legacy_service_artifacts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "projects"
+            root.mkdir()
+            database = root / ".CADYX-LEGACY.sqlite3"
+            database.write_bytes(b"legacy database")
+            frames = root / ".REVOPOINT-OLD.frames"
+            frames.mkdir()
+            (frames / "capture.raw").write_bytes(b"raw frame")
+
+            state = prepare_workspace_state(root)
+
+            self.assertFalse(database.exists())
+            self.assertFalse(frames.exists())
+            self.assertEqual((state / database.name).read_bytes(), b"legacy database")
+            self.assertEqual((state / frames.name / "capture.raw").read_bytes(), b"raw frame")
+
     def test_collision_does_not_overwrite_or_partially_migrate(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "projects"

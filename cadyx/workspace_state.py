@@ -15,7 +15,7 @@ def prepare_workspace_state(root: Path) -> Path:
         raise ValidationError("Workspace state directory must not be a symbolic link.")
     state.mkdir(parents=True, exist_ok=True)
     legacy = [entry for entry in root.iterdir()
-              if entry.name.startswith((".cadyx-", ".revopoint-"))]
+              if entry.name.casefold().startswith((".cadyx-", ".revopoint-"))]
     for entry in legacy:
         if entry.is_symlink():
             raise ValidationError("Legacy workspace state must not be a symbolic link.")
