@@ -85,7 +85,7 @@ class ProjectWorkspaceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValidationError, "Project file could not be read"):
                 ProjectRecordStore().load(directory, project["id"])
 
-        history = b"{}\\n"
+        history = b"{}\n"
         (directory / ".cadyx-history.jsonl").write_bytes(history)
         pointer = {"file": ".cadyx-history.jsonl", "count": 1, "bytes": len(history)}
         with patch("cadyx.workspace_projects.json.loads", side_effect=RecursionError("too deep")):
