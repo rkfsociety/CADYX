@@ -23,7 +23,7 @@ def normalize_mesh_parameters(method: Any, parameters: Any) -> dict[str, Any]:
     if method == "smooth":
         if type(p["iterations"]) is not int or not 1 <= p["iterations"] <= 10:
             raise ValidationError("Smoothing iterations must be an integer from 1 to 10.")
-        if type(p["strength"]) not in (int, float) or not math.isfinite(p["strength"]) or not 0 < p["strength"] <= .5:
+        if type(p["strength"]) not in (int, float) or not 0 < p["strength"] <= .5:
             raise ValidationError("Smoothing strength must be positive and at most 0.5.")
     return p
 

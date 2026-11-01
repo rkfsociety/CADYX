@@ -10,7 +10,7 @@ from cadyx.command_scan import ScanCommands
 from cadyx.errors import ValidationError
 from cadyx.kernel_primitive import PrimitiveKernelAdapter
 from cadyx.mesh_geometry import geometry_from_native_buffer, tessellate_mesh_geometry
-from cadyx.mesh_processing import process_mesh_geometry
+from cadyx.mesh_processing import normalize_mesh_parameters, process_mesh_geometry
 from cadyx.models import Document
 
 
@@ -58,6 +58,17 @@ class MeshProcessingTests(unittest.TestCase):
         self.assertEqual(stats["after"]["nonmanifold_edges"], 0)
         with self.assertRaises(ValidationError):
             process_mesh_geometry(source, "smooth", {"iterations": True, "strength": .1})
+
+    def test_smoothing_strength_rejects_huge_and_nonfinite_numbers(self):
+        import math
+        # The range check must not convert unbounded JSON integers to float:
+        # math.isfinite(10**400) raises OverflowError.
+        for strength in (10**400, -(10**400), math.nan, math.inf, -math.inf, True):
+            with self.subTest(strength=strength):
+                with self.assertRaisesRegex(ValidationError, "strength"):
+                    normalize_mesh_parameters("smooth", {"iterations": 1, "strength": strength})
+        self.assertEqual(normalize_mesh_parameters(
+            "smooth", {"iterations": 1, "strength": 0.5})["strength"], 0.5)
 
     def test_command_preserves_source_and_saves_hash_bound_history_and_artifact(self):
         with tempfile.TemporaryDirectory() as folder:
