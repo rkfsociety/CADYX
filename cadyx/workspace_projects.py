@@ -110,7 +110,7 @@ def _unpack_project_geometries(project: dict[str, Any], directory: Path) -> dict
                     try:
                         with blob_path.open("r", encoding="utf-8") as stream:
                             geometry = json.load(stream)
-                    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+                    except (FileNotFoundError, json.JSONDecodeError, UnicodeError, OSError) as exc:
                         raise ValidationError("Project geometry blob is missing or invalid.") from exc
                 if not isinstance(geometry, dict) or geometry.get("kind") != "imported_brep":
                     raise ValidationError("Project geometry reference is invalid.")
@@ -156,7 +156,7 @@ def _read_history_log(directory: Path, pointer: Any) -> tuple[list[dict[str, Any
                 consumed += len(line)
     except FileNotFoundError as exc:
         raise ValidationError("Project history log is missing.") from exc
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, UnicodeError, OSError) as exc:
         raise ValidationError(f"Project history log could not be read: {exc}.") from exc
     if consumed != committed_bytes or len(entries) != count:
         raise ValidationError("Project history log does not match its committed count and offset.")
@@ -196,12 +196,17 @@ class ProjectRecordStore:
         summary_only: bool = False,
     ) -> dict[str, Any]:
         project_file = directory / "project.json"
+        # Reject untrusted project records that redirect reads outside the workspace.
+        if project_file.is_symlink():
+            raise ValidationError("Project file must not be a symbolic link.")
+        if project_file.exists() and not project_file.is_file():
+            raise ValidationError("Project file must be a regular file.")
         try:
             with project_file.open("r", encoding="utf-8") as stream:
                 project = json.load(stream)
         except FileNotFoundError as exc:
             raise NotFoundError("Project was not found.") from exc
-        except (json.JSONDecodeError, OSError) as exc:
+        except (json.JSONDecodeError, UnicodeError, OSError) as exc:
             raise ValidationError(f"Project file could not be read: {exc}.") from exc
         if not isinstance(project, dict):
             raise ValidationError("Project file must contain a JSON object.")
@@ -237,9 +242,15 @@ class ProjectRecordStore:
                     project["history"] = history
                 else:
                     history_path = directory / _HISTORY_FILE
-                    if count and (history_path.is_symlink() or not history_path.is_file()
-                                  or history_path.stat().st_size < offset):
-                        raise ValidationError("Project history log is missing or shorter than its committed offset.")
+                    if count:
+                        try:
+                            history_valid = (not history_path.is_symlink() and history_path.is_file()
+                                             and history_path.stat().st_size >= offset)
+                        except OSError:
+                            # A concurrent deletion can race the final stat call.
+                            history_valid = False
+                        if not history_valid:
+                            raise ValidationError("Project history log is missing or shorter than its committed offset.")
                     project["history"] = []
                     project["_history_count"] = count
                 self._history_state[str(project_file)] = (count, offset, True)

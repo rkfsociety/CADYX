@@ -21,6 +21,88 @@ class ProjectWorkspaceTests(unittest.TestCase):
         self.root = Path(self.temporary_directory.name) / "projects"
         self.workspace = ProjectWorkspace(self.root)
 
+    def test_project_record_rejects_symlink_and_nonregular_file(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root)
+            project_directory = directory / "project"
+            project_directory.mkdir()
+            record = project_directory / "project.json"
+            outside = directory / "outside.json"
+            outside.write_text("{}", encoding="utf-8")
+            try:
+                record.symlink_to(outside)
+            except (OSError, NotImplementedError):
+                # Some Windows environments do not permit unprivileged symlinks.
+                pass
+            else:
+                for summary_only in (False, True):
+                    with self.subTest(summary_only=summary_only):
+                        with self.assertRaisesRegex(ValidationError, "symbolic link"):
+                            ProjectRecordStore().load(
+                                project_directory, str(uuid4()), summary_only=summary_only,
+                            )
+                self.assertEqual(outside.read_text(encoding="utf-8"), "{}")
+                record.unlink()
+            record.mkdir()
+            with self.assertRaisesRegex(ValidationError, "regular file"):
+                ProjectRecordStore().load(project_directory, str(uuid4()))
+
+    def test_project_storage_rejects_invalid_utf8_as_validation_error(self) -> None:
+        from cadyx.workspace_projects import _unpack_project_geometries
+
+        project = self.workspace.create("Invalid encoding")
+        directory = self.workspace._project_dir(project["id"])
+        project_file = directory / "project.json"
+        saved = project_file.read_bytes()
+        project_file.write_bytes(bytes([255]))
+        with self.assertRaisesRegex(ValidationError, "Project file could not be read"):
+            ProjectRecordStore().load(directory, project["id"])
+        project_file.write_bytes(saved)
+
+        record = json.loads(saved)
+        record["$cadyx_storage"]["history"] = {
+            "file": ".cadyx-history.jsonl", "count": 1, "bytes": 2,
+        }
+        project_file.write_text(json.dumps(record), encoding="utf-8")
+        (directory / ".cadyx-history.jsonl").write_bytes(bytes([255, 10]))
+        with self.assertRaisesRegex(ValidationError, "Project history log could not be read"):
+            ProjectRecordStore().load(directory, project["id"])
+
+        key = "0" * 64
+        (directory / f".cadyx-brep-{key}.json").write_bytes(bytes([255]))
+        with self.assertRaisesRegex(ValidationError, "Project geometry blob is missing or invalid"):
+            _unpack_project_geometries({
+                "$cadyx_storage": {},
+                "geometry": {"$cadyx_geometry_ref": key},
+            }, directory)
+
+    def test_history_stat_race_returns_validation_error(self) -> None:
+        project = self.workspace.create("History race")
+        directory = self.workspace._project_dir(project["id"])
+        project_file = directory / "project.json"
+        record = json.loads(project_file.read_text(encoding="utf-8"))
+        record["$cadyx_storage"]["history"] = {
+            "file": ".cadyx-history.jsonl", "count": 1, "bytes": 2,
+        }
+        project_file.write_text(json.dumps(record), encoding="utf-8")
+        history_path = directory / ".cadyx-history.jsonl"
+        history_path.write_bytes(bytes([123, 125, 10]))
+        original_stat = Path.stat
+        stat_calls = 0
+
+        def disappearing_stat(path, *args, **kwargs):
+            nonlocal stat_calls
+            if path == history_path:
+                stat_calls += 1
+                if stat_calls == 2:
+                    raise FileNotFoundError("history removed during inspection")
+            return original_stat(path, *args, **kwargs)
+
+        with patch.object(Path, "stat", disappearing_stat):
+            with self.assertRaisesRegex(ValidationError, "history log"):
+                ProjectRecordStore().load(directory, project["id"], include_history=False)
+        self.assertEqual(stat_calls, 2)
+
     def test_project_folder_uses_a_safe_display_name_and_keeps_uuid_identity(self) -> None:
         project = self.workspace.create("  Тестовая кружка / верх: 3  ")
         project_directory = self.workspace._project_dir(project["id"])
