@@ -98,7 +98,10 @@ class EditLeaseManager:
     @contextmanager
     def agent_control(self, project_id: str) -> Iterator[sqlite3.Connection]:
         """Independent durable signals: never wait for the document transaction."""
-        path = self._project_directory(project_id) / ".cadyx-agent.sqlite3"
+        project_directory = self._project_directory(project_id)
+        if (project_directory / ".cadyx-deleting").exists():
+            raise NotFoundError("Project is being deleted.")
+        path = project_directory / ".cadyx-agent.sqlite3"
         if not path.parent.is_dir() or not (path.parent / "project.json").is_file():
             raise NotFoundError("Project was not found.")
         if path.is_symlink():
@@ -111,7 +114,11 @@ class EditLeaseManager:
                     lease_id TEXT PRIMARY KEY, stopped INTEGER NOT NULL,
                     revision_required INTEGER NOT NULL
                 )""")
+                if (project_directory / ".cadyx-deleting").exists():
+                    raise NotFoundError("Project is being deleted.")
                 yield connection
+                if (project_directory / ".cadyx-deleting").exists():
+                    raise NotFoundError("Project is being deleted.")
         except sqlite3.OperationalError as exc:
             if _sqlite_contention(exc):
                 raise ConflictError("Agent control is busy; retry later.", code="PROJECT_BUSY") from exc
@@ -173,7 +180,10 @@ class EditLeaseManager:
         SQLite needs a writable connection when a crashed writer leaves a hot rollback
         journal. This SELECT does not modify lease content; opening the database lets
         SQLite recover its journal and return the last committed snapshot."""
-        path = self._project_directory(project_id) / ".cadyx-leases.sqlite3"
+        project_directory = self._project_directory(project_id)
+        if (project_directory / ".cadyx-deleting").exists():
+            raise NotFoundError("Project is being deleted.")
+        path = project_directory / ".cadyx-leases.sqlite3"
         if not path.parent.is_dir() or not (path.parent / "project.json").is_file():
             raise NotFoundError("Project was not found.")
         if path.is_symlink():
@@ -203,6 +213,8 @@ class EditLeaseManager:
             if connection is not None:
                 connection.close()
 
+        if (project_directory / ".cadyx-deleting").exists():
+            raise NotFoundError("Project is being deleted.")
         if row is None:
             return {"state": "FREE", "lease": None, "recovery_required": False}
         lease = EditLease(project_id, OwnerType(row[0]), *row[1:5])

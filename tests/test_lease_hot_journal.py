@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from cadyx.errors import ConflictError
+from cadyx.errors import ConflictError, NotFoundError
 from cadyx.lease import EditLeaseManager
 
 
@@ -61,6 +61,39 @@ class LeaseSnapshotJournalTests(unittest.TestCase):
             self.assertEqual(snapshot["lease"]["lease_id"], "committed")
             self.assertEqual(snapshot["lease"]["owner_id"], "committed")
             self.assertFalse(snapshot["recovery_required"])
+
+    def test_deleting_project_rejects_agent_control_and_listing_without_creating_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            (project_dir / ".cadyx-deleting").touch()
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+
+            with self.assertRaises(NotFoundError):
+                with manager.agent_control("project"):
+                    self.fail("Agent control must not open a deleting project")
+            with self.assertRaises(NotFoundError):
+                manager.snapshot_for_listing("project")
+            self.assertFalse((project_dir / ".cadyx-agent.sqlite3").exists())
+            self.assertFalse((project_dir / ".cadyx-leases.sqlite3").exists())
+
+    def test_deletion_during_agent_control_rolls_back_stop_fence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            marker = project_dir / ".cadyx-deleting"
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+
+            with self.assertRaises(NotFoundError):
+                with manager.agent_control("project") as connection:
+                    connection.execute("INSERT INTO control VALUES ('lease', 1, 0)")
+                    marker.touch()
+
+            marker.unlink()
+            with manager.agent_control("project") as connection:
+                self.assertIsNone(connection.execute(
+                    "SELECT stopped FROM control WHERE lease_id = 'lease'"
+                ).fetchone())
 
     def test_heartbeat_remains_monotonic_after_wall_clock_moves_backwards(self):
         with tempfile.TemporaryDirectory() as directory:
