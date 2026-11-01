@@ -77,6 +77,58 @@ class LeaseSnapshotJournalTests(unittest.TestCase):
             self.assertFalse((project_dir / ".cadyx-agent.sqlite3").exists())
             self.assertFalse((project_dir / ".cadyx-leases.sqlite3").exists())
 
+    def test_listing_does_not_recreate_database_removed_during_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            manager.acquire("project", "agent", "worker")
+            database = project_dir / ".cadyx-leases.sqlite3"
+            original_connect = sqlite3.connect
+
+            def remove_before_connect(*args, **kwargs):
+                database.unlink()
+                return original_connect(*args, **kwargs)
+
+            with patch("cadyx.lease.sqlite3.connect", side_effect=remove_before_connect):
+                snapshot = manager.snapshot_for_listing("project")
+
+            self.assertEqual(snapshot, {
+                "state": "BUSY", "lease": None, "recovery_required": False,
+            })
+            self.assertFalse(database.exists(), "A listing must never recreate the database")
+
+    def test_listing_rejects_deletion_marker_added_during_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            manager.acquire("project", "agent", "worker")
+            database = project_dir / ".cadyx-leases.sqlite3"
+            original_connect = sqlite3.connect
+
+            def delete_before_connect(*args, **kwargs):
+                database.unlink()
+                (project_dir / ".cadyx-deleting").touch()
+                return original_connect(*args, **kwargs)
+
+            with patch("cadyx.lease.sqlite3.connect", side_effect=delete_before_connect):
+                with self.assertRaises(NotFoundError):
+                    manager.snapshot_for_listing("project")
+            self.assertFalse(database.exists())
+
+    def test_listing_uri_handles_reserved_path_characters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory) / "project ?# unicode ä"
+            project_dir.mkdir()
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            lease = manager.acquire("project", "agent", "worker")
+
+            snapshot = manager.snapshot_for_listing("project")
+
+            self.assertEqual(snapshot["lease"]["lease_id"], lease.lease_id)
+
     def test_deletion_during_agent_control_rolls_back_stop_fence(self):
         with tempfile.TemporaryDirectory() as directory:
             project_dir = Path(directory)

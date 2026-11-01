@@ -193,8 +193,11 @@ class EditLeaseManager:
 
         connection: sqlite3.Connection | None = None
         try:
+            # Listings must not recreate a lease database if deletion removes it
+            # after the existence check but before SQLite opens the file.
             connection = sqlite3.connect(
-                path, timeout=0, isolation_level=None,
+                f"{path.absolute().as_uri()}?mode=rw",
+                uri=True, timeout=0, isolation_level=None,
             )
             table = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lease'"
@@ -207,6 +210,16 @@ class EditLeaseManager:
             ).fetchone()
         except sqlite3.OperationalError as exc:
             if _sqlite_contention(exc):
+                return {"state": "BUSY", "lease": None, "recovery_required": False}
+            code = getattr(exc, "sqlite_errorcode", None)
+            if (
+                isinstance(code, int)
+                and (code & 0xFF) == sqlite3.SQLITE_CANTOPEN
+                and not path.exists()
+            ):
+                if (project_directory / ".cadyx-deleting").exists():
+                    raise NotFoundError("Project is being deleted.") from exc
+                # The missing database may be a deletion race, not a free lease.
                 return {"state": "BUSY", "lease": None, "recovery_required": False}
             raise
         finally:
