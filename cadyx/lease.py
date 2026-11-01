@@ -257,7 +257,9 @@ class EditLeaseManager:
     def heartbeat(self, project_id: str, lease_id: str) -> EditLease:
         with self.guard(project_id):
             lease = self.require(project_id, lease_id)
-            updated = replace(lease, heartbeat_at=self._clock())
+            # Wall-clock corrections must not move a durable lease heartbeat
+            # backwards: a later forward adjustment could otherwise expire it.
+            updated = replace(lease, heartbeat_at=max(lease.heartbeat_at, self._clock()))
             self._local.connections[project_id].execute(
                 "UPDATE lease SET heartbeat_at = ? WHERE singleton = 1", (updated.heartbeat_at,)
             )

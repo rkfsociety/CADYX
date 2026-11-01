@@ -62,6 +62,23 @@ class LeaseSnapshotJournalTests(unittest.TestCase):
             self.assertEqual(snapshot["lease"]["owner_id"], "committed")
             self.assertFalse(snapshot["recovery_required"])
 
+    def test_heartbeat_remains_monotonic_after_wall_clock_moves_backwards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            now = [100.0]
+            manager = EditLeaseManager(lambda _project_id: project_dir, clock=lambda: now[0])
+            lease = manager.acquire("project", "agent", "worker")
+
+            now[0] = 110.0
+            self.assertEqual(manager.heartbeat("project", lease.lease_id).heartbeat_at, 110.0)
+            now[0] = 105.0
+            self.assertEqual(manager.heartbeat("project", lease.lease_id).heartbeat_at, 110.0)
+            self.assertEqual(manager.get("project").heartbeat_at, 110.0)
+            now[0] = 111.0
+            self.assertEqual(manager.heartbeat("project", lease.lease_id).heartbeat_at, 111.0)
+
+
     def test_extended_sqlite_contention_returns_retryable_project_busy(self):
         with tempfile.TemporaryDirectory() as directory:
             project_dir = Path(directory)
