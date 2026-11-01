@@ -202,6 +202,111 @@ class WorkspaceServiceTests(unittest.TestCase):
         marker.unlink()
         self.assertEqual(len(store.list(directory)), 1)
 
+    def test_artifact_batch_operations_reject_casefold_collisions(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        (directory / "Part.step").write_bytes(b"original")
+        subfolder = directory / "samples"
+        subfolder.mkdir()
+        (subfolder / "Part.step").write_bytes(b"original")
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+
+        operations = (
+            lambda: store.remove_project_files(directory, ["Part.step", "part.step"]),
+            lambda: store.remove_project_subfolder_files(
+                directory, "samples", ["Part.step", "part.step"]
+            ),
+            lambda: store.move_project_files_to_subfolder(
+                directory, ["Part.step", "part.step"], "target"
+            ),
+            lambda: store.prune_project_files(
+                "project", directory, ["Part.step", "part.step"]
+            ),
+            lambda: store.publish_cad_delivery(
+                directory, {"Part.step": b"one", "part.step": b"two"}
+            ),
+        )
+        for operation in operations:
+            with self.subTest(operation=operation), self.assertRaises(ValidationError):
+                operation()
+        self.assertEqual((directory / "Part.step").read_bytes(), b"original")
+        self.assertEqual((subfolder / "Part.step").read_bytes(), b"original")
+        self.assertFalse((directory / "target").exists())
+
+    def test_artifact_move_rejects_casefold_collisions_from_different_folders(self) -> None:
+        directory = self.root / "project"
+        (directory / "first").mkdir(parents=True)
+        (directory / "second").mkdir()
+        (directory / "first" / "Part.step").write_bytes(b"one")
+        (directory / "second" / "part.step").write_bytes(b"two")
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+
+        with self.assertRaises(ValidationError):
+            store.move_project_files_to_subfolder(
+                directory, ["first/Part.step", "second/part.step"], "target"
+            )
+        self.assertFalse((directory / "target").exists())
+        self.assertTrue((directory / "first" / "Part.step").exists())
+        self.assertTrue((directory / "second" / "part.step").exists())
+
+    def test_artifact_reserved_paths_are_case_insensitive(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        (directory / "PROJECT.JSON").write_bytes(b"metadata")
+        (directory / ".CADYX-PRIVATE").write_bytes(b"internal")
+        (directory / "visible.txt").write_bytes(b"user")
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+
+        self.assertEqual(
+            [item["name"] for item in store.list_project_files(directory)], ["visible.txt"]
+        )
+        self.assertEqual(
+            [item["name"] for item in store.list_folder_files(directory)],
+            ["PROJECT.JSON", "visible.txt"]
+        )
+        for filename in ("PROJECT.JSON", ".CADYX-PRIVATE"):
+            with self.subTest(filename=filename), self.assertRaises(NotFoundError):
+                store.resolve_project_file(directory, filename)
+        with self.assertRaises(NotFoundError):
+            store.resolve_folder_file(directory, ".CADYX-PRIVATE")
+        for filename in ("PROJECT.JSON", ".CADYX-HIDDEN.txt"):
+            with self.subTest(filename=filename), self.assertRaises(ValidationError):
+                store.publish_project_file(directory, filename, b"data")
+        with self.assertRaises(ValidationError):
+            store.publish_project_step(directory, ".CADYX-EXPORT.STEP", b"data")
+        with self.assertRaises(ValidationError):
+            store.rename_project_file(directory, "visible.txt", "PROJECT.JSON")
+        self.assertEqual((directory / "visible.txt").read_bytes(), b"user")
+
+    def test_artifact_upload_rejects_reserved_metadata_and_invalid_names(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        for filename in ("project.json", ".cadyx-leases.sqlite3", None, 42):
+            with self.subTest(filename=filename), self.assertRaises(ValidationError):
+                WorkspaceArtifactStore.publish_project_file(directory, filename, b"data")
+        with self.assertRaises(ValidationError):
+            WorkspaceArtifactStore.publish_scan_output(
+                directory, "project", ".cadyx-private.ply", b"scan"
+            )
+        self.assertEqual(list(directory.iterdir()), [])
+
+    def test_validation_listing_rechecks_deletion_after_missing_database(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        marker = directory / ".cadyx-deleting"
+        database = ValidationRecordStore.database_path(directory)
+        original_exists = Path.exists
+
+        def deletion_during_exists(path):
+            if path == database:
+                marker.touch()
+                return False
+            return original_exists(path)
+
+        with patch.object(Path, "exists", deletion_during_exists):
+            with self.assertRaises(NotFoundError):
+                ValidationRecordStore().list(directory)
+
     def test_artifact_store_lists_only_direct_user_files(self) -> None:
         directory = self.root / "project"
         directory.mkdir()

@@ -24,7 +24,7 @@ class WorkspaceArtifactStore:
         files: list[dict[str, Any]] = []
         for entry in folder.iterdir():
             if (
-                entry.name.startswith(".cadyx-")
+                entry.name.casefold().startswith(".cadyx-")
                 or self._is_internal_file(folder, entry.name)
                 or entry.is_symlink()
                 or not entry.is_file()
@@ -54,8 +54,8 @@ class WorkspaceArtifactStore:
         files: list[dict[str, Any]] = []
         for entry in directory.iterdir():
             if (
-                entry.name == "project.json"
-                or entry.name.startswith(".cadyx-")
+                entry.name.casefold() == "project.json"
+                or entry.name.casefold().startswith(".cadyx-")
                 or entry.is_symlink()
                 or not entry.is_file()
             ):
@@ -136,7 +136,7 @@ class WorkspaceArtifactStore:
             raise ValidationError("A safe direct project subfolder name is required.")
         if not isinstance(file_names, list) or not file_names or len(file_names) > 1000:
             raise ValidationError("Provide between 1 and 1000 project files to move.")
-        if any(not isinstance(name, str) for name in file_names) or len(set(file_names)) != len(file_names):
+        if any(not isinstance(name, str) for name in file_names) or len({name.casefold() for name in file_names}) != len(file_names):
             raise ValidationError("Project file names must be unique strings.")
 
         sources = []
@@ -149,7 +149,7 @@ class WorkspaceArtifactStore:
             else:
                 raise ValidationError("Source file must be direct or one project folder/file.")
         destination_names = [path.name for path in sources]
-        if len(set(destination_names)) != len(destination_names):
+        if len({name.casefold() for name in destination_names}) != len(destination_names):
             raise ValidationError("Source files must have unique destination names.")
         target = directory / folder_name
         created = False
@@ -203,7 +203,7 @@ class WorkspaceArtifactStore:
     ) -> dict[str, Any]:
         if not isinstance(file_names, list) or not file_names or len(file_names) > 1000:
             raise ValidationError("Provide between 1 and 1000 project subfolder files to remove.")
-        if any(not isinstance(name, str) for name in file_names) or len(set(file_names)) != len(file_names):
+        if any(not isinstance(name, str) for name in file_names) or len({name.casefold() for name in file_names}) != len(file_names):
             raise ValidationError("Project subfolder file names must be unique strings.")
         paths = [self.resolve_project_subfolder_file(directory, folder_name, name) for name in file_names]
         sizes = [path.stat().st_size for path in paths]
@@ -220,8 +220,8 @@ class WorkspaceArtifactStore:
         self, directory: Path, file_name: str, new_name: str, folder_name: str | None = None,
     ) -> dict[str, Any]:
         if (not isinstance(new_name, str) or not _is_single_path_segment(new_name)
-                or new_name in {"project.json", ".cadyx-project-id"}
-                or new_name.startswith((".cadyx-", ".cadyx-tmp-"))):
+                or new_name.casefold() in {"project.json", ".cadyx-project-id"}
+                or new_name.casefold().startswith(".cadyx-")):
             raise ValidationError("A safe direct project filename is required.")
         target_directory = self._project_subfolder(directory, folder_name) if folder_name is not None else directory
         source = (self.resolve_project_subfolder_file(directory, folder_name, file_name)
@@ -265,7 +265,7 @@ class WorkspaceArtifactStore:
     def remove_project_files(self, directory: Path, file_names: list[str]) -> dict[str, Any]:
         if not isinstance(file_names, list) or not file_names or len(file_names) > 1000:
             raise ValidationError("Provide between 1 and 1000 project files to remove.")
-        if any(not isinstance(name, str) for name in file_names) or len(set(file_names)) != len(file_names):
+        if any(not isinstance(name, str) for name in file_names) or len({name.casefold() for name in file_names}) != len(file_names):
             raise ValidationError("Project file names must be unique strings.")
         paths = [self.resolve_project_file(directory, name) for name in file_names]
         sizes = [path.stat().st_size for path in paths]
@@ -292,7 +292,7 @@ class WorkspaceArtifactStore:
             for name in file_names:
                 path = current_path / name
                 scan_log = expected_scan_log is not None and current_path == target and name == expected_scan_log
-                if (path.is_symlink() or (name.startswith(".cadyx-") and not scan_log)
+                if (path.is_symlink() or (name.casefold().startswith(".cadyx-") and not scan_log)
                         or self._is_internal_file(current_path, name)):
                     raise ValidationError("Refusing to remove a project folder containing a link or internal file.")
                 files.append(path)
@@ -317,9 +317,7 @@ class WorkspaceArtifactStore:
         files: list[tuple[Path, Path, int]] = []
         for source in sorted(source_root.rglob("*"), key=lambda item: item.as_posix().casefold()):
             relative = source.relative_to(source_root)
-            if any(part.startswith(".cadyx-") for part in relative.parts) or relative == Path(
-                "project.json"
-            ):
+            if any(part.casefold().startswith(".cadyx-") for part in relative.parts) or relative.as_posix().casefold() == "project.json":
                 continue
             if source.is_symlink():
                 raise ValidationError(
@@ -419,7 +417,7 @@ class WorkspaceArtifactStore:
     ) -> dict[str, Any]:
         if not keep_files or any(not _is_single_path_segment(name) for name in keep_files):
             raise ValidationError("keep_files must contain direct project filenames only.")
-        if len(set(keep_files)) != len(keep_files):
+        if len({name.casefold() for name in keep_files}) != len(keep_files):
             raise ValidationError("keep_files must not contain duplicates.")
         keep = set(keep_files)
         entries = sorted(root.rglob("*"), key=lambda item: item.as_posix().casefold())
@@ -430,9 +428,7 @@ class WorkspaceArtifactStore:
         files: list[Path] = []
         for entry in entries:
             relative = entry.relative_to(root)
-            if any(part.startswith(".cadyx-") for part in relative.parts) or relative == Path(
-                "project.json"
-            ):
+            if any(part.casefold().startswith(".cadyx-") for part in relative.parts) or relative.as_posix().casefold() == "project.json":
                 continue
             if entry.is_symlink():
                 raise ValidationError(
@@ -488,6 +484,7 @@ class WorkspaceArtifactStore:
     ) -> dict[str, Any]:
         if (
             not _is_single_path_segment(filename)
+            or filename.casefold().startswith(".cadyx-")
             or Path(filename).suffix.casefold() not in suffixes
             or not isinstance(content, bytes)
             or not content
@@ -545,7 +542,9 @@ class WorkspaceArtifactStore:
 
     @staticmethod
     def publish_project_file(directory: Path, filename: str, content: bytes) -> dict[str, Any]:
-        if (filename.startswith(".cadyx-")
+        if (not isinstance(filename, str)
+                or filename.casefold() == "project.json"
+                or filename.casefold().startswith(".cadyx-")
                 or Path(filename).suffix.casefold() in {".step", ".stp", ".ply"}):
             raise ValidationError("This file must use its dedicated upload path or its name is reserved by CADYX.")
         return WorkspaceArtifactStore._publish_project_source(
@@ -570,8 +569,8 @@ class WorkspaceArtifactStore:
     def resolve_project_file(directory: Path, file_name: str) -> Path:
         if (
             not _is_single_path_segment(file_name)
-            or file_name in {"project.json", ".cadyx-project-id"}
-            or file_name.startswith(".cadyx-")
+            or file_name.casefold() in {"project.json", ".cadyx-project-id"}
+            or file_name.casefold().startswith(".cadyx-")
         ):
             raise NotFoundError("Project file was not found.")
         path = directory / file_name
@@ -588,7 +587,7 @@ class WorkspaceArtifactStore:
     def resolve_folder_file(self, folder: Path, file_name: str) -> Path:
         if not _is_single_path_segment(file_name):
             raise NotFoundError("Project file was not found.")
-        if file_name.startswith(".cadyx-tmp-") or self._is_internal_file(folder, file_name):
+        if file_name.casefold().startswith(".cadyx-") or self._is_internal_file(folder, file_name):
             raise NotFoundError("Project file was not found.")
         path = folder / file_name
         if path.is_symlink() or not path.is_file():
@@ -603,7 +602,9 @@ class WorkspaceArtifactStore:
 
     @staticmethod
     def publish_scan_output(folder: Path, folder_name: str, source_filename: str, content: bytes) -> dict[str, Any]:
-        if not _is_single_path_segment(source_filename) or not isinstance(content, bytes) or not content:
+        if (not _is_single_path_segment(source_filename)
+                or source_filename.casefold().startswith(".cadyx-")
+                or not isinstance(content, bytes) or not content):
             raise ValidationError("A source filename and non-empty scan output are required.")
         digest = hashlib.sha256(content).hexdigest()
         stem = Path(source_filename).stem[:100].rstrip(" .") or "scan"
@@ -670,12 +671,15 @@ class WorkspaceArtifactStore:
     def publish_cad_delivery(directory: Path, files: dict[str, bytes]) -> list[dict[str, Any]]:
         if not isinstance(files, dict) or not files:
             raise ValidationError("CAD delivery needs at least one artifact file.")
+        if (any(not isinstance(name, str) for name in files)
+                or len({name.casefold() for name in files}) != len(files)):
+            raise ValidationError("CAD delivery filenames must be unique ignoring case.")
         contents: list[tuple[str, bytes, str]] = []
         for filename, content in files.items():
             if (
                 not _is_single_path_segment(filename)
                 or filename in {"project.json", ".cadyx-project-id"}
-                or filename.startswith((".cadyx-", ".cadyx-tmp-"))
+                or filename.casefold().startswith(".cadyx-")
                 or Path(filename).suffix.casefold() not in {".step", ".stl", ".json"}
                 or (
                     filename.casefold().endswith(".json")

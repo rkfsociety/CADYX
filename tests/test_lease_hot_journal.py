@@ -144,6 +144,49 @@ class LeaseSnapshotJournalTests(unittest.TestCase):
                     manager.snapshot_for_listing("project")
             self.assertFalse(database.exists())
 
+    def test_listing_rechecks_deletion_when_lease_table_is_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            database = project_dir / ".cadyx-leases.sqlite3"
+            sqlite3.connect(database).close()
+            marker = project_dir / ".cadyx-deleting"
+            original_connect = sqlite3.connect
+
+            class DeletingConnection(sqlite3.Connection):
+                def execute(self, sql, parameters=()):
+                    cursor = super().execute(sql, parameters)
+                    if "sqlite_master" in sql:
+                        marker.touch()
+                    return cursor
+
+            def connect_during_deletion(*args, **kwargs):
+                return original_connect(*args, **kwargs, factory=DeletingConnection)
+
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            with patch("cadyx.lease.sqlite3.connect", side_effect=connect_during_deletion):
+                with self.assertRaises(NotFoundError):
+                    manager.snapshot_for_listing("project")
+
+    def test_listing_rechecks_deletion_when_database_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project_dir = Path(directory)
+            (project_dir / "project.json").write_text("{}", encoding="utf-8")
+            database = project_dir / ".cadyx-leases.sqlite3"
+            marker = project_dir / ".cadyx-deleting"
+            original_exists = Path.exists
+
+            def deletion_during_exists(path):
+                if path == database:
+                    marker.touch()
+                    return False
+                return original_exists(path)
+
+            manager = EditLeaseManager(lambda _project_id: project_dir)
+            with patch.object(Path, "exists", deletion_during_exists):
+                with self.assertRaises(NotFoundError):
+                    manager.snapshot_for_listing("project")
+
     def test_listing_uri_handles_reserved_path_characters(self):
         with tempfile.TemporaryDirectory() as directory:
             project_dir = Path(directory) / "project # percent% unicode ä"

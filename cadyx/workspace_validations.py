@@ -112,6 +112,7 @@ class ValidationRecordStore:
         self._validate_database_path(database_path)
         self._ensure_project_available(project_dir)
         if not database_path.exists():
+            self._ensure_project_available(project_dir)
             return []
         try:
             # Read-only listing must not recreate a database removed between

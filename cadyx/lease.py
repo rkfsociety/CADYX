@@ -201,6 +201,8 @@ class EditLeaseManager:
         if path.is_symlink():
             raise ValidationError("Lease database must not be a symbolic link.")
         if not path.exists():
+            if (project_directory / ".cadyx-deleting").exists():
+                raise NotFoundError("Project is being deleted.")
             return {"state": "FREE", "lease": None, "recovery_required": False}
 
         connection: sqlite3.Connection | None = None
@@ -215,11 +217,12 @@ class EditLeaseManager:
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lease'"
             ).fetchone()
             if table is None:
-                return {"state": "FREE", "lease": None, "recovery_required": False}
-            row = connection.execute(
-                "SELECT owner_type, owner_id, acquired_at, heartbeat_at, lease_id, timeout_seconds "
-                "FROM lease WHERE singleton = 1"
-            ).fetchone()
+                row = None
+            else:
+                row = connection.execute(
+                    "SELECT owner_type, owner_id, acquired_at, heartbeat_at, lease_id, timeout_seconds "
+                    "FROM lease WHERE singleton = 1"
+                ).fetchone()
         except sqlite3.OperationalError as exc:
             if _sqlite_contention(exc):
                 return {"state": "BUSY", "lease": None, "recovery_required": False}
