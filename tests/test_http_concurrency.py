@@ -181,6 +181,30 @@ class HTTPConcurrencyTests(unittest.TestCase):
         with caught.exception as response:
             self.assertEqual(response.code, 404)
 
+    def test_json_nesting_limit_ignores_brackets_and_escaped_quotes_in_strings(self) -> None:
+        server, _, base_url = self._start_live_server(max_http_requests=1)
+        accepted_bodies = (
+            b'{"value":' + b"[" * 127 + b"0" + b"]" * 127 + b"}",
+            json.dumps({"value": "[" * 500 + '\\"' + "]" * 500}).encode("utf-8"),
+        )
+        for body in accepted_bodies:
+            with self.subTest(accepted_length=len(body)):
+                self.assertTrue(self._wait_for_http_capacity(server))
+                request = Request(base_url + "/api/v1/unknown", data=body, method="POST")
+                with self.assertRaises(HTTPError) as caught:
+                    urlopen(request, timeout=3)
+                with caught.exception as response:
+                    self.assertEqual(response.code, 404)
+
+        rejected = b'{"value":' + b"[" * 128 + b"0" + b"]" * 128 + b"}"
+        self.assertTrue(self._wait_for_http_capacity(server))
+        request = Request(base_url + "/api/v1/unknown", data=rejected, method="POST")
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(request, timeout=3)
+        with caught.exception as response:
+            self.assertEqual(response.code, 400)
+            self.assertEqual(json.loads(response.read())["error"], "INVALID_JSON")
+
     def test_oversized_declared_post_length_is_rejected_without_body_read(self) -> None:
         server, _, _ = self._start_live_server(max_http_requests=1)
         connection = HTTPConnection("127.0.0.1", server.server_port, timeout=3)

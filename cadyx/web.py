@@ -25,6 +25,7 @@ from .web_routes import dispatch_route, match_route
 
 _MAX_BODY_BYTES = 1_000_000
 _MAX_JSON_INTEGER_DIGITS = 4300
+_MAX_JSON_NESTING = 128
 _MAX_PROJECT_SOURCE_UPLOAD_BYTES = 64 * 1024 * 1024
 _MAX_VIEWPORT_SNAPSHOT_BYTES = 16 * 1024 * 1024
 _DEFAULT_MAX_HTTP_REQUESTS = 64
@@ -109,6 +110,33 @@ def _bounded_json_int(value: str) -> int:
         return int(value)
     except ValueError as exc:
         raise ValidationError("JSON integer exceeds the supported digit limit.") from exc
+
+
+class _JSONNestingLimitError(ValueError):
+    """The JSON body exceeds the nesting accepted by the HTTP API."""
+
+
+def _validate_json_nesting(raw: bytes) -> None:
+    """Bound nesting before decoding, independently of Python's parser recursion limit."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for byte in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 0x5C:  # Backslash escapes the next byte, including a quote.
+                escaped = True
+            elif byte == 0x22:
+                in_string = False
+        elif byte == 0x22:
+            in_string = True
+        elif byte in (0x5B, 0x7B):  # [ or {
+            depth += 1
+            if depth > _MAX_JSON_NESTING:
+                raise _JSONNestingLimitError("Request JSON nesting exceeds the supported limit.")
+        elif byte in (0x5D, 0x7D):  # ] or }
+            depth -= 1
 
 
 def _validate_json_unicode(value: Any) -> None:
@@ -281,7 +309,7 @@ def make_request_handler(
             except CadyxError as exc:
                 self.close_connection = True
                 self._json(exc.http_status, exc.as_dict())
-            except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
+            except (json.JSONDecodeError, UnicodeDecodeError, RecursionError, _JSONNestingLimitError):
                 self.close_connection = True
                 self._json(400, {"error": "INVALID_JSON", "message": "Request body must be valid UTF-8 JSON."})
             except Exception:
@@ -388,6 +416,7 @@ def make_request_handler(
                 raise ValidationError("Request body was incomplete.")
             if not raw:
                 return None
+            _validate_json_nesting(raw)
             value = json.loads(
                 raw.decode("utf-8"),
                 parse_float=_finite_json_float,
