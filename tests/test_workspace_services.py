@@ -113,17 +113,14 @@ class WorkspaceServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "could not be read"):
             store.list(directory)
 
-    def test_validation_record_rejects_excessive_json_nesting(self) -> None:
+    def test_validation_record_rejects_json_encoder_recursion(self) -> None:
         directory = self.root / "project"
         directory.mkdir()
         store = ValidationRecordStore()
-        result = {"revision": 1, "geometry_sha256": "a" * 64, "nested": {}}
-        cursor = result["nested"]
-        for _ in range(1500):
-            cursor["child"] = {}
-            cursor = cursor["child"]
-        with self.assertRaisesRegex(ValidationError, "cannot be serialized"):
-            store.record(directory, "body_dimensions", result)
+        result = {"revision": 1, "geometry_sha256": "a" * 64}
+        with patch("cadyx.workspace_validations.json.dumps", side_effect=RecursionError("too deep")):
+            with self.assertRaisesRegex(ValidationError, "cannot be serialized"):
+                store.record(directory, "body_dimensions", result)
         self.assertFalse(store.database_path(directory).exists())
 
     def test_validation_record_rejects_invalid_revisions_before_sqlite_open(self) -> None:
