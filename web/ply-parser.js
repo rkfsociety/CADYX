@@ -382,17 +382,18 @@
                 || itemCount > record.values.length - valueIndex) {
               throw new Error("Некорректная грань в файле PLY.");
             }
-            const samplePolygon = property.name === "vertex_indices" && sampleFace;
-            if (samplePolygon) {
-              const polygon = [];
+            // Validate every index list, including faces omitted from the preview.
+            // Only sampled faces need an allocated polygon for triangulation.
+            if (property.name === "vertex_indices") {
+              const polygon = sampleFace ? [] : null;
               for (let item = 0; item < itemCount; item += 1) {
                 const pointIndex = Number(record.values[valueIndex + item]);
                 if (!Number.isSafeInteger(pointIndex) || pointIndex < 0 || pointIndex >= vertex.count) {
                   throw new Error("Грань PLY ссылается на отсутствующую вершину.");
                 }
-                polygon.push(pointIndex);
+                if (polygon) polygon.push(pointIndex);
               }
-              triangulatePolygon(polygon, positions, triangles);
+              if (polygon) triangulatePolygon(polygon, positions, triangles);
             }
             valueIndex += itemCount;
           } else {
@@ -568,21 +569,21 @@
             }
             const listBytes = itemCount * itemReader.size;
             if (listBytes > buffer.byteLength - cursor) throw new Error("Данные граней PLY обрезаны.");
-            const samplePolygon = property.name === "vertex_indices" && sampleFace;
-            if (!samplePolygon) {
+            if (property.name !== "vertex_indices") {
               cursor += listBytes;
               continue;
             }
-            const polygon = [];
+            // Even decimated faces must not silently contain invalid indices.
+            const polygon = sampleFace ? [] : null;
             for (let item = 0; item < itemCount; item += 1) {
               const index = itemReader.read(data, cursor, littleEndian);
               if (!Number.isSafeInteger(index) || index < 0 || index >= vertex.count) {
                 throw new Error("Грань PLY ссылается на отсутствующую вершину.");
               }
-              polygon.push(index);
+              if (polygon) polygon.push(index);
               cursor += itemReader.size;
             }
-            triangulatePolygon(polygon, positions, triangles);
+            if (polygon) triangulatePolygon(polygon, positions, triangles);
           } else {
             const scalar = scalarTypes[property.type];
             if (!scalar) throw new Error(`Неподдерживаемый тип PLY: ${property.type}.`);

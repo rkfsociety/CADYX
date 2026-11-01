@@ -58,6 +58,23 @@ const large = mesh(36_002);
 const sampled = parse(large.buffer);
 assert.equal(sampled.faceCount, 36_002);
 assert.equal(sampled.previewFaceCount, 18_001);
+
+// Faces omitted by preview decimation must still have valid vertex references.
+const skippedBinary = large.buffer.slice(0);
+new DataView(skippedBinary).setUint32(large.headerSize + 36 + 23 + 1, 99, true);
+assert.throws(() => parse(skippedBinary), /отсутствующую вершину/,
+  "binary PLY must validate indices on an unsampled face");
+const skippedAscii = Buffer.from(
+  "ply\nformat ascii 1.0\nelement vertex 3\n"
+  + "property float x\nproperty float y\nproperty float z\n"
+  + "element face 36002\nproperty list uchar int vertex_indices\nend_header\n"
+  + "0 0 0\n1 0 0\n0 1 0\n"
+  + Array.from({ length: 36_002 }, (_, index) => index === 1 ? "3 0 99 2\n" : "3 0 1 2\n").join("")
+);
+assert.throws(() => parse(skippedAscii.buffer.slice(
+  skippedAscii.byteOffset, skippedAscii.byteOffset + skippedAscii.byteLength,
+)), /отсутствующую вершину/, "ASCII PLY must validate indices on an unsampled face");
+
 assert.ok(Array.from(sampled.triangles).every((index, offset) => index === offset % 3));
 assert.throws(() => parse(large.buffer.slice(0, -2)), /обрезаны/);
 assert.throws(() => parse(small.buffer.slice(0, small.headerSize + 35)), /обрезаны/);
