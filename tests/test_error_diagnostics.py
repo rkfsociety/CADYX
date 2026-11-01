@@ -111,6 +111,16 @@ class ErrorDiagnosticsTests(unittest.TestCase):
             self.assertNotIn(secret, sanitized)
         self.assertIn('"authorization": "[redacted]"', sanitized)
 
+    def test_public_text_redacts_windows_slash_and_network_paths(self) -> None:
+        paths = (
+            r"Z:/privateCAD/design.step",
+            r"\\\\fileserver\\share\\private.step",
+            r"\\\\?\\C:\\private\\design.step",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertEqual(public_text(path), "[host path]")
+
     def test_public_data_handles_cycles_and_bounded_nesting(self) -> None:
         mapping = {}
         mapping["self"] = mapping

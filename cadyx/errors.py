@@ -6,7 +6,8 @@ import math
 import re
 from typing import Any
 
-_WINDOWS_PATH = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\[^\s\"'<>|]+")
+_WINDOWS_PATH = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s\"'<>|]+")
+_UNC_PATH = re.compile(r"(?<!\\)\\\\[^\\\s]+\\[^\\\s]+(?:\\[^\s\"'<>|]+)*")
 _UNIX_PATH = re.compile(r"(?<![\w])/(?:Users|Volumes|home|tmp|var|etc|opt|root|workspace|mnt|data|app|private|srv|run|media|proc|sys)/[^\s\"'<>]+")
 _URL_CREDENTIALS = re.compile(r"(?i)(https?://)[^/\s:@]+:[^/@\s]+@")
 _BEARER = re.compile(r"(?i)\bBearer[ \t]+\S+")
@@ -32,6 +33,7 @@ _SECRET = re.compile(
     r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;]+)"
 )
 
+
 def public_text(value: str) -> str:
     """Remove credentials and absolute host paths before crossing a public boundary."""
     value = _URL_CREDENTIALS.sub(r"\1[redacted]@", value)
@@ -39,6 +41,7 @@ def public_text(value: str) -> str:
     value = _JSON_SECRET.sub(r"\1[redacted]\2", value)
     value = _AUTH_HEADER.sub(r"\1\2[redacted]", value)
     value = _SECRET.sub(r"\1\2[redacted]", value)
+    value = _UNC_PATH.sub("[host path]", value)
     value = _WINDOWS_PATH.sub("[host path]", value)
     return _UNIX_PATH.sub("[host path]", value)
 
@@ -115,6 +118,7 @@ def _safe_value(value: Any, _active: set[int] | None = None, _depth: int = 0) ->
     if value is None or type(value) in {bool, int}:
         return value
     return None
+
 
 def public_data(value: Any) -> Any:
     """Return a recursively sanitized copy of data crossing an agent boundary."""
