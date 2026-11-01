@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 _WINDOWS_PATH = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s\"'<>|]+")
-_UNC_PATH = re.compile(r"(?<!\\)\\\\[^\\\s]+\\[^\\\s]+(?:\\[^\s\"'<>|]+)*")
+_UNC_PATH = re.compile(r"(?<!\\)\\{2,}[^\\\s\"'<>|]+\\+[^\\\s\"'<>|]+(?:\\+[^\s\"'<>|]+)*")
 _UNIX_PATH = re.compile(r"(?<![\w])/(?:Users|Volumes|home|tmp|var|etc|opt|root|workspace|mnt|data|app|private|srv|run|media|proc|sys)/[^\s\"'<>]+")
 _URL_CREDENTIALS = re.compile(r"(?i)(https?://)[^/\s:@]+:[^/@\s]+@")
 _BEARER = re.compile(r"(?i)\bBearer[ \t]+\S+")

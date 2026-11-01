@@ -125,6 +125,8 @@ class ErrorDiagnosticsTests(unittest.TestCase):
             r"Z:/privateCAD/design.step",
             r"\\\\fileserver\\share\\private.step",
             r"\\\\?\\C:\\private\\design.step",
+            r"\\fileserver\share\private.step",
+            r"\\?\C:\private\design.step",
         )
         for path in paths:
             with self.subTest(path=path):

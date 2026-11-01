@@ -111,6 +111,23 @@ def _bounded_json_int(value: str) -> int:
         raise ValidationError("JSON integer exceeds the supported digit limit.") from exc
 
 
+def _validate_json_unicode(value: Any) -> None:
+    """Reject lone surrogate escapes that cannot be encoded as UTF-8 responses."""
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            try:
+                item.encode("utf-8")
+            except UnicodeEncodeError as exc:
+                raise ValidationError("Request JSON contains an unpaired Unicode surrogate.") from exc
+        elif isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+
+
 class CadyxHTTPServer(ThreadingHTTPServer):
     """Threaded HTTP server with bounded request/SSE admission and shutdown signaling."""
 
@@ -264,7 +281,7 @@ def make_request_handler(
             except CadyxError as exc:
                 self.close_connection = True
                 self._json(exc.http_status, exc.as_dict())
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
                 self.close_connection = True
                 self._json(400, {"error": "INVALID_JSON", "message": "Request body must be valid UTF-8 JSON."})
             except Exception:
@@ -346,6 +363,9 @@ def make_request_handler(
                 except ValueError as exc:
                     self.close_connection = True
                     raise ValidationError("Content-Length is invalid.") from exc
+                if body_allowed and length > _MAX_PROJECT_SOURCE_UPLOAD_BYTES:
+                    self.close_connection = True
+                    raise ValidationError("Request body exceeds the 64 MiB upload limit.")
                 if not body_allowed and length:
                     self.close_connection = True
                     raise ValidationError("Request body is not supported for this method.")
@@ -376,6 +396,7 @@ def make_request_handler(
             )
             if not isinstance(value, dict):
                 raise ValidationError("Request JSON must be an object.")
+            _validate_json_unicode(value)
             return value
 
         def _json(

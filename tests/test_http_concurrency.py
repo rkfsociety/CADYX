@@ -156,6 +156,45 @@ class HTTPConcurrencyTests(unittest.TestCase):
         with caught.exception as response:
             self.assertEqual(response.code, 404)
 
+    def test_deep_json_and_unpaired_surrogates_fail_before_routing(self) -> None:
+        server, _, base_url = self._start_live_server(max_http_requests=1)
+        bodies = (
+            b'{"name":"\\ud800"}',
+            b'{"\\udfff":"value"}',
+            b'{"value":' + b"[" * 10000 + b"0" + b"]" * 10000 + b"}",
+        )
+        for body in bodies:
+            with self.subTest(body_length=len(body), prefix=body[:24]):
+                self.assertTrue(self._wait_for_http_capacity(server))
+                request = Request(base_url + "/api/v1/unknown", data=body, method="POST")
+                with self.assertRaises(HTTPError) as caught:
+                    urlopen(request, timeout=3)
+                with caught.exception as response:
+                    self.assertEqual(response.code, 400)
+                    self.assertEqual(json.loads(response.read())["error"], "VALIDATION_ERROR"
+                                     if b"\\ud" in body else "INVALID_JSON")
+
+        self.assertTrue(self._wait_for_http_capacity(server))
+        request = Request(base_url + "/api/v1/unknown", data='{"name":"é"}'.encode("utf-8"), method="POST")
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(request, timeout=3)
+        with caught.exception as response:
+            self.assertEqual(response.code, 404)
+
+    def test_oversized_declared_post_length_is_rejected_without_body_read(self) -> None:
+        server, _, _ = self._start_live_server(max_http_requests=1)
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
+        try:
+            connection.putrequest("POST", "/api/v1/unknown")
+            connection.putheader("Content-Length", str(64 * 1024 * 1024 + 1))
+            connection.endheaders()
+            response = connection.getresponse()
+            self.assertEqual(response.status, 400)
+            self.assertEqual(response.getheader("Connection"), "close")
+            self.assertEqual(json.loads(response.read())["error"], "VALIDATION_ERROR")
+        finally:
+            connection.close()
+
     def test_request_and_sse_budgets_are_independent(self) -> None:
         self.assertTrue(self.server.try_acquire_request_slot())
         self.assertFalse(self.server.try_acquire_request_slot())
