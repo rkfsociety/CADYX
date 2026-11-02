@@ -86,3 +86,14 @@ for (const [done, expected] of [[99, '11 / 11'], [-5, '0 / 11'], [null, '0 / 11'
 }
 render(container, capture, {...job, total:0, done:4});
 assert.equal(container.children[2].children[1].children[0].children[1].textContent, '—');
+
+// Unsafe numeric counters must never appear as enormous progress totals.
+assert.equal(summary({state:'running', frame_count:2 ** 54, completed_frames:2 ** 53}).total, 0);
+render(container, capture, {...job, total:2 ** 54, done:2 ** 53});
+assert.equal(container.children[2].children[1].children[0].children[1].textContent, '—');
+
+// A failed publishing step must not be presented as a completed final stage.
+render(container, capture, {...job, state:'failed', phase:'publishing', error:'disk full'});
+assert.equal(container.children[2].dataset.stageState, 'completed');
+assert.equal(container.children[3].dataset.stageState, 'failed');
+assert.equal(container.children[3].children[1].children[2].textContent, 'Сохранение результата остановлено');

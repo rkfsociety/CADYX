@@ -1,8 +1,8 @@
 (function (root) {
   function summary(scan) {
     if (!scan || scan.state === 'idle') return null;
-    const total = Number.isInteger(scan.frame_count) && scan.frame_count > 0 ? scan.frame_count : 0;
-    const count = value => Math.max(0, Math.min(total, Number.isInteger(value) ? value : 0));
+    const total = Number.isSafeInteger(scan.frame_count) && scan.frame_count > 0 ? scan.frame_count : 0;
+    const count = value => Math.max(0, Math.min(total, Number.isSafeInteger(value) ? value : 0));
     const captured = count(scan.completed_frames), cleaned = count(scan.preprocessed_frames);
     const failed = count(scan.preprocessing_failed_frames);
     const current = scan.preprocessing_current_frame;
@@ -34,8 +34,8 @@
       const badge = text('span', 'scan-progress-badge', String(number));
       const body = document.createElement('div'); body.className = 'scan-progress-body';
       const heading = document.createElement('div'); heading.className = 'scan-progress-heading';
-      const maximum = Number.isInteger(total) && total > 0 ? total : 0;
-      const progress = maximum && Number.isInteger(value) ? Math.max(0, Math.min(maximum, value)) : 0;
+      const maximum = Number.isSafeInteger(total) && total > 0 ? total : 0;
+      const progress = maximum && Number.isSafeInteger(value) ? Math.max(0, Math.min(maximum, value)) : 0;
       heading.append(text('strong', '', label), text('span', 'scan-progress-count', maximum ? `${progress} / ${maximum}` : '—'));
       const bar = document.createElement('progress'); bar.max = maximum || 1; bar.value = progress;
       bar.setAttribute('aria-label', `${label}: ${note}`);
@@ -58,19 +58,20 @@
     const needsReview = hasFusion && fusion.state === 'completed' && fusion.result?.quality === 'review_required';
     const registrationState = !hasFusion ? 'unknown' : registrationDone ? (needsReview ? 'warning' : 'completed') :
       fusion.state === 'failed' ? 'failed' : 'active';
-    const cleanupDone = hasFusion && (fusion.state === 'completed' || ['publishing', 'completed'].includes(fusion.phase));
+    const publishingFailed = hasFusion && fusion.state === 'failed' && fusion.phase === 'publishing';
+    const cleanupDone = hasFusion && !publishingFailed && (fusion.state === 'completed' || ['publishing', 'completed'].includes(fusion.phase));
     const finalState = !hasFusion ? 'unknown' : cleanupDone ? 'completed' :
-      fusion.state === 'failed' && fusion.phase === 'cleanup' ? 'failed' :
+      fusion.state === 'failed' && ['cleanup', 'publishing'].includes(fusion.phase) ? 'failed' :
       fusion.phase === 'cleanup' ? 'active' : 'waiting';
     const phaseNames = {starting:'Запуск', load:'Подготовка кадров', register:'Совмещение кадров',
       loops:'Проверка замыкания', optimize:'Оптимизация', merge:'Объединение', cleanup:'Очистка облака',
       publishing:'Сохранение результатов', completed:'Завершено'};
     const registrationNote = !hasFusion ? 'Нет данных' : registrationState === 'failed' ? 'Сшивка остановлена' :
       needsReview ? 'Требует проверки' : registrationDone ? 'Сшивка завершена' : (phaseNames[fusion.phase] || 'Выполняется');
-    const finalNote = !hasFusion ? 'Нет данных' : finalState === 'failed' ? 'Очистка остановлена' :
+    const finalNote = !hasFusion ? 'Нет данных' : finalState === 'failed' ? (publishingFailed ? 'Сохранение результата остановлено' : 'Очистка остановлена') :
       cleanupDone ? 'Очистка завершена' : finalState === 'active' ? 'Очистка облака' : 'Ожидает';
-    const regMeasured = hasFusion && registrationPhases.includes(fusion.phase) && Number.isInteger(fusion.total) && fusion.total > 0;
-    const cleanupMeasured = hasFusion && fusion.phase === 'cleanup' && Number.isInteger(fusion.total) && fusion.total > 0;
+    const regMeasured = hasFusion && registrationPhases.includes(fusion.phase) && Number.isSafeInteger(fusion.total) && fusion.total > 0;
+    const cleanupMeasured = hasFusion && fusion.phase === 'cleanup' && Number.isSafeInteger(fusion.total) && fusion.total > 0;
     const current = document.createElement('div'); current.className = 'scan-progress-current';
     const label = text('small', '', 'Текущий файл');
     const file = text('strong', 'scan-progress-file', (hasFusion ? fusion.file || fusion.result?.cleaned : scan.preprocessing_current_frame?.source_file) || 'Нет данных');

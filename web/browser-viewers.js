@@ -8,15 +8,16 @@
       });
     }
     function apply(name) {
+      if (!Object.prototype.hasOwnProperty.call(presets, name)) return false;
       const preset = presets[name];
-      if (!preset) return false;
       viewer.setCamera({ ...preset, zoom: viewer.getCamera().zoom, projection: "orthographic" });
       setSelected(name);
       return true;
     }
     root.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-camera-preset]");
-      if (button) apply(button.dataset.cameraPreset);
+      const button = event.target?.closest?.("[data-camera-preset]")
+        || event.target?.parentElement?.closest?.("[data-camera-preset]");
+      if (button && buttons.includes(button) && !button.disabled) apply(button.dataset.cameraPreset);
     });
     canvas.addEventListener("pointerdown", () => setSelected(null));
     canvas.addEventListener("wheel", () => setSelected(null), { passive: true });
