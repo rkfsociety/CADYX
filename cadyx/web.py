@@ -112,6 +112,16 @@ def _bounded_json_int(value: str) -> int:
         raise ValidationError("JSON integer exceeds the supported digit limit.") from exc
 
 
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous duplicate JSON keys, including escaped equivalents."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValidationError("Request JSON object keys must be unique.")
+        result[key] = value
+    return result
+
+
 class _JSONNestingLimitError(ValueError):
     """The JSON body exceeds the nesting accepted by the HTTP API."""
 
@@ -422,6 +432,7 @@ def make_request_handler(
                 parse_float=_finite_json_float,
                 parse_int=_bounded_json_int,
                 parse_constant=_finite_json_float,
+                object_pairs_hook=_unique_json_object,
             )
             if not isinstance(value, dict):
                 raise ValidationError("Request JSON must be an object.")

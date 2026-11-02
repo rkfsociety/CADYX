@@ -108,6 +108,33 @@ class HTTPConcurrencyTests(unittest.TestCase):
                 finally:
                     stalled.close()
 
+    def test_duplicate_json_object_keys_are_rejected_before_routing(self) -> None:
+        server, _, base_url = self._start_live_server(max_http_requests=1)
+        duplicates = (
+            b'{"value":1,"value":2}',
+            b'{"nested":{"value":1,"value":2}}',
+            b'{"value":1,"\u0076alue":2}',
+        )
+        for body in duplicates:
+            with self.subTest(body=body):
+                self.assertTrue(self._wait_for_http_capacity(server))
+                request = Request(base_url + "/api/v1/unknown", data=body, method="POST")
+                with self.assertRaises(HTTPError) as caught:
+                    urlopen(request, timeout=3)
+                with caught.exception as response:
+                    self.assertEqual(response.code, 400)
+                    self.assertEqual(json.loads(response.read())["error"], "VALIDATION_ERROR")
+
+        self.assertTrue(self._wait_for_http_capacity(server))
+        request = Request(
+            base_url + "/api/v1/unknown",
+            data=b'{"value":1,"nested":{"value":2}}', method="POST",
+        )
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(request, timeout=3)
+        with caught.exception as response:
+            self.assertEqual(response.code, 404)
+
     def test_nonfinite_json_numbers_are_rejected_before_routing(self) -> None:
         server, _, base_url = self._start_live_server(max_http_requests=1)
         for body in (
