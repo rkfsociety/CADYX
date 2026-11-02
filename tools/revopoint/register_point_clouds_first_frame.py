@@ -402,6 +402,7 @@ def register_sequence(project: Path, run_id: str, output: Path,
         "registration_input_files": [
             (item[0].name if item is not None else path.name) for path, item in zip(paths, prepared)],
         "source_cloud_count": len(clouds),
+        "frame_to_first_transforms": [np.asarray(node.pose).tolist() for node in pose_graph.nodes],
         "source_point_counts": source_point_counts,
         "preprocessed_point_counts": [len(cloud.points) for cloud in clouds],
         "voxel_size_q": fused_voxel_size,

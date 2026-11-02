@@ -74,6 +74,9 @@ class GeometricRegistrationIntegrationTests(unittest.TestCase):
             result = register_sequence(series, run_id, root / 'fused.ply', 1.0, .5)
             self.assertGreater(result['adjacent_edges'][0]['fitness'], .9)
             self.assertLess(result['last_to_first_local_correction']['rotation_degrees'], 1)
+            transform = np.asarray(result['frame_to_first_transforms'][1])
+            recovered = (points @ rotation.T + [2, -1, .5]) @ transform[:3, :3].T + transform[:3, 3]
+            self.assertLess(float(np.median(np.linalg.norm(recovered - points, axis=1))), .15)
             self.assertGreater(result['non_dominant_component_points'], 0)
             self.assertEqual(result['discarded_isolated_points'], 0)
             self.assertFalse(result['preprocessing']['until_both_report_zero_removals'])
