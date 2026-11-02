@@ -234,6 +234,30 @@ class WorkspaceArtifactStore:
             "moved_bytes": sum(sizes),
         }
 
+    @staticmethod
+    def _unlink_verified_files(paths: list[Path]) -> list[int]:
+        # Validate every target before deleting the first file. A path that
+        # became a directory, link, or different file must not cause a partial
+        # batch removal of otherwise valid project sources.
+        snapshots = [path.lstat() for path in paths]
+        if any(not stat.S_ISREG(item.st_mode) for item in snapshots):
+            raise ValidationError("Project file changed before removal.")
+
+        def identity(item: os.stat_result) -> tuple[int, int, int, int]:
+            return item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns
+
+        for path, expected in zip(paths, snapshots):
+            current = path.lstat()
+            if not stat.S_ISREG(current.st_mode) or identity(current) != identity(expected):
+                raise ValidationError("Project file changed during removal.")
+        for path, expected in zip(paths, snapshots):
+            # Recheck immediately before unlink to narrow the replacement window.
+            current = path.lstat()
+            if not stat.S_ISREG(current.st_mode) or identity(current) != identity(expected):
+                raise ValidationError("Project file changed during removal.")
+            path.unlink()
+        return [item.st_size for item in snapshots]
+
     def remove_project_subfolder_files(
         self, directory: Path, folder_name: str, file_names: list[str],
     ) -> dict[str, Any]:
@@ -242,9 +266,7 @@ class WorkspaceArtifactStore:
         if any(not isinstance(name, str) for name in file_names) or len({name.casefold() for name in file_names}) != len(file_names):
             raise ValidationError("Project subfolder file names must be unique strings.")
         paths = [self.resolve_project_subfolder_file(directory, folder_name, name) for name in file_names]
-        sizes = [path.stat().st_size for path in paths]
-        for path in paths:
-            path.unlink()
+        sizes = self._unlink_verified_files(paths)
         return {
             "folder": folder_name,
             "removed": [{"name": name, "size": size} for name, size in zip(file_names, sizes)],
@@ -328,9 +350,7 @@ class WorkspaceArtifactStore:
         if any(not isinstance(name, str) for name in file_names) or len({name.casefold() for name in file_names}) != len(file_names):
             raise ValidationError("Project file names must be unique strings.")
         paths = [self.resolve_project_file(directory, name) for name in file_names]
-        sizes = [path.stat().st_size for path in paths]
-        for path in paths:
-            path.unlink()
+        sizes = self._unlink_verified_files(paths)
         return {
             "removed": [{"name": name, "size": size} for name, size in zip(file_names, sizes)],
             "removed_count": len(paths),

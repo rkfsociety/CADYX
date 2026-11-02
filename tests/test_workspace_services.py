@@ -408,6 +408,68 @@ class WorkspaceServiceTests(unittest.TestCase):
         self.assertEqual((subfolder / "Part.step").read_bytes(), b"original")
         self.assertFalse((directory / "target").exists())
 
+    def test_batch_removal_preflights_replaced_direct_file(self) -> None:
+        project = self.root / "project"
+        project.mkdir()
+        first = project / "first.txt"
+        second = project / "second.txt"
+        first.write_bytes(b"first")
+        second.write_bytes(b"second")
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+        original_resolve = store.resolve_project_file
+
+        def replace_after_resolve(directory, name):
+            path = original_resolve(directory, name)
+            if name == "second.txt":
+                path.unlink()
+                path.mkdir()
+            return path
+
+        with patch.object(store, "resolve_project_file", side_effect=replace_after_resolve):
+            with self.assertRaisesRegex(ValidationError, "changed before removal"):
+                store.remove_project_files(project, ["first.txt", "second.txt"])
+        self.assertEqual(first.read_bytes(), b"first")
+        self.assertTrue(second.is_dir())
+
+    def test_batch_removal_preflights_replaced_subfolder_file(self) -> None:
+        project = self.root / "project"
+        folder = project / "scans"
+        folder.mkdir(parents=True)
+        first = folder / "first.ply"
+        second = folder / "second.ply"
+        first.write_bytes(b"first")
+        second.write_bytes(b"second")
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+        original_resolve = store.resolve_project_subfolder_file
+
+        def replace_after_resolve(directory, folder_name, name):
+            path = original_resolve(directory, folder_name, name)
+            if name == "second.ply":
+                path.unlink()
+                path.mkdir()
+            return path
+
+        with patch.object(store, "resolve_project_subfolder_file", side_effect=replace_after_resolve):
+            with self.assertRaisesRegex(ValidationError, "changed before removal"):
+                store.remove_project_subfolder_files(project, "scans", ["first.ply", "second.ply"])
+        self.assertEqual(first.read_bytes(), b"first")
+        self.assertTrue(second.is_dir())
+
+    def test_batch_removal_of_regular_files_preserves_result_counts(self) -> None:
+        project = self.root / "project"
+        folder = project / "scans"
+        folder.mkdir(parents=True)
+        (project / "source.txt").write_bytes(b"abc")
+        (folder / "frame.ply").write_bytes(b"scan")
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+
+        direct = store.remove_project_files(project, ["source.txt"])
+        nested = store.remove_project_subfolder_files(project, "scans", ["frame.ply"])
+        self.assertEqual((direct["removed_count"], direct["removed_bytes"]), (1, 3))
+        self.assertEqual((nested["removed_count"], nested["removed_bytes"]), (1, 4))
+        self.assertFalse((project / "source.txt").exists())
+        self.assertFalse((folder / "frame.ply").exists())
+
     def test_artifact_move_rejects_casefold_collisions_from_different_folders(self) -> None:
         directory = self.root / "project"
         (directory / "first").mkdir(parents=True)
