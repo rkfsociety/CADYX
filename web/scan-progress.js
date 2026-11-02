@@ -24,20 +24,21 @@
     container.className = 'scan-progress';
     container.dataset.state = data.state;
     const text = (tag, className, value) => { const node = document.createElement(tag); node.className = className; node.textContent = value; return node; };
-    const title = text('strong', 'scan-progress-title', data.title);
+    const title = text('strong', 'scan-progress-title', data.detail || data.title);
+    title.title = data.detail ? `${data.title} — ${data.detail}` : data.title;
     const row = (label, value, suffix) => {
       const section = document.createElement('div'); section.className = 'scan-progress-row';
       const heading = document.createElement('div'); heading.className = 'scan-progress-heading';
       heading.append(text('span', '', label), text('span', 'scan-progress-count', `${value} / ${data.total}`));
       const bar = document.createElement('progress'); bar.max = data.total || 1; bar.value = value;
-      bar.setAttribute('aria-label', label);
-      section.append(heading, bar, text('small', '', suffix)); return section;
+      bar.setAttribute('aria-label', `${label}: ${value} из ${data.total}. ${suffix}`);
+      section.title = `${label}: ${value} из ${data.total}. ${suffix}`;
+      section.append(heading, bar); return section;
     };
     const remainingCapture = Math.max(0, data.total - data.captured);
     const remainingClean = Math.max(0, data.total - data.cleaned - data.failed);
     const items = [title, row('Съёмка', data.captured, `Осталось кадров: ${remainingCapture}`),
       row('Очистка', data.cleaned, `Осталось кадров: ${remainingClean}${data.failed ? ` · Ошибок: ${data.failed}` : ''}`)];
-    if (data.detail) items.push(text('div', 'scan-progress-detail', data.detail));
     container.replaceChildren(...items);
   }
   root.CadyxScanProgress = {summary, render};
