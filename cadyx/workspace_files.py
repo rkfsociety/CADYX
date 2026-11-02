@@ -7,6 +7,7 @@ import mimetypes
 import os
 import re
 import shutil
+import stat
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
@@ -155,6 +156,15 @@ class WorkspaceArtifactStore:
         if len({name.casefold() for name in destination_names}) != len(destination_names):
             raise ValidationError("Source files must have unique destination names.")
         target = directory / folder_name
+        # A case-sensitive volume can contain an existing folder with a
+        # different spelling that becomes the same path on Windows.
+        for entry in directory.iterdir():
+            if entry.name.casefold() == folder_name.casefold() and entry.name != folder_name:
+                if entry.is_symlink() or not target.exists() or not os.path.samefile(entry, target):
+                    raise ConflictError(
+                        "Project scan destination has a case-insensitive folder collision.",
+                        code="ARTIFACT_CONFLICT",
+                    )
         created = False
         if target.exists() or target.is_symlink():
             if target.is_symlink() or not target.is_dir() or target.resolve(strict=True).parent != directory.resolve(strict=True):
@@ -179,12 +189,25 @@ class WorkspaceArtifactStore:
             raise ConflictError("Moving project files would overwrite an existing file; no files were moved.",
                                 code="ARTIFACT_CONFLICT")
 
-        sizes = [path.stat().st_size for path in sources]
+        source_stats = [path.stat() for path in sources]
+        sizes = [item.st_size for item in source_stats]
         moved: list[tuple[Path, Path]] = []
         try:
-            for source, destination in zip(sources, destinations):
+            for source, destination, expected in zip(sources, destinations, source_stats):
                 os.link(source, destination)
                 try:
+                    # os.link can link a replaced source (including a symlink)
+                    # after resolution. Never unlink it unless both paths still
+                    # refer to the originally validated regular file.
+                    linked = destination.lstat()
+                    current = source.lstat()
+                    identity = lambda item: (
+                        item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns
+                    )
+                    if (not stat.S_ISREG(linked.st_mode)
+                            or identity(linked) != identity(expected)
+                            or identity(current) != identity(expected)):
+                        raise OSError("Project source changed while moving files")
                     source.unlink()
                 except OSError:
                     destination.unlink(missing_ok=True)
@@ -265,9 +288,12 @@ class WorkspaceArtifactStore:
                     code="ARTIFACT_CONFLICT",
                 )
         try:
-            if new_name.casefold() == file_name.casefold():
+            if new_name.casefold() == file_name.casefold() and destination.exists():
+                # On Windows a case-only alias already resolves to this file.
                 source.rename(destination)
             else:
+                # On case-sensitive volumes rename() could overwrite a file
+                # created after preflight. A hard link fails atomically instead.
                 os.link(source, destination)
                 try:
                     source.unlink()

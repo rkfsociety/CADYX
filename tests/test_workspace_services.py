@@ -734,5 +734,68 @@ class WorkspaceServiceTests(unittest.TestCase):
         self.assertEqual((project / "Readme.txt").read_bytes(), b"existing")
         self.assertEqual(len(list(project.iterdir())), 1)
 
+
+    def test_move_rejects_casefold_alias_of_target_folder(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Case-sensitive filesystem required")
+        project = self.root / "project"
+        project.mkdir()
+        (project / "part.step").write_bytes(b"original")
+        (project / "Scans").mkdir()
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+
+        with self.assertRaisesRegex(ConflictError, "case-insensitive folder collision"):
+            store.move_project_files_to_subfolder(project, ["part.step"], "scans")
+        self.assertEqual((project / "part.step").read_bytes(), b"original")
+        self.assertFalse((project / "scans").exists())
+
+    def test_move_detects_source_replaced_by_symlink_before_link(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Symlink replacement test requires POSIX")
+        project = self.root / "project"
+        project.mkdir()
+        source = project / "part.step"
+        source.write_bytes(b"original")
+        backup = project / "original.backup"
+        outside = self.root / "outside.step"
+        outside.write_bytes(b"outside")
+        original_link = os.link
+
+        def replace_source(src, dst, *args, **kwargs):
+            if Path(src) == source:
+                source.rename(backup)
+                source.symlink_to(outside)
+            return original_link(src, dst, *args, **kwargs)
+
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+        with patch("cadyx.workspace_files.os.link", side_effect=replace_source):
+            with self.assertRaisesRegex(ValidationError, "source changed"):
+                store.move_project_files_to_subfolder(project, ["part.step"], "scans")
+        self.assertEqual(backup.read_bytes(), b"original")
+        self.assertEqual(outside.read_bytes(), b"outside")
+        self.assertFalse((project / "scans").exists())
+
+    def test_case_only_rename_never_overwrites_racing_file(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Case-sensitive filesystem required")
+        project = self.root / "project"
+        project.mkdir()
+        source = project / "part.step"
+        source.write_bytes(b"original")
+        destination = project / "PART.step"
+        original_link = os.link
+
+        def concurrent_create(src, dst, *args, **kwargs):
+            if Path(dst) == destination:
+                destination.write_bytes(b"concurrent")
+            return original_link(src, dst, *args, **kwargs)
+
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+        with patch("cadyx.workspace_files.os.link", side_effect=concurrent_create):
+            with self.assertRaises(ConflictError):
+                store.rename_project_file(project, "part.step", "PART.step")
+        self.assertEqual(source.read_bytes(), b"original")
+        self.assertEqual(destination.read_bytes(), b"concurrent")
+
 if __name__ == "__main__":
     unittest.main()
