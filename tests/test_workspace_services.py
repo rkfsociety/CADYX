@@ -699,5 +699,40 @@ class WorkspaceServiceTests(unittest.TestCase):
         self.assertEqual((target / "scans" / "new.ply").read_bytes(), b"new")
         self.assertEqual((target / "scans" / "old.ply").read_bytes(), b"existing")
 
+    def test_move_rejects_casefold_alias_in_existing_destination(self) -> None:
+        project = self.root / "project"
+        project.mkdir()
+        (project / "part.step").write_bytes(b"source")
+        (project / "scans").mkdir()
+        (project / "scans" / "Part.step").write_bytes(b"existing")
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+
+        with self.assertRaisesRegex(ConflictError, "case-insensitive filename collisions"):
+            store.move_project_files_to_subfolder(project, ["part.step"], "scans")
+        self.assertEqual((project / "part.step").read_bytes(), b"source")
+        self.assertEqual((project / "scans" / "Part.step").read_bytes(), b"existing")
+
+    def test_rename_rejects_casefold_alias_of_another_file(self) -> None:
+        project = self.root / "project"
+        project.mkdir()
+        (project / "part.step").write_bytes(b"source")
+        (project / "Other.step").write_bytes(b"existing")
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+
+        with self.assertRaises(ConflictError):
+            store.rename_project_file(project, "part.step", "other.step")
+        self.assertEqual((project / "part.step").read_bytes(), b"source")
+        self.assertEqual((project / "Other.step").read_bytes(), b"existing")
+
+    def test_upload_rejects_casefold_alias_of_existing_file(self) -> None:
+        project = self.root / "project"
+        project.mkdir()
+        (project / "Readme.txt").write_bytes(b"existing")
+
+        with self.assertRaises(ConflictError):
+            WorkspaceArtifactStore.publish_project_file(project, "readme.txt", b"new")
+        self.assertEqual((project / "Readme.txt").read_bytes(), b"existing")
+        self.assertEqual(len(list(project.iterdir())), 1)
+
 if __name__ == "__main__":
     unittest.main()

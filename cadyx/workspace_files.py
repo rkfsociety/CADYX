@@ -163,6 +163,16 @@ class WorkspaceArtifactStore:
             target.mkdir()
             created = True
         destinations = [target / name for name in destination_names]
+        # Avoid creating names that differ only by case on Linux and then
+        # become ambiguous when the project is opened on Windows.
+        existing_names = {entry.name.casefold() for entry in target.iterdir()}
+        if any(name.casefold() in existing_names for name in destination_names):
+            if created:
+                target.rmdir()
+            raise ConflictError(
+                "Moving project files would create case-insensitive filename collisions.",
+                code="ARTIFACT_CONFLICT",
+            )
         if any(path.exists() or path.is_symlink() for path in destinations):
             if created:
                 target.rmdir()
@@ -234,6 +244,14 @@ class WorkspaceArtifactStore:
             return {"old_name": file_name, "name": new_name, "size": size, "renamed": False}
 
         destination = target_directory / new_name
+        if any(
+            entry.name.casefold() == new_name.casefold() and entry.name != source.name
+            for entry in target_directory.iterdir()
+        ):
+            raise ConflictError(
+                "A file with this name already exists in the project; renaming never overwrites files.",
+                code="ARTIFACT_CONFLICT",
+            )
         if destination.exists() or destination.is_symlink():
             same_file = False
             if new_name.casefold() == file_name.casefold() and not destination.is_symlink():
@@ -590,6 +608,11 @@ class WorkspaceArtifactStore:
         target = directory / filename
         temporary: Path | None = None
         try:
+            if any(entry.name.casefold() == filename.casefold() for entry in directory.iterdir()):
+                raise ConflictError(
+                    "A file with this name already exists in the project; uploads never overwrite files.",
+                    code="ARTIFACT_CONFLICT",
+                )
             with tempfile.NamedTemporaryFile(
                 mode="wb",
                 prefix=".cadyx-tmp-",
