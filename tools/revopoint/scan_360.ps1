@@ -285,22 +285,24 @@ try {
         '--expected-frame-count', [string]$frameCount,
         '--stop-signal', $workerStopPath, '--report-file', $preprocessingReportPath,
         '--calibration-file', $projectCalibration, '--depth-scale', $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture),
-        '--max-workers', '1'
+        '--max-workers', '1', '--timing', 'after_capture_before_registration'
     ) | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }
-    $preprocessingWorker = Start-Process -FilePath $PythonExecutable -ArgumentList ($workerArguments -join ' ') `
-        -WorkingDirectory $repoRoot -PassThru -WindowStyle Hidden `
-        -RedirectStandardOutput $workerStdout -RedirectStandardError $workerStderr
+    Invoke-Turntable -Arguments @(
+        'capture-sweep', [string]$frameCount, [string]$StepDegrees, '0', $poseLog, $captureExe, $prefix,
+        $projectCalibration, $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw,
+        $ScannerDeviceId, $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
+        $TurntableServiceUuid, $TurntableCharacteristicUuid
+    ) | Out-Null
+    # The completed sweep has already flushed its pose log; process that fixed
+    # inventory only after capture so cleanup cannot compete with the scanner.
+    [IO.File]::WriteAllText($workerStopPath, 'stop', [Text.UTF8Encoding]::new($false))
     try {
-        Invoke-Turntable -Arguments @(
-            'capture-sweep', [string]$frameCount, [string]$StepDegrees, '0', $poseLog, $captureExe, $prefix,
-            $projectCalibration, $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw,
-            $ScannerDeviceId, $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
-            $TurntableServiceUuid, $TurntableCharacteristicUuid
-        ) | Out-Null
+        $preprocessingWorker = Start-Process -FilePath $PythonExecutable -ArgumentList ($workerArguments -join ' ') `
+            -WorkingDirectory $repoRoot -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput $workerStdout -RedirectStandardError $workerStderr
+        $preprocessingWorker.WaitForExit()
     }
     finally {
-        [IO.File]::WriteAllText($workerStopPath, 'stop', [Text.UTF8Encoding]::new($false))
-        $preprocessingWorker.WaitForExit()
         Remove-Item -LiteralPath $workerStopPath -Force -ErrorAction SilentlyContinue
     }
     $preprocessingWorker.Refresh()

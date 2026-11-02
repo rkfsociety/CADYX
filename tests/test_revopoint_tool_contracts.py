@@ -18,6 +18,14 @@ class RevopointToolContractTests(unittest.TestCase):
         self.assertLess(zero, speed)
         self.assertLess(speed, capture)
 
+    def test_capture_sweep_finishes_before_frame_cleanup_starts(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "tools" / "revopoint" / "scan_360.ps1").read_text(encoding="utf-8")
+        work = source[source.index("$complete = $false"):]
+        self.assertLess(work.index("'capture-sweep'"), work.index("$preprocessingWorker = Start-Process"))
+        self.assertIn("'--timing', 'after_capture_before_registration'", work)
+        self.assertLess(work.index("[IO.File]::WriteAllText($workerStopPath"),
+                        work.index("$preprocessingWorker = Start-Process"))
+
     def test_rotation_step_tolerance_handles_observed_overshoot_without_relaxing_closure(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "tools" / "revopoint" / "turntable.cs").read_text(
             encoding="utf-8",

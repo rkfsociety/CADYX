@@ -422,8 +422,13 @@ def register_sequence(project: Path, run_id: str, output: Path,
                                              for method in ("isolation_filter", "remove_overlaps"))
                 for report in frame_cleanup
             ),
-            "source_frame_timing": ("during_capture" if prepared and prepared[0] is not None
-                                     else "after_capture_before_registration_legacy_fallback"),
+            "source_frame_timing": (
+                frame_cleanup[0].get("timing", "unknown")
+                if prepared and prepared[0] is not None
+                and all(item.get("timing", "unknown") == frame_cleanup[0].get("timing", "unknown")
+                        for item in frame_cleanup)
+                else "mixed" if prepared and prepared[0] is not None
+                else "after_capture_before_registration_legacy_fallback"),
             "frames": frame_cleanup,
         },
         "source_files": [path.name for path in paths],

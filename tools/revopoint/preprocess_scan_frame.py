@@ -1,4 +1,4 @@
-"""Clean individual Y16-derived PLY frames while a 360 capture is running."""
+"""Clean individual Y16-derived PLY frames from a completed 360 capture."""
 
 from __future__ import annotations
 
@@ -337,8 +337,8 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
                   stop_signal: Path, report_path: Path, *, max_workers: int = 1,
                   poll_seconds: float = 0.1, calibration_path: Path | None = None,
                   depth_scale: float | None = None, in_place: bool = True,
-                  output_directory: Path | None = None) -> dict[str, Any]:
-    """Launch frame cleanup as soon as each capture-completed row is flushed."""
+                  output_directory: Path | None = None, timing: str = "during_capture") -> dict[str, Any]:
+    """Process completed frames; the caller controls when the worker starts."""
     run_directory = run_directory.resolve(strict=True)
     pose_log = pose_log.resolve()
     stop_signal = stop_signal.resolve()
@@ -355,6 +355,8 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
         raise ValueError("expected frame count is invalid")
     if max_workers != 1:
         raise ValueError("capture preprocessing must use exactly one worker")
+    if timing not in ("during_capture", "after_capture_before_registration"):
+        raise ValueError("invalid frame cleanup timing")
     if not 0.01 <= poll_seconds <= 2.0:
         raise ValueError("pose-log polling interval must be between 0.01 and 2 seconds")
     if (calibration_path is None) != (depth_scale is None):
@@ -375,7 +377,7 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
     script_path = Path(__file__).resolve()
     aggregate: dict[str, Any] = {
         "format": "cadyx-scan-preprocessing-v1", "run_id": run_id,
-        "timing": "during_capture", "method_order": list(_METHODS),
+        "timing": timing, "method_order": list(_METHODS),
         "expected_frame_count": expected_frame_count, "worker_limit": max_workers,
         "state": "running", "frames": [],
     }
@@ -435,7 +437,7 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
             frame_report_path = source_path.with_name(source_path.stem + "_cleaned.json")
             command = [sys.executable, str(script_path), "--input-ply", str(source_path),
                        "--cleaned-ply", str(cleaned_path), "--report-file", str(frame_report_path),
-                       "--frame-index", str(index), "--timing", "during_capture"]
+                       "--frame-index", str(index), "--timing", timing]
             if in_place:
                 command.append("--in-place")
             if calibration_path is not None and depth_scale is not None:
@@ -498,7 +500,7 @@ def main() -> int:
                                    args.expected_frame_count, args.stop_signal, args.report_file,
                                    max_workers=args.max_workers, calibration_path=args.calibration_file,
                                    depth_scale=args.depth_scale, in_place=True,
-                                   output_directory=args.output_directory)
+                                   output_directory=args.output_directory, timing=args.timing)
         except (OSError, ValueError, RuntimeError) as exc:
             print(f"capture preprocessing worker failed: {exc}", file=sys.stderr)
             return 2

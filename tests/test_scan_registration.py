@@ -177,19 +177,43 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
             stop_signal.touch()
 
             report = watch_capture(pose_log, run_directory, run_id, 1, stop_signal,
-                                   run_directory / f"{run_id}_preprocessing.json", max_workers=1)
+                                   run_directory / f"{run_id}_preprocessing.json", max_workers=1,
+                                   timing="after_capture_before_registration")
 
             report_path = run_directory / f"{run_id}_pose_000_cleaned.json"
             frame_report = json.loads(report_path.read_text(encoding="utf-8"))
             verified = verified_preprocessed_frame(source_path)
             self.assertEqual(report["state"], "completed")
             self.assertEqual(report["cleaned_frame_count"], 1)
+            self.assertEqual(report["timing"], "after_capture_before_registration")
+            self.assertEqual(frame_report["timing"], "after_capture_before_registration")
             self.assertEqual(frame_report["removed_by_method"]["isolation_filter"], 4)
             self.assertEqual(frame_report["processing_mode"], "in_place")
             self.assertEqual(frame_report["source_sha256"], hashlib.sha256(source_bytes).hexdigest())
             self.assertEqual(verified[0], source_path.resolve())
             self.assertNotEqual(source_path.read_bytes(), source_bytes)
             self.assertFalse(source_path.with_name(source_path.stem + "_cleaned.ply").exists())
+
+    def test_post_capture_worker_drains_every_completed_frame_before_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            run_id = "revopoint_20261023T091400Z"
+            poses = directory / f"{run_id}_poses.csv"
+            rows = []
+            for index in range(2):
+                source = directory / f"{run_id}_pose_{index:03d}.ply"
+                source.write_bytes(self._source_ply())
+                rows.append({"step_index": index, "event": "capture_completed", "command": str(source.with_suffix(""))})
+            with poses.open("w", encoding="utf-8", newline="") as stream:
+                writer = csv.DictWriter(stream, fieldnames=["step_index", "event", "command"])
+                writer.writeheader(); writer.writerows(rows)
+            stop = directory / "stop.signal"; stop.touch()
+            report = watch_capture(poses, directory, run_id, 2, stop, directory / "aggregate.json",
+                                   timing="after_capture_before_registration")
+            self.assertEqual(report["state"], "completed")
+            self.assertEqual(report["cleaned_frame_count"], 2)
+            self.assertEqual([frame["frame_index"] for frame in report["frames"]], [0, 1])
+            self.assertTrue(all(frame["timing"] == "after_capture_before_registration" for frame in report["frames"]))
 
     def test_capture_worker_finishes_frame_before_scan_stop_signal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

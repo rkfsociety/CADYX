@@ -17,6 +17,24 @@ from cadyx.scan_capture import (Scan360CaptureController, _capture_log_progress,
 
 
 class Scan360CaptureTests(unittest.TestCase):
+    def test_unprocessed_preview_uses_latest_completed_pose_in_support_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261010T100000Z"
+            support = project / f"scan_support_{run_id}"
+            support.mkdir()
+            (project / "project.json").write_text(json.dumps({"id":"project-id", "name":"scan"}))
+            (support / f"{run_id}_poses.csv").write_text(
+                "step_index,event\n0,capture_completed\n1,capture_completed\n2,capture_started\n")
+            for index in range(3):
+                (support / f"{run_id}_pose_{index:03}.ply").write_text("ply")
+                (support / f"{run_id}_pose_{index:03}.json").write_text("{}")
+            preview = Scan360CaptureController._unprocessed_capture_preview(project, run_id, 24)
+            self.assertEqual(preview["preview_file"], f"{run_id}_pose_001.ply")
+            self.assertEqual(preview["preview_subfolder"], support.name)
+            self.assertEqual(preview["preview_processing"], "raw")
+            self.assertEqual(preview["preview_project_id"], "project-id")
+
     def test_capture_log_progress_ignores_oversized_and_unrelated_counts(self) -> None:
         huge = "9" * 5000
         log = (f"captured pose {huge}/12\n"

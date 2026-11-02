@@ -1447,9 +1447,11 @@ class Scan360CaptureController:
         return_code = self._job.process.poll()
         state = "running" if return_code is None else "completed" if return_code == 0 else "failed"
         log_tail = _read_log_tail(self._job.log_path, 64 * 1024)
-        completed = _capture_log_progress(log_tail, self._job.frame_count)
-        completed = max(completed, self._count_run_frames(
-            self._job.project_directory, self._job.run_id, self._job.frame_count))
+        pose_indices = self._completed_pose_indices(self._job.project_directory, self._job.run_id,
+                                                   self._job.frame_count)
+        completed = (len(pose_indices) if pose_indices is not None else max(
+            _capture_log_progress(log_tail, self._job.frame_count), self._count_run_frames(
+                self._job.project_directory, self._job.run_id, self._job.frame_count)))
         capture_sweep_completed = f"sweep completed: {self._job.frame_count} steps" in log_tail.lower()
         alignment_failed = "table-map alignment failed" in log_tail.lower()
         preprocessing = self._preprocessing_payload(
@@ -1494,7 +1496,10 @@ class Scan360CaptureController:
             "message": message,
             **preprocessing,
         }
-        snapshot.update(self._preview_payload(
+        raw_preview = (self._unprocessed_capture_preview(self._job.project_directory, self._job.run_id,
+                                                         self._job.frame_count)
+                       if state == "running" and preprocessing["preprocessing_status"] == "starting" else {})
+        snapshot.update(raw_preview or self._preview_payload(
             self._run_directory(self._job.project_directory, self._job.run_id),
             self._job.run_id, completed, self._job.frame_count,
         ))
@@ -1671,6 +1676,54 @@ class Scan360CaptureController:
         return sum(1 for index in range(count)
                    if (run_directory / f"{run_id}_pose_{index:03d}.raw").is_file()
                    or (run_directory / f"{run_id}_pose_pose_{index:03d}.raw").is_file())
+
+    @classmethod
+    def _completed_pose_indices(cls, project_directory: Path, run_id: str,
+                                frame_count: int) -> list[int] | None:
+        support = cls._support_directory(project_directory, run_id)
+        try:
+            with (support / f"{run_id}_poses.csv").open(encoding="utf-8-sig", newline="") as stream:
+                rows = csv.DictReader(stream)
+                if not rows.fieldnames or not {"event", "step_index"}.issubset(rows.fieldnames):
+                    return None
+                indices = {int(row["step_index"]) for row in rows
+                           if row.get("event") == "capture_completed"
+                           and isinstance(row.get("step_index"), str) and row["step_index"].isdigit()
+                           and len(row["step_index"]) <= 3}
+                return sorted(index for index in indices if 0 <= index < frame_count)
+        except (OSError, ValueError, TypeError, csv.Error):
+            return None
+
+    @classmethod
+    def _unprocessed_capture_preview(cls, project_directory: Path, run_id: str,
+                                     frame_count: int) -> dict[str, str | int]:
+        """Expose only a fully captured raw frame while cleanup has not started."""
+        support = cls._support_directory(project_directory, run_id)
+        if support == project_directory or support.name != f"scan_support_{run_id}":
+            return {}
+        try:
+            indices = cls._completed_pose_indices(project_directory, run_id, frame_count)
+            if indices is None:
+                return {}
+            record = json.loads((project_directory / "project.json").read_text(encoding="utf-8"))
+            if not isinstance(record, dict):
+                return {}
+        except (OSError, ValueError, TypeError, csv.Error):
+            return {}
+        for index in reversed(indices):
+            for stem in (f"{run_id}_pose_{index:03d}", f"{run_id}_pose_pose_{index:03d}"):
+                ply = support / f"{stem}.ply"
+                if ply.is_file() and not ply.is_symlink() and (support / f"{stem}.json").is_file():
+                    result: dict[str, str | int] = {
+                        "preview_folder": record.get("name", project_directory.name),
+                        "preview_subfolder": support.name, "preview_file": ply.name,
+                        "preview_kind": "single", "preview_frame_count": frame_count,
+                        "preview_frame_index": index, "preview_processing": "raw", "origin_file": ply.name,
+                    }
+                    if isinstance(record.get("id"), str):
+                        result["preview_project_id"] = record["id"]
+                    return result
+        return {}
 
     @staticmethod
     def _run_directory(project_directory: Path, run_id: str) -> Path:
