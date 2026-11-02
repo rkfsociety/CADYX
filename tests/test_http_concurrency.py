@@ -113,7 +113,7 @@ class HTTPConcurrencyTests(unittest.TestCase):
         duplicates = (
             b'{"value":1,"value":2}',
             b'{"nested":{"value":1,"value":2}}',
-            b'{"value":1,"\u0076alue":2}',
+            b'{"value":1,"\\u0076alue":2}',
         )
         for body in duplicates:
             with self.subTest(body=body):
