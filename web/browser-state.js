@@ -88,7 +88,8 @@
       context?.projectId
       && !String(context.projectId).startsWith("folder:")
       && context.renderedProjectId === context.projectId
-      && Number.isInteger(context.revision),
+      && Number.isSafeInteger(context.revision)
+      && context.revision >= 0,
     );
 
     function schedule() {
@@ -129,6 +130,12 @@
           revision: context.revision,
           image,
         });
+        if (!sameContext(context, getContext())) {
+          dirty = true;
+          retryCount = 0;
+          retryNotBefore = 0;
+          return;
+        }
         if (!response.ok) {
           if (response.status !== 409 && !errorShown) {
             onFailure("publish", response.status);
@@ -146,6 +153,12 @@
         retryNotBefore = 0;
         errorShown = false;
       } catch (error) {
+        if (!sameContext(context, getContext())) {
+          dirty = true;
+          retryCount = 0;
+          retryNotBefore = 0;
+          return;
+        }
         if (!errorShown) {
           onFailure("sync", null, error);
           errorShown = true;

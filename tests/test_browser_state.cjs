@@ -131,6 +131,44 @@ async function checkViewportSnapshotSync() {
   assert.equal(published.length, 1);
   assert.equal(published[0].revision, 2);
   assert.equal(published[0].image, 'fresh');
+
+  const stalePublishClock = makeClock();
+  let resolveStalePublish;
+  let activeRevision = 1;
+  const sentRevisions = [];
+  const staleFailures = [];
+  const stalePublish = state.createViewportSnapshotSynchronizer({
+    now: stalePublishClock.now, setTimer: stalePublishClock.setTimer,
+    getContext: () => ({ projectId: 'p', renderedProjectId: 'p', revision: activeRevision }),
+    capture: async () => 'frame',
+    publish: snapshot => {
+      sentRevisions.push(snapshot.revision);
+      return sentRevisions.length === 1
+        ? new Promise(resolve => { resolveStalePublish = resolve; })
+        : Promise.resolve({ ok: true, status: 200 });
+    },
+    onFailure: (...args) => staleFailures.push(args),
+  });
+  stalePublish.markDirty();
+  await stalePublishClock.fire();
+  activeRevision = 2;
+  resolveStalePublish({ ok: false, status: 503 });
+  for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  assert.equal(staleFailures.length, 0, 'obsolete publish responses must not show errors');
+  assert.equal(await stalePublishClock.fire(), 0, 'new revision must not inherit old retry backoff');
+  assert.deepEqual(sentRevisions, [1, 2], 'a revision change during publish must send a fresh frame');
+
+  const invalidClock = makeClock();
+  let invalidCaptures = 0;
+  const invalid = state.createViewportSnapshotSynchronizer({
+    now: invalidClock.now, setTimer: invalidClock.setTimer,
+    getContext: () => ({ projectId: 'p', renderedProjectId: 'p', revision: -1 }),
+    capture: async () => { invalidCaptures += 1; return 'invalid'; },
+    publish: async () => ({ ok: true, status: 200 }),
+  });
+  invalid.markDirty();
+  await invalidClock.fire();
+  assert.equal(invalidCaptures, 0, 'invalid revisions must never be published');
   console.log('Viewport snapshots: immediate send, bounded retries, conflict and revision fencing passed.');
 }
 

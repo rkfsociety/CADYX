@@ -17,7 +17,7 @@ const countingJson = {
     return JSON.stringify(value, replacer, space);
   },
 };
-const context = vm.createContext({ window, Error, JSON: countingJson, Object, TypeError, Number, encodeURIComponent });
+const context = vm.createContext({ window, Headers, Error, JSON: countingJson, Object, TypeError, Number, encodeURIComponent });
 vm.runInContext(traceDraftSource, context, { filename: "trace-draft.js" });
 vm.runInContext(source, context, { filename: "browser-api.js" });
 
@@ -113,6 +113,7 @@ assert.equal(longDraft.current()[0].end.x, 1, "long ownership snapshots must sta
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "/api/v1/projects/project%2Fwith%20space/commands");
   assert.equal(calls[0].options.method, "POST");
+  assert.equal(calls[0].options.headers.get("content-type"), "application/json");
   const request = JSON.parse(calls[0].options.body);
   assert.equal(request.lease_id, "lease-1");
   assert.equal(request.expected_revision, 7);
