@@ -569,7 +569,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-live-camera,
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-toggle-turntable,
 .primary-grid[data-view="scanning"] .model-toolbar #scanning-devices { display: inline-flex !important; }
-.primary-grid[data-view="scanning"] .model-toolbar #viewport-scan-360-status:not([hidden]) { display: inline-flex !important; }
+.primary-grid[data-view="scanning"] .scan-side-panel #viewport-scan-360-status:not([hidden]) { display: flex; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-four-views,
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-fit { display: none !important; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-camera-presets {
@@ -714,13 +714,15 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                     <button id="viewport-scan-360" class="button" type="button">Сканировать 360°</button>
                     <button id="viewport-live-camera" class="button viewport-scan-mode-button viewport-live-camera-button" type="button" aria-label="Предпросмотр сканера в реальном времени" aria-pressed="false">Предпросмотр</button>
                     <button id="viewport-toggle-turntable" class="button" type="button" aria-label="Скрыть стол" aria-pressed="true">Скрыть стол</button>
-                    <button id="scanning-devices" class="button" type="button">Устройства</button><div id="viewport-scan-360-status" role="status" aria-live="polite" hidden></div>
+                    <button id="scanning-devices" class="button" type="button">Устройства</button>
                   </div>
                 </div>
                 <div class="viewport" id="viewport">
                   <canvas id="model-preview" class="model-preview ply-preview-canvas" aria-label="Координатная сетка, оси и 3D-модель"></canvas>
                   <output id="scanner-map-alignment" class="scanner-map-alignment" aria-label="Сопоставление точек с картой стола" hidden>Карта: —</output>
                   <output id="scanner-preview-fps" class="scanner-preview-fps" aria-label="Частота кадров сенсора" hidden>FPS —</output>
+                  <div class="scan-side-panel">
+                  <div id="viewport-scan-360-status" role="status" aria-live="polite" hidden></div>
                   <aside id="turntable-control-panel" class="turntable-control-panel" aria-label="Управление поворотным столом">
                     <div class="turntable-control-position">
                       <div class="turntable-control-card" role="group" aria-label="Угол поворота"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M39 17a17 17 0 1 0 2 9M39 8v9h-9M24 2v9m-4.5-4.5h9"/></svg><div><strong id="turntable-angle">—</strong></div></div>
@@ -735,6 +737,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                     <div class="turntable-control-actions"><button id="turntable-stop" class="button turntable-stop-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9h6v6H9z"/></svg><span>Стоп</span></button><button id="turntable-spin" class="button turntable-spin-button" type="button" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 4 14 8-14 8z"/></svg><span class="turntable-spin-label">Постоянное вращение</span></button></div>
                     <output id="turntable-control-status" class="turntable-control-status" role="status" aria-live="polite" hidden></output>
                   </aside>
+                  </div>
                 </div>
                 <footer class="viewport-footer" aria-label="Сводка модели">
                   <span>МОДЕЛЬ <strong id="viewport-model-name">—</strong></span><span>ОБЪЕКТЫ <strong id="viewport-object-count">0</strong></span><span>ВЕРШИНЫ <strong id="viewport-vertex-count">0</strong></span><span>ГРАНИ <strong id="viewport-face-count">0</strong></span><span>РЕВ. <strong id="viewport-revision">—</strong></span>
