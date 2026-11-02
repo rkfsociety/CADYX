@@ -258,6 +258,78 @@ async function main() {
     assert.equal(confirmed.tilt_degrees, 5);
   }
 
+
+  // Optional device discovery must not delay capture settings or leave a stale loading label.
+  {
+    let finishDeviceNames;
+    const f = fixture(async (url) => {
+      if (url === '/api/v1/scanner/devices') {
+        return new Promise(resolve => { finishDeviceNames = resolve; });
+      }
+      if (url.startsWith('/api/v1/scanner/scan-capture-settings')) {
+        return response({ ...savedSettings, step_degrees: 17, tilt_degrees: 99 });
+      }
+      throw Error('Unexpected request: ' + url);
+    });
+    f.sandbox.window.CadyxDeviceSettings = {
+      scannerDeviceId: () => 'scanner-1',
+      turntableDeviceId: () => 'table-1',
+      turntableProfileId: () => '',
+    };
+    const pending = f.api.open();
+    for (let i = 0; i < 6; i++) await tick();
+    assert.equal(f.get('scan-capture-settings-start').disabled, false,
+      'a slow optional device-name request must not block the start action');
+    assert.equal(f.get('scan-capture-step').value, '30',
+      'unsupported saved steps must fall back to a valid default');
+    assert.equal(f.get('scan-capture-tilt').value, '10',
+      'saved tilt outside the supported range must be clamped');
+    assert.match(f.get('scan-capture-devices').textContent, /scanner-1/,
+      'device identifiers remain visible until display names arrive');
+    assert.doesNotMatch(f.get('scan-capture-settings-status').textContent, /Загружаю/,
+      'the status must reflect completed settings loading');
+    finishDeviceNames(response({
+      scanners: [{ device_id: 'scanner-1', profile_name: 'Revopoint MINI' }],
+      turntables: [{ device_id: 'table-1', profile_name: 'Двухосевой стол' }],
+    }));
+    for (let i = 0; i < 6; i++) await tick();
+    assert.match(f.get('scan-capture-devices').textContent, /Revopoint MINI/);
+    await f.get('scan-capture-settings-cancel').click();
+    assert.equal(await pending, null);
+  }
+
+  // Invalid control values must be rejected locally without writing scanner settings.
+  {
+    let writes = 0;
+    const f = fixture(async (url, options = {}) => {
+      if (url === '/api/v1/scanner/devices') return response({ scanners: [], turntables: [] });
+      if (url.startsWith('/api/v1/scanner/scan-capture-settings') && options.method !== 'POST') {
+        return response(savedSettings);
+      }
+      if (options.method === 'POST') { writes += 1; return response({ ok: true }); }
+      throw Error('Unexpected request: ' + url);
+    });
+    f.sandbox.window.CadyxDeviceSettings = {
+      scannerDeviceId: () => 'scanner-1',
+      turntableDeviceId: () => 'table-1',
+      turntableProfileId: () => '',
+    };
+    const pending = f.api.open();
+    for (let i = 0; i < 6; i++) await tick();
+    f.get('scan-capture-step').value = '17';
+    await f.get('scan-capture-settings-start').click();
+    assert.equal(writes, 0, 'unsupported step must not reach the server');
+    assert.equal(f.get('scan-capture-settings-start').disabled, false);
+    f.get('scan-capture-step').value = '15';
+    f.get('scan-capture-tilt').value = '11';
+    await f.get('scan-capture-settings-start').click();
+    assert.equal(writes, 0, 'out-of-range tilt must not reach the server');
+    assert.match(f.get('scan-capture-settings-status').textContent, /допустимый шаг/);
+    assert.equal(f.get('scan-capture-tilt').disabled, false);
+    await f.get('scan-capture-settings-cancel').click();
+    assert.equal(await pending, null);
+  }
+
   console.log('scan capture settings dialog tests passed');
 }
 

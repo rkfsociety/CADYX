@@ -84,26 +84,28 @@
       dialog.showModal();
       return Promise.resolve(null);
     }
-    devicesNote.textContent = 'Загружаю настройки для выбранной пары…';
+    devicesNote.textContent = `Сканер: ${selection.scanner_device_id} · Стол: ${selection.turntable_device_id}`;
+    setStatus('Загружаю настройки…');
     dialog.showModal();
-    void loadDeviceNames(selection).then(async names => {
+    // Device names are optional display metadata; slow discovery must not
+    // block loading saved capture settings or enabling the start action.
+    void loadDeviceNames(selection).then(names => {
       if (request !== requestId || !dialog.open) return;
       devicesNote.textContent = `Сканер: ${names.scannerName} · Стол: ${names.tableName}`;
-      try {
-        const saved = await loadSettings(selection);
-        if (request !== requestId || !dialog.open) return;
-        if (Number.isInteger(saved.step_degrees)) fillSteps(saved.step_degrees);
-        if (Number.isFinite(Number(saved.tilt_degrees))) {
-          tiltInput.value = String(Math.max(-10, Math.min(10, Number(saved.tilt_degrees))));
-        }
-        syncTiltDisplay();
-        setStatus(saved.configured ? 'Загружены сохранённые настройки пары.' : '');
-        startButton.disabled = false;
-      } catch (error) {
-        if (request !== requestId || !dialog.open) return;
-        setStatus(error.message, true);
-        startButton.disabled = false;
+    });
+    void loadSettings(selection).then(saved => {
+      if (request !== requestId || !dialog.open) return;
+      if (stepOptions.includes(saved.step_degrees)) fillSteps(saved.step_degrees);
+      if (Number.isFinite(Number(saved.tilt_degrees))) {
+        tiltInput.value = String(Math.max(-10, Math.min(10, Number(saved.tilt_degrees))));
       }
+      syncTiltDisplay();
+      setStatus(saved.configured ? 'Загружены сохранённые настройки пары.' : '');
+      startButton.disabled = false;
+    }).catch(error => {
+      if (request !== requestId || !dialog.open) return;
+      setStatus(error.message, true);
+      startButton.disabled = false;
     });
     return new Promise(resolve => { resolvePending = resolve; });
   };
@@ -132,12 +134,17 @@
       setStatus('Выбранные устройства изменились. Закройте окно и откройте настройки заново.', true);
       return;
     }
+    const stepDegrees = Number(stepSelect.value);
+    const tiltDegrees = Number(tiltInput.value);
+    if (!stepOptions.includes(stepDegrees) || !Number.isFinite(tiltDegrees)
+        || String(tiltInput.value).trim() === '' || tiltDegrees < -10 || tiltDegrees > 10) {
+      setStatus('Укажите допустимый шаг поворота и наклон от −10° до +10°.', true);
+      return;
+    }
     startButton.disabled = true;
     stepSelect.disabled = true;
     tiltInput.disabled = true;
     const request = requestId;
-    const stepDegrees = Number(stepSelect.value);
-    const tiltDegrees = Number(tiltInput.value);
     setStatus('Сохраняю настройки…');
     try {
       const response = await fetch('/api/v1/scanner/scan-capture-settings', {
