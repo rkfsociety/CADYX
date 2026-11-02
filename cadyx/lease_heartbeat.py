@@ -27,6 +27,10 @@ class LeaseHeartbeat:
                 raise RuntimeError("Cannot start a stopped CADYX lease heartbeat.")
             if self._thread is not None:
                 raise RuntimeError("CADYX lease heartbeat has already started.")
+            # A newly acquired lease can age while the worker waits for its
+            # first timer tick. Renew it synchronously before returning control
+            # to the command, even when worker scheduling is delayed.
+            self._core.heartbeat(self._project_id, self._lease_id)
             thread = threading.Thread(target=self._run, name="cadyx-agent-heartbeat", daemon=True)
             thread.start()
             self._thread = thread

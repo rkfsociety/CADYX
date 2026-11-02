@@ -292,10 +292,21 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(self.core.inspect_project(self.project_id)["lock"]["state"], "FREE")
 
     def test_command_heartbeat_runs_only_while_lease_is_held(self) -> None:
+        # Advance lease time only when a renewal is actually attempted. This
+        # exercises expiry protection without relying on subsecond Windows
+        # scheduler timing or on the speed of the geometry kernel.
+        clock = [0.0]
+        clock_lock = threading.Lock()
+
+        def lease_clock() -> float:
+            with clock_lock:
+                return clock[0]
+
         core = CadyxCore(
             str(Path(self.temporary_directory.name) / "heartbeat-command-projects"),
             kernel=PrimitiveKernelAdapter(),
-            lease_timeout_seconds=0.3,
+            lease_timeout_seconds=1.0,
+            lease_clock=lease_clock,
         )
         project_id = core.create_project("Command heartbeat")["project"]["id"]
         provider = LockCheckingProvider(core, project_id, [
@@ -305,17 +316,31 @@ class AgentRuntimeTests(unittest.TestCase):
             AgentResponse("Saved."),
         ])
         original_execute = core.execute_command
+        original_heartbeat = core.heartbeat
+        renewed_past_initial_expiry = threading.Event()
+
+        def record_renewal(*args, **kwargs):
+            with clock_lock:
+                clock[0] += 0.6
+                elapsed = clock[0]
+            result = original_heartbeat(*args, **kwargs)
+            if elapsed >= 1.2:
+                renewed_past_initial_expiry.set()
+            return result
 
         def long_command(*args, **kwargs):
-            time.sleep(0.25)
+            self.assertTrue(
+                renewed_past_initial_expiry.wait(5.0),
+                "the lease was not renewed past its original expiration",
+            )
             return original_execute(*args, **kwargs)
 
-        with patch.object(core, "heartbeat", wraps=core.heartbeat) as heartbeat:
+        with patch.object(core, "heartbeat", side_effect=record_renewal) as heartbeat:
             with patch.object(core, "execute_command", side_effect=long_command):
                 result = AgentRuntime(core, provider, owner_id="heartbeat").run(
                     project_id, "Create a box.",
                 )
-        self.assertGreater(heartbeat.call_count, 0)
+        self.assertGreaterEqual(heartbeat.call_count, 2)
         self.assertEqual(result.revision, 1)
         self.assertEqual(provider.provider_lock_states, ["FREE", "FREE"])
         self.assertEqual(core.inspect_project(project_id)["lock"]["state"], "FREE")
