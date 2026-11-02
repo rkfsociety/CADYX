@@ -7,6 +7,8 @@ import json
 import math
 import os
 import re
+import shutil
+import stat
 import threading
 from collections import OrderedDict
 from contextlib import ExitStack, contextmanager
@@ -189,17 +191,100 @@ class ProjectLifecycleService(_CoreService):
 
     def start_scan_360(self, project_id: str, rotation_period_seconds: float = 18.0,
                        scanner_device_id: str | None = None, turntable_device_id: str | None = None,
-                       step_degrees: int = 30, align_to_markers: bool = True) -> dict[str, Any]:
+                       step_degrees: int = 30, align_to_markers: bool = True,
+                       replace_run_id: str | None = None) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
             self._require_project_policy(
                 project_id,
                 "file_management",
                 "A 360 scan can start only in a free project with no running operation.",
             )
+            project_dir = self.workspace._project_dir(project_id)
+            if replace_run_id is None:
+                return self._scan_capture.start(project_id, project_dir, rotation_period_seconds,
+                                                scanner_device_id, turntable_device_id, step_degrees, align_to_markers)
+            if not isinstance(replace_run_id, str) or not re.fullmatch(r"revopoint_\d{8}T\d{6}Z", replace_run_id):
+                raise ValidationError("Укажите корректную серию для пересъёмки.")
             return self._scan_capture.start(
-                project_id, self.workspace._project_dir(project_id), rotation_period_seconds,
-                scanner_device_id, turntable_device_id, step_degrees, align_to_markers,
+                project_id, project_dir, rotation_period_seconds, scanner_device_id, turntable_device_id,
+                step_degrees, align_to_markers,
+                before_capture=lambda: self._remove_rescanned_series(project_id, replace_run_id),
             )
+
+    def _remove_rescanned_series(self, project_id: str, run_id: str) -> None:
+        """Remove only the explicitly selected series immediately before a replacement capture."""
+        project = self.workspace._project_dir(project_id).resolve(strict=True)
+        names = (run_id, f"scan_support_{run_id}")
+        entries = []
+        for name in names:
+            candidate = project / name
+            if candidate.is_symlink():
+                raise ValidationError("Серия содержит небезопасную ссылку.")
+            if candidate.exists():
+                resolved = candidate.resolve(strict=True)
+                if not candidate.is_dir() or resolved.parent != project or resolved.name != name:
+                    raise ValidationError("Папка серии находится вне проекта.")
+                for current, dirs, files in os.walk(resolved, followlinks=False):
+                    base = Path(current)
+                    if any((base / item).is_symlink() or item.startswith('.')
+                           or (base / item).resolve().parent != base.resolve()
+                           or (base / item).resolve().name != item for item in dirs):
+                        raise ValidationError("Серия содержит небезопасную папку или ссылку.")
+                    for item in files:
+                        path = base / item
+                        allowed_log = name == names[1] and base == resolved and item == f'.cadyx-scan360-{run_id[10:]}.log'
+                        if (not stat.S_ISREG(path.lstat().st_mode)
+                                or item.casefold().startswith('.cadyx-') and not allowed_log):
+                            raise ValidationError("Серия содержит внутренний или небезопасный файл.")
+                entries.append(resolved)
+        for item in project.iterdir():
+            if item.name.startswith(f"{run_id}_") or item.name == f".cadyx-scan360-{run_id[10:]}.log":
+                if item.is_symlink() or not item.is_file() or item.resolve().parent != project:
+                    raise ValidationError("Файл серии находится вне проекта или является ссылкой.")
+                entries.append(item)
+        if not entries:
+            raise NotFoundError("Серия для пересъёмки не найдена.")
+        document = Document.from_validated_dict(self.workspace.load(project_id, include_history=False)["document"])
+        for obj in document.objects:
+            source = obj.get("source") if obj.get("type") == "feature" else None
+            if not isinstance(source, dict):
+                continue
+            for key in ("project_folder", "folder"):
+                value = source.get(key)
+                if isinstance(value, str):
+                    value = value.replace("\\", "/")
+                    if any(value == name or value.startswith(f"{name}/") for name in names):
+                        raise ConflictError("Серия используется моделью и не может быть удалена.", code="FILE_IN_USE")
+            for key in ("file", "project_file"):
+                value = source.get(key)
+                if isinstance(value, str):
+                    value = value.replace("\\", "/")
+                    if any(value.startswith(f"{name}/") for name in names) or value.startswith(f"{run_id}_"):
+                        raise ConflictError("Файл серии используется моделью и не может быть удалён.", code="FILE_IN_USE")
+        # Move all selected entries aside first. A failed move is rolled back
+        # before any deletion; the project guard prevents concurrent edits.
+        staging = project / f".cadyx-rescan-{uuid4().hex}"
+        staging.mkdir()
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for source in entries:
+                destination = staging / source.name
+                source.rename(destination)
+                moved.append((source, destination))
+        except OSError:
+            for source, destination in reversed(moved):
+                if source.exists() or source.is_symlink():
+                    raise ConflictError("Не удалось восстановить серию: исходный путь занят; временные файлы сохранены.",
+                                        code="RESCAN_ROLLBACK_CONFLICT")
+                destination.rename(source)
+            staging.rmdir()
+            raise
+        try:
+            if staging.is_symlink() or staging.resolve(strict=True).parent != project:
+                raise ValidationError("Временная папка пересъёмки находится вне проекта.")
+            shutil.rmtree(staging)
+        except OSError as exc:
+            raise ValidationError(f"Не удалось полностью удалить прежнюю серию: {exc}") from exc
 
     def scan_360_status(self, project_id: str) -> dict[str, Any]:
         return self._scan_capture.status(project_id, self.workspace._project_dir(project_id))

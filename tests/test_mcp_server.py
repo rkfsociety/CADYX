@@ -96,6 +96,15 @@ class CadyxMCPServerTests(unittest.TestCase):
         start.assert_called_once_with(project_id, 18.0, None, None, 30, True)
         status.assert_called_once_with(project_id)
 
+    def test_rescan_passes_explicit_series_and_step(self) -> None:
+        project_id = self._create_project("Rescan MCP")
+        run_id = "revopoint_20261010T100000Z"
+        with patch.object(self.core, "start_scan_360", return_value={"state":"running"}) as start:
+            result = self._tool_value("cadyx_rescan_360", {"project_id":project_id, "run_id":run_id,
+                                                            "step_degrees":15})
+        self.assertEqual(result["scan"]["state"], "running")
+        start.assert_called_once_with(project_id, 18.0, None, None, 15, True, replace_run_id=run_id)
+
     def test_scan_fusion_tools_route_start_and_status(self) -> None:
         project_id = self._create_project("Scan fusion MCP")
         job = {"state": "running", "run_id": "revopoint_20261010T100000Z",

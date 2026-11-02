@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .errors import ConflictError, ValidationError
 from .workspace_state import prepare_workspace_state
@@ -1115,7 +1115,8 @@ class Scan360CaptureController:
               scanner_device_id: str | None = None,
               turntable_device_id: str | None = None,
               step_degrees: int = 30,
-              align_to_markers: bool = True) -> dict[str, Any]:
+              align_to_markers: bool = True,
+              before_capture: Callable[[], None] | None = None) -> dict[str, Any]:
         if (isinstance(rotation_period_seconds, bool)
                 or not isinstance(rotation_period_seconds, (int, float))
                 or not 18.0 <= rotation_period_seconds <= 90.0):
@@ -1184,6 +1185,13 @@ class Scan360CaptureController:
             except FileExistsError as exc:
                 run_directory.rmdir()
                 raise ConflictError("A scan support folder already exists; no files were replaced.", code="SCAN_LOG_EXISTS") from exc
+            if before_capture is not None:
+                try:
+                    before_capture()
+                except Exception:
+                    support_directory.rmdir()
+                    run_directory.rmdir()
+                    raise
             log_path = support_directory / f".cadyx-scan360-{stamp}.log"
             startup_info = subprocess.STARTUPINFO()
             startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW

@@ -909,6 +909,32 @@ class Scan360CaptureTests(unittest.TestCase):
             expected_python = expected_python.with_name("python.exe")
         self.assertEqual(command[command.index("-PythonExecutable") + 1], str(expected_python))
 
+    @unittest.skipUnless(os.name == "nt", "Revopoint 360 capture runs on the Windows scanner host")
+    def test_rescan_removal_runs_after_device_preflight_and_before_capture_process(self) -> None:
+        class FakeProcess:
+            def poll(self): return None
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = root / "projects" / "part"
+            project.mkdir(parents=True)
+            script = root / "tools" / "revopoint" / "scan_360.ps1"
+            script.parent.mkdir(parents=True); script.touch()
+            controller = Scan360CaptureController(root, project.parent)
+            devices = {"scanners":[{"device_id":"scanner-1", "profile_id":"revopoint-mini-y16"}],
+                       "turntables":[{"device_id":"table-1", "profile_id":"revopoint-dual-axis-table",
+                                       "expected_name":"table", "advertisement_uuid":"adv",
+                                       "service_uuid":"service", "characteristic_uuid":"char"}]}
+            events = []
+            def device_list(): events.append('preflight'); return devices
+            def spawn(*args, **kwargs): events.append('capture'); return FakeProcess()
+            with patch.object(controller, 'list_connected_devices', side_effect=device_list), \
+                 patch.object(controller, '_resolve_scanner_calibration', return_value=(root/'Q.bin', .005)), \
+                 patch.object(controller, '_turntable_marker_map_path', return_value=root/'table.mkf'), \
+                 patch('cadyx.scan_capture.shutil.which', return_value='powershell.exe'), \
+                 patch('cadyx.scan_capture.subprocess.Popen', side_effect=spawn):
+                controller.start('part', project, before_capture=lambda:events.append('delete'))
+            self.assertEqual(events, ['preflight', 'delete', 'capture'])
+
     def test_restart_rejects_unverified_capture_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

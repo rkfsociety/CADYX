@@ -588,6 +588,7 @@ button.object-row.selected { border-color: #9b6038; background: #ff874012; }
 .scan-progress-current-note { color: #bdcdd5 !important; }
 
 .cad3-scan-fuse { margin: 4px 8px 6px 30px; min-height: 28px; font-size: 11px; }
+.cad3-scan-rescan { margin: 4px 8px 6px 0; min-height: 28px; font-size: 11px; }
 .cad3-scan-rescan-note { margin: 2px 8px 6px 30px; color: #ffc68b; font-size: 11px; line-height: 1.4; }
 
 .scan-progress-stage[data-stage-state="warning"] .scan-progress-badge { border-color: #e5aa4e; background: #5b4118; color: #ffdb96; }

@@ -15,7 +15,7 @@ async function main(){
     stitchedSeriesFiles:[],scanTreeLoadedProject:null,scanTreeRequest:0,scanTreeExpanded:new Set(),
     scanTreePreviewSelection:null,scanFusionJob:null,scanFusionPending:false,
     localStorage:{getItem(){return null},setItem(){}},document:{createElement:element},$:()=>null,
-    Intl,Date,Map,Set,I:{cloud:'cloud'},canOpenFilesView:()=>true,notify:()=>{},window:{},
+    Intl,Date,Map,Set,I:{cloud:'cloud'},canOpenFilesView:()=>true,notify:()=>{},window:{confirm:()=>true},
     semanticJson:async url=>url.includes('/folders/')?{files:[{name:`${id}_pose_000.ply`,size:20}]}:
       {files:[],folders:[{name:id}]},
     fetch:async (url,options)=>{requests.push({url,options});return {ok:true,json:async()=>({fusion:{state:'running',run_id:id}})}}};
@@ -36,5 +36,13 @@ async function main(){
   const names=list.children[0].children[1].children.map(item=>item.textContent);
   assert.ok(names.some(name=>name.includes('Сшитое облако')));
   assert.ok(names.some(name=>name.includes('Очищенное облако')));
+  vm.runInContext('scanFusionJob=null; renderScanTree()',sandbox);
+  const rescan=list.children[0].children[1].children[1];
+  assert.equal(rescan.textContent,'Удалить и переснять');
+  await rescan.click();
+  assert.match(requests[1].url,/\/scans\/360$/);
+  assert.equal(JSON.parse(requests[1].options.body).replace_run_id,id);
+  assert.equal(JSON.parse(requests[1].options.body).step_degrees,15);
+
 }
 main().catch(error=>{console.error(error);process.exitCode=1});

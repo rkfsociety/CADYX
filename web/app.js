@@ -391,6 +391,10 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           fuse.textContent=scanFusionJob?.state==='running'&&scanFusionJob.run_id===run.id?'Сшивка выполняется…':'Сшить и обработать';
           fuse.disabled=scanFusionPending||scanFusionJob?.state==='running'||typeof canOpenFilesView!=='function'||!canOpenFilesView(state.project);
           fuse.onclick=()=>startScanFusion(run);children.append(fuse);
+          const rescan=document.createElement('button');rescan.type='button';rescan.className='button cad3-scan-rescan';
+          rescan.textContent='Удалить и переснять';
+          rescan.disabled=fuse.disabled;
+          rescan.onclick=()=>rescanSeries(run);children.append(rescan);
         }
         if(scanFusionJob?.state==='failed'&&scanFusionJob.run_id===run.id&&scanFusionJob.next_action){
           const advice=document.createElement('div');advice.className='cad3-scan-rescan-note';
@@ -420,6 +424,20 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось запустить сшивку');
         if(state.project!==id)return;
         scanFusionJob=payload.fusion;
+      }catch(error){notify(error.message,true)}
+      finally{scanFusionPending=false;if(state.project===id)renderScanTree()}
+    }
+    async function rescanSeries(run){
+      const id=state.project;
+      if(!id||!run.folderName||scanFusionPending||scanFusionJob?.state==='running'||typeof canOpenFilesView!=='function'||!canOpenFilesView(id))return;
+      if(!window.confirm(`Все файлы выбранной серии и её служебные исходники будут удалены до повторной съёмки. Другие серии сохранятся. Оставьте деталь в прежнем положении. Новая съёмка: 24 кадра, шаг 15°. Продолжить?`))return;
+      scanFusionPending=true;renderScanTree();
+      try{
+        const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({replace_run_id:run.id,step_degrees:15,rotation_period_seconds:window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.()??18,scanner_device_id:window.CadyxDeviceSettings?.scannerDeviceId?.(),turntable_device_id:window.CadyxDeviceSettings?.turntableDeviceId?.()})});
+        const payload=await response.json();
+        if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось переснять серию');
+        if(state.project!==id)return;
+        scanFusionJob=null;await loadScanTree(id,true);notify('Пересъёмка запущена: 24 кадра с шагом 15°.');
       }catch(error){notify(error.message,true)}
       finally{scanFusionPending=false;if(state.project===id)renderScanTree()}
     }
