@@ -244,6 +244,78 @@ class Scan360CaptureTests(unittest.TestCase):
                 self.assertEqual(sorted(path.name for path in directory.iterdir()),
                                  ["settings.json"])
 
+    def test_scan_capture_settings_retries_transient_windows_replace_conflicts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            workspace.mkdir()
+            controller = Scan360CaptureController(root, workspace)
+            original_replace = os.replace
+            attempts = []
+
+            def intermittent_replace(source, destination):
+                attempts.append(destination)
+                if len(attempts) < 3:
+                    error = PermissionError("Windows sharing violation")
+                    error.winerror = 5
+                    raise error
+                return original_replace(source, destination)
+
+            with (
+                patch.dict(os.environ, {"LOCALAPPDATA": str(root / "appdata")}),
+                patch("cadyx.scan_capture.os.replace", side_effect=intermittent_replace),
+                patch("cadyx.scan_capture.time.sleep") as sleep,
+            ):
+                saved = controller.save_scan_capture_settings("scanner-1", "table-1", 15, 2.5)
+                loaded = controller.scan_capture_settings("scanner-1", "table-1")
+            self.assertEqual(loaded["step_degrees"], 15)
+            self.assertTrue(saved["configured"])
+            self.assertEqual(len(attempts), 3)
+            self.assertEqual(sleep.call_count, 2)
+            directory = controller._scan_capture_settings_directory("scanner-1", "table-1")
+            self.assertEqual([path.name for path in directory.iterdir()], ["settings.json"])
+
+    def test_scan_capture_settings_does_not_retry_permanent_replace_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            workspace.mkdir()
+            controller = Scan360CaptureController(root, workspace)
+            with (
+                patch.dict(os.environ, {"LOCALAPPDATA": str(root / "appdata")}),
+                patch("cadyx.scan_capture.os.replace",
+                      side_effect=PermissionError("Denied")) as replace,
+                patch("cadyx.scan_capture.time.sleep") as sleep,
+            ):
+                with self.assertRaisesRegex(ValidationError, "Could not save"):
+                    controller.save_scan_capture_settings("scanner-1", "table-1", 15, 2.5)
+            self.assertEqual(replace.call_count, 1)
+            sleep.assert_not_called()
+            directory = controller._scan_capture_settings_directory("scanner-1", "table-1")
+            self.assertEqual(list(directory.iterdir()), [])
+
+    def test_parallel_turntable_settings_saves_do_not_share_temporary_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            workspace.mkdir()
+            controller = Scan360CaptureController(root, workspace)
+            with (
+                patch.dict(os.environ, {"LOCALAPPDATA": str(root / "appdata")}),
+                patch.object(controller, "_known_turntable_profile",
+                             return_value="revopoint-dual-axis-table"),
+            ):
+                periods = [18.0, 25.0, 30.0, 40.0] * 8
+                with ThreadPoolExecutor(max_workers=8) as pool:
+                    results = list(pool.map(
+                        lambda period: controller.save_turntable_settings(
+                            "table-1", period, "revopoint-dual-axis-table"), periods))
+                directory = controller._turntable_settings_directory("table-1")
+                stored = json.loads((directory / "settings.json").read_text(encoding="utf-8"))
+                self.assertIn(stored["rotation_period_seconds"], periods)
+                self.assertTrue(all(result["configured"] for result in results))
+                self.assertEqual([path.name for path in directory.iterdir()], ["settings.json"])
+
     def test_scan_capture_settings_validate_step_and_tilt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

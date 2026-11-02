@@ -34,6 +34,33 @@ _LIVE_PREVIEW_CLIENT_METRIC_FIELDS = frozenset({
 })
 
 
+def _write_settings_atomically(destination: Path, payload: str) -> None:
+    """Publish complete settings, tolerating brief Windows replacement sharing conflicts."""
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                         prefix=".settings-", suffix=".tmp",
+                                         dir=destination.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+        # A second process or antivirus may open the destination without
+        # FILE_SHARE_DELETE on Windows. Retry only Windows sharing errors.
+        for attempt in range(8):
+            try:
+                temporary.replace(destination)
+                return
+            except PermissionError as exc:
+                if getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 7:
+                    raise
+                time.sleep(min(0.01 * (attempt + 1), 0.05))
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 class _ScanFileChanged(Exception):
     """The file changed while its cache entry was being calculated."""
 
@@ -281,6 +308,7 @@ class Scan360CaptureController:
         self._workspace_root = workspace_root.resolve()
         self._state_root = prepare_workspace_state(self._workspace_root)
         self._guard = threading.RLock()
+        self._settings_guard = threading.RLock()
         self._job: _Scan360Job | None = None
         self._live_preview: _LivePreviewJob | None = None
         self._turntable_spin: _TurntableSpinJob | None = None
@@ -1060,14 +1088,12 @@ class Scan360CaptureController:
                 temporary_map.unlink(missing_ok=True)
                 raise ValidationError("Could not initialize the selected table's marker map.") from exc
         destination = directory / "settings.json"
-        temporary = directory / "settings.json.tmp"
         payload = json.dumps({"profile_id": profile_id,
                               "rotation_period_seconds": float(rotation_period_seconds)}, indent=2) + "\n"
         try:
-            temporary.write_text(payload, encoding="utf-8")
-            temporary.replace(destination)
+            with self._settings_guard:
+                _write_settings_atomically(destination, payload)
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
             raise ValidationError("Could not save the selected turntable's settings file.") from exc
         return {"turntable_device_id": turntable_device_id,
                 "profile_id": profile_id,
@@ -1096,7 +1122,8 @@ class Scan360CaptureController:
                     "profile_id": profile_id,
                     "step_degrees": 30, "tilt_degrees": 0.0, "configured": False}
         try:
-            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            with self._settings_guard:
+                settings = json.loads(settings_path.read_text(encoding="utf-8"))
             step = _validate_scan_step_degrees(settings["step_degrees"])
             tilt = _validate_scan_tilt_degrees(settings["tilt_degrees"])
             saved_scanner = settings["scanner_device_id"]
@@ -1131,19 +1158,10 @@ class Scan360CaptureController:
                               "profile_id": profile_id,
                               "step_degrees": step,
                               "tilt_degrees": tilt}, indent=2) + "\n"
-        temporary: Path | None = None
         try:
-            # A fixed .tmp name races with another request saving the same pair.
-            # Each writer publishes its complete file through an atomic replace.
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
-                                             prefix=".settings-", suffix=".tmp",
-                                             dir=directory, delete=False) as stream:
-                temporary = Path(stream.name)
-                stream.write(payload)
-            temporary.replace(destination)
+            with self._settings_guard:
+                _write_settings_atomically(destination, payload)
         except OSError as exc:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
             raise ValidationError("Could not save the scan capture settings file.") from exc
         return {"scanner_device_id": scanner_device_id,
                 "turntable_device_id": turntable_device_id,
