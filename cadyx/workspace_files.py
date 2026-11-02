@@ -317,8 +317,13 @@ class WorkspaceArtifactStore:
     ) -> dict[str, Any]:
         if source_project_id == target_project_id:
             raise ValidationError("Source and target projects must be different.")
-        files: list[tuple[Path, Path, int]] = []
         canonical_source_root = source_root.resolve(strict=True)
+        canonical_target_root = target_root.resolve(strict=True)
+        if (canonical_source_root == canonical_target_root
+                or canonical_source_root in canonical_target_root.parents
+                or canonical_target_root in canonical_source_root.parents):
+            raise ValidationError("Project merge requires separate, non-nested project directories.")
+        files: list[tuple[Path, Path, os.stat_result]] = []
         for source in sorted(source_root.rglob("*"), key=lambda item: item.as_posix().casefold()):
             relative = source.relative_to(source_root)
             if any(part.casefold().startswith(".cadyx-") for part in relative.parts) or relative.as_posix().casefold() == "project.json":
@@ -337,7 +342,7 @@ class WorkspaceArtifactStore:
                     f"Project file escapes its source directory: {relative.as_posix()}."
                 )
             destination = target_root / relative
-            files.append((source, destination, resolved.stat().st_size))
+            files.append((source, destination, resolved.stat()))
 
         for _, destination, _ in files:
             current = target_root
@@ -361,7 +366,12 @@ class WorkspaceArtifactStore:
         copied: list[Path] = []
         manifest: list[dict[str, Any]] = []
         try:
-            for source, destination, size in files:
+            for source, destination, source_stat in files:
+                size = source_stat.st_size
+                source_identity = (
+                    source_stat.st_dev, source_stat.st_ino,
+                    source_stat.st_size, source_stat.st_mtime_ns,
+                )
                 missing: list[Path] = []
                 parent = destination.parent
                 while parent != target_root and not parent.exists():
@@ -380,9 +390,20 @@ class WorkspaceArtifactStore:
                         delete=False,
                     ) as output_stream:
                         temporary = Path(output_stream.name)
+                        opened_stat = os.fstat(input_stream.fileno())
+                        if (opened_stat.st_dev, opened_stat.st_ino,
+                                opened_stat.st_size, opened_stat.st_mtime_ns) != source_identity:
+                            raise ValidationError("Project source changed during merge; no files were copied.")
+                        copied_bytes = 0
                         while chunk := input_stream.read(1024 * 1024):
                             output_stream.write(chunk)
                             digest.update(chunk)
+                            copied_bytes += len(chunk)
+                        final_stat = os.fstat(input_stream.fileno())
+                        if (copied_bytes != size or
+                                (final_stat.st_dev, final_stat.st_ino,
+                                 final_stat.st_size, final_stat.st_mtime_ns) != source_identity):
+                            raise ValidationError("Project source changed during merge; no files were copied.")
                         output_stream.flush()
                         os.fsync(output_stream.fileno())
                     os.link(temporary, destination)

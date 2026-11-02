@@ -276,6 +276,43 @@ class WorkspaceServiceTests(unittest.TestCase):
             b"scan",
         )
 
+    def test_project_merge_rejects_overlapping_directories(self) -> None:
+        source = self.root / "source"
+        source.mkdir()
+        (source / "part.step").write_bytes(b"source")
+        nested = source / "nested"
+        nested.mkdir()
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+
+        for target in (source, nested, self.root):
+            with self.subTest(target=target), self.assertRaisesRegex(
+                ValidationError, "non-nested"
+            ):
+                store.copy_project_files("source-id", "target-id", source, target)
+        self.assertEqual([entry.name for entry in nested.iterdir()], [])
+        self.assertEqual((source / "part.step").read_bytes(), b"source")
+
+    def test_project_merge_rolls_back_when_source_changes_before_copy(self) -> None:
+        source = self.root / "source"
+        target = self.root / "target"
+        source.mkdir()
+        target.mkdir()
+        source_file = source / "part.step"
+        source_file.write_bytes(b"original")
+        original_open = Path.open
+
+        def changed_source_on_open(path, *args, **kwargs):
+            if path == source_file and args and args[0] == "rb":
+                source_file.write_bytes(b"changed content")
+            return original_open(path, *args, **kwargs)
+
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+        with patch.object(Path, "open", changed_source_on_open):
+            with self.assertRaisesRegex(ValidationError, "source changed"):
+                store.copy_project_files("source-id", "target-id", source, target)
+        self.assertEqual(list(target.iterdir()), [])
+        self.assertEqual(source_file.read_bytes(), b"changed content")
+
     def test_artifact_batch_operations_reject_casefold_collisions(self) -> None:
         directory = self.root / "project"
         directory.mkdir()
