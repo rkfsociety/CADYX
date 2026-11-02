@@ -1317,10 +1317,11 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         if(!id){scanStatus.textContent='Проект не выбран.';return}
         const captureSettings=await (window.CadyxScanCaptureSettings?.open()??Promise.resolve(null));
         if(!captureSettings)return;
+        if(id!==projectId()||captureSettings.scanner_device_id!==window.CadyxDeviceSettings?.scannerDeviceId?.()||captureSettings.turntable_device_id!==window.CadyxDeviceSettings?.turntableDeviceId?.()||captureSettings.profile_id!==(window.CadyxDeviceSettings?.turntableProfileId?.()||'')){scanStatus.textContent='Проект или устройства изменились. Откройте настройки съёмки заново.';return}
         if(scanTreePreviewSelection)clearScanTreePreview();
         scan360.dataset.scanCapturePending='true';syncCaptureButton();scanStatus.hidden=false;scanStatus.textContent='Запускаю съёмку…';
         try{
-          const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation_period_seconds:window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.()??18,scanner_device_id:window.CadyxDeviceSettings?.scannerDeviceId?.(),turntable_device_id:window.CadyxDeviceSettings?.turntableDeviceId?.(),step_degrees:captureSettings.step_degrees,tilt_degrees:captureSettings.tilt_degrees})});
+          const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation_period_seconds:window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.()??18,scanner_device_id:captureSettings.scanner_device_id,turntable_device_id:captureSettings.turntable_device_id,step_degrees:captureSettings.step_degrees,tilt_degrees:captureSettings.tilt_degrees})});
           const payload=await response.json();
           if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
           if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось запустить сканирование');

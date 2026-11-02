@@ -93,7 +93,7 @@ class CadyxMCPServerTests(unittest.TestCase):
 
         self.assertEqual(started["scan"], scan)
         self.assertEqual(current["scan"], scan)
-        start.assert_called_once_with(project_id, 18.0, None, None, 30, True)
+        start.assert_called_once_with(project_id, 18.0, None, None, 30, True, 0.0)
         status.assert_called_once_with(project_id)
 
     def test_rescan_passes_explicit_series_and_step(self) -> None:
@@ -103,7 +103,29 @@ class CadyxMCPServerTests(unittest.TestCase):
             result = self._tool_value("cadyx_rescan_360", {"project_id":project_id, "run_id":run_id,
                                                             "step_degrees":15})
         self.assertEqual(result["scan"]["state"], "running")
-        start.assert_called_once_with(project_id, 18.0, None, None, 15, True, replace_run_id=run_id)
+        start.assert_called_once_with(project_id, 18.0, None, None, 15, True, 0.0, replace_run_id=run_id)
+
+    def test_mcp_scan_tilt_reaches_core_and_rejects_unsafe_values(self) -> None:
+        project_id = self._create_project("Tilted scan MCP")
+        with patch.object(self.core, "start_scan_360", return_value={"state": "running"}) as start:
+            self._tool_value("cadyx_start_scan_360", {
+                "project_id": project_id, "step_degrees": 15, "tilt_degrees": -7.5,
+            })
+            start.assert_called_once_with(project_id, 18.0, None, None, 15, True, -7.5)
+            start.reset_mock()
+            self._tool_value("cadyx_rescan_360", {
+                "project_id": project_id, "run_id": "revopoint_20261010T100000Z",
+                "tilt_degrees": 8.0,
+            })
+            start.assert_called_once_with(project_id, 18.0, None, None, 30, True, 8.0,
+                                          replace_run_id="revopoint_20261010T100000Z")
+            start.reset_mock()
+            for unsafe in (-10.1, 10.1, True):
+                result = self.app.call_tool("cadyx_start_scan_360", {
+                    "project_id": project_id, "tilt_degrees": unsafe,
+                })
+                self.assertTrue(result.get("isError"), result)
+            start.assert_not_called()
 
     def test_scan_fusion_tools_route_start_and_status(self) -> None:
         project_id = self._create_project("Scan fusion MCP")

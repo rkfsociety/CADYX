@@ -86,6 +86,7 @@ const timers = [];
 const browserSandbox = {
   window: {},
   URLSearchParams,
+  Headers,
   Math,
   performance: { now: () => 1_000 },
 };

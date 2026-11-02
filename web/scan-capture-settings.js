@@ -14,6 +14,7 @@
 
   let resolvePending = null;
   let requestId = 0;
+  let activeSelection = null;
 
   const setStatus = (message = '', isError = false) => {
     if (status.textContent !== message) status.textContent = message;
@@ -24,6 +25,10 @@
     turntable_device_id: window.CadyxDeviceSettings?.turntableDeviceId?.() || '',
     profile_id: window.CadyxDeviceSettings?.turntableProfileId?.() || '',
   });
+  const sameSelection = (a, b) => Boolean(a && b
+    && a.scanner_device_id === b.scanner_device_id
+    && a.turntable_device_id === b.turntable_device_id
+    && a.profile_id === b.profile_id);
   const syncTiltDisplay = () => {
     const label = `${Number(tiltInput.value).toFixed(1).replace(/\.0$/, '')}°`;
     if (tiltValue.textContent !== label) tiltValue.textContent = label;
@@ -65,6 +70,7 @@
     if (dialog.open) return Promise.resolve(null);
     const request = ++requestId;
     const selection = deviceSelection();
+    activeSelection = selection;
     setStatus();
     startButton.disabled = true;
     fillSteps(30);
@@ -102,6 +108,7 @@
   const settle = value => {
     const resolve = resolvePending;
     resolvePending = null;
+    activeSelection = null;
     requestId += 1;
     dialog.close();
     resolve?.(value);
@@ -114,9 +121,13 @@
   dialog.addEventListener('cancel', () => settle(null));
   startButton.addEventListener('click', async () => {
     if (startButton.disabled) return;
-    const selection = deviceSelection();
-    if (!selection.scanner_device_id || !selection.turntable_device_id) {
+    const selection = activeSelection;
+    if (!selection?.scanner_device_id || !selection.turntable_device_id) {
       setStatus('Выберите сканер и стол в настройках устройств.', true);
+      return;
+    }
+    if (!sameSelection(selection, deviceSelection())) {
+      setStatus('Выбранные устройства изменились. Закройте окно и откройте настройки заново.', true);
       return;
     }
     startButton.disabled = true;
@@ -129,7 +140,10 @@
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error?.message || payload.message || 'Не удалось сохранить настройки съёмки.');
-      settle({ step_degrees: Number(stepSelect.value), tilt_degrees: Number(tiltInput.value) });
+      if (!sameSelection(selection, deviceSelection())) {
+        throw new Error('Выбранные устройства изменились. Закройте окно и откройте настройки заново.');
+      }
+      settle({ ...selection, step_degrees: Number(stepSelect.value), tilt_degrees: Number(tiltInput.value) });
     } catch (error) {
       setStatus(error.message, true);
       startButton.disabled = false;

@@ -17,7 +17,7 @@ assert.doesNotMatch(html.match(/<dialog id="scan-capture-settings-dialog"[\s\S]*
   /\stitle=/i, 'the capture settings dialog uses aria-label, not native hover tooltips');
 assert.match(appSource, /CadyxScanCaptureSettings\?\.open\(\)/,
   'the Сканировать 360° button opens the settings dialog before starting');
-assert.match(appSource, /step_degrees:captureSettings\.step_degrees,tilt_degrees:captureSettings\.tilt_degrees/,
+assert.match(appSource, /scanner_device_id:captureSettings\.scanner_device_id,turntable_device_id:captureSettings\.turntable_device_id,step_degrees:captureSettings\.step_degrees,tilt_degrees:captureSettings\.tilt_degrees/,
   'the confirmed dialog values drive the 360 capture start request');
 
 function fixture(fetch) {
@@ -123,6 +123,8 @@ async function main() {
       profile_id: 'revopoint-dual-axis-table', step_degrees: 15, tilt_degrees: 5,
     });
     const confirmed = await pending;
+    assert.equal(confirmed.scanner_device_id, 'scanner-1');
+    assert.equal(confirmed.turntable_device_id, 'table-1');
     assert.equal(confirmed.step_degrees, 15);
     assert.equal(confirmed.tilt_degrees, 5);
     assert.equal(f.get('scan-capture-settings-dialog').open, false);
@@ -149,6 +151,35 @@ async function main() {
     assert.equal(await pending, null);
     assert.ok(!requests.some(url => url === '/api/v1/scanner/scan-capture-settings'),
       'cancel never persists settings');
+  }
+
+  // Device changes while the dialog is open must not save settings to another pair.
+  {
+    const requests = [];
+    let tableId = 'table-1';
+    const f = fixture(async (url, options = {}) => {
+      requests.push([url, options]);
+      if (url === '/api/v1/scanner/devices') return response({ scanners: [], turntables: [] });
+      if (url.startsWith('/api/v1/scanner/scan-capture-settings') && options.method !== 'POST') {
+        return response(savedSettings);
+      }
+      if (options.method === 'POST') return response({ ok: true });
+      throw Error('Unexpected request: ' + url);
+    });
+    f.sandbox.window.CadyxDeviceSettings = {
+      scannerDeviceId: () => 'scanner-1',
+      turntableDeviceId: () => tableId,
+      turntableProfileId: () => 'revopoint-dual-axis-table',
+    };
+    const pending = f.api.open();
+    for (let i = 0; i < 6; i++) await tick();
+    tableId = 'table-2';
+    await f.get('scan-capture-settings-start').click();
+    assert.equal(requests.filter(([, opts]) => opts.method === 'POST').length, 0);
+    assert.match(f.get('scan-capture-settings-status').textContent, /изменились/);
+    assert.equal(f.get('scan-capture-settings-dialog').open, true);
+    await f.get('scan-capture-settings-cancel').click();
+    assert.equal(await pending, null);
   }
 
   console.log('scan capture settings dialog tests passed');

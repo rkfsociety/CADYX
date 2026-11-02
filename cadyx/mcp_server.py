@@ -344,8 +344,8 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_remove_project_files", "description": "Remove explicitly listed, unused files from a project or project subfolder after checking the project is free.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING, "filenames": {"type": "array", "items": _STRING, "minItems": 1, "maxItems": 1000}}, ["project_id", "filenames"])},
     {"name": "cadyx_remove_project_folder", "description": "Remove one existing project subfolder recursively after checking it is unused and the project is free.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING}, ["project_id", "folder_name"])},
     {"name": "cadyx_move_project_files", "description": "Move explicitly listed direct project files into a scan-series subfolder after checking the project is free and files are unused.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING, "filenames": {"type": "array", "items": _STRING, "minItems": 1, "maxItems": 1000}}, ["project_id", "folder_name", "filenames"])},
-    {"name": "cadyx_start_scan_360", "description": "Start direct-UVC 360-degree point capture in a free project. Set step_degrees (divisor of 360, 1–30; default 30) and align_to_markers=false to preserve camera-frame points for geometry-only registration. The physical turntable must be level.", "inputSchema": _schema({"project_id": _STRING, "step_degrees": {"type": "integer", "minimum": 1, "maximum": 30}, "align_to_markers": {"type": "boolean"}, "rotation_period_seconds": {"type": "number", "minimum": 18, "maximum": 90}, "scanner_device_id": _STRING, "turntable_device_id": _STRING}, ["project_id"])},
-    {"name": "cadyx_rescan_360", "description": "Explicitly replace one selected 360 scan: delete its series and support files immediately before capturing a new series. The part must remain in the same position.", "inputSchema": _schema({"project_id": _STRING, "run_id": _STRING, "step_degrees": {"type": "integer", "minimum": 1, "maximum": 30}}, ["project_id", "run_id"])},
+    {"name": "cadyx_start_scan_360", "description": "Start direct-UVC 360-degree point capture in a free project. Set step_degrees (divisor of 360, 1–30; default 30) and align_to_markers=false to preserve camera-frame points for geometry-only registration. Use tilt_degrees within the safe ±10° range (default 0).", "inputSchema": _schema({"project_id": _STRING, "step_degrees": {"type": "integer", "minimum": 1, "maximum": 30}, "align_to_markers": {"type": "boolean"}, "rotation_period_seconds": {"type": "number", "minimum": 18, "maximum": 90}, "scanner_device_id": _STRING, "turntable_device_id": _STRING, "tilt_degrees": {"type": "number", "minimum": -10, "maximum": 10}}, ["project_id"])},
+    {"name": "cadyx_rescan_360", "description": "Explicitly replace one selected 360 scan: delete its series and support files immediately before capturing a new series. The part must remain in the same position.", "inputSchema": _schema({"project_id": _STRING, "run_id": _STRING, "step_degrees": {"type": "integer", "minimum": 1, "maximum": 30}, "tilt_degrees": {"type": "number", "minimum": -10, "maximum": 10}}, ["project_id", "run_id"])},
     {"name": "cadyx_get_scan_360_status", "description": "Read native 360-degree scan progress and the latest captured point-cloud preview for a project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_start_scan_fusion", "description": "Start background geometric registration and cleanup for a completed 360-degree series, retaining source and provisional outputs.", "inputSchema": _schema({"project_id": _STRING, "run_id": _STRING}, ["project_id", "run_id"])},
     {"name": "cadyx_get_scan_fusion_status", "description": "Read actual progress and outcome of a scan-series registration and cleanup job.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
@@ -614,13 +614,13 @@ class MCPApplication:
             })
         if name == "cadyx_start_scan_360":
             body = {key: args[key] for key in ("step_degrees", "align_to_markers", "rotation_period_seconds",
-                                               "scanner_device_id", "turntable_device_id") if key in args}
+                                               "scanner_device_id", "turntable_device_id", "tilt_degrees") if key in args}
             return self.api.post(self._project(args["project_id"], "/scans/360"), body)
         if name == "cadyx_get_scan_360_status":
             return self.api.get(self._project(args["project_id"], "/scans/360"))
         if name == "cadyx_rescan_360":
             return self.api.post(self._project(args["project_id"], "/scans/360"),
-                                 {"replace_run_id": args["run_id"], **({"step_degrees": args["step_degrees"]} if "step_degrees" in args else {})})
+                                 {"replace_run_id": args["run_id"], **{key: args[key] for key in ("step_degrees", "tilt_degrees") if key in args}})
         if name == "cadyx_start_scan_fusion":
             return self.api.post(self._project(args["project_id"], "/scans/fusion"), {"run_id": args["run_id"]})
         if name == "cadyx_get_scan_fusion_status":
