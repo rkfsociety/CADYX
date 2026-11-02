@@ -732,8 +732,12 @@ class WorkspaceServiceTests(unittest.TestCase):
         source.write_bytes(b"original")
         original_link = os.link
 
+        replaced = False
+
         def replace_source(src, dst, *args, **kwargs):
-            if Path(src) == source and Path(dst) == destination:
+            nonlocal replaced
+            if not replaced:
+                replaced = True
                 source.unlink()
                 source.write_bytes(b"replacement")
             return original_link(src, dst, *args, **kwargs)
@@ -742,6 +746,7 @@ class WorkspaceServiceTests(unittest.TestCase):
         with patch("cadyx.workspace_files.os.link", side_effect=replace_source):
             with self.assertRaisesRegex(ValidationError, "source changed"):
                 store.rename_project_file(project, "part.step", "renamed.step")
+        self.assertTrue(replaced, "The test must inject a replacement during os.link")
         self.assertEqual(source.read_bytes(), b"replacement")
         self.assertFalse(destination.exists())
 
@@ -758,8 +763,12 @@ class WorkspaceServiceTests(unittest.TestCase):
         outside.write_bytes(b"outside")
         original_link = os.link
 
+        replaced = False
+
         def replace_source(src, dst, *args, **kwargs):
-            if Path(src) == source and Path(dst) == destination:
+            nonlocal replaced
+            if not replaced:
+                replaced = True
                 source.rename(backup)
                 source.symlink_to(outside)
             return original_link(src, dst, *args, **kwargs)
@@ -768,6 +777,7 @@ class WorkspaceServiceTests(unittest.TestCase):
         with patch("cadyx.workspace_files.os.link", side_effect=replace_source):
             with self.assertRaisesRegex(ValidationError, "source changed"):
                 store.rename_project_file(project, "part.step", "renamed.step")
+        self.assertTrue(replaced, "The test must inject a symlink during os.link")
         self.assertEqual(backup.read_bytes(), b"original")
         self.assertTrue(source.is_symlink())
         self.assertEqual(outside.read_bytes(), b"outside")
