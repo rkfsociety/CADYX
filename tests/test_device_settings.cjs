@@ -147,7 +147,67 @@ async function main() {
   assert.equal(stale.get('scanner-device-select').value, 'scanner-1',
     'late discovery from a closed dialog must not erase current device choices');
   assert.equal(stale.get('device-settings-save').disabled, false);
-  console.log('Device settings: keyboard tabs, persisted period, single save and stale discovery passed.');
+
+  // Closing during calibration must not start a table write or persist a stale selection.
+  const calibrationGate = deferred();
+  let calibrationPosts = 0, tablePosts = 0;
+  const canceled = fixture(async (url, options = {}) => {
+    if (url === '/api/v1/scanner/devices') return response({
+      ...discovered, scanners: [{ ...discovered.scanners[0], calibrated: false }],
+    });
+    if (url.startsWith('/api/v1/scanner/turntable/settings') && options.method !== 'POST')
+      return response({ configured: true, turntable_device_id: 'table-1',
+        profile_id: 'table-profile', rotation_period_seconds: 30 });
+    if (url === '/api/v1/scanner/calibration' && options.method === 'POST') {
+      calibrationPosts += 1; await calibrationGate.promise; return response({});
+    }
+    if (url === '/api/v1/scanner/turntable/settings' && options.method === 'POST') {
+      tablePosts += 1; return response({});
+    }
+    throw Error('Unexpected canceled-save request: ' + url);
+  });
+  await canceled.get('scanning-devices').fire('click');
+  for (let i = 0; i < 6; i++) await tick();
+  canceled.get('scanner-q-matrix').files = [{ size: 64, arrayBuffer: async () => new Uint8Array(64).buffer }];
+  canceled.get('scanner-depth-scale').value = '0.1';
+  const pending = canceled.get('device-settings-save').fire('click');
+  await tick();
+  assert.equal(calibrationPosts, 1);
+  assert.equal(canceled.get('device-settings-refresh').disabled, true);
+  assert.equal(canceled.get('scanner-device-select').disabled, true);
+  assert.equal(canceled.get('turntable-device-select').disabled, true);
+  await canceled.get('device-settings-dialog').close();
+  calibrationGate.resolve();
+  await pending;
+  assert.equal(tablePosts, 0, 'canceled calibration must not start a table write');
+  assert.equal(canceled.storage.has('cadyx-device-settings-v1'), false,
+    'canceled save must not persist a stale selection');
+
+  // Delayed GET responses cannot overwrite a period edited in the dialog.
+  const oldTableSettings = deferred();
+  let settingsReads = 0;
+  const edited = fixture(async (url, options = {}) => {
+    if (url === '/api/v1/scanner/devices') return response(discovered);
+    if (url.startsWith('/api/v1/scanner/calibration?')) return response({ depth_scale_mm_per_raw_unit: 0.1 });
+    if (url.startsWith('/api/v1/scanner/turntable/settings') && options.method !== 'POST') {
+      settingsReads += 1;
+      return settingsReads === 1
+        ? response({ configured: true, turntable_device_id: 'table-1',
+          profile_id: 'table-profile', rotation_period_seconds: 30 })
+        : oldTableSettings.promise;
+    }
+    throw Error('Unexpected period-edit request: ' + url);
+  });
+  await edited.get('scanning-devices').fire('click');
+  for (let i = 0; i < 6; i++) await tick();
+  edited.get('turntable-rotation-period').value = '45';
+  await edited.get('turntable-rotation-period').fire('input');
+  oldTableSettings.resolve(response({ configured: true, turntable_device_id: 'table-1',
+    profile_id: 'table-profile', rotation_period_seconds: 60 }));
+  for (let i = 0; i < 4; i++) await tick();
+  assert.equal(edited.get('turntable-rotation-period').value, '45',
+    'late settings must not overwrite manual input');
+  console.log('Device settings: tabs, save cancellation, stale discovery and period edits passed.');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

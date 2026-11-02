@@ -196,6 +196,8 @@
     updateCalibrationStatus();
   });
   tableSelect.addEventListener('change', () => updateTurntableSettings());
+  // A manual period edit takes precedence over an earlier settings request.
+  period.addEventListener('input', () => { tableSettingsRequest += 1; });
   replaceQFile.addEventListener('click', () => qFile.click());
   qFile.addEventListener('change', () => {
     calibrationRequest += 1;
@@ -205,6 +207,8 @@
     else updateCalibrationStatus();
   });
   open.addEventListener('click', () => {
+    calibrationRequest += 1;
+    tableSettingsRequest += 1;
     const saved = read();
     selectDevice(saved.activeDevice);
     period.value = String(saved.turntableRotationPeriodSeconds);
@@ -225,21 +229,35 @@
   refresh.addEventListener('click', discover);
   dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
   save.addEventListener('click', async () => {
-    if (saving || !devicesReady || refresh.disabled) return;
+    if (saving || !devicesReady || refresh.disabled || !dialog.open) return;
+    const request = discoveryRequest;
+    const current = () => dialog.open && request === discoveryRequest;
+    const scannerId = scannerSelect.value;
+    const tableId = tableSelect.value;
+    const rotationPeriod = Number(period.value);
+    const selectedTab = activeDevice;
     saving = true;
     save.disabled = true;
+    refresh.disabled = true;
+    scannerSelect.disabled = true;
+    tableSelect.disabled = true;
+    period.disabled = true;
+    qFile.disabled = true;
+    replaceQFile.disabled = true;
+    calibrationRequest += 1;
+    tableSettingsRequest += 1;
     try {
-      if (!scannerSelect.value || !tableSelect.value) {
+      if (!scannerId || !tableId) {
         status.textContent = 'Выберите подключённый сканер и стол.';
         return;
       }
-      const value = Number(period.value);
+      const value = rotationPeriod;
       if (!allowedPeriods.has(value)) {
         status.textContent = 'Выберите поддерживаемый период оборота.';
         return;
       }
-      const scanner = devices.scanners.find(item => item.device_id === scannerSelect.value);
-      const turntable = devices.turntables.find(item => item.device_id === tableSelect.value);
+      const scanner = devices.scanners.find(item => item.device_id === scannerId);
+      const turntable = devices.turntables.find(item => item.device_id === tableId);
       if (!scanner || !turntable) {
         status.textContent = 'Обновите список устройств и выберите подключённый сканер и стол.';
         return;
@@ -253,6 +271,7 @@
         }
         try {
           const bytes = new Uint8Array(await file.arrayBuffer());
+          if (!current()) return;
           let binary = '';
           for (const byte of bytes) binary += String.fromCharCode(byte);
           const response = await fetch('/api/v1/scanner/calibration', {
@@ -260,31 +279,34 @@
             body: JSON.stringify({ scanner_device_id: scanner.device_id, q_matrix_base64: btoa(binary), depth_scale_mm_per_raw_unit: scale }),
           });
           const result = await response.json();
+          if (!current()) return;
           if (!response.ok) throw new Error(result.message || result.error || 'Не удалось сохранить калибровку.');
           scanner.calibrated = true;
         } catch (error) {
-          status.textContent = error.message;
+          if (current()) status.textContent = error.message;
           return;
         }
       }
+      if (!current()) return;
       try {
         const tableResponse = await fetch('/api/v1/scanner/turntable/settings', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ turntable_device_id: tableSelect.value, profile_id: turntable.profile_id,
+          body: JSON.stringify({ turntable_device_id: tableId, profile_id: turntable.profile_id,
             rotation_period_seconds: value }),
         });
         const tableResult = await tableResponse.json();
+        if (!current()) return;
         if (!tableResponse.ok) throw new Error(tableResult.message || tableResult.error || 'Не удалось сохранить настройки стола.');
         turntableProfileId = turntable.profile_id;
         turntableRotationPeriodSeconds = value;
       } catch (error) {
-        status.textContent = error.message;
+        if (current()) status.textContent = error.message;
         return;
       }
       const settings = {
-        activeDevice,
-        scannerDeviceId: scannerSelect.value,
-        turntableDeviceId: tableSelect.value,
+        activeDevice: selectedTab,
+        scannerDeviceId: scannerId,
+        turntableDeviceId: tableId,
         turntableProfileId,
         turntableRotationPeriodSeconds: value,
       };
@@ -296,7 +318,14 @@
       }
     } finally {
       saving = false;
-      save.disabled = !devicesReady;
+      scannerSelect.disabled = false;
+      tableSelect.disabled = false;
+      period.disabled = false;
+      qFile.disabled = false;
+      replaceQFile.disabled = false;
+      // Do not unlock a new discovery after a canceled save and dialog reopen.
+      if (!dialog.open || current()) refresh.disabled = false;
+      save.disabled = !dialog.open || !devicesReady || refresh.disabled;
     }
   });
   selectDevice(activeDevice);
