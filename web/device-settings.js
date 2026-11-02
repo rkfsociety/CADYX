@@ -39,6 +39,9 @@
   let turntableRotationPeriodSeconds = read().turntableRotationPeriodSeconds;
   let calibrationRequest = 0;
   let tableSettingsRequest = 0;
+  let discoveryRequest = 0;
+  let devicesReady = false;
+  let saving = false;
   const tableMigrations = new Set();
   const selectDevice = (name) => {
     activeDevice = name === 'turntable' ? 'turntable' : 'scanner';
@@ -141,27 +144,52 @@
     }
   };
   const discover = async () => {
+    const request = ++discoveryRequest;
+    devicesReady = false;
     refresh.disabled = true;
+    save.disabled = true;
     status.textContent = 'Идёт поиск USB-сканеров и Bluetooth-столов…';
     try {
       const response = await fetch('/api/v1/scanner/devices', { cache: 'no-store' });
       const payload = await response.json();
+      if (request !== discoveryRequest || !dialog.open) return;
       if (!response.ok) throw new Error(payload.message || payload.error || 'Не удалось найти устройства.');
-      devices = { scanners: payload.scanners || [], turntables: payload.turntables || [] };
+      devices = {
+        scanners: Array.isArray(payload.scanners) ? payload.scanners : [],
+        turntables: Array.isArray(payload.turntables) ? payload.turntables : [],
+      };
       const saved = read();
       options(scannerSelect, devices.scanners, saved.scannerDeviceId);
       options(tableSelect, devices.turntables, saved.turntableDeviceId);
+      devicesReady = devices.scanners.length > 0 && devices.turntables.length > 0;
       status.textContent = `Найдено: сканеров ${devices.scanners.length}, столов ${devices.turntables.length}.`;
       await updateCalibrationStatus();
+      if (request !== discoveryRequest || !dialog.open) return;
       await updateTurntableSettings();
     } catch (error) {
-      status.textContent = error.message;
+      if (request === discoveryRequest && dialog.open) status.textContent = error.message;
     } finally {
-      refresh.disabled = false;
+      if (request === discoveryRequest) {
+        refresh.disabled = false;
+        save.disabled = saving || !devicesReady;
+      }
     }
   };
-  for (const tab of dialog.querySelectorAll('[data-device-tab]')) {
+  const tabs = [...dialog.querySelectorAll('[data-device-tab]')];
+  for (const tab of tabs) {
     tab.addEventListener('click', () => selectDevice(tab.dataset.deviceTab));
+    tab.addEventListener('keydown', event => {
+      const index = tabs.indexOf(tab);
+      let next = index;
+      if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+      else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      selectDevice(tabs[next].dataset.deviceTab);
+      tabs[next].focus();
+    });
   }
   scannerSelect.addEventListener('change', () => {
     qFile.value = '';
@@ -184,75 +212,89 @@
     discover();
   });
   close.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => {
+    discoveryRequest += 1;
+    calibrationRequest += 1;
+    tableSettingsRequest += 1;
+    devicesReady = false;
+    save.disabled = true;
+    refresh.disabled = false;
+  });
   refresh.addEventListener('click', discover);
   dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
   save.addEventListener('click', async () => {
-    if (!scannerSelect.value || !tableSelect.value) {
-      status.textContent = 'Выберите подключённый сканер и стол.';
-      return;
-    }
-    const value = Number(period.value);
-    if (!allowedPeriods.has(value)) {
-      status.textContent = 'Выберите поддерживаемый период оборота.';
-      return;
-    }
-    const scanner = devices.scanners.find(item => item.device_id === scannerSelect.value);
-    const turntable = devices.turntables.find(item => item.device_id === tableSelect.value);
-    if (!scanner || !turntable) {
-      status.textContent = 'Обновите список устройств и выберите подключённый сканер и стол.';
-      return;
-    }
-    const file = qFile.files?.[0];
-    if (file || !scanner?.calibrated) {
-      const scale = Number(depthScale.value);
-      if (!file || file.size !== 64 || !Number.isFinite(scale) || scale <= 0) {
-        status.textContent = 'Для нового сканера выберите Q.bin размером 64 байта и укажите масштаб глубины.';
+    if (saving || !devicesReady || refresh.disabled) return;
+    saving = true;
+    save.disabled = true;
+    try {
+      if (!scannerSelect.value || !tableSelect.value) {
+        status.textContent = 'Выберите подключённый сканер и стол.';
         return;
       }
-      save.disabled = true;
+      const value = Number(period.value);
+      if (!allowedPeriods.has(value)) {
+        status.textContent = 'Выберите поддерживаемый период оборота.';
+        return;
+      }
+      const scanner = devices.scanners.find(item => item.device_id === scannerSelect.value);
+      const turntable = devices.turntables.find(item => item.device_id === tableSelect.value);
+      if (!scanner || !turntable) {
+        status.textContent = 'Обновите список устройств и выберите подключённый сканер и стол.';
+        return;
+      }
+      const file = qFile.files?.[0];
+      if (file || !scanner?.calibrated) {
+        const scale = Number(depthScale.value);
+        if (!file || file.size !== 64 || !Number.isFinite(scale) || scale <= 0) {
+          status.textContent = 'Для нового сканера выберите Q.bin размером 64 байта и укажите масштаб глубины.';
+          return;
+        }
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          let binary = '';
+          for (const byte of bytes) binary += String.fromCharCode(byte);
+          const response = await fetch('/api/v1/scanner/calibration', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scanner_device_id: scanner.device_id, q_matrix_base64: btoa(binary), depth_scale_mm_per_raw_unit: scale }),
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.message || result.error || 'Не удалось сохранить калибровку.');
+          scanner.calibrated = true;
+        } catch (error) {
+          status.textContent = error.message;
+          return;
+        }
+      }
       try {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        let binary = '';
-        for (const byte of bytes) binary += String.fromCharCode(byte);
-        const response = await fetch('/api/v1/scanner/calibration', {
+        const tableResponse = await fetch('/api/v1/scanner/turntable/settings', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ scanner_device_id: scanner.device_id, q_matrix_base64: btoa(binary), depth_scale_mm_per_raw_unit: scale }),
+          body: JSON.stringify({ turntable_device_id: tableSelect.value, profile_id: turntable.profile_id,
+            rotation_period_seconds: value }),
         });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.message || result.error || 'Не удалось сохранить калибровку.');
-        scanner.calibrated = true;
+        const tableResult = await tableResponse.json();
+        if (!tableResponse.ok) throw new Error(tableResult.message || tableResult.error || 'Не удалось сохранить настройки стола.');
+        turntableProfileId = turntable.profile_id;
+        turntableRotationPeriodSeconds = value;
       } catch (error) {
         status.textContent = error.message;
-        save.disabled = false;
         return;
       }
-      save.disabled = false;
-    }
-    try {
-      const tableResponse = await fetch('/api/v1/scanner/turntable/settings', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ turntable_device_id: tableSelect.value, profile_id: turntable.profile_id,
-          rotation_period_seconds: value }),
-      });
-      const tableResult = await tableResponse.json();
-      if (!tableResponse.ok) throw new Error(tableResult.message || tableResult.error || 'Не удалось сохранить настройки стола.');
-      turntableProfileId = turntable.profile_id;
-      turntableRotationPeriodSeconds = value;
-    } catch (error) {
-      status.textContent = error.message;
-      return;
-    }
-    const settings = {
-      activeDevice,
-      scannerDeviceId: scannerSelect.value,
-      turntableDeviceId: tableSelect.value,
-      turntableProfileId,
-    };
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(settings));
-      status.textContent = 'Выбор устройств и настройки сохранены.';
-    } catch {
-      status.textContent = 'Браузер не разрешил сохранить выбор устройств.';
+      const settings = {
+        activeDevice,
+        scannerDeviceId: scannerSelect.value,
+        turntableDeviceId: tableSelect.value,
+        turntableProfileId,
+        turntableRotationPeriodSeconds: value,
+      };
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(settings));
+        status.textContent = 'Выбор устройств и настройки сохранены.';
+      } catch {
+        status.textContent = 'Браузер не разрешил сохранить выбор устройств.';
+      }
+    } finally {
+      saving = false;
+      save.disabled = !devicesReady;
     }
   });
   selectDevice(activeDevice);
