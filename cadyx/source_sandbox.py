@@ -10,6 +10,7 @@ import ctypes
 import json
 import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any, Sequence
@@ -28,6 +29,91 @@ class SourceSandboxUnavailable(CadyxError):
 def _decode_windows_command_output(value: bytes) -> str:
     """Decode localized Windows command output without failing on code-page bytes."""
     return value.decode("mbcs", errors="replace")
+
+
+_ALLOWED_WINDOWS_ENVIRONMENT_NAMES = frozenset({
+        "ALLUSERSPROFILE", "APPDATA", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)",
+        "COMMONPROGRAMW6432", "COMPUTERNAME", "COMSPEC", "DRIVERDATA", "HOMEDRIVE",
+        "HOMEPATH", "LOCALAPPDATA", "LOGONSERVER", "NUMBER_OF_PROCESSORS", "OS", "PATH",
+        "PATHEXT", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER", "PROCESSOR_LEVEL",
+        "PROCESSOR_REVISION", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+        "PROGRAMW6432", "PUBLIC", "SYSTEMDRIVE", "SYSTEMROOT", "TEMP", "TMP",
+        "USERDOMAIN", "USERDOMAIN_ROAMINGPROFILE", "USERNAME", "USERPROFILE", "WINDIR",
+})
+
+def _appcontainer_environment_block(environment: dict[str, str]) -> str:
+    """Serialize only unambiguous, allowlisted Windows environment entries."""
+    seen: set[str] = set()
+    entries: list[tuple[str, str]] = []
+    for name, value in environment.items():
+        if (not isinstance(name, str) or name.upper() not in _ALLOWED_WINDOWS_ENVIRONMENT_NAMES
+                or "=" in name or "\0" in name):
+            raise ValidationError(
+                "The AppContainer environment may contain only standard Windows runtime variables."
+            )
+        if not isinstance(value, str) or "\0" in value:
+            raise ValidationError("The AppContainer environment contains an invalid variable value.")
+        folded = name.casefold()
+        if folded in seen:
+            raise ValidationError("The AppContainer environment contains duplicate variable names.")
+        seen.add(folded)
+        entries.append((name, value))
+    entries.sort(key=lambda item: item[0].casefold())
+    return "\0".join(f"{name}={value}" for name, value in entries) + "\0\0"
+
+
+def _same_result_file(first: os.stat_result, second: os.stat_result) -> bool:
+    """Compare the opened file with the directory entry, not just its path."""
+    return (first.st_dev, first.st_ino) == (second.st_dev, second.st_ino)
+
+
+def _read_appcontainer_result(path: Path, *, tail_bytes: int | None = None) -> str:
+    """Read bounded sandbox output from a verified, unchanged regular-file handle.
+
+    The sandbox can rename or replace files after a path-based validation. Open
+    the original entry and compare its identity before and after reading so a
+    replacement symlink, hard link or concurrent writer cannot redirect a
+    privileged host read.
+    """
+    limit = 1024 * 1024
+    if tail_bytes is not None and (
+        isinstance(tail_bytes, bool) or not isinstance(tail_bytes, int)
+        or not 0 <= tail_bytes <= limit
+    ):
+        raise ValidationError("AppContainer diagnostic tail size is invalid.")
+    try:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise SourceSandboxUnavailable("An AppContainer result must be a regular, unlinked file.")
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        with os.fdopen(os.open(path, flags), "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            current = path.lstat()
+            if (not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(current.st_mode)
+                    or opened.st_nlink != 1 or not _same_result_file(before, opened)
+                    or not _same_result_file(opened, current)):
+                raise SourceSandboxUnavailable("An AppContainer result changed during opening.")
+            if tail_bytes is None:
+                content = stream.read(limit + 1)
+                if len(content) > limit:
+                    raise SourceSandboxUnavailable(
+                        "An AppContainer test result exceeded the 1 MiB output limit."
+                    )
+            else:
+                stream.seek(0, os.SEEK_END)
+                stream.seek(max(0, stream.tell() - tail_bytes))
+                content = stream.read(tail_bytes)
+            finished = os.fstat(stream.fileno())
+            current = path.lstat()
+            if (not stat.S_ISREG(current.st_mode) or current.st_nlink != 1
+                    or not _same_result_file(opened, finished)
+                    or not _same_result_file(opened, current)
+                    or (opened.st_size, opened.st_mtime_ns)
+                    != (finished.st_size, finished.st_mtime_ns)):
+                raise SourceSandboxUnavailable("An AppContainer result changed during reading.")
+    except OSError as exc:
+        raise SourceSandboxUnavailable("An AppContainer result could not be read safely.") from exc
+    return content.decode("utf-8", errors="replace")
 
 
 def run_appcontainer_process(
@@ -124,21 +210,7 @@ def run_appcontainer_process(
                                      ctypes.c_uint32, ctypes.c_void_p]
     kernel32.CreateFileW.restype = ctypes.c_void_p
 
-    safe_names = {
-        "ALLUSERSPROFILE", "APPDATA", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)",
-        "COMMONPROGRAMW6432", "COMPUTERNAME", "COMSPEC", "DRIVERDATA", "HOMEDRIVE",
-        "HOMEPATH", "LOCALAPPDATA", "LOGONSERVER", "NUMBER_OF_PROCESSORS", "OS", "PATH",
-        "PATHEXT", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER", "PROCESSOR_LEVEL",
-        "PROCESSOR_REVISION", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
-        "PROGRAMW6432", "PUBLIC", "SYSTEMDRIVE", "SYSTEMROOT", "TEMP", "TMP",
-        "USERDOMAIN", "USERDOMAIN_ROAMINGPROFILE", "USERNAME", "USERPROFILE", "WINDIR",
-    }
-    if any(key.upper() not in safe_names for key in environment):
-        raise ValidationError("The AppContainer environment may contain only standard Windows runtime variables.")
-    environment_entries = [
-        *(f"{key}={value}" for key, value in sorted(environment.items(), key=lambda item: item[0].casefold())),
-    ]
-    environment_block = "\0".join(environment_entries) + "\0\0"
+    environment_block = _appcontainer_environment_block(environment)
     environment_buffer = ctypes.create_unicode_buffer(environment_block)
     command_line = ctypes.create_unicode_buffer(
         subprocess.list2cmdline([str(application), *arguments]),
@@ -321,8 +393,10 @@ def run_appcontainer_process(
             if (resolved.parent != container_temp.resolve() or attributes == 0xFFFFFFFF
                     or attributes & 0x400):  # FILE_ATTRIBUTE_REPARSE_POINT
                 raise SourceSandboxUnavailable("An AppContainer test result was not a regular file inside its scratch directory.")
-            collected_files[name] = resolved.read_text(encoding="utf-8", errors="replace")
-        diagnostics = diagnostics_path.read_text(encoding="utf-8", errors="replace")[-12000:]
+            collected_files[name] = _read_appcontainer_result(
+                candidate, tail_bytes=12000 if name == "test-output.txt" else None,
+            )
+        diagnostics = _read_appcontainer_result(diagnostics_path, tail_bytes=12000)
         return {"exit_code": int(exit_code.value), "timed_out": timed_out,
                 "process_id": int(process.dwProcessId), "identity": profile_name,
                 "files": collected_files, "diagnostics": diagnostics}

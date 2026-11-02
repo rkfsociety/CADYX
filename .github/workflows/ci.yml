@@ -67,6 +67,9 @@ jobs:
       - name: Check Windows workspace file safety
         run: python -m unittest discover -s tests -p test_workspace_services.py -v
 
+      - name: Check AppContainer input and output boundaries
+        run: python -m unittest discover -s tests -p test_source_sandbox.py -v
+
   windows:
     needs: source
     runs-on: windows-latest

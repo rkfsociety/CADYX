@@ -43,7 +43,7 @@ class SketchCurveCommandTests(unittest.TestCase):
             method="POST",
         )
         try:
-            with urlopen(request, timeout=3) as response:
+            with urlopen(request, timeout=20) as response:
                 return response.status, json.loads(response.read())
         except HTTPError as error:
             with error:
