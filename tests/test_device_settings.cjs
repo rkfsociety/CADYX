@@ -138,6 +138,8 @@ async function main() {
   await stale.get('scanning-devices').fire('click');
   await stale.get('device-settings-dialog').close();
   await stale.get('scanning-devices').fire('click');
+  // HTMLDialogElement's close event can be delivered after the next showModal.
+  await stale.get('device-settings-dialog').fire('close');
   for (let i = 0; i < 6; i++) await tick();
   assert.equal(stale.get('scanner-device-select').value, 'scanner-1');
   oldDiscovery.resolve(response({ scanners: [], turntables: [] }));

@@ -213,6 +213,8 @@
   });
   close.addEventListener('click', () => dialog.close());
   dialog.addEventListener('close', () => {
+    // A queued close event may arrive after the dialog was reopened.
+    if (dialog.open) return;
     discoveryRequest += 1;
     calibrationRequest += 1;
     tableSettingsRequest += 1;
