@@ -130,6 +130,8 @@ _ROUTE_SPECS = (
     RouteSpec("DELETE", "/api/v1/agent/projects/{project_id}/files/{filename}", "agent_project_file_delete", "files"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/scans/360", "agent_scan_360_start", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/scans/360", "agent_scan_360_status", "agent"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/scans/fusion", "agent_scan_fusion_start", "agent", "json"),
+    RouteSpec("GET", "/api/v1/agent/projects/{project_id}/scans/fusion", "agent_scan_fusion_status", "agent"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/rename", "agent_rename", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/type", "agent_project_type", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/copy-files", "agent_copy_files", "agent", "json"),
@@ -804,6 +806,13 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         )})
     elif name == "agent_scan_360_status":
         handler._json(200, {"scan": core.scan_360_status(project_id)})
+    elif name == "agent_scan_fusion_start":
+        body = _require_json(handler)
+        if set(body) != {"run_id"} or not isinstance(body["run_id"], str):
+            raise ValidationError("Для сшивки укажите run_id серии.")
+        handler._json(202, {"fusion": core.start_scan_fusion(project_id, body["run_id"])})
+    elif name == "agent_scan_fusion_status":
+        handler._json(200, {"fusion": core.scan_fusion_status(project_id)})
     elif name == "agent_inspection":
         query = parse_qs(parsed.query, keep_blank_values=True)
         allowed = {"section", "expected_revision", "kind", "body_id", "shape",

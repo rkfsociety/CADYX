@@ -346,6 +346,8 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_move_project_files", "description": "Move explicitly listed direct project files into a scan-series subfolder after checking the project is free and files are unused.", "inputSchema": _schema({"project_id": _STRING, "folder_name": _STRING, "filenames": {"type": "array", "items": _STRING, "minItems": 1, "maxItems": 1000}}, ["project_id", "folder_name", "filenames"])},
     {"name": "cadyx_start_scan_360", "description": "Start direct-UVC 360-degree point capture in a free project. Set step_degrees (divisor of 360, 1–30; default 30) and align_to_markers=false to preserve camera-frame points for geometry-only registration. The physical turntable must be level.", "inputSchema": _schema({"project_id": _STRING, "step_degrees": {"type": "integer", "minimum": 1, "maximum": 30}, "align_to_markers": {"type": "boolean"}, "rotation_period_seconds": {"type": "number", "minimum": 18, "maximum": 90}, "scanner_device_id": _STRING, "turntable_device_id": _STRING}, ["project_id"])},
     {"name": "cadyx_get_scan_360_status", "description": "Read native 360-degree scan progress and the latest captured point-cloud preview for a project.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
+    {"name": "cadyx_start_scan_fusion", "description": "Start background geometric registration and cleanup for a completed 360-degree series, retaining source and provisional outputs.", "inputSchema": _schema({"project_id": _STRING, "run_id": _STRING}, ["project_id", "run_id"])},
+    {"name": "cadyx_get_scan_fusion_status", "description": "Read actual progress and outcome of a scan-series registration and cleanup job.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_get_scanner_devices", "description": "List connected scanners and supported turntables with their device and profile IDs. Device discovery may take several seconds.", "inputSchema": _schema()},
     {"name": "cadyx_get_turntable_status", "description": "Read turntable angle, tilt, rotation period and motion/scan lock state. Supply the selected device_id and profile_id to avoid rediscovering Bluetooth devices.", "inputSchema": _schema({"device_id": _STRING, "profile_id": _STRING})},
     {"name": "cadyx_get_turntable_marker_map", "description": "Read the selected turntable's MKF marker map as marker coordinates and normals with a SHA-256. Map coordinate units are not established.", "inputSchema": _schema({"device_id": _STRING, "profile_id": _STRING})},
@@ -615,6 +617,10 @@ class MCPApplication:
             return self.api.post(self._project(args["project_id"], "/scans/360"), body)
         if name == "cadyx_get_scan_360_status":
             return self.api.get(self._project(args["project_id"], "/scans/360"))
+        if name == "cadyx_start_scan_fusion":
+            return self.api.post(self._project(args["project_id"], "/scans/fusion"), {"run_id": args["run_id"]})
+        if name == "cadyx_get_scan_fusion_status":
+            return self.api.get(self._project(args["project_id"], "/scans/fusion"))
         if name == "cadyx_get_scanner_devices":
             return self.api.get("/api/v1/scanner/devices")
         if name == "cadyx_get_turntable_status":

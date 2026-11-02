@@ -96,6 +96,20 @@ class CadyxMCPServerTests(unittest.TestCase):
         start.assert_called_once_with(project_id, 18.0, None, None, 30, True)
         status.assert_called_once_with(project_id)
 
+    def test_scan_fusion_tools_route_start_and_status(self) -> None:
+        project_id = self._create_project("Scan fusion MCP")
+        job = {"state": "running", "run_id": "revopoint_20261010T100000Z",
+               "phase": "register", "done": 1, "total": 11}
+        with (patch.object(self.core, "start_scan_fusion", return_value=job) as start,
+              patch.object(self.core, "scan_fusion_status", return_value=job) as status):
+            started = self._tool_value("cadyx_start_scan_fusion", {"project_id": project_id,
+                                        "run_id": job["run_id"]})
+            current = self._tool_value("cadyx_get_scan_fusion_status", {"project_id": project_id})
+        self.assertEqual(started["fusion"], job)
+        self.assertEqual(current["fusion"], job)
+        start.assert_called_once_with(project_id, job["run_id"])
+        status.assert_called_once_with(project_id)
+
     def test_scanner_and_turntable_api_routes_are_available_through_mcp(self) -> None:
         device_id = "0123456789AB"
         profile_id = "revopoint-dual-axis-table"

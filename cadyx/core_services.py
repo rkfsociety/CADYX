@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import math
+import os
+import re
 import threading
 from collections import OrderedDict
 from contextlib import ExitStack, contextmanager
@@ -14,6 +18,7 @@ from uuid import uuid4
 
 from .delivery import geometry_sha256
 from .errors import CadyxError, ConflictError, NotFoundError, ValidationError
+from .lease_heartbeat import LeaseHeartbeat
 from .mesh_geometry import mesh_bounds
 from .models import Document, OwnerType
 from .rendering import render_scene, render_scene_png
@@ -89,6 +94,7 @@ class ProjectLifecycleService(_CoreService):
             running_operation=(
                 any(item.get("state") == "running" for item in activities)
                 or self._scan_capture.is_running(project_id, nonblocking=nonblocking)
+                or self._scan_fusion.is_running(project_id, nonblocking=nonblocking)
             ),
         )
 
@@ -197,6 +203,93 @@ class ProjectLifecycleService(_CoreService):
 
     def scan_360_status(self, project_id: str) -> dict[str, Any]:
         return self._scan_capture.status(project_id, self.workspace._project_dir(project_id))
+
+    def start_scan_fusion(self, project_id: str, run_id: str) -> dict[str, Any]:
+        heartbeat = None
+        lease_id = None
+        try:
+            with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+                self._require_project_policy(project_id, "file_management",
+                                             "Сшивка возможна только в свободном проекте.")
+                lease = self.leases.acquire(project_id, "system", "scan-fusion")
+                lease_id = lease.lease_id
+                self.events.publish("project.lock.changed", project_id, self.leases.snapshot(project_id))
+                heartbeat = LeaseHeartbeat(self._core, project_id, lease_id)
+                heartbeat.start()
+                return self._scan_fusion.start(project_id, self.workspace._project_dir(project_id),
+                                               run_id, lease_id, heartbeat)
+        except Exception:
+            if heartbeat is not None:
+                heartbeat.stop()
+            if lease_id is not None:
+                # The project guard rolls its transaction back if startup fails.
+                current = self.leases.get(project_id)
+                if current is not None and current.lease_id == lease_id:
+                    self.release_lease(project_id, lease_id)
+            raise
+
+    def publish_scan_fusion(self, project_id: str, run_id: str, staging: Path, lease_id: str) -> dict[str, Any]:
+        """Commit validated staging files without replacing project data."""
+        def digest(path: Path) -> str:
+            if path.is_symlink() or not path.is_file():
+                raise ValidationError("Файл результата отсутствует или небезопасен.")
+            with path.open("rb") as stream:
+                return hashlib.file_digest(stream, "sha256").hexdigest()
+
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            self.leases.require(project_id, lease_id)
+            project = self.workspace._project_dir(project_id).resolve(strict=True)
+            series = self.workspace._artifacts._project_subfolder(project, run_id)
+            try:
+                report = json.loads((staging / "pipeline.json").read_text(encoding="utf-8"))
+                inputs = report["input_sha256"]
+                if (report["format"] != "cadyx-scan-pipeline-v1" or report["state"] != "completed"
+                        or report["run_id"] != run_id or report["quality"] != "provisional"
+                        or not isinstance(inputs, dict) or len(inputs) < 2):
+                    raise ValueError("invalid pipeline report")
+                for name, expected in inputs.items():
+                    if (not isinstance(name, str)
+                            or not re.fullmatch(re.escape(run_id) + r"_pose_(?:pose_)?\d{3}\.ply", name)
+                            or not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected)):
+                        raise ValueError("invalid input record")
+                    if digest(series / name) != expected:
+                        raise ValidationError("Исходные кадры изменились во время сшивки; результат не опубликован.")
+                artifacts = []
+                for key in ("fused", "cleaned"):
+                    item = report[key]
+                    if item["file"] != f"{key}.ply" or digest(staging / item["file"]) != item["sha256"]:
+                        raise ValueError("artifact hash mismatch")
+                    filename = f"{run_id}_{key}.cadyx-{item['sha256'][:12]}.ply"
+                    artifacts.append((staging / item["file"], series / filename))
+                published = {key: artifacts[index][1].name for index, key in enumerate(("fused", "cleaned"))}
+                report["published_files"] = published
+                report_bytes = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
+                report_hash = hashlib.sha256(report_bytes).hexdigest()
+                report_source = staging / "published-report.json"
+                with report_source.open("xb") as stream:
+                    stream.write(report_bytes)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                report_name = f"{run_id}_pipeline.cadyx-{report_hash[:12]}.json"
+                artifacts.append((report_source, series / report_name))
+                for _, target in artifacts:
+                    self.workspace._artifacts._reject_casefold_artifact_alias(series, target.name)
+                created = []
+                try:
+                    for source, target in artifacts:
+                        os.link(source, target)
+                        created.append(target)
+                    self.leases.refresh_after_command(project_id, lease_id)
+                except Exception:
+                    for target in reversed(created):
+                        source = next(source for source, destination in artifacts if destination == target)
+                        if target.exists() and os.path.samefile(source, target):
+                            target.unlink()
+                    raise
+                return {"folder": run_id, "fused": published["fused"], "cleaned": published["cleaned"],
+                        "report": report_name, "quality": "provisional"}
+            except (KeyError, TypeError, ValueError, OSError) as exc:
+                raise ValidationError(f"Не удалось безопасно сохранить результат сшивки: {exc}") from exc
 
     def copy_project_files(self, target_project_id: str, source_project_id: str) -> dict[str, Any]:
         if target_project_id == source_project_id:

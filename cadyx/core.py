@@ -30,6 +30,7 @@ from .models import Document, OwnerType
 from .runtime_cache import RuntimeCachePolicy
 from .scan import ScanProcessor
 from .scan_capture import Scan360CaptureController
+from .scan_fusion import ScanFusionJobs
 from .self_evolving import SelfEvolvingCapabilityEngine
 from .source_extension import SourceExtensionEngine
 from .workspace import ProjectWorkspace
@@ -75,6 +76,9 @@ class CadyxCore:
         self._server_agent_leases: dict[str, tuple[str, str]] = {}
         self.events.prune_agent_dashboards(self.workspace._project_ids_for_dashboard_cleanup())
         self._lifecycle = ProjectLifecycleService(self)
+        self._scan_fusion = ScanFusionJobs(Path(__file__).resolve().parent.parent,
+                                           self.workspace.state_root, self._lifecycle.publish_scan_fusion,
+                                           self.release_lease)
         self._command_activity = CommandActivityService(self)
         self._rendering = RenderingCacheService(self, cache_policy=cache_policy)
         self._engineering_validation = EngineeringValidationService(self)
@@ -152,6 +156,13 @@ class CadyxCore:
 
     def scan_360_status(self, project_id: str) -> dict[str, Any]:
         return self._lifecycle.scan_360_status(project_id)
+
+    def start_scan_fusion(self, project_id: str, run_id: str) -> dict[str, Any]:
+        return self._lifecycle.start_scan_fusion(project_id, run_id)
+
+    def scan_fusion_status(self, project_id: str) -> dict[str, Any]:
+        self.workspace._project_dir(project_id)
+        return self._scan_fusion.status(project_id)
 
     def scanner_devices(self) -> dict[str, list[dict[str, Any]]]:
         return self._scan_capture.list_connected_devices()

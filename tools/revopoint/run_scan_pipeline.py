@@ -41,12 +41,15 @@ def run_pipeline(series: Path, run_id: str, staging: Path, *, progress=None) -> 
     for path in paths:
         if path.is_symlink() or verified_preprocessed_frame(path) is None:
             raise ValueError(f'Не подтверждена очистка кадра {path.name}.')
+    input_hashes = {path.name: _sha256(path) for path in paths}
     if staging.exists():
         raise FileExistsError('Каталог результатов уже существует.')
     staging.mkdir(parents=True)
     fused = staging / 'fused.ply'
     cleaned = staging / 'cleaned.ply'
     registration = register_sequence(series, run_id, fused, progress=progress)
+    if any(path.is_symlink() or _sha256(path) != input_hashes[path.name] for path in paths):
+        raise ValueError('Исходные кадры изменились во время сшивки; результат не опубликован.')
     cloud = o3d.io.read_point_cloud(str(fused))
     points = [tuple(map(float, point)) for point in np.asarray(cloud.points)]
     stages = []
@@ -68,6 +71,7 @@ def run_pipeline(series: Path, run_id: str, staging: Path, *, progress=None) -> 
         raise OSError('Не удалось записать очищенное облако.')
     report = {'format': 'cadyx-scan-pipeline-v1', 'state': 'completed', 'run_id': run_id,
               'quality': 'provisional', 'registration': registration,
+              'input_sha256': input_hashes,
               'fused': {'file': fused.name, 'sha256': _sha256(fused)},
               'cleaned': {'file': cleaned.name, 'sha256': _sha256(cleaned)},
               'cleanup': stages,
