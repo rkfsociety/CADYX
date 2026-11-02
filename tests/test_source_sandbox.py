@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -48,6 +50,54 @@ class AppContainerBoundaryTests(unittest.TestCase):
             path.write_bytes(b"x" * (1024 * 1024 + 1))
             with self.assertRaisesRegex(SourceSandboxUnavailable, "1 MiB"):
                 _read_appcontainer_result(path)
+
+    def test_result_reader_rejects_symlinks(self) -> None:
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "target.json"
+            target.write_text('{"secret":true}', encoding="utf-8")
+            link = Path(directory) / "result.json"
+            try:
+                link.symlink_to(target)
+            except (NotImplementedError, OSError):
+                self.skipTest("Creating symbolic links is not supported")
+            with self.assertRaisesRegex(SourceSandboxUnavailable, "regular"):
+                _read_appcontainer_result(link)
+
+    def test_result_reader_rejects_hardlinks(self) -> None:
+        with TemporaryDirectory() as directory:
+            target = Path(directory) / "target.json"
+            target.write_text("private", encoding="utf-8")
+            link = Path(directory) / "result.json"
+            try:
+                os.link(target, link)
+            except OSError:
+                self.skipTest("Creating hard links is not supported")
+            with self.assertRaisesRegex(SourceSandboxUnavailable, "regular"):
+                _read_appcontainer_result(link)
+
+    def test_result_reader_detects_replacement_between_check_and_open(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            path.write_text("original", encoding="utf-8")
+            real_open = os.open
+
+            def replace_before_open(name: os.PathLike[str], flags: int) -> int:
+                path.unlink()
+                path.write_text("replacement", encoding="utf-8")
+                return real_open(name, flags)
+
+            with patch("cadyx.source_sandbox.os.open", side_effect=replace_before_open):
+                with self.assertRaisesRegex(SourceSandboxUnavailable, "changed"):
+                    _read_appcontainer_result(path)
+
+    def test_result_reader_rejects_invalid_tail_lengths(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            path.write_text("safe", encoding="utf-8")
+            for length in (-1, 1024 * 1024 + 1, True):
+                with self.subTest(length=length):
+                    with self.assertRaises(ValidationError):
+                        _read_appcontainer_result(path, tail_bytes=length)
 
     def test_diagnostic_reader_only_reads_bounded_tail(self) -> None:
         with TemporaryDirectory() as directory:

@@ -10,6 +10,7 @@ import ctypes
 import json
 import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any, Sequence
@@ -61,19 +62,57 @@ def _appcontainer_environment_block(environment: dict[str, str]) -> str:
     return "\0".join(f"{name}={value}" for name, value in entries) + "\0\0"
 
 
+def _same_result_file(first: os.stat_result, second: os.stat_result) -> bool:
+    """Compare the opened file with the directory entry, not just its path."""
+    return (first.st_dev, first.st_ino) == (second.st_dev, second.st_ino)
+
+
 def _read_appcontainer_result(path: Path, *, tail_bytes: int | None = None) -> str:
-    """Bound host memory when reading output controlled by sandboxed code."""
-    with path.open("rb") as stream:
-        if tail_bytes is None:
-            content = stream.read(1024 * 1024 + 1)
-            if len(content) > 1024 * 1024:
-                raise SourceSandboxUnavailable(
-                    "An AppContainer test result exceeded the 1 MiB output limit."
-                )
-        else:
-            stream.seek(0, os.SEEK_END)
-            stream.seek(max(0, stream.tell() - tail_bytes))
-            content = stream.read(tail_bytes)
+    """Read bounded sandbox output from a verified, unchanged regular-file handle.
+
+    The sandbox can rename or replace files after a path-based validation. Open
+    the original entry and compare its identity before and after reading so a
+    replacement symlink, hard link or concurrent writer cannot redirect a
+    privileged host read.
+    """
+    limit = 1024 * 1024
+    if tail_bytes is not None and (
+        isinstance(tail_bytes, bool) or not isinstance(tail_bytes, int)
+        or not 0 <= tail_bytes <= limit
+    ):
+        raise ValidationError("AppContainer diagnostic tail size is invalid.")
+    try:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise SourceSandboxUnavailable("An AppContainer result must be a regular, unlinked file.")
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        with os.fdopen(os.open(path, flags), "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            current = path.lstat()
+            if (not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(current.st_mode)
+                    or opened.st_nlink != 1 or not _same_result_file(before, opened)
+                    or not _same_result_file(opened, current)):
+                raise SourceSandboxUnavailable("An AppContainer result changed during opening.")
+            if tail_bytes is None:
+                content = stream.read(limit + 1)
+                if len(content) > limit:
+                    raise SourceSandboxUnavailable(
+                        "An AppContainer test result exceeded the 1 MiB output limit."
+                    )
+            else:
+                stream.seek(0, os.SEEK_END)
+                stream.seek(max(0, stream.tell() - tail_bytes))
+                content = stream.read(tail_bytes)
+            finished = os.fstat(stream.fileno())
+            current = path.lstat()
+            if (not stat.S_ISREG(current.st_mode) or current.st_nlink != 1
+                    or not _same_result_file(opened, finished)
+                    or not _same_result_file(opened, current)
+                    or (opened.st_size, opened.st_mtime_ns)
+                    != (finished.st_size, finished.st_mtime_ns)):
+                raise SourceSandboxUnavailable("An AppContainer result changed during reading.")
+    except OSError as exc:
+        raise SourceSandboxUnavailable("An AppContainer result could not be read safely.") from exc
     return content.decode("utf-8", errors="replace")
 
 
@@ -355,7 +394,7 @@ def run_appcontainer_process(
                     or attributes & 0x400):  # FILE_ATTRIBUTE_REPARSE_POINT
                 raise SourceSandboxUnavailable("An AppContainer test result was not a regular file inside its scratch directory.")
             collected_files[name] = _read_appcontainer_result(
-                resolved, tail_bytes=12000 if name == "test-output.txt" else None,
+                candidate, tail_bytes=12000 if name == "test-output.txt" else None,
             )
         diagnostics = _read_appcontainer_result(diagnostics_path, tail_bytes=12000)
         return {"exit_code": int(exit_code.value), "timed_out": timed_out,
