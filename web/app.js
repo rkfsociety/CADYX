@@ -469,8 +469,21 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           maxPreviewPoints:125_000,totalBytes:Number(file.size)||undefined,
         });
         if(request!==scanTreePreviewRequest||projectId!==state.project)return;
+        let tableFrame=null;
+        const pose=file.name.match(/_pose_(\d+)\.ply$/i);
+        const merged=/_(?:fused|cleaned)\.cadyx-[0-9a-f]+\.ply$/i.test(file.name);
+        if(run.folderName&&scanRunPattern.test(run.id)&&(pose||merged)){
+          try{
+            const support=`scan_support_${run.id}`;
+            const report=await semanticJson(`/api/v1/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(support)}/files/${encodeURIComponent(`${run.id}_table_alignment.json`)}`);
+            const index=pose?Number(pose[1]):0;
+            if(report.run_id===run.id&&report.coordinate_frame==='table_marker_map_center_xy'&&Array.isArray(report.frames))
+              tableFrame=report.frames.find(frame=>frame.index===index&&frame.status==='aligned')||null;
+          }catch(error){ /* The cloud remains viewable without a claimed table alignment. */ }
+        }
+        if(request!==scanTreePreviewRequest||projectId!==state.project)return;
         const pointCount=geometry.previewVertexCount??geometry.positions.length/3;
-        scanView?.showFileCloud(geometry,{reset:true});
+        scanView?.showFileCloud(geometry,{reset:true,tableFrame});
         if(status)status.textContent=`Предпросмотр ${scanFileLabel(file,run.id)} · ${new Intl.NumberFormat('ru-RU').format(pointCount)} точек`;
       }catch(error){
         if(request!==scanTreePreviewRequest)return;

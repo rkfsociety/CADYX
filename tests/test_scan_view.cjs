@@ -36,6 +36,16 @@ const testDocument = {
 };
 const sandbox = { window: { location: new URL("http://127.0.0.1:8888/p/new-model-scan?project_id=project-1&scan_folder=scan%20folder&scan_file=frame.ply&scan_origin_file=origin.ply"), setTimeout }, document: testDocument, URL, URLSearchParams, setTimeout: scheduleTestTimeout, clearTimeout, fetch: async () => ({ ok: true, async text() { return pointCloud; } }) };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../web/scan-view.js"), "utf8"), sandbox);
+const previewFrame = {status:'aligned', scanner_table_plane_origin:[1,2,3],
+  scanner_table_plane_axes:{x:[0,1,0],y:[0,0,1],z:[1,0,0]},
+  map_similarity:{a:2,b:0,c:0,d:2,tx:10,ty:-5,scale:2,reflection:1}};
+const sourcePreview = new Float32Array([1,2,3, 5,4,6, 0,2,3]);
+const positionedPreview = sandbox.window.CadyxScanView.placeCloudForPreview(sourcePreview, previewFrame);
+assert.deepEqual(Array.from(positionedPreview), [10,-5,0,14,1,8,10,-5,-2]);
+assert.deepEqual(Array.from(sourcePreview), [1,2,3,5,4,6,0,2,3], 'preview placement must not alter measured coordinates');
+assert.equal(sandbox.window.CadyxScanView.placeCloudForPreview(sourcePreview,
+  {...previewFrame,map_similarity:{...previewFrame.map_similarity,reflection:-1}}), null);
+assert.equal(sandbox.window.CadyxScanView.placeCloudForPreview(sourcePreview, null), null);
 let sampledLivePixels = 0;
 const liveSampleSlots = new Set();
 for (let y = 0; y < 400; y += 1) {
@@ -250,6 +260,13 @@ const tableButton = element();
 const viewport = element();
 const view = sandbox.window.CadyxScanView.initialize({ cloudButton, meshButton, tableButton, viewport, viewer, getModelGeometry, meshReady: true }, undefined, fetchPreview);
 const selectedCloud = { positions: new Float32Array([0,0,2,1,0,2,0,1,2]), previewVertexCount: 3 };
+view.showFileCloud(selectedCloud, {tableFrame:null});
+assert.equal(viewerLoads.at(-1).geometry, selectedCloud, 'an unaligned cloud is shown alone without asserting a table placement');
+assert.equal(tableButton.disabled, true);
+view.showFileCloud(selectedCloud, {tableFrame:previewFrame});
+assert.equal(tableButton.disabled, false);
+assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0, 'marker placement adds the table to the preview');
+assert.deepEqual(Array.from(selectedCloud.positions), [0,0,2,1,0,2,0,1,2], 'preview never rewrites the source cloud');
 view.showFileCloud(selectedCloud);
 assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0, "selected scan file retains table triangles in the shared viewer");
 assert.equal(viewerLoads.at(-1).geometry.pointCloudVertexCount, 3);

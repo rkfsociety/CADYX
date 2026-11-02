@@ -9,6 +9,37 @@
   const TURNTABLE_RADIUS_MM = TURNTABLE_DIAMETER_MM / 2;
   const TURNTABLE_DEGREE_SCALE_ZERO_DEGREES = 90;
   const TURNTABLE_TILT_PIVOT_Z_MM = -25;
+  // Marker coordinates are used only to place a copy in the viewport.
+  // Do not clamp, discard, or modify the saved cloud's measured points.
+  const placeCloudForPreview = (positions, frame) => {
+    const origin = frame?.scanner_table_plane_origin;
+    const axes = frame?.scanner_table_plane_axes;
+    const map = frame?.map_similarity;
+    const vectors = [origin, axes?.x, axes?.y, axes?.z];
+    if (frame?.status !== 'aligned' || !positions || positions.length % 3 ||
+        vectors.some(v => !Array.isArray(v) || v.length !== 3 || !v.every(Number.isFinite)) ||
+        !map || !['a','b','c','d','tx','ty','scale'].every(k => Number.isFinite(map[k])) ||
+        map.reflection !== 1 || map.scale <= 0) return null;
+    const basis = vectors.slice(1);
+    const dot = (a,b) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+    for (let i=0;i<3;i++) for (let j=0;j<3;j++)
+      if (Math.abs(dot(basis[i],basis[j])-(i===j?1:0))>0.001) return null;
+    const [x,y,z] = basis;
+    const cross = [x[1]*y[2]-x[2]*y[1],x[2]*y[0]-x[0]*y[2],x[0]*y[1]-x[1]*y[0]];
+    if (dot(cross,z)<0.999 || Math.abs(map.a-map.d)>0.001 || Math.abs(map.b+map.c)>0.001 ||
+        Math.abs(Math.hypot(map.a,map.c)-map.scale)>0.001) return null;
+    const result = new Float32Array(positions.length);
+    for (let i=0;i<positions.length;i+=3) {
+      const point = [positions[i]-origin[0],positions[i+1]-origin[1],positions[i+2]-origin[2]];
+      if (!point.every(Number.isFinite)) return null;
+      const local = basis.map(axis=>dot(axis,point));
+      result[i]=map.a*local[0]+map.b*local[1]+map.tx;
+      result[i+1]=map.c*local[0]+map.d*local[1]+map.ty;
+      result[i+2]=local[2]*map.scale;
+      if (!Number.isFinite(result[i]) || !Number.isFinite(result[i+1]) || !Number.isFinite(result[i+2])) return null;
+    }
+    return result;
+  };
   const isScanDepthValid = depth => Number.isFinite(depth)
     && depth >= MIN_SCAN_DEPTH_MM && depth <= MAX_SCAN_DEPTH_MM;
   const shouldRunTableMapRansac = (priorMatchCount, frameSequence, lastSequence, mapPointCount = 4) =>
@@ -724,6 +755,8 @@
     let cloudTableFrame = null;
     let cloudPreviewPositions = null;
     let cloudPreviewPointCount = 0;
+    let unplacedFileGeometry = null;
+    let fileCloudTablePlaced = false;
     let renderedCloudSource = null;
     let capturePreviewRun = null;
     let capturePreviewAutoOpened = false;
@@ -835,6 +868,10 @@
       liveTimer = null;
       livePreviewOwned = false;
       cloudPreviewOpen = false;
+      unplacedFileGeometry = null;
+      fileCloudTablePlaced = false;
+      if (tableButton) tableButton.disabled = false;
+      if (liveMapAlignmentIndicator) liveMapAlignmentIndicator.hidden = true;
       meshPreviewOpen = false;
       staticTurntableVisible = false;
       updateButton();
@@ -1199,6 +1236,7 @@
       const pose = currentTurntableDisplayPose();
       const displayedPositions = positions || (cloudPreviewOpen ? cloudPreviewPositions : null);
       const displayedCount = positions ? count : cloudPreviewPointCount;
+      const moveCloudWithTable = aligned || (!positions && cloudPreviewOpen && fileCloudTablePlaced);
       const pointStep = displayedPositions ? Math.max(1, Math.ceil(displayedCount / LIVE_PREVIEW_POINT_LIMIT)) : 1;
       const overlay = staticTurntableVisible ? null : liveTableOverlay;
       const cloudPointIndices = displayedPositions
@@ -1227,7 +1265,7 @@
       const firstCloudVertex = fixedVertexCount;
       for (const index of cloudPointIndices) {
         const point = [displayedPositions[index * 3], displayedPositions[index * 3 + 1], displayedPositions[index * 3 + 2]];
-        const transformed = aligned
+        const transformed = moveCloudWithTable
           ? transformTableDisplayPoint(point, pose.angle, pose.tilt) : point;
         combinedPositions[output++] = transformed[0];
         combinedPositions[output++] = transformed[1];
@@ -1300,6 +1338,7 @@
       liveViewportInitialized = true;
     };
     tableButton?.addEventListener('click', () => {
+      if (unplacedFileGeometry) return;
       tableVisible = !tableVisible;
       updateButton();
       if (livePreviewOwned || staticTurntableVisible || cloudPreviewOpen) {
@@ -1978,7 +2017,8 @@
       }
       if (open) { void showCloud(true); return; }
     };
-    const showFileCloud = (geometry, { reset = true } = {}) => {
+    const showFileCloud = (geometry, options = {}) => {
+      const { reset = true } = options;
       cloudRequest += 1;
       liveRequest += 1;
       clearTimeout(liveTimer);
@@ -1986,7 +2026,23 @@
       livePreviewOwned = false;
       meshPreviewOpen = false;
       cloudPreviewOpen = true;
-      cloudPreviewPositions = geometry.positions;
+      const explicitAlignment = Object.prototype.hasOwnProperty.call(options, 'tableFrame');
+      const placed = explicitAlignment ? placeCloudForPreview(geometry.positions, options.tableFrame) : geometry.positions;
+      unplacedFileGeometry = explicitAlignment && !placed ? geometry : null;
+      fileCloudTablePlaced = Boolean(explicitAlignment && placed);
+      if (tableButton) tableButton.disabled = Boolean(unplacedFileGeometry);
+      if (liveMapAlignmentIndicator && explicitAlignment) {
+        liveMapAlignmentIndicator.hidden = false;
+        setMapAlignmentStatus(placed ? 'Положение по маркерам · предварительно' :
+          'Положение на столе не определено', placed ? 'aligned' : 'waiting');
+      }
+      if (unplacedFileGeometry) {
+        staticTurntableVisible = false;
+        updateButton();
+        viewer.load(geometry, { reset });
+        return;
+      }
+      cloudPreviewPositions = placed;
       cloudPreviewPointCount = geometry.previewVertexCount ?? geometry.positions.length / 3;
       staticTurntableVisible = true;
       updateButton();
@@ -2123,7 +2179,7 @@
     return controller;
   };
 
-  window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers,
+  window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers, placeCloudForPreview,
     shouldRunTableMapRansac, buildTurntableDisplayModel, hasClosedTriangleTopology, transformTableDisplayPoint,
     livePreviewSampleIndex, isScanDepthValid, buildPreviewCloudPointIndices, buildMatchedMapMarkerPointIndices };
 })();
