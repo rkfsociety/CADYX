@@ -318,7 +318,9 @@ def register_sequence(project: Path, run_id: str, output: Path,
     if not len(cluster_ids):
         raise RuntimeError("fusion produced no connected point-cloud component")
     dominant = int(cluster_ids[int(np.argmax(cluster_sizes))])
-    fused = sampled.select_by_index(np.flatnonzero(labels == dominant).tolist())
+    # Sparse or disconnected regions can be real features; retain them for review.
+    dominant_points = int(np.count_nonzero(labels == dominant))
+    fused = sampled
     bounds = np.asarray(fused.get_axis_aligned_bounding_box().get_box_points())
     registration_lower, registration_upper = bounds.min(axis=0), bounds.max(axis=0)
     overlap = [
@@ -373,7 +375,11 @@ def register_sequence(project: Path, run_id: str, output: Path,
         "preprocessing": {
             "order": ["isolation_filter", "remove_overlaps"],
             "applied_per_source_frame_before_registration": True,
-            "until_both_report_zero_removals": True,
+            "until_both_report_zero_removals": all(
+                report.get("passes") and all(report["passes"][-1].get(method) == 0
+                                             for method in ("isolation_filter", "remove_overlaps"))
+                for report in frame_cleanup
+            ),
             "source_frame_timing": ("during_capture" if prepared and prepared[0] is not None
                                      else "after_capture_before_registration_legacy_fallback"),
             "frames": frame_cleanup,
@@ -386,8 +392,9 @@ def register_sequence(project: Path, run_id: str, output: Path,
         "preprocessed_point_counts": [len(cloud.points) for cloud in clouds],
         "voxel_size_q": fused_voxel_size,
         "output_points": len(fused.points),
-        "discarded_isolated_points": int(len(sampled.points) - len(fused.points)),
-        "dominant_component_fraction": float(len(fused.points) / max(1, len(sampled.points))),
+        "discarded_isolated_points": 0,
+        "non_dominant_component_points": int(len(sampled.points) - dominant_points),
+        "dominant_component_fraction": float(dominant_points / max(1, len(sampled.points))),
         "registration_dimensions_q": (registration_upper - registration_lower).tolist(),
         "output_dimensions": (output_upper - output_lower).tolist(),
         "output_coordinate_units": ("table map units; physical scale unverified"
