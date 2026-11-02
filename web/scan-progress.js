@@ -17,8 +17,11 @@
       scan.state === 'failed' ? (scan.message || 'Не удалось завершить съёмку') : '';
     return {title, detail, total, captured, cleaned, failed, state: scan.state};
   }
-  function render(container, scan) {
-    const data = summary(scan);
+  function render(container, scan, fusion = null) {
+    const hasFusion = fusion && ['running', 'completed', 'failed'].includes(fusion.state);
+    const sameSeries = !hasFusion || !fusion.run_id || scan?.preview_subfolder === fusion.run_id;
+    if (hasFusion && !sameSeries) scan = {state:'busy', frame_count:0};
+    const data = summary(scan) || (hasFusion ? summary({state:'busy', frame_count:0}) : null);
     if (!data) { container.replaceChildren(); container.hidden = true; return; }
     container.hidden = false;
     container.className = 'scan-progress';
@@ -47,18 +50,35 @@
       captureState === 'failed' ? 'Съёмка остановлена' : `Осталось кадров: ${remainingCapture}`;
     const cleanNote = cleanState === 'unknown' ? 'Нет данных' : cleanState === 'failed' ? `Ошибок: ${data.failed || 'неизвестно'}` :
       cleanState === 'completed' ? 'Очистка завершена' : `Осталось кадров: ${remainingClean}`;
+    const registrationPhases = ['load', 'register', 'loops', 'optimize', 'merge'];
+    const registrationDone = hasFusion && (fusion.state === 'completed' || ['cleanup', 'publishing', 'completed'].includes(fusion.phase));
+    const registrationState = !hasFusion ? 'unknown' : registrationDone ? 'completed' :
+      fusion.state === 'failed' ? 'failed' : 'active';
+    const cleanupDone = hasFusion && (fusion.state === 'completed' || ['publishing', 'completed'].includes(fusion.phase));
+    const finalState = !hasFusion ? 'unknown' : cleanupDone ? 'completed' :
+      fusion.state === 'failed' && fusion.phase === 'cleanup' ? 'failed' :
+      fusion.phase === 'cleanup' ? 'active' : 'waiting';
+    const phaseNames = {starting:'Запуск', load:'Подготовка кадров', register:'Совмещение кадров',
+      loops:'Проверка замыкания', optimize:'Оптимизация', merge:'Объединение', cleanup:'Очистка облака',
+      publishing:'Сохранение результатов', completed:'Завершено'};
+    const registrationNote = !hasFusion ? 'Нет данных' : registrationState === 'failed' ? 'Сшивка остановлена' :
+      registrationDone ? 'Сшивка завершена' : (phaseNames[fusion.phase] || 'Выполняется');
+    const finalNote = !hasFusion ? 'Нет данных' : finalState === 'failed' ? 'Очистка остановлена' :
+      cleanupDone ? 'Очистка завершена' : finalState === 'active' ? 'Очистка облака' : 'Ожидает';
+    const regMeasured = hasFusion && registrationPhases.includes(fusion.phase) && Number.isInteger(fusion.total) && fusion.total > 0;
+    const cleanupMeasured = hasFusion && fusion.phase === 'cleanup' && Number.isInteger(fusion.total) && fusion.total > 0;
     const current = document.createElement('div'); current.className = 'scan-progress-current';
     const label = text('small', '', 'Текущий файл');
-    const file = text('strong', 'scan-progress-file', scan.preprocessing_current_frame?.source_file || 'Нет данных');
+    const file = text('strong', 'scan-progress-file', (hasFusion ? fusion.file || fusion.result?.cleaned : scan.preprocessing_current_frame?.source_file) || 'Нет данных');
     file.title = file.textContent;
-    const detail = text('small', 'scan-progress-current-note', data.state === 'failed' ? (scan.message || data.title) :
+    const detail = text('small', 'scan-progress-current-note', hasFusion ? (fusion.state === 'failed' ? (fusion.error || 'Ошибка сшивки') : fusion.state === 'completed' ? 'Результат предварительный' : (phaseNames[fusion.phase] || 'Запуск')) : data.state === 'failed' ? (scan.message || data.title) :
       cleanState === 'active' ? `Осталось очистить: ${remainingClean}` : captureState === 'active' ? `Осталось снять: ${remainingCapture}` : data.title);
     current.append(label, file, detail);
     container.replaceChildren(
       stage(1, 'Съёмка', data.captured, captureAvailable ? data.total : 0, captureState, captureNote),
       stage(2, 'Очистка кадров', data.cleaned, cleanAvailable ? data.total : 0, cleanState, cleanNote),
-      stage(3, 'Сшивка', 0, 0, 'unknown', 'Нет данных'),
-      stage(4, 'Финальная очистка', 0, 0, 'unknown', 'Нет данных'), current);
+      stage(3, 'Сшивка', registrationDone ? 1 : regMeasured ? fusion.done : 0, registrationDone ? 1 : regMeasured ? fusion.total : 0, registrationState, registrationNote),
+      stage(4, 'Финальная очистка', cleanupDone ? 1 : cleanupMeasured ? fusion.done : 0, cleanupDone ? 1 : cleanupMeasured ? fusion.total : 0, finalState, finalNote), current);
   }
   root.CadyxScanProgress = {summary, render};
   if (typeof module !== 'undefined') module.exports = {summary, render};

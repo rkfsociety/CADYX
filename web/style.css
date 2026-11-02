@@ -586,3 +586,5 @@ button.object-row.selected { border-color: #9b6038; background: #ff874012; }
 .scan-progress-current { display: grid; flex: 1.2 0 175px; min-width: 0; gap: 3px; padding-left: 14px; align-content: start; }
 .scan-progress-file { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .scan-progress-current-note { color: #bdcdd5 !important; }
+
+.cad3-scan-fuse { margin: 4px 8px 6px 30px; min-height: 28px; font-size: 11px; }

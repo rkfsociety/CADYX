@@ -98,8 +98,8 @@ def _overlap_in_bounds(source: np.ndarray, target: np.ndarray,
     if not len(source) or not len(target):
         return {"source_points": int(len(source)), "target_points": int(len(target)),
                 "source_to_target_within_5": 0.0, "target_to_source_within_5": 0.0}
-    forward = cKDTree(target).query(source, k=1, workers=-1)[0]
-    reverse = cKDTree(source).query(target, k=1, workers=-1)[0]
+    forward = cKDTree(target).query(source, k=1, workers=2)[0]
+    reverse = cKDTree(source).query(target, k=1, workers=2)[0]
     return {
         "source_points": int(len(source)), "target_points": int(len(target)),
         "source_to_target_within_2": float(np.mean(forward < 2.0)),

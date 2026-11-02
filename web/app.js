@@ -239,6 +239,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       const roots=state.objects.filter(body=>body.type==='body'&&!consumed.has(body.id)&&byBody.has(body.id));
       return roots.map(body=>{const included=new Set();const visit=id=>{if(!id||included.has(id))return;included.add(id);for(const feature of byBody.get(id)||[]){visit(feature.source_body_id);visit(feature.base_body_id);visit(feature.tool_body_id)}};visit(body.id);return{body,features:features.filter(feature=>included.has(feature.body_id))}});
     }
+    let scanFusionJob=null,scanFusionPending=false;
     const scanRunPattern=/^revopoint_\d{8}T\d{6}Z$/i;
     const scanFileRunId=name=>/^(revopoint_\d{8}T\d{6}Z)_/i.exec(name)?.[1]||null;
     function scanRunTitle(runId){
@@ -254,6 +255,8 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       return `${new Intl.NumberFormat('ru-RU',{maximumFractionDigits:1}).format(size/(1024*1024))} МБ`;
     }
     function scanFileLabel(file,runId){
+      if(/_fused\.cadyx-[0-9a-f]+\.ply$/i.test(file.name))return `Сшитое облако · предварительно · ${scanFileSize(file.size)}`;
+      if(/_cleaned\.cadyx-[0-9a-f]+\.ply$/i.test(file.name))return `Очищенное облако · предварительно · ${scanFileSize(file.size)}`;
       return `${file.name.startsWith(`${runId}_`)?file.name.slice(runId.length+1):file.name} · ${scanFileSize(file.size)}`;
     }
     async function loadScanRunFiles(run,projectId){
@@ -352,7 +355,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       for(const run of scanTreeEntries){
         const title=scanRunTitle(run.id);
         const files=(run.files||[]).filter(file=>file.name.startsWith(`${run.id}_`)
-          && /_pose_\d+\.ply$/i.test(file.name));
+          && (/_pose_\d+\.ply$/i.test(file.name) || /_(?:fused|cleaned)\.cadyx-[0-9a-f]+\.ply$/i.test(file.name)));
         const matchingFiles=files.filter(file=>!query||file.name.toLowerCase().includes(query));
         if(query&&!title.toLowerCase().includes(query)&&!matchingFiles.length)continue;
         const container=document.createElement('div');container.className='cad3-tree-node';
@@ -383,6 +386,12 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         remove.onclick=event=>{event.stopPropagation();deleteScanRun(run)};
         row.append(disclosure,button,remove);container.append(row);
         const children=document.createElement('div');children.id=childrenId;children.className='cad3-tree-children';children.hidden=!expanded;
+        if(run.folderName){
+          const fuse=document.createElement('button');fuse.type='button';fuse.className='button cad3-scan-fuse';
+          fuse.textContent=scanFusionJob?.state==='running'&&scanFusionJob.run_id===run.id?'Сшивка выполняется…':'Сшить и обработать';
+          fuse.disabled=scanFusionPending||scanFusionJob?.state==='running'||typeof canOpenFilesView!=='function'||!canOpenFilesView(state.project);
+          fuse.onclick=()=>startScanFusion(run);children.append(fuse);
+        }
         if(run.loading){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent='Загружаю файлы серии…';children.append(leaf)}
         else if(run.loadError){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=`Не удалось загрузить файлы серии (${run.loadError}).`;children.append(leaf)}
         for(const file of matchingFiles){
@@ -396,6 +405,19 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       }
       const empty=$('#cad-tree-empty');
       if(empty){empty.hidden=shown>0;empty.textContent=message||(!state.project?'Выберите проект, чтобы увидеть серии сканирования.':query?'Совпадений нет.':'В проекте пока нет сохранённых серий сканирования.');}
+    }
+    async function startScanFusion(run){
+      const id=state.project;
+      if(!id||!run.folderName||scanFusionPending||scanFusionJob?.state==='running'||typeof canOpenFilesView!=='function'||!canOpenFilesView(id))return;
+      scanFusionPending=true;renderScanTree();
+      try{
+        const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/fusion`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:run.id})});
+        const payload=await response.json();
+        if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось запустить сшивку');
+        if(state.project!==id)return;
+        scanFusionJob=payload.fusion;
+      }catch(error){notify(error.message,true)}
+      finally{scanFusionPending=false;if(state.project===id)renderScanTree()}
     }
     function activeScanPreviewMode(){
       if(liveCamera?.getAttribute('aria-pressed')==='true')return 'live';
@@ -1215,7 +1237,9 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           pollTimer=setTimeout(()=>pollScan(id),2500);return;
         }
         try{
-          const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{cache:'no-store'});
+          const [response,fusionResponse]=await Promise.all([fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{cache:'no-store'}),fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/fusion`,{cache:'no-store'})]);
+          const fusionPayload=await fusionResponse.json();
+          if(!fusionResponse.ok)throw new Error(fusionPayload.error?.message||'Не удалось получить статус сшивки');
           const payload=await response.json();
           if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
           if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось получить статус съёмки');
@@ -1225,8 +1249,14 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           const captureFinished=scan.state!=='running'&&scanWasRunning;
           scanWasRunning=scan.state==='running';
           if(!window.CadyxScanProgress)await import('/assets/scan-progress.js');
-          window.CadyxScanProgress.render(scanStatus,scan);
-          setCaptureBusy(scan.state==='running'||scan.state==='busy');
+          const previousFusion=scanFusionJob;scanFusionJob=fusionPayload.fusion;
+          window.CadyxScanProgress.render(scanStatus,scan,scanFusionJob);
+          if(previousFusion?.state==='running'&&scanFusionJob.state!=='running'){
+            await loadScanTree(id,true);renderScanTree();
+            if(scanFusionJob.state==='failed')notify(scanFusionJob.error||'Сшивка не завершилась',true);
+            else if(scanFusionJob.state==='completed')notify('Сшивка и очистка завершены; результат предварительный.');
+          }else if(previousFusion?.state!==scanFusionJob.state){renderScanTree()}
+          setCaptureBusy(scan.state==='running'||scan.state==='busy'||scanFusionJob?.state==='running');
           if(scan.state==='running'){
             showCapturePreview(scan,{open:captureStarted});
             pollTimer=setTimeout(()=>pollScan(id),1200);

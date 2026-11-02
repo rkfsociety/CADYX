@@ -83,6 +83,7 @@ class ScanFusionJobs:
             command = [str(python), '-u', str(worker), '--series', str(series), '--run-id', run_id,
                        '--staging', str(staging)]
             env = dict(os.environ, PYTHONIOENCODING='utf-8')
+            env.update(OMP_NUM_THREADS='2', OPENBLAS_NUM_THREADS='2', MKL_NUM_THREADS='2')
             try:
                 process = subprocess.Popen(command, cwd=self._repository, stdout=subprocess.PIPE,
                                            stderr=subprocess.STDOUT, text=True, encoding='utf-8',

@@ -34,3 +34,23 @@ assert.equal(container.children[1].dataset.stageState, 'failed');
 render(container, {state:'busy', frame_count:12});
 assert.equal(container.children[0].dataset.stageState, 'unknown');
 assert.equal(container.children[1].dataset.stageState, 'unknown');
+
+const capture = {state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:12,
+  preprocessing_status:'completed', preview_subfolder:'revopoint_20261010T100000Z'};
+const job = {state:'running', run_id:capture.preview_subfolder, phase:'register', done:3, total:11, file:'frame_004.ply'};
+render(container, capture, job);
+assert.equal(container.children[2].dataset.stageState, 'active');
+assert.equal(container.children[2].children[1].children[0].children[1].textContent, '3 / 11');
+assert.equal(container.children[3].dataset.stageState, 'waiting');
+assert.equal(container.children[4].children[1].textContent, 'frame_004.ply');
+render(container, capture, {...job, phase:'cleanup', done:1, total:2});
+assert.equal(container.children[2].dataset.stageState, 'completed');
+assert.equal(container.children[3].dataset.stageState, 'active');
+render(container, capture, {...job, state:'failed', phase:'cleanup', error:'Ошибка очистки'});
+assert.equal(container.children[3].dataset.stageState, 'failed');
+assert.equal(container.children[4].children[2].textContent, 'Ошибка очистки');
+render(container, capture, {...job, state:'completed', phase:'completed', result:{cleaned:'result.ply'}});
+assert.equal(container.children[3].dataset.stageState, 'completed');
+assert.equal(container.children[4].children[2].textContent, 'Результат предварительный');
+render(container, capture, {...job, run_id:'another-series'});
+assert.equal(container.children[0].dataset.stageState, 'unknown');
