@@ -368,6 +368,7 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
 
     pending: dict[int, Path] = {}
     active: dict[int, subprocess.Popen[str]] = {}
+    active_files: dict[int, str] = {}
     reports: dict[int, dict[str, Any]] = {}
     errors: dict[int, str] = {}
     stop_signal_seen = False
@@ -425,6 +426,7 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
                 except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                     errors[index] = f"invalid cleanup report: {exc}"
             del active[index]
+            del active_files[index]
 
         while pending and len(active) < max_workers:
             index = min(pending)
@@ -444,6 +446,7 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
                 active[index] = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                                   text=True, encoding="utf-8", errors="replace",
                                                   creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0))
+                active_files[index] = source_path.name
             except OSError as exc:
                 errors[index] = f"could not start per-frame cleanup: {exc}"
 
@@ -451,6 +454,10 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
         aggregate["failed_frames"] = [{"frame_index": i, "error": errors[i]} for i in sorted(errors)]
         aggregate["cleaned_frame_count"] = len(reports)
         aggregate["failed_frame_count"] = len(errors)
+        aggregate["active_frames"] = [
+            {"frame_index": index, "source_file": active_files[index]}
+            for index in sorted(active)
+        ]
         aggregate["detected_table_marker_count"] = sum(report.get("detected_table_markers", 0) for report in reports.values())
         aggregate["removed_table_marker_points"] = sum(report.get("removed_table_marker_points", 0) for report in reports.values())
         if stop_signal_seen and not pending and not active:

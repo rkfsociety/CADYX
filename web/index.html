@@ -375,7 +375,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .viewport-live-camera-button.cad3-tool,
 .viewport-scan-mesh-button.cad3-tool { min-width: 112px; height: 34px; justify-content: center; padding: 0 12px; font: 600 12px var(--ui-font); }
 .viewport-scan-mode-button[aria-pressed="true"] { border-color: #9b6038; color: var(--accent); background: #26190f; }
-#viewport-scan-360-status { color: var(--muted); font-size: 11px; max-width: 220px; }
+#viewport-scan-360-status { font-size: 11px; }
 .viewport-icon-button,
 .viewport-fit-button,
 .viewport-four-views-button {
@@ -569,7 +569,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-live-camera,
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-toggle-turntable,
 .primary-grid[data-view="scanning"] .model-toolbar #scanning-devices { display: inline-flex !important; }
-.primary-grid[data-view="scanning"] .model-toolbar #viewport-scan-360-status { display: inline-flex !important; }
+.primary-grid[data-view="scanning"] .model-toolbar #viewport-scan-360-status:not([hidden]) { display: inline-flex !important; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-four-views,
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-fit { display: none !important; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-camera-presets {
@@ -714,7 +714,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                     <button id="viewport-scan-360" class="button" type="button">Сканировать 360°</button>
                     <button id="viewport-live-camera" class="button viewport-scan-mode-button viewport-live-camera-button" type="button" aria-label="Предпросмотр сканера в реальном времени" aria-pressed="false">Предпросмотр</button>
                     <button id="viewport-toggle-turntable" class="button" type="button" aria-label="Скрыть стол" aria-pressed="true">Скрыть стол</button>
-                    <button id="scanning-devices" class="button" type="button">Устройства</button><span id="viewport-scan-360-status" role="status" aria-live="polite"></span>
+                    <button id="scanning-devices" class="button" type="button">Устройства</button><div id="viewport-scan-360-status" role="status" aria-live="polite" hidden></div>
                   </div>
                 </div>
                 <div class="viewport" id="viewport">
@@ -862,6 +862,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
     <script src="/assets/scan-view.js" defer></script>
     <script src="/assets/device-settings.js" defer></script>
     <script src="/assets/turntable-controls.js" defer></script>
+    <script src="/assets/scan-progress.js" defer></script>
     <script src="/assets/app.js" defer></script>
     <script id="cadyx-cad-reference-script">
 window.addEventListener("DOMContentLoaded", () => {

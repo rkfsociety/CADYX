@@ -509,6 +509,23 @@ class Scan360CaptureTests(unittest.TestCase):
         self.assertEqual(status["detected_table_marker_count"], 5)
         self.assertEqual(status["removed_table_marker_points"], 91)
 
+    def test_active_preprocessing_frame_is_reported_and_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            run_id = "revopoint_20261010T101010Z"
+            report = project / f"{run_id}_preprocessing.json"
+            payload = {"format": "cadyx-scan-preprocessing-v1", "state": "running",
+                       "frames": [], "failed_frames": [], "cleaned_frame_count": 0,
+                       "failed_frame_count": 0,
+                       "active_frames": [{"frame_index": 0, "source_file": f"{run_id}_pose_000.ply"}]}
+            report.write_text(json.dumps(payload), encoding="utf-8")
+            status = Scan360CaptureController._preprocessing_payload_uncached(project, run_id, 2)
+            self.assertEqual(status["preprocessing_current_frame"], payload["active_frames"][0])
+            payload["active_frames"][0]["source_file"] = "../unexpected.ply"
+            report.write_text(json.dumps(payload), encoding="utf-8")
+            status = Scan360CaptureController._preprocessing_payload_uncached(project, run_id, 2)
+            self.assertEqual(status["preprocessing_status"], "failed")
+
     def test_malformed_preprocessing_reports_fail_closed(self) -> None:
         reports = [
             None,

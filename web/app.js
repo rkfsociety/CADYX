@@ -1224,7 +1224,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           const captureStarted=scan.state==='running'&&!scanWasRunning;
           const captureFinished=scan.state!=='running'&&scanWasRunning;
           scanWasRunning=scan.state==='running';
-          if(!scanTreePreviewSelection)scanStatus.textContent=scan.state==='idle'||scan.state==='completed'?'':scan.message||`${scan.completed_frames}/${scan.frame_count}`;
+          window.CadyxScanProgress.render(scanStatus,scan);
           setCaptureBusy(scan.state==='running'||scan.state==='busy');
           if(scan.state==='running'){
             showCapturePreview(scan,{open:captureStarted});
@@ -1240,7 +1240,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           }
         }catch(error){
           syncCaptureButton();
-          if(!scanTreePreviewSelection)scanStatus.textContent=error.message;
+          scanStatus.hidden=false;scanStatus.textContent=error.message;
           pollTimer=setTimeout(()=>pollScan(id),4000);
         }
       };
@@ -1250,7 +1250,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         const id=projectId();
         if(!id){scanStatus.textContent='Проект не выбран.';return}
         if(scanTreePreviewSelection)clearScanTreePreview();
-        scan360.dataset.scanCapturePending='true';syncCaptureButton();scanStatus.textContent='Запускаю съёмку…';
+        scan360.dataset.scanCapturePending='true';syncCaptureButton();scanStatus.hidden=false;scanStatus.textContent='Запускаю съёмку…';
         try{
           const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation_period_seconds:window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.()??18,scanner_device_id:window.CadyxDeviceSettings?.scannerDeviceId?.(),turntable_device_id:window.CadyxDeviceSettings?.turntableDeviceId?.()})});
           const payload=await response.json();

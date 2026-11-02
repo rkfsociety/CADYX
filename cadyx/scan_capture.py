@@ -1590,6 +1590,22 @@ class Scan360CaptureController:
                 if any(type(value) is not int or value < 0 for value in values):
                     raise ValueError("invalid table marker counters")
                 marker_counts[summary_key] = sum(values)
+            active_frames = report.get("active_frames", [])
+            if not isinstance(active_frames, list) or len(active_frames) > 1:
+                raise ValueError("invalid active preprocessing frames")
+            current_frame = None
+            if active_frames:
+                row = active_frames[0]
+                if not isinstance(row, dict):
+                    raise ValueError("invalid active preprocessing frame")
+                index = row.get("frame_index")
+                name = row.get("source_file")
+                if (type(index) is not int or not 0 <= index < frame_count
+                        or name not in (f"{run_id}_pose_{index:03d}.ply",
+                                        f"{run_id}_pose_pose_{index:03d}.ply")
+                        or state != "running"):
+                    raise ValueError("invalid active preprocessing frame")
+                current_frame = {"frame_index": index, "source_file": name}
             return {
                 "preprocessing_status": report.get("state", "failed"),
                 "preprocessed_frames": cleaned_count,
@@ -1598,6 +1614,7 @@ class Scan360CaptureController:
                 "preprocessing_pending_frames": max(
                     0, frame_count - cleaned_count
                     - failed_count),
+                "preprocessing_current_frame": current_frame,
                 "table_marker_detection_status": marker_status,
                 **marker_counts,
             }
