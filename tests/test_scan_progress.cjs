@@ -10,6 +10,12 @@ assert.equal(summary({state:'running', frame_count:12, completed_frames:4, prepr
   preprocessing_status:'running'}).detail, 'Очистка кадров выполняется');
 assert.equal(summary({state:'failed', frame_count:12, completed_frames:6, message:'Ошибка связи'}).detail, 'Ошибка связи');
 assert.equal(summary({state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:12}).title, 'Съёмка и очистка завершены');
+assert.equal(summary({state:'completed', frame_count:12, completed_frames:12,
+  preprocessed_frames:11, preprocessing_failed_frames:1}).title,
+  'Съёмка завершена, очистка с ошибками');
+assert.equal(summary({state:'failed', frame_count:12, completed_frames:8,
+  preprocessing_current_frame:{source_file:'frame_008.ply'}, message:'Ошибка записи'}).detail,
+  'Ошибка записи', 'failure details take precedence over a stale processing filename');
 
 class Element {
   constructor() { this.children = []; this.dataset = {}; this.textContent = ''; }

@@ -30,6 +30,10 @@
       device_id: window.CadyxDeviceSettings?.turntableDeviceId?.() || undefined,
       profile_id: window.CadyxDeviceSettings?.turntableProfileId?.() || undefined,
     });
+    const sameSelection = selected => {
+      const current = selection();
+      return current.device_id === selected.device_id && current.profile_id === selected.profile_id;
+    };
     const setStatus = (message = '', state = 'idle') => {
       if (status.textContent !== message) status.textContent = message;
       if (status.dataset.state !== state) status.dataset.state = state;
@@ -117,14 +121,15 @@
       if (automaticQueryPending || pending) return;
       automaticQueryPending = true;
       const revision = controlRevision;
+      const selected = selection();
       try {
         const payload = await fetchJson('/api/v1/scanner/turntable/control', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ command: 'query', ...selection() }),
+          body: JSON.stringify({ command: 'query', ...selected }),
         });
-        if (revision === controlRevision && !pending) readPosition(payload.result || {});
+        if (revision === controlRevision && !pending && sameSelection(selected)) readPosition(payload.result || {});
       } catch (error) {
-        if (revision === controlRevision && !pending) setStatus(error.message, 'error');
+        if (revision === controlRevision && !pending && sameSelection(selected)) setStatus(error.message, 'error');
       } finally {
         automaticQueryPending = false;
         if (revision !== controlRevision) return;
@@ -143,13 +148,13 @@
       }
       const revision = controlRevision;
       const requestId = ++refreshRequestId;
+      const selected = selection();
       try {
         const query = new URLSearchParams();
-        const selected = selection();
         if (selected.device_id) query.set('device_id', selected.device_id);
         if (selected.profile_id) query.set('profile_id', selected.profile_id);
         const payload = await fetchJson(`/api/v1/scanner/turntable/control${query.size ? `?${query}` : ''}`, { cache: 'no-store' });
-        if (revision !== controlRevision || requestId !== refreshRequestId || pending) return;
+        if (revision !== controlRevision || requestId !== refreshRequestId || pending || !sameSelection(selected)) return;
         const control = payload.control || {};
         scanActive = Boolean(control.spin?.scan_active);
         spinState = control.spin?.state || 'idle';
@@ -166,7 +171,8 @@
           void queryHardwarePosition();
         }
       } catch (error) {
-        if (!quiet && revision === controlRevision && requestId === refreshRequestId && !pending) {
+        if (!quiet && revision === controlRevision && requestId === refreshRequestId
+            && !pending && sameSelection(selected)) {
           setStatus(error.message, 'error');
         }
       } finally {
@@ -174,12 +180,13 @@
         clearTimeout(pollTimer);
         const liveScanning = document.querySelector('.primary-grid')?.dataset.view === 'scanning';
         pollTimer = setTimeout(() => void refresh({ quiet: true }),
-          spinState === 'starting' ? 600 : spinState === 'running' || spinState === 'stopping'
-            ? 1500 : liveScanning ? 3000 : 15000);
+          !sameSelection(selected) ? 250 : spinState === 'starting' ? 600
+            : spinState === 'running' || spinState === 'stopping' ? 1500 : liveScanning ? 3000 : 15000);
       }
     };
     const command = async (action, value) => {
       if (pending) return null;
+      const selected = selection();
       pending = true;
       controlRevision += 1;
       setBusy();
@@ -187,12 +194,13 @@
       try {
         const payload = await fetchJson('/api/v1/scanner/turntable/control', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ command: action, ...selection(), ...(value === undefined ? {} : { value }) }),
+          body: JSON.stringify({ command: action, ...selected, ...(value === undefined ? {} : { value }) }),
         });
         const result = payload.result || {};
         if (action === 'speed') {
-          window.CadyxDeviceSettings?.rememberTurntableRotationPeriodSeconds?.(Number(value));
-          const selected = selection();
+          if (sameSelection(selected)) {
+            window.CadyxDeviceSettings?.rememberTurntableRotationPeriodSeconds?.(Number(value));
+          }
           if (selected.device_id && selected.profile_id) {
             await fetchJson('/api/v1/scanner/turntable/settings', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -201,6 +209,7 @@
             });
           }
         }
+        if (!sameSelection(selected)) return result;
         readPosition(result);
         if (action === 'spin-start') spinState = result.state || 'failed';
         if (action === 'spin-stop') spinState = result.state || 'idle';
@@ -208,10 +217,17 @@
         else setStatus();
         return result;
       } catch (error) {
-        setStatus(error.message, 'error');
+        if (sameSelection(selected)) setStatus(error.message, 'error');
         return null;
       } finally {
         pending = false;
+        if (!sameSelection(selected)) {
+          // The previous device's telemetry cannot authorize controls for the new selection.
+          scanActive = false;
+          spinState = 'idle';
+          tiltAtZero = false;
+          setStatus();
+        }
         setBusy();
         clearTimeout(pollTimer);
         pollTimer = setTimeout(() => void refresh({ quiet: true }), 250);

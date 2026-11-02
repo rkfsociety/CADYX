@@ -110,9 +110,12 @@ let deferNextStatus = false;
 let releaseStatus = null;
 let deferNextQuery = false;
 let releaseQuery = null;
+let deferNextRotate = false;
+let releaseRotate = null;
+let selectedDeviceId = '0123456789AB';
 const window = {
   CadyxDeviceSettings: {
-    turntableDeviceId: () => '0123456789AB', turntableProfileId: () => 'revopoint-dual-axis-table',
+    turntableDeviceId: () => selectedDeviceId, turntableProfileId: () => 'revopoint-dual-axis-table',
     turntableRotationPeriodSeconds: () => 30, rememberTurntableRotationPeriodSeconds(value) { this.savedSpeed = value; },
   },
   cadyxSyncCaptureButton() {},
@@ -133,6 +136,10 @@ const fetch = async (url, options = {}) => {
   } }; } };
   }
   const body = JSON.parse(options.body);
+  if (body.command === 'rotate' && deferNextRotate) {
+    deferNextRotate = false;
+    await new Promise(resolve => { releaseRotate = resolve; });
+  }
   let result = { state: 'completed', command: body.command, output: `${body.command} completed`,
     turntable_device_id: body.device_id, profile_id: body.profile_id };
   if (body.command === 'query') {
@@ -265,5 +272,34 @@ const pollStatus = async () => {
   assert.equal(elements['turntable-stop'].dataset.active, 'false',
     'the stop control returns to neutral when rotation stops');
   assert.ok(calls.some(call => call.url.startsWith('/api/v1/scanner/turntable/control')));
+
+  // A cached GET for the old device must not replace the newly selected device's position.
+  deferNextStatus = true;
+  scheduledTimers.filter(timer => timer.delay === 3000).at(-1).callback();
+  await waitUntil(() => typeof releaseStatus === 'function');
+  const beforeSwitch = elements['turntable-angle'].textContent;
+  selectedDeviceId = 'NEW-TABLE';
+  releaseStatus();
+  releaseStatus = null;
+  await wait();
+  assert.equal(elements['turntable-angle'].textContent, beforeSwitch,
+    'old-device telemetry cannot overwrite the newly selected turntable');
+  assert.equal(scheduledTimers.at(-1).delay, 250,
+    'a selection change schedules an immediate refresh of the new device');
+
+  // A manual command that finishes after selection changes must not apply old-device telemetry.
+  deferNextRotate = true;
+  handlers.get('turntable-rotate-right:click')();
+  await waitUntil(() => typeof releaseRotate === 'function');
+  const oldDeviceCall = calls.filter(call => call.options.method === 'POST'
+    && JSON.parse(call.options.body).command === 'rotate').at(-1);
+  assert.equal(JSON.parse(oldDeviceCall.options.body).device_id, 'NEW-TABLE');
+  selectedDeviceId = 'THIRD-TABLE';
+  releaseRotate();
+  await waitUntil(() => !elements['turntable-rotate-right'].disabled);
+  assert.equal(elements['turntable-angle'].textContent, beforeSwitch,
+    'old-device command results cannot change the new device position');
+  assert.equal(elements['turntable-spin'].disabled, true,
+    'the new device cannot spin before its tilt position is verified');
   console.log('turntable controls passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

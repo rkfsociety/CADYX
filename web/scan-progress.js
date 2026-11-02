@@ -8,13 +8,15 @@
     const current = scan.preprocessing_current_frame;
     const processing = current && typeof current.source_file === 'string' ? current.source_file : null;
     const running = scan.state === 'running';
+    const preprocessingFailed = scan.preprocessing_status === 'failed' || failed > 0;
     const title = scan.state === 'failed' ? 'Сканирование остановлено с ошибкой' :
+      scan.state === 'completed' && preprocessingFailed ? 'Съёмка завершена, очистка с ошибками' :
       scan.state === 'completed' ? 'Съёмка и очистка завершены' :
       scan.state === 'busy' ? 'Сканер занят' : captured < total ? 'Съёмка и обработка' : 'Обработка кадров';
-    const detail = processing ? `Обрабатывается: ${processing}` :
+    const detail = scan.state === 'failed' ? (scan.message || 'Не удалось завершить съёмку') :
+      processing ? `Обрабатывается: ${processing}` :
       running && scan.preprocessing_status === 'running' ? 'Очистка кадров выполняется' :
-      running && captured === total ? 'Завершение съёмки и обработки' :
-      scan.state === 'failed' ? (scan.message || 'Не удалось завершить съёмку') : '';
+      running && captured === total ? 'Завершение съёмки и обработки' : '';
     return {title, detail, total, captured, cleaned, failed, state: scan.state};
   }
   function render(container, scan, fusion = null) {
