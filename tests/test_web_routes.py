@@ -178,6 +178,31 @@ class WebRouteTableTests(unittest.TestCase):
         self.assertEqual(upload.spec.body_kind, "project_source")
         self.assertEqual(command.spec.body_kind, "json")
 
+    def test_host_restart_accepts_empty_object_and_reports_scheduling(self) -> None:
+        parsed = urlsplit("/api/v1/host/restart")
+        route = match_route("POST", parsed.path)
+        self.assertIsNotNone(route)
+        assert route is not None
+        for scheduled in (True, False):
+            with self.subTest(scheduled=scheduled):
+                responses = []
+                handler = SimpleNamespace(
+                    _read_json=lambda: {},
+                    _json=lambda status, body: responses.append((status, body)),
+                )
+                with patch("cadyx.web_routes._schedule_host_restart", return_value=scheduled) as spawn:
+                    dispatch_route(handler, SimpleNamespace(), route, parsed)
+                spawn.assert_called_once_with("restart-host.ps1")
+                self.assertEqual(responses, [(200, {"restart_scheduled": scheduled})])
+
+    def test_host_restart_rejects_body_fields(self) -> None:
+        parsed = urlsplit("/api/v1/host/restart")
+        route = match_route("POST", parsed.path)
+        assert route is not None
+        handler = SimpleNamespace(_read_json=lambda: {"delay": 1})
+        with self.assertRaisesRegex(ValidationError, "empty object only"):
+            dispatch_route(handler, SimpleNamespace(), route, parsed)
+
 
 class HTTPJSONBodyFramingTests(unittest.TestCase):
     def test_transfer_encoding_rejected_for_all_methods(self) -> None:

@@ -45,6 +45,7 @@ class RouteMatch:
 
 _ROUTE_SPECS = (
     RouteSpec("GET", "/api/v1/health", "health", "system"),
+    RouteSpec("POST", "/api/v1/host/restart", "host_restart", "system", "json"),
     RouteSpec("GET", "/api/v1/events", "events", "system"),
     RouteSpec("GET", "/api/v1/updates", "updates", "system"),
     RouteSpec("GET", "/api/v1/agent/capabilities", "capabilities", "system"),
@@ -250,10 +251,29 @@ def _query_nonnegative_integer(value: str, message: str, *, ascii_only: bool = T
         raise ValidationError(message) from exc
 
 
+def _schedule_host_restart(script_name: str) -> bool:
+    """Launch the detached PowerShell host restart; false when it cannot spawn."""
+    script = Path(__file__).resolve().parent.parent / "scripts" / script_name
+    try:
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+            cwd=script.parent.parent, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except OSError:
+        return False
+    return True
+
+
 def _dispatch_system(handler: Any, core: CadyxCore, route: RouteMatch, parsed: SplitResult) -> None:
     name = route.spec.name
     if name == "health":
         handler._json(200, {"status": "ok", "api_version": 1})
+    elif name == "host_restart":
+        if _require_json(handler):
+            raise ValidationError("Host restart accepts an empty object only.")
+        handler._json(200, {"restart_scheduled": _schedule_host_restart("restart-host.ps1")})
     elif name == "events":
         handler._stream_events(parse_qs(parsed.query).get("project_id", [None])[0])
     elif name == "capabilities":
@@ -902,17 +922,7 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
             raise ValidationError("Source extension development requires only a proposal object.")
         result = core.develop_agent_source_extension(project_id, body["proposal"])
         if result.get("restart_required"):
-            script = Path(__file__).resolve().parent.parent / "scripts" / "restart-after-source-extension.ps1"
-            try:
-                subprocess.Popen(
-                    ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script)],
-                    cwd=script.parent.parent, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL, close_fds=True,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-                result["restart_scheduled"] = True
-            except OSError:
-                result["restart_scheduled"] = False
+            result["restart_scheduled"] = _schedule_host_restart("restart-after-source-extension.ps1")
         handler._json(201 if result.get("status") == "ready" else 200, result)
     elif name == "agent_source_extension_rollback":
         body = _require_json(handler)

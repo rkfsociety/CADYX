@@ -93,9 +93,9 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .header-revision::before { content: "РЕВ"; color: var(--dim); font: 10px var(--mono); letter-spacing: .08em; }
 .header-revision .topbar-label { display: none; }
 .header-revision strong { color: var(--muted); font: 11px var(--mono); }
-.topbar-sync .project-light { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; background: transparent; box-shadow: none; color: var(--dim); }
-.topbar-sync .project-light.active { background: transparent; box-shadow: none; color: var(--text); }
-.topbar-sync .project-light svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.topbar-restart { min-height: 30px; padding: 0 14px; }
+.topbar-restart:hover { border-color: var(--accent); color: var(--accent); }
+.topbar-restart:disabled { opacity: .55; cursor: default; }
 .topbar .workspace-lock-status {
   grid-area: lock;
   position: static;
@@ -656,11 +656,11 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
         <a id="brand-link" class="brand" href="/" aria-label="CADYX — проекты"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.7 21 7.8v8.4l-9 5.1-9-5.1V7.8l9-5.1Z M3 7.8l9 5.1 9-5.1M12 12.9v8.4"/></svg><span>CADYX</span></a>
       </div>
       <div class="topbar-sync">
-        <span id="api-light" class="project-light" role="status" aria-label="Состояние подключения не подтверждено"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 18h10a4 4 0 0 0 .4-8A6 6 0 0 0 6.1 8.5 4.5 4.5 0 0 0 7 18Z"></path></svg></span>
         <div class="topbar-project-copy">
           <span id="api-status-label" class="topbar-label">СВЯЗЬ С СЕРВЕРОМ…</span>
           <strong id="api-sync-time" class="document-title">—</strong>
         </div>
+        <button id="host-restart" class="button topbar-restart" type="button" aria-label="Перезапустить сервер CADYX">ПЕРЕЗАПУСК</button>
       </div>
       <div class="topbar-project">
         <span id="project-light" class="project-light" aria-hidden="true"></span>

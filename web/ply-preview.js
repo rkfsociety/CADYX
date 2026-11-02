@@ -170,6 +170,22 @@ $("#viewport-fit").addEventListener("click", () => {
   modelViewer.fit();
   setCameraPresetState("isometric");
 });
+const hostRestartButton = $("#host-restart");
+hostRestartButton.addEventListener("click", async () => {
+  if (!window.confirm("Перезапустить сервер CADYX? Незавершённые операции будут прерваны; сохранённые проекты не пострадают.")) return;
+  hostRestartButton.disabled = true;
+  hostRestartButton.textContent = "ПЕРЕЗАПУСК…";
+  try {
+    const result = await api("/api/v1/host/restart", { method: "POST", body: "{}" });
+    if (!result.restart_scheduled) throw new Error("Host restart was not scheduled.");
+  } catch {
+    hostRestartButton.disabled = false;
+    hostRestartButton.textContent = "ПЕРЕЗАПУСК";
+    notify("Не удалось запланировать перезапуск сервера CADYX.", true);
+    return;
+  }
+  notify("Сервер CADYX перезапускается, страница восстановит связь автоматически.", false, 10000);
+});
 const toast = $("#toast");
 const copyProjectIdButton = $("#copy-project-id");
 async function writeClipboardText(value) {
@@ -641,11 +657,8 @@ function showValidationRecordsError() {
 
 function setApiConnectionStatus(online) {
   const label = online ? "Сервер CADYX на связи" : "Нет связи с сервером CADYX";
-  const indicator = $("#api-light");
-  indicator.classList.toggle("active", online);
-  indicator.setAttribute("aria-label", label);
-  indicator.title = label;
   $("#api-status-label").textContent = online ? "СЕРВЕР НА СВЯЗИ" : "НЕТ СВЯЗИ С СЕРВЕРОМ";
+  $("#api-status-label").title = label;
   if (online) {
     $("#api-sync-time").textContent = new Intl.DateTimeFormat("ru-RU", {
       hour: "2-digit", minute: "2-digit", second: "2-digit",
