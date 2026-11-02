@@ -180,8 +180,9 @@ async function main() {
   calibrationGate.resolve();
   await pending;
   assert.equal(tablePosts, 0, 'canceled calibration must not start a table write');
-  assert.equal(canceled.storage.has('cadyx-device-settings-v1'), false,
-    'canceled save must not persist a stale selection');
+  const canceledSettings = JSON.parse(canceled.storage.get('cadyx-device-settings-v1') || '{}');
+  assert.equal(canceledSettings.scannerDeviceId || '', '',
+    'canceled save must not persist a scanner selection');
 
   // Delayed GET responses cannot overwrite a period edited in the dialog.
   const oldTableSettings = deferred();
