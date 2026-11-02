@@ -182,6 +182,44 @@ async function main() {
     assert.equal(await pending, null);
   }
 
+  // A canceled save may finish after a new dialog opens. Its late response must
+  // not close or resolve the new dialog with the previous capture settings.
+  {
+    let finishOldSave;
+    let saves = 0;
+    const f = fixture(async (url, options = {}) => {
+      if (url === '/api/v1/scanner/devices') return response({ scanners: [], turntables: [] });
+      if (url.startsWith('/api/v1/scanner/scan-capture-settings') && options.method !== 'POST') {
+        return response(savedSettings);
+      }
+      if (options.method === 'POST') {
+        saves += 1;
+        return new Promise(resolve => { finishOldSave = resolve; });
+      }
+      throw Error('Unexpected request: ' + url);
+    });
+    f.sandbox.window.CadyxDeviceSettings = {
+      scannerDeviceId: () => 'scanner-1',
+      turntableDeviceId: () => 'table-1',
+      turntableProfileId: () => 'revopoint-dual-axis-table',
+    };
+    const first = f.api.open();
+    for (let i = 0; i < 6; i++) await tick();
+    const saving = f.get('scan-capture-settings-start').click();
+    await tick();
+    assert.equal(saves, 1);
+    await f.get('scan-capture-settings-cancel').click();
+    assert.equal(await first, null);
+    const second = f.api.open();
+    for (let i = 0; i < 6; i++) await tick();
+    finishOldSave(response({ ok: true }));
+    await saving;
+    assert.equal(f.get('scan-capture-settings-dialog').open, true,
+      'a stale save must not close the newer dialog');
+    await f.get('scan-capture-settings-cancel').click();
+    assert.equal(await second, null);
+  }
+
   console.log('scan capture settings dialog tests passed');
 }
 

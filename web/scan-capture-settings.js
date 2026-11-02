@@ -131,6 +131,7 @@
       return;
     }
     startButton.disabled = true;
+    const request = requestId;
     setStatus('Сохраняю настройки…');
     try {
       const response = await fetch('/api/v1/scanner/scan-capture-settings', {
@@ -139,12 +140,14 @@
                                tilt_degrees: Number(tiltInput.value) }),
       });
       const payload = await response.json();
+      if (request !== requestId || !dialog.open) return;
       if (!response.ok) throw new Error(payload.error?.message || payload.message || 'Не удалось сохранить настройки съёмки.');
       if (!sameSelection(selection, deviceSelection())) {
         throw new Error('Выбранные устройства изменились. Закройте окно и откройте настройки заново.');
       }
       settle({ ...selection, step_degrees: Number(stepSelect.value), tilt_degrees: Number(tiltInput.value) });
     } catch (error) {
+      if (request !== requestId || !dialog.open) return;
       setStatus(error.message, true);
       startButton.disabled = false;
     }
