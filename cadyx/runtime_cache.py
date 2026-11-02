@@ -100,6 +100,11 @@ def remember_bounded_bytes(
         retained_bytes -= old_bytes
         retained_entries -= 1
 
+    # An inconsistent caller byte count can exceed the budget even after
+    # every eligible entry was evicted. Reject it before mutating the cache.
+    if retained_entries > max_entries or retained_bytes > max_bytes:
+        raise ValueError("Cache byte accounting exceeds the available eviction budget.")
+
     if had_previous:
         del cache[key]
     cache[key] = value

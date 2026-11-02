@@ -160,6 +160,22 @@ class RuntimeCacheTests(unittest.TestCase):
             )
         self.assertEqual(cache, OrderedDict([("old", b"123")]))
 
+    def test_excess_byte_accounting_rejects_unfulfillable_budget_without_mutation(self):
+        scenarios = (
+            (OrderedDict(), "new", 3, 2),
+            (OrderedDict([("old", b"abc")]), "new", 20, 5),
+            (OrderedDict([("old", b"abc")]), "old", 20, 5),
+        )
+        for original, key, accounted_bytes, budget in scenarios:
+            with self.subTest(key=key, accounted_bytes=accounted_bytes, budget=budget):
+                cache = original.copy()
+                with self.assertRaisesRegex(ValueError, "byte accounting"):
+                    remember_bounded_bytes(
+                        cache, key, b"x", current_bytes=accounted_bytes,
+                        max_entries=2, max_bytes=budget, size_of=len,
+                    )
+                self.assertEqual(cache, original)
+
     def test_policy_budgets_are_validated_in_one_object(self):
         policy = RuntimeCachePolicy(
             validated_document_entries=1,
