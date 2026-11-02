@@ -325,13 +325,29 @@ class AgentRuntime:
                 primary_error = exc
                 raise
             finally:
-                heartbeat.stop()
+                # A renewal worker can fail after the last command-side check
+                # but before stop() joins it. Observe its final state before
+                # declaring success, and release the lease even if join fails.
+                heartbeat_error: BaseException | None = None
+                try:
+                    heartbeat.stop()
+                    heartbeat.check()
+                except BaseException as exc:
+                    if primary_error is None:
+                        heartbeat_error = exc
+                    else:
+                        primary_error.add_note(f"Agent lease heartbeat shutdown also failed: {exc}")
                 try:
                     self.core.stop_agent(project_id, lease_id)
                 except BaseException as stop_error:
-                    if primary_error is None:
+                    if primary_error is not None:
+                        primary_error.add_note(f"Agent lease cleanup also failed: {stop_error}")
+                    elif heartbeat_error is not None:
+                        heartbeat_error.add_note(f"Agent lease cleanup also failed: {stop_error}")
+                    else:
                         raise
-                    primary_error.add_note(f"Agent lease cleanup also failed: {stop_error}")
+                if heartbeat_error is not None:
+                    raise heartbeat_error
             return result
 
         def develop_capability(arguments: Mapping[str, Any]) -> dict[str, Any]:

@@ -21,6 +21,7 @@ from cadyx.agent_runtime import (
 from cadyx.capability_registry import CapabilityRegistry
 from cadyx.core import CadyxCore
 from cadyx.kernel import PrimitiveKernelAdapter
+from cadyx.lease_heartbeat import LeaseHeartbeat
 from cadyx.models import OwnerType
 
 
@@ -472,6 +473,82 @@ class AgentRuntimeTests(unittest.TestCase):
 
         self.assertEqual(len(provider.requests), 2)
         self.assertEqual(self.core.inspect_project(self.project_id)["document"]["revision"], 0)
+        self.assertEqual(self.core.inspect_project(self.project_id)["lock"]["state"], "FREE")
+
+    def test_heartbeat_failure_after_command_is_reported_and_lease_released(self) -> None:
+        provider = ScriptedProvider([
+            AgentResponse(None, (AgentToolCall("edit", "execute_command", {
+                "command": {"type": "create_box", "width": 2, "height": 3, "depth": 4},
+            }),)),
+        ])
+        # Simulate failure between the last command-side check and worker join.
+        with patch.object(LeaseHeartbeat, "check", side_effect=[
+            None, None, RuntimeError("late heartbeat failure"),
+        ]) as checks:
+            with patch.object(self.core, "stop_agent", wraps=self.core.stop_agent) as stop:
+                with self.assertRaisesRegex(RuntimeError, "late heartbeat failure"):
+                    AgentRuntime(self.core, provider, owner_id="late-heartbeat").run(
+                        self.project_id, "Create a box.",
+                    )
+        self.assertEqual(checks.call_count, 3)
+        stop.assert_called_once()
+        self.assertEqual(self.core.inspect_project(self.project_id)["document"]["revision"], 1)
+        self.assertEqual(self.core.inspect_project(self.project_id)["lock"]["state"], "FREE")
+
+    def test_command_error_remains_primary_when_heartbeat_shutdown_fails(self) -> None:
+        provider = ScriptedProvider([
+            AgentResponse(None, (AgentToolCall("edit", "execute_command", {
+                "command": {"type": "create_box", "width": 2, "height": 3, "depth": 4},
+            }),)),
+        ])
+        with patch.object(self.core, "execute_command", side_effect=RuntimeError("command failed")):
+            with patch.object(LeaseHeartbeat, "check", side_effect=[
+                None, RuntimeError("heartbeat failed at shutdown"),
+            ]):
+                with self.assertRaisesRegex(RuntimeError, "command failed") as error:
+                    AgentRuntime(self.core, provider, owner_id="primary-error").run(
+                        self.project_id, "Create a box.",
+                    )
+        self.assertTrue(any("heartbeat failed at shutdown" in note
+                            for note in error.exception.__notes__))
+        self.assertEqual(self.core.inspect_project(self.project_id)["lock"]["state"], "FREE")
+
+    def test_heartbeat_failure_preserves_cleanup_failure_as_note(self) -> None:
+        provider = ScriptedProvider([
+            AgentResponse(None, (AgentToolCall("edit", "execute_command", {
+                "command": {"type": "create_box", "width": 2, "height": 3, "depth": 4},
+            }),)),
+        ])
+        with patch.object(LeaseHeartbeat, "check", side_effect=[
+            None, None, RuntimeError("heartbeat failed at shutdown"),
+        ]):
+            with patch.object(self.core, "stop_agent", side_effect=RuntimeError("cleanup failed")) as stop:
+                with self.assertRaisesRegex(RuntimeError, "heartbeat failed at shutdown") as error:
+                    AgentRuntime(self.core, provider, owner_id="shutdown-error").run(
+                        self.project_id, "Create a box.",
+                    )
+        stop.assert_called_once()
+        self.assertTrue(any("cleanup failed" in note for note in error.exception.__notes__))
+
+    def test_heartbeat_join_failure_still_releases_command_lease(self) -> None:
+        provider = ScriptedProvider([
+            AgentResponse(None, (AgentToolCall("edit", "execute_command", {
+                "command": {"type": "create_box", "width": 2, "height": 3, "depth": 4},
+            }),)),
+        ])
+        original_stop = LeaseHeartbeat.stop
+
+        def fail_after_join(heartbeat: LeaseHeartbeat) -> None:
+            original_stop(heartbeat)
+            raise RuntimeError("heartbeat join failed")
+
+        with patch.object(LeaseHeartbeat, "stop", autospec=True, side_effect=fail_after_join):
+            with patch.object(self.core, "stop_agent", wraps=self.core.stop_agent) as stop:
+                with self.assertRaisesRegex(RuntimeError, "heartbeat join failed"):
+                    AgentRuntime(self.core, provider, owner_id="join-error").run(
+                        self.project_id, "Create a box.",
+                    )
+        stop.assert_called_once()
         self.assertEqual(self.core.inspect_project(self.project_id)["lock"]["state"], "FREE")
 
     def test_command_failure_preserves_primary_error_when_cleanup_also_fails(self) -> None:
