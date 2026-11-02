@@ -17,3 +17,6 @@ const sandbox={$:selector=>elements.get(selector),detail:{dataset:{}},I:{fit:'ic
 vm.runInNewContext(source.slice(start,end),sandbox);
 assert.ok(elements.get('.model-toolbar').children.includes(elements.get('#viewport-toggle-turntable')),
   'the assembled scanner toolbar keeps the table visibility button');
+
+assert.ok(elements.get('.model-toolbar').children.includes(elements.get('#viewport-scan-360-status')),
+  'the scan status belongs to the same toolbar as the scanner controls');
