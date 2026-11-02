@@ -324,10 +324,19 @@ class WorkspaceArtifactStore:
                 or canonical_target_root in canonical_source_root.parents):
             raise ValidationError("Project merge requires separate, non-nested project directories.")
         files: list[tuple[Path, Path, os.stat_result]] = []
+        casefold_paths: dict[str, str] = {}
         for source in sorted(source_root.rglob("*"), key=lambda item: item.as_posix().casefold()):
             relative = source.relative_to(source_root)
             if any(part.casefold().startswith(".cadyx-") for part in relative.parts) or relative.as_posix().casefold() == "project.json":
                 continue
+            # Source volumes may be case-sensitive even when the destination is not.
+            # Reject ambiguous file and directory names before copying anything.
+            for depth in range(1, len(relative.parts) + 1):
+                name = "/".join(relative.parts[:depth])
+                folded = name.casefold()
+                previous = casefold_paths.setdefault(folded, name)
+                if previous != name:
+                    raise ValidationError("Project merge contains case-insensitive path collisions.")
             if source.is_symlink():
                 raise ValidationError(
                     f"Project merge does not copy symbolic links: {relative.as_posix()}."
@@ -452,11 +461,16 @@ class WorkspaceArtifactStore:
         root: Path,
         keep_files: list[str],
     ) -> dict[str, Any]:
-        if not keep_files or any(not _is_single_path_segment(name) for name in keep_files):
-            raise ValidationError("keep_files must contain direct project filenames only.")
+        if (not isinstance(keep_files, list) or not keep_files
+                or any(not _is_single_path_segment(name)
+                       or name.casefold() == "project.json"
+                       or name.casefold().startswith(".cadyx-")
+                       for name in keep_files)):
+            raise ValidationError("keep_files must contain direct user project filenames only.")
         if len({name.casefold() for name in keep_files}) != len(keep_files):
             raise ValidationError("keep_files must not contain duplicates.")
         keep = set(keep_files)
+        keep_by_fold = {name.casefold(): name for name in keep}
         canonical_root = root.resolve(strict=True)
         entries = sorted(root.rglob("*"), key=lambda item: item.as_posix().casefold())
         for name in keep:
@@ -477,7 +491,10 @@ class WorkspaceArtifactStore:
                 continue
             if not entry.is_file():
                 continue
-            if relative.parts == (entry.name,) and entry.name in keep:
+            # A Windows case-only alias is the same file, but two distinct
+            # case-colliding files on a case-sensitive volume are not.
+            if (len(relative.parts) == 1 and entry.name.casefold() in keep_by_fold
+                    and entry.samefile(root / keep_by_fold[entry.name.casefold()])):
                 continue
             resolved = entry.resolve(strict=True)
             if canonical_root not in resolved.parents:
@@ -493,9 +510,16 @@ class WorkspaceArtifactStore:
             path = root / name
             before = path.lstat()
             digest = hashlib.sha256()
+            before_identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
             with path.open("rb") as stream:
+                opened = os.fstat(stream.fileno())
+                if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns) != before_identity:
+                    raise ValidationError("Retained project source changed during pruning.")
                 while chunk := stream.read(1024 * 1024):
                     digest.update(chunk)
+                finished = os.fstat(stream.fileno())
+                if (finished.st_dev, finished.st_ino, finished.st_size, finished.st_mtime_ns) != before_identity:
+                    raise ValidationError("Retained project source changed during pruning.")
             after = path.lstat()
             if (path.is_symlink() or
                     (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) !=

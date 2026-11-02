@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -541,6 +543,116 @@ class WorkspaceServiceTests(unittest.TestCase):
             with self.subTest(folder_name=unsafe), self.assertRaises(NotFoundError):
                 store.list_project_subfolder_files(directory, unsafe)
 
+
+    def test_prune_keeps_case_only_alias_on_windows(self) -> None:
+        if os.name != "nt":
+            self.skipTest("Windows case-insensitive file lookup is required")
+        project = self.root / "project"
+        project.mkdir()
+        (project / "Part.step").write_bytes(b"keep")
+        (project / "discard.step").write_bytes(b"discard")
+
+        result = WorkspaceArtifactStore.prune_project_files(
+            "project-id", project, ["PART.step"]
+        )
+
+        self.assertEqual(result["removed"], ["discard.step"])
+        self.assertEqual((project / "Part.step").read_bytes(), b"keep")
+        self.assertEqual(result["retained"][0]["sha256"], hashlib.sha256(b"keep").hexdigest())
+
+    def test_prune_does_not_keep_distinct_casefold_colliding_files(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Case-sensitive file lookup is required")
+        project = self.root / "project"
+        project.mkdir()
+        (project / "Part.step").write_bytes(b"keep")
+        (project / "part.step").write_bytes(b"discard")
+
+        result = WorkspaceArtifactStore.prune_project_files(
+            "project-id", project, ["Part.step"]
+        )
+
+        self.assertEqual(result["removed"], ["part.step"])
+        self.assertEqual((project / "Part.step").read_bytes(), b"keep")
+        self.assertFalse((project / "part.step").exists())
+
+    def test_prune_rejects_internal_metadata_and_invalid_keep_lists(self) -> None:
+        project = self.root / "project"
+        project.mkdir()
+        (project / "project.json").write_bytes(b"{}")
+        (project / ".cadyx-project-id").write_bytes(b"metadata")
+        (project / "discard.step").write_bytes(b"discard")
+
+        for keep_files in (
+            ["project.json"], [".cadyx-project-id"], [".CADYX-private"],
+            "discard.step", None,
+        ):
+            with self.subTest(keep_files=keep_files), self.assertRaises(ValidationError):
+                WorkspaceArtifactStore.prune_project_files("project-id", project, keep_files)
+            self.assertEqual((project / "discard.step").read_bytes(), b"discard")
+
+    def test_prune_detects_replaced_retained_stream_even_after_path_restored(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Unlinking an open file is not supported on Windows")
+        project = self.root / "project"
+        project.mkdir()
+        retained = project / "keep.step"
+        retained.write_bytes(b"original")
+        discarded = project / "discard.step"
+        discarded.write_bytes(b"discard")
+        backup = project / ".cadyx-backup"
+        original_open = Path.open
+
+        def swap_and_restore(path, *args, **kwargs):
+            if path == retained and args and args[0] == "rb":
+                retained.rename(backup)
+                retained.write_bytes(b"replacement")
+                stream = original_open(retained, *args, **kwargs)
+                retained.unlink()
+                backup.rename(retained)
+                return stream
+            return original_open(path, *args, **kwargs)
+
+        with patch.object(Path, "open", swap_and_restore):
+            with self.assertRaisesRegex(ValidationError, "source changed"):
+                WorkspaceArtifactStore.prune_project_files(
+                    "project-id", project, ["keep.step"]
+                )
+        self.assertEqual(retained.read_bytes(), b"original")
+        self.assertEqual(discarded.read_bytes(), b"discard")
+
+    def test_merge_rejects_casefold_colliding_file_names_before_copy(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Case-sensitive source volume is required")
+        source = self.root / "source"
+        target = self.root / "target"
+        source.mkdir()
+        target.mkdir()
+        (source / "Part.step").write_bytes(b"first")
+        (source / "part.step").write_bytes(b"second")
+
+        with self.assertRaisesRegex(ValidationError, "case-insensitive path collisions"):
+            WorkspaceArtifactStore.copy_project_files(
+                "source-id", "target-id", source, target
+            )
+        self.assertEqual(list(target.iterdir()), [])
+
+    def test_merge_rejects_casefold_colliding_directories_before_copy(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Case-sensitive source volume is required")
+        source = self.root / "source"
+        target = self.root / "target"
+        (source / "Scans").mkdir(parents=True)
+        (source / "scans").mkdir()
+        target.mkdir()
+        (source / "Scans" / "first.ply").write_bytes(b"first")
+        (source / "scans" / "second.ply").write_bytes(b"second")
+
+        with self.assertRaisesRegex(ValidationError, "case-insensitive path collisions"):
+            WorkspaceArtifactStore.copy_project_files(
+                "source-id", "target-id", source, target
+            )
+        self.assertEqual(list(target.iterdir()), [])
 
 if __name__ == "__main__":
     unittest.main()
