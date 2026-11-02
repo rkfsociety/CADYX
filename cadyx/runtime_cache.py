@@ -60,6 +60,11 @@ def remember_bounded_bytes(
     if any(type(amount) is not int or amount < 0
            for amount in (current_bytes, max_entries, max_bytes)):
         raise ValueError("Cache budgets and byte accounting must be non-negative integers.")
+    # Disabled caches must not evaluate an expensive or failing size callback.
+    # Discard any previously retained entries when the policy is set to zero.
+    if max_entries == 0:
+        cache.clear()
+        return 0
     value_bytes = size_of(value)
     if type(value_bytes) is not int or value_bytes < 0:
         raise ValueError("Cache item size must be a non-negative integer.")
@@ -70,9 +75,6 @@ def remember_bounded_bytes(
     if previous_bytes > current_bytes:
         raise ValueError("Cache byte accounting is smaller than the replaced item.")
     retained_bytes = current_bytes - previous_bytes
-    if max_entries == 0:
-        cache.clear()
-        return 0
     # An oversized replacement removes only its old entry; other entries remain.
     if value_bytes > max_bytes:
         if had_previous:

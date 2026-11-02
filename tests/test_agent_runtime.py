@@ -486,11 +486,13 @@ class AgentRuntimeTests(unittest.TestCase):
             None, None, RuntimeError("late heartbeat failure"),
         ]) as checks:
             with patch.object(self.core, "stop_agent", wraps=self.core.stop_agent) as stop:
-                with self.assertRaisesRegex(RuntimeError, "late heartbeat failure"):
+                with self.assertRaisesRegex(RuntimeError, "late heartbeat failure") as error:
                     AgentRuntime(self.core, provider, owner_id="late-heartbeat").run(
                         self.project_id, "Create a box.",
                     )
         self.assertEqual(checks.call_count, 3)
+        self.assertTrue(any("inspect the saved revision" in note
+                            for note in error.exception.__notes__))
         stop.assert_called_once()
         self.assertEqual(self.core.inspect_project(self.project_id)["document"]["revision"], 1)
         self.assertEqual(self.core.inspect_project(self.project_id)["lock"]["state"], "FREE")

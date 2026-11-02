@@ -57,6 +57,19 @@ class RuntimeCacheTests(unittest.TestCase):
         self.assertEqual(cache, OrderedDict())
         self.assertEqual(retained, 0)
 
+    def test_disabled_cache_does_not_measure_new_or_stale_values(self):
+        cache = OrderedDict([("stale", b"123")])
+
+        def should_not_measure(value):
+            raise AssertionError("disabled cache must not invoke size_of")
+
+        retained = remember_bounded_bytes(
+            cache, "new", b"456", current_bytes=3,
+            max_entries=0, max_bytes=5, size_of=should_not_measure,
+        )
+        self.assertEqual(retained, 0)
+        self.assertEqual(cache, OrderedDict())
+
     def test_none_entry_and_failed_size_calculation_preserve_accounting(self):
         cache = OrderedDict([("empty", None), ("data", b"12")])
         size_of = lambda value: 0 if value is None else len(value)

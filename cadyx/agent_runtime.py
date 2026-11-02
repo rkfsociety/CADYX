@@ -347,6 +347,11 @@ class AgentRuntime:
                     else:
                         raise
                 if heartbeat_error is not None:
+                    # The command already returned a saved revision. Do not
+                    # encourage blind retries that could duplicate geometry.
+                    heartbeat_error.add_note(
+                        "The command may have committed; inspect the saved revision before retrying."
+                    )
                     raise heartbeat_error
             return result
 
