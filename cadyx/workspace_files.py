@@ -262,7 +262,10 @@ class WorkspaceArtifactStore:
         target_directory = self._project_subfolder(directory, folder_name) if folder_name is not None else directory
         source = (self.resolve_project_subfolder_file(directory, folder_name, file_name)
                   if folder_name is not None else self.resolve_project_file(directory, file_name))
-        size = source.stat().st_size
+        source_stat = source.lstat()
+        if not stat.S_ISREG(source_stat.st_mode):
+            raise ValidationError("Project source changed while renaming file.")
+        size = source_stat.st_size
         if new_name == file_name:
             return {"old_name": file_name, "name": new_name, "size": size, "renamed": False}
 
@@ -292,10 +295,20 @@ class WorkspaceArtifactStore:
                 # On Windows a case-only alias already resolves to this file.
                 source.rename(destination)
             else:
-                # On case-sensitive volumes rename() could overwrite a file
-                # created after preflight. A hard link fails atomically instead.
+                # Linking refuses a concurrently created destination. Verify
+                # the original inode before unlinking: the source path can be
+                # replaced with another file or symlink after preflight.
                 os.link(source, destination)
                 try:
+                    linked = destination.lstat()
+                    current = source.lstat()
+                    identity = lambda item: (
+                        item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns
+                    )
+                    if (not stat.S_ISREG(linked.st_mode)
+                            or identity(linked) != identity(source_stat)
+                            or identity(current) != identity(source_stat)):
+                        raise OSError("Project source changed while renaming file")
                     source.unlink()
                 except OSError:
                     destination.unlink(missing_ok=True)

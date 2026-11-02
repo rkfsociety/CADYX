@@ -724,6 +724,55 @@ class WorkspaceServiceTests(unittest.TestCase):
         self.assertEqual((project / "part.step").read_bytes(), b"source")
         self.assertEqual((project / "Other.step").read_bytes(), b"existing")
 
+    def test_rename_detects_source_replaced_during_link(self) -> None:
+        project = self.root / "project"
+        project.mkdir()
+        source = project / "part.step"
+        destination = project / "renamed.step"
+        source.write_bytes(b"original")
+        original_link = os.link
+
+        def replace_source(src, dst, *args, **kwargs):
+            if Path(src) == source and Path(dst) == destination:
+                source.unlink()
+                source.write_bytes(b"replacement")
+            return original_link(src, dst, *args, **kwargs)
+
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+        with patch("cadyx.workspace_files.os.link", side_effect=replace_source):
+            with self.assertRaisesRegex(ValidationError, "source changed"):
+                store.rename_project_file(project, "part.step", "renamed.step")
+        self.assertEqual(source.read_bytes(), b"replacement")
+        self.assertFalse(destination.exists())
+
+    def test_rename_detects_source_replaced_by_symlink(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Symlink replacement test requires POSIX")
+        project = self.root / "project"
+        project.mkdir()
+        source = project / "part.step"
+        destination = project / "renamed.step"
+        source.write_bytes(b"original")
+        backup = project / "original.backup"
+        outside = self.root / "outside.step"
+        outside.write_bytes(b"outside")
+        original_link = os.link
+
+        def replace_source(src, dst, *args, **kwargs):
+            if Path(src) == source and Path(dst) == destination:
+                source.rename(backup)
+                source.symlink_to(outside)
+            return original_link(src, dst, *args, **kwargs)
+
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+        with patch("cadyx.workspace_files.os.link", side_effect=replace_source):
+            with self.assertRaisesRegex(ValidationError, "source changed"):
+                store.rename_project_file(project, "part.step", "renamed.step")
+        self.assertEqual(backup.read_bytes(), b"original")
+        self.assertTrue(source.is_symlink())
+        self.assertEqual(outside.read_bytes(), b"outside")
+        self.assertFalse(destination.exists())
+
     def test_upload_rejects_casefold_alias_of_existing_file(self) -> None:
         project = self.root / "project"
         project.mkdir()

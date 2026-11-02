@@ -751,7 +751,7 @@ class CadyxMCPServerTests(unittest.TestCase):
 
         def slow_execute(*args, **kwargs):
             entered.set()
-            if not finish.wait(timeout=5):
+            if not finish.wait(timeout=15):
                 raise TimeoutError("test operation did not receive release")
             return original_execute(*args, **kwargs)
 
@@ -764,18 +764,22 @@ class CadyxMCPServerTests(unittest.TestCase):
         try:
             with ThreadPoolExecutor(max_workers=2) as pool:
                 command = pool.submit(self.app._execute_command, project_id, 0, {"type": "create_box", "width": 1, "height": 1, "depth": 1})
-                self.assertTrue(entered.wait(timeout=3))
+                self.assertTrue(entered.wait(timeout=10))
                 stop = pool.submit(self.app._stop_agent_work, project_id)
-                self.assertTrue(fenced.wait(timeout=3))
+                self.assertTrue(fenced.wait(timeout=10))
                 finish.set()
-                stopped = stop.result(timeout=5)
+                # Completion may include native geometry validation and disk
+                # synchronization on a busy Windows runner. Wait for the
+                # admitted command before checking the stop receipt.
+                self.assertEqual(command.result(timeout=20)["revision"], 1)
+                stopped = stop.result(timeout=20)
                 self.assertTrue(stopped.get("stopped") or stopped.get("command_already_finished"))
                 stopped_revision = (
                     stopped["document"]["revision"] if stopped.get("stopped")
                     else stopped["revision"]
                 )
                 self.assertEqual(stopped_revision, 1)
-                self.assertEqual(command.result(timeout=5)["revision"], 1)
+
         finally:
             finish.set()
             self.core.commands.execute = original_execute
