@@ -96,6 +96,28 @@ class GeometricRegistrationIntegrationTests(unittest.TestCase):
                 self.assertTrue((series / status['result'][key]).is_file())
             self.assertEqual(core.leases.snapshot(project_id)['state'], 'FREE')
 
+    def test_rejects_geometrically_inconsistent_adjacent_rotation(self):
+        from tools.revopoint.register_point_clouds_first_frame import register_sequence
+        rng = np.random.default_rng(42)
+        points = np.vstack((rng.normal([0, 0, 0], [8, 3, 2], (500, 3)),
+                            rng.normal([8, 5, 4], [2, 1, 3], (250, 3))))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_id = 'revopoint_20261010T100000Z'
+            series = root / run_id
+            series.mkdir()
+            (series / f'{run_id}_scan_360.json').write_text(json.dumps({'frame_count':4}))
+            for index, degrees in enumerate((0, 30, 60, 218)):
+                theta = np.deg2rad(degrees)
+                rotation = np.array([[np.cos(theta), -np.sin(theta), 0],
+                                     [np.sin(theta), np.cos(theta), 0], [0, 0, 1]])
+                cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points @ rotation.T))
+                self.assertTrue(o3d.io.write_point_cloud(str(series / f'{run_id}_pose_{index:03}.ply'),
+                                                          cloud, write_ascii=True))
+            with self.assertRaisesRegex(RuntimeError, 'ambiguous.*alignment'):
+                register_sequence(series, run_id, root / 'fused.ply', 1.0, .5)
+            self.assertFalse((root / 'fused.ply').exists())
+
     def test_registered_cloud_retains_non_dominant_samples(self):
         from tools.revopoint.register_point_clouds_first_frame import register_sequence
 
@@ -115,6 +137,8 @@ class GeometricRegistrationIntegrationTests(unittest.TestCase):
                 cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(values))
                 path = series / f'{run_id}_pose_{index:03}.ply'
                 self.assertTrue(o3d.io.write_point_cloud(str(path), cloud, write_ascii=True))
+            with self.assertRaisesRegex(ValueError, 'only for visual preview'):
+                register_sequence(series, run_id, root / 'marker_output.ply', 1.0, .5, table_alignment_report=root / 'map.json')
             result = register_sequence(series, run_id, root / 'fused.ply', 1.0, .5)
             self.assertGreater(result['adjacent_edges'][0]['fitness'], .9)
             self.assertLess(result['last_to_first_local_correction']['rotation_degrees'], 1)

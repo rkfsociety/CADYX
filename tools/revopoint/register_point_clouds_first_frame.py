@@ -109,6 +109,24 @@ def _overlap_in_bounds(source: np.ndarray, target: np.ndarray,
     }
 
 
+def _rotation_degrees(transform: np.ndarray) -> float:
+    matrix = np.asarray(transform, dtype=np.float64)
+    if matrix.shape != (4, 4) or not np.isfinite(matrix).all():
+        raise ValueError("registration transform must be a finite 4x4 matrix")
+    rotation = matrix[:3, :3]
+    if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-3) or np.linalg.det(rotation) < 0.999:
+        raise ValueError("registration transform must contain a proper rigid rotation")
+    return float(np.degrees(np.arccos(np.clip((np.trace(matrix[:3, :3]) - 1) / 2, -1, 1))))
+
+
+def _consistent_rotation(angle: float, previous: list[float]) -> bool:
+    """Reject gross geometric outliers relative to prior equal-step registrations."""
+    if len(previous) < 2:
+        return True
+    median = float(np.median(previous))
+    return abs(angle - median) <= max(20.0, median * 0.75)
+
+
 def register_sequence(project: Path, run_id: str, output: Path,
                       voxel_size: float = 2.0, fused_voxel_size: float = 0.75,
                       table_alignment_report: Path | None = None,
@@ -131,23 +149,8 @@ def register_sequence(project: Path, run_id: str, output: Path,
     if not math.isfinite(fused_voxel_size) or fused_voxel_size <= 0:
         raise ValueError("fused voxel size must be positive and finite")
 
-    alignment_path: Path | None = None
-    alignment_data: dict[str, Any] | None = None
-    frame0_alignment: dict[str, Any] | None = None
     if table_alignment_report is not None:
-        alignment_path = table_alignment_report.resolve(strict=True)
-        try:
-            alignment_data = json.loads(alignment_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
-            raise ValueError("table-alignment report is unreadable") from error
-        if (not isinstance(alignment_data, dict)
-                or alignment_data.get("run_id") != run_id
-                or alignment_data.get("coordinate_frame") != "table_marker_map_center_xy"):
-            raise ValueError("table-alignment report does not match this scan run and coordinate frame")
-        frame0_alignment = next((frame for frame in alignment_data.get("frames", [])
-                                 if isinstance(frame, dict) and frame.get("index") == 0), None)
-        if not isinstance(frame0_alignment, dict) or frame0_alignment.get("status") != "aligned":
-            raise ValueError("frame zero does not have a verified table-marker alignment")
+        raise ValueError("marker alignment is only for visual preview; fused coordinates must remain geometric")
 
     o3d.utility.random.seed(20261020)
     paths = source_paths(project, run_id)
@@ -213,12 +216,24 @@ def register_sequence(project: Path, run_id: str, output: Path,
         o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 4, max_nn=40))
     adjacent_edges = []
     incremental_edges = []
+    adjacent_rotations: list[float] = []
     frame_count = len(clouds)
     for target_id in range(1, frame_count):
         if progress:
             progress("register", target_id - 1, frame_count - 1, paths[target_id].name)
         source_id = target_id - 1
         adjacent_result, _ = pairwise(source_id, target_id)
+        # Repeated geometric searches provide alternative hypotheses, not a
+        # guessed turntable axis or a pose inferred from encoder telemetry.
+        for _ in range(3):
+            if (adjacent_result.fitness >= 0.35 and adjacent_result.inlier_rmse <= rmse_limit
+                    and _consistent_rotation(_rotation_degrees(adjacent_result.transformation), adjacent_rotations)):
+                break
+            adjacent_result, _ = pairwise(source_id, target_id)
+        adjacent_angle = _rotation_degrees(adjacent_result.transformation)
+        if not _consistent_rotation(adjacent_angle, adjacent_rotations):
+            raise RuntimeError(f"ambiguous adjacent alignment {source_id}->{target_id}: "
+                               f"rotation {adjacent_angle:.1f}° conflicts with neighboring geometric matches")
         if adjacent_result.fitness < 0.35 or adjacent_result.inlier_rmse > rmse_limit:
             raise RuntimeError(f"weak adjacent alignment {source_id}->{target_id}: "
                                f"fitness={adjacent_result.fitness:.3f}, rmse={adjacent_result.inlier_rmse:.3f}")
@@ -234,6 +249,11 @@ def register_sequence(project: Path, run_id: str, output: Path,
                                f"rmse={incremental_result.inlier_rmse:.3f}")
         current_pose = np.asarray(incremental_result.transformation)
         transform = np.linalg.inv(current_pose) @ accumulated_pose
+        refined_angle = _rotation_degrees(transform)
+        if not _consistent_rotation(refined_angle, adjacent_rotations):
+            raise RuntimeError(f"ambiguous accumulated alignment {source_id}->{target_id}: "
+                               f"rotation {refined_angle:.1f}° conflicts with neighboring geometric matches")
+        adjacent_rotations.append(refined_angle)
         information = registration.get_information_matrix_from_point_clouds(
             downsampled[source_id], downsampled[target_id], correspondence_distance, transform)
         pose_graph.nodes.append(registration.PoseGraphNode(current_pose.copy()))
@@ -247,7 +267,8 @@ def register_sequence(project: Path, run_id: str, output: Path,
             o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 4, max_nn=40))
         adjacent_edges.append({"source": source_id, "target": target_id,
                                "fitness": float(adjacent_result.fitness),
-                               "inlier_rmse": float(adjacent_result.inlier_rmse)})
+                               "inlier_rmse": float(adjacent_result.inlier_rmse),
+                               "rotation_degrees": adjacent_angle})
         incremental_edges.append({"source": target_id, "target": "accumulated",
                                   "fitness": float(incremental_result.fitness),
                                   "inlier_rmse": float(incremental_result.inlier_rmse)})
@@ -257,16 +278,25 @@ def register_sequence(project: Path, run_id: str, output: Path,
         progress("register", frame_count - 1, frame_count - 1, None)
 
     loop_edges = []
+    rejected_loops = []
     for target_id in range(2, frame_count):
         if progress:
             progress("loops", target_id - 2, frame_count - 2, paths[target_id].name)
         result, information = pairwise(0, target_id)
-        if result.fitness >= 0.35 and result.inlier_rmse <= voxel_size * 1.5:
+        predicted = np.linalg.inv(np.asarray(pose_graph.nodes[target_id].pose)) @ np.asarray(pose_graph.nodes[0].pose)
+        rotation_disagreement = _rotation_degrees(np.asarray(result.transformation) @ np.linalg.inv(predicted))
+        if result.fitness >= 0.35 and result.inlier_rmse <= voxel_size * 1.5 and rotation_disagreement <= 35.0:
             pose_graph.edges.append(registration.PoseGraphEdge(
                 0, target_id, np.asarray(result.transformation), information, uncertain=True))
             loop_edges.append({"source": 0, "target": target_id,
                                "fitness": float(result.fitness),
-                               "inlier_rmse": float(result.inlier_rmse)})
+                               "inlier_rmse": float(result.inlier_rmse),
+                               "rotation_disagreement_degrees": rotation_disagreement})
+        else:
+            rejected_loops.append({"source": 0, "target": target_id,
+                                   "fitness": float(result.fitness),
+                                   "inlier_rmse": float(result.inlier_rmse),
+                                   "rotation_disagreement_degrees": rotation_disagreement})
 
     optimization_option = registration.GlobalOptimizationOption(
         max_correspondence_distance=correspondence_distance,
@@ -292,7 +322,18 @@ def register_sequence(project: Path, run_id: str, output: Path,
 
     if progress:
         progress("optimize", 0, 1, None)
+    def validate_optimized_angles() -> list[float]:
+        angles = [_rotation_degrees(np.linalg.inv(np.asarray(pose_graph.nodes[index].pose))
+                                    @ np.asarray(pose_graph.nodes[index - 1].pose))
+                  for index in range(1, frame_count)]
+        for index, angle in enumerate(angles):
+            if not _consistent_rotation(angle, adjacent_rotations):
+                raise RuntimeError(f"ambiguous optimized alignment {index}->{index + 1}: "
+                                   f"rotation {angle:.1f}° conflicts with neighboring geometric matches")
+        return angles
+
     optimize_pose_graph()
+    optimized_angles = validate_optimized_angles()
     registered = transform_clouds()
     endpoint_closure = registration.registration_icp(
         registered[-1], registered[0], correspondence_distance, np.eye(4),
@@ -316,6 +357,7 @@ def register_sequence(project: Path, run_id: str, output: Path,
         pose_graph.edges.append(registration.PoseGraphEdge(
             0, frame_count - 1, first_to_last, closure_information, uncertain=False))
         optimize_pose_graph()
+        optimized_angles = validate_optimized_angles()
         registered = transform_clouds()
         closure_refinement["status"] = "applied"
         closure_refinement["edge"] = [0, frame_count - 1]
@@ -353,25 +395,7 @@ def register_sequence(project: Path, run_id: str, output: Path,
     correction_rotation = float(np.degrees(np.arccos(np.clip(
         (np.trace(correction[:3, :3]) - 1.0) / 2.0, -1.0, 1.0))))
     coordinate_frame = "first captured point cloud"
-    table_map_alignment: dict[str, Any] | None = None
-    clipped_below_table = 0
-    if frame0_alignment is not None and alignment_data is not None and alignment_path is not None:
-        mapped_points, clipped_below_table = transform_points_to_table_map(
-            np.asarray(fused.points), frame0_alignment,
-        )
-        if len(mapped_points) == 0:
-            raise RuntimeError("frame-zero table transform clipped every fused point")
-        fused.points = o3d.utility.Vector3dVector(mapped_points)
-        coordinate_frame = "table_marker_map_center_xy"
-        table_map_alignment = {
-            "report_file": alignment_path.name,
-            "report_sha256": hashlib.sha256(alignment_path.read_bytes()).hexdigest(),
-            "frame_index": 0,
-            "matched_marker_count": frame0_alignment["matched_marker_count"],
-            "marker_median_residual_map_units": frame0_alignment["marker_median_residual_map_units"],
-            "scanner_to_map_scale": frame0_alignment["scanner_to_map_scale"],
-            "clipped_below_table_points": clipped_below_table,
-        }
+    table_map_alignment = None
     output_bounds = np.asarray(fused.get_axis_aligned_bounding_box().get_box_points())
     output_lower, output_upper = output_bounds.min(axis=0), output_bounds.max(axis=0)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -412,11 +436,12 @@ def register_sequence(project: Path, run_id: str, output: Path,
         "dominant_component_fraction": float(dominant_points / max(1, len(sampled.points))),
         "registration_dimensions_q": (registration_upper - registration_lower).tolist(),
         "output_dimensions": (output_upper - output_lower).tolist(),
-        "output_coordinate_units": ("table map units; physical scale unverified"
-                                    if table_map_alignment else "Q-derived units; physical scale unverified"),
+        "output_coordinate_units": "Q-derived units; physical scale unverified",
         "adjacent_edges": adjacent_edges,
         "incremental_edges": incremental_edges,
         "loop_edges_to_first_frame": loop_edges,
+        "rejected_loop_edges": rejected_loops,
+        "optimized_adjacent_rotation_degrees": optimized_angles,
         "adjacent_direct_overlap": overlap,
         "last_to_first_direct_overlap": closure,
         "last_to_first_local_correction": {
@@ -444,7 +469,7 @@ def main() -> int:
     parser.add_argument("--fused-voxel-size", type=float, default=0.75,
                         help="Q-derived units used for point-only fusion (default: 0.75)")
     parser.add_argument("--table-alignment-report", type=Path,
-                        help="rebase the fused first-frame cloud to table-map XY using frame zero's marker fit")
+                        help="unsupported: marker alignment is reserved for visual preview")
     args = parser.parse_args()
     try:
         print(json.dumps(register_sequence(args.project_directory, args.run_id, args.output_ply,

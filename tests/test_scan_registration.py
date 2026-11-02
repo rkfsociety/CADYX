@@ -21,7 +21,7 @@ from tools.revopoint.preprocess_scan_frame import (
     verified_preprocessed_frame, watch_capture,
 )
 from tools.revopoint.register_point_clouds_first_frame import source_paths
-from tools.revopoint.register_point_clouds_first_frame import transform_points_to_table_map
+from tools.revopoint.register_point_clouds_first_frame import transform_points_to_table_map, _consistent_rotation, _rotation_degrees
 
 
 class PointCloudRegistrationInputTests(unittest.TestCase):
@@ -55,6 +55,19 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
         self.assertEqual(clipped, 1)
         np.testing.assert_allclose(aligned, [[10.0, -5.0, 0.0], [14.0, 1.0, 8.0],
                                              [10.0, -5.0, 0.0]])
+
+    def test_equal_step_rotation_consensus_rejects_large_geometric_outlier(self) -> None:
+        self.assertTrue(_consistent_rotation(31.0, [29.7, 30.2]))
+        self.assertFalse(_consistent_rotation(157.8, [29.7, 30.2, 30.6]))
+        self.assertTrue(_consistent_rotation(157.8, [30.0]))
+        theta = np.deg2rad(30)
+        transform = np.eye(4)
+        transform[:3, :3] = [[np.cos(theta), -np.sin(theta), 0],
+                             [np.sin(theta), np.cos(theta), 0], [0, 0, 1]]
+        self.assertAlmostEqual(_rotation_degrees(transform), 30.0)
+        transform[0, 0] = -1
+        with self.assertRaisesRegex(ValueError, 'proper rigid rotation'):
+            _rotation_degrees(transform)
 
     def test_processing_accepts_numpy_real_scalars_and_rejects_nonfinite(self) -> None:
         for dtype in (np.float32, np.float64, np.int64):
