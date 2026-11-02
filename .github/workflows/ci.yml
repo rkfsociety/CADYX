@@ -120,3 +120,24 @@ jobs:
             & $node (Join-Path tests $test)
             if ($LASTEXITCODE -ne 0) { throw "Browser regression failed: $test" }
           }
+
+  linux-filesystem:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read reviewed Python version
+        id: versions
+        shell: pwsh
+        run: |
+          $versions = Get-Content scripts/runtime-versions.json -Raw | ConvertFrom-Json
+          "python=$($versions.python.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.versions.outputs.python }}
+
+      - name: Check case-sensitive workspace operations
+        run: python -m unittest discover -s tests -p test_workspace_services.py -v

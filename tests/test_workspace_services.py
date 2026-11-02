@@ -9,7 +9,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from cadyx.errors import NotFoundError, ValidationError
+from cadyx.errors import ConflictError, NotFoundError, ValidationError
 from cadyx.workspace_files import WorkspaceArtifactStore
 from cadyx.workspace_groups import ProjectGroupStore
 from cadyx.workspace_projects import ProjectRecordStore
@@ -653,6 +653,51 @@ class WorkspaceServiceTests(unittest.TestCase):
                 "source-id", "target-id", source, target
             )
         self.assertEqual(list(target.iterdir()), [])
+
+    def test_merge_rejects_casefold_collision_with_existing_target_file(self) -> None:
+        source = self.root / "source"
+        target = self.root / "target"
+        source.mkdir()
+        target.mkdir()
+        (source / "part.step").write_bytes(b"new")
+        (target / "Part.step").write_bytes(b"existing")
+
+        with self.assertRaisesRegex(ConflictError, "case-insensitive path collision"):
+            WorkspaceArtifactStore.copy_project_files(
+                "source-id", "target-id", source, target
+            )
+        self.assertEqual((target / "Part.step").read_bytes(), b"existing")
+        self.assertEqual([entry.name for entry in target.iterdir()], ["Part.step"])
+
+    def test_merge_rejects_casefold_collision_with_existing_target_directory(self) -> None:
+        source = self.root / "source"
+        target = self.root / "target"
+        (source / "scans").mkdir(parents=True)
+        (target / "Scans").mkdir(parents=True)
+        (source / "scans" / "new.ply").write_bytes(b"new")
+        (target / "Scans" / "old.ply").write_bytes(b"existing")
+
+        with self.assertRaisesRegex(ConflictError, "case-insensitive path collision"):
+            WorkspaceArtifactStore.copy_project_files(
+                "source-id", "target-id", source, target
+            )
+        self.assertEqual((target / "Scans" / "old.ply").read_bytes(), b"existing")
+        self.assertFalse((target / "scans" / "new.ply").exists())
+
+    def test_merge_allows_existing_target_directory_with_same_case(self) -> None:
+        source = self.root / "source"
+        target = self.root / "target"
+        (source / "scans").mkdir(parents=True)
+        (target / "scans").mkdir(parents=True)
+        (source / "scans" / "new.ply").write_bytes(b"new")
+        (target / "scans" / "old.ply").write_bytes(b"existing")
+
+        result = WorkspaceArtifactStore.copy_project_files(
+            "source-id", "target-id", source, target
+        )
+        self.assertEqual(result["file_count"], 1)
+        self.assertEqual((target / "scans" / "new.ply").read_bytes(), b"new")
+        self.assertEqual((target / "scans" / "old.ply").read_bytes(), b"existing")
 
 if __name__ == "__main__":
     unittest.main()

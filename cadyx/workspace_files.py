@@ -353,6 +353,28 @@ class WorkspaceArtifactStore:
             destination = target_root / relative
             files.append((source, destination, resolved.stat()))
 
+        # Check each existing destination directory only once. On case-sensitive
+        # volumes an exact-path check alone permits "Scans" and "scans" to
+        # coexist, producing a merge that cannot be opened safely on Windows.
+        target_directory_names: dict[Path, dict[str, set[str]]] = {}
+        for _, destination, _ in files:
+            current = target_root
+            for part in destination.relative_to(target_root).parts:
+                if current.is_dir() and not current.is_symlink():
+                    names = target_directory_names.get(current)
+                    if names is None:
+                        names = {}
+                        for entry in current.iterdir():
+                            names.setdefault(entry.name.casefold(), set()).add(entry.name)
+                        target_directory_names[current] = names
+                    if names.get(part.casefold(), set()) - {part}:
+                        raise ConflictError(
+                            "Project merge destination contains a case-insensitive path collision; "
+                            "no files were copied.",
+                            code="ARTIFACT_CONFLICT",
+                        )
+                current = current / part
+
         for _, destination, _ in files:
             current = target_root
             for part in destination.parent.relative_to(target_root).parts:
