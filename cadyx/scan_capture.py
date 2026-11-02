@@ -1126,17 +1126,24 @@ class Scan360CaptureController:
         directory = self._scan_capture_settings_directory(scanner_device_id, turntable_device_id)
         directory.mkdir(parents=True, exist_ok=True)
         destination = directory / "settings.json"
-        temporary = directory / "settings.json.tmp"
         payload = json.dumps({"scanner_device_id": scanner_device_id,
                               "turntable_device_id": turntable_device_id,
                               "profile_id": profile_id,
                               "step_degrees": step,
                               "tilt_degrees": tilt}, indent=2) + "\n"
+        temporary: Path | None = None
         try:
-            temporary.write_text(payload, encoding="utf-8")
+            # A fixed .tmp name races with another request saving the same pair.
+            # Each writer publishes its complete file through an atomic replace.
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                             prefix=".settings-", suffix=".tmp",
+                                             dir=directory, delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(payload)
             temporary.replace(destination)
         except OSError as exc:
-            temporary.unlink(missing_ok=True)
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
             raise ValidationError("Could not save the scan capture settings file.") from exc
         return {"scanner_device_id": scanner_device_id,
                 "turntable_device_id": turntable_device_id,

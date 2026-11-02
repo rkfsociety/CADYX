@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import subprocess
@@ -220,6 +221,28 @@ class Scan360CaptureTests(unittest.TestCase):
         self.assertFalse(other_pair["configured"])
         self.assertFalse(other_table["configured"])
         self.assertIn('"tilt_degrees": 5.0', settings_text)
+
+    def test_concurrent_scan_capture_settings_saves_publish_complete_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            workspace.mkdir()
+            controller = Scan360CaptureController(root, workspace)
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(root / "appdata")}):
+                steps = [30, 20, 18, 15, 12, 10, 9, 8] * 4
+                with ThreadPoolExecutor(max_workers=8) as pool:
+                    results = list(pool.map(
+                        lambda step: controller.save_scan_capture_settings(
+                            "scanner-1", "table-1", step, float(step) / 10),
+                        steps,
+                    ))
+                loaded = controller.scan_capture_settings("scanner-1", "table-1")
+                directory = controller._scan_capture_settings_directory("scanner-1", "table-1")
+                self.assertIn(loaded["step_degrees"], steps)
+                self.assertEqual(loaded["tilt_degrees"], loaded["step_degrees"] / 10)
+                self.assertTrue(all(result["configured"] for result in results))
+                self.assertEqual(sorted(path.name for path in directory.iterdir()),
+                                 ["settings.json"])
 
     def test_scan_capture_settings_validate_step_and_tilt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
