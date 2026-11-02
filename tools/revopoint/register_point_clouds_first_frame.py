@@ -9,7 +9,7 @@ import math
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -111,7 +111,8 @@ def _overlap_in_bounds(source: np.ndarray, target: np.ndarray,
 
 def register_sequence(project: Path, run_id: str, output: Path,
                       voxel_size: float = 2.0, fused_voxel_size: float = 0.75,
-                      table_alignment_report: Path | None = None) -> dict[str, Any]:
+                      table_alignment_report: Path | None = None,
+                      progress: Callable[[str, int, int, str | None], None] | None = None) -> dict[str, Any]:
     import open3d as o3d
 
     project = project.resolve(strict=True)
@@ -157,6 +158,8 @@ def register_sequence(project: Path, run_id: str, output: Path,
     source_point_counts = []
     frame_cleanup = []
     for index, path in enumerate(paths):
+        if progress:
+            progress("load", index, len(paths), path.name)
         source_cloud = o3d.io.read_point_cloud(str(path))
         if len(source_cloud.points) == 0:
             raise ValueError(f"source cloud {path.name} contains no finite points")
@@ -212,6 +215,8 @@ def register_sequence(project: Path, run_id: str, output: Path,
     incremental_edges = []
     frame_count = len(clouds)
     for target_id in range(1, frame_count):
+        if progress:
+            progress("register", target_id - 1, frame_count - 1, paths[target_id].name)
         source_id = target_id - 1
         adjacent_result, _ = pairwise(source_id, target_id)
         if adjacent_result.fitness < 0.35 or adjacent_result.inlier_rmse > rmse_limit:
@@ -248,8 +253,13 @@ def register_sequence(project: Path, run_id: str, output: Path,
                                   "inlier_rmse": float(incremental_result.inlier_rmse)})
         accumulated_pose = current_pose
 
+    if progress:
+        progress("register", frame_count - 1, frame_count - 1, None)
+
     loop_edges = []
     for target_id in range(2, frame_count):
+        if progress:
+            progress("loops", target_id - 2, frame_count - 2, paths[target_id].name)
         result, information = pairwise(0, target_id)
         if result.fitness >= 0.35 and result.inlier_rmse <= voxel_size * 1.5:
             pose_graph.edges.append(registration.PoseGraphEdge(
@@ -280,6 +290,8 @@ def register_sequence(project: Path, run_id: str, output: Path,
             aligned_clouds.append(aligned)
         return aligned_clouds
 
+    if progress:
+        progress("optimize", 0, 1, None)
     optimize_pose_graph()
     registered = transform_clouds()
     endpoint_closure = registration.registration_icp(
@@ -309,6 +321,8 @@ def register_sequence(project: Path, run_id: str, output: Path,
         closure_refinement["edge"] = [0, frame_count - 1]
 
     merged = o3d.geometry.PointCloud()
+    if progress:
+        progress("merge", 0, 1, None)
     for cloud in registered:
         merged += cloud
     sampled = merged.voxel_down_sample(fused_voxel_size)
