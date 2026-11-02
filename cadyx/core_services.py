@@ -192,6 +192,7 @@ class ProjectLifecycleService(_CoreService):
     def start_scan_360(self, project_id: str, rotation_period_seconds: float = 18.0,
                        scanner_device_id: str | None = None, turntable_device_id: str | None = None,
                        step_degrees: int = 30, align_to_markers: bool = True,
+                       tilt_degrees: float = 0.0,
                        replace_run_id: str | None = None) -> dict[str, Any]:
         with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
             self._require_project_policy(
@@ -202,12 +203,13 @@ class ProjectLifecycleService(_CoreService):
             project_dir = self.workspace._project_dir(project_id)
             if replace_run_id is None:
                 return self._scan_capture.start(project_id, project_dir, rotation_period_seconds,
-                                                scanner_device_id, turntable_device_id, step_degrees, align_to_markers)
+                                                scanner_device_id, turntable_device_id, step_degrees,
+                                                align_to_markers, tilt_degrees)
             if not isinstance(replace_run_id, str) or not re.fullmatch(r"revopoint_\d{8}T\d{6}Z", replace_run_id):
                 raise ValidationError("Укажите корректную серию для пересъёмки.")
             return self._scan_capture.start(
                 project_id, project_dir, rotation_period_seconds, scanner_device_id, turntable_device_id,
-                step_degrees, align_to_markers,
+                step_degrees, align_to_markers, tilt_degrees,
                 before_capture=lambda: self._remove_rescanned_series(project_id, replace_run_id),
             )
 

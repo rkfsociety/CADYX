@@ -149,10 +149,11 @@ class CadyxCore:
     def start_scan_360(self, project_id: str, rotation_period_seconds: float = 18.0,
                        scanner_device_id: str | None = None, turntable_device_id: str | None = None,
                        step_degrees: int = 30, align_to_markers: bool = True,
+                       tilt_degrees: float = 0.0,
                        replace_run_id: str | None = None) -> dict[str, Any]:
         return self._lifecycle.start_scan_360(
             project_id, rotation_period_seconds, scanner_device_id, turntable_device_id,
-            step_degrees, align_to_markers, replace_run_id,
+            step_degrees, align_to_markers, tilt_degrees, replace_run_id,
         )
 
     def scan_360_status(self, project_id: str) -> dict[str, Any]:
@@ -180,6 +181,22 @@ class CadyxCore:
                                 profile_id: str | None = None) -> dict[str, Any]:
         return self._scan_capture.save_turntable_settings(
             turntable_device_id, rotation_period_seconds, profile_id,
+        )
+
+    def scan_capture_settings(self, scanner_device_id: str,
+                              turntable_device_id: str,
+                              profile_id: str | None = None) -> dict[str, Any]:
+        return self._scan_capture.scan_capture_settings(
+            scanner_device_id, turntable_device_id, profile_id,
+        )
+
+    def save_scan_capture_settings(self, scanner_device_id: str,
+                                   turntable_device_id: str,
+                                   step_degrees: int,
+                                   tilt_degrees: float,
+                                   profile_id: str | None = None) -> dict[str, Any]:
+        return self._scan_capture.save_scan_capture_settings(
+            scanner_device_id, turntable_device_id, step_degrees, tilt_degrees, profile_id,
         )
 
     def turntable_control(self, command: str, turntable_device_id: str | None = None,

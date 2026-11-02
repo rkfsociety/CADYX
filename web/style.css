@@ -70,6 +70,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .device-settings-select, .device-settings-number { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #111a20; color: var(--text); font: 12px var(--ui-font); }
 .device-settings-file { width: 100%; min-height: 38px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: #111a20; color: var(--muted); font: 11px var(--ui-font); }
 .device-settings-control span { color: var(--dim); font-size: 10px; }
+.device-settings-control input[type="range"] { width: 100%; accent-color: var(--accent); }
 .device-settings-footer { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 .device-settings-footer [role="status"] { color: var(--success); font-size: 11px; }
 .device-settings-footer .button { min-height: 34px; padding: 0 15px; border-color: #a65b2d; background: #3a2114; color: #ffbd91; font: 600 10px var(--ui-font); }

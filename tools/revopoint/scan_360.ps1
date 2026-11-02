@@ -18,6 +18,9 @@ param(
     [ValidateRange(1, 30)]
     [int]$StepDegrees = 30,
 
+    [ValidateRange(-10, 10)]
+    [double]$TiltDegrees = 0,
+
     [switch]$SkipTableMarkerAlignment,
 
     [string]$ScannerDeviceId = '',
@@ -198,8 +201,8 @@ if ($ManifestOnly) {
     foreach ($row in $rows) {
         if ([string]::IsNullOrWhiteSpace([string]$row.tilt_degrees)) { continue }
         $tilt = [double]::Parse([string]$row.tilt_degrees, [Globalization.CultureInfo]::InvariantCulture)
-        if ([math]::Abs($tilt) -gt 0.5) {
-            throw "Pose log contains nonzero tilt ($tilt degrees); no manifest was written."
+        if ([math]::Abs($tilt - $TiltDegrees) -gt 0.5) {
+            throw "Pose log contains tilt $tilt degrees instead of the requested $TiltDegrees; no manifest was written."
         }
     }
     $frames = @()
@@ -231,7 +234,7 @@ if ($ManifestOnly) {
         format = 'revopoint-y16-turntable-capture-v2'
         frame_count = $frames.Count
         step_degrees = $StepDegrees
-        table_tilt_degrees = 0
+        table_tilt_degrees = $TiltDegrees
         starting_position_preserved = $true
         starting_table_angle_degrees = $startAngle
         final_table_angle_degrees = $finalAngle
@@ -269,6 +272,22 @@ try {
         $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
         $TurntableServiceUuid, $TurntableCharacteristicUuid
     ) | Out-Null
+    if ([math]::Abs($TiltDegrees) -gt 0.0001) {
+        $tiltOutput = Invoke-Turntable -Arguments @(
+            'tilt', $TiltDegrees.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture),
+            $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
+            $TurntableServiceUuid, $TurntableCharacteristicUuid
+        )
+        $tiltAfter = [regex]::Match($tiltOutput, 'tilt after(?: zero)?:\s*(-?\d+(?:\.\d+)?)')
+        if (-not $tiltAfter.Success) {
+            throw "Turntable did not confirm the requested tilt of $TiltDegrees degrees; no sweep was started."
+        }
+        $confirmedTilt = [double]::Parse($tiltAfter.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
+        if ([math]::Abs($confirmedTilt - $TiltDegrees) -gt 0.5) {
+            throw "Turntable reported tilt $confirmedTilt degrees instead of the requested $TiltDegrees; no sweep was started."
+        }
+        Write-Host "Turntable tilt set to $confirmedTilt degrees for the 360 capture."
+    }
     $preprocessingReportPath = Join-Path $runDirectory "${runPrefix}_preprocessing.json"
     $workerControlDirectory = Join-Path $repoRoot '.runtime\scan-reconstruction'
     New-Item -ItemType Directory -Force -Path $workerControlDirectory | Out-Null
@@ -288,7 +307,9 @@ try {
         '--max-workers', '1', '--timing', 'after_capture_before_registration'
     ) | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }
     Invoke-Turntable -Arguments @(
-        'capture-sweep', [string]$frameCount, [string]$StepDegrees, '0', $poseLog, $captureExe, $prefix,
+        'capture-sweep', [string]$frameCount, [string]$StepDegrees,
+        $TiltDegrees.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture),
+        $poseLog, $captureExe, $prefix,
         $projectCalibration, $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture), $liveRaw,
         $ScannerDeviceId, $TurntableAddress, $TurntableName, $TurntableAdvertisementUuid,
         $TurntableServiceUuid, $TurntableCharacteristicUuid
@@ -395,7 +416,7 @@ try {
         frame_count = $frames.Count
         step_degrees = $StepDegrees
         turntable_rotation_period_seconds = $TurntableRotationPeriodSeconds
-        table_tilt_degrees = 0
+        table_tilt_degrees = $TiltDegrees
         starting_position_preserved = $true
         projection_method = 'Q_ray_scaled_to_depth'
         depth_scale_mm_per_raw_unit = $DepthScale

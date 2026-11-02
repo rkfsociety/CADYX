@@ -1315,17 +1315,19 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         if(scan360.dataset.captureLocked==='true')return;
         const id=projectId();
         if(!id){scanStatus.textContent='Проект не выбран.';return}
+        const captureSettings=await (window.CadyxScanCaptureSettings?.open()??Promise.resolve(null));
+        if(!captureSettings)return;
         if(scanTreePreviewSelection)clearScanTreePreview();
         scan360.dataset.scanCapturePending='true';syncCaptureButton();scanStatus.hidden=false;scanStatus.textContent='Запускаю съёмку…';
         try{
-          const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation_period_seconds:window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.()??18,scanner_device_id:window.CadyxDeviceSettings?.scannerDeviceId?.(),turntable_device_id:window.CadyxDeviceSettings?.turntableDeviceId?.()})});
+          const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation_period_seconds:window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.()??18,scanner_device_id:window.CadyxDeviceSettings?.scannerDeviceId?.(),turntable_device_id:window.CadyxDeviceSettings?.turntableDeviceId?.(),step_degrees:captureSettings.step_degrees,tilt_degrees:captureSettings.tilt_degrees})});
           const payload=await response.json();
           if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
           if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось запустить сканирование');
           showCapturePreview(payload.scan,{open:true});
           scanWasRunning=payload.scan.state==='running';
           setCaptureBusy(payload.scan.state==='running'||payload.scan.state==='busy');
-          scanStatus.textContent='Кадр 0/12';
+          scanStatus.textContent=`Кадр 0/${360/captureSettings.step_degrees}`;
           clearTimeout(pollTimer);pollScan(id);
         }catch(error){
           setCaptureBusy(false);

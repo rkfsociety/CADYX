@@ -61,6 +61,8 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/scanner/calibration", "scanner_calibration_save", "scanner", "json"),
     RouteSpec("GET", "/api/v1/scanner/turntable/settings", "turntable_settings", "scanner"),
     RouteSpec("POST", "/api/v1/scanner/turntable/settings", "turntable_settings_save", "scanner", "json"),
+    RouteSpec("GET", "/api/v1/scanner/scan-capture-settings", "scan_capture_settings", "scanner"),
+    RouteSpec("POST", "/api/v1/scanner/scan-capture-settings", "scan_capture_settings_save", "scanner", "json"),
     RouteSpec("GET", "/api/v1/scanner/turntable/control", "turntable_control_status", "scanner"),
     RouteSpec("POST", "/api/v1/scanner/turntable/control", "turntable_control", "scanner", "json"),
     RouteSpec("GET", "/api/v1/scanner/turntable/map", "turntable_marker_map", "scanner"),
@@ -169,6 +171,7 @@ _ROUTE_SPECS = (
     RouteSpec("GET", "/assets/scan-progress.js", "asset_scan_progress", "static"),
     RouteSpec("GET", "/assets/scan-preview-worker.js", "asset_scan_preview_worker", "static"),
     RouteSpec("GET", "/assets/device-settings.js", "asset_device_settings", "static"),
+    RouteSpec("GET", "/assets/scan-capture-settings.js", "asset_scan_capture_settings", "static"),
     RouteSpec("GET", "/assets/turntable-controls.js", "asset_turntable_controls", "static"),
     RouteSpec("GET", "/assets/style.css", "asset_style", "static"),
 )
@@ -435,6 +438,35 @@ def _dispatch_scanner(handler: Any, core: CadyxCore, route: RouteMatch, parsed: 
                 or not math.isfinite(period) or not 18.0 <= period <= 90.0):
             raise ValidationError("The turntable rotation period must be between 18 and 90 seconds.")
         handler._json(200, core.save_turntable_settings(device_id, period, profile_id))
+        return
+    if route.spec.name == "scan_capture_settings":
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if (set(query) - {"scanner_device_id", "turntable_device_id", "profile_id"}
+                or any(len(query.get(key, [])) > 1 for key in ("scanner_device_id", "turntable_device_id", "profile_id"))):
+            raise ValidationError("Scan capture settings accept one scanner_device_id, turntable_device_id and profile_id at most.")
+        scanner_id = query.get("scanner_device_id", [None])[0]
+        turntable_id = query.get("turntable_device_id", [None])[0]
+        profile_id = query.get("profile_id", [None])[0]
+        if not scanner_id or not turntable_id:
+            raise ValidationError("Scan capture settings require selected scanner and turntable device IDs.")
+        handler._json(200, core.scan_capture_settings(scanner_id, turntable_id, profile_id or None))
+        return
+    if route.spec.name == "scan_capture_settings_save":
+        body = _require_json(handler)
+        required = {"scanner_device_id", "turntable_device_id", "step_degrees", "tilt_degrees"}
+        if set(body) not in (required, required | {"profile_id"}):
+            raise ValidationError("Scan capture settings require scanner and turntable device IDs, step_degrees and tilt_degrees.")
+        scanner_id = body["scanner_device_id"]
+        turntable_id = body["turntable_device_id"]
+        profile_id = body.get("profile_id")
+        if not isinstance(scanner_id, str) or not scanner_id:
+            raise ValidationError("The scanner device ID must be a non-empty string.")
+        if not isinstance(turntable_id, str) or not turntable_id:
+            raise ValidationError("The turntable device ID must be a non-empty string.")
+        if profile_id is not None and not isinstance(profile_id, str):
+            raise ValidationError("The turntable profile ID must be a string.")
+        handler._json(200, core.save_scan_capture_settings(
+            scanner_id, turntable_id, body["step_degrees"], body["tilt_degrees"], profile_id))
         return
     if route.spec.name == "turntable_control_status":
         query = parse_qs(parsed.query, keep_blank_values=True)
@@ -802,8 +834,8 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
     elif name == "agent_scan_360_start":
         body = _require_json(handler)
         if set(body) - {"rotation_period_seconds", "scanner_device_id", "turntable_device_id",
-                        "step_degrees", "align_to_markers", "replace_run_id"}:
-            raise ValidationError("A 360 scan accepts device IDs, rotation period, step_degrees, align_to_markers and replace_run_id.")
+                        "step_degrees", "tilt_degrees", "align_to_markers", "replace_run_id"}:
+            raise ValidationError("A 360 scan accepts device IDs, rotation period, step_degrees, tilt_degrees, align_to_markers and replace_run_id.")
         rotation_period_seconds = body.get("rotation_period_seconds", 18.0)
         if (isinstance(rotation_period_seconds, bool)
                 or not isinstance(rotation_period_seconds, (int, float))
@@ -812,10 +844,14 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         scanner_device_id = body.get("scanner_device_id")
         turntable_device_id = body.get("turntable_device_id")
         step_degrees = body.get("step_degrees", 30)
+        tilt_degrees = body.get("tilt_degrees", 0.0)
         align_to_markers = body.get("align_to_markers", True)
         replace_run_id = body.get("replace_run_id")
         if isinstance(step_degrees, bool) or not isinstance(step_degrees, int):
             raise ValidationError("step_degrees must be an integer divisor of 360 between 1 and 30.")
+        if (isinstance(tilt_degrees, bool) or not isinstance(tilt_degrees, (int, float))
+                or not math.isfinite(tilt_degrees) or abs(tilt_degrees) > 10.0):
+            raise ValidationError("tilt_degrees must be a finite number from -10 to 10 degrees.")
         if not isinstance(align_to_markers, bool):
             raise ValidationError("align_to_markers must be a boolean.")
         if replace_run_id is not None and not isinstance(replace_run_id, str):
@@ -824,7 +860,7 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
                 turntable_device_id is not None and not isinstance(turntable_device_id, str)):
             raise ValidationError("Scanner and turntable device IDs must be strings.")
         args = (project_id, rotation_period_seconds, scanner_device_id, turntable_device_id,
-                step_degrees, align_to_markers)
+                step_degrees, align_to_markers, float(tilt_degrees))
         handler._json(202, {"scan": core.start_scan_360(*args, replace_run_id=replace_run_id)
                             if replace_run_id is not None else core.start_scan_360(*args)})
     elif name == "agent_scan_360_status":
@@ -1195,6 +1231,7 @@ def _dispatch_static(handler: Any, core: CadyxCore, route: RouteMatch, parsed: S
         "asset_scan_progress": ("scan-progress.js", "text/javascript; charset=utf-8"),
         "asset_scan_preview_worker": ("scan-preview-worker.js", "text/javascript; charset=utf-8"),
         "asset_device_settings": ("device-settings.js", "text/javascript; charset=utf-8"),
+        "asset_scan_capture_settings": ("scan-capture-settings.js", "text/javascript; charset=utf-8"),
         "asset_turntable_controls": ("turntable-controls.js", "text/javascript; charset=utf-8"),
         "asset_style": ("style.css", "text/css; charset=utf-8"),
     }

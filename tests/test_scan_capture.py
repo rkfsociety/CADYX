@@ -196,6 +196,65 @@ class Scan360CaptureTests(unittest.TestCase):
         self.assertEqual((override_data, override_count), (self._marker_map(5), 5))
         self.assertTrue(settings_exists)
 
+    def test_scan_capture_settings_are_bound_to_scanner_table_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            workspace.mkdir()
+            controller = Scan360CaptureController(root, workspace)
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(root / "appdata")}):
+                default = controller.scan_capture_settings("scanner-1", "table-1")
+                self.assertFalse(default["configured"])
+                self.assertEqual((default["step_degrees"], default["tilt_degrees"]), (30, 0.0))
+                saved = controller.save_scan_capture_settings(
+                    "scanner-1", "table-1", 15, 5.0, "revopoint-dual-axis-table")
+                self.assertTrue(saved["configured"])
+                loaded = controller.scan_capture_settings("scanner-1", "table-1",
+                                                          "revopoint-dual-axis-table")
+                other_pair = controller.scan_capture_settings("scanner-2", "table-1")
+                other_table = controller.scan_capture_settings("scanner-1", "table-2")
+                settings_text = (controller._scan_capture_settings_directory("scanner-1", "table-1")
+                                 / "settings.json").read_text(encoding="utf-8")
+        self.assertEqual((loaded["step_degrees"], loaded["tilt_degrees"]), (15, 5.0))
+        self.assertEqual(loaded["profile_id"], "revopoint-dual-axis-table")
+        self.assertFalse(other_pair["configured"])
+        self.assertFalse(other_table["configured"])
+        self.assertIn('"tilt_degrees": 5.0', settings_text)
+
+    def test_scan_capture_settings_validate_step_and_tilt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            workspace.mkdir()
+            controller = Scan360CaptureController(root, workspace)
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(root / "appdata")}):
+                for step in (0, 7, 31, True):
+                    with self.subTest(step=step):
+                        with self.assertRaisesRegex(ValidationError, "scan step"):
+                            controller.save_scan_capture_settings("scanner-1", "table-1", step, 0.0)
+                for tilt in (-10.5, 10.5, float("nan"), float("inf"), True):
+                    with self.subTest(tilt=tilt):
+                        with self.assertRaisesRegex(ValidationError, "scan tilt"):
+                            controller.save_scan_capture_settings("scanner-1", "table-1", 30, tilt)
+                with self.assertRaisesRegex(ValidationError, "scanner and turntable"):
+                    controller.save_scan_capture_settings("", "table-1", 30, 0.0)
+                saved = controller.save_scan_capture_settings("scanner-1", "table-1", 10, -10.0)
+                self.assertEqual((saved["step_degrees"], saved["tilt_degrees"]), (10, -10.0))
+                loaded = controller.scan_capture_settings("scanner-1", "table-1")
+                self.assertEqual((loaded["step_degrees"], loaded["tilt_degrees"]), (10, -10.0))
+
+    def test_scan_360_start_validates_tilt_before_the_platform_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "projects"
+            workspace.mkdir()
+            controller = Scan360CaptureController(root, workspace)
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(root / "appdata")}):
+                with self.assertRaisesRegex(ValidationError, "scan tilt"):
+                    controller.start("p-1", workspace, step_degrees=30, tilt_degrees=15.0)
+                with self.assertRaisesRegex(ValidationError, "scan tilt"):
+                    controller.start("p-1", workspace, step_degrees=30, tilt_degrees=float("nan"))
+
     def test_turntable_map_rejects_invalid_record_data(self) -> None:
         with self.assertRaisesRegex(ValidationError, "invalid header or record count"):
             Scan360CaptureController._validate_marker_map(bytes(16))

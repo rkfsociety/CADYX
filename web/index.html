@@ -860,6 +860,20 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
         <footer class="device-settings-footer"><span id="device-settings-status" role="status" aria-live="polite"></span><div><button id="device-settings-refresh" class="button" type="button">ОБНОВИТЬ СПИСОК</button><button id="device-settings-save" class="button" type="button">СОХРАНИТЬ</button></div></footer>
       </div>
     </dialog>
+    <dialog id="scan-capture-settings-dialog" class="device-settings-dialog" aria-labelledby="scan-capture-settings-title">
+      <div class="device-settings-shell">
+        <header class="device-settings-heading"><div><span class="device-settings-kicker">СКАНИРОВАНИЕ 360°</span><h2 id="scan-capture-settings-title">Настройки съёмки</h2></div><button id="scan-capture-settings-close" class="device-settings-close" type="button" aria-label="Закрыть настройки съёмки">×</button></header>
+        <p id="scan-capture-devices" class="device-settings-note">Сканер и стол не выбраны.</p>
+        <section class="device-settings-panel">
+          <label class="device-settings-field" for="scan-capture-step">Шаг поворота</label>
+          <select id="scan-capture-step" class="device-settings-select"></select>
+          <label class="device-settings-field" for="scan-capture-tilt">Наклон стола</label>
+          <div class="device-settings-control"><input id="scan-capture-tilt" type="range" min="-10" max="10" step="0.5" value="0" aria-label="Наклон стола для съёмки 360°"><span id="scan-capture-tilt-value">0°</span></div>
+          <p class="device-settings-note">Наклон ограничен безопасным диапазоном стола: от −10° до +10°. Настройки сохраняются для выбранной пары «сканер + стол».</p>
+        </section>
+        <footer class="device-settings-footer"><span id="scan-capture-settings-status" role="status" aria-live="polite"></span><div><button id="scan-capture-settings-cancel" class="button" type="button">ОТМЕНА</button><button id="scan-capture-settings-start" class="button" type="button">НАЧАТЬ СКАНИРОВАНИЕ</button></div></footer>
+      </div>
+    </dialog>
     <p id="toast" class="toast" role="status" aria-live="polite"></p>
     <script src="/assets/viewport.js" defer></script>
     <script src="/assets/viewport-helpers.js" defer></script>
@@ -868,6 +882,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
     <script src="/assets/ply-preview.js" defer></script>
     <script src="/assets/scan-view.js" defer></script>
     <script src="/assets/device-settings.js" defer></script>
+    <script src="/assets/scan-capture-settings.js" defer></script>
     <script src="/assets/turntable-controls.js" defer></script>
     <script src="/assets/scan-progress.js" defer></script>
     <script src="/assets/app.js" defer></script>

@@ -9,6 +9,7 @@ from email.message import Message
 from io import BytesIO
 import json
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 from urllib.parse import urlsplit
 
@@ -108,6 +109,8 @@ class WebRouteTableTests(unittest.TestCase):
             ("DELETE", "/api/v1/scanner/live-preview", "scanner_live_preview_stop", {}),
             ("GET", "/api/v1/scanner/turntable/settings", "turntable_settings", {}),
             ("POST", "/api/v1/scanner/turntable/settings", "turntable_settings_save", {}),
+            ("GET", "/api/v1/scanner/scan-capture-settings", "scan_capture_settings", {}),
+            ("POST", "/api/v1/scanner/scan-capture-settings", "scan_capture_settings_save", {}),
             ("GET", "/api/v1/scanner/turntable/map", "turntable_marker_map", {}),
             ("GET", "/api/v1/workspace/folders/source%20files/files/a.step", "folder_file",
              {"folder": "source%20files", "filename": "a.step"}),
@@ -202,6 +205,74 @@ class WebRouteTableTests(unittest.TestCase):
         handler = SimpleNamespace(_read_json=lambda: {"delay": 1})
         with self.assertRaisesRegex(ValidationError, "empty object only"):
             dispatch_route(handler, SimpleNamespace(), route, parsed)
+
+    def test_scan_capture_settings_roundtrip_via_dispatch(self) -> None:
+        parsed = urlsplit(
+            "/api/v1/scanner/scan-capture-settings?scanner_device_id=sc-1&turntable_device_id=tb-1"
+            "&profile_id=revopoint-dual-axis-table")
+        route = match_route("GET", parsed.path)
+        self.assertIsNotNone(route)
+        assert route is not None
+        settings = {"scanner_device_id": "sc-1", "turntable_device_id": "tb-1",
+                    "profile_id": "revopoint-dual-axis-table",
+                    "step_degrees": 15, "tilt_degrees": 5.0, "configured": True}
+        responses: list[tuple[int, Any]] = []
+        core = SimpleNamespace(scan_capture_settings=lambda scanner, table, profile: settings)
+        handler = SimpleNamespace(_json=lambda status, body: responses.append((status, body)))
+        dispatch_route(handler, core, route, parsed)
+        self.assertEqual(responses, [(200, settings)])
+
+        parsed = urlsplit("/api/v1/scanner/scan-capture-settings")
+        route = match_route("POST", parsed.path)
+        assert route is not None
+        responses = []
+        saved_args: list[tuple[Any, ...]] = []
+        core = SimpleNamespace(save_scan_capture_settings=lambda *args: saved_args.append(args) or {"saved": True})
+        handler = SimpleNamespace(
+            _read_json=lambda: {"scanner_device_id": "sc-1", "turntable_device_id": "tb-1",
+                                "step_degrees": 10, "tilt_degrees": -5.0},
+            _json=lambda status, body: responses.append((status, body)),
+        )
+        dispatch_route(handler, core, route, parsed)
+        self.assertEqual(saved_args, [("sc-1", "tb-1", 10, -5.0, None)])
+        self.assertEqual(responses, [(200, {"saved": True})])
+
+    def test_scan_capture_settings_require_the_device_pair(self) -> None:
+        parsed = urlsplit("/api/v1/scanner/scan-capture-settings")
+        route = match_route("GET", parsed.path)
+        assert route is not None
+        with self.assertRaisesRegex(ValidationError, "scanner and turntable"):
+            dispatch_route(SimpleNamespace(_json=lambda status, body: None), SimpleNamespace(), route, parsed)
+        parsed = urlsplit("/api/v1/scanner/scan-capture-settings?scanner_device_id=sc-1&turntable_device_id=tb-1")
+        route = match_route("POST", parsed.path)
+        assert route is not None
+        handler = SimpleNamespace(_read_json=lambda: {"scanner_device_id": "sc-1", "turntable_device_id": "tb-1",
+                                                      "step_degrees": 15, "tilt_degrees": 0, "extra": 1})
+        with self.assertRaisesRegex(ValidationError, "step_degrees and tilt_degrees"):
+            dispatch_route(handler, SimpleNamespace(), route, parsed)
+
+    def test_agent_scan_360_start_passes_and_validates_tilt_degrees(self) -> None:
+        parsed = urlsplit("/api/v1/agent/projects/p-2/scans/360")
+        route = match_route("POST", parsed.path)
+        self.assertIsNotNone(route)
+        assert route is not None
+        calls: list[tuple[Any, ...]] = []
+        responses: list[tuple[int, Any]] = []
+        core = SimpleNamespace(start_scan_360=lambda *args: calls.append(args) or {"state": "running"})
+        handler = SimpleNamespace(
+            _read_json=lambda: {"step_degrees": 15, "tilt_degrees": 5.0},
+            _json=lambda status, body: responses.append((status, body)),
+        )
+        dispatch_route(handler, core, route, parsed)
+        self.assertEqual(calls, [("p-2", 18.0, None, None, 15, True, 5.0)])
+        self.assertEqual(responses, [(202, {"scan": {"state": "running"}})])
+
+        handler = SimpleNamespace(_read_json=lambda: {"tilt_degrees": 30.0})
+        with self.assertRaisesRegex(ValidationError, "tilt_degrees"):
+            dispatch_route(handler, core, route, parsed)
+        handler = SimpleNamespace(_read_json=lambda: {"tilt_degrees": True})
+        with self.assertRaisesRegex(ValidationError, "tilt_degrees"):
+            dispatch_route(handler, core, route, parsed)
 
 
 class HTTPJSONBodyFramingTests(unittest.TestCase):

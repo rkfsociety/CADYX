@@ -25,6 +25,7 @@ from .errors import ConflictError, ValidationError
 from .workspace_state import prepare_workspace_state
 
 _DEFAULT_FRAME_COUNT = 12
+SAFE_SCAN_TILT_LIMIT_DEGREES = 10.0
 _TURNTABLE_POSITION_CACHE_SECONDS = 6.0
 _LIVE_PREVIEW_METRICS_PREFIX = "preview_metrics "
 _LIVE_PREVIEW_CLIENT_METRIC_FIELDS = frozenset({
@@ -57,6 +58,24 @@ def _preprocessing_report_identity(path: Path) -> tuple[tuple[int, int, int, int
 def _normalize_turntable_angle(angle_degrees: float) -> float:
     """Return the equivalent signed table orientation in [-180, 180)."""
     return (angle_degrees + 180.0) % 360.0 - 180.0
+
+
+def _validate_scan_tilt_degrees(value: Any) -> float:
+    """Validate one scan capture tilt against the safe table tilt limit."""
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or abs(value) > SAFE_SCAN_TILT_LIMIT_DEGREES):
+        raise ValidationError(
+            f"The scan tilt must be a finite number from -{SAFE_SCAN_TILT_LIMIT_DEGREES:g} "
+            f"to {SAFE_SCAN_TILT_LIMIT_DEGREES:g} degrees.")
+    return float(value)
+
+
+def _validate_scan_step_degrees(value: Any) -> int:
+    """Validate a 360 capture rotation step: an integer divisor of 360 in [1, 30]."""
+    if (isinstance(value, bool) or not isinstance(value, int)
+            or not 1 <= value <= 30 or 360 % value != 0):
+        raise ValidationError("The scan step must be an integer divisor of 360 between 1 and 30 degrees.")
+    return value
 
 
 def _capture_log_progress(log_tail: str, frame_count: int) -> int:
@@ -224,6 +243,7 @@ class _Scan360Job:
     started_at: str
     frame_count: int
     step_degrees: int
+    tilt_degrees: float
     align_to_markers: bool
 
 
@@ -1053,6 +1073,76 @@ class Scan360CaptureController:
                 "profile_id": profile_id,
                 "rotation_period_seconds": float(rotation_period_seconds), "configured": True}
 
+    def _scan_capture_settings_directory(self, scanner_device_id: str,
+                                         turntable_device_id: str) -> Path:
+        app_data = os.environ.get("LOCALAPPDATA")
+        if not app_data:
+            raise ValidationError("The Windows user profile path is unavailable for scan capture settings storage.")
+        if (not isinstance(scanner_device_id, str) or not scanner_device_id
+                or not isinstance(turntable_device_id, str) or not turntable_device_id):
+            raise ValidationError("Scan capture settings require selected scanner and turntable device IDs.")
+        pair_key = hashlib.sha256(f"{turntable_device_id}|{scanner_device_id}".encode("utf-8")).hexdigest()
+        return Path(app_data) / "CADYX" / "scan-capture-settings" / pair_key
+
+    def scan_capture_settings(self, scanner_device_id: str,
+                              turntable_device_id: str,
+                              profile_id: str | None = None) -> dict[str, Any]:
+        """Return the saved 360 capture settings for one scanner/turntable pair."""
+        directory = self._scan_capture_settings_directory(scanner_device_id, turntable_device_id)
+        settings_path = directory / "settings.json"
+        if not settings_path.is_file():
+            return {"scanner_device_id": scanner_device_id,
+                    "turntable_device_id": turntable_device_id,
+                    "profile_id": profile_id,
+                    "step_degrees": 30, "tilt_degrees": 0.0, "configured": False}
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            step = _validate_scan_step_degrees(settings["step_degrees"])
+            tilt = _validate_scan_tilt_degrees(settings["tilt_degrees"])
+            saved_scanner = settings["scanner_device_id"]
+            saved_table = settings["turntable_device_id"]
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ValidationError("The scan capture settings file for this scanner and table is invalid.") from exc
+        if saved_scanner != scanner_device_id or saved_table != turntable_device_id:
+            raise ValidationError("The scan capture settings file does not match the selected devices.")
+        saved_profile = settings.get("profile_id", profile_id)
+        if profile_id is not None and saved_profile is not None and saved_profile != profile_id:
+            raise ValidationError("The scan capture settings profile does not match the selected table.")
+        return {"scanner_device_id": scanner_device_id,
+                "turntable_device_id": turntable_device_id,
+                "profile_id": saved_profile,
+                "step_degrees": step, "tilt_degrees": tilt, "configured": True}
+
+    def save_scan_capture_settings(self, scanner_device_id: str,
+                                   turntable_device_id: str,
+                                   step_degrees: int,
+                                   tilt_degrees: float,
+                                   profile_id: str | None = None) -> dict[str, Any]:
+        """Persist 360 capture settings bound to one scanner/turntable pair."""
+        step = _validate_scan_step_degrees(step_degrees)
+        tilt = _validate_scan_tilt_degrees(tilt_degrees)
+        if profile_id is not None and (not isinstance(profile_id, str) or not profile_id):
+            raise ValidationError("The turntable profile ID must be a non-empty string.")
+        directory = self._scan_capture_settings_directory(scanner_device_id, turntable_device_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / "settings.json"
+        temporary = directory / "settings.json.tmp"
+        payload = json.dumps({"scanner_device_id": scanner_device_id,
+                              "turntable_device_id": turntable_device_id,
+                              "profile_id": profile_id,
+                              "step_degrees": step,
+                              "tilt_degrees": tilt}, indent=2) + "\n"
+        try:
+            temporary.write_text(payload, encoding="utf-8")
+            temporary.replace(destination)
+        except OSError as exc:
+            temporary.unlink(missing_ok=True)
+            raise ValidationError("Could not save the scan capture settings file.") from exc
+        return {"scanner_device_id": scanner_device_id,
+                "turntable_device_id": turntable_device_id,
+                "profile_id": profile_id,
+                "step_degrees": step, "tilt_degrees": tilt, "configured": True}
+
     def _known_turntable_profile(self, profile_id: str | None) -> str:
         if not isinstance(profile_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", profile_id):
             raise ValidationError("The selected turntable profile ID is invalid.")
@@ -1116,14 +1206,14 @@ class Scan360CaptureController:
               turntable_device_id: str | None = None,
               step_degrees: int = 30,
               align_to_markers: bool = True,
+              tilt_degrees: float = 0.0,
               before_capture: Callable[[], None] | None = None) -> dict[str, Any]:
         if (isinstance(rotation_period_seconds, bool)
                 or not isinstance(rotation_period_seconds, (int, float))
                 or not 18.0 <= rotation_period_seconds <= 90.0):
             raise ValidationError("The turntable rotation period must be between 18 and 90 seconds per revolution.")
-        if (isinstance(step_degrees, bool) or not isinstance(step_degrees, int)
-                or not 1 <= step_degrees <= 30 or 360 % step_degrees != 0):
-            raise ValidationError("The scan step must be an integer divisor of 360 between 1 and 30 degrees.")
+        step_degrees = _validate_scan_step_degrees(step_degrees)
+        tilt_degrees = _validate_scan_tilt_degrees(tilt_degrees)
         if not isinstance(align_to_markers, bool):
             raise ValidationError("align_to_markers must be a boolean.")
         frame_count = 360 // step_degrees
@@ -1203,6 +1293,7 @@ class Scan360CaptureController:
                          "-File", str(script), "-ProjectPath", str(project_directory), "-RunId", run_id,
                          "-TurntableRotationPeriodSeconds", format(rotation_period_seconds, ".15g"),
                          "-StepDegrees", str(step_degrees),
+                         "-TiltDegrees", format(tilt_degrees, ".15g"),
                          "-ScannerDeviceId", scanner_device_id,
                          "-TurntableAddress", turntable_device_id,
                          "-TurntableName", turntable["expected_name"],
@@ -1231,6 +1322,7 @@ class Scan360CaptureController:
                 started_at=datetime.now(timezone.utc).isoformat(),
                 frame_count=frame_count,
                 step_degrees=step_degrees,
+                tilt_degrees=tilt_degrees,
                 align_to_markers=align_to_markers,
             )
             return self._snapshot_locked()
@@ -1492,6 +1584,7 @@ class Scan360CaptureController:
             "completed_frames": completed,
             "frame_count": self._job.frame_count,
             "step_degrees": self._job.step_degrees,
+            "tilt_degrees": getattr(self._job, "tilt_degrees", 0.0),
             "started_at": self._job.started_at,
             "message": message,
             **preprocessing,
