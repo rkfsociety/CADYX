@@ -24,23 +24,42 @@
     container.className = 'scan-progress';
     container.dataset.state = data.state;
     const text = (tag, className, value) => { const node = document.createElement(tag); node.className = className; node.textContent = value; return node; };
-    const title = text('strong', 'scan-progress-title', data.detail || data.title);
-    title.title = data.detail ? `${data.title} — ${data.detail}` : data.title;
-    const row = (label, value, suffix) => {
-      const section = document.createElement('div'); section.className = 'scan-progress-row';
+    const stage = (number, label, value, total, state, note) => {
+      const section = document.createElement('div'); section.className = 'scan-progress-stage';
+      section.dataset.stageState = state;
+      const badge = text('span', 'scan-progress-badge', String(number));
+      const body = document.createElement('div'); body.className = 'scan-progress-body';
       const heading = document.createElement('div'); heading.className = 'scan-progress-heading';
-      heading.append(text('span', '', label), text('span', 'scan-progress-count', `${value} / ${data.total}`));
-      const bar = document.createElement('progress'); bar.max = data.total || 1; bar.value = value;
-      bar.setAttribute('aria-label', `${label}: ${value} из ${data.total}. ${suffix}`);
-      section.title = `${label}: ${value} из ${data.total}. ${suffix}`;
-      section.append(heading, bar); return section;
+      heading.append(text('strong', '', label), text('span', 'scan-progress-count', total ? `${value} / ${total}` : '—'));
+      const bar = document.createElement('progress'); bar.max = total || 1; bar.value = value;
+      bar.setAttribute('aria-label', `${label}: ${note}`);
+      body.append(heading, bar, text('small', 'scan-progress-note', note));
+      section.append(badge, body); return section;
     };
     const remainingCapture = Math.max(0, data.total - data.captured);
     const remainingClean = Math.max(0, data.total - data.cleaned - data.failed);
-    const items = [title, row('Съёмка', data.captured, `Осталось кадров: ${remainingCapture}`),
-      row('Очистка', data.cleaned, `Осталось кадров: ${remainingClean}${data.failed ? ` · Ошибок: ${data.failed}` : ''}`)];
-    container.replaceChildren(...items);
+    const captureAvailable = Boolean(data.total) && data.state !== 'busy';
+    const cleanAvailable = ['running', 'partial', 'completed', 'failed'].includes(scan.preprocessing_status);
+    const captureState = !captureAvailable ? 'unknown' : !remainingCapture ? 'completed' : data.state === 'failed' ? 'failed' : 'active';
+    const cleanState = !cleanAvailable ? 'unknown' : data.failed || scan.preprocessing_status === 'failed' ? 'failed' :
+      data.total && !remainingClean ? 'completed' : scan.preprocessing_status === 'running' ? 'active' : 'waiting';
+    const captureNote = captureState === 'unknown' ? 'Нет данных' : captureState === 'completed' ? 'Съёмка завершена' :
+      captureState === 'failed' ? 'Съёмка остановлена' : `Осталось кадров: ${remainingCapture}`;
+    const cleanNote = cleanState === 'unknown' ? 'Нет данных' : cleanState === 'failed' ? `Ошибок: ${data.failed || 'неизвестно'}` :
+      cleanState === 'completed' ? 'Очистка завершена' : `Осталось кадров: ${remainingClean}`;
+    const current = document.createElement('div'); current.className = 'scan-progress-current';
+    const label = text('small', '', 'Текущий файл');
+    const file = text('strong', 'scan-progress-file', scan.preprocessing_current_frame?.source_file || 'Нет данных');
+    file.title = file.textContent;
+    const detail = text('small', 'scan-progress-current-note', data.state === 'failed' ? (scan.message || data.title) :
+      cleanState === 'active' ? `Осталось очистить: ${remainingClean}` : captureState === 'active' ? `Осталось снять: ${remainingCapture}` : data.title);
+    current.append(label, file, detail);
+    container.replaceChildren(
+      stage(1, 'Съёмка', data.captured, captureAvailable ? data.total : 0, captureState, captureNote),
+      stage(2, 'Очистка кадров', data.cleaned, cleanAvailable ? data.total : 0, cleanState, cleanNote),
+      stage(3, 'Сшивка', 0, 0, 'unknown', 'Нет данных'),
+      stage(4, 'Финальная очистка', 0, 0, 'unknown', 'Нет данных'), current);
   }
   root.CadyxScanProgress = {summary, render};
-  if (typeof module !== 'undefined') module.exports = {summary};
+  if (typeof module !== 'undefined') module.exports = {summary, render};
 })(typeof window !== 'undefined' ? window : globalThis);

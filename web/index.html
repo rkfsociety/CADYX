@@ -376,6 +376,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .viewport-scan-mesh-button.cad3-tool { min-width: 112px; height: 34px; justify-content: center; padding: 0 12px; font: 600 12px var(--ui-font); }
 .viewport-scan-mode-button[aria-pressed="true"] { border-color: #9b6038; color: var(--accent); background: #26190f; }
 #viewport-scan-360-status { font-size: 11px; }
+#viewport-scan-360-status[hidden] { display: none !important; }
 .viewport-icon-button,
 .viewport-fit-button,
 .viewport-four-views-button {
@@ -563,21 +564,22 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
 .model-toolbar #viewport-scan-360,
 .model-toolbar #viewport-live-camera,
 .model-toolbar #viewport-toggle-turntable,
-.model-toolbar #scanning-devices,
-.model-toolbar #viewport-scan-360-status { display: none !important; }
+.model-toolbar #scanning-devices { display: none !important; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-scan-360,
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-live-camera,
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-toggle-turntable,
 .primary-grid[data-view="scanning"] .model-toolbar #scanning-devices { display: inline-flex !important; }
-.primary-grid[data-view="scanning"] .model-toolbar #viewport-scan-360-status:not([hidden]) { display: flex !important; }
+.primary-grid:not([data-view="scanning"]) #viewport-scan-360-status { display: none !important; }
+.primary-grid[data-view="scanning"] #viewport-scan-360-status:not([hidden]) { display: flex; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-four-views,
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-fit { display: none !important; }
 .primary-grid[data-view="scanning"] .model-toolbar #viewport-camera-presets {
   display: flex !important; padding: 2px; border: 1px solid #52616bcc; border-radius: 6px; background: #0b1114ed;
 }
-.primary-grid[data-view="scanning"] .viewport-heading { width: 100%; }
+.primary-grid[data-view="scanning"] .viewport-heading { width: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 0; }
 .primary-grid[data-view="scanning"] .model-toolbar { box-sizing: border-box; width: 100%; flex-wrap: nowrap; overflow: hidden; }
 .primary-grid[data-view="scanning"] .viewport { top: 56px; }
+.primary-grid[data-view="scanning"]:has(#viewport-scan-360-status:not([hidden])) .viewport { top: 125px; }
 .primary-grid[data-view="analysis"] > #comparison-panel {
   display: grid;
   height: 100%;
@@ -701,6 +703,7 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
               <section class="panel model-panel" aria-labelledby="model-title">
                 <div class="panel-heading viewport-heading">
                   <div><h2 id="model-title">3D-МОДЕЛЬ</h2><span class="viewport-mode">ОРТОГОНАЛЬНАЯ ПРОЕКЦИЯ</span></div>
+                  <div id="viewport-scan-360-status" role="status" aria-live="polite" hidden></div>
                   <div class="model-toolbar" aria-label="Инструменты просмотра 3D-модели">
                     <div id="viewport-camera-presets" class="viewport-camera-presets" role="group" aria-label="Стандартные ракурсы">
                       <button class="viewport-icon-button" type="button" data-camera-preset="isometric" aria-label="Изометрический вид" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 8 4.5v9.3l-8 4.6-8-4.6V7.3l8-4.5Z M4.2 7.4 12 12l7.8-4.6M12 12v9"/></svg></button>
@@ -717,7 +720,6 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
                     <button id="viewport-live-camera" class="button viewport-scan-mode-button viewport-live-camera-button" type="button" aria-label="Предпросмотр сканера в реальном времени" aria-pressed="false">Предпросмотр</button>
                     <button id="viewport-toggle-turntable" class="button" type="button" aria-label="Скрыть стол" aria-pressed="true">Скрыть стол</button>
                     <button id="scanning-devices" class="button" type="button">Устройства</button>
-                    <div id="viewport-scan-360-status" role="status" aria-live="polite" hidden></div>
                   </div>
                 </div>
                 <div class="viewport" id="viewport">
