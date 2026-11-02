@@ -70,6 +70,19 @@ class RuntimeCacheTests(unittest.TestCase):
         self.assertEqual(retained, 0)
         self.assertEqual(cache, OrderedDict())
 
+    def test_zero_byte_budget_disables_cache_without_measuring_values(self):
+        cache = OrderedDict([("old", b"123")])
+
+        def should_not_measure(_value):
+            raise AssertionError("zero byte budget must not invoke size_of")
+
+        retained = remember_bounded_bytes(
+            cache, "new", b"456", current_bytes=3,
+            max_entries=2, max_bytes=0, size_of=should_not_measure,
+        )
+        self.assertEqual(retained, 0)
+        self.assertEqual(cache, OrderedDict())
+
     def test_none_entry_and_failed_size_calculation_preserve_accounting(self):
         cache = OrderedDict([("empty", None), ("data", b"12")])
         size_of = lambda value: 0 if value is None else len(value)

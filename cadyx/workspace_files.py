@@ -394,18 +394,30 @@ class WorkspaceArtifactStore:
                         if (opened_stat.st_dev, opened_stat.st_ino,
                                 opened_stat.st_size, opened_stat.st_mtime_ns) != source_identity:
                             raise ValidationError("Project source changed during merge; no files were copied.")
-                        copied_bytes = 0
-                        while chunk := input_stream.read(1024 * 1024):
+                        # Copy exactly the size observed during discovery. A source
+                        # growing continuously must not consume unbounded disk space.
+                        remaining = size
+                        while remaining:
+                            chunk = input_stream.read(min(1024 * 1024, remaining))
+                            if not chunk:
+                                raise ValidationError("Project source changed during merge; no files were copied.")
                             output_stream.write(chunk)
                             digest.update(chunk)
-                            copied_bytes += len(chunk)
+                            remaining -= len(chunk)
+                        if input_stream.read(1):
+                            raise ValidationError("Project source changed during merge; no files were copied.")
                         final_stat = os.fstat(input_stream.fileno())
-                        if (copied_bytes != size or
-                                (final_stat.st_dev, final_stat.st_ino,
-                                 final_stat.st_size, final_stat.st_mtime_ns) != source_identity):
+                        if ((final_stat.st_dev, final_stat.st_ino,
+                             final_stat.st_size, final_stat.st_mtime_ns) != source_identity):
                             raise ValidationError("Project source changed during merge; no files were copied.")
                         output_stream.flush()
                         os.fsync(output_stream.fileno())
+                    # fstat alone misses replacement of the source pathname
+                    # while the original file descriptor remains open.
+                    path_stat = source.lstat()
+                    if ((path_stat.st_dev, path_stat.st_ino,
+                         path_stat.st_size, path_stat.st_mtime_ns) != source_identity):
+                        raise ValidationError("Project source changed during merge; no files were copied.")
                     os.link(temporary, destination)
                     copied.append(destination)
                 finally:
@@ -473,6 +485,25 @@ class WorkspaceArtifactStore:
                     f"Project file escapes its directory: {relative.as_posix()}."
                 )
             files.append(entry)
+        # Validate and hash all retained sources before deleting anything.
+        # Otherwise an unreadable or disappearing kept file can leave the
+        # project pruned even though the operation reports a failure.
+        retained_files = []
+        for name in sorted(keep):
+            path = root / name
+            before = path.lstat()
+            digest = hashlib.sha256()
+            with path.open("rb") as stream:
+                while chunk := stream.read(1024 * 1024):
+                    digest.update(chunk)
+            after = path.lstat()
+            if (path.is_symlink() or
+                    (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) !=
+                    (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)):
+                raise ValidationError("Retained project source changed during pruning.")
+            retained_files.append(
+                {"path": name, "size": after.st_size, "sha256": digest.hexdigest()}
+            )
         removed: list[str] = []
         for path in files:
             relative = path.relative_to(root).as_posix()
@@ -487,16 +518,6 @@ class WorkspaceArtifactStore:
                 directory.rmdir()
             except OSError:
                 pass
-        retained_files = []
-        for name in sorted(keep):
-            path = root / name
-            digest = hashlib.sha256()
-            with path.open("rb") as stream:
-                while chunk := stream.read(1024 * 1024):
-                    digest.update(chunk)
-            retained_files.append(
-                {"path": name, "size": path.stat().st_size, "sha256": digest.hexdigest()}
-            )
         return {
             "project_id": project_id,
             "removed_count": len(removed),

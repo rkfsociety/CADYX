@@ -313,6 +313,68 @@ class WorkspaceServiceTests(unittest.TestCase):
         self.assertEqual(list(target.iterdir()), [])
         self.assertEqual(source_file.read_bytes(), b"changed content")
 
+    def test_project_merge_limits_reads_to_original_source_size(self) -> None:
+        source = self.root / "source"
+        target = self.root / "target"
+        source.mkdir()
+        target.mkdir()
+        source_file = source / "part.step"
+        source_file.write_bytes(b"original")
+        original_open = Path.open
+        read_sizes: list[int] = []
+
+        class TrackingReader:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def __enter__(self):
+                self.stream.__enter__()
+                return self
+
+            def __exit__(self, *args):
+                return self.stream.__exit__(*args)
+
+            def fileno(self):
+                return self.stream.fileno()
+
+            def read(self, count=-1):
+                read_sizes.append(count)
+                return self.stream.read(count)
+
+        def track_source_reads(path, *args, **kwargs):
+            stream = original_open(path, *args, **kwargs)
+            if path == source_file and args and args[0] == "rb":
+                return TrackingReader(stream)
+            return stream
+
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+        with patch.object(Path, "open", track_source_reads):
+            result = store.copy_project_files("source-id", "target-id", source, target)
+        self.assertEqual(result["file_count"], 1)
+        self.assertEqual((target / "part.step").read_bytes(), b"original")
+        self.assertEqual(read_sizes, [len(b"original"), 1])
+
+    def test_prune_validates_retained_files_before_removing_other_files(self) -> None:
+        project = self.root / "project"
+        project.mkdir()
+        retained = project / "keep.step"
+        discarded = project / "discard.step"
+        retained.write_bytes(b"keep")
+        discarded.write_bytes(b"discard")
+        original_open = Path.open
+
+        def fail_retained_read(path, *args, **kwargs):
+            if path == retained and args and args[0] == "rb":
+                raise OSError("retained file is unreadable")
+            return original_open(path, *args, **kwargs)
+
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+        with patch.object(Path, "open", fail_retained_read):
+            with self.assertRaisesRegex(OSError, "unreadable"):
+                store.prune_project_files("project-id", project, ["keep.step"])
+        self.assertEqual(discarded.read_bytes(), b"discard")
+        self.assertEqual(retained.read_bytes(), b"keep")
+
     def test_artifact_batch_operations_reject_casefold_collisions(self) -> None:
         directory = self.root / "project"
         directory.mkdir()

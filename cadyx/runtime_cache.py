@@ -60,9 +60,9 @@ def remember_bounded_bytes(
     if any(type(amount) is not int or amount < 0
            for amount in (current_bytes, max_entries, max_bytes)):
         raise ValueError("Cache budgets and byte accounting must be non-negative integers.")
-    # Disabled caches must not evaluate an expensive or failing size callback.
-    # Discard any previously retained entries when the policy is set to zero.
-    if max_entries == 0:
+    # Disabled entry or byte budgets must not evaluate an expensive or
+    # failing size callback. Discard previously retained entries.
+    if max_entries == 0 or max_bytes == 0:
         cache.clear()
         return 0
     value_bytes = size_of(value)
