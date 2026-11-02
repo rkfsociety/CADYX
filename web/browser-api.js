@@ -40,6 +40,7 @@
 
   async function readJsonResponse(response) {
     const contentType = (response.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase();
+    if ([204, 205, 304].includes(response.status) || response.headers.get("content-length") === "0") return {};
     if (contentType !== "application/json"
         && !(contentType.startsWith("application/") && contentType.endsWith("+json"))) return {};
     try {
@@ -57,10 +58,9 @@
   }
 
   async function requestJson(path, options = {}, fetchImpl = window.fetch.bind(window)) {
-    const response = await fetchResponse(path, {
-      ...options,
-      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    }, fetchImpl);
+    const headers = new Headers(options.headers);
+    if (!headers.has("content-type")) headers.set("Content-Type", "application/json");
+    const response = await fetchResponse(path, { ...options, headers }, fetchImpl);
     const value = await readJsonResponse(response);
     if (!response.ok) throw responseError(value, response.status);
     return value;
@@ -96,10 +96,10 @@
       segments = [],
     }) {
       if (!projectId || !leaseId) throw new TypeError("projectId and leaseId are required");
-      if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
         throw new TypeError("expectedRevision must be a non-negative integer");
       }
-      if (!Number.isInteger(baseVersion) || baseVersion < 0) {
+      if (!Number.isSafeInteger(baseVersion) || baseVersion < 0) {
         throw new TypeError("baseVersion must be a non-negative integer");
       }
       this.projectId = projectId;
@@ -149,7 +149,10 @@
         );
         const result = response?.history_entry?.result;
         const revision = response?.document?.revision;
-        if (!result || !Number.isInteger(result.trace_version) || !result.trace_id || !Number.isInteger(revision)) {
+        if (!result || typeof result.trace_id !== "string" || !result.trace_id.trim()
+            || (this.traceId && result.trace_id !== this.traceId)
+            || !Number.isSafeInteger(result.trace_version) || result.trace_version <= this.baseVersion
+            || !Number.isSafeInteger(revision) || revision <= this.expectedRevision) {
           throw new Error("Сервер CADYX вернул неполный результат сохранения трассировки.");
         }
         this.traceId = result.trace_id;

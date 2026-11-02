@@ -13,7 +13,7 @@ const window = {
   },
 };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../web/browser-api.js'), 'utf8'),
-  { window }, { filename: 'browser-api.js' });
+  { window, Headers }, { filename: 'browser-api.js' });
 const api = window.CadyxBrowserApi;
 const response = (status, type, payload) => ({
   ok: status >= 200 && status < 300,
@@ -53,6 +53,39 @@ const response = (status, type, payload) => ({
   assert.equal(Object.keys(await api.requestJson('/test', {}, async () =>
     response(200, 'text/html', '<html>'))).length, 0);
 
+  // Empty JSON responses and empty error bodies must not trigger parsing failures.
+  for (const status of [204, 205]) {
+    const empty = response(status, 'application/json', null);
+    empty.json = async () => { throw new Error('empty response has no JSON body'); };
+    assert.equal(Object.keys(await api.requestJson('/empty', {}, async () => empty)).length, 0);
+  }
+  const emptyError = response(503, 'application/problem+json', null);
+  emptyError.headers.get = name => name === 'content-length' ? '0' : 'application/problem+json';
+  emptyError.json = async () => { throw new Error('empty error body'); };
+  await assert.rejects(api.requestJson('/empty-error', {}, async () => emptyError),
+    error => error.status === 503 && /Сервер CADYX/.test(error.message));
+
+  // Fetch accepts Headers and header tuples; preserve caller MIME and credentials.
+  for (const headers of [new Headers([['content-type', 'application/merge-patch+json'], ['X-Token', 'secret']]),
+    [['content-type', 'application/merge-patch+json'], ['X-Token', 'secret']]]) {
+    await api.requestJson('/headers', { headers }, async (_url, options) => {
+      assert.equal(options.headers.get('content-type'), 'application/merge-patch+json');
+      assert.equal(options.headers.get('x-token'), 'secret');
+      return response(200, 'application/json', {});
+    });
+  }
+  await api.requestJson('/default-headers', {}, async (_url, options) => {
+    assert.equal(options.headers.get('content-type'), 'application/json');
+    return response(200, 'application/json', {});
+  });
+
+  for (const field of ['expectedRevision', 'baseVersion']) {
+    const args = {projectId:'part', leaseId:'lease', expectedRevision:0, baseVersion:0,
+      name:'Contour', sourceImageSha256:'digest', coordinateSystem:{}};
+    args[field] = Number.MAX_SAFE_INTEGER + 1;
+    assert.throws(() => new api.TraceEditorSession(args), /non-negative integer/);
+  }
+
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
   const calls = [];
@@ -86,6 +119,20 @@ const response = (status, type, payload) => ({
   }), /offline/);
   await session.save(saveFetch);
   assert.equal(calls.length, 3);
+  // Invalid or stale success payloads cannot corrupt optimistic concurrency state.
+  const oldState = [session.traceId, session.baseVersion, session.expectedRevision];
+  for (const [traceId, traceVersion, revision] of [
+    ['trace', oldState[1], oldState[2] + 1],
+    ['other-trace', oldState[1] + 1, oldState[2] + 1],
+    ['trace', oldState[1] + 1, oldState[2]],
+    [{ invalid: true }, oldState[1] + 1, oldState[2] + 1],
+  ]) {
+    await assert.rejects(session.save(async () => response(200, 'application/json', {
+      history_entry: { result: { trace_id: traceId, trace_version: traceVersion } },
+      document: { revision },
+    })), /неполный результат/);
+    assert.deepEqual([session.traceId, session.baseVersion, session.expectedRevision], oldState);
+  }
   console.log('Browser API: MIME handling, safe error labels and serialized trace saves passed.');
 })().catch((error) => {
   console.error(error);
