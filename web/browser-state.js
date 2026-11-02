@@ -8,20 +8,25 @@
 
   function dashboardHasUnfinishedWork(dashboard) {
     const workflow = dashboard?.workflow;
+    const phases = Array.isArray(workflow?.phases) ? workflow.phases : [];
+    const tasks = Array.isArray(dashboard?.tasks) ? dashboard.tasks : [];
     return Boolean(workflow && (
       Number(workflow.progress_percent) < 100
-      || workflow.phases.some((phase) => phase.state !== "completed")
-    )) || (dashboard?.tasks || []).some((task) => task.state !== "completed");
+      || phases.some((phase) => phase?.state !== "completed")
+    )) || tasks.some((task) => task?.state !== "completed");
   }
 
   function currentProgressWork(dashboard, value, lock = null) {
-    const activities = Array.isArray(value) ? value : value ? [value] : [];
+    const activities = (Array.isArray(value) ? value : value ? [value] : [])
+      .filter((item) => item && typeof item === "object");
     const runningActivity = activities.slice().reverse().find((item) => item.state === "running") || null;
     const activity = runningActivity || activities[activities.length - 1] || null;
     const agentLeaseActive = lock?.state === "AI_LOCKED" && lock.lease?.owner_type === "agent"
       && !lock.recovery_required;
-    const runningTask = (dashboard?.tasks || []).find((task) => task.state === "running") || null;
-    const activePhase = (dashboard?.workflow?.phases || []).find((phase) => phase.state === "in_progress") || null;
+    const tasks = Array.isArray(dashboard?.tasks) ? dashboard.tasks : [];
+    const phases = Array.isArray(dashboard?.workflow?.phases) ? dashboard.workflow.phases : [];
+    const runningTask = tasks.find((task) => task?.state === "running") || null;
+    const activePhase = phases.find((phase) => phase?.state === "in_progress") || null;
     const dashboardWork = runningTask || activePhase;
     return {
       activities, runningActivity, activity, agentLeaseActive,
