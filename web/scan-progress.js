@@ -21,6 +21,7 @@
     const hasFusion = fusion && ['running', 'completed', 'failed'].includes(fusion.state);
     const sameSeries = !hasFusion || !fusion.run_id || scan?.preview_subfolder === fusion.run_id;
     if (hasFusion && !sameSeries) scan = {state:'busy', frame_count:0};
+    scan = scan && typeof scan === 'object' ? scan : hasFusion ? {state:'busy', frame_count:0} : null;
     const data = summary(scan) || (hasFusion ? summary({state:'busy', frame_count:0}) : null);
     if (!data) { container.replaceChildren(); container.hidden = true; return; }
     container.hidden = false;
@@ -33,8 +34,10 @@
       const badge = text('span', 'scan-progress-badge', String(number));
       const body = document.createElement('div'); body.className = 'scan-progress-body';
       const heading = document.createElement('div'); heading.className = 'scan-progress-heading';
-      heading.append(text('strong', '', label), text('span', 'scan-progress-count', total ? `${value} / ${total}` : '—'));
-      const bar = document.createElement('progress'); bar.max = total || 1; bar.value = value;
+      const maximum = Number.isInteger(total) && total > 0 ? total : 0;
+      const progress = maximum && Number.isInteger(value) ? Math.max(0, Math.min(maximum, value)) : 0;
+      heading.append(text('strong', '', label), text('span', 'scan-progress-count', maximum ? `${progress} / ${maximum}` : '—'));
+      const bar = document.createElement('progress'); bar.max = maximum || 1; bar.value = progress;
       bar.setAttribute('aria-label', `${label}: ${note}`);
       body.append(heading, bar, text('small', 'scan-progress-note', note));
       section.append(badge, body); return section;

@@ -61,3 +61,28 @@ assert.match(container.children[4].children[2].textContent, /проверьте 
 
 render(container, capture, {...job, state:'failed', phase:'register', error:'geometry', next_action:'Повторите съёмку в том же положении.'});
 assert.equal(container.children[4].children[2].textContent, 'Повторите съёмку в том же положении.');
+
+// An absent scan without a fusion job still hides the progress panel.
+render(container, null);
+assert.equal(container.hidden, true);
+assert.equal(container.children.length, 0);
+
+// Fusion polling can lead the capture snapshot, including on first load or after an SSE gap.
+render(container, null, job);
+assert.equal(container.hidden, false);
+assert.equal(container.children.length, 5);
+assert.equal(container.children[0].dataset.stageState, 'unknown');
+assert.equal(container.children[2].dataset.stageState, 'active');
+assert.equal(container.children[2].children[1].children[0].children[1].textContent, '3 / 11');
+render(container, undefined, {...job, phase:'cleanup', done:1, total:2});
+assert.equal(container.children[3].dataset.stageState, 'active');
+
+// Partial or corrupt progress payloads must not leak impossible numbers into the UI.
+for (const [done, expected] of [[99, '11 / 11'], [-5, '0 / 11'], [null, '0 / 11'], [2.5, '0 / 11']]) {
+  render(container, capture, {...job, done});
+  assert.equal(container.children[2].children[1].children[0].children[1].textContent, expected);
+  const bar = container.children[2].children[1].children[1];
+  assert.ok(bar.value >= 0 && bar.value <= bar.max);
+}
+render(container, capture, {...job, total:0, done:4});
+assert.equal(container.children[2].children[1].children[0].children[1].textContent, '—');
