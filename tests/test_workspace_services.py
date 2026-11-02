@@ -523,7 +523,9 @@ class WorkspaceServiceTests(unittest.TestCase):
             "CON", "con.txt", "NUL.log", "AUX.txt", "COM1.txt",
             "LPT9.txt", "COM¹.txt", "CONIN$.txt", "project.json.",
             "PROJECT.JSON ", ".CADYX-LEASES.SQLITE3.", "file.txt ",
-            "bad\nname.txt",
+            "bad\nname.txt", "bad\x7fname.txt",
+            "bad<name.txt", 'bad"name.txt', "bad>name.txt",
+            "bad|name.txt", "bad?name.txt", "bad*name.txt",
         )
         for filename in unsafe:
             with self.subTest(filename=filename):
@@ -531,6 +533,79 @@ class WorkspaceServiceTests(unittest.TestCase):
                     store.publish_project_file(directory, filename, b"data")
                 with self.assertRaises(NotFoundError):
                     store.resolve_project_file(directory, filename)
+        self.assertEqual(list(directory.iterdir()), [])
+
+    def test_step_removal_rejects_symlinks_and_preserves_target(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        target = directory / "real.step"
+        target.write_bytes(b"keep")
+        link = directory / "linked.step"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("Symbolic links are unavailable on this filesystem")
+        with self.assertRaisesRegex(ValidationError, "changed"):
+            WorkspaceArtifactStore.remove_project_step(link, link.name)
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(target.read_bytes(), b"keep")
+
+    def test_step_removal_detects_replaced_source_before_unlink(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        source = directory / "part.step"
+        source.write_bytes(b"original")
+        original_lstat = Path.lstat
+        inspections = 0
+
+        def replace_during_preflight(path):
+            nonlocal inspections
+            if path == source:
+                inspections += 1
+                if inspections == 2:
+                    source.unlink()
+                    source.write_bytes(b"replacement content")
+            return original_lstat(path)
+
+        with patch.object(Path, "lstat", replace_during_preflight):
+            with self.assertRaisesRegex(ValidationError, "changed"):
+                WorkspaceArtifactStore.remove_project_step(source, source.name)
+        self.assertGreaterEqual(inspections, 2)
+        self.assertEqual(source.read_bytes(), b"replacement content")
+
+    def test_step_removal_preserves_regular_file_result(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        source = directory / "part.step"
+        source.write_bytes(b"step data")
+        self.assertEqual(
+            WorkspaceArtifactStore.remove_project_step(source, source.name),
+            {"name": "part.step", "removed": True, "size": 9},
+        )
+        self.assertFalse(source.exists())
+
+    def test_subfolder_removal_rejects_special_files(self) -> None:
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("FIFO creation is unavailable on this platform")
+        project = self.root / "project"
+        project.mkdir()
+        scans = project / "scans"
+        scans.mkdir()
+        pipe = scans / "capture.pipe"
+        os.mkfifo(pipe)
+        store = WorkspaceArtifactStore(lambda _folder, _name: False)
+        with self.assertRaisesRegex(ValidationError, "link or internal file"):
+            store.remove_project_subfolder(project, "scans")
+        self.assertTrue(pipe.exists())
+        self.assertTrue(scans.exists())
+
+    def test_scan_output_rejects_windows_invalid_source_name(self) -> None:
+        directory = self.root / "project"
+        directory.mkdir()
+        with self.assertRaises(ValidationError):
+            WorkspaceArtifactStore.publish_scan_output(
+                directory, "project", "frame?.ply", b"scan data"
+            )
         self.assertEqual(list(directory.iterdir()), [])
 
     def test_artifact_upload_rejects_reserved_metadata_and_invalid_names(self) -> None:

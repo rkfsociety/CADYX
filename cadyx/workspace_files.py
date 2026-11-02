@@ -372,7 +372,8 @@ class WorkspaceArtifactStore:
             for name in file_names:
                 path = current_path / name
                 scan_log = expected_scan_log is not None and current_path == target and name == expected_scan_log
-                if (path.is_symlink() or (name.casefold().startswith(".cadyx-") and not scan_log)
+                if (not stat.S_ISREG(path.lstat().st_mode)
+                        or (name.casefold().startswith(".cadyx-") and not scan_log)
                         or self._is_internal_file(current_path, name)):
                     raise ValidationError("Refusing to remove a project folder containing a link or internal file.")
                 files.append(path)
@@ -734,8 +735,9 @@ class WorkspaceArtifactStore:
         ):
             raise ValidationError("Only a direct .step or .stp reference file can be removed.")
         try:
-            size = path.stat().st_size
-            path.unlink()
+            # Reuse the batch-removal identity fence: a source swapped for a
+            # link, directory or different file must never be removed.
+            size = WorkspaceArtifactStore._unlink_verified_files([path])[0]
         except OSError as exc:
             raise ValidationError(f"STEP reference file could not be removed: {exc}.") from exc
         return {"name": filename, "removed": True, "size": size}
@@ -981,7 +983,9 @@ def _is_single_path_segment(value: str) -> bool:
         and "/" not in value
         and "\\" not in value
         and value.rstrip(" .") == value
-        and all(ord(character) >= 32 for character in value)
+        and all(ord(character) >= 32 and ord(character) != 127 for character in value)
+        # These characters are legal on POSIX but invalid in Windows filenames.
+        and not any(character in '<>"|?*' for character in value)
         and not re.match(
             r"(?i)^(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)",
             value,
