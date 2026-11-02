@@ -794,6 +794,51 @@ class WorkspaceServiceTests(unittest.TestCase):
         self.assertEqual(len(list(project.iterdir())), 1)
 
 
+    def test_scan_output_rejects_casefold_alias_of_generated_filename(self) -> None:
+        project = self.root / "project"
+        project.mkdir()
+        payload = b"scan points"
+        digest = hashlib.sha256(payload).hexdigest()[:12]
+        existing = project / f"FRAME.cadyx-{digest}.ply"
+        existing.write_bytes(payload)
+
+        with self.assertRaisesRegex(ConflictError, "case-insensitive filename collision"):
+            WorkspaceArtifactStore.publish_scan_output(project, "project", "frame.ply", payload)
+        self.assertEqual(existing.read_bytes(), payload)
+        self.assertEqual([entry.name for entry in project.iterdir()], [existing.name])
+
+    def test_delivery_rejects_casefold_alias_before_publication(self) -> None:
+        project = self.root / "project"
+        project.mkdir()
+        existing = project / "MODEL.STEP"
+        existing.write_bytes(b"existing")
+
+        with self.assertRaisesRegex(ConflictError, "case-insensitive filename collision"):
+            WorkspaceArtifactStore.publish_cad_delivery(project, {
+                "first.step": b"new",
+                "model.step": b"replacement",
+                "report.cad-delivery.json": b"manifest",
+            })
+        self.assertEqual(existing.read_bytes(), b"existing")
+        self.assertEqual([entry.name for entry in project.iterdir()], [existing.name])
+
+    def test_generated_artifact_publish_remains_idempotent_for_exact_name(self) -> None:
+        project = self.root / "project"
+        project.mkdir()
+        payload = b"scan points"
+        first = WorkspaceArtifactStore.publish_scan_output(project, "project", "frame.ply", payload)
+        second = WorkspaceArtifactStore.publish_scan_output(project, "project", "frame.ply", payload)
+        self.assertTrue(first["created"])
+        self.assertFalse(second["created"])
+        self.assertEqual(first["file"], second["file"])
+
+        files = {"body.step": b"body", "report.cad-delivery.json": b"manifest"}
+        published = WorkspaceArtifactStore.publish_cad_delivery(project, files)
+        repeated = WorkspaceArtifactStore.publish_cad_delivery(project, files)
+        self.assertTrue(all(item["created"] for item in published))
+        self.assertTrue(all(not item["created"] for item in repeated))
+        self.assertEqual((project / "body.step").read_bytes(), b"body")
+
     def test_move_rejects_casefold_alias_of_target_folder(self) -> None:
         if os.name == "nt":
             self.skipTest("Case-sensitive filesystem required")

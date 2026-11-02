@@ -758,6 +758,19 @@ class WorkspaceArtifactStore:
         return resolved
 
     @staticmethod
+    def _reject_casefold_artifact_alias(directory: Path, filename: str) -> None:
+        # Case-sensitive volumes can hold aliases that Windows cannot distinguish.
+        # Reject them even when the existing bytes happen to match.
+        if any(
+            entry.name.casefold() == filename.casefold() and entry.name != filename
+            for entry in directory.iterdir()
+        ):
+            raise ConflictError(
+                "A case-insensitive filename collision exists at the artifact path.",
+                code="ARTIFACT_CONFLICT",
+            )
+
+    @staticmethod
     def publish_scan_output(folder: Path, folder_name: str, source_filename: str, content: bytes) -> dict[str, Any]:
         if (not _is_single_path_segment(source_filename)
                 or source_filename.casefold().startswith(".cadyx-")
@@ -769,6 +782,7 @@ class WorkspaceArtifactStore:
         target = folder / filename
         temporary: Path | None = None
         try:
+            WorkspaceArtifactStore._reject_casefold_artifact_alias(folder, filename)
             with tempfile.NamedTemporaryFile(
                 mode="wb",
                 prefix=".cadyx-tmp-",
@@ -865,6 +879,9 @@ class WorkspaceArtifactStore:
                 return False
 
         try:
+            # Preflight the entire delivery before writing any new artifact.
+            for filename, _, _ in contents:
+                WorkspaceArtifactStore._reject_casefold_artifact_alias(directory, filename)
             for filename, content, _ in contents:
                 with tempfile.NamedTemporaryFile(
                     mode="wb",
@@ -880,6 +897,7 @@ class WorkspaceArtifactStore:
                 temporary_by_name[filename] = temporary
 
             for filename, content, digest in contents:
+                WorkspaceArtifactStore._reject_casefold_artifact_alias(directory, filename)
                 target = directory / filename
                 if target.exists() or target.is_symlink():
                     if not matching_existing(target, digest):
