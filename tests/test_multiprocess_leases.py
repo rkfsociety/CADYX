@@ -133,14 +133,16 @@ class MultiprocessLeaseTests(unittest.TestCase):
         entered, finish = self.context.Event(), self.context.Event()
         command = self.launch("execute_command", (token, BOX), entered=entered, finish=finish)
         self.assertTrue(entered.wait(10))
+        # A different project remains usable while this command holds its lock.
+        # Complete that independent work before starting the recovery's bounded
+        # SQLite wait, so slow CI runners cannot exhaust its five-second timeout.
+        other = self.core.create_project("Independent", select=False)["project"]["id"]
+        self.core.acquire_lease(other, "human", "human")
         attempted = self.context.Event()
         recovery = self.launch("recover_expired_lease", now=106, attempted=attempted)
         self.assertTrue(attempted.wait(10))
         with self.assertRaises(queue.Empty):
             recovery[1].get(timeout=0.2)
-        # A different project remains usable while this command holds its lock.
-        other = self.core.create_project("Independent", select=False)["project"]["id"]
-        self.core.acquire_lease(other, "human", "human")
         finish.set()
         self.assertEqual(self.result(command)[0], "ok")
         self.assertEqual(self.result(recovery)[0], "ok")
