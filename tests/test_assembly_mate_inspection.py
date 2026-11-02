@@ -53,6 +53,7 @@ class ReadOnlyAssemblyMateInspectionTests(unittest.TestCase):
             leases = LeaseManager()
             events = Events()
             _scan_capture = ScanCapture()
+            _scan_fusion = ScanCapture()
             kernel = PrimitiveKernelAdapter()
 
             @staticmethod

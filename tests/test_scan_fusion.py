@@ -83,6 +83,16 @@ class ScanFusionCoreTests(unittest.TestCase):
             (project / RUN).mkdir()
             make_manifest(project)
             proc = FakeProcess()
+            # This test mocks the fusion worker, so provide a matching fake
+            # runtime layout rather than depending on a locally installed Open3D.
+            fake_repository = Path(temp) / 'fake-worker'
+            fake_python = fake_repository / '.runtime' / 'scan-reconstruction' / 'venv' / (
+                'Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+            fake_worker = fake_repository / 'tools' / 'revopoint' / 'run_scan_pipeline.py'
+            for path in (fake_python, fake_worker):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            core._scan_fusion._repository = fake_repository
             with patch('cadyx.scan_fusion.subprocess.Popen', return_value=proc):
                 result = core.start_scan_fusion(project_id, RUN)
                 self.assertEqual(result['state'], 'running')
