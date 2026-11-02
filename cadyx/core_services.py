@@ -244,7 +244,7 @@ class ProjectLifecycleService(_CoreService):
                 report = json.loads((staging / "pipeline.json").read_text(encoding="utf-8"))
                 inputs = report["input_sha256"]
                 if (report["format"] != "cadyx-scan-pipeline-v1" or report["state"] != "completed"
-                        or report["run_id"] != run_id or report["quality"] != "provisional"
+                        or report["run_id"] != run_id or report["quality"] not in ("provisional", "review_required")
                         or not isinstance(inputs, dict) or len(inputs) < 2):
                     raise ValueError("invalid pipeline report")
                 for name, expected in inputs.items():
@@ -287,7 +287,8 @@ class ProjectLifecycleService(_CoreService):
                             target.unlink()
                     raise
                 return {"folder": run_id, "fused": published["fused"], "cleaned": published["cleaned"],
-                        "report": report_name, "quality": "provisional"}
+                        "report": report_name, "quality": report["quality"],
+                        "quality_warnings": report.get("quality_warnings", [])}
             except (KeyError, TypeError, ValueError, OSError) as exc:
                 raise ValidationError(f"Не удалось безопасно сохранить результат сшивки: {exc}") from exc
 

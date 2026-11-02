@@ -52,7 +52,8 @@
       cleanState === 'completed' ? 'Очистка завершена' : `Осталось кадров: ${remainingClean}`;
     const registrationPhases = ['load', 'register', 'loops', 'optimize', 'merge'];
     const registrationDone = hasFusion && (fusion.state === 'completed' || ['cleanup', 'publishing', 'completed'].includes(fusion.phase));
-    const registrationState = !hasFusion ? 'unknown' : registrationDone ? 'completed' :
+    const needsReview = hasFusion && fusion.state === 'completed' && fusion.result?.quality === 'review_required';
+    const registrationState = !hasFusion ? 'unknown' : registrationDone ? (needsReview ? 'warning' : 'completed') :
       fusion.state === 'failed' ? 'failed' : 'active';
     const cleanupDone = hasFusion && (fusion.state === 'completed' || ['publishing', 'completed'].includes(fusion.phase));
     const finalState = !hasFusion ? 'unknown' : cleanupDone ? 'completed' :
@@ -62,7 +63,7 @@
       loops:'Проверка замыкания', optimize:'Оптимизация', merge:'Объединение', cleanup:'Очистка облака',
       publishing:'Сохранение результатов', completed:'Завершено'};
     const registrationNote = !hasFusion ? 'Нет данных' : registrationState === 'failed' ? 'Сшивка остановлена' :
-      registrationDone ? 'Сшивка завершена' : (phaseNames[fusion.phase] || 'Выполняется');
+      needsReview ? 'Требует проверки' : registrationDone ? 'Сшивка завершена' : (phaseNames[fusion.phase] || 'Выполняется');
     const finalNote = !hasFusion ? 'Нет данных' : finalState === 'failed' ? 'Очистка остановлена' :
       cleanupDone ? 'Очистка завершена' : finalState === 'active' ? 'Очистка облака' : 'Ожидает';
     const regMeasured = hasFusion && registrationPhases.includes(fusion.phase) && Number.isInteger(fusion.total) && fusion.total > 0;
@@ -71,7 +72,7 @@
     const label = text('small', '', 'Текущий файл');
     const file = text('strong', 'scan-progress-file', (hasFusion ? fusion.file || fusion.result?.cleaned : scan.preprocessing_current_frame?.source_file) || 'Нет данных');
     file.title = file.textContent;
-    const detail = text('small', 'scan-progress-current-note', hasFusion ? (fusion.state === 'failed' ? (fusion.error || 'Ошибка сшивки') : fusion.state === 'completed' ? 'Результат предварительный' : (phaseNames[fusion.phase] || 'Запуск')) : data.state === 'failed' ? (scan.message || data.title) :
+    const detail = text('small', 'scan-progress-current-note', hasFusion ? (fusion.state === 'failed' ? (fusion.error || 'Ошибка сшивки') : fusion.state === 'completed' ? (needsReview ? 'Внимание: проверьте совмещение' : 'Результат предварительный') : (phaseNames[fusion.phase] || 'Запуск')) : data.state === 'failed' ? (scan.message || data.title) :
       cleanState === 'active' ? `Осталось очистить: ${remainingClean}` : captureState === 'active' ? `Осталось снять: ${remainingCapture}` : data.title);
     current.append(label, file, detail);
     container.replaceChildren(

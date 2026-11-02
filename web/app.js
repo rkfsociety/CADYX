@@ -1254,7 +1254,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           if(previousFusion?.state==='running'&&scanFusionJob.state!=='running'){
             await loadScanTree(id,true);renderScanTree();
             if(scanFusionJob.state==='failed')notify(scanFusionJob.error||'Сшивка не завершилась',true);
-            else if(scanFusionJob.state==='completed')notify('Сшивка и очистка завершены; результат предварительный.');
+            else if(scanFusionJob.state==='completed')notify(scanFusionJob.result?.quality==='review_required'?'Результат требует проверки совмещения.':'Сшивка и очистка завершены; результат предварительный.',scanFusionJob.result?.quality==='review_required');
           }else if(previousFusion?.state!==scanFusionJob.state){renderScanTree()}
           setCaptureBusy(scan.state==='running'||scan.state==='busy'||scanFusionJob?.state==='running');
           if(scan.state==='running'){

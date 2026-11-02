@@ -25,6 +25,21 @@ def make_manifest(directory: Path) -> None:
         'starting_position_preserved':True, 'preprocessing_status':'completed', 'frames':frames}))
 
 
+class ScanFusionQualityTests(unittest.TestCase):
+    def test_large_loop_disagreement_requires_review(self):
+        from tools.revopoint.run_scan_pipeline import assess_registration
+        report = {'registration_dimensions_q':[111.5, 107.8, 103.8],
+                  'last_to_first_local_correction':{'rotation_degrees':74.7,
+                      'translation_q':[68.8, -141.4, -34.3]},
+                  'last_to_first_direct_overlap':{'source_to_target_within_5':.06,
+                      'target_to_source_within_5':.023}}
+        self.assertEqual(len(assess_registration(report)), 3)
+        report['last_to_first_local_correction'] = {'rotation_degrees':.2, 'translation_q':[.1, .2, .3]}
+        report['last_to_first_direct_overlap'] = {'source_to_target_within_5':.8, 'target_to_source_within_5':.7}
+        self.assertEqual(assess_registration(report), [])
+        self.assertEqual(assess_registration({}), ['Недостаточно данных для проверки замыкания серии.'])
+
+
 class ScanFusionCoreTests(unittest.TestCase):
     def test_incomplete_series_is_rejected_before_launch(self):
         with tempfile.TemporaryDirectory() as temp:

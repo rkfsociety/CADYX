@@ -28,6 +28,36 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def assess_registration(registration: dict[str, Any]) -> list[str]:
+    """Flag strong loop-closure disagreement; this is not metrological certification."""
+    import math
+    correction = registration.get('last_to_first_local_correction') or {}
+    overlap = registration.get('last_to_first_direct_overlap') or {}
+    dims = registration.get('registration_dimensions_q') or []
+    warnings = []
+    angle = correction.get('rotation_degrees')
+    translation = correction.get('translation_q')
+    forward = overlap.get('source_to_target_within_5')
+    backward = overlap.get('target_to_source_within_5')
+    if (not isinstance(angle, (int, float)) or not math.isfinite(angle)
+            or not isinstance(translation, list) or len(translation) != 3 or len(dims) != 3
+            or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in (*translation, *dims))
+            or math.hypot(*dims) <= 0 or not isinstance(forward, (int, float))
+            or not isinstance(backward, (int, float)) or not math.isfinite(forward)
+            or not math.isfinite(backward)):
+        return ['Недостаточно данных для проверки замыкания серии.']
+    if (isinstance(angle, (int, float)) and math.isfinite(angle) and angle > 15):
+        warnings.append('Большая угловая поправка при замыкании серии; проверьте совмещение.')
+    if (isinstance(translation, list) and len(translation) == 3 and len(dims) == 3
+            and all(isinstance(v, (int, float)) and math.isfinite(v) for v in (*translation, *dims))
+            and math.hypot(*dims) > 0 and math.hypot(*translation) > .25 * math.hypot(*dims)):
+        warnings.append('Большое смещение при замыкании серии; проверьте совмещение.')
+    if (isinstance(forward, (int, float)) and isinstance(backward, (int, float))
+            and math.isfinite(forward) and math.isfinite(backward) and max(forward, backward) < .10):
+        warnings.append('Низкое взаимное перекрытие первого и последнего кадров.')
+    return warnings
+
+
 def run_pipeline(series: Path, run_id: str, staging: Path, *, progress=None) -> dict[str, Any]:
     import numpy as np
     import open3d as o3d
@@ -69,8 +99,10 @@ def run_pipeline(series: Path, run_id: str, staging: Path, *, progress=None) -> 
     output = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(np.asarray(points)))
     if not o3d.io.write_point_cloud(str(cleaned), output, write_ascii=True, compressed=False):
         raise OSError('Не удалось записать очищенное облако.')
+    warnings = assess_registration(registration)
     report = {'format': 'cadyx-scan-pipeline-v1', 'state': 'completed', 'run_id': run_id,
-              'quality': 'provisional', 'registration': registration,
+              'quality': 'review_required' if warnings else 'provisional',
+              'quality_warnings': warnings, 'registration': registration,
               'input_sha256': input_hashes,
               'fused': {'file': fused.name, 'sha256': _sha256(fused)},
               'cleaned': {'file': cleaned.name, 'sha256': _sha256(cleaned)},
