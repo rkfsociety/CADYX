@@ -23,6 +23,8 @@
     let automaticQueryPending = false;
     let lastAutomaticQueryAt = 0;
     let pollTimer = null;
+    let controlRevision = 0;
+    let refreshRequestId = 0;
 
     const selection = () => ({
       device_id: window.CadyxDeviceSettings?.turntableDeviceId?.() || undefined,
@@ -114,16 +116,18 @@
     const queryHardwarePosition = async () => {
       if (automaticQueryPending || pending) return;
       automaticQueryPending = true;
+      const revision = controlRevision;
       try {
         const payload = await fetchJson('/api/v1/scanner/turntable/control', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ command: 'query', ...selection() }),
         });
-        readPosition(payload.result || {});
+        if (revision === controlRevision && !pending) readPosition(payload.result || {});
       } catch (error) {
-        setStatus(error.message, 'error');
+        if (revision === controlRevision && !pending) setStatus(error.message, 'error');
       } finally {
         automaticQueryPending = false;
+        if (revision !== controlRevision) return;
         clearTimeout(pollTimer);
         pollTimer = setTimeout(() => void refresh({ quiet: true }), 250);
       }
@@ -137,12 +141,15 @@
         pollTimer = setTimeout(() => void refresh({ quiet: true }), 6000);
         return;
       }
+      const revision = controlRevision;
+      const requestId = ++refreshRequestId;
       try {
         const query = new URLSearchParams();
         const selected = selection();
         if (selected.device_id) query.set('device_id', selected.device_id);
         if (selected.profile_id) query.set('profile_id', selected.profile_id);
         const payload = await fetchJson(`/api/v1/scanner/turntable/control${query.size ? `?${query}` : ''}`, { cache: 'no-store' });
+        if (revision !== controlRevision || requestId !== refreshRequestId || pending) return;
         const control = payload.control || {};
         scanActive = Boolean(control.spin?.scan_active);
         spinState = control.spin?.state || 'idle';
@@ -159,8 +166,11 @@
           void queryHardwarePosition();
         }
       } catch (error) {
-        if (!quiet) setStatus(error.message, 'error');
+        if (!quiet && revision === controlRevision && requestId === refreshRequestId && !pending) {
+          setStatus(error.message, 'error');
+        }
       } finally {
+        if (revision !== controlRevision || requestId !== refreshRequestId) return;
         clearTimeout(pollTimer);
         const liveScanning = document.querySelector('.primary-grid')?.dataset.view === 'scanning';
         pollTimer = setTimeout(() => void refresh({ quiet: true }),
@@ -171,6 +181,7 @@
     const command = async (action, value) => {
       if (pending) return null;
       pending = true;
+      controlRevision += 1;
       setBusy();
       setStatus();
       try {

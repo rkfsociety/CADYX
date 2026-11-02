@@ -22,11 +22,18 @@ const turntablePanelHtml = html.match(/<aside id="turntable-control-panel"[\s\S]
 assert.doesNotMatch(turntablePanelHtml, /<span>(?:Поворот|Наклон)<\/span>/,
   'icons replace redundant rotation and tilt labels');
 const turntablePanelCss = style.match(/\.turntable-control-panel\s*\{([^}]+)\}/)?.[1] || '';
-assert.match(turntablePanelCss, /position:\s*absolute/);
-assert.match(turntablePanelCss, /top:\s*12px/);
-assert.match(turntablePanelCss, /right:\s*12px/);
-assert.match(turntablePanelCss, /width:\s*min\(380px,\s*calc\(100% - 24px\)\)/,
-  'the turntable card stays compact in the preview corner');
+const scanSidePanelCss = style.match(/\.scan-side-panel\s*\{([^}]+)\}/)?.[1] || '';
+assert.match(scanSidePanelCss, /position:\s*absolute/);
+assert.match(scanSidePanelCss, /top:\s*12px/);
+assert.match(scanSidePanelCss, /right:\s*12px/);
+assert.match(scanSidePanelCss, /width:\s*min\(380px,\s*calc\(100% - 24px\)\)/);
+assert.match(scanSidePanelCss, /max-height:\s*calc\(100% - 24px\)/);
+assert.match(scanSidePanelCss, /overflow-y:\s*auto/);
+assert.match(scanSidePanelCss, /overscroll-behavior:\s*contain/,
+  'the scan sidebar scrolls without passing wheel movement into the viewport');
+assert.match(turntablePanelCss, /position:\s*relative/);
+assert.match(turntablePanelCss, /width:\s*100%/,
+  'the turntable card fills the shared preview sidebar');
 assert.match(turntablePanelCss, /font:\s*14px\/1\.2 var\(--ui-font\)/,
   'panel copy uses one UI font family and size');
 assert.match(style, /\.turntable-control-panel select[^}]*font:\s*700 14px var\(--ui-font\)/);
@@ -36,7 +43,7 @@ assert.doesNotMatch(style, /\.turntable-spin-label[^}]*text-overflow:\s*ellipsis
 assert.match(style, /\.turntable-control-panel \.turntable-spin-button\[aria-pressed="false"\][^{]*\{[^}]*#03bad5/);
 assert.match(style, /\.turntable-control-panel \.turntable-spin-button\[aria-pressed="true"\][^{]*\{[^}]*#8b9ba7/);
 assert.match(style, /\.turntable-control-panel \.turntable-stop-button\[data-active="true"\][^{]*\{[^}]*#bd2f4e/);
-assert.match(html, /<div class="viewport" id="viewport">[\s\S]*?<aside id="turntable-control-panel"[^>]*>[\s\S]*?<\/aside>[\s\S]*?<\/div>\s*<footer class="viewport-footer"/,
+assert.match(html, /<div class="viewport" id="viewport">[\s\S]*?<div class="scan-side-panel">\s*<aside id="turntable-control-panel"[^>]*>[\s\S]*?<\/aside>\s*<\/div>\s*<\/div>\s*<footer class="viewport-footer"/,
   'the turntable card stays inside the preview container');
 assert.match(html, /class="turntable-control-card"/,
   'rotation and tilt values use the large paired status cards');
@@ -99,6 +106,10 @@ const pollDelays = [];
 const scheduledTimers = [];
 let currentSpinState = 'idle';
 let currentPositionAge = 0;
+let deferNextStatus = false;
+let releaseStatus = null;
+let deferNextQuery = false;
+let releaseQuery = null;
 const window = {
   CadyxDeviceSettings: {
     turntableDeviceId: () => '0123456789AB', turntableProfileId: () => 'revopoint-dual-axis-table',
@@ -108,21 +119,33 @@ const window = {
 };
 const fetch = async (url, options = {}) => {
   calls.push({ url, options });
-  if (!options.method) return { ok: true, async json() { return { control: {
-    spin: { state: currentSpinState, scan_active: false },
-    position: currentSpinState === 'idle'
+  if (!options.method) {
+    const snapshotSpinState = currentSpinState;
+    if (deferNextStatus) {
+      deferNextStatus = false;
+      await new Promise(resolve => { releaseStatus = resolve; });
+    }
+    return { ok: true, async json() { return { control: {
+    spin: { state: snapshotSpinState, scan_active: false },
+    position: snapshotSpinState === 'idle'
       ? { command: 'query', angle_degrees: 12, tilt_degrees: 0, rotation_period_seconds: 17.5,
         age_seconds: currentPositionAge } : null,
   } }; } };
+  }
   const body = JSON.parse(options.body);
   let result = { state: 'completed', command: body.command, output: `${body.command} completed`,
     turntable_device_id: body.device_id, profile_id: body.profile_id };
   if (body.command === 'query') {
+    if (deferNextQuery) {
+      deferNextQuery = false;
+      await new Promise(resolve => { releaseQuery = resolve; });
+    }
     currentPositionAge = 0;
     result.angle_degrees = 12;
     result.tilt_degrees = 0;
     result.rotation_period_seconds = 18;
   }
+  if (body.command === 'rotate') result.angle_degrees = 27;
   if (body.command === 'spin-start') { result.state = 'starting'; currentSpinState = 'starting'; }
   if (body.command === 'spin-stop') { result.state = 'stopping'; currentSpinState = 'stopping'; }
   return { ok: true, async json() { return { result }; } };
@@ -161,9 +184,15 @@ const pollStatus = async () => {
   assert.equal(elements['turntable-spin'].disabled, false,
     'continuous rotation is enabled when the scanner preview is live');
   currentPositionAge = 8;
+  deferNextQuery = true;
   await pollStatus();
-  await waitUntil(() => calls.some(call => call.options.method === 'POST'
-    && JSON.parse(call.options.body).command === 'query'));
+  await waitUntil(() => typeof releaseQuery === 'function');
+  await handlers.get('turntable-rotate-right:click')();
+  await waitUntil(() => elements['turntable-angle'].textContent === '27.0°');
+  releaseQuery();
+  await wait();
+  assert.equal(elements['turntable-angle'].textContent, '27.0°',
+    'a delayed automatic position query cannot revert a newer manual rotation');
   assert.equal(currentPositionAge, 0, 'a stale position triggers an automatic hardware query');
   elements['viewport-live-camera'].setAttribute('aria-pressed', 'false');
   await pollStatus();
@@ -189,9 +218,18 @@ const pollStatus = async () => {
   assert.equal(window.CadyxDeviceSettings.savedSpeed, 45);
   assert.ok(calls.some(call => call.url === '/api/v1/scanner/turntable/settings'));
 
+  // An older GET response must not overwrite a command that completed while it was in flight.
+  deferNextStatus = true;
+  scheduledTimers.filter(timer => timer.delay === 3000).at(-1).callback();
+  await waitUntil(() => typeof releaseStatus === 'function');
   await handlers.get('turntable-spin:click')();
   await waitUntil(() => calls.filter(call => call.options.method === 'POST').some(call =>
     JSON.parse(call.options.body).command === 'spin-start'));
+  await waitUntil(() => elements['turntable-spin'].attributes['aria-pressed'] === 'true');
+  releaseStatus();
+  await wait();
+  assert.equal(elements['turntable-spin'].attributes['aria-pressed'], 'true',
+    'a delayed idle status cannot undo a newer spin-start command');
   await waitUntil(() => elements['turntable-spin'].attributes['aria-pressed'] === 'true');
   assert.equal(elements['turntable-spin'].attributes['aria-pressed'], 'true');
   assert.equal(elements['turntable-spin-label'].textContent, 'Подключение…',

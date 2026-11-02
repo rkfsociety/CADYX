@@ -234,7 +234,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .scanner-map-alignment[data-state="aligned"] { color: #91e2bc; }
 .scanner-map-alignment[data-state="stale"],.scanner-map-alignment[data-state="waiting"] { color: #edc27a; }
 .scanner-map-alignment[hidden] { display: none; }
-.scan-side-panel { position: absolute; z-index: 6; top: 12px; right: 12px; width: min(380px, calc(100% - 24px)); max-height: calc(100% - 24px); display: flex; flex-direction: column; gap: 10px; align-items: stretch; overflow-y: auto; }
+.scan-side-panel { position: absolute; z-index: 6; top: 12px; right: 12px; width: min(380px, calc(100% - 24px)); max-height: calc(100% - 24px); display: flex; flex-direction: column; gap: 10px; align-items: stretch; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #405664 transparent; }
 .primary-grid:not([data-view="scanning"]) .scan-side-panel { display: none; }
 .turntable-control-panel {
   position: relative;
