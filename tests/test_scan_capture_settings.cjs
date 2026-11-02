@@ -220,6 +220,44 @@ async function main() {
     assert.equal(await second, null);
   }
 
+  // Capture settings are a snapshot at submit time, not values read after
+  // a delayed POST; the controls are disabled until the request completes.
+  {
+    let finishSave;
+    let submitted;
+    const f = fixture(async (url, options = {}) => {
+      if (url === '/api/v1/scanner/devices') return response({ scanners: [], turntables: [] });
+      if (url.startsWith('/api/v1/scanner/scan-capture-settings') && options.method !== 'POST') {
+        return response(savedSettings);
+      }
+      if (options.method === 'POST') {
+        submitted = JSON.parse(options.body);
+        return new Promise(resolve => { finishSave = resolve; });
+      }
+      throw Error('Unexpected request: ' + url);
+    });
+    f.sandbox.window.CadyxDeviceSettings = {
+      scannerDeviceId: () => 'scanner-1',
+      turntableDeviceId: () => 'table-1',
+      turntableProfileId: () => 'revopoint-dual-axis-table',
+    };
+    const pending = f.api.open();
+    for (let i = 0; i < 6; i++) await tick();
+    const saving = f.get('scan-capture-settings-start').click();
+    await tick();
+    assert.equal(f.get('scan-capture-step').disabled, true);
+    assert.equal(f.get('scan-capture-tilt').disabled, true);
+    f.get('scan-capture-step').value = '30';
+    f.get('scan-capture-tilt').value = '9';
+    finishSave(response({ ok: true }));
+    await saving;
+    const confirmed = await pending;
+    assert.equal(submitted.step_degrees, 15);
+    assert.equal(submitted.tilt_degrees, 5);
+    assert.equal(confirmed.step_degrees, 15);
+    assert.equal(confirmed.tilt_degrees, 5);
+  }
+
   console.log('scan capture settings dialog tests passed');
 }
 

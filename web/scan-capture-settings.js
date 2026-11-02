@@ -73,6 +73,8 @@
     activeSelection = selection;
     setStatus();
     startButton.disabled = true;
+    stepSelect.disabled = false;
+    tiltInput.disabled = false;
     fillSteps(30);
     tiltInput.value = '0';
     syncTiltDisplay();
@@ -131,13 +133,17 @@
       return;
     }
     startButton.disabled = true;
+    stepSelect.disabled = true;
+    tiltInput.disabled = true;
     const request = requestId;
+    const stepDegrees = Number(stepSelect.value);
+    const tiltDegrees = Number(tiltInput.value);
     setStatus('Сохраняю настройки…');
     try {
       const response = await fetch('/api/v1/scanner/scan-capture-settings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...selection, step_degrees: Number(stepSelect.value),
-                               tilt_degrees: Number(tiltInput.value) }),
+        body: JSON.stringify({ ...selection, step_degrees: stepDegrees,
+                               tilt_degrees: tiltDegrees }),
       });
       const payload = await response.json();
       if (request !== requestId || !dialog.open) return;
@@ -145,11 +151,13 @@
       if (!sameSelection(selection, deviceSelection())) {
         throw new Error('Выбранные устройства изменились. Закройте окно и откройте настройки заново.');
       }
-      settle({ ...selection, step_degrees: Number(stepSelect.value), tilt_degrees: Number(tiltInput.value) });
+      settle({ ...selection, step_degrees: stepDegrees, tilt_degrees: tiltDegrees });
     } catch (error) {
       if (request !== requestId || !dialog.open) return;
       setStatus(error.message, true);
       startButton.disabled = false;
+      stepSelect.disabled = false;
+      tiltInput.disabled = false;
     }
   });
 
