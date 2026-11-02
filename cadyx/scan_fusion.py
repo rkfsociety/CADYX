@@ -93,7 +93,8 @@ class ScanFusionJobs:
                 raise ValidationError(f'Не удалось запустить сшивку: {exc}') from exc
             self._jobs[project_id] = {'id': job_id, 'state': 'running', 'run_id': run_id,
                                       'phase': 'starting', 'done': 0, 'total': None,
-                                      'file': None, 'result': None, 'error': None}
+                                      'file': None, 'result': None, 'error': None,
+                                      'error_code': None, 'next_action': None}
             thread = threading.Thread(target=self._watch, args=(project_id, run_id, staging, process, lease_id, heartbeat),
                                       name=f'cad-scan-fusion-{job_id[:8]}', daemon=True)
             try:
@@ -108,6 +109,8 @@ class ScanFusionJobs:
     def _watch(self, project_id: str, run_id: str, staging: Path, process: subprocess.Popen[str],
                lease_id: str, heartbeat: Any) -> None:
         error = None
+        error_code = None
+        next_action = None
         result = None
         try:
             assert process.stdout is not None
@@ -120,6 +123,10 @@ class ScanFusionJobs:
                     continue
                 if value.get('state') == 'failed' and isinstance(value.get('error'), str):
                     error = value['error'][:2000]
+                    if value.get('error_code') == 'SCAN_RECAPTURE_REQUIRED':
+                        error_code = value['error_code']
+                        if isinstance(value.get('next_action'), str):
+                            next_action = value['next_action'][:1000]
                 phase = value.get('phase')
                 done, total = value.get('done'), value.get('total')
                 if (isinstance(phase, str) and phase in _PHASES and type(done) is int
@@ -154,6 +161,7 @@ class ScanFusionJobs:
                 error = error or f'Не удалось освободить блокировку проекта: {exc}'
             with self._guard:
                 if error:
-                    self._jobs[project_id].update(state='failed', error=error)
+                    self._jobs[project_id].update(state='failed', error=error, error_code=error_code,
+                                                  next_action=next_action)
                 else:
                     self._jobs[project_id].update(state='completed', phase='completed', result=result)

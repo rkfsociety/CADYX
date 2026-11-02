@@ -22,6 +22,10 @@ from tools.revopoint.preprocess_scan_frame import preprocess_points, verified_pr
 _RUN_ID = re.compile(r"^revopoint_\d{8}T\d{6}Z$")
 
 
+class RegistrationInsufficientError(RuntimeError):
+    """Geometry does not support a sufficiently consistent registration."""
+
+
 def transform_points_to_table_map(points: np.ndarray, frame: dict[str, Any],
                                  clip_below_table: float = -2.5) -> tuple[np.ndarray, int]:
     """Rebase first-frame points through its marker fit into the table-map XY frame."""
@@ -232,10 +236,10 @@ def register_sequence(project: Path, run_id: str, output: Path,
             adjacent_result, _ = pairwise(source_id, target_id)
         adjacent_angle = _rotation_degrees(adjacent_result.transformation)
         if not _consistent_rotation(adjacent_angle, adjacent_rotations):
-            raise RuntimeError(f"ambiguous adjacent alignment {source_id}->{target_id}: "
+            raise RegistrationInsufficientError(f"ambiguous adjacent alignment {source_id}->{target_id}: "
                                f"rotation {adjacent_angle:.1f}° conflicts with neighboring geometric matches")
         if adjacent_result.fitness < 0.35 or adjacent_result.inlier_rmse > rmse_limit:
-            raise RuntimeError(f"weak adjacent alignment {source_id}->{target_id}: "
+            raise RegistrationInsufficientError(f"weak adjacent alignment {source_id}->{target_id}: "
                                f"fitness={adjacent_result.fitness:.3f}, rmse={adjacent_result.inlier_rmse:.3f}")
         adjacent_transform = np.asarray(adjacent_result.transformation)
         initial_transform = accumulated_pose @ np.linalg.inv(adjacent_transform)
@@ -244,14 +248,14 @@ def register_sequence(project: Path, run_id: str, output: Path,
             initial_transform,
             registration.TransformationEstimationPointToPlane(registration.TukeyLoss(1.0)))
         if incremental_result.fitness < 0.35 or incremental_result.inlier_rmse > rmse_limit:
-            raise RuntimeError(f"weak incremental alignment {target_id} to accumulated frames: "
+            raise RegistrationInsufficientError(f"weak incremental alignment {target_id} to accumulated frames: "
                                f"fitness={incremental_result.fitness:.3f}, "
                                f"rmse={incremental_result.inlier_rmse:.3f}")
         current_pose = np.asarray(incremental_result.transformation)
         transform = np.linalg.inv(current_pose) @ accumulated_pose
         refined_angle = _rotation_degrees(transform)
         if not _consistent_rotation(refined_angle, adjacent_rotations):
-            raise RuntimeError(f"ambiguous accumulated alignment {source_id}->{target_id}: "
+            raise RegistrationInsufficientError(f"ambiguous accumulated alignment {source_id}->{target_id}: "
                                f"rotation {refined_angle:.1f}° conflicts with neighboring geometric matches")
         adjacent_rotations.append(refined_angle)
         information = registration.get_information_matrix_from_point_clouds(
@@ -328,7 +332,7 @@ def register_sequence(project: Path, run_id: str, output: Path,
                   for index in range(1, frame_count)]
         for index, angle in enumerate(angles):
             if not _consistent_rotation(angle, adjacent_rotations):
-                raise RuntimeError(f"ambiguous optimized alignment {index}->{index + 1}: "
+                raise RegistrationInsufficientError(f"ambiguous optimized alignment {index}->{index + 1}: "
                                    f"rotation {angle:.1f}° conflicts with neighboring geometric matches")
         return angles
 
@@ -372,7 +376,7 @@ def register_sequence(project: Path, run_id: str, output: Path,
                                                print_progress=False))
     cluster_ids, cluster_sizes = np.unique(labels[labels >= 0], return_counts=True)
     if not len(cluster_ids):
-        raise RuntimeError("fusion produced no connected point-cloud component")
+        raise RegistrationInsufficientError("fusion produced no connected point-cloud component")
     dominant = int(cluster_ids[int(np.argmax(cluster_sizes))])
     # Sparse or disconnected regions can be real features; retain them for review.
     dominant_points = int(np.count_nonzero(labels == dominant))

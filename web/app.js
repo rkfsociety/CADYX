@@ -392,6 +392,10 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           fuse.disabled=scanFusionPending||scanFusionJob?.state==='running'||typeof canOpenFilesView!=='function'||!canOpenFilesView(state.project);
           fuse.onclick=()=>startScanFusion(run);children.append(fuse);
         }
+        if(scanFusionJob?.state==='failed'&&scanFusionJob.run_id===run.id&&scanFusionJob.next_action){
+          const advice=document.createElement('div');advice.className='cad3-scan-rescan-note';
+          advice.setAttribute('role','alert');advice.textContent=scanFusionJob.next_action;children.append(advice);
+        }
         if(run.loading){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent='Загружаю файлы серии…';children.append(leaf)}
         else if(run.loadError){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=`Не удалось загрузить файлы серии (${run.loadError}).`;children.append(leaf)}
         for(const file of matchingFiles){
@@ -1266,7 +1270,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           window.CadyxScanProgress.render(scanStatus,scan,scanFusionJob);
           if(previousFusion?.state==='running'&&scanFusionJob.state!=='running'){
             await loadScanTree(id,true);renderScanTree();
-            if(scanFusionJob.state==='failed')notify(scanFusionJob.error||'Сшивка не завершилась',true);
+            if(scanFusionJob.state==='failed')notify(scanFusionJob.next_action||scanFusionJob.error||'Сшивка не завершилась',true);
             else if(scanFusionJob.state==='completed')notify(scanFusionJob.result?.quality==='review_required'?'Результат требует проверки совмещения.':'Сшивка и очистка завершены; результат предварительный.',scanFusionJob.result?.quality==='review_required');
           }else if(previousFusion?.state!==scanFusionJob.state){renderScanTree()}
           setCaptureBusy(scan.state==='running'||scan.state==='busy'||scanFusionJob?.state==='running');

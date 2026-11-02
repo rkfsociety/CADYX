@@ -17,7 +17,7 @@ if str(REPOSITORY) not in sys.path:
     sys.path.insert(0, str(REPOSITORY))
 
 from tools.revopoint.preprocess_scan_frame import verified_preprocessed_frame
-from tools.revopoint.register_point_clouds_first_frame import register_sequence, source_paths
+from tools.revopoint.register_point_clouds_first_frame import RegistrationInsufficientError, register_sequence, source_paths
 
 
 def _sha256(path: Path) -> str:
@@ -124,6 +124,11 @@ def main() -> int:
         report = run_pipeline(args.series, args.run_id, args.staging, progress=progress)
         print(json.dumps({'state': 'completed', 'report': str(args.staging / 'pipeline.json')}, ensure_ascii=False), flush=True)
         return 0
+    except RegistrationInsufficientError as exc:
+        print(json.dumps({'state': 'failed', 'error_code': 'SCAN_RECAPTURE_REQUIRED',
+                          'error': str(exc), 'next_action': 'Повторно отсканируйте серию, сохранив деталь в том же положении, что и при исходной съёмке.'},
+                         ensure_ascii=False), file=sys.stderr, flush=True)
+        return 1
     except Exception as exc:
         print(json.dumps({'state': 'failed', 'error': str(exc)}, ensure_ascii=False), file=sys.stderr, flush=True)
         return 1

@@ -1,5 +1,6 @@
 from __future__ import annotations
 import hashlib
+import io
 import json
 import os
 import tempfile
@@ -26,6 +27,18 @@ def make_manifest(directory: Path) -> None:
 
 
 class ScanFusionQualityTests(unittest.TestCase):
+    def test_geometry_failure_requests_rescan_without_automatic_capture(self):
+        from tools.revopoint import run_scan_pipeline
+        from tools.revopoint.register_point_clouds_first_frame import RegistrationInsufficientError
+        stderr = io.StringIO()
+        args = ['pipeline', '--series', '.', '--run-id', RUN, '--staging', 'candidate']
+        with (patch.object(run_scan_pipeline, 'run_pipeline', side_effect=RegistrationInsufficientError('ambiguous')),
+              patch('sys.argv', args), patch('sys.stderr', stderr)):
+            self.assertEqual(run_scan_pipeline.main(), 1)
+        result = json.loads(stderr.getvalue())
+        self.assertEqual(result['error_code'], 'SCAN_RECAPTURE_REQUIRED')
+        self.assertIn('том же положении', result['next_action'])
+
     def test_large_loop_disagreement_requires_review(self):
         from tools.revopoint.run_scan_pipeline import assess_registration
         report = {'registration_dimensions_q':[111.5, 107.8, 103.8],
@@ -59,7 +72,7 @@ class ScanFusionCoreTests(unittest.TestCase):
             def __iter__(self):
                 yield json.dumps({'phase':'register', 'done':1, 'total':11, 'file':'frame.ply'})
                 self.ready.wait(5)
-                yield json.dumps({'state':'failed', 'error':'intentional failure'})
+                yield json.dumps({'state':'failed', 'error':'intentional failure', 'error_code':'SCAN_RECAPTURE_REQUIRED', 'next_action':'Повторите съёмку в том же положении.'})
             def wait(self): return 1
             def poll(self): return 1
             def close(self): pass
@@ -89,6 +102,8 @@ class ScanFusionCoreTests(unittest.TestCase):
                 status = core.scan_fusion_status(project_id)
                 self.assertEqual(status['state'], 'failed')
                 self.assertEqual(status['error'], 'intentional failure')
+                self.assertEqual(status['error_code'], 'SCAN_RECAPTURE_REQUIRED')
+                self.assertIn('том же положении', status['next_action'])
                 self.assertFalse(core._project_availability(project_id).running_operation)
 
     def test_publication_verifies_sources_and_never_overwrites(self):

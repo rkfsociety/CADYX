@@ -58,3 +58,6 @@ assert.equal(container.children[0].dataset.stageState, 'unknown');
 render(container, capture, {...job, state:'completed', phase:'completed', result:{cleaned:'result.ply', quality:'review_required'}});
 assert.equal(container.children[2].dataset.stageState, 'warning');
 assert.match(container.children[4].children[2].textContent, /проверьте совмещение/);
+
+render(container, capture, {...job, state:'failed', phase:'register', error:'geometry', next_action:'Повторите съёмку в том же положении.'});
+assert.equal(container.children[4].children[2].textContent, 'Повторите съёмку в том же положении.');

@@ -72,9 +72,10 @@
     const label = text('small', '', 'Текущий файл');
     const file = text('strong', 'scan-progress-file', (hasFusion ? fusion.file || fusion.result?.cleaned : scan.preprocessing_current_frame?.source_file) || 'Нет данных');
     file.title = file.textContent;
-    const detail = text('small', 'scan-progress-current-note', hasFusion ? (fusion.state === 'failed' ? (fusion.error || 'Ошибка сшивки') : fusion.state === 'completed' ? (needsReview ? 'Внимание: проверьте совмещение' : 'Результат предварительный') : (phaseNames[fusion.phase] || 'Запуск')) : data.state === 'failed' ? (scan.message || data.title) :
+    const detail = text('small', 'scan-progress-current-note', hasFusion ? (fusion.state === 'failed' ? (fusion.next_action || fusion.error || 'Ошибка сшивки') : fusion.state === 'completed' ? (needsReview ? 'Внимание: проверьте совмещение' : 'Результат предварительный') : (phaseNames[fusion.phase] || 'Запуск')) : data.state === 'failed' ? (scan.message || data.title) :
       cleanState === 'active' ? `Осталось очистить: ${remainingClean}` : captureState === 'active' ? `Осталось снять: ${remainingCapture}` : data.title);
     current.append(label, file, detail);
+    detail.title = detail.textContent;
     container.replaceChildren(
       stage(1, 'Съёмка', data.captured, captureAvailable ? data.total : 0, captureState, captureNote),
       stage(2, 'Очистка кадров', data.cleaned, cleanAvailable ? data.total : 0, cleanState, cleanNote),
