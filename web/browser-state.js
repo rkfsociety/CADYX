@@ -69,6 +69,10 @@
   }) {
     let timer = 0;
     let lastSentAt = 0;
+    let hasSent = false;
+    let retryCount = 0;
+    let retryNotBefore = 0;
+    const maxRetries = 3;
     let inFlight = false;
     let dirty = false;
     let errorShown = false;
@@ -89,11 +93,19 @@
 
     function schedule() {
       if (timer || inFlight || !dirty) return;
-      const delay = Math.max(0, minimumIntervalMs - (now() - lastSentAt));
+      const delay = Math.max(0, hasSent ? minimumIntervalMs - (now() - lastSentAt) : 0,
+        retryNotBefore - now());
       timer = setTimer(() => {
         timer = 0;
         void flush();
       }, delay);
+    }
+
+    function retryTransientFailure() {
+      if (retryCount >= maxRetries) return;
+      retryCount += 1;
+      retryNotBefore = now() + Math.min(8000, 500 * (2 ** (retryCount - 1)));
+      dirty = true;
     }
 
     async function flush() {
@@ -122,16 +134,23 @@
             onFailure("publish", response.status);
             errorShown = true;
           }
+          if ([408, 429].includes(response.status) || response.status >= 500) {
+            retryTransientFailure();
+          }
           return;
         }
         if (typeof response.consume === "function") await response.consume();
         lastSentAt = now();
+        hasSent = true;
+        retryCount = 0;
+        retryNotBefore = 0;
         errorShown = false;
       } catch (error) {
         if (!errorShown) {
           onFailure("sync", null, error);
           errorShown = true;
         }
+        retryTransientFailure();
       } finally {
         inFlight = false;
         if (dirty) schedule();
@@ -139,6 +158,10 @@
     }
 
     function markDirty() {
+      if (!dirty && !inFlight) {
+        retryCount = 0;
+        retryNotBefore = 0;
+      }
       dirty = true;
       schedule();
     }

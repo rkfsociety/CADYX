@@ -40,3 +40,98 @@ const locked = state.currentProgressWork(null, null, {
 assert.equal(locked.agentLeaseActive, true);
 assert.equal(locked.isWorking, true);
 console.log('Browser state: malformed progress payloads and normal active work passed.');
+
+
+async function checkViewportSnapshotSync() {
+  const makeClock = () => {
+    let time = 10000;
+    const timers = [];
+    return {
+      now: () => time,
+      timers,
+      setTimer(callback, delay) {
+        timers.push({ callback, delay });
+        return timers.length;
+      },
+      async fire() {
+        const next = timers.shift();
+        assert.ok(next, 'expected a scheduled snapshot');
+        time += next.delay;
+        next.callback();
+        for (let index = 0; index < 12; index += 1) await Promise.resolve();
+        return next.delay;
+      },
+    };
+  };
+  const context = { projectId: 'p', renderedProjectId: 'p', revision: 1 };
+  const clock = makeClock();
+  const failures = [];
+  let attempts = 0;
+  const sync = state.createViewportSnapshotSynchronizer({
+    now: clock.now, setTimer: clock.setTimer,
+    getContext: () => context, capture: async () => 'frame',
+    publish: async () => ({ ok: ++attempts === 3, status: attempts === 1 ? 503 : attempts === 2 ? 429 : 200 }),
+    onFailure: (...args) => failures.push(args),
+  });
+  sync.markDirty();
+  assert.equal(await clock.fire(), 0, 'the first snapshot should not wait for the throttle interval');
+  assert.equal(await clock.fire(), 500, 'transient failure should retry after a bounded delay');
+  assert.equal(await clock.fire(), 1000, 'a second transient failure should back off');
+  assert.equal(attempts, 3);
+  assert.equal(failures.length, 1, 'repeated failures should not spam the user');
+  assert.equal(sync.state().dirty, false);
+  assert.equal(sync.state().errorShown, false);
+  sync.markDirty();
+  assert.equal(await clock.fire(), 400, 'successful snapshots retain the normal throttle');
+
+  const exhaustedClock = makeClock();
+  let exhaustedAttempts = 0;
+  const exhausted = state.createViewportSnapshotSynchronizer({
+    now: exhaustedClock.now, setTimer: exhaustedClock.setTimer,
+    getContext: () => context, capture: async () => 'frame',
+    publish: async () => { exhaustedAttempts += 1; throw new TypeError('offline'); },
+  });
+  exhausted.markDirty();
+  for (let index = 0; index < 4; index += 1) await exhaustedClock.fire();
+  assert.equal(exhaustedAttempts, 4);
+  assert.equal(exhaustedClock.timers.length, 0, 'persistent failures must not cause endless retries');
+  assert.equal(exhausted.state().dirty, false);
+  exhausted.markDirty();
+  await exhaustedClock.fire();
+  assert.equal(exhaustedAttempts, 5, 'a new viewport change should restart recovery');
+
+  const conflictClock = makeClock();
+  const conflict = state.createViewportSnapshotSynchronizer({
+    now: conflictClock.now, setTimer: conflictClock.setTimer,
+    getContext: () => context, capture: async () => 'frame',
+    publish: async () => ({ ok: false, status: 409 }),
+  });
+  conflict.markDirty();
+  await conflictClock.fire();
+  assert.equal(conflictClock.timers.length, 0, 'revision conflicts must not be retried blindly');
+
+  const changedClock = makeClock();
+  let resolveCapture;
+  let revision = 1;
+  let captures = 0;
+  const published = [];
+  const changed = state.createViewportSnapshotSynchronizer({
+    now: changedClock.now, setTimer: changedClock.setTimer,
+    getContext: () => ({ projectId: 'p', renderedProjectId: 'p', revision }),
+    capture: () => ++captures === 1 ? new Promise(resolve => { resolveCapture = resolve; }) : Promise.resolve('fresh'),
+    publish: async snapshot => { published.push(snapshot); return { ok: true, status: 200 }; },
+  });
+  changed.markDirty();
+  await changedClock.fire();
+  revision = 2;
+  resolveCapture('stale');
+  for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  assert.equal(published.length, 0, 'a stale capture must never publish to the old revision');
+  await changedClock.fire();
+  assert.equal(published.length, 1);
+  assert.equal(published[0].revision, 2);
+  assert.equal(published[0].image, 'fresh');
+  console.log('Viewport snapshots: immediate send, bounded retries, conflict and revision fencing passed.');
+}
+
+checkViewportSnapshotSync().catch(error => { console.error(error); process.exitCode = 1; });

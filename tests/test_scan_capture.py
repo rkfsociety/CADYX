@@ -268,11 +268,11 @@ class Scan360CaptureTests(unittest.TestCase):
             ):
                 saved = controller.save_scan_capture_settings("scanner-1", "table-1", 15, 2.5)
                 loaded = controller.scan_capture_settings("scanner-1", "table-1")
+                directory = controller._scan_capture_settings_directory("scanner-1", "table-1")
             self.assertEqual(loaded["step_degrees"], 15)
             self.assertTrue(saved["configured"])
             self.assertEqual(len(attempts), 3)
             self.assertEqual(sleep.call_count, 2)
-            directory = controller._scan_capture_settings_directory("scanner-1", "table-1")
             self.assertEqual([path.name for path in directory.iterdir()], ["settings.json"])
 
     def test_scan_capture_settings_does_not_retry_permanent_replace_errors(self) -> None:
@@ -289,9 +289,9 @@ class Scan360CaptureTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(ValidationError, "Could not save"):
                     controller.save_scan_capture_settings("scanner-1", "table-1", 15, 2.5)
+                directory = controller._scan_capture_settings_directory("scanner-1", "table-1")
             self.assertEqual(replace.call_count, 1)
             sleep.assert_not_called()
-            directory = controller._scan_capture_settings_directory("scanner-1", "table-1")
             self.assertEqual(list(directory.iterdir()), [])
 
     def test_parallel_turntable_settings_saves_do_not_share_temporary_file(self) -> None:
