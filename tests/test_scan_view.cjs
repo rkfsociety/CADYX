@@ -81,12 +81,12 @@ const rotateMap = angle => ({ ...candidateMap, a: Math.cos(angle), b: -Math.sin(
   c: Math.sin(angle), d: Math.cos(angle) });
 const spinning1 = sandbox.window.CadyxScanView.updateTableAlignmentCandidate(null, candidateFrame, candidateMap, 1, 0, true);
 const spinning2 = sandbox.window.CadyxScanView.updateTableAlignmentCandidate(spinning1, candidateFrame,
-  rotateMap(-5 * Math.PI / 180), 2, 5, true);
+  rotateMap(5 * Math.PI / 180), 2, 5, true);
 assert.equal(spinning2.ready, false, 'a rotating table needs a measurable change of angle');
 assert.equal(sandbox.window.CadyxScanView.updateTableAlignmentCandidate(spinning2, candidateFrame,
-  rotateMap(-12 * Math.PI / 180), 3, 12, true).ready, true);
+  rotateMap(12 * Math.PI / 180), 3, 12, true).ready, true);
 assert.equal(sandbox.window.CadyxScanView.updateTableAlignmentCandidate(spinning2, candidateFrame,
-  rotateMap(12 * Math.PI / 180), 3, 12, true).count, 1,
+  rotateMap(-12 * Math.PI / 180), 3, 12, true).count, 1,
   'a map rotating in the wrong direction cannot confirm a tabletop plane');
 const planeMarkers = [-20, -20, 0, 20, -20, 0, -20, 20, 0, 20, 20, 0, 0, 0, 0];
 const plane1 = sandbox.window.CadyxScanView.updateLivePlaneCandidate(null, candidateFrame, planeMarkers, 1);

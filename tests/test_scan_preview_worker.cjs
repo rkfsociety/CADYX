@@ -69,3 +69,18 @@ assert.equal(unrenderableProjection.result.markerPositions.length, 0,
   "unrenderable marker points must not enter table fitting");
 
 console.log("Scan preview worker: depth filtering, marker regions and calibrated projection passed.");
+
+const searchMessages = [];
+const searchSandbox = { ArrayBuffer, URL, URLSearchParams, self: { postMessage(message) { searchMessages.push(message); } } };
+const searchContext = vm.createContext(searchSandbox);
+searchSandbox.importScripts = asset => {
+  assert.equal(asset, '/assets/scan-view.js');
+  searchSandbox.window = searchSandbox.self;
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/scan-view.js'), 'utf8'), searchContext);
+};
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../web/scan-preview-worker.js'), 'utf8'), searchContext);
+const markerPoints = [[0, 0], [17, 1], [3, 23], [25, 32], [41, 7], [19, 49]];
+searchSandbox.self.onmessage({ data: { operation: 'match-markers', points: markerPoints, map: { points: markerPoints } } });
+assert.equal(searchMessages[0].error, undefined);
+assert.equal(searchMessages[0].result.matches.length, markerPoints.length,
+  'the background marker search returns map correspondences using the shared registration implementation');

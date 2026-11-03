@@ -146,6 +146,25 @@
   }
 
   self.onmessage = event => {
+    if (event.data?.operation === 'match-markers') {
+      try {
+        if (!self.CadyxScanView) {
+          self.window = self;
+          importScripts('/assets/scan-view.js');
+        }
+      } catch (error) {
+        self.postMessage({ workerError: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+      try {
+        const { points, map } = event.data;
+        const result = self.CadyxScanView.registerTableMarkers(points, map, 5, null, true, false, 8192);
+        self.postMessage({ result });
+      } catch (error) {
+        self.postMessage({ error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
     const { requestId, rawBuffer, matrix, scale } = event.data || {};
     try {
       const result = processFrame(rawBuffer, matrix, scale);

@@ -82,7 +82,7 @@
     const compatible = previous && sequence > previous.sequence && sequence - previous.sequence <= 24
       && normal.reduce((sum, value, axis) => sum + value * previous.normal[axis], 0) >= 0.98
       && Math.hypot(...center.map((value, axis) => value - previous.center[axis])) <= 8
-      && (!spinning || Math.abs(wrapAngle(mapDelta + poseDelta)) <= 8);
+      && (!spinning || Math.abs(wrapAngle(mapDelta - poseDelta)) <= 8);
     const count = compatible ? previous.count + 1 : 1;
     return { center: compatible ? previous.center : center, normal: compatible ? previous.normal : [...normal],
       initialPose: compatible ? previous.initialPose : poseAngle,
@@ -756,7 +756,7 @@
   };
 
   const registerTableMarkers = (livePoints, tableMap, threshold = 5, priorPairs = null, allowRansac = true,
-    allowReflection = true) => {
+    allowReflection = true, searchIterations = 512) => {
     if (!Array.isArray(livePoints) || livePoints.length < 4 || tableMap?.points?.length < 4) {
       throw new Error('Для привязки к карте стола нужны минимум четыре маркера.');
     }
@@ -783,7 +783,7 @@
         let value = Math.imul(seed ^ seed >>> 7, 61 | seed) ^ seed;
         return ((value ^ value >>> 14) >>> 0) % length;
       };
-      search: for (let iteration = 0; iteration < 512; iteration += 1) {
+      search: for (let iteration = 0; iteration < searchIterations; iteration += 1) {
         const sourceA = randomIndex(livePoints.length), sourceB = randomIndex(livePoints.length);
         const targetA = randomIndex(tableMap.points.length), targetB = randomIndex(tableMap.points.length);
         if (sourceA === sourceB || targetA === targetB) continue;
@@ -928,8 +928,53 @@
       queue: new Int32Array(640 * 400),
     };
     let liveFrameWorker = null;
+    let liveMarkerSearchWorker = null;
+    let liveMarkerSearchBusy = false;
+    let liveMarkerSearchFailed = false;
     let liveFrameWorkerRequestId = 0;
     const liveFrameWorkerRequests = new Map();
+    const searchMarkersInWorker = (points, map, pixels, sourceIndices, sequence, request) => {
+      if (typeof window.Worker !== 'function' || liveMarkerSearchFailed) return false;
+      if (liveMarkerSearchBusy) return true;
+      try {
+        if (!liveMarkerSearchWorker) {
+          liveMarkerSearchWorker = new window.Worker('/assets/scan-preview-worker.js');
+          liveMarkerSearchWorker.onerror = () => {
+            liveMarkerSearchWorker?.terminate();
+            liveMarkerSearchWorker = null;
+            liveMarkerSearchBusy = false;
+            liveMarkerSearchFailed = true;
+          };
+        }
+        const worker = liveMarkerSearchWorker;
+        liveMarkerSearchBusy = true;
+        worker.onmessage = event => {
+          liveMarkerSearchBusy = false;
+          if (worker !== liveMarkerSearchWorker || request !== liveRequest || !livePreviewOwned
+              || liveMarkerTrackSequence > sequence || liveFrameSequence - sequence > 24) return;
+          if (event.data?.workerError) {
+            worker.terminate();
+            liveMarkerSearchWorker = null;
+            liveMarkerSearchFailed = true;
+            return;
+          }
+          const match = event.data?.result;
+          if (!match || !isCredibleInitialMarkerFit(match, points.length)) return;
+          liveMarkerTracks = match.matches.map(pair => ({
+            pixel: pixels[sourceIndices[pair.sourceIndex]], mapIndex: pair.targetIndex,
+          }));
+          liveMarkerTrackSequence = sequence;
+        };
+        worker.postMessage({ operation: 'match-markers', points, map });
+        return true;
+      } catch (error) {
+        liveMarkerSearchWorker?.terminate();
+        liveMarkerSearchWorker = null;
+        liveMarkerSearchBusy = false;
+        liveMarkerSearchFailed = true;
+        return false;
+      }
+    };
     const processLiveFrameInWorker = (raw, matrix, scale) => {
       if (typeof window.Worker !== 'function') return null;
       if (!liveFrameWorker) {
@@ -1921,8 +1966,10 @@
                       planarPrior.length, frameSequence, lastMapRansacSequence,
                       Math.max(4, Math.ceil(planar.points.length * 0.6)));
                     if (allowRansac) lastMapRansacSequence = frameSequence;
+                    const searchingInWorker = allowRansac && searchMarkersInWorker(planar.points, liveTableMap,
+                      markerCenterPixelPositions, planar.sourceIndices, frameSequence, request);
                     const mapTransform = registerTableMarkers(planar.points, liveTableMap, 5,
-                      planarPrior, allowRansac, false);
+                      planarPrior, allowRansac && !searchingInWorker, false);
                     mapTransform.matches = mapTransform.matches.map(match =>
                       ({ ...match, sourceIndex: planar.sourceIndices[match.sourceIndex] }));
                     if (mapTransform.reflection !== 1 || !matchedMarkersOnPlane(markerCenterPositions, tableFrame, mapTransform.matches)) {
@@ -2087,6 +2134,9 @@
     const closeLivePreview = () => {
       if (livePreviewOwned) {
         livePreviewOwned = false;
+        liveMarkerSearchWorker?.terminate();
+        liveMarkerSearchWorker = null;
+        liveMarkerSearchBusy = false;
         if (liveFpsIndicator) {
           liveFpsIndicator.textContent = 'FPS —';
           liveFpsIndicator.hidden = true;
