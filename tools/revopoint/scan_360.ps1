@@ -304,7 +304,7 @@ try {
         '--expected-frame-count', [string]$frameCount,
         '--stop-signal', $workerStopPath, '--report-file', $preprocessingReportPath,
         '--calibration-file', $projectCalibration, '--depth-scale', $DepthScale.ToString('0.############', [Globalization.CultureInfo]::InvariantCulture),
-        '--max-workers', '1', '--timing', 'after_capture_before_registration'
+        '--max-workers', '2', '--timing', 'after_capture_before_registration'
     ) | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }
     Invoke-Turntable -Arguments @(
         'capture-sweep', [string]$frameCount, [string]$StepDegrees,

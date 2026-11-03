@@ -353,10 +353,10 @@ def watch_capture(pose_log: Path, run_directory: Path, run_id: str, expected_fra
             raise ValueError("split capture output must be the series folder and use in-place cleanup")
     if not 1 <= expected_frame_count <= 360:
         raise ValueError("expected frame count is invalid")
-    if max_workers != 1:
-        raise ValueError("capture preprocessing must use exactly one worker")
     if timing not in ("during_capture", "after_capture_before_registration"):
         raise ValueError("invalid frame cleanup timing")
+    if max_workers not in (1, 2) or (timing == "during_capture" and max_workers != 1):
+        raise ValueError("capture preprocessing allows one worker during capture and up to two after capture")
     if not 0.01 <= poll_seconds <= 2.0:
         raise ValueError("pose-log polling interval must be between 0.01 and 2 seconds")
     if (calibration_path is None) != (depth_scale is None):

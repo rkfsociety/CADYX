@@ -708,6 +708,13 @@ class Scan360CaptureTests(unittest.TestCase):
             report.write_text(json.dumps(payload), encoding="utf-8")
             status = Scan360CaptureController._preprocessing_payload_uncached(project, run_id, 2)
             self.assertEqual(status["preprocessing_current_frame"], payload["active_frames"][0])
+            payload["active_frames"].append({"frame_index": 1, "source_file": f"{run_id}_pose_001.ply"})
+            report.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(Scan360CaptureController._preprocessing_payload_uncached(project, run_id, 2)["preprocessing_status"], "running")
+            payload["active_frames"][1]["source_file"] = "../unexpected.ply"
+            report.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(Scan360CaptureController._preprocessing_payload_uncached(project, run_id, 2)["preprocessing_status"], "failed")
+            payload["active_frames"].pop()
             payload["active_frames"][0]["source_file"] = "../unexpected.ply"
             report.write_text(json.dumps(payload), encoding="utf-8")
             status = Scan360CaptureController._preprocessing_payload_uncached(project, run_id, 2)

@@ -209,8 +209,9 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
                 writer.writeheader(); writer.writerows(rows)
             stop = directory / "stop.signal"; stop.touch()
             report = watch_capture(poses, directory, run_id, 2, stop, directory / "aggregate.json",
-                                   timing="after_capture_before_registration")
+                                   max_workers=2, timing="after_capture_before_registration")
             self.assertEqual(report["state"], "completed")
+            self.assertEqual(report["worker_limit"], 2)
             self.assertEqual(report["cleaned_frame_count"], 2)
             self.assertEqual([frame["frame_index"] for frame in report["frames"]], [0, 1])
             self.assertTrue(all(frame["timing"] == "after_capture_before_registration" for frame in report["frames"]))
@@ -320,7 +321,7 @@ class PointCloudRegistrationInputTests(unittest.TestCase):
     def test_capture_worker_rejects_parallel_processing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             run_directory = Path(temporary)
-            with self.assertRaisesRegex(ValueError, "exactly one worker"):
+            with self.assertRaisesRegex(ValueError, "one worker during capture"):
                 watch_capture(
                     run_directory / "poses.csv", run_directory, "revopoint_20261023T091400Z", 2,
                     run_directory / "stop.signal", run_directory / "report.json", max_workers=2,

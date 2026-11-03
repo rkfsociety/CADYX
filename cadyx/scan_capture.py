@@ -1724,11 +1724,11 @@ class Scan360CaptureController:
                     raise ValueError("invalid table marker counters")
                 marker_counts[summary_key] = sum(values)
             active_frames = report.get("active_frames", [])
-            if not isinstance(active_frames, list) or len(active_frames) > 1:
+            if not isinstance(active_frames, list) or len(active_frames) > 2:
                 raise ValueError("invalid active preprocessing frames")
             current_frame = None
-            if active_frames:
-                row = active_frames[0]
+            active_indices: set[int] = set()
+            for row in active_frames:
                 if not isinstance(row, dict):
                     raise ValueError("invalid active preprocessing frame")
                 index = row.get("frame_index")
@@ -1736,9 +1736,12 @@ class Scan360CaptureController:
                 if (type(index) is not int or not 0 <= index < frame_count
                         or name not in (f"{run_id}_pose_{index:03d}.ply",
                                         f"{run_id}_pose_pose_{index:03d}.ply")
-                        or state != "running"):
+                        or state != "running" or index in active_indices
+                        or (report.get("format") == "cadyx-scan-preprocessing-v1" and index in seen)):
                     raise ValueError("invalid active preprocessing frame")
-                current_frame = {"frame_index": index, "source_file": name}
+                active_indices.add(index)
+                if current_frame is None:
+                    current_frame = {"frame_index": index, "source_file": name}
             return {
                 "preprocessing_status": report.get("state", "failed"),
                 "preprocessed_frames": cleaned_count,
