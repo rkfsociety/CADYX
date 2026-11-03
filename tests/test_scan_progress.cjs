@@ -125,6 +125,11 @@ assert.equal(summary({state:'running', frame_count:2 ** 54, completed_frames:2 *
 render(container, capture, {...job, total:2 ** 54, done:2 ** 53});
 assert.equal(container.children[2].children[1].children[0].children[1].textContent, '—');
 
+// A failed registration must not leave the final stage falsely waiting for work that cannot start.
+render(container, capture, {...job, state:'failed', phase:'register', error:'registration failed'});
+assert.equal(container.children[3].dataset.stageState, 'failed');
+assert.equal(container.children[3].children[1].children[2].textContent, 'Сшивка остановлена');
+
 // A failed publishing step must not be presented as a completed final stage.
 render(container, capture, {...job, state:'failed', phase:'publishing', error:'disk full'});
 assert.equal(container.children[2].dataset.stageState, 'completed');
