@@ -35,6 +35,18 @@ const response = (status, type, payload) => ({
       (error) => error.status === 409 && error.code === code && error.message.includes(expected),
     );
   }
+  // HTTP errors without typed CADYX codes should offer actionable feedback.
+  for (const [status, expected] of [
+    [429, 'Слишком много запросов'],
+    [413, 'превышают допустимый размер'],
+    [401, 'требуется авторизация'],
+    [403, 'Недостаточно прав'],
+  ]) {
+    await assert.rejects(
+      api.requestJson('/http-error', {}, async () => response(status, 'text/plain', '')),
+      error => error.status === status && error.message.includes(expected),
+    );
+  }
   // Untrusted error names must not resolve Object.prototype properties as labels.
   for (const code of ['constructor', '__proto__', 'toString']) {
     await assert.rejects(
