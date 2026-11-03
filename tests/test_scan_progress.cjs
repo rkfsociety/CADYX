@@ -54,6 +54,9 @@ assert.equal(container.children[1].dataset.stageState, 'unknown');
 
 const capture = {state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:12,
   preprocessing_status:'completed', preview_subfolder:'revopoint_20261010T100000Z'};
+render(container, {...capture, preprocessing_current_frame:{source_file:'stale.ply'}});
+assert.equal(container.children[4].children[1].textContent, 'Нет данных',
+  'completed cleanup must not keep showing its last active file');
 const job = {state:'running', run_id:capture.preview_subfolder, phase:'register', done:3, total:11, file:'frame_004.ply'};
 render(container, capture, job);
 assert.equal(container.children[2].dataset.stageState, 'active');
