@@ -602,11 +602,12 @@
     }
     return transformed;
   };
-  const placeLiveCloudInStationaryFrame = (positions, count, anchorPose) => {
-    for (let index = 0; index < count * 3; index += 3) {
-      positions.set(transformTableDisplayPoint(
-        [positions[index], positions[index + 1], positions[index + 2]], anchorPose.angle, anchorPose.tilt), index);
-    }
+  const advanceLiveMapTransform = (map, anchorAngle, currentAngle) => {
+    const angle = (currentAngle - anchorAngle) * Math.PI / 180;
+    const c = Math.cos(angle), s = Math.sin(angle);
+    return { ...map, a: c * map.a - s * map.c, b: c * map.b - s * map.d,
+      c: s * map.a + c * map.c, d: s * map.b + c * map.d,
+      tx: c * map.tx - s * map.ty, ty: s * map.tx + c * map.ty };
   };
   const livePreviewSampleIndex = (x, y) => {
     if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || x >= 640 || y < 0 || y >= 400) return -1;
@@ -1418,9 +1419,7 @@
         aligned = false, reset = false } = options;
       lastTurntableSceneOptions = { ...options, reset: false };
       const telemetryPose = currentTurntableDisplayPose();
-      // The fitted transform maps camera coordinates into the rotating map;
-      // display its inverse so mapped markers follow camera-space geometry.
-      const pose = { ...telemetryPose, angle: -telemetryPose.angle };
+      const pose = telemetryPose;
       const displayedPositions = positions || (cloudPreviewOpen ? cloudPreviewPositions : null);
       const displayedCount = positions ? count : cloudPreviewPointCount;
       const moveCloudWithTable = aligned || (!positions && cloudPreviewOpen && fileCloudTablePlaced);
@@ -2015,10 +2014,9 @@
                         throw new Error('Проверяется устойчивость плоскости стола.');
                       }
                       liveTableFrame = tableFrame;
-                      liveMapTransform = mapTransform;
-                      const anchorPose = currentTurntableDisplayPose();
-                      liveAnchorPose = { ...anchorPose, angle: -anchorPose.angle };
                     }
+                    liveMapTransform = mapTransform;
+                    liveAnchorPose = currentTurntableDisplayPose();
                     matchedMapIndices = mapTransform.matches.map(match => match.targetIndex);
                     tableAligned = true;
                     liveMapAlignmentSummary = `Карта ${mapTransform.matches.length}/${liveTableMap.points.length}`
@@ -2060,23 +2058,24 @@
                 }
                 const tablePositions = liveFrameScratch.tablePositions;
                 tablePositions.set(positions.subarray(0, count * 3));
+                const framePose = currentTurntableDisplayPose();
+                const frameMap = advanceLiveMapTransform(liveMapTransform, liveAnchorPose.angle, framePose.angle);
                 const transformed = transformLiveToTableFrame(tablePositions.subarray(0, count * 3), liveTableFrame,
-                  liveMapTransform, markerFlags);
+                  frameMap, markerFlags);
                 if (transformed.count >= LIVE_MIN_OBJECT_PREVIEW_POINTS || liveTableMap.points.length >= 4) {
                   count = transformed.count >= LIVE_MIN_OBJECT_PREVIEW_POINTS ? transformed.count : 0;
-                  placeLiveCloudInStationaryFrame(tablePositions, count, liveAnchorPose);
                   const markerIndices = count ? transformed.markerIndices : [];
                   const displayPositions = tablePositions;
                   const bounds = transformed.bounds;
                   lastMapAlignedFrame = { positions: new Float32Array(tablePositions.subarray(0, count * 3)),
-                    count, markerIndices: [...markerIndices], matchedMapIndices: [...matchedMapIndices], aligned: false };
+                    count, markerIndices: [...markerIndices], matchedMapIndices: [...matchedMapIndices], aligned: true };
                   if (count === 0) {
                     setMapAlignmentStatus(`${liveMapAlignmentSummary} · только маркеры карты`, 'aligned');
                   }
                   const processMs = Math.max(0, clock() - processStartedAt);
                   const renderStartedAt = clock();
                   renderLiveFrame({ positions: displayPositions, count, bounds, markerIndices, matchedMapIndices,
-                    aligned: false, reset: false });
+                    aligned: true, reset: false });
                   const renderMs = Math.max(0, clock() - renderStartedAt);
                   const now = clock();
                   if (!liveClientWindowStartedAt) liveClientWindowStartedAt = now;
@@ -2425,6 +2424,6 @@
     matchedMarkersOnPlane, planarMarkerCandidates, isCredibleInitialMarkerFit, placeUnalignedLiveCloud,
     updateTableAlignmentCandidate,
     updateLivePlaneCandidate, placePlaneAlignedLiveCloud,
-    shouldRunTableMapRansac, buildTurntableDisplayModel, hasClosedTriangleTopology, transformTableDisplayPoint, placeLiveCloudInStationaryFrame,
+    shouldRunTableMapRansac, buildTurntableDisplayModel, hasClosedTriangleTopology, transformTableDisplayPoint, advanceLiveMapTransform,
     livePreviewSampleIndex, isScanDepthValid, buildPreviewCloudPointIndices, buildMatchedMapMarkerPointIndices };
 })();

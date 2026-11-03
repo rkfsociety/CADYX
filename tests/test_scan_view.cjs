@@ -212,24 +212,27 @@ assert.deepEqual(Array.from(sandbox.window.CadyxScanView.buildMatchedMapMarkerPo
   { markerPoints: new Uint32Array([10, 11, 12]) }, [2, 0, 99])), [12, 10],
   "only confirmed correspondences highlight exact map marker locations");
 const rotatedPoint = sandbox.window.CadyxScanView.transformTableDisplayPoint([0, 10, 0], 90, 0);
-// The camera-to-map transform and telemetry advance in the same direction.
-// Its inverse is the rotation used to display the moving table in camera space.
+// Camera-to-map rotation advances with encoder telemetry. A tracked point
+// must remain at its fixed map position before the table pose is applied.
 const mapPoint = [24, -11, 5];
 const initialMapAngle = 35, initialTelemetry = 20, currentTelemetry = 65;
 const rotate = sandbox.window.CadyxScanView.transformTableDisplayPoint;
 const cameraAtCurrentPose = rotate(mapPoint, -(initialMapAngle + currentTelemetry - initialTelemetry), 0);
-const mappedInAnchorFrame = rotate(cameraAtCurrentPose, initialMapAngle, 0);
-const cloudOnDisplay = rotate(mappedInAnchorFrame, -initialTelemetry, 0);
-const markerOnDisplay = rotate(mapPoint, -currentTelemetry, 0);
+const radians = initialMapAngle * Math.PI / 180;
+const advanced = sandbox.window.CadyxScanView.advanceLiveMapTransform(
+  { a: Math.cos(radians), b: -Math.sin(radians), c: Math.sin(radians), d: Math.cos(radians), tx: 0, ty: 0 },
+  initialTelemetry, currentTelemetry);
+const mappedNow = [advanced.a * cameraAtCurrentPose[0] + advanced.b * cameraAtCurrentPose[1] + advanced.tx,
+  advanced.c * cameraAtCurrentPose[0] + advanced.d * cameraAtCurrentPose[1] + advanced.ty, cameraAtCurrentPose[2]];
+const cloudOnDisplay = rotate(mappedNow, currentTelemetry, 0);
+const markerOnDisplay = rotate(mapPoint, currentTelemetry, 0);
 assert.ok(Math.hypot(...cloudOnDisplay.map((value, axis) => value - markerOnDisplay[axis])) < 1e-6,
   'the captured point and its fixed table marker stay together as telemetry changes');
-const stationaryCloud = new Float32Array([0, 10, 4, 2, 3, 5]);
-sandbox.window.CadyxScanView.placeLiveCloudInStationaryFrame(stationaryCloud, 2, { angle: 90, tilt: 0 });
-for (const [index, source] of [[0, [0, 10, 4]], [3, [2, 3, 5]]]) {
-  const expected = sandbox.window.CadyxScanView.transformTableDisplayPoint(source, 90, 0);
-  assert.ok(expected.every((value, axis) => Math.abs(value - stationaryCloud[index + axis]) < 1e-5),
-    'live camera points use the initial table pose exactly once');
-}
+const shiftedMap = { a: 1, b: 0, c: 0, d: 1, tx: 10, ty: 5, scale: 1, reflection: 1 };
+const wrappedMap = sandbox.window.CadyxScanView.advanceLiveMapTransform(shiftedMap, 179, -179);
+const predictedShift = rotate([10, 5, 0], 2, 0);
+assert.ok(Math.hypot(wrappedMap.tx - predictedShift[0], wrappedMap.ty - predictedShift[1]) < 1e-6,
+  'advancing a temporarily lost match rotates its translation and handles the encoder wrap');
 assert.ok(Math.abs(rotatedPoint[0] + 10) < 1e-5 && Math.abs(rotatedPoint[1]) < 1e-5,
   "turntable encoder rotation changes only the display-frame point position");
 const tiltedPoint = sandbox.window.CadyxScanView.transformTableDisplayPoint([0, 0, 0], 0, 30);
@@ -561,7 +564,7 @@ const rotatedMap = [...rotatedGeometry.positions.slice(rotatedMapLayer.points[0]
 assert.deepEqual([...rotatedGeometry.positions.slice(0, 3)],
   [...lastAlignedGeometry.positions.slice(0, 3)], "the circular lower support stays fixed while the tabletop moves");
 for (const [actual, before] of [[rotatedMap, mapBeforeDisplayRotation]]) {
-  const expected = sandbox.window.CadyxScanView.transformTableDisplayPoint(before, -15, 0);
+  const expected = sandbox.window.CadyxScanView.transformTableDisplayPoint(before, 15, 0);
   assert.ok(Math.hypot(...actual.map((value, axis) => value - expected[axis])) < 1e-4,
     "the confirmed map markers rotate together with the table display");
 }
@@ -592,8 +595,10 @@ turntableAngleDisplay.textContent = '30.0°';
 await waitUntil(() => viewerLoads.length > loadsBeforeTurn);
 const turnedGeometry = viewerLoads.at(-1).geometry;
 const turnedIndex = turnedGeometry.pointLayers.find(layer => layer.style.color === '#ff9d54').points[0];
-assert.deepEqual([...turnedGeometry.positions.slice(turnedIndex * 3, turnedIndex * 3 + 3)], objectBefore,
-  'rotating the displayed table does not rotate an already captured live camera point');
+const turnedPoint = [...turnedGeometry.positions.slice(turnedIndex * 3, turnedIndex * 3 + 3)];
+const expectedTurned = sandbox.window.CadyxScanView.transformTableDisplayPoint(objectBefore, 15, 0);
+assert.ok(Math.hypot(...turnedPoint.map((value, axis) => value - expectedTurned[axis])) < 1e-4,
+  'the last mapped frame remains attached to the rotating display table');
 fixedPlacementView.closeLivePreview();
 
 const makeUnalignedFrame = (markerCenters, extraDepth = 0) => {
