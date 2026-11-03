@@ -41,13 +41,17 @@ const response = (status, type, payload) => ({
     [413, 'превышают допустимый размер'],
     [401, 'требуется авторизация'],
     [403, 'Недостаточно прав'],
+    [408, 'Время ожидания'],
+    [502, 'промежуточного сервера'],
+    [503, 'временно недоступен'],
+    [504, 'Время ожидания'],
   ]) {
     await assert.rejects(
       api.requestJson('/http-error', {}, async () => response(status, 'text/plain', '')),
       error => error.status === status && error.message.includes(expected),
     );
   }
-  // Untrusted error names must not resolve Object.prototype properties as labels.
+  // Known CADYX codes take precedence over generic gateway errors.\n  await assert.rejects(\n    api.requestJson('/gateway', {}, async () => response(503, 'application/json', { error: 'PROJECT_BUSY' })),\n    error => error.status === 503 && error.code === 'PROJECT_BUSY' && error.message.includes('Проект занят'),\n  );\n  // Untrusted error names must not resolve Object.prototype properties as labels.
   for (const code of ['constructor', '__proto__', 'toString']) {
     await assert.rejects(
       api.requestJson('/test', {}, async () => response(400, 'application/json', { error: code })),
@@ -75,7 +79,7 @@ const response = (status, type, payload) => ({
   emptyError.headers.get = name => name === 'content-length' ? '0' : 'application/problem+json';
   emptyError.json = async () => { throw new Error('empty error body'); };
   await assert.rejects(api.requestJson('/empty-error', {}, async () => emptyError),
-    error => error.status === 503 && /Сервер CADYX/.test(error.message));
+    error => error.status === 503 && /временно недоступен/.test(error.message));
 
   // Fetch accepts Headers and header tuples; preserve caller MIME and credentials.
   for (const headers of [new Headers([['content-type', 'application/merge-patch+json'], ['X-Token', 'secret']]),
