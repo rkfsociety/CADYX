@@ -85,7 +85,8 @@
     const regMeasured = hasFusion && registrationPhases.includes(fusion.phase) && Number.isSafeInteger(fusion.total) && fusion.total > 0;
     const cleanupMeasured = hasFusion && fusion.phase === 'cleanup' && Number.isSafeInteger(fusion.total) && fusion.total > 0;
     const current = document.createElement('div'); current.className = 'scan-progress-current';
-    const label = text('small', '', 'Текущий файл');
+    const fileLabel = hasFusion ? (fusion.state === 'completed' ? 'Результат сшивки' : fusion.state === 'failed' ? 'Последний файл сшивки' : 'Текущий файл сшивки') : scan.preprocessing_status === 'failed' ? 'Последний файл очистки' : 'Текущий файл';
+    const label = text('small', '', fileLabel);
     const scanFile = ['running', 'failed'].includes(scan.preprocessing_status) ? scan.preprocessing_current_frame?.source_file : null;
     const file = text('strong', 'scan-progress-file', (hasFusion ? (fusion.state === 'completed' ? fusion.result?.cleaned || fusion.file : fusion.file) : scanFile) || 'Нет данных');
     file.title = file.textContent;
