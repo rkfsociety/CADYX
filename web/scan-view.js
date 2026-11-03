@@ -52,6 +52,21 @@
         sum + component * (centers[index + axis] - frame.origin[axis]), 0);
       return Number.isFinite(distance) && Math.abs(distance) <= tolerance;
     });
+  const planarMarkerCandidates = (centers, frame, tolerance = 2.5) => {
+    const points = [], sourceIndices = [];
+    for (let index = 0; index + 2 < centers.length; index += 3) {
+      const relative = frame.origin.map((value, axis) => centers[index + axis] - value);
+      const project = axis => axis.reduce((sum, value, component) => sum + value * relative[component], 0);
+      if (Math.abs(project(frame.zAxis)) <= tolerance) {
+        points.push([project(frame.xAxis), project(frame.yAxis)]);
+        sourceIndices.push(index / 3);
+      }
+    }
+    return { points, sourceIndices };
+  };
+  const isCredibleInitialMarkerFit = (match, candidateCount) =>
+    match.matches.length >= Math.max(4, Math.ceil(candidateCount * 0.6))
+      && match.medianResidual <= 1.5;
   const updateTableAlignmentCandidate = (previous, frame, map, sequence, poseAngle = 0, spinning = false) => {
     const determinant = map.a * map.d - map.b * map.c;
     if (!Number.isFinite(determinant) || determinant <= 1e-10) return null;
@@ -768,7 +783,7 @@
         let value = Math.imul(seed ^ seed >>> 7, 61 | seed) ^ seed;
         return ((value ^ value >>> 14) >>> 0) % length;
       };
-      for (let iteration = 0; iteration < 512; iteration += 1) {
+      search: for (let iteration = 0; iteration < 512; iteration += 1) {
         const sourceA = randomIndex(livePoints.length), sourceB = randomIndex(livePoints.length);
         const targetA = randomIndex(tableMap.points.length), targetB = randomIndex(tableMap.points.length);
         if (sourceA === sourceB || targetA === targetB) continue;
@@ -780,6 +795,7 @@
           const error = pairs.length ? pairs.reduce((sum, pair) => sum + pair.distance, 0) / pairs.length : Infinity;
           if (pairs.length >= 4 && (!best || pairs.length > best.pairs.length
               || pairs.length === best.pairs.length && error < best.error)) best = { pairs, transform, error };
+          if (pairs.length >= Math.max(4, Math.ceil(livePoints.length * 0.85)) && error <= 1) break search;
         }
       }
     }
@@ -1896,26 +1912,34 @@
                         markerCenterPositions, frameSequence);
                       if (livePlaneCandidate?.ready) liveApproximatePlane = livePlaneCandidate.frame;
                     }
-                    const markerCoordinates = [];
-                    for (let index = 0; index < markerCenterPositions.length; index += 3) {
-                      const relative = [markerCenterPositions[index] - tableFrame.origin[0],
-                        markerCenterPositions[index + 1] - tableFrame.origin[1], markerCenterPositions[index + 2] - tableFrame.origin[2]];
-                      markerCoordinates.push([tableFrame.xAxis, tableFrame.yAxis].map(axis =>
-                        axis[0] * relative[0] + axis[1] * relative[1] + axis[2] * relative[2]));
-                    }
+                    const planar = planarMarkerCandidates(markerCenterPositions, tableFrame);
+                    const planarPrior = priorMarkerMatches.flatMap(match => {
+                      const sourceIndex = planar.sourceIndices.indexOf(match.sourceIndex);
+                      return sourceIndex < 0 ? [] : [{ ...match, sourceIndex }];
+                    });
                     const allowRansac = shouldRunTableMapRansac(
-                      priorMarkerMatches.length, frameSequence, lastMapRansacSequence, liveTableMap.points.length);
+                      planarPrior.length, frameSequence, lastMapRansacSequence,
+                      Math.max(4, Math.ceil(planar.points.length * 0.6)));
                     if (allowRansac) lastMapRansacSequence = frameSequence;
-                    const mapTransform = registerTableMarkers(markerCoordinates, liveTableMap, 5,
-                      priorMarkerMatches, allowRansac, false);
+                    const mapTransform = registerTableMarkers(planar.points, liveTableMap, 5,
+                      planarPrior, allowRansac, false);
+                    mapTransform.matches = mapTransform.matches.map(match =>
+                      ({ ...match, sourceIndex: planar.sourceIndices[match.sourceIndex] }));
                     if (mapTransform.reflection !== 1 || !matchedMarkersOnPlane(markerCenterPositions, tableFrame, mapTransform.matches)) {
                       throw new Error('Плоскость или ориентация маркеров не подтверждена.');
+                    }
+                    if (!hadTableAlignment && !isCredibleInitialMarkerFit(mapTransform, planar.points.length)) {
+                      throw new Error('Начальное соответствие карты неоднозначно.');
                     }
                     liveMarkerTracks = mapTransform.matches.map(match => ({
                       pixel: markerCenterPixelPositions[match.sourceIndex], mapIndex: match.targetIndex,
                     }));
                     liveMarkerTrackSequence = frameSequence;
                     if (!hadTableAlignment) {
+                      const reportedAngle = Number.parseFloat(document.getElementById?.('turntable-angle')?.textContent || '');
+                      if (!Number.isFinite(reportedAngle)) {
+                        throw new Error('Ожидаются данные положения стола.');
+                      }
                       liveAlignmentCandidate = updateTableAlignmentCandidate(liveAlignmentCandidate, tableFrame,
                         mapTransform, frameSequence, currentTurntableDisplayPose().angle, turntableSpinIsActive());
                       if (!liveAlignmentCandidate?.ready) {
@@ -2323,7 +2347,7 @@
   };
 
   window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers, placeCloudForPreview,
-    matchedMarkersOnPlane, placeUnalignedLiveCloud,
+    matchedMarkersOnPlane, planarMarkerCandidates, isCredibleInitialMarkerFit, placeUnalignedLiveCloud,
     updateTableAlignmentCandidate,
     updateLivePlaneCandidate, placePlaneAlignedLiveCloud,
     shouldRunTableMapRansac, buildTurntableDisplayModel, hasClosedTriangleTopology, transformTableDisplayPoint, placeLiveCloudInStationaryFrame,

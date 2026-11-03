@@ -59,6 +59,18 @@ assert.ok(fallback.positions[2] >= 0 && fallback.positions[5] >= 0 && fallback.p
 assert.ok(Math.abs((fallback.positions[0] + fallback.positions[6]) / 2) < 6,
   'the approximate preview is centered horizontally');
 const candidateFrame = { origin: [0, 0, 0], xAxis: [1, 0, 0], yAxis: [0, 1, 0], zAxis: [0, 0, 1] };
+const planarCandidates = sandbox.window.CadyxScanView.planarMarkerCandidates(
+  [10, 10, 20, 0, 0, 0, 20, 0, 0, 0, 20, 0, 20, 20, 0], candidateFrame);
+assert.deepEqual(Array.from(planarCandidates.sourceIndices), [1, 2, 3, 4],
+  'an object feature above the table is excluded before matching, preserving original detection indices');
+assert.deepEqual(Array.from(planarCandidates.points, point => Array.from(point)),
+  [[0, 0], [20, 0], [0, 20], [20, 20]]);
+const credibleFit = sandbox.window.CadyxScanView.isCredibleInitialMarkerFit;
+assert.equal(credibleFit({ matches: Array(10).fill({}), medianResidual: 0.3 }, 11), true);
+assert.equal(credibleFit({ matches: Array(6).fill({}), medianResidual: 0.3 }, 11), false,
+  'a partial accidental match must not seed tracking');
+assert.equal(credibleFit({ matches: Array(10).fill({}), medianResidual: 2 }, 11), false,
+  'a diffuse fit must not seed tracking');
 const candidateMap = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
 const candidate1 = sandbox.window.CadyxScanView.updateTableAlignmentCandidate(null, candidateFrame, candidateMap, 1);
 const candidate2 = sandbox.window.CadyxScanView.updateTableAlignmentCandidate(candidate1, candidateFrame, candidateMap, 2);
