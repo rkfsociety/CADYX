@@ -157,6 +157,13 @@ assert.deepEqual(Array.from(sandbox.window.CadyxScanView.buildMatchedMapMarkerPo
   { markerPoints: new Uint32Array([10, 11, 12]) }, [2, 0, 99])), [12, 10],
   "only confirmed correspondences highlight exact map marker locations");
 const rotatedPoint = sandbox.window.CadyxScanView.transformTableDisplayPoint([0, 10, 0], 90, 0);
+const stationaryCloud = new Float32Array([0, 10, 4, 2, 3, 5]);
+sandbox.window.CadyxScanView.placeLiveCloudInStationaryFrame(stationaryCloud, 2, { angle: 90, tilt: 0 });
+for (const [index, source] of [[0, [0, 10, 4]], [3, [2, 3, 5]]]) {
+  const expected = sandbox.window.CadyxScanView.transformTableDisplayPoint(source, 90, 0);
+  assert.ok(expected.every((value, axis) => Math.abs(value - stationaryCloud[index + axis]) < 1e-5),
+    'live camera points use the initial table pose exactly once');
+}
 assert.ok(Math.abs(rotatedPoint[0] + 10) < 1e-5 && Math.abs(rotatedPoint[1]) < 1e-5,
   "turntable encoder rotation changes only the display-frame point position");
 const tiltedPoint = sandbox.window.CadyxScanView.transformTableDisplayPoint([0, 0, 0], 0, 30);
@@ -487,6 +494,35 @@ for (const [actual, before] of [[rotatedMap, mapBeforeDisplayRotation],
     "the confirmed map markers rotate together with the table display");
 }
 mapAlignedView.closeLivePreview();
+
+const objectWithoutMarkers = new Uint8Array(640 * 400 * 2);
+for (let y = 260; y < 300; y += 1) for (let x = 280; x < 330; x += 1) {
+  const offset = (y * 640 + x) * 2;
+  objectWithoutMarkers[offset] = 110;
+}
+liveRawFrameSource = [unshiftedMapFrame, objectWithoutMarkers];
+liveFrameSequence = 0;
+const fixedPlacementView = sandbox.window.CadyxScanView.initialize({
+  cloudButton: element(), meshButton: element(), viewport: element(), viewer, getModelGeometry, meshReady: true,
+}, undefined, fetchPreview);
+const fixedPlacementStart = viewerLoads.length;
+fixedPlacementView.showLivePreview({ open: true });
+await waitUntil(() => liveFrameSequence >= 2);
+assert.ok(viewerLoads.length >= fixedPlacementStart + 4,
+  'after initial placement, a valid frame still renders when markers disappear');
+const objectGeometry = viewerLoads.at(-1).geometry;
+const objectLayer = objectGeometry.pointLayers.find(layer => layer.style.color === '#ff9d54');
+assert.ok(objectLayer?.points.length, 'the marker-free frame retains the live object');
+const objectIndex = objectLayer.points[0];
+const objectBefore = [...objectGeometry.positions.slice(objectIndex * 3, objectIndex * 3 + 3)];
+const loadsBeforeTurn = viewerLoads.length;
+turntableAngleDisplay.textContent = '30.0°';
+await waitUntil(() => viewerLoads.length > loadsBeforeTurn);
+const turnedGeometry = viewerLoads.at(-1).geometry;
+const turnedIndex = turnedGeometry.pointLayers.find(layer => layer.style.color === '#ff9d54').points[0];
+assert.deepEqual([...turnedGeometry.positions.slice(turnedIndex * 3, turnedIndex * 3 + 3)], objectBefore,
+  'rotating the displayed table does not rotate an already captured live camera point');
+fixedPlacementView.closeLivePreview();
 
 const makeUnalignedFrame = (markerCenters, extraDepth = 0) => {
   const frame = new Uint8Array(640 * 400 * 2);

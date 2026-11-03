@@ -479,6 +479,12 @@
     }
     return transformed;
   };
+  const placeLiveCloudInStationaryFrame = (positions, count, anchorPose) => {
+    for (let index = 0; index < count * 3; index += 3) {
+      positions.set(transformTableDisplayPoint(
+        [positions[index], positions[index + 1], positions[index + 2]], anchorPose.angle, anchorPose.tilt), index);
+    }
+  };
   const livePreviewSampleIndex = (x, y) => {
     if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || x >= 640 || y < 0 || y >= 400) return -1;
     return y * 640 + x;
@@ -770,6 +776,7 @@
     let liveClientWindowMax = { request: 0, process: 0, render: 0, total: 0 };
     let liveCalibration = null;
     let liveTableFrame = null;
+    let liveAnchorPose = null;
     let liveTableMap = null;
     let liveTableOverlay = null;
     let turntableMapCache = null;
@@ -1558,6 +1565,7 @@
       liveFrameSequence = 0;
       liveCalibration = null;
       liveTableFrame = null;
+      liveAnchorPose = null;
       liveTableMap = null;
       liveTableOverlay = null;
       liveMapTransform = null;
@@ -1769,7 +1777,7 @@
               if (request !== liveRequest || !livePreviewOwned) return;
               if (count >= 3) {
                 const hadTableAlignment = Boolean(liveTableFrame && liveMapTransform);
-                let tableAligned = false;
+                let tableAligned = hadTableAlignment;
                 let matchedMapIndices = [];
                 const priorMarkerMatches = trackTableMarkerMatches(markerCenterPixelPositions, frameSequence);
                 const canRegisterFromTracks = hadTableAlignment && priorMarkerMatches.length >= 4;
@@ -1789,8 +1797,11 @@
                     if (allowRansac) lastMapRansacSequence = frameSequence;
                     const mapTransform = registerTableMarkers(markerCoordinates, liveTableMap, 5,
                       priorMarkerMatches, allowRansac);
-                    liveTableFrame = tableFrame;
-                    liveMapTransform = mapTransform;
+                    if (!hadTableAlignment) {
+                      liveTableFrame = tableFrame;
+                      liveMapTransform = mapTransform;
+                      liveAnchorPose = currentTurntableDisplayPose();
+                    }
                     liveMarkerTracks = mapTransform.matches.map(match => ({
                       pixel: markerCenterPixelPositions[match.sourceIndex], mapIndex: match.targetIndex,
                     }));
@@ -1805,16 +1816,8 @@
                       ? `${liveMapAlignmentSummary} · нужна повторная привязка`
                       : 'Карта: соответствие неоднозначно', hadTableAlignment ? 'stale' : 'waiting');
                   }
-                }
-                if (!tableAligned && hadTableAlignment) {
-                  liveFrameSequence = frameSequence;
-                  setMapAlignmentStatus(liveMapAlignmentSummary
-                    ? `${liveMapAlignmentSummary} · последний кадр`
-                    : 'Карта: мало маркеров · последний кадр', 'stale');
-                  if (lastMapAlignedFrame && turntableDisplayPoseChanged()) {
-                    renderLiveFrame({ ...lastMapAlignedFrame, reset: false });
-                  }
-                  return;
+                } else if (hadTableAlignment) {
+                  setMapAlignmentStatus('Привязка сохранена · мало маркеров', 'stale');
                 }
                 if (!tableAligned && liveTableMap) {
                   setMapAlignmentStatus(`Карта: ${regions}/${liveTableMap.points.length} маркеров; нужно 4`, 'waiting');
@@ -1829,18 +1832,19 @@
                   liveMapTransform, markerFlags);
                 if (transformed.count >= LIVE_MIN_OBJECT_PREVIEW_POINTS || liveTableMap.points.length >= 4) {
                   count = transformed.count >= LIVE_MIN_OBJECT_PREVIEW_POINTS ? transformed.count : 0;
+                  placeLiveCloudInStationaryFrame(tablePositions, count, liveAnchorPose);
                   const markerIndices = count ? transformed.markerIndices : [];
                   const displayPositions = tablePositions;
                   const bounds = transformed.bounds;
                   lastMapAlignedFrame = { positions: new Float32Array(tablePositions.subarray(0, count * 3)),
-                    count, markerIndices: [...markerIndices], matchedMapIndices: [...matchedMapIndices], aligned: true };
+                    count, markerIndices: [...markerIndices], matchedMapIndices: [...matchedMapIndices], aligned: false };
                   if (count === 0) {
                     setMapAlignmentStatus(`${liveMapAlignmentSummary} · только маркеры карты`, 'aligned');
                   }
                   const processMs = Math.max(0, clock() - processStartedAt);
                   const renderStartedAt = clock();
                   renderLiveFrame({ positions: displayPositions, count, bounds, markerIndices, matchedMapIndices,
-                    aligned: true, reset: false });
+                    aligned: false, reset: false });
                   const renderMs = Math.max(0, clock() - renderStartedAt);
                   const now = clock();
                   if (!liveClientWindowStartedAt) liveClientWindowStartedAt = now;
@@ -1932,6 +1936,7 @@
         restoreModel();
         liveFrameSequence = 0;
         liveTableFrame = null;
+        liveAnchorPose = null;
         liveTableMap = null;
         liveTableOverlay = null;
         lastMapAlignedFrame = null;
@@ -2180,6 +2185,6 @@
   };
 
   window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers, placeCloudForPreview,
-    shouldRunTableMapRansac, buildTurntableDisplayModel, hasClosedTriangleTopology, transformTableDisplayPoint,
+    shouldRunTableMapRansac, buildTurntableDisplayModel, hasClosedTriangleTopology, transformTableDisplayPoint, placeLiveCloudInStationaryFrame,
     livePreviewSampleIndex, isScanDepthValid, buildPreviewCloudPointIndices, buildMatchedMapMarkerPointIndices };
 })();
