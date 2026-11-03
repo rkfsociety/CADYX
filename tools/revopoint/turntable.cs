@@ -1068,8 +1068,8 @@ internal static class Program
 
     private static async Task PauseAfterCaptureAsync()
     {
-        Console.WriteLine("camera release and table-settle pause after frame: 2 seconds");
-        await Task.Delay(TimeSpan.FromSeconds(2));
+        Console.WriteLine("camera release and table-settle pause after frame: 1 second");
+        await Task.Delay(TimeSpan.FromSeconds(1));
     }
 
     private static void CaptureY16Pose(ScanCaptureOptions options, string prefix)

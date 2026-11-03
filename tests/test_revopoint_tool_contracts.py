@@ -59,7 +59,7 @@ class RevopointToolContractTests(unittest.TestCase):
         self.assertLess(worker_section.index("if (-not $verifiedCleanupOutputs)"),
                         worker_section.index("if (-not $SkipTableMarkerAlignment)"))
 
-    def test_each_scan_frame_waits_two_seconds_before_the_next_motion(self) -> None:
+    def test_each_scan_frame_waits_one_second_before_the_next_motion(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "tools" / "revopoint" / "turntable.cs").read_text(
             encoding="utf-8",
         )
@@ -67,7 +67,7 @@ class RevopointToolContractTests(unittest.TestCase):
         helper_end = source.index("private static void CaptureY16Pose(", helper_start)
         helper = source[helper_start:helper_end]
 
-        self.assertIn("await Task.Delay(TimeSpan.FromSeconds(2));", helper)
+        self.assertIn("await Task.Delay(TimeSpan.FromSeconds(1));", helper)
         self.assertEqual(source.count("await PauseAfterCaptureAsync();"), 2)
         self.assertEqual(source.count('"capture_completed"'), 2)
         for capture, completion, pause in zip(
