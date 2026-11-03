@@ -90,16 +90,20 @@ def _points_in_box(points: list[tuple[float, float, float]], tree: _KDNode,
                    maximum: tuple[float, float, float]) -> list[int]:
     found: list[int] = []
     pending = [tree]
+    min_x, min_y, min_z = minimum
+    max_x, max_y, max_z = maximum
     while pending:
         node = pending.pop()
         node_minimum, node_maximum, _, indices, left, right = node
-        if any(node_maximum[axis] < minimum[axis] or node_minimum[axis] > maximum[axis]
-               for axis in range(3)):
+        if (node_maximum[0] < min_x or node_minimum[0] > max_x
+                or node_maximum[1] < min_y or node_minimum[1] > max_y
+                or node_maximum[2] < min_z or node_minimum[2] > max_z):
             continue
         if indices is not None:
-            found.extend(index for index in indices
-                         if all(minimum[axis] <= points[index][axis] <= maximum[axis]
-                                for axis in range(3)))
+            for index in indices:
+                x, y, z = points[index]
+                if min_x <= x <= max_x and min_y <= y <= max_y and min_z <= z <= max_z:
+                    found.append(index)
             continue
         if left is not None:
             pending.append(left)
