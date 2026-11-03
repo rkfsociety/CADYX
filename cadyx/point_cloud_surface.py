@@ -44,9 +44,9 @@ def _build_kd_tree(points: list[tuple[float, float, float]], indices: list[int])
 
 def _box_distance(node: _KDNode, point: tuple[float, float, float]) -> float:
     minimum, maximum = node[0], node[1]
-    dx = max(minimum[0] - point[0], point[0] - maximum[0], 0.0)
-    dy = max(minimum[1] - point[1], point[1] - maximum[1], 0.0)
-    dz = max(minimum[2] - point[2], point[2] - maximum[2], 0.0)
+    dx = minimum[0] - point[0] if point[0] < minimum[0] else point[0] - maximum[0] if point[0] > maximum[0] else 0.0
+    dy = minimum[1] - point[1] if point[1] < minimum[1] else point[1] - maximum[1] if point[1] > maximum[1] else 0.0
+    dz = minimum[2] - point[2] if point[2] < minimum[2] else point[2] - maximum[2] if point[2] > maximum[2] else 0.0
     return math.hypot(dx, dy, dz)
 
 
@@ -84,6 +84,39 @@ def _nearest_points(points: list[tuple[float, float, float]], tree: _KDNode,
                 heapq.heappush(pending, (distance, sequence, right))
                 sequence += 1
     return sorted((-distance, -index) for distance, index in nearest)
+
+
+def _nearest_other_distance(points: list[tuple[float, float, float]], tree: _KDNode,
+                            point: tuple[float, float, float], own_index: int) -> float:
+    """Find only the closest other point; ties have the same distance."""
+    best = math.inf
+    pending = [(0.0, tree)]
+    while pending:
+        lower_bound, node = pending.pop()
+        if lower_bound > best:
+            continue
+        indices, left, right = node[3], node[4], node[5]
+        if indices is not None:
+            for index in indices:
+                if index != own_index:
+                    distance = math.dist(point, points[index])
+                    if distance < best:
+                        best = distance
+            continue
+        left_distance = _box_distance(left, point)
+        right_distance = _box_distance(right, point)
+        if left_distance < right_distance:
+            if right_distance <= best:
+                pending.append((right_distance, right))
+            if left_distance <= best:
+                pending.append((left_distance, left))
+        else:
+            if left_distance <= best:
+                pending.append((left_distance, left))
+            if right_distance <= best:
+                pending.append((right_distance, right))
+    return best
+
 
 def _points_in_box(points: list[tuple[float, float, float]], tree: _KDNode,
                    minimum: tuple[float, float, float],
@@ -137,9 +170,13 @@ def surface_points(points: list[tuple[float, float, float]], method: str,
             # Neighbor deltas can overflow when many finite, widely spaced
             # points are still within a very large finite search radius.
             center = [_mean_coordinate([current[j][a] for j in neighbors]) for a in range(3)]
-            covariance = [[math.fsum(((current[j][a] - center[a]) / radius) * ((current[j][b] - center[b]) / radius)
-                                    for j in neighbors) / len(neighbors)
-                           for b in range(3)] for a in range(3)]
+            normalized = [tuple((current[j][axis] - center[axis]) / radius for axis in range(3))
+                          for j in neighbors]
+            covariance = [[0.0] * 3 for _ in range(3)]
+            for a in range(3):
+                for b in range(a, 3):
+                    value = math.fsum(delta[a] * delta[b] for delta in normalized) / len(neighbors)
+                    covariance[a][b] = covariance[b][a] = value
             values, axes = _jacobi_eigenvectors(covariance)
             if values[0] <= 0 or values[1] <= values[0] * 1e-6 or values[2] > values[1] * .25:
                 continue
@@ -175,12 +212,7 @@ def isolation_points(points: list[tuple[float, float, float]], rate: float,
                      diagnostics: dict[str, Any] | None = None) -> list[tuple[float, float, float]]:
     """Keep the largest scan component and remove sparse points within the rate cap."""
     tree = _build_kd_tree(points, list(range(len(points))))
-    nearest = [math.inf] * len(points)
-    for i, point in enumerate(points):
-        candidates = _nearest_points(
-            points, tree, point, math.inf, 2,
-        )
-        nearest[i] = next((distance for distance, index in candidates if index != i), math.inf)
+    nearest = [_nearest_other_distance(points, tree, point, i) for i, point in enumerate(points)]
     finite = sorted(distance for distance in nearest if math.isfinite(distance))
     if len(finite) < 3:
         raise ValidationError("Isolation detection requires at least four points.")

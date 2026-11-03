@@ -242,6 +242,28 @@ class PointCloudProcessingTests(unittest.TestCase):
                 self.assertEqual([index for _, index in neighbors], [0, 1, 2])
                 self.assertEqual([distance for distance, _ in neighbors], [0., scale, scale])
 
+    def test_nearest_other_distance_matches_brute_force_with_duplicates_and_extremes(self):
+        from cadyx.point_cloud_surface import _build_kd_tree, _nearest_other_distance
+
+        for scale in (1e-200, 1., 1e200):
+            points = [(scale * ((i * 17) % 13), scale * ((i * 11) % 19), scale * (i % 7))
+                      for i in range(95)] + [(0., 0., 0.)] * 5
+            tree = _build_kd_tree(points, list(range(len(points))))
+            for index, point in enumerate(points):
+                expected = min(math.dist(point, other) for j, other in enumerate(points) if j != index)
+                self.assertEqual(_nearest_other_distance(points, tree, point, index), expected)
+
+    def test_kd_box_distance_handles_boundaries_and_extreme_coordinates(self):
+        from cadyx.point_cloud_surface import _box_distance, _build_kd_tree
+
+        points = [(-1e200, -2., -1e-200), (1e200, 3., 1e-200)]
+        tree = _build_kd_tree(points, list(range(len(points))))
+        for query in (points[0], points[1], (0., 0., 0.), (1e200, 5., 1e-200),
+                      (-1.7e308, -1.7e308, -1.7e308)):
+            expected = math.hypot(*(max(tree[0][axis] - query[axis], query[axis] - tree[1][axis], 0.)
+                                    for axis in range(3)))
+            self.assertEqual(_box_distance(tree, query), expected)
+
     def test_isolation_filter_does_not_join_diagonal_outlier_at_large_scale(self):
         scale = 1e200
         points = [(0., 0., 0.), (scale, 0., 0.), (0., scale, 0.),
