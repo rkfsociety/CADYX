@@ -65,10 +65,10 @@ assert.equal(container.children[2].dataset.stageState, 'completed');
 assert.equal(container.children[3].dataset.stageState, 'active');
 render(container, capture, {...job, state:'failed', phase:'cleanup', error:'Ошибка очистки'});
 assert.equal(container.children[3].dataset.stageState, 'failed');
+assert.equal(container.children[4].children[2].textContent, 'Ошибка очистки');
 render(container, capture, {...job, state:'failed', phase:'completed', error:'finalization failed'});
 assert.equal(container.children[3].dataset.stageState, 'failed',
   'failed finalization must not appear complete even with a completed phase label');
-assert.equal(container.children[4].children[2].textContent, 'Ошибка очистки');
 render(container, capture, {...job, state:'completed', phase:'completed', result:{cleaned:'result.ply'}});
 assert.equal(container.children[3].dataset.stageState, 'completed');
 assert.equal(container.children[4].children[2].textContent, 'Результат предварительный');
