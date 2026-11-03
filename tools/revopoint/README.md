@@ -295,6 +295,8 @@ or thin features can be removed. Fusion and physical scale remain provisional an
 
 The separate continuous-turn workflow keeps the live DepthCam Y16 reader and RGBCam MJPG reader active while the table receives one `+CT,TURNANGLE=360;` command. It archives every changed Y16 frame and every RGB image under one `revopoint_<UTC timestamp>` project folder. Run it from the scan-processing environment while the CADYX host is available:
 
+Table controls remain locked during capture. Once the turntable driver and RGB capture have finished successfully and the depth preview has stopped, the controls are released while frame processing continues; the project remains reserved until the processing worker exits.
+
 ```powershell
 $runId = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
 $project = 'projects\<existing CADYX project folder>'

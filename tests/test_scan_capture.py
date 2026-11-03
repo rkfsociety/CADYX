@@ -26,7 +26,7 @@ class Scan360CaptureTests(unittest.TestCase):
             controller._continuous_job = SimpleNamespace(
                 project_id="p", project_directory=project, run_id="revopoint_20261103T120000Z",
                 process=SimpleNamespace(poll=lambda: None), stop_path=signal,
-                log_path=project / "log", started_at="now")
+                log_path=project / "log", started_at="now", hardware_released=False)
             self.assertTrue(controller.is_running("p"))
             self.assertFalse(controller.is_running("other"))
             self.assertEqual(controller.continuous_status("p")["state"], "running")
@@ -45,12 +45,40 @@ class Scan360CaptureTests(unittest.TestCase):
             controller = Scan360CaptureController(project, project)
             events = []
             process = SimpleNamespace(poll=lambda: None, wait=lambda: events.append("worker finished"))
-            job = SimpleNamespace(project_directory=project, run_id=run_id, process=process)
+            job = SimpleNamespace(project_id="p", project_directory=project, run_id=run_id, process=process,
+                                  hardware_released=False)
             controller._continuous_job = job
-            with patch.object(controller, "stop_live_preview", side_effect=lambda **kwargs: events.append("scanner stopped")) as stop:
+            def stop_preview(**kwargs):
+                self.assertFalse(job.hardware_released)
+                events.append("scanner stopped")
+
+            def finish_worker():
+                self.assertTrue(job.hardware_released)
+                self.assertTrue(controller.is_running("p"))
+                events.append("worker finished")
+
+            process.wait = finish_worker
+            with patch.object(controller, "stop_live_preview", side_effect=stop_preview) as stop:
                 controller._finish_continuous(job)
             stop.assert_called_once_with(_capture_finished=True)
             self.assertEqual(events, ["scanner stopped", "worker finished"])
+
+    def test_failed_continuous_capture_does_not_release_hardware_while_worker_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261103T120000Z"
+            run = project / run_id
+            run.mkdir()
+            (run / "capture_manifest.json").write_text('{"status":"capture_failed"}', encoding="utf-8")
+            controller = Scan360CaptureController(project, project)
+            job = SimpleNamespace(project_directory=project, run_id=run_id, hardware_released=False)
+            def finish_worker():
+                self.assertFalse(job.hardware_released)
+            job.process = SimpleNamespace(poll=lambda: None, wait=finish_worker)
+            controller._continuous_job = job
+            with patch.object(controller, "stop_live_preview"):
+                controller._finish_continuous(job)
+            self.assertFalse(job.hardware_released)
 
     def test_deleted_series_clears_finished_job_and_orphaned_support(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -587,6 +615,14 @@ class Scan360CaptureTests(unittest.TestCase):
             self.assertEqual(controller.turntable_control("spin-status")["scan_active"], True)
 
             controller._job = None
+            controller._continuous_job = SimpleNamespace(process=RunningProcess(), hardware_released=False,
+                                                         stop_path=root / "continuous.stop")
+            with self.assertRaisesRegex(ConflictError, "locked during continuous capture"):
+                controller.turntable_control("query", "0123456789AB", profile_id)
+            controller._continuous_job.hardware_released = True
+            with patch("cadyx.scan_capture.subprocess.run", return_value=query):
+                self.assertEqual(controller.turntable_control("query", "0123456789AB", profile_id)["angle_degrees"], 5.0)
+            controller._continuous_job = None
             with self.assertRaisesRegex(ConflictError, "live scanner preview"):
                 controller.turntable_control("spin-start", "0123456789AB", profile_id)
             ready_path = (workspace.parent / f".{workspace.name}-state") / ".revopoint-live-preview.ready"

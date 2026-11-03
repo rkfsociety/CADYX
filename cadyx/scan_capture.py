@@ -309,6 +309,7 @@ class _ContinuousScanJob:
     stop_path: Path
     log_path: Path
     started_at: str
+    hardware_released: bool = False
 
 
 class Scan360CaptureController:
@@ -417,7 +418,8 @@ class Scan360CaptureController:
         if command in {"query", "zero", "stop", "spin-start", "spin-stop", "spin-status"} and value is not None:
             raise ValidationError(f"Turntable {command} does not accept a value.")
         with self._guard:
-            if self._continuous_job is not None and self._continuous_job.process.poll() is None:
+            if (self._continuous_job is not None and self._continuous_job.process.poll() is None
+                    and not self._continuous_job.hardware_released):
                 if command == "stop":
                     self._continuous_job.stop_path.touch()
                     return {"state": "stopping", "message": "Остановка непрерывного сканирования запрошена."}
@@ -1443,6 +1445,8 @@ class Scan360CaptureController:
                 with self._guard:
                     if self._continuous_job is job:
                         self.stop_live_preview(_capture_finished=True)
+                        if manifest.get("status") in {"processing", "captured"}:
+                            job.hardware_released = True
                         preview_stopped = True
                 break
             time.sleep(0.5)
@@ -1576,7 +1580,8 @@ class Scan360CaptureController:
     def stop_live_preview(self, *, _capture_finished: bool = False) -> dict[str, Any]:
         with self._guard:
             if (not _capture_finished and self._continuous_job is not None
-                    and self._continuous_job.process.poll() is None):
+                    and self._continuous_job.process.poll() is None
+                    and not self._continuous_job.hardware_released):
                 raise ConflictError("Stop the continuous scan before stopping its preview.", code="SCAN_ACTIVE")
             job = self._live_preview
             if job is None:
