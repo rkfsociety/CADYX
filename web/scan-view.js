@@ -40,6 +40,22 @@
     }
     return result;
   };
+  // Without a measured table frame, retain the cloud's orientation and use
+  // its bounds only for a clearly provisional display translation.
+  const placeCloudApproximately = positions => {
+    if (!positions?.length || positions.length % 3) return null;
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < positions.length; i += 3) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        const value = positions[i + axis];
+        if (!Number.isFinite(value)) return null;
+        min[axis] = Math.min(min[axis], value);
+        max[axis] = Math.max(max[axis], value);
+      }
+    }
+    const offset = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, min[2]];
+    return Float32Array.from(positions, (value, index) => value - offset[index % 3]);
+  };
   const isScanDepthValid = depth => Number.isFinite(depth)
     && depth >= MIN_SCAN_DEPTH_MM && depth <= MAX_SCAN_DEPTH_MM;
   const shouldRunTableMapRansac = (priorMatchCount, frameSequence, lastSequence, mapPointCount = 4) =>
@@ -2248,14 +2264,16 @@
       meshPreviewOpen = false;
       cloudPreviewOpen = true;
       const explicitAlignment = Object.prototype.hasOwnProperty.call(options, 'tableFrame');
-      const placed = explicitAlignment ? placeCloudForPreview(geometry.positions, options.tableFrame) : geometry.positions;
+      const measured = explicitAlignment ? placeCloudForPreview(geometry.positions, options.tableFrame) : null;
+      const placed = explicitAlignment ? measured || placeCloudApproximately(geometry.positions) : geometry.positions;
       unplacedFileGeometry = explicitAlignment && !placed ? geometry : null;
       fileCloudTablePlaced = Boolean(explicitAlignment && placed);
       if (tableButton) tableButton.disabled = Boolean(unplacedFileGeometry);
       if (liveMapAlignmentIndicator && explicitAlignment) {
         liveMapAlignmentIndicator.hidden = false;
-        setMapAlignmentStatus(placed ? 'Положение по маркерам · предварительно' :
-          'Положение на столе не определено', placed ? 'aligned' : 'waiting');
+        setMapAlignmentStatus(measured ? 'Положение по маркерам · предварительно' : placed
+          ? 'Примерное размещение · ориентация не подтверждена' : 'Положение на столе не определено',
+        measured ? 'aligned' : 'waiting');
       }
       if (unplacedFileGeometry) {
         staticTurntableVisible = false;
@@ -2400,7 +2418,7 @@
     return controller;
   };
 
-  window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers, placeCloudForPreview,
+  window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers, placeCloudForPreview, placeCloudApproximately,
     matchedMarkersOnPlane, planarMarkerCandidates, isCredibleInitialMarkerFit, placeUnalignedLiveCloud,
     updateTableAlignmentCandidate,
     updateLivePlaneCandidate, placePlaneAlignedLiveCloud,
