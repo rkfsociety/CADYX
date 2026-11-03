@@ -1970,7 +1970,10 @@
                 const canInitializeMap = regions >= 4;
                 if (canRegisterFromTracks || canInitializeMap) {
                   try {
-                    const tableFrame = fitTableFrame(markerPositions, centerRay(liveCalibration));
+                    // The established scanner/table frame is fixed during a
+                    // level spin; detections are still checked against it.
+                    const tableFrame = hadTableAlignment ? liveTableFrame
+                      : fitTableFrame(markerPositions, centerRay(liveCalibration));
                     if (!liveApproximatePlane) {
                       livePlaneCandidate = updateLivePlaneCandidate(livePlaneCandidate, tableFrame,
                         markerCenterPositions, frameSequence);
