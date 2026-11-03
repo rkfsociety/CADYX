@@ -9,7 +9,7 @@
     const processing = scan.preprocessing_status === 'running' && current && typeof current.source_file === 'string' ? current.source_file : null;
     const running = scan.state === 'running';
     const preprocessingFailed = scan.preprocessing_status === 'failed' || failed > 0;
-    const cleanupComplete = !preprocessingFailed &&
+    const cleanupComplete = !preprocessingFailed && !['running', 'partial'].includes(scan.preprocessing_status) &&
       ((total > 0 && cleaned === total) || (total === 0 && scan.preprocessing_status === 'completed'));
     const title = scan.state === 'failed' ? 'Сканирование остановлено с ошибкой' :
       scan.state === 'completed' && preprocessingFailed ? 'Съёмка завершена, очистка с ошибками' :
@@ -58,7 +58,8 @@
       || data.cleaned > 0 || data.failed > 0;
     const captureState = !captureAvailable ? 'unknown' : !remainingCapture ? 'completed' : data.state === 'failed' ? 'failed' : 'active';
     const cleanState = !cleanAvailable ? 'unknown' : data.failed || scan.preprocessing_status === 'failed' ? 'failed' :
-      data.total && !remainingClean ? 'completed' : scan.preprocessing_status === 'running' ? 'active' : 'waiting';
+      scan.preprocessing_status === 'running' ? 'active' :
+      (data.total && !remainingClean) || (scan.preprocessing_status === 'completed' && !data.total) ? 'completed' : 'waiting';
     const captureNote = captureState === 'unknown' ? 'Нет данных' : captureState === 'completed' ? 'Съёмка завершена' :
       captureState === 'failed' ? 'Съёмка остановлена' : `Осталось кадров: ${remainingCapture}`;
     const cleanNote = cleanState === 'unknown' ? 'Нет данных' : cleanState === 'failed' ? `Ошибок: ${data.failed || 'неизвестно'}` :

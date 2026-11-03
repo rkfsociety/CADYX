@@ -12,6 +12,9 @@ assert.equal(summary({state:'failed', frame_count:12, completed_frames:6, messag
 assert.equal(summary({state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:12}).title, 'Съёмка и очистка завершены');
 assert.equal(summary({state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:5,
   preprocessing_status:'running'}).title, 'Съёмка завершена, очистка продолжается');
+assert.equal(summary({state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:12,
+  preprocessing_status:'running'}).title, 'Съёмка завершена, очистка продолжается',
+  'cleanup remains active until the server confirms it is no longer running');
 assert.equal(summary({state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:0}).title,
   'Съёмка завершена, очистка не подтверждена');
 assert.equal(summary({state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:12,
@@ -46,6 +49,10 @@ render(container, {state:'failed', frame_count:12, completed_frames:6, preproces
   preprocessing_status:'failed', preprocessing_failed_frames:1, message:'Ошибка'});
 assert.equal(container.children[0].dataset.stageState, 'failed');
 assert.equal(container.children[1].dataset.stageState, 'failed');
+render(container, {state:'completed', frame_count:12, completed_frames:12,
+  preprocessed_frames:12, preprocessing_status:'running'});
+assert.equal(container.children[1].dataset.stageState, 'active',
+  'cleanup status must not complete before the running phase ends');
 render(container, {state:'busy', frame_count:12});
 assert.equal(container.children[0].dataset.stageState, 'unknown');
 assert.equal(container.children[0].children[1].children[1]['aria-hidden'], 'true',
