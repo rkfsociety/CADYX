@@ -70,18 +70,21 @@ assert.equal(container.children[2].dataset.stageState, 'active');
 assert.equal(container.children[2].children[1].children[0].children[1].textContent, '3 / 11');
 assert.equal(container.children[3].dataset.stageState, 'waiting');
 assert.equal(container.children[4].children[1].textContent, 'frame_004.ply');
+assert.equal(container.children[4].children[0].textContent, 'Текущий файл сшивки');
 render(container, capture, {...job, phase:'cleanup', done:1, total:2});
 assert.equal(container.children[2].dataset.stageState, 'completed');
 assert.equal(container.children[3].dataset.stageState, 'active');
 render(container, capture, {...job, state:'failed', phase:'cleanup', error:'Ошибка очистки'});
 assert.equal(container.children[3].dataset.stageState, 'failed');
 assert.equal(container.children[4].children[2].textContent, 'Ошибка очистки');
+assert.equal(container.children[4].children[0].textContent, 'Последний файл сшивки');
 render(container, capture, {...job, state:'failed', phase:'completed', error:'finalization failed'});
 assert.equal(container.children[3].dataset.stageState, 'failed',
   'failed finalization must not appear complete even with a completed phase label');
 render(container, capture, {...job, state:'completed', phase:'completed', result:{cleaned:'result.ply'}});
 assert.equal(container.children[3].dataset.stageState, 'completed');
 assert.equal(container.children[4].children[2].textContent, 'Результат предварительный');
+assert.equal(container.children[4].children[0].textContent, 'Результат сшивки');
 render(container, capture, {...job, state:'completed', phase:'completed', file:'old-frame.ply', result:{cleaned:'result.ply'}});
 assert.equal(container.children[4].children[1].textContent, 'result.ply',
   'completed fusion should display the output artifact rather than its last input frame');
