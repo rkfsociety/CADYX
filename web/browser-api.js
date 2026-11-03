@@ -22,7 +22,7 @@
     if (typeof value?.error === "string" && Object.prototype.hasOwnProperty.call(errorLabels, value.error)) {
       return errorLabels[value.error];
     }
-    if (status >= 500) return "Сервер CADYX не смог выполнить запрос.";
+    if (status === 429) return "Слишком много запросов к CADYX. Повторите попытку позже.";\n    if (status === 413) return "Передаваемые данные превышают допустимый размер.";\n    if (status === 401) return "Для выполнения запроса требуется авторизация.";\n    if (status === 403) return "Недостаточно прав для выполнения запроса.";\n    if (status >= 500) return "Сервер CADYX не смог выполнить запрос.";
     if (status === 404) return "Запрошенные данные не найдены.";
     return "Запрос отклонён. Проверьте данные и повторите попытку.";
   }
