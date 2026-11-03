@@ -73,14 +73,14 @@
     const cleanupDone = hasFusion && fusion.state !== 'failed' &&
       (fusion.state === 'completed' || ['publishing', 'completed'].includes(fusion.phase));
     const finalState = !hasFusion ? 'unknown' : cleanupDone ? 'completed' :
-      fusion.state === 'failed' && ['cleanup', 'publishing', 'completed'].includes(fusion.phase) ? 'failed' :
+      fusion.state === 'failed' ? 'failed' :
       fusion.phase === 'cleanup' ? 'active' : 'waiting';
     const phaseNames = {starting:'Запуск', load:'Подготовка кадров', register:'Совмещение кадров',
       loops:'Проверка замыкания', optimize:'Оптимизация', merge:'Объединение', cleanup:'Очистка облака',
       publishing:'Сохранение результатов', completed:'Завершено'};
     const registrationNote = !hasFusion ? 'Нет данных' : registrationState === 'failed' ? 'Сшивка остановлена' :
       needsReview ? 'Требует проверки' : registrationDone ? 'Сшивка завершена' : (phaseNames[fusion.phase] || 'Выполняется');
-    const finalNote = !hasFusion ? 'Нет данных' : finalState === 'failed' ? (publishingFailed ? 'Сохранение результата остановлено' : 'Очистка остановлена') :
+    const finalNote = !hasFusion ? 'Нет данных' : finalState === 'failed' ? (publishingFailed ? 'Сохранение результата остановлено' : fusion.phase === 'cleanup' || fusion.phase === 'completed' ? 'Очистка остановлена' : 'Сшивка остановлена') :
       cleanupDone ? 'Очистка завершена' : finalState === 'active' ? 'Очистка облака' : 'Ожидает';
     const regMeasured = hasFusion && registrationPhases.includes(fusion.phase) && Number.isSafeInteger(fusion.total) && fusion.total > 0;
     const cleanupMeasured = hasFusion && fusion.phase === 'cleanup' && Number.isSafeInteger(fusion.total) && fusion.total > 0;
