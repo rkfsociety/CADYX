@@ -300,6 +300,17 @@ class _TurntableSpinJob:
     preview_ready_path: Path
 
 
+@dataclass
+class _ContinuousScanJob:
+    project_id: str
+    project_directory: Path
+    run_id: str
+    process: subprocess.Popen[bytes]
+    stop_path: Path
+    log_path: Path
+    started_at: str
+
+
 class Scan360CaptureController:
     """Own one active physical 360 capture and expose compact progress."""
 
@@ -312,6 +323,7 @@ class Scan360CaptureController:
         self._job: _Scan360Job | None = None
         self._live_preview: _LivePreviewJob | None = None
         self._turntable_spin: _TurntableSpinJob | None = None
+        self._continuous_job: _ContinuousScanJob | None = None
         self._last_turntable_position: dict[str, Any] | None = None
         self._last_turntable_position_at = 0.0
 
@@ -405,6 +417,12 @@ class Scan360CaptureController:
         if command in {"query", "zero", "stop", "spin-start", "spin-stop", "spin-status"} and value is not None:
             raise ValidationError(f"Turntable {command} does not accept a value.")
         with self._guard:
+            if self._continuous_job is not None and self._continuous_job.process.poll() is None:
+                if command == "stop":
+                    self._continuous_job.stop_path.touch()
+                    return {"state": "stopping", "message": "Остановка непрерывного сканирования запрошена."}
+                if command != "spin-status":
+                    raise ConflictError("Turntable controls are locked during continuous capture.", code="SCAN_ACTIVE")
             spin = self._turntable_spin
             if command == "spin-status":
                 snapshot = self._turntable_spin_snapshot_locked()
@@ -1278,6 +1296,8 @@ class Scan360CaptureController:
                 python_executable = console_python
 
         with self._guard:
+            if self._continuous_job is not None and self._continuous_job.process.poll() is None:
+                raise ConflictError("Stop the continuous scan before starting a 360 scan.", code="SCANNER_BUSY")
             if self._turntable_spin is not None and self._turntable_spin.process.poll() is None:
                 raise ConflictError("Stop continuous table rotation before starting a 360 scan.",
                                     code="TURNTABLE_SPIN_ACTIVE")
@@ -1352,7 +1372,134 @@ class Scan360CaptureController:
             )
             return self._snapshot_locked()
 
-    def start_live_preview(self, scanner_device_id: str | None = None, fps: int = 10) -> dict[str, Any]:
+    def start_continuous(self, project_id: str, project_directory: Path) -> dict[str, Any]:
+        """Start one guarded continuous turn and all-frame fusion worker."""
+        if os.name != "nt":
+            raise ValidationError("Continuous Revopoint capture requires Windows.")
+        project_directory = project_directory.resolve(strict=True)
+        if project_directory.parent != self._workspace_root or self._workspace_root != (self._repository_root / "projects").resolve():
+            raise ValidationError("Continuous capture requires a project in this checkout's projects folder.")
+        python = self._repository_root / ".runtime" / "scan-reconstruction" / "venv" / "Scripts" / "python.exe"
+        script = self._repository_root / "tools" / "revopoint" / "capture_continuous_turn.py"
+        if not python.is_file() or not script.is_file():
+            raise ValidationError("Continuous capture environment is not installed.")
+        with self._guard:
+            if ((self._job is not None and self._job.process.poll() is None)
+                    or (self._continuous_job is not None and self._continuous_job.process.poll() is None)
+                    or (self._turntable_spin is not None and self._turntable_spin.process.poll() is None)
+                    or (self._live_preview is not None and self._live_preview.process.poll() is None)):
+                raise ConflictError("Scanner or turntable is already in use.", code="SCANNER_BUSY")
+            devices = self.list_connected_devices()
+            scanners, tables = devices["scanners"], devices["turntables"]
+            if (len(scanners) != 1 or len(tables) != 1
+                    or scanners[0].get("profile_id") != "revopoint-mini-y16"
+                    or tables[0].get("profile_id") != "revopoint-dual-axis-table"):
+                raise ValidationError("Continuous capture requires exactly one supported Revopoint MINI scanner and dual-axis table.")
+            scanner_id, table_id = scanners[0]["device_id"], tables[0]["device_id"]
+            calibration, _ = self._resolve_scanner_calibration(scanner_id, 1, scanners[0]["profile_id"])
+            scale_path = calibration.with_name("depth_scale.json")
+            self.start_live_preview(scanner_device_id=scanner_id, archive_latest=True)
+            preview = self._live_preview
+            assert preview is not None
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline and preview.process.poll() is None and not preview.ready_path.is_file():
+                time.sleep(0.1)
+            if preview.process.poll() is not None or not preview.ready_path.is_file():
+                self.stop_live_preview()
+                raise ValidationError("Scanner live preview did not become ready.")
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            run_id = f"revopoint_{stamp}"
+            stop_path = self._state_root / f".continuous-{stamp}.stop"
+            log_path = self._state_root / f".continuous-{stamp}.log"
+            if stop_path.exists() or log_path.exists() or (project_directory / run_id).exists():
+                self.stop_live_preview()
+                raise ConflictError("Continuous capture output already exists.", code="SCAN_LOG_EXISTS")
+            try:
+                with log_path.open("xb") as log:
+                    process = subprocess.Popen([str(python), "-u", str(script), str(project_directory),
+                                                "--run-id", run_id, "--stop-file", str(stop_path),
+                                                "--q-file", str(calibration), "--scale-file", str(scale_path),
+                                                "--turntable-address", table_id],
+                                               cwd=self._repository_root, stdin=subprocess.DEVNULL,
+                                               stdout=log, stderr=subprocess.STDOUT,
+                                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            except OSError as exc:
+                self.stop_live_preview()
+                raise ValidationError(f"Could not start continuous capture: {exc}") from exc
+            job = _ContinuousScanJob(project_id, project_directory, run_id, process, stop_path, log_path,
+                                     datetime.now(timezone.utc).isoformat())
+            self._continuous_job = job
+            threading.Thread(target=self._finish_continuous, args=(job,), daemon=True).start()
+            return self._continuous_snapshot_locked(job)
+
+    def _finish_continuous(self, job: _ContinuousScanJob) -> None:
+        preview_stopped = False
+        while job.process.poll() is None:
+            try:
+                manifest = json.loads((job.project_directory / job.run_id / "capture_manifest.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                manifest = {}
+            if manifest.get("status") in {"processing", "captured", "capture_failed", "capture_incomplete"}:
+                with self._guard:
+                    if self._continuous_job is job:
+                        self.stop_live_preview(_capture_finished=True)
+                        preview_stopped = True
+                break
+            time.sleep(0.5)
+        job.process.wait()
+        with self._guard:
+            if self._continuous_job is job and not preview_stopped:
+                self.stop_live_preview()
+
+    def _continuous_snapshot_locked(self, job: _ContinuousScanJob) -> dict[str, Any]:
+        code = job.process.poll()
+        manifest_path = job.project_directory / job.run_id / "capture_manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            manifest = {}
+        if code is None:
+            state = "stopping" if job.stop_path.exists() else "running"
+        elif code == 0 and manifest.get("status") == "candidate_ready":
+            state = "completed"
+        elif job.stop_path.exists():
+            state = "cancelled"
+        else:
+            state = "failed"
+        count = manifest.get("y16_frame_count")
+        if count is None:
+            try:
+                with (manifest_path.parent / "depth_frames.csv").open(encoding="utf-8", newline="") as stream:
+                    count = sum(1 for _ in csv.DictReader(stream))
+            except OSError:
+                pass
+        registration = manifest.get("registration_metrics")
+        return {"state": state, "run_id": job.run_id, "started_at": job.started_at,
+                "phase": manifest.get("status", "starting"), "frame_count": count,
+                "file": manifest.get("cleaned_candidate") or manifest.get("fused_candidate"),
+                "cleanup": manifest.get("cloud_cleanup"),
+                "quality": registration.get("status") if isinstance(registration, dict) else None,
+                "placement": registration.get("placement") if isinstance(registration, dict) else None,
+                "error": manifest.get("error") or manifest.get("registration_error"),
+                "log_tail": _read_log_tail(job.log_path, 4000) if state in {"failed", "cancelled"} else None}
+
+    def continuous_status(self, project_id: str) -> dict[str, Any]:
+        with self._guard:
+            job = self._continuous_job
+            if job is None or job.project_id != project_id:
+                return {"state": "idle"}
+            return self._continuous_snapshot_locked(job)
+
+    def stop_continuous(self, project_id: str) -> dict[str, Any]:
+        with self._guard:
+            job = self._continuous_job
+            if job is None or job.project_id != project_id or job.process.poll() is not None:
+                return {"state": "idle"}
+            job.stop_path.touch()
+            return {"state": "stopping", "run_id": job.run_id}
+
+    def start_live_preview(self, scanner_device_id: str | None = None, fps: int = 10,
+                           *, archive_latest: bool = False) -> dict[str, Any]:
         if os.name != "nt":
             raise ValidationError("Live Revopoint preview is available only on the Windows scanner host.")
         if isinstance(fps, bool) or not isinstance(fps, int) or fps not in {5, 10, 15}:
@@ -1398,6 +1545,7 @@ class Scan360CaptureController:
                 with log_path.open("wb") as log_stream:
                     process = subprocess.Popen(
                         [str(capture_executable), "--live-only", "--live-frames-dir", str(frames_path),
+                         *(["--live-raw", str(raw_path)] if archive_latest else []),
                          "--stop-file", str(stop_path), "--ready-file", str(ready_path), "--fps", str(fps),
                          "--device-id", scanner_device_id],
                         cwd=str(self._repository_root), stdin=subprocess.DEVNULL,
@@ -1425,8 +1573,11 @@ class Scan360CaptureController:
             job.client_metrics_at = datetime.now(timezone.utc)
             return {"recorded": True}
 
-    def stop_live_preview(self) -> dict[str, Any]:
+    def stop_live_preview(self, *, _capture_finished: bool = False) -> dict[str, Any]:
         with self._guard:
+            if (not _capture_finished and self._continuous_job is not None
+                    and self._continuous_job.process.poll() is None):
+                raise ConflictError("Stop the continuous scan before stopping its preview.", code="SCAN_ACTIVE")
             job = self._live_preview
             if job is None:
                 raw_path = self._state_root / ".revopoint-live.raw"
@@ -1554,7 +1705,10 @@ class Scan360CaptureController:
             return True
         try:
             return bool(
-                self._job is not None
+                self._continuous_job is not None
+                and self._continuous_job.project_id == project_id
+                and self._continuous_job.process.poll() is None
+                or self._job is not None
                 and self._job.project_id == project_id
                 and self._job.process.poll() is None
             )

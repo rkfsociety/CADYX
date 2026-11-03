@@ -275,6 +275,24 @@ If all twelve frames exist but manifest creation failed, rebuild only that metad
 
 ## Continuous RGB/Y16 capture and colorized fusion
 
+In the 360° capture settings, select **Непрерывный оборот** to start this mode; its status includes a stop button. The mode currently requires exactly one connected Revopoint MINI and one supported dual-axis table, and uses the scanner-specific calibration and table settings. The camera stream stops after the turn, before registration completes.
+
+CADYX exposes this workflow as `POST /api/v1/agent/projects/{id}/scans/continuous` (empty JSON),
+`GET` on the same route for status, and `POST .../scans/continuous/stop` (empty JSON) to request
+cooperative stopping. The MCP tools are `cadyx_start_continuous_scan`,
+`cadyx_get_continuous_scan_status` and `cadyx_stop_continuous_scan`. A running job reserves the
+project and scanner, starts its own preview and preserves captured source frames on failure or
+cancellation. The table driver stops both axes when cancellation, lost control heartbeat or
+lost camera acquisition is detected. Geometry registration does not require marker matches. Reliable
+marker alignment places the result in the table map and removes points below XY; a candidate
+that places more than 5% of fused points over 2.5 units below the plane is rejected rather
+than discarding that geometry. Without a reliable marker placement, the result is centered
+on XY with its lowest point at Z=0, using the detected table plane for
+orientation when available. When no table plane is detected, orientation is unverified.
+A separate cleaned candidate keeps points observed in at least 2% of frames (minimum two),
+using 1.5-unit support voxels; the unfiltered fusion remains available because briefly visible
+or thin features can be removed. Fusion and physical scale remain provisional and must be reviewed.
+
 The separate continuous-turn workflow keeps the live DepthCam Y16 reader and RGBCam MJPG reader active while the table receives one `+CT,TURNANGLE=360;` command. It archives every changed Y16 frame and every RGB image under one `revopoint_<UTC timestamp>` project folder. Run it from the scan-processing environment while the CADYX host is available:
 
 ```powershell

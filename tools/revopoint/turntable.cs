@@ -44,8 +44,10 @@ internal static class Program
             }
             if (NotificationsEnabled && Characteristic != null)
             {
-                Characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-                    GattClientCharacteristicConfigurationDescriptorValue.None).AsTask().GetAwaiter().GetResult();
+                var disable = Characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
+                    GattClientCharacteristicConfigurationDescriptorValue.None).AsTask();
+                if (!disable.Wait(GattOperationTimeout))
+                    Console.Error.WriteLine("Turntable notification cleanup timed out.");
             }
             if (Service != null) Service.Dispose();
             if (Device != null) Device.Dispose();
@@ -493,6 +495,12 @@ internal static class Program
             if (operation == "continuous-turn")
             {
                 string fullPath = System.IO.Path.GetFullPath(monitorPath);
+                string stopPath = fullPath + ".stop";
+                string heartbeatPath = fullPath + ".heartbeat";
+                if (System.IO.File.Exists(stopPath))
+                    throw new InvalidOperationException("Continuous turn was cancelled before motion started.");
+                if (!IsSpinHeartbeatFresh(heartbeatPath))
+                    throw new InvalidOperationException("Continuous turn requires a live control heartbeat.");
                 if (System.IO.File.Exists(fullPath))
                     throw new InvalidOperationException("Continuous-turn output already exists; refusing to overwrite: " + fullPath);
                 string directory = System.IO.Path.GetDirectoryName(fullPath);
@@ -519,6 +527,9 @@ internal static class Program
                     writer.Flush();
                     Console.WriteLine("continuous full turn baseline: angle=" + baselineAngle.ToString("F1", CultureInfo.InvariantCulture) +
                                       " deg, tilt=" + baselineTilt.ToString("F1", CultureInfo.InvariantCulture));
+                    Exception turnFailure = null;
+                    try
+                    {
                     string command = "+CT,TURNANGLE=360;";
                     string commandReply = await SendAndReadAsync(connection, command);
                     writer.WriteLine(String.Join(",", new[] {
@@ -541,6 +552,21 @@ internal static class Program
                     int stableAfterFullTurn = 0;
                     while (DateTime.UtcNow < turnDeadline)
                     {
+                        if (System.IO.File.Exists(stopPath) || !IsSpinHeartbeatFresh(heartbeatPath))
+                        {
+                            await SendAndReadAsync(connection, "+CT,STOP;");
+                            await SendAndReadAsync(connection, "+CR,STOP;");
+                            throw new InvalidOperationException("Continuous turn cancelled; both axes were stopped.");
+                        }
+                        bool captureActive = true;
+                        try { EnsureContinuousCaptureActive(); }
+                        catch { captureActive = false; }
+                        if (!captureActive)
+                        {
+                            await SendAndReadAsync(connection, "+CT,STOP;");
+                            await SendAndReadAsync(connection, "+CR,STOP;");
+                            throw new InvalidOperationException("Continuous capture stopped; both axes were stopped.");
+                        }
                         string rotationResponse = await SendAndReadAsync(connection, "+QT,CHANGEANGLE;");
                         string currentTiltText = await SendAndReadAsync(connection, "+QR,TILTVALUE;");
                         DateTime observedUtc = DateTime.UtcNow;
@@ -596,6 +622,16 @@ internal static class Program
                     Console.WriteLine("continuous turn completed: " + unwrapped.ToString("F1", CultureInfo.InvariantCulture) +
                                       " deg, closure=" + closure.ToString("F1", CultureInfo.InvariantCulture) + " deg, elapsed=" +
                                       turnTimer.Elapsed.TotalSeconds.ToString("F1", CultureInfo.InvariantCulture) + " s");
+                    }
+                    catch (Exception error) { turnFailure = error; }
+                    if (turnFailure != null)
+                    {
+                        try { await SendAndReadAsync(connection, "+CT,STOP;"); }
+                        catch (Exception stopError) { Console.Error.WriteLine("Could not confirm rotation stop: " + stopError.Message); }
+                        try { await SendAndReadAsync(connection, "+CR,STOP;"); }
+                        catch (Exception stopError) { Console.Error.WriteLine("Could not confirm tilt stop: " + stopError.Message); }
+                        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(turnFailure).Throw();
+                    }
                 }
                 return 0;
             }

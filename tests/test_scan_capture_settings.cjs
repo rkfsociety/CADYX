@@ -47,6 +47,7 @@ function fixture(fetch) {
   }
   ['scan-capture-settings-dialog', 'scan-capture-settings-close', 'scan-capture-settings-cancel',
    'scan-capture-settings-start', 'scan-capture-devices', 'scan-capture-step',
+   'scan-capture-mode', 'scan-capture-continuous-note',
    'scan-capture-tilt', 'scan-capture-tilt-value', 'scan-capture-settings-status',
   ].forEach(element);
   const sandbox = {
@@ -296,6 +297,28 @@ async function main() {
     assert.match(f.get('scan-capture-devices').textContent, /Revopoint MINI/);
     await f.get('scan-capture-settings-cancel').click();
     assert.equal(await pending, null);
+  }
+
+  // Continuous capture does not apply or overwrite stepped settings.
+  {
+    let writes = 0;
+    const f = fixture(async (url, options = {}) => {
+      if (options.method === 'POST') writes++;
+      if (url === '/api/v1/scanner/devices') return response({scanners: [], turntables: []});
+      return response(savedSettings);
+    });
+    f.sandbox.window.CadyxDeviceSettings = {
+      scannerDeviceId: () => 'scanner-1', turntableDeviceId: () => 'table-1', turntableProfileId: () => '',
+    };
+    const pending = f.api.open();
+    for (let i = 0; i < 6; i++) await tick();
+    f.get('scan-capture-mode').value = 'continuous';
+    await f.get('scan-capture-mode').fire('change');
+    assert.equal(f.get('scan-capture-step').disabled, true);
+    assert.equal(f.get('scan-capture-tilt').disabled, true);
+    await f.get('scan-capture-settings-start').click();
+    assert.equal((await pending).mode, 'continuous');
+    assert.equal(writes, 0);
   }
 
   // Invalid control values must be rejected locally without writing scanner settings.

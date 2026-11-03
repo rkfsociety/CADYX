@@ -11,11 +11,24 @@ from tools.revopoint.colorize_continuous_scan import (
     parse_rgb_calibration,
     project_depth_points_to_rgb,
     _load_unique_pairs,
+    _read_rgb_image,
     visible_projected_points,
 )
 
 
 class ContinuousRgbColorizationTests(unittest.TestCase):
+    def test_rgb_image_in_unicode_directory(self) -> None:
+        import open3d as o3d
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original = root / "source.jpg"
+            self.assertTrue(o3d.io.write_image(str(original), o3d.geometry.Image(np.full((8, 8, 3), 120, dtype=np.uint8))))
+            target = root / "кадры" / "frame.jpg"
+            target.parent.mkdir()
+            target.write_bytes(original.read_bytes())
+            self.assertEqual(_read_rgb_image(target, o3d).shape, (8, 8, 3))
+
     @staticmethod
     def calibration_bytes() -> tuple[bytes, bytes]:
         extrinsic = struct.pack("<12f", 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)

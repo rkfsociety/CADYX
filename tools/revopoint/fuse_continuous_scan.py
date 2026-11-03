@@ -19,8 +19,7 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 if str(REPOSITORY) not in sys.path:
     sys.path.insert(0, str(REPOSITORY))
 
-from tools.revopoint.align_y16_to_table import _map_frame
-from tools.revopoint.reproject_y16 import reproject_y16
+from tools.revopoint.reproject_y16 import reproject_y16_numpy
 
 _RUN_ID = re.compile(r"^revopoint_\d{8}T\d{6}Z$")
 
@@ -53,6 +52,12 @@ def loop_edge_is_acceptable(fitness: float, inlier_rmse: float,
     return fitness >= minimum_fitness and inlier_rmse <= maximum_rmse
 
 
+def closure_edge_transform(correction: np.ndarray, source_pose: np.ndarray,
+                           target_pose: np.ndarray) -> np.ndarray:
+    """Convert an optimized-frame correction to a source-to-target pose-graph edge."""
+    return np.linalg.inv(target_pose) @ correction @ source_pose
+
+
 def rigid_pose_residual(measured_transform: np.ndarray, source_pose: np.ndarray,
                         target_pose: np.ndarray) -> tuple[float, float]:
     """Compare an observed source-to-target edge with its optimized node-pose relation."""
@@ -71,9 +76,12 @@ def _read_rows(path: Path) -> list[dict[str, str]]:
     return rows
 
 
-def _read_marker_anchor(run_dir: Path) -> tuple[str, np.ndarray, dict[str, Any]]:
+def _read_marker_anchor(run_dir: Path) -> tuple[str, np.ndarray, dict[str, Any]] | None:
     run_id = run_dir.name
-    report = json.loads((run_dir / f"{run_id}_table_alignment.json").read_text(encoding="utf-8"))
+    report_path = run_dir / f"{run_id}_table_alignment.json"
+    if not report_path.is_file():
+        return None
+    report = json.loads(report_path.read_text(encoding="utf-8"))
     selected_rows = _read_rows(run_dir / "selected_poses.csv")
     selected_by_pose = {int(row["pose_index"]): row for row in selected_rows}
     candidates = []
@@ -86,7 +94,7 @@ def _read_marker_anchor(run_dir: Path) -> tuple[str, np.ndarray, dict[str, Any]]
         if matches >= 5 and residual <= 1.0 and 0.75 <= scale <= 1.25:
             candidates.append((residual, -matches, frame))
     if not candidates:
-        raise ValueError("No marker frame has at least five matches, <=1 map-unit residual and a stable scale.")
+        return None
     _, _, frame = min(candidates)
     pose_row = selected_by_pose[int(frame["index"])]
     source_raw = pose_row["file"]
@@ -100,6 +108,43 @@ def _read_marker_anchor(run_dir: Path) -> tuple[str, np.ndarray, dict[str, Any]]
     return source_raw, marker_similarity_matrix(frame, frame["map_similarity"]), metadata
 
 
+
+def _read_table_plane_anchor(run_dir: Path) -> tuple[str, np.ndarray] | None:
+    """Use a detected table plane for orientation without trusting marker correspondence."""
+    report_path = run_dir / f"{run_dir.name}_table_alignment.json"
+    if not report_path.is_file():
+        return None
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    candidates = [f for f in report.get("frames", []) if f.get("status") == "aligned"]
+    if not candidates:
+        return None
+    frame = min(candidates, key=lambda f: float(f.get("marker_median_residual_map_units", math.inf)))
+    axes = frame["scanner_table_plane_axes"]
+    rotation = np.asarray([axes["x"], axes["y"], axes["z"]], dtype=np.float64)
+    if rotation.shape != (3, 3) or not np.isfinite(rotation).all() or not np.allclose(rotation @ rotation.T, np.eye(3), atol=1e-4):
+        raise ValueError("Detected table plane has invalid axes")
+    origin = np.asarray(frame["scanner_table_plane_origin"], dtype=np.float64)
+    matrix = np.eye(4)
+    matrix[:3, :3] = rotation
+    matrix[:3, 3] = -rotation @ origin
+    rows = _read_rows(run_dir / "selected_poses.csv")
+    source = next(row["file"] for row in rows if int(row["pose_index"]) == int(frame["index"]))
+    return source, matrix
+
+
+def _marker_plane_below_fraction(points: np.ndarray) -> float:
+    """Measure the share materially below the proposed marker plane."""
+    if len(points) == 0:
+        raise ValueError("Cannot validate marker placement without points")
+    return float(np.mean(points[:, 2] < -2.5))
+
+
+def _center_on_table(lower: np.ndarray, upper: np.ndarray) -> np.ndarray:
+    matrix = np.eye(4)
+    matrix[:3, 3] = [-(lower[0] + upper[0]) / 2, -(lower[1] + upper[1]) / 2, -lower[2]]
+    return matrix
+
+
 def _cloud(points: np.ndarray, o3d: Any) -> Any:
     cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points.astype(np.float64, copy=False)))
     return cloud
@@ -107,9 +152,15 @@ def _cloud(points: np.ndarray, o3d: Any) -> Any:
 
 def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
                     fused_voxel_size: float = 0.75,
-                    minimum_loop_fitness: float = 0.6) -> dict[str, Any]:
+                    minimum_loop_fitness: float = 0.6,
+                    stop_path: Path | None = None) -> dict[str, Any]:
     import open3d as o3d
 
+    def check_cancelled() -> None:
+        if stop_path is not None and stop_path.exists():
+            raise RuntimeError("Continuous scan cancelled during registration; source frames are preserved.")
+
+    check_cancelled()
     run_dir = run_dir.resolve(strict=True)
     run_id = run_dir.name
     if not _RUN_ID.fullmatch(run_id):
@@ -141,15 +192,20 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
     q = struct.unpack("<16f", q_bytes)
     scale_data = json.loads((run_dir / "depth_scale.json").read_text(encoding="utf-8"))
     depth_scale = float(scale_data["depth_scale_mm_per_raw_unit"])
-    alignment = json.loads((run_dir / f"{run_id}_table_alignment.json").read_text(encoding="utf-8"))
-    table_map = (run_dir / "framesmall.mkf").read_bytes()
-    map_frame = _map_frame(table_map)
-    anchor_raw, anchor_to_map, anchor_report = _read_marker_anchor(run_dir)
-    anchor_row = next(row for row in rows if row["file"] == anchor_raw)
-    anchor_index = int(anchor_row["index"])
+    table_map_path = run_dir / "framesmall.mkf"
+    table_map = table_map_path.read_bytes() if table_map_path.is_file() else None
+    anchor = _read_marker_anchor(run_dir)
+    positions = {row["file"]: index for index, row in enumerate(rows)}
+    plane_anchor = _read_table_plane_anchor(run_dir)
+    if anchor is None:
+        anchor_index, anchor_to_map, anchor_report = 0, np.eye(4), None
+        if plane_anchor is not None:
+            anchor_index, anchor_to_map = positions[plane_anchor[0]], plane_anchor[1]
+    else:
+        anchor_raw, anchor_to_map, anchor_report = anchor
+        anchor_index = positions[anchor_raw]
     selected_rows = _read_rows(run_dir / "selected_poses.csv")
-    loop_indices = sorted({int(re.search(r"frame_(\d+)\.raw", row["file"]).group(1))
-                           for row in selected_rows if re.search(r"frame_(\d+)\.raw", row["file"])})
+    loop_indices = sorted({positions[row["file"]] for row in selected_rows if row["file"] in positions})
     loop_indices = sorted(set(loop_indices) | {0, len(rows) - 1})
 
     frame_clouds = []
@@ -167,7 +223,8 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
     with tempfile.TemporaryDirectory(prefix=f"{run_id}_all_frames_") as temporary:
         temporary_path = Path(temporary)
         for index, raw_path in enumerate(source_paths):
-            points = np.asarray(reproject_y16(raw_path.read_bytes(), q, depth_scale), dtype=np.float32)
+            check_cancelled()
+            points = np.asarray(reproject_y16_numpy(raw_path.read_bytes(), q, depth_scale), dtype=np.float32)
             if len(points) < 100:
                 raise ValueError(f"frame {index} contains fewer than 100 valid depth points")
             np.save(temporary_path / f"frame_{index:05d}.npy", points, allow_pickle=False)
@@ -219,6 +276,7 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
         loop_edge_candidates = []
         anchor_clouds = {index: cloud for index, cloud in enumerate(downsampled) if cloud is not None}
         for source in sorted(set(loop_indices) | {len(rows) - 1}):
+            check_cancelled()
             if source == 0 or source not in anchor_clouds:
                 continue
             candidate = registration.registration_icp(
@@ -245,6 +303,7 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
                 loop_edges.append({"source": source, "target": 0, "fitness": float(candidate.fitness),
                                    "inlier_rmse": float(candidate.inlier_rmse)})
 
+        check_cancelled()
         registration.global_optimization(
             pose_graph,
             registration.GlobalOptimizationLevenbergMarquardt(),
@@ -252,6 +311,51 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
             registration.GlobalOptimizationOption(max_correspondence_distance=correspondence_distance,
                                                    edge_prune_threshold=0.25, reference_node=0),
         )
+
+        # The first optimization can settle on a locally plausible, but offset,
+        # final-to-first loop. Re-estimate that closure in the optimized frame and
+        # constrain it only when the direct overlap is strong.
+        final_source = _cloud(np.load(temporary_path / f"frame_{len(rows)-1:05d}.npy", allow_pickle=False), o3d).voxel_down_sample(voxel_size)
+        final_target = _cloud(np.load(temporary_path / "frame_00000.npy", allow_pickle=False), o3d).voxel_down_sample(voxel_size)
+        final_source.transform(pose_graph.nodes[-1].pose)
+        final_target.transform(pose_graph.nodes[0].pose)
+        refined = registration.registration_icp(
+            final_source, final_target, correspondence_distance, np.eye(4),
+            registration.TransformationEstimationPointToPoint(False),
+        )
+        refinement_applied = False
+        if refined.fitness >= 0.9 and refined.inlier_rmse <= voxel_size * 0.75:
+            correction = np.asarray(refined.transformation)
+            edge_transform = closure_edge_transform(correction, np.asarray(pose_graph.nodes[-1].pose),
+                                                    np.asarray(pose_graph.nodes[0].pose))
+            last_down = downsampled[-1]
+            assert last_down is not None
+            information = registration.get_information_matrix_from_point_clouds(
+                last_down, first_down, correspondence_distance, edge_transform)
+            refined_graph = registration.PoseGraph()
+            for node in pose_graph.nodes:
+                refined_graph.nodes.append(registration.PoseGraphNode(np.asarray(node.pose).copy()))
+            for edge in pose_graph.edges:
+                if edge.source_node_id == len(rows) - 1 and edge.target_node_id == 0:
+                    continue
+                refined_graph.edges.append(edge)
+            refined_graph.edges.append(registration.PoseGraphEdge(len(rows) - 1, 0, edge_transform,
+                                                                  information, uncertain=False))
+            registration.global_optimization(
+                refined_graph, registration.GlobalOptimizationLevenbergMarquardt(),
+                registration.GlobalOptimizationConvergenceCriteria(),
+                registration.GlobalOptimizationOption(max_correspondence_distance=correspondence_distance,
+                                                       edge_prune_threshold=0.25, reference_node=0),
+            )
+            pose_graph = refined_graph
+            refinement_applied = True
+            for edge in loop_edge_candidates:
+                if edge["source"] == len(rows) - 1:
+                    edge.update({"fitness": float(refined.fitness), "inlier_rmse": float(refined.inlier_rmse),
+                                 "accepted": True, "transformation": edge_transform.tolist(), "refined": True})
+            loop_edges = [edge for edge in loop_edges if edge["source"] != len(rows) - 1]
+            loop_edges.append({"source": len(rows) - 1, "target": 0, "fitness": float(refined.fitness),
+                               "inlier_rmse": float(refined.inlier_rmse), "refined": True})
 
         residual_values = {"adjacent_rotation": [], "adjacent_translation": [],
                            "loop_rotation": [], "loop_translation": []}
@@ -297,11 +401,13 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
         fused_chunks = []
         frame_poses = []
         for index, node in enumerate(pose_graph.nodes):
+            check_cancelled()
             scanner_to_map = first_to_map @ np.asarray(node.pose)
             frame_poses.append({
                 "frame_index": int(rows[index]["index"]),
                 "source_file": rows[index]["file"],
-                "scanner_to_map": scanner_to_map.tolist(),
+                "scanner_to_output": scanner_to_map.tolist(),
+                **({"scanner_to_map": scanner_to_map.tolist()} if anchor_report is not None else {}),
             })
             points = np.load(temporary_path / f"frame_{index:05d}.npy", allow_pickle=False)
             cloud = _cloud(points, o3d)
@@ -313,6 +419,37 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
         fused = _cloud(all_fused_points, o3d).voxel_down_sample(fused_voxel_size)
         if not len(fused.points):
             raise RuntimeError("all-frame fusion produced no points")
+        marker_rejection = None
+        if anchor_report is not None:
+            below_fraction = _marker_plane_below_fraction(np.asarray(fused.points))
+            if below_fraction > 0.05:
+                marker_rejection = {"reason": "points_below_table", "fraction_below_minus_2_5": below_fraction}
+                anchor_report = None
+                # Remove the unreliable marker similarity, retaining only a detected
+                # table-plane orientation and the geometric registration poses.
+                if plane_anchor is not None:
+                    plane_index = positions[plane_anchor[0]]
+                    first_to_fallback = plane_anchor[1] @ np.linalg.inv(np.asarray(pose_graph.nodes[plane_index].pose))
+                else:
+                    first_to_fallback = np.linalg.inv(np.asarray(pose_graph.nodes[0].pose))
+                correction = first_to_fallback @ np.linalg.inv(first_to_map)
+                fused.transform(correction)
+                for frame in frame_poses:
+                    frame["scanner_to_output"] = (correction @ np.asarray(frame["scanner_to_output"])).tolist()
+                    frame.pop("scanner_to_map", None)
+        if anchor_report is None:
+            bounds_before = np.asarray(fused.get_axis_aligned_bounding_box().get_box_points())
+            placement = _center_on_table(bounds_before.min(axis=0), bounds_before.max(axis=0))
+            fused.transform(placement)
+            for frame in frame_poses:
+                frame["scanner_to_output"] = (placement @ np.asarray(frame["scanner_to_output"])).tolist()
+        else:
+            # Small negative values are measurement noise; preserve points while
+            # enforcing the table half-space.
+            points_above_table = np.flatnonzero(np.asarray(fused.points)[:, 2] >= 0.0)
+            fused = fused.select_by_index(points_above_table.tolist())
+            if not len(fused.points):
+                raise RuntimeError("No fused points lie above the detected table plane")
         output.parent.mkdir(parents=True, exist_ok=True)
         if not o3d.io.write_point_cloud(str(output), fused, write_ascii=False, compressed=False):
             raise OSError(f"Open3D failed to write the fused point cloud: {output}")
@@ -335,8 +472,9 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
             "format": "cadyx-continuous-all-frame-fusion-v1",
             "status": "provisional",
             "run_id": run_id,
-            "coordinate_frame": "table_marker_map_center_xy",
-            "coordinate_units": "table map units; physical scale remains unverified",
+            "coordinate_frame": "table_marker_map_center_xy" if anchor_report is not None else "centered_table_xy",
+            "coordinate_units": ("table map units; physical scale remains unverified" if anchor_report is not None
+                                 else "reprojected camera units; physical scale remains unverified"),
             "all_captured_frames_used": True,
             "source_frame_count": len(rows),
             "source_files": [path.name for path in source_paths],
@@ -344,7 +482,11 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
             "registration": "adjacent robust point-to-plane ICP; selected 30-degree frames used only as loop-closure anchors",
             "table_encoder_used_for_frame_selection": True,
             "marker_anchor": anchor_report,
-            "marker_map_sha256": __import__("hashlib").sha256(table_map).hexdigest(),
+            "marker_rejection": marker_rejection,
+            "placement": ("marker_map" if anchor_report is not None else
+                          "centered_on_detected_table_plane" if plane_anchor is not None else
+                          "centered_camera_axes_table_orientation_unverified"),
+            "marker_map_sha256": __import__("hashlib").sha256(table_map).hexdigest() if table_map is not None else None,
             "depth_scale_status": scale_data.get("status", "unverified"),
             "registration_voxel_size": voxel_size,
             "fusion_voxel_size": fused_voxel_size,
@@ -362,6 +504,7 @@ def fuse_all_frames(run_dir: Path, output: Path, voxel_size: float = 2.0,
                 "adjacent_translation_p95_map_units": float(np.quantile(residual_values["adjacent_translation"], 0.95)),
                 **loop_residual_summary,
             },
+            "closure_refinement_applied": refinement_applied,
             "last_to_first_closure": {
                 "fitness": float(closure.fitness), "inlier_rmse": float(closure.inlier_rmse),
                 "local_correction_degrees": closure_rotation,

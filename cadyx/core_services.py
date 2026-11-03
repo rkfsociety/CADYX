@@ -291,6 +291,12 @@ class ProjectLifecycleService(_CoreService):
     def scan_360_status(self, project_id: str) -> dict[str, Any]:
         return self._scan_capture.status(project_id, self.workspace._project_dir(project_id))
 
+    def start_continuous_scan(self, project_id: str) -> dict[str, Any]:
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            self._require_project_policy(project_id, "file_management",
+                                         "Непрерывное сканирование требует свободного проекта.")
+            return self._scan_capture.start_continuous(project_id, self.workspace._project_dir(project_id))
+
     def start_scan_fusion(self, project_id: str, run_id: str) -> dict[str, Any]:
         heartbeat = None
         lease_id = None

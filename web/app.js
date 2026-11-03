@@ -1254,7 +1254,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
     if(liveCamera&&scanView)window.CadyxScanView?.initializeLivePreview({button:liveCamera,view:scanView,captureButton:scan360});
     window.CadyxTurntableControls?.initialize();
     if(scan360&&scanStatus){
-      let pollTimer=null,scanWasRunning=false;
+      let pollTimer=null,scanWasRunning=false,continuousWasRunning=false;
       const projectId=()=>window.cadyxSelectedProjectId?.();
       const syncCaptureButton=()=>{
         const current=document.querySelector('#viewport-scan-360');
@@ -1273,7 +1273,25 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           pollTimer=setTimeout(()=>pollScan(id),2500);return;
         }
         try{
-          const [response,fusionResponse]=await Promise.all([fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{cache:'no-store'}),fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/fusion`,{cache:'no-store'})]);
+          const [response,fusionResponse,continuousResponse]=await Promise.all([fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{cache:'no-store'}),fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/fusion`,{cache:'no-store'}),fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/continuous`,{cache:'no-store'})]);
+          const continuousPayload=await continuousResponse.json();
+          if(!continuousResponse.ok)throw new Error(continuousPayload.error?.message||'Не удалось получить статус непрерывного сканирования');
+          const continuous=continuousPayload.scan;
+          const continuousRunning=['running','stopping'].includes(continuous?.state);
+          if(continuousRunning || continuousWasRunning){
+            scanStatus.hidden=false;scanStatus.className='';scanStatus.replaceChildren();
+            const message=document.createElement('span');
+            message.textContent=continuousRunning ? (continuous.state==='stopping'?'Остановка…':['processing','captured','cleaning','candidate_ready'].includes(continuous.phase)?`Обработка ${continuous.frame_count||0} кадров…`:`Непрерывная съёмка: ${continuous.frame_count||0} кадров`) : continuous.state==='completed'?'Сканирование завершено; проверьте предварительное облако':continuous.error||'Непрерывное сканирование остановлено';
+            scanStatus.append(message);
+            if(continuous.state==='running'){
+              const stop=document.createElement('button');stop.className='button';stop.type='button';stop.textContent='Остановить';
+              stop.onclick=async()=>{stop.disabled=true;try{const r=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/continuous/stop`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const body=await r.json();if(!r.ok)throw new Error(body.error?.message||'Не удалось остановить сканирование')}catch(error){scanStatus.textContent=error.message}};
+              scanStatus.append(stop);
+            }
+            if(!continuousRunning&&continuousWasRunning){await loadScanTree(id,true);renderScanTree();notify(message.textContent,continuous.state==='failed')}
+            continuousWasRunning=continuousRunning;setCaptureBusy(continuousRunning);
+            pollTimer=setTimeout(()=>pollScan(id),continuousRunning?1200:4000);return;
+          }
           const fusionPayload=await fusionResponse.json();
           if(!fusionResponse.ok)throw new Error(fusionPayload.error?.message||'Не удалось получить статус сшивки');
           const payload=await response.json();
@@ -1322,10 +1340,12 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         if(scanTreePreviewSelection)clearScanTreePreview();
         scan360.dataset.scanCapturePending='true';syncCaptureButton();scanStatus.hidden=false;scanStatus.textContent='Запускаю съёмку…';
         try{
-          const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rotation_period_seconds:window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.()??18,scanner_device_id:captureSettings.scanner_device_id,turntable_device_id:captureSettings.turntable_device_id,step_degrees:captureSettings.step_degrees,tilt_degrees:captureSettings.tilt_degrees})});
+          const continuous=captureSettings.mode==='continuous';
+          const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/${continuous?'continuous':'360'}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(continuous?{}:{rotation_period_seconds:window.CadyxDeviceSettings?.turntableRotationPeriodSeconds?.()??18,scanner_device_id:captureSettings.scanner_device_id,turntable_device_id:captureSettings.turntable_device_id,step_degrees:captureSettings.step_degrees,tilt_degrees:captureSettings.tilt_degrees})});
           const payload=await response.json();
           if(id!==projectId()){scanWasRunning=false;waitForProjectId();return}
           if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось запустить сканирование');
+          if(continuous){continuousWasRunning=true;setCaptureBusy(true);clearTimeout(pollTimer);pollScan(id);return}
           showCapturePreview(payload.scan,{open:true});
           scanWasRunning=payload.scan.state==='running';
           setCaptureBusy(payload.scan.state==='running'||payload.scan.state==='busy');

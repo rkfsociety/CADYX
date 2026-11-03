@@ -7,8 +7,10 @@ import csv
 import hashlib
 import json
 import math
+import shutil
 import struct
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,7 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 if str(REPOSITORY) not in sys.path:
     sys.path.insert(0, str(REPOSITORY))
 
-from tools.revopoint.reproject_y16 import reproject_y16
+from tools.revopoint.reproject_y16 import reproject_y16_numpy
 
 RGB_WIDTH = 1280
 RGB_HEIGHT = 800
@@ -28,6 +30,16 @@ PAIR_TOLERANCE_MS = 15.0
 VISIBILITY_EPSILON_MAP_UNITS = 0.75
 COLOR_SAMPLE_VOXEL_MAP_UNITS = 1.5
 COLOR_ASSOCIATION_RADIUS_MAP_UNITS = 2.0
+
+
+def _read_rgb_image(path: Path, o3d: Any) -> np.ndarray:
+    # Open3D's Windows JPEG reader cannot open non-ASCII paths reliably.
+    if str(path).isascii():
+        return np.asarray(o3d.io.read_image(str(path)))
+    with tempfile.TemporaryDirectory(prefix="cadyx-rgb-") as temporary:
+        staged = Path(temporary) / "frame.jpg"
+        shutil.copyfile(path, staged)
+        return np.asarray(o3d.io.read_image(str(staged))).copy()
 
 
 def parse_rgb_calibration(extrinsic_bytes: bytes, projection_bytes: bytes) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -139,10 +151,10 @@ def colorize_continuous_scan(run_directory: Path, source_cloud_path: Path,
         raise ValueError("Registration report is missing one optimized pose per captured depth frame.")
     pose_by_file: dict[str, np.ndarray] = {}
     for frame in frame_poses:
-        matrix = np.asarray(frame.get("scanner_to_map"), dtype=np.float64)
+        matrix = np.asarray(frame.get("scanner_to_output", frame.get("scanner_to_map")), dtype=np.float64)
         if (matrix.shape != (4, 4) or not np.isfinite(matrix).all()
                 or not np.allclose(matrix[3], [0.0, 0.0, 0.0, 1.0], atol=1e-7)):
-            raise ValueError("Registration report contains an invalid scanner-to-map matrix.")
+            raise ValueError("Registration report contains an invalid scanner-to-output matrix.")
         pose_by_file[str(frame["source_file"])] = matrix
 
     extrinsic_path = run_dir / "LC_RT.bin"
@@ -194,11 +206,11 @@ def colorize_continuous_scan(run_directory: Path, source_cloud_path: Path,
         raw = raw_path.read_bytes()
         if len(raw) != 640 * 400 * 2:
             raise ValueError(f"Depth frame has the wrong byte length: {source_name}")
-        points = np.asarray(reproject_y16(raw, q, depth_scale), dtype=np.float64)
+        points = np.asarray(reproject_y16_numpy(raw, q, depth_scale), dtype=np.float64)
         camera_to_rgb = (rotation @ (points * np.asarray([1.0, -1.0, -1.0])).T).T + translation
         z = camera_to_rgb[:, 2]
 
-        image = np.asarray(o3d.io.read_image(str(rgb_path)))
+        image = _read_rgb_image(rgb_path, o3d)
         if image.ndim != 3 or image.shape[2] < 3:
             raise ValueError(f"Paired RGB image is not a 3-channel image: {rgb_path.name}")
         height, width = int(image.shape[0]), int(image.shape[1])

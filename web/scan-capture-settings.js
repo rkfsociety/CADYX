@@ -6,11 +6,13 @@
   const startButton = document.querySelector('#scan-capture-settings-start');
   const devicesNote = document.querySelector('#scan-capture-devices');
   const stepSelect = document.querySelector('#scan-capture-step');
+  const modeSelect = document.querySelector('#scan-capture-mode');
+  const continuousNote = document.querySelector('#scan-capture-continuous-note');
   const tiltInput = document.querySelector('#scan-capture-tilt');
   const tiltValue = document.querySelector('#scan-capture-tilt-value');
   const status = document.querySelector('#scan-capture-settings-status');
   if (!dialog || !closeButton || !cancelButton || !startButton || !devicesNote
-      || !stepSelect || !tiltInput || !tiltValue || !status) return;
+      || !stepSelect || !modeSelect || !continuousNote || !tiltInput || !tiltValue || !status) return;
 
   let resolvePending = null;
   let requestId = 0;
@@ -73,6 +75,8 @@
     activeSelection = selection;
     setStatus();
     startButton.disabled = true;
+    modeSelect.value = 'stepped';
+    continuousNote.hidden = true;
     stepSelect.disabled = false;
     tiltInput.disabled = false;
     fillSteps(30);
@@ -118,6 +122,12 @@
     resolve?.(value);
   };
 
+  modeSelect.addEventListener('change', () => {
+    const continuous = modeSelect.value === 'continuous';
+    stepSelect.disabled = continuous;
+    tiltInput.disabled = continuous;
+    continuousNote.hidden = !continuous;
+  });
   tiltInput.addEventListener('input', syncTiltDisplay);
   closeButton.addEventListener('click', () => settle(null));
   cancelButton.addEventListener('click', () => settle(null));
@@ -132,6 +142,10 @@
     }
     if (!sameSelection(selection, deviceSelection())) {
       setStatus('Выбранные устройства изменились. Закройте окно и откройте настройки заново.', true);
+      return;
+    }
+    if (modeSelect.value === 'continuous') {
+      settle({ ...selection, mode: 'continuous' });
       return;
     }
     const stepDegrees = Number(stepSelect.value);

@@ -159,6 +159,17 @@ class CadyxCore:
     def scan_360_status(self, project_id: str) -> dict[str, Any]:
         return self._lifecycle.scan_360_status(project_id)
 
+    def start_continuous_scan(self, project_id: str) -> dict[str, Any]:
+        return self._lifecycle.start_continuous_scan(project_id)
+
+    def continuous_scan_status(self, project_id: str) -> dict[str, Any]:
+        self.workspace._project_dir(project_id)
+        return self._scan_capture.continuous_status(project_id)
+
+    def stop_continuous_scan(self, project_id: str) -> dict[str, Any]:
+        self.workspace._project_dir(project_id)
+        return self._scan_capture.stop_continuous(project_id)
+
     def start_scan_fusion(self, project_id: str, run_id: str) -> dict[str, Any]:
         return self._lifecycle.start_scan_fusion(project_id, run_id)
 

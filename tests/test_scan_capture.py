@@ -18,6 +18,40 @@ from cadyx.scan_capture import (Scan360CaptureController, _capture_log_progress,
 
 
 class Scan360CaptureTests(unittest.TestCase):
+    def test_continuous_job_locks_project_and_signals_stop(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            controller = Scan360CaptureController(project, project)
+            signal = project / "stop"
+            controller._continuous_job = SimpleNamespace(
+                project_id="p", project_directory=project, run_id="revopoint_20261103T120000Z",
+                process=SimpleNamespace(poll=lambda: None), stop_path=signal,
+                log_path=project / "log", started_at="now")
+            self.assertTrue(controller.is_running("p"))
+            self.assertFalse(controller.is_running("other"))
+            self.assertEqual(controller.continuous_status("p")["state"], "running")
+            with self.assertRaises(ConflictError):
+                controller.stop_live_preview()
+            self.assertEqual(controller.stop_continuous("p")["state"], "stopping")
+            self.assertTrue(signal.exists())
+
+    def test_continuous_preview_stops_after_capture_before_registration_finishes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261103T120000Z"
+            run = project / run_id
+            run.mkdir()
+            (run / "capture_manifest.json").write_text('{"status":"processing"}', encoding="utf-8")
+            controller = Scan360CaptureController(project, project)
+            events = []
+            process = SimpleNamespace(poll=lambda: None, wait=lambda: events.append("worker finished"))
+            job = SimpleNamespace(project_directory=project, run_id=run_id, process=process)
+            controller._continuous_job = job
+            with patch.object(controller, "stop_live_preview", side_effect=lambda **kwargs: events.append("scanner stopped")) as stop:
+                controller._finish_continuous(job)
+            stop.assert_called_once_with(_capture_finished=True)
+            self.assertEqual(events, ["scanner stopped", "worker finished"])
+
     def test_deleted_series_clears_finished_job_and_orphaned_support(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

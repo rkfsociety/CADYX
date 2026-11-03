@@ -201,7 +201,11 @@ def wait_ready(path: Path, process: subprocess.Popen[bytes], timeout: float) -> 
     raise TimeoutError(f"Timed out waiting for first capture frame: {path.name}")
 
 
-def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
+def run_capture(project: Path, run_id: str, repository: Path,
+                stop_path: Path | None = None, q_file: Path | None = None,
+                scale_file: Path | None = None, turntable_address: str | None = None) -> dict[str, Any]:
+    if stop_path is not None and stop_path.exists():
+        raise RuntimeError("Continuous scan cancelled before capture.")
     project = project.resolve(strict=True)
     project_record = json.loads((project / "project.json").read_text(encoding="utf-8"))
     if project_record.get("format") != "cadyx-project":
@@ -218,8 +222,8 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
     capture_rgb = tools / "build" / "CaptureRgb.exe"
     table = tools / "build" / "TurntableController.exe"
     live_path = repository / ".projects-state" / ".revopoint-live.raw"
-    q_path = tools / "calibration" / "scanners" / "revopoint-mini-y16" / "Q.bin"
-    scale_path = tools / "calibration" / "scanners" / "revopoint-mini-y16" / "depth_scale.json"
+    q_path = q_file or tools / "calibration" / "scanners" / "revopoint-mini-y16" / "Q.bin"
+    scale_path = scale_file or tools / "calibration" / "scanners" / "revopoint-mini-y16" / "depth_scale.json"
     for path in (capture_rgb, table, q_path, scale_path):
         if not path.is_file():
             raise FileNotFoundError(f"Required scan input is missing: {path}")
@@ -276,9 +280,15 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
     (run_dir / "capture_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     turntable_args: list[str] = []
     controller_args = [str(table), "query"]
+    if turntable_address:
+        controller_args += [turntable_address, TABLE_NAME, ADVERTISEMENT_UUID, SERVICE_UUID, CHARACTERISTIC_UUID]
     turntable_log = (run_dir / "turntable.log").open("wb")
     try:
+        if stop_path is not None and stop_path.exists():
+            raise RuntimeError("Continuous scan cancelled before table connection.")
         query = subprocess.run(controller_args, cwd=repository, capture_output=True, timeout=20, check=True)
+        if stop_path is not None and stop_path.exists():
+            raise RuntimeError("Continuous scan cancelled before rotation.")
         query_text = (query.stdout + query.stderr).decode("utf-8", errors="replace")
         manifest["turntable_baseline_query"] = query_text
         if not any(line.startswith("+QR,TILTVALUE; => +DATA=0.0") for line in query_text.splitlines()):
@@ -294,9 +304,8 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
         override_map = app_data / "CADYX" / "turntable-settings" / table_key / "framesmall.mkf"
         profile_map = tools / "calibration" / "tables" / "revopoint-dual-axis-table" / "framesmall.mkf"
         active_map = override_map if override_map.is_file() else profile_map
-        if not active_map.is_file():
-            raise FileNotFoundError("The active turntable marker map is unavailable.")
-        shutil.copy2(active_map, run_dir / "framesmall.mkf")
+        if active_map.is_file():
+            shutil.copy2(active_map, run_dir / "framesmall.mkf")
 
         watcher.start()
         rgb_process = subprocess.Popen(
@@ -306,9 +315,40 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         wait_ready(rgb_ready, rgb_process, 20)
-        rotation_started.set()
-        turntable = subprocess.run(turntable_args, cwd=repository, stdout=turntable_log,
-                                   stderr=subprocess.STDOUT, timeout=130)
+        if stop_path is not None and stop_path.exists():
+            raise RuntimeError("Continuous scan cancelled before rotation.")
+        turn_stop = run_dir / "turntable.csv.stop"
+        heartbeat = run_dir / "turntable.csv.heartbeat"
+        heartbeat_stop = threading.Event()
+
+        def maintain_control() -> None:
+            while not heartbeat_stop.is_set():
+                heartbeat.touch()
+                if stop_path is not None and stop_path.exists():
+                    turn_stop.touch()
+                heartbeat_stop.wait(0.5)
+
+        heartbeat.touch()
+        if stop_path is not None and stop_path.exists():
+            turn_stop.touch()
+        control_thread = threading.Thread(target=maintain_control, daemon=True)
+        control_thread.start()
+        try:
+            rotation_started.set()
+            turntable = subprocess.Popen(turntable_args, cwd=repository, stdout=turntable_log,
+                                         stderr=subprocess.STDOUT)
+            try:
+                turntable.wait(timeout=130)
+            except subprocess.TimeoutExpired:
+                turn_stop.touch(exist_ok=True)
+                try:
+                    turntable.wait(timeout=20)
+                except subprocess.TimeoutExpired as exc:
+                    raise RuntimeError("Turntable controller did not confirm its stop; check the table.") from exc
+                raise RuntimeError("Continuous turn timed out; the controller was asked to stop.")
+        finally:
+            heartbeat_stop.set()
+            control_thread.join(timeout=2)
         if turntable.returncode != 0:
             raise RuntimeError(f"Continuous turntable run failed ({turntable.returncode}); see turntable.log.")
         rgb_stop.touch(exist_ok=True)
@@ -335,6 +375,8 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
         turntable_log.close()
         rgb_log.close()
 
+    manifest["status"] = "processing"
+    (run_dir / "capture_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     frames = list(csv.DictReader(frame_rows_path.open(encoding="utf-8", newline="")))
     encoder = load_encoder_rows(run_dir / "turntable.csv")
     if not encoder or abs(abs(encoder[-1][1] - encoder[0][1]) - 360) > 3:
@@ -343,7 +385,18 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
         (run_dir / "capture_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         raise RuntimeError(manifest["error"])
 
+    # The camera starts before BLE connects. Keep those source files but do not
+    # register a long stationary lead-in as if it were part of the revolution.
+    frames = [row for row in frames
+              if encoder[0][0] <= datetime.fromisoformat(row["frame_mtime_utc"].replace("Z", "+00:00")) <= encoder[-1][0]]
+    with frame_rows_path.open("w", encoding="utf-8", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=["index", "file", "frame_mtime_utc", "observed_utc", "bytes"])
+        writer.writeheader()
+        writer.writerows(frames)
+
     selected = select_uniform_frames(frames, encoder)
+    if stop_path is not None and stop_path.exists():
+        raise RuntimeError("Continuous scan cancelled before registration; source frames are preserved.")
     scale = float(json.loads(scale_path.read_text(encoding="utf-8"))["depth_scale_mm_per_raw_unit"])
     for pose_index, (row, angle) in enumerate(selected):
         raw_path = run_dir / f"{run_id}_pose_{pose_index:03d}.raw"
@@ -382,13 +435,16 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
     try:
         from tools.revopoint.align_y16_to_table import align_run
         from tools.revopoint.fuse_continuous_scan import fuse_all_frames
-        alignment = align_run(run_dir, run_id, run_dir / "framesmall.mkf", run_dir / "Q.bin", scale)
-        manifest["marker_alignment"] = {
-            "status": alignment["status"],
-            "aligned_frames": alignment["aligned_frame_count"],
-            "deferred_frames": alignment["deferred_frame_count"],
-        }
-        registration = fuse_all_frames(run_dir, output)
+        try:
+            alignment = align_run(run_dir, run_id, run_dir / "framesmall.mkf", run_dir / "Q.bin", scale)
+            manifest["marker_alignment"] = {
+                "status": alignment["status"],
+                "aligned_frames": alignment["aligned_frame_count"],
+                "deferred_frames": alignment["deferred_frame_count"],
+            }
+        except (OSError, ValueError) as exc:
+            manifest["marker_alignment"] = {"status": "unavailable", "error": str(exc)}
+        registration = fuse_all_frames(run_dir, output, stop_path=stop_path)
     except Exception as exc:
         manifest["status"] = "registration_failed"
         manifest["frame_registration"] = "failed"
@@ -409,13 +465,43 @@ def run_capture(project: Path, run_id: str, repository: Path) -> dict[str, Any]:
     manifest["fused_candidate"] = saved_candidate.name
     manifest["registration_report"] = saved_report.name
     manifest["registration_metrics"] = registration
+    manifest["status"] = "cleaning"
+    (run_dir / "capture_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    try:
+        from tools.revopoint.clean_continuous_scan import clean_continuous_scan
+        cleaned_output = repository / ".runtime" / "scan-reconstruction" / f"{run_id}_frame_support_candidate.ply"
+        cleanup = clean_continuous_scan(run_dir, output, registration, cleaned_output, stop_path=stop_path)
+        saved_cleaned = run_dir / f"{run_id}_all_frames_cleaned.ply"
+        saved_cleanup_report = run_dir / f"{run_id}_frame_support.json"
+        shutil.copy2(cleaned_output, saved_cleaned)
+        shutil.copy2(cleaned_output.with_suffix(".json"), saved_cleanup_report)
+        cleaned_registration = dict(registration)
+        cleaned_registration["frame_poses"] = []
+        translation = cleanup["placement_translation"]
+        for pose in registration["frame_poses"]:
+            adjusted = dict(pose)
+            matrix = [list(row) for row in pose["scanner_to_output"]]
+            for axis in range(3):
+                matrix[axis][3] += translation[axis]
+            adjusted["scanner_to_output"] = matrix
+            cleaned_registration["frame_poses"].append(adjusted)
+        cleaned_registration_path = run_dir / f"{run_id}_cleaned_registration.json"
+        cleaned_registration_path.write_text(json.dumps(cleaned_registration, indent=2) + "\n", encoding="utf-8")
+        manifest["cleaned_candidate"] = saved_cleaned.name
+        manifest["cloud_cleanup"] = cleanup
+    except (OSError, ValueError, RuntimeError) as exc:
+        manifest["cloud_cleanup"] = {"status": "failed", "error": str(exc)}
+        if stop_path is not None and stop_path.exists():
+            raise
+    manifest["status"] = "candidate_ready"
     (run_dir / "capture_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     if rgb_calibration["status"] == "available":
         from tools.revopoint.colorize_continuous_scan import colorize_continuous_scan
         colorized_path = run_dir / f"{run_id}_all_frames_colored_candidate.ply"
         try:
             color_result = colorize_continuous_scan(
-                run_dir, saved_candidate, saved_report, colorized_path,
+                run_dir, run_dir / manifest.get("cleaned_candidate", saved_candidate.name),
+                cleaned_registration_path if manifest.get("cleaned_candidate") else saved_report, colorized_path,
             )
             manifest["colorized_candidate"] = colorized_path.name
             manifest["color_mapping_report"] = colorized_path.with_suffix(".json").name
@@ -441,12 +527,17 @@ def main() -> int:
     parser.add_argument("project_directory", type=Path)
     parser.add_argument("--run-id", help="UTC run ID; defaults to the current UTC second")
     parser.add_argument("--repository", type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument("--stop-file", type=Path, help="Signal cooperative cancellation of the table motion")
+    parser.add_argument("--q-file", type=Path)
+    parser.add_argument("--scale-file", type=Path)
+    parser.add_argument("--turntable-address")
     args = parser.parse_args()
     run_id = args.run_id or datetime.now(timezone.utc).strftime("revopoint_%Y%m%dT%H%M%SZ")
     if not run_id.startswith("revopoint_") or len(run_id) != 26:
         parser.error("run ID must use revopoint_YYYYMMDDTHHMMSSZ")
     try:
-        run_capture(args.project_directory, run_id, args.repository.resolve(strict=True))
+        run_capture(args.project_directory, run_id, args.repository.resolve(strict=True), args.stop_file,
+                    args.q_file, args.scale_file, args.turntable_address)
         return 0
     except (OSError, RuntimeError, ValueError, TimeoutError, subprocess.SubprocessError) as error:
         print(f"error: {error}", file=sys.stderr)

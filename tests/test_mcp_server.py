@@ -96,6 +96,18 @@ class CadyxMCPServerTests(unittest.TestCase):
         start.assert_called_once_with(project_id, 18.0, None, None, 30, True, 0.0)
         status.assert_called_once_with(project_id)
 
+    def test_continuous_scan_tools_use_project_api(self) -> None:
+        project_id = self._create_project("Continuous MCP")
+        with (patch.object(self.core, "start_continuous_scan", return_value={"state": "running"}) as start,
+              patch.object(self.core, "continuous_scan_status", return_value={"state": "running"}) as status,
+              patch.object(self.core, "stop_continuous_scan", return_value={"state": "stopping"}) as stop):
+            self.assertEqual(self._tool_value("cadyx_start_continuous_scan", {"project_id": project_id})["scan"]["state"], "running")
+            self.assertEqual(self._tool_value("cadyx_get_continuous_scan_status", {"project_id": project_id})["scan"]["state"], "running")
+            self.assertEqual(self._tool_value("cadyx_stop_continuous_scan", {"project_id": project_id})["scan"]["state"], "stopping")
+        start.assert_called_once_with(project_id)
+        status.assert_called_once_with(project_id)
+        stop.assert_called_once_with(project_id)
+
     def test_rescan_passes_explicit_series_and_step(self) -> None:
         project_id = self._create_project("Rescan MCP")
         run_id = "revopoint_20261010T100000Z"

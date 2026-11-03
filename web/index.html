@@ -865,6 +865,9 @@ body { color: var(--text); font-family: var(--ui-font); font-size: 14px; }
         <header class="device-settings-heading"><div><span class="device-settings-kicker">СКАНИРОВАНИЕ 360°</span><h2 id="scan-capture-settings-title">Настройки съёмки</h2></div><button id="scan-capture-settings-close" class="device-settings-close" type="button" aria-label="Закрыть настройки съёмки">×</button></header>
         <p id="scan-capture-devices" class="device-settings-note">Сканер и стол не выбраны.</p>
         <section class="device-settings-panel">
+          <label class="device-settings-field" for="scan-capture-mode">Режим съёмки</label>
+          <select id="scan-capture-mode" class="device-settings-select"><option value="stepped">Покадровый</option><option value="continuous">Непрерывный оборот</option></select>
+          <p id="scan-capture-continuous-note" class="device-settings-note" hidden>Стол совершает один оборот, сканер записывает кадры непрерывно. Для этого режима должна быть подключена одна поддерживаемая пара устройств.</p>
           <label class="device-settings-field" for="scan-capture-step">Шаг поворота</label>
           <select id="scan-capture-step" class="device-settings-select"></select>
           <label class="device-settings-field" for="scan-capture-tilt">Наклон стола</label>

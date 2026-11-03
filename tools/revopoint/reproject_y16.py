@@ -45,6 +45,32 @@ def reproject_y16(raw: bytes, q: tuple[float, ...], depth_scale: float) -> list[
     return points
 
 
+def reproject_y16_numpy(raw: bytes, q: tuple[float, ...], depth_scale: float):
+    """Vectorized equivalent for the existing NumPy-based scan processing environment."""
+    import numpy as np
+
+    if len(raw) != RAW_BYTES:
+        raise ValueError(f"Y16 frame must be exactly {RAW_BYTES} bytes.")
+    if len(q) != 16 or not all(math.isfinite(value) for value in q):
+        raise ValueError("Q calibration must contain 16 finite values.")
+    if not math.isfinite(depth_scale) or depth_scale <= 0:
+        raise ValueError("Depth scale must be positive and finite.")
+    depth = np.frombuffer(raw, dtype="<u2").astype(np.float64) * depth_scale
+    valid = (depth >= MIN_DEPTH_MM) & (depth <= MAX_DEPTH_MM)
+    indices = np.flatnonzero(valid)
+    d = depth[indices]
+    x = indices % WIDTH
+    y = indices // WIDTH
+    ray_x = q[0] * x + q[1] * y + q[2] * d + q[3]
+    ray_y = q[4] * x + q[5] * y + q[6] * d + q[7]
+    ray_z = q[8] * x + q[9] * y + q[10] * d + q[11]
+    valid_ray = np.isfinite(ray_z) & (np.abs(ray_z) >= 1e-12)
+    result = np.column_stack((ray_x[valid_ray] * d[valid_ray] / ray_z[valid_ray],
+                              -ray_y[valid_ray] * d[valid_ray] / ray_z[valid_ray],
+                              -d[valid_ray]))
+    return result[np.isfinite(result).all(axis=1)]
+
+
 def reproject_files(raw_path: Path, q_path: Path, output_prefix: Path, depth_scale: float) -> tuple[Path, Path]:
     raw_path = raw_path.resolve(strict=True)
     q_path = q_path.resolve(strict=True)

@@ -133,6 +133,9 @@ _ROUTE_SPECS = (
     RouteSpec("DELETE", "/api/v1/agent/projects/{project_id}/files/{filename}", "agent_project_file_delete", "files"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/scans/360", "agent_scan_360_start", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/scans/360", "agent_scan_360_status", "agent"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/scans/continuous", "agent_continuous_scan_start", "agent", "json"),
+    RouteSpec("GET", "/api/v1/agent/projects/{project_id}/scans/continuous", "agent_continuous_scan_status", "agent"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/scans/continuous/stop", "agent_continuous_scan_stop", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/scans/fusion", "agent_scan_fusion_start", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/scans/fusion", "agent_scan_fusion_status", "agent"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/rename", "agent_rename", "agent", "json"),
@@ -865,6 +868,16 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
                             if replace_run_id is not None else core.start_scan_360(*args)})
     elif name == "agent_scan_360_status":
         handler._json(200, {"scan": core.scan_360_status(project_id)})
+    elif name == "agent_continuous_scan_start":
+        if _require_json(handler):
+            raise ValidationError("Continuous scan does not accept parameters.")
+        handler._json(202, {"scan": core.start_continuous_scan(project_id)})
+    elif name == "agent_continuous_scan_status":
+        handler._json(200, {"scan": core.continuous_scan_status(project_id)})
+    elif name == "agent_continuous_scan_stop":
+        if _require_json(handler):
+            raise ValidationError("Continuous scan stop does not accept parameters.")
+        handler._json(202, {"scan": core.stop_continuous_scan(project_id)})
     elif name == "agent_scan_fusion_start":
         body = _require_json(handler)
         if set(body) != {"run_id"} or not isinstance(body["run_id"], str):
