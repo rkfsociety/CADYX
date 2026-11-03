@@ -630,7 +630,6 @@ internal static class Program
                         WriteSweepRow(writer, 0, "capture_started", 0, currentAngle, currentTilt, prefix, initialRotation, initialTilt);
                         CaptureY16Pose(scanCapture, prefix);
                         WriteSweepRow(writer, 0, "capture_completed", 0, currentAngle, currentTilt, prefix, initialRotation, initialTilt);
-                        await PauseAfterCaptureAsync();
                         Console.WriteLine("captured pose 0/11: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) + " deg, tilt=" + currentTilt.ToString("F1", CultureInfo.InvariantCulture));
                     }
 
@@ -687,7 +686,6 @@ internal static class Program
                             WriteSweepRow(writer, step, "capture_started", degrees, currentAngle, currentTilt, prefix, "", "");
                             CaptureY16Pose(scanCapture, prefix);
                             WriteSweepRow(writer, step, "capture_completed", degrees, currentAngle, currentTilt, prefix, "", "");
-                            await PauseAfterCaptureAsync();
                             Console.WriteLine("captured pose " + step + "/11: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) + " deg, tilt=" + currentTilt.ToString("F1", CultureInfo.InvariantCulture));
                         }
                     }
@@ -1066,12 +1064,6 @@ internal static class Program
         public string CharacteristicUuid;
     }
 
-    private static async Task PauseAfterCaptureAsync()
-    {
-        Console.WriteLine("camera release and table-settle pause after frame: 1 second");
-        await Task.Delay(TimeSpan.FromSeconds(1));
-    }
-
     private static void CaptureY16Pose(ScanCaptureOptions options, string prefix)
     {
         var start = new ProcessStartInfo {
@@ -1096,6 +1088,12 @@ internal static class Program
             }
             if (process.ExitCode != 0)
                 throw new InvalidOperationException("CaptureY16 failed at " + prefix + " with exit code " + process.ExitCode + ".");
+        }
+        foreach (string extension in new[] { ".raw", ".ply", ".json" })
+        {
+            var file = new System.IO.FileInfo(prefix + extension);
+            if (!file.Exists || file.Length == 0)
+                throw new InvalidOperationException("CaptureY16 did not save a complete " + extension + " file at " + prefix + ".");
         }
     }
 

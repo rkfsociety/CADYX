@@ -604,6 +604,7 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
             write_preview_metrics(MetricsClock::now());
         }
     }
+    CheckHr(source->Shutdown(), "Stop depth camera source");
     return frames;
 }
 
