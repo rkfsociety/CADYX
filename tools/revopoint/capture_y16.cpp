@@ -41,6 +41,8 @@ struct Options {
     std::filesystem::path live_frames_dir;
     std::filesystem::path ready_file;
     std::filesystem::path stop_file;
+    std::filesystem::path input_raw;
+    DWORD parent_pid = 0;
     std::wstring device_id;
     bool list_devices = false;
     bool list_modes = false;
@@ -97,6 +99,8 @@ void PrintUsage() {
               << "       CaptureY16.exe --live-only --live-frames-dir DIR --stop-file PATH [--ready-file PATH] [--fps 5|10|15]\n"
               << "       Optional --ready-file PATH is created after the first valid frame is received.\n"
               << "       Optional --stop-file PATH ends a burst after the next valid frame.\n"
+              << "       Optional --input-raw PATH converts one existing 640x400 Y16 frame without opening the camera.\n"
+              << "       Optional --parent-pid PID stops live capture if its controlling process exits.\n"
               << "       CaptureY16.exe --list-modes\n"
               << "       CaptureY16.exe --list-devices\n"
               << "       Optional --device-id SYMBOLIC_LINK selects one enumerated camera.\n"
@@ -149,6 +153,14 @@ Options ParseOptions(int argc, wchar_t** argv) {
             options.ready_file = value;
         } else if (argument == L"--stop-file") {
             options.stop_file = value;
+        } else if (argument == L"--input-raw") {
+            options.input_raw = value;
+        } else if (argument == L"--parent-pid") {
+            try {
+                const auto pid = std::stoul(value);
+                if (!pid || pid > (std::numeric_limits<DWORD>::max)()) throw std::runtime_error("Invalid PID");
+                options.parent_pid = static_cast<DWORD>(pid);
+            } catch (...) { throw std::runtime_error("--parent-pid must be a valid process ID."); }
         } else if (argument == L"--device-id") {
             options.device_id = value;
         } else {
@@ -157,14 +169,15 @@ Options ParseOptions(int argc, wchar_t** argv) {
     }
     if (options.list_modes || options.list_devices) return options;
     if (options.live_only) {
-        if (options.live_frames_dir.empty() || options.stop_file.empty() || options.measure_only ||
+        if (options.live_frames_dir.empty() || options.stop_file.empty() || options.measure_only || !options.input_raw.empty() ||
             options.width != 640 || options.height != 400 ||
             (options.requested_fps != 5 && options.requested_fps != 10 && options.requested_fps != 15)) {
             throw std::runtime_error("Live-only preview requires --live-frames-dir, --stop-file, 640x400 Y16, and fps 5, 10, or 15.");
         }
         return options;
     }
-    if (options.output_prefix.empty() || (!options.measure_only && (options.q_file.empty() || options.depth_scale <= 0.0 ||
+    if (options.parent_pid || (!options.input_raw.empty() && (options.measure_only || options.frame_count != 1 || !options.stop_file.empty() || !options.ready_file.empty() || !options.live_frames_dir.empty())) ||
+        options.output_prefix.empty() || (!options.measure_only && (options.q_file.empty() || options.depth_scale <= 0.0 ||
         !std::isfinite(options.depth_scale))) || options.frame_count < 1 || options.frame_count > 1000 ||
         !((options.width == 640 && (options.height == 400 || options.height == 800)) ||
           (options.width == 1280 && options.height == 800)) ||
@@ -409,7 +422,16 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
                                                         const std::filesystem::path& stop_file,
                                                         const std::wstring& device_id,
                                                         bool live_only,
+                                                        DWORD parent_pid,
                                                         std::size_t& captured_frame_count) {
+    struct ParentHandle {
+        HANDLE value = nullptr;
+        ~ParentHandle() { if (value) CloseHandle(value); }
+    } parent;
+    if (parent_pid) {
+        parent.value = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
+        if (!parent.value) throw std::runtime_error("Could not monitor the controlling process.");
+    }
     ComPtr<IMFActivate> activation = FindDepthCamera(device_id);
     ComPtr<IMFMediaSource> source;
     CheckHr(activation->ActivateObject(IID_PPV_ARGS(&source)), "Activate depth camera");
@@ -510,6 +532,11 @@ std::vector<std::vector<std::uint8_t>> CaptureY16Frames(int frame_count, int req
     };
     while ((live_only || static_cast<int>(captured_frame_count) < frame_count) &&
            (stop_file.empty() || !std::filesystem::exists(stop_file))) {
+        if (parent.value) {
+            const DWORD parent_state = WaitForSingleObject(parent.value, 0);
+            if (parent_state == WAIT_OBJECT_0) break;
+            if (parent_state != WAIT_TIMEOUT) throw std::runtime_error("Could not check the controlling process.");
+        }
         DWORD stream_index = 0;
         DWORD flags = 0;
         LONGLONG timestamp = 0;
@@ -787,6 +814,19 @@ int wmain(int argc, wchar_t** argv) {
         if (options.list_modes) { ListNativeModes(); return 0; }
         std::array<double, 16> q{};
         if (!options.measure_only && !options.live_only) q = ReadQMatrix(options.q_file);
+        if (!options.input_raw.empty()) {
+            std::ifstream input(options.input_raw, std::ios::binary | std::ios::ate);
+            const auto size = static_cast<std::streamoff>(options.width) * options.height * 2;
+            if (!input || input.tellg() != size) throw std::runtime_error("Input Y16 frame has an invalid size.");
+            input.seekg(0);
+            std::vector<std::uint8_t> raw(static_cast<std::size_t>(size));
+            input.read(reinterpret_cast<char*>(raw.data()), size);
+            if (!input) throw std::runtime_error("Could not read the complete input Y16 frame.");
+            const auto points = Reproject(raw, options.width, options.height, q, options.depth_scale);
+            if (points.size() < 100) throw std::runtime_error("Fewer than 100 valid points were reconstructed; no output was published.");
+            SaveOutputs(options, raw, points);
+            return 0;
+        }
         std::vector<LONGLONG> timestamps;
         std::vector<std::int64_t> utc_epoch_us;
         std::vector<DWORD> sample_flags;
@@ -799,7 +839,7 @@ int wmain(int argc, wchar_t** argv) {
                                              sample_flags, empty_sample_flags, null_sample_count,
                                              options.live_raw_path, options.live_frames_dir,
                                              options.ready_file, options.stop_file,
-                                             options.device_id, options.live_only, captured_frame_count);
+                                             options.device_id, options.live_only, options.parent_pid, captured_frame_count);
         const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         if (options.live_only) {
             std::cout << "Live-only preview ended after " << captured_frame_count << " frames. No scan files were saved.\n";

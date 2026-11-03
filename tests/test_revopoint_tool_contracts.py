@@ -1,10 +1,50 @@
 from __future__ import annotations
 
 import unittest
+import json
+import os
+import struct
+import subprocess
+import tempfile
 from pathlib import Path
 
 
 class RevopointToolContractTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Native Revopoint tools require Windows")
+    def test_saved_y16_conversion_preserves_input_and_rejects_invalid_data(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        executable = root / "tools" / "revopoint" / "build" / "CaptureY16.exe"
+        if not executable.exists():
+            self.skipTest("Build the native Revopoint tools to run the converter integration test")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            frame = directory / "input.raw"
+            frame_bytes = struct.pack("<H", 30000) * 200 + bytes(640 * 400 * 2 - 400)
+            frame.write_bytes(frame_bytes)
+            q_file = directory / "Q.bin"
+            matrix = [0.0] * 16
+            matrix[0] = matrix[5] = matrix[11] = 1.0
+            q_file.write_bytes(struct.pack("<16f", *matrix))
+            output = directory / "pose"
+            command = [str(executable), "--input-raw", str(frame), "--out-prefix", str(output),
+                       "--q-file", str(q_file), "--depth-scale", "0.005"]
+            result = subprocess.run(command, capture_output=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(output.with_suffix(".raw").read_bytes(), frame_bytes)
+            self.assertEqual(json.loads(output.with_suffix(".json").read_text())["point_count"], 200)
+            self.assertNotEqual(subprocess.run(command, capture_output=True, timeout=30).returncode, 0)
+            frame.write_bytes(b"invalid")
+            command[4] = str(directory / "invalid")
+            self.assertNotEqual(subprocess.run(command, capture_output=True, timeout=30).returncode, 0)
+            self.assertFalse((directory / "invalid.raw").exists())
+            dead_parent = subprocess.run(
+                [str(executable), "--live-only", "--live-frames-dir", str(directory),
+                 "--stop-file", str(directory / "stop"), "--parent-pid", "4294967295"],
+                capture_output=True, timeout=30,
+            )
+            self.assertNotEqual(dead_parent.returncode, 0)
+            self.assertIn(b"Could not monitor the controlling process", dead_parent.stderr)
+
     def test_360_scan_homes_both_table_axes_before_setting_speed_or_capturing(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "tools" / "revopoint" / "scan_360.ps1").read_text(
             encoding="utf-8",
@@ -66,17 +106,24 @@ class RevopointToolContractTests(unittest.TestCase):
         helper = source[source.index("private static void CaptureY16Pose("):source.index("private static string QuoteWindowsArgument(")]
         self.assertIn("process.WaitForExit(30000)", helper)
         self.assertIn("process.ExitCode != 0", helper)
+        self.assertIn('"--input-raw", frame', helper)
+        self.assertIn("stream.NextStationaryFrame()", helper)
         self.assertIn('new[] { ".raw", ".ply", ".json" }', helper)
         self.assertIn("!file.Exists || file.Length == 0", helper)
         self.assertNotIn("PauseAfterCaptureAsync", source)
         self.assertEqual(source.count('"capture_completed"'), 2)
         for capture, completion in zip(
-            [i for i in range(len(source)) if source.startswith("CaptureY16Pose(scanCapture, prefix);", i)],
+            [i for i in range(len(source)) if source.startswith("CaptureY16Pose(scanCapture, stream, prefix);", i)],
             [i for i in range(len(source)) if source.startswith('"capture_completed"', i)],
         ):
             self.assertLess(capture, completion)
         capture_source = (Path(__file__).resolve().parents[1] / "tools" / "revopoint" / "capture_y16.cpp").read_text(encoding="utf-8")
         self.assertIn('CheckHr(source->Shutdown(), "Stop depth camera source");', capture_source)
+        self.assertIn('"--live-only", "--live-frames-dir", directory', source)
+        self.assertIn('"--parent-pid", Process.GetCurrentProcess().Id', source)
+        self.assertIn("WaitForSingleObject(parent.value, 0)", capture_source)
+        self.assertIn("latest >= baseline + 2", source)
+        self.assertIn("previousTargetAngle", source)
 
 
 if __name__ == "__main__":

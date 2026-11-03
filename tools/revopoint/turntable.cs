@@ -607,6 +607,7 @@ internal static class Program
                     throw new InvalidOperationException("Sweep output already exists; refusing to overwrite: " + fullPath);
                 string directory = System.IO.Path.GetDirectoryName(fullPath);
                 if (!String.IsNullOrEmpty(directory)) System.IO.Directory.CreateDirectory(directory);
+                using (var stream = scanCapture == null ? null : new ScanStream(scanCapture))
                 using (var writer = new System.IO.StreamWriter(fullPath, false, new UTF8Encoding(false)))
                 {
                     writer.WriteLine("utc,step_index,event,target_delta_degrees,angle_degrees,tilt_degrees,command,rotation_response,tilt_response");
@@ -628,7 +629,7 @@ internal static class Program
                     {
                         string prefix = scanCapture.OutputPrefix + "_pose_000";
                         WriteSweepRow(writer, 0, "capture_started", 0, currentAngle, currentTilt, prefix, initialRotation, initialTilt);
-                        CaptureY16Pose(scanCapture, prefix);
+                        CaptureY16Pose(scanCapture, stream, prefix);
                         WriteSweepRow(writer, 0, "capture_completed", 0, currentAngle, currentTilt, prefix, initialRotation, initialTilt);
                         Console.WriteLine("captured pose 0/11: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) + " deg, tilt=" + currentTilt.ToString("F1", CultureInfo.InvariantCulture));
                     }
@@ -642,6 +643,7 @@ internal static class Program
                         Console.WriteLine("sweep step " + step + "/" + sweepSteps + ": " + command + " => " + commandReply);
 
                         bool reached = false;
+                        double previousTargetAngle = Double.NaN;
                         DateTime sweepDeadline = DateTime.UtcNow.AddSeconds(10.0 + Math.Abs(degrees) * 90.0 / 360.0);
                         while (DateTime.UtcNow < sweepDeadline)
                         {
@@ -653,7 +655,10 @@ internal static class Program
                                 currentAngle = angle;
                                 currentTilt = tilt;
                                 double sweepMeasured = SignedAngleDelta(sweepBefore, currentAngle);
-                                bool targetReached = Math.Abs(sweepMeasured - degrees) <= RotationSetpointToleranceDegrees;
+                                bool atTarget = Math.Abs(sweepMeasured - degrees) <= RotationSetpointToleranceDegrees;
+                                bool targetReached = atTarget && (operation != "capture-sweep" ||
+                                    (!Double.IsNaN(previousTargetAngle) && Math.Abs(SignedAngleDelta(previousTargetAngle, angle)) <= 0.2));
+                                previousTargetAngle = atTarget ? angle : Double.NaN;
                                 WriteSweepRow(writer, step, targetReached ? "target_reached" : "telemetry",
                                     degrees, currentAngle, currentTilt, "", rotationResponse, tiltResponse);
                                 if (Math.Abs(currentTilt - baselineTilt) > 0.5)
@@ -684,7 +689,7 @@ internal static class Program
                         {
                             string prefix = scanCapture.OutputPrefix + "_pose_" + step.ToString("D3", CultureInfo.InvariantCulture);
                             WriteSweepRow(writer, step, "capture_started", degrees, currentAngle, currentTilt, prefix, "", "");
-                            CaptureY16Pose(scanCapture, prefix);
+                            CaptureY16Pose(scanCapture, stream, prefix);
                             WriteSweepRow(writer, step, "capture_completed", degrees, currentAngle, currentTilt, prefix, "", "");
                             Console.WriteLine("captured pose " + step + "/11: angle=" + currentAngle.ToString("F1", CultureInfo.InvariantCulture) + " deg, tilt=" + currentTilt.ToString("F1", CultureInfo.InvariantCulture));
                         }
@@ -1064,8 +1069,94 @@ internal static class Program
         public string CharacteristicUuid;
     }
 
-    private static void CaptureY16Pose(ScanCaptureOptions options, string prefix)
+    private sealed class ScanStream : IDisposable
     {
+        private readonly string directory;
+        private readonly string stopPath;
+        private readonly Process process;
+        private int highestFrameIndex;
+
+        public ScanStream(ScanCaptureOptions options)
+        {
+            directory = Path.Combine(Path.GetTempPath(), "cadyx-scan-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            stopPath = Path.Combine(directory, "stop");
+            var start = new ProcessStartInfo {
+                FileName = options.CaptureExecutable,
+                Arguments = String.Join(" ", new[] {
+                    "--live-only", "--live-frames-dir", directory, "--stop-file", stopPath,
+                    "--live-raw", options.LiveRawFile, "--device-id", options.ScannerDeviceId,
+                    "--parent-pid", Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture),
+                }.Select(QuoteWindowsArgument)),
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            try { process = Process.Start(start); }
+            catch { Directory.Delete(directory, true); throw; }
+        }
+
+        private int LatestFrameIndex()
+        {
+            int latest = highestFrameIndex;
+            foreach (string file in Directory.GetFiles(directory, "frame-*.y16"))
+            {
+                Match match = Regex.Match(Path.GetFileName(file), @"^frame-(\d+)\.y16$");
+                int index;
+                if (match.Success && Int32.TryParse(match.Groups[1].Value, out index)) latest = Math.Max(latest, index);
+            }
+            highestFrameIndex = latest;
+            return latest;
+        }
+
+        public string NextStationaryFrame()
+        {
+            // Discard the first frame published after the table stopped: it could
+            // have begun exposure while the table was still moving.
+            int baseline = LatestFrameIndex();
+            var deadline = Stopwatch.StartNew();
+            while (deadline.Elapsed < TimeSpan.FromSeconds(30))
+            {
+                if (process.HasExited) throw new InvalidOperationException("Continuous camera capture stopped unexpectedly, exit code " + process.ExitCode + ".");
+                int latest = LatestFrameIndex();
+                if (latest >= baseline + 2) return Path.Combine(directory, "frame-" + latest + ".y16");
+                System.Threading.Thread.Sleep(50);
+            }
+            throw new TimeoutException("Continuous camera did not provide a fresh stationary frame within 30 seconds.");
+        }
+
+        public void DiscardFrames()
+        {
+            foreach (string file in Directory.GetFiles(directory, "frame-*.y16"))
+            {
+                Match match = Regex.Match(Path.GetFileName(file), @"^frame-(\d+)\.y16$");
+                int index;
+                if (match.Success && Int32.TryParse(match.Groups[1].Value, out index))
+                    highestFrameIndex = Math.Max(highestFrameIndex, index);
+                File.Delete(file);
+            }
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    File.WriteAllText(stopPath, "stop");
+                    if (!process.WaitForExit(10000)) { process.Kill(); process.WaitForExit(); }
+                }
+            }
+            finally
+            {
+                process.Dispose();
+                Directory.Delete(directory, true);
+            }
+        }
+    }
+
+    private static void CaptureY16Pose(ScanCaptureOptions options, ScanStream stream, string prefix)
+    {
+        string frame = stream.NextStationaryFrame();
         var start = new ProcessStartInfo {
             FileName = options.CaptureExecutable,
             Arguments = String.Join(" ", new[] {
@@ -1073,8 +1164,7 @@ internal static class Program
                 "--q-file", options.CalibrationFile,
                 "--depth-scale", options.DepthScale.ToString("R", CultureInfo.InvariantCulture),
                 "--frames", "1",
-                "--live-raw", options.LiveRawFile,
-                "--device-id", options.ScannerDeviceId,
+                "--input-raw", frame,
             }.Select(QuoteWindowsArgument)),
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -1095,6 +1185,7 @@ internal static class Program
             if (!file.Exists || file.Length == 0)
                 throw new InvalidOperationException("CaptureY16 did not save a complete " + extension + " file at " + prefix + ".");
         }
+        stream.DiscardFrames();
     }
 
     private static string QuoteWindowsArgument(string value)
