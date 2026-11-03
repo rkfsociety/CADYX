@@ -46,6 +46,49 @@ assert.deepEqual(Array.from(sourcePreview), [1,2,3,5,4,6,0,2,3], 'preview placem
 assert.equal(sandbox.window.CadyxScanView.placeCloudForPreview(sourcePreview,
   {...previewFrame,map_similarity:{...previewFrame.map_similarity,reflection:-1}}), null);
 assert.equal(sandbox.window.CadyxScanView.placeCloudForPreview(sourcePreview, null), null);
+const planeCheck = sandbox.window.CadyxScanView.matchedMarkersOnPlane;
+const samplePlane = { origin: [0, 0, 0], zAxis: [0, 0, 1] };
+const markerMatches = [0, 1, 2, 3].map(sourceIndex => ({ sourceIndex }));
+assert.equal(planeCheck([0, 0, 0, 10, 0, 0.2, 0, 10, -0.1, 10, 10, 0], samplePlane, markerMatches), true);
+assert.equal(planeCheck([0, 0, 0, 10, 0, 0.2, 0, 10, -0.1, 10, 10, 12], samplePlane, markerMatches), false,
+  'a plausible 2D map match cannot validate a marker far from the measured plane');
+const fallback = sandbox.window.CadyxScanView.placeUnalignedLiveCloud(
+  new Float32Array([10, 2, -100, 20, 7, -110, 30, 12, -120]));
+assert.ok(fallback.positions[2] >= 0 && fallback.positions[5] >= 0 && fallback.positions[8] >= 0,
+  'the approximate preview is grounded above the table');
+assert.ok(Math.abs((fallback.positions[0] + fallback.positions[6]) / 2) < 6,
+  'the approximate preview is centered horizontally');
+const candidateFrame = { origin: [0, 0, 0], xAxis: [1, 0, 0], yAxis: [0, 1, 0], zAxis: [0, 0, 1] };
+const candidateMap = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+const candidate1 = sandbox.window.CadyxScanView.updateTableAlignmentCandidate(null, candidateFrame, candidateMap, 1);
+const candidate2 = sandbox.window.CadyxScanView.updateTableAlignmentCandidate(candidate1, candidateFrame, candidateMap, 2);
+assert.equal(candidate2.count, 2);
+assert.equal(sandbox.window.CadyxScanView.updateTableAlignmentCandidate(candidate2, candidateFrame,
+  { ...candidateMap, tx: 20 }, 3).count, 1, 'an unstable estimated table center restarts confirmation');
+const rotateMap = angle => ({ ...candidateMap, a: Math.cos(angle), b: -Math.sin(angle),
+  c: Math.sin(angle), d: Math.cos(angle) });
+const spinning1 = sandbox.window.CadyxScanView.updateTableAlignmentCandidate(null, candidateFrame, candidateMap, 1, 0, true);
+const spinning2 = sandbox.window.CadyxScanView.updateTableAlignmentCandidate(spinning1, candidateFrame,
+  rotateMap(-5 * Math.PI / 180), 2, 5, true);
+assert.equal(spinning2.ready, false, 'a rotating table needs a measurable change of angle');
+assert.equal(sandbox.window.CadyxScanView.updateTableAlignmentCandidate(spinning2, candidateFrame,
+  rotateMap(-12 * Math.PI / 180), 3, 12, true).ready, true);
+assert.equal(sandbox.window.CadyxScanView.updateTableAlignmentCandidate(spinning2, candidateFrame,
+  rotateMap(12 * Math.PI / 180), 3, 12, true).count, 1,
+  'a map rotating in the wrong direction cannot confirm a tabletop plane');
+const planeMarkers = [-20, -20, 0, 20, -20, 0, -20, 20, 0, 20, 20, 0, 0, 0, 0];
+const plane1 = sandbox.window.CadyxScanView.updateLivePlaneCandidate(null, candidateFrame, planeMarkers, 1);
+const plane2 = sandbox.window.CadyxScanView.updateLivePlaneCandidate(plane1, candidateFrame, planeMarkers, 2);
+assert.equal(plane2.ready, false);
+assert.equal(sandbox.window.CadyxScanView.updateLivePlaneCandidate(plane2, candidateFrame, planeMarkers, 3).ready, true,
+  'a distributed planar marker set must persist across frames before defining XY');
+assert.equal(sandbox.window.CadyxScanView.updateLivePlaneCandidate(null, candidateFrame,
+  [0, 0, 0, 10, 0, 0, 20, 0, 0, 30, 0, 0, 40, 0, 0], 1), null,
+  'collinear detections cannot establish a tabletop plane');
+const onPlane = sandbox.window.CadyxScanView.placePlaneAlignedLiveCloud(
+  new Float32Array([0, 0, 0, 10, 0, 3, -10, 0, 4, 0, 8, 8]), candidateFrame);
+assert.equal(onPlane.count, 3, 'table surface returns are excluded while points above XY remain');
+assert.ok([...onPlane.positions].filter((_, index) => index % 3 === 2).every(value => value > 0));
 let sampledLivePixels = 0;
 const liveSampleSlots = new Set();
 for (let y = 0; y < 400; y += 1) {
@@ -225,6 +268,14 @@ const recoveredMarkerFit = sandbox.window.CadyxScanView.registerTableMarkers(
 );
 assert.equal(recoveredMarkerFit.matches.length, uniqueMarkerPattern.length,
   "periodic global registration replaces a plausible partial tracked fit with the complete unique-pattern fit");
+const mirroredPattern = [[0, 0], [17, 1], [3, 23], [25, 32], [41, 7]];
+const mirroredTargets = mirroredPattern.map(([x, y]) => [x, -y]);
+const mirroredPairs = mirroredPattern.map((_, sourceIndex) => ({ sourceIndex, targetIndex: sourceIndex }));
+assert.equal(sandbox.window.CadyxScanView.registerTableMarkers(mirroredPattern,
+  { points: mirroredTargets }, 0.01, mirroredPairs, false).reflection, -1);
+assert.throws(() => sandbox.window.CadyxScanView.registerTableMarkers(mirroredPattern,
+  { points: mirroredTargets }, 0.01, mirroredPairs, false, false), /не сопоставилась/,
+  'live alignment must not accept an otherwise exact mirrored map fit');
 for (const frame of liveRawFrames) {
   for (const [centerX, centerY] of centers) {
     for (let y = centerY - 16; y <= centerY + 16; y += 1) for (let x = centerX - 16; x <= centerX + 16; x += 1) {
@@ -241,8 +292,9 @@ for (const frame of liveRawFrames) {
   }
 }
 let liveFrameSequence = 0;
+liveRawFrames.push(liveRawFrames[1], liveRawFrames[1]);
 const waitUntil = async predicate => {
-  const deadline = Date.now() + 2000;
+  const deadline = Date.now() + 8000;
   while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
 };
 const fetchPreview = async url => {
@@ -340,7 +392,7 @@ let mappedLiveGeometry = null;
 await waitUntil(() => {
   if (viewerLoads.length < livePreviewLoadStart + 3) return false;
   const geometry = viewerLoads.at(-1)?.geometry;
-  if (!geometry?.pointLayers?.some(layer => layer.style?.color === "#00d8ff")) return false;
+  if (!geometry?.pointLayers?.some(layer => layer.style?.color === "#ff4545")) return false;
   mappedLiveGeometry = geometry;
   return true;
 });
@@ -349,13 +401,11 @@ assert.equal(viewport.dataset.scanPreviewMode, "live");
 assert.equal(mappedLiveGeometry.pointPreviewLimit, 8_000);
 const emptyTableGeometry = mappedLiveGeometry;
 const mappedMarkerLayer = emptyTableGeometry.pointLayers.find(layer => layer.style.color === "#d4f6ff");
-const matchedMarkerLayer = emptyTableGeometry.pointLayers.find(layer => layer.style.color === "#00d8ff");
 assert.equal(emptyTableGeometry.points.length, 0, "raw scan samples do not masquerade as map markers");
 assert.equal(mappedMarkerLayer.points.length, centers.length, "all saved map markers remain visible");
-assert.equal(matchedMarkerLayer.points.length, centers.length, "only map-confirmed current markers are highlighted");
-assert.equal(matchedMarkerLayer.style.size, 12);
+const matchedMarkerLayer = emptyTableGeometry.pointLayers.find(layer => layer.style.color === "#ff4545");
+assert.equal(matchedMarkerLayer.points.length, centers.length, "confirmed markers are highlighted in red");
 assert.equal(mappedMarkerLayer.style.shape, "circle");
-assert.equal(matchedMarkerLayer.style.shape, "circle");
 tableButton.click();
 assert.equal(viewport.dataset.scanPreviewMode, 'live', 'hiding the table does not stop live preview');
 assert.equal(viewerLoads.at(-1).geometry.triangles.length, 0);
@@ -364,7 +414,7 @@ assert.ok(!viewerLoads.at(-1).geometry.pointLayers.some(layer => layer.style.col
 tableButton.click();
 assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0, 'the live table can be restored');
 const markerPositions = emptyTableGeometry.positions;
-for (const pointIndex of [...mappedMarkerLayer.points, ...matchedMarkerLayer.points]) {
+for (const pointIndex of mappedMarkerLayer.points) {
   const index = pointIndex * 3;
   assert.ok(Math.abs(markerPositions[index + 2]) < 2, "map markers lie on the tabletop plane");
   assert.ok(Math.hypot(markerPositions[index], markerPositions[index + 1]) <= 100,
@@ -431,7 +481,8 @@ for (let y = 0; y < 400; y += 1) for (let x = 0; x < 640; x += 1) {
   translatedMapFrame[translatedOffset] = unshiftedMapFrame[depthOffset];
   translatedMapFrame[translatedOffset + 1] = unshiftedMapFrame[depthOffset + 1];
 }
-liveRawFrameSource = [unshiftedMapFrame, translatedMapFrame, new Uint8Array(640 * 400 * 2)];
+liveRawFrameSource = [unshiftedMapFrame, unshiftedMapFrame, unshiftedMapFrame,
+  translatedMapFrame, new Uint8Array(640 * 400 * 2)];
 liveFrameSequence = 0;
 sandbox.window.cadyxUiReloadCamera = {
   orientation: [0, 0, -1, 0, 1, 0, 1, 0, 0], zoom: 1.7, panX: 13, panY: -9, projection: "orthographic",
@@ -442,53 +493,45 @@ const mapAlignedView = sandbox.window.CadyxScanView.initialize({
 }, undefined, fetchPreview);
 const mapAlignedStart = viewerLoads.length;
 mapAlignedView.showLivePreview({ open: true });
-await waitUntil(() => viewerLoads.length >= mapAlignedStart + 4
-  && liveFrameSequence >= 2);
+await waitUntil(() => viewerLoads.length >= mapAlignedStart + 6
+  && liveFrameSequence >= 4);
 assert.ok(viewerCameraUpdates.includes(savedReloadCamera),
   "the saved camera is restored after the immediate table scene load");
 assert.equal(viewerLoads[mapAlignedStart + 1].options.reset, false,
   "loading the table map does not replace the restored user camera");
-const mapAlignedGeometries = [viewerLoads[mapAlignedStart + 2].geometry, viewerLoads[mapAlignedStart + 3].geometry];
+const mapAlignedGeometries = [viewerLoads[mapAlignedStart + 4].geometry, viewerLoads[mapAlignedStart + 5].geometry];
 const mappedMarkerCoordinates = mapAlignedGeometries.map(geometry => {
   const layer = geometry.pointLayers.find(item => item.style.color === "#d4f6ff");
-  const matchedLayer = geometry.pointLayers.find(item => item.style.color === "#00d8ff");
   assert.equal(layer.points.length, centers.length);
-  assert.equal(matchedLayer.points.length, centers.length);
+  assert.equal(geometry.pointLayers.find(item => item.style.color === "#ff4545").points.length, centers.length);
   assert.equal(geometry.pointLayers.some(item => item.style.color === "#ff9d54"), false,
     "an empty tabletop contains no live surface cloud");
-  return [...matchedLayer.points].map(index => [...geometry.positions.slice(index * 3, index * 3 + 3)]);
+  return [...layer.points].map(index => [...geometry.positions.slice(index * 3, index * 3 + 3)]);
 });
 assert.deepEqual(mappedMarkerCoordinates[0], mappedMarkerCoordinates[1],
   "mapped marker highlights stay at exact table-map coordinates as image-space detections move");
 assert.match(mapAlignmentOutput.textContent, /Карта \d+\/5/,
   "the live preview reports its current table-map correspondence quality");
-await waitUntil(() => liveFrameSequence >= 3);
+await waitUntil(() => liveFrameSequence >= 5);
 await new Promise(resolve => setTimeout(resolve, 30));
-assert.equal(viewerLoads.length, mapAlignedStart + 4,
+assert.equal(viewerLoads.length, mapAlignedStart + 6,
   "a frame without enough table markers does not replace the last map-aligned cloud with unaligned points");
 assert.match(mapAlignmentOutput.textContent, /последний кадр/,
   "the map status explains when the preview is retaining its last aligned frame");
 const lastAlignedGeometry = viewerLoads.at(-1).geometry;
 const lastMapLayer = lastAlignedGeometry.pointLayers.find(layer => layer.style.color === "#d4f6ff");
-const lastMatchedLayer = lastAlignedGeometry.pointLayers.find(layer => layer.style.color === "#00d8ff");
 const mapBeforeDisplayRotation = [...lastAlignedGeometry.positions.slice(lastMapLayer.points[0] * 3,
   lastMapLayer.points[0] * 3 + 3)];
-const matchedBeforeDisplayRotation = [...lastAlignedGeometry.positions.slice(lastMatchedLayer.points[0] * 3,
-  lastMatchedLayer.points[0] * 3 + 3)];
 const beforeDisplayRotationLoads = viewerLoads.length;
 turntableAngleDisplay.textContent = "15.0°";
 await waitUntil(() => viewerLoads.length > beforeDisplayRotationLoads);
 const rotatedGeometry = viewerLoads.at(-1).geometry;
 const rotatedMapLayer = rotatedGeometry.pointLayers.find(layer => layer.style.color === "#d4f6ff");
-const rotatedMatchedLayer = rotatedGeometry.pointLayers.find(layer => layer.style.color === "#00d8ff");
 const rotatedMap = [...rotatedGeometry.positions.slice(rotatedMapLayer.points[0] * 3,
   rotatedMapLayer.points[0] * 3 + 3)];
-const rotatedMatched = [...rotatedGeometry.positions.slice(rotatedMatchedLayer.points[0] * 3,
-  rotatedMatchedLayer.points[0] * 3 + 3)];
 assert.deepEqual([...rotatedGeometry.positions.slice(0, 3)],
   [...lastAlignedGeometry.positions.slice(0, 3)], "the circular lower support stays fixed while the tabletop moves");
-for (const [actual, before] of [[rotatedMap, mapBeforeDisplayRotation],
-  [rotatedMatched, matchedBeforeDisplayRotation]]) {
+for (const [actual, before] of [[rotatedMap, mapBeforeDisplayRotation]]) {
   const expected = sandbox.window.CadyxScanView.transformTableDisplayPoint(before, 15, 0);
   assert.ok(Math.hypot(...actual.map((value, axis) => value - expected[axis])) < 1e-4,
     "the confirmed map markers rotate together with the table display");
@@ -500,15 +543,15 @@ for (let y = 260; y < 300; y += 1) for (let x = 280; x < 330; x += 1) {
   const offset = (y * 640 + x) * 2;
   objectWithoutMarkers[offset] = 110;
 }
-liveRawFrameSource = [unshiftedMapFrame, objectWithoutMarkers];
+liveRawFrameSource = [unshiftedMapFrame, unshiftedMapFrame, unshiftedMapFrame, objectWithoutMarkers];
 liveFrameSequence = 0;
 const fixedPlacementView = sandbox.window.CadyxScanView.initialize({
   cloudButton: element(), meshButton: element(), viewport: element(), viewer, getModelGeometry, meshReady: true,
 }, undefined, fetchPreview);
 const fixedPlacementStart = viewerLoads.length;
 fixedPlacementView.showLivePreview({ open: true });
-await waitUntil(() => liveFrameSequence >= 2);
-assert.ok(viewerLoads.length >= fixedPlacementStart + 4,
+await waitUntil(() => liveFrameSequence >= 4);
+assert.ok(viewerLoads.length >= fixedPlacementStart + 6,
   'after initial placement, a valid frame still renders when markers disappear');
 const objectGeometry = viewerLoads.at(-1).geometry;
 const objectLayer = objectGeometry.pointLayers.find(layer => layer.style.color === '#ff9d54');
@@ -562,8 +605,9 @@ assert.ok(viewerLoads.at(-1).geometry.triangles.length > 0,
   "the table remains visible immediately while preview startup is waiting on scanner APIs");
 await waitUntil(() => liveFrameSequence >= 2 && viewerLoads.length > unalignedStart);
 const firstUnaligned = viewerLoads.at(-1).geometry;
-assert.equal(displayedLiveCloudCount(firstUnaligned), 0,
-  "unaligned camera points are hidden until they can be placed on the table map");
+assert.ok(displayedLiveCloudCount(firstUnaligned) > 0,
+  "without a confirmed map, camera points remain visible in the approximate centered preview");
+assert.match(mapAlignmentOutput.textContent, /Примерное размещение/);
 assert.equal(firstUnaligned.pointLayers.find(layer => layer.style.color === "#d4f6ff").points.length, centers.length,
   "the saved marker map remains visible while live detections wait for enough correspondences");
 assert.ok(firstUnaligned.triangles.length > 0,
@@ -592,8 +636,8 @@ const movingStart = viewerLoads.length;
 movingView.showLivePreview({ open: true });
 await waitUntil(() => liveFrameSequence >= 2 && viewerLoads.length > movingStart);
 const movingSecondGeometry = viewerLoads.at(-1).geometry;
-assert.equal(displayedLiveCloudCount(movingSecondGeometry), 0,
-  "live detections outside reliable map correspondences are not shown as table markers");
+assert.ok(displayedLiveCloudCount(movingSecondGeometry) > 0,
+  "unmatched live points remain visible using approximate placement");
 assert.ok(movingSecondGeometry.triangles.length > 0,
   "misaligned frames leave the opaque table model visible in the same viewport");
 assert.equal(movingSecondGeometry.pointLayers.some(layer => layer.style.color === "#00d8ff"), false,
@@ -605,7 +649,7 @@ for (let y = 40; y < 170; y += 1) for (let x = 80; x < 300; x += 1) {
   const pixel = y * 640 + x;
   denseFrame[pixel * 2] = 100;
 }
-liveRawFrameSource = [denseFrame, denseFrame];
+liveRawFrameSource = [denseFrame, denseFrame, denseFrame, denseFrame];
 liveFrameSequence = 0;
 const denseView = sandbox.window.CadyxScanView.initialize({
   cloudButton: element(), meshButton: element(), viewport: element(), viewer, getModelGeometry, meshReady: true,

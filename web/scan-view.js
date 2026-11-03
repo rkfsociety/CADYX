@@ -44,6 +44,98 @@
     && depth >= MIN_SCAN_DEPTH_MM && depth <= MAX_SCAN_DEPTH_MM;
   const shouldRunTableMapRansac = (priorMatchCount, frameSequence, lastSequence, mapPointCount = 4) =>
     lastSequence === 0 || frameSequence - lastSequence >= 8 && priorMatchCount < mapPointCount;
+  const matchedMarkersOnPlane = (centers, frame, matches, tolerance = 2.5) =>
+    matches.length >= 4 && matches.every(({ sourceIndex }) => {
+      const index = sourceIndex * 3;
+      if (index < 0 || index + 2 >= centers.length) return false;
+      const distance = frame.zAxis.reduce((sum, component, axis) =>
+        sum + component * (centers[index + axis] - frame.origin[axis]), 0);
+      return Number.isFinite(distance) && Math.abs(distance) <= tolerance;
+    });
+  const updateTableAlignmentCandidate = (previous, frame, map, sequence, poseAngle = 0, spinning = false) => {
+    const determinant = map.a * map.d - map.b * map.c;
+    if (!Number.isFinite(determinant) || determinant <= 1e-10) return null;
+    const x = (map.b * map.ty - map.d * map.tx) / determinant;
+    const y = (map.c * map.tx - map.a * map.ty) / determinant;
+    const center = frame.origin.map((value, axis) => value + x * frame.xAxis[axis] + y * frame.yAxis[axis]);
+    if (!center.every(Number.isFinite)) return null;
+    const normal = frame.zAxis;
+    const mapAngle = Math.atan2(map.c, map.a) * 180 / Math.PI;
+    const wrapAngle = value => (value + 540) % 360 - 180;
+    const poseDelta = previous ? wrapAngle(poseAngle - previous.initialPose) : 0;
+    const mapDelta = previous ? wrapAngle(mapAngle - previous.initialMapAngle) : 0;
+    const compatible = previous && sequence > previous.sequence && sequence - previous.sequence <= 24
+      && normal.reduce((sum, value, axis) => sum + value * previous.normal[axis], 0) >= 0.98
+      && Math.hypot(...center.map((value, axis) => value - previous.center[axis])) <= 8
+      && (!spinning || Math.abs(wrapAngle(mapDelta + poseDelta)) <= 8);
+    const count = compatible ? previous.count + 1 : 1;
+    return { center: compatible ? previous.center : center, normal: compatible ? previous.normal : [...normal],
+      initialPose: compatible ? previous.initialPose : poseAngle,
+      initialMapAngle: compatible ? previous.initialMapAngle : mapAngle,
+      sequence, count, ready: count >= 3 && (!spinning || compatible && Math.abs(poseDelta) >= 10) };
+  };
+  const updateLivePlaneCandidate = (previous, frame, centers, sequence) => {
+    const points = [];
+    for (let i = 0; i + 2 < centers.length; i += 3) {
+      const relative = frame.origin.map((value, axis) => centers[i + axis] - value);
+      const dot = axis => axis.reduce((sum, value, index) => sum + value * relative[index], 0);
+      if (Math.abs(dot(frame.zAxis)) <= 2.5) points.push([dot(frame.xAxis), dot(frame.yAxis)]);
+    }
+    if (points.length < 5) return null;
+    const mean = [0, 1].map(axis => points.reduce((sum, point) => sum + point[axis], 0) / points.length);
+    let xx = 0, xy = 0, yy = 0;
+    for (const [x, y] of points) { xx += (x - mean[0]) ** 2; xy += (x - mean[0]) * (y - mean[1]); yy += (y - mean[1]) ** 2; }
+    const delta = Math.hypot(xx - yy, 2 * xy);
+    const largest = (xx + yy + delta) / 2, smallest = (xx + yy - delta) / 2;
+    if (largest < 400 || smallest < largest * 0.02) return null;
+    const compatible = previous && sequence > previous.sequence && sequence - previous.sequence <= 24
+      && frame.zAxis.reduce((sum, value, axis) => sum + value * previous.frame.zAxis[axis], 0) >= 0.995
+      && Math.abs(frame.zAxis.reduce((sum, value, axis) =>
+        sum + value * (frame.origin[axis] - previous.frame.origin[axis]), 0)) <= 2.5;
+    const count = compatible ? previous.count + 1 : 1;
+    return { frame: compatible ? previous.frame : frame, sequence, count, ready: count >= 3 };
+  };
+  const placePlaneAlignedLiveCloud = (positions, frame, previous = null) => {
+    const projected = [];
+    for (let i = 0; i < positions.length; i += 3) {
+      const relative = frame.origin.map((value, axis) => positions[i + axis] - value);
+      const point = [frame.xAxis, frame.yAxis, frame.zAxis].map(axis =>
+        axis.reduce((sum, value, index) => sum + value * relative[index], 0));
+      if (point.every(Number.isFinite) && point[2] > LIVE_TABLE_SURFACE_DISPLAY_HEIGHT) projected.push(point);
+    }
+    if (projected.length < LIVE_MIN_OBJECT_PREVIEW_POINTS) return null;
+    const ranges = [0, 1].map(axis => projected.map(point => point[axis]).sort((a, b) => a - b));
+    const target = ranges.map(axis => (axis[Math.floor((axis.length - 1) * 0.05)]
+      + axis[Math.floor((axis.length - 1) * 0.95)]) / 2);
+    const anchor = previous ? target.map((value, axis) => previous[axis] * 0.85 + value * 0.15) : target;
+    const result = new Float32Array(projected.length * 3);
+    projected.forEach((point, index) => result.set([point[0] - anchor[0], point[1] - anchor[1], point[2]], index * 3));
+    return { positions: result, anchor, count: projected.length };
+  };
+  // With no verified plane, camera up is an approximation; it is not a measured datum.
+  const placeUnalignedLiveCloud = (positions, previous = null) => {
+    if (!positions || positions.length < 9 || positions.length % 3) return null;
+    const coordinates = [[], [], []];
+    for (let i = 0; i < positions.length; i += 3) {
+      if (![positions[i], positions[i + 1], positions[i + 2]].every(Number.isFinite)) return null;
+      coordinates[0].push(positions[i]);
+      coordinates[1].push(-positions[i + 2]);
+      coordinates[2].push(positions[i + 1]);
+    }
+    for (const axis of coordinates) axis.sort((a, b) => a - b);
+    const quantile = (axis, fraction) => axis[Math.floor((axis.length - 1) * fraction)];
+    const target = [(quantile(coordinates[0], 0.05) + quantile(coordinates[0], 0.95)) / 2,
+      (quantile(coordinates[1], 0.05) + quantile(coordinates[1], 0.95)) / 2,
+      quantile(coordinates[2], 0.02)];
+    const anchor = previous ? target.map((value, axis) => previous[axis] * 0.85 + value * 0.15) : target;
+    const result = new Float32Array(positions.length);
+    for (let i = 0; i < positions.length; i += 3) {
+      result[i] = positions[i] - anchor[0];
+      result[i + 1] = -positions[i + 2] - anchor[1];
+      result[i + 2] = Math.max(0, positions[i + 1] - anchor[2]);
+    }
+    return { positions: result, anchor };
+  };
   const createMeshBuilder = () => ({ positions: [], triangles: [], triangleColors: [] });
   const addTriangle = (mesh, first, second, third, color) => {
     mesh.triangles.push(first, second, third);
@@ -573,11 +665,12 @@
   const buildTableMapOverlay = tableMap => {
     const positions = [];
     const markerPoints = [];
+    const maxRadius = tableMap.points.reduce((maximum, point) => Math.max(maximum, Math.hypot(...point)), 0);
+    const scale = maxRadius > 93 ? 93 / maxRadius : 1;
     for (const point of tableMap.points) {
       markerPoints.push(positions.length / 3);
-      positions.push(point[0], point[1], 0);
+      positions.push(point[0] * scale, point[1] * scale, 0.2);
     }
-    const maxRadius = tableMap.points.reduce((maximum, point) => Math.max(maximum, Math.hypot(...point)), 0);
     return { positions: new Float32Array(positions), markerPoints: new Uint32Array(markerPoints),
       lines: new Uint32Array(0), maxRadius };
   };
@@ -612,9 +705,9 @@
       .filter(match => match.distance <= threshold && nearestSource[match.targetIndex]?.index === match.sourceIndex);
   };
 
-  const fitMarkerSimilarity = (source, target, pairs) => {
+  const fitMarkerSimilarity = (source, target, pairs, allowReflection = true) => {
     let best = null;
-    for (const reflection of [1, -1]) {
+    for (const reflection of allowReflection ? [1, -1] : [1]) {
       const sourceCenter = [0, 0], targetCenter = [0, 0];
       for (const pair of pairs) for (let axis = 0; axis < 2; axis += 1) {
         sourceCenter[axis] += (axis ? reflection * source[pair.sourceIndex][axis] : source[pair.sourceIndex][axis]) / pairs.length;
@@ -647,13 +740,14 @@
     return best?.transform || null;
   };
 
-  const registerTableMarkers = (livePoints, tableMap, threshold = 5, priorPairs = null, allowRansac = true) => {
+  const registerTableMarkers = (livePoints, tableMap, threshold = 5, priorPairs = null, allowRansac = true,
+    allowReflection = true) => {
     if (!Array.isArray(livePoints) || livePoints.length < 4 || tableMap?.points?.length < 4) {
       throw new Error('Для привязки к карте стола нужны минимум четыре маркера.');
     }
     let best = null;
     if (Array.isArray(priorPairs) && priorPairs.length >= 4) {
-      const transform = fitMarkerSimilarity(livePoints, tableMap.points, priorPairs);
+      const transform = fitMarkerSimilarity(livePoints, tableMap.points, priorPairs, allowReflection);
       if (transform) {
         const anchorResiduals = priorPairs.map(pair => {
           const projected = applyMapTransform(livePoints[pair.sourceIndex], transform);
@@ -678,7 +772,7 @@
         const sourceA = randomIndex(livePoints.length), sourceB = randomIndex(livePoints.length);
         const targetA = randomIndex(tableMap.points.length), targetB = randomIndex(tableMap.points.length);
         if (sourceA === sourceB || targetA === targetB) continue;
-        for (const reflection of [1, -1]) {
+        for (const reflection of allowReflection ? [1, -1] : [1]) {
           const transform = transformFromPair(livePoints[sourceA], livePoints[sourceB],
             tableMap.points[targetA], tableMap.points[targetB], reflection);
           if (!transform) continue;
@@ -692,7 +786,7 @@
     if (!best) throw new Error('Карта стола не сопоставилась: нужны устойчивые соответствия минимум трёх маркеров.');
     let pairs = best.pairs, transform = best.transform;
     for (let iteration = 0; iteration < 5; iteration += 1) {
-      const refined = fitMarkerSimilarity(livePoints, tableMap.points, pairs);
+      const refined = fitMarkerSimilarity(livePoints, tableMap.points, pairs, allowReflection);
       if (!refined) break;
       const matches = mutualMarkerMatches(livePoints, tableMap.points, refined, threshold);
       if (matches.length < 4) break;
@@ -777,6 +871,11 @@
     let liveCalibration = null;
     let liveTableFrame = null;
     let liveAnchorPose = null;
+    let liveFallbackAnchor = null;
+    let liveAlignmentCandidate = null;
+    let livePlaneCandidate = null;
+    let liveApproximatePlane = null;
+    let livePlaneAnchor = null;
     let liveTableMap = null;
     let liveTableOverlay = null;
     let turntableMapCache = null;
@@ -793,6 +892,7 @@
     let turntableDisplayFrame = 0;
     let turntableDisplayLastFrameAt = 0;
     let liveMarkerTracks = [];
+    const liveMatchedMarkerTimes = new Map();
     let liveMarkerTrackSequence = 0;
     let lastMapRansacSequence = 0;
     let liveViewportInitialized = false;
@@ -1328,7 +1428,7 @@
       if (overlay && tableVisible) pointLayers.push({ points: mapMarkerPoints,
         style: { size: 6, opacity: 1, color: '#d4f6ff', shape: 'circle' } });
       if (matchedMapMarkerPoints.length) pointLayers.push({ points: matchedMapMarkerPoints,
-        style: { size: 12, opacity: 1, color: '#00d8ff', shape: 'circle' } });
+        style: { size: 8, opacity: 1, color: '#ff4545', shape: 'circle' } });
       viewer.load({ positions: combinedPositions, triangles, triangleColors,
         surfaceTriangleRanges: [{ start: 0, end: triangles.length / 3 }],
         lines: trajectoryLines, textLabels: degreeTextLabels, pointCloudVertexCount: tableVisible ? cloudPointCount : null,
@@ -1566,10 +1666,16 @@
       liveCalibration = null;
       liveTableFrame = null;
       liveAnchorPose = null;
+      liveFallbackAnchor = null;
+      liveAlignmentCandidate = null;
+      livePlaneCandidate = null;
+      liveApproximatePlane = null;
+      livePlaneAnchor = null;
       liveTableMap = null;
       liveTableOverlay = null;
       liveMapTransform = null;
       liveMarkerTracks = [];
+      liveMatchedMarkerTimes.clear();
       liveMarkerTrackSequence = 0;
       lastMapRansacSequence = 0;
       lastMapAlignedFrame = null;
@@ -1785,6 +1891,11 @@
                 if (canRegisterFromTracks || canInitializeMap) {
                   try {
                     const tableFrame = fitTableFrame(markerPositions, centerRay(liveCalibration));
+                    if (!liveApproximatePlane) {
+                      livePlaneCandidate = updateLivePlaneCandidate(livePlaneCandidate, tableFrame,
+                        markerCenterPositions, frameSequence);
+                      if (livePlaneCandidate?.ready) liveApproximatePlane = livePlaneCandidate.frame;
+                    }
                     const markerCoordinates = [];
                     for (let index = 0; index < markerCenterPositions.length; index += 3) {
                       const relative = [markerCenterPositions[index] - tableFrame.origin[0],
@@ -1796,17 +1907,25 @@
                       priorMarkerMatches.length, frameSequence, lastMapRansacSequence, liveTableMap.points.length);
                     if (allowRansac) lastMapRansacSequence = frameSequence;
                     const mapTransform = registerTableMarkers(markerCoordinates, liveTableMap, 5,
-                      priorMarkerMatches, allowRansac);
-                    if (!hadTableAlignment) {
-                      liveTableFrame = tableFrame;
-                      liveMapTransform = mapTransform;
-                      liveAnchorPose = currentTurntableDisplayPose();
+                      priorMarkerMatches, allowRansac, false);
+                    if (mapTransform.reflection !== 1 || !matchedMarkersOnPlane(markerCenterPositions, tableFrame, mapTransform.matches)) {
+                      throw new Error('Плоскость или ориентация маркеров не подтверждена.');
                     }
                     liveMarkerTracks = mapTransform.matches.map(match => ({
                       pixel: markerCenterPixelPositions[match.sourceIndex], mapIndex: match.targetIndex,
                     }));
-                    matchedMapIndices = mapTransform.matches.map(match => match.targetIndex);
                     liveMarkerTrackSequence = frameSequence;
+                    if (!hadTableAlignment) {
+                      liveAlignmentCandidate = updateTableAlignmentCandidate(liveAlignmentCandidate, tableFrame,
+                        mapTransform, frameSequence, currentTurntableDisplayPose().angle, turntableSpinIsActive());
+                      if (!liveAlignmentCandidate?.ready) {
+                        throw new Error('Проверяется устойчивость плоскости стола.');
+                      }
+                      liveTableFrame = tableFrame;
+                      liveMapTransform = mapTransform;
+                      liveAnchorPose = currentTurntableDisplayPose();
+                    }
+                    matchedMapIndices = mapTransform.matches.map(match => match.targetIndex);
                     tableAligned = true;
                     liveMapAlignmentSummary = `Карта ${mapTransform.matches.length}/${liveTableMap.points.length}`
                       + ` · остаток ${mapTransform.medianResidual.toFixed(1)} ед.`;
@@ -1819,10 +1938,29 @@
                 } else if (hadTableAlignment) {
                   setMapAlignmentStatus('Привязка сохранена · мало маркеров', 'stale');
                 }
+                const markerTime = clock();
+                for (const index of matchedMapIndices) liveMatchedMarkerTimes.set(index, markerTime);
+                for (const [index, seenAt] of liveMatchedMarkerTimes) {
+                  if (markerTime - seenAt > 500) liveMatchedMarkerTimes.delete(index);
+                }
+                matchedMapIndices = [...liveMatchedMarkerTimes.keys()];
                 if (!tableAligned && liveTableMap) {
                   setMapAlignmentStatus(`Карта: ${regions}/${liveTableMap.points.length} маркеров; нужно 4`, 'waiting');
                 }
                 if (!tableAligned) {
+                  const approximate = liveApproximatePlane
+                    ? placePlaneAlignedLiveCloud(positions.subarray(0, count * 3), liveApproximatePlane, livePlaneAnchor)
+                    : placeUnalignedLiveCloud(positions.subarray(0, count * 3), liveFallbackAnchor);
+                  if (approximate) {
+                    if (liveApproximatePlane) livePlaneAnchor = approximate.anchor;
+                    else liveFallbackAnchor = approximate.anchor;
+                    lastMapAlignedFrame = { positions: approximate.positions, count: approximate.count ?? count, markerIndices: [],
+                      matchedMapIndices: [], aligned: false };
+                    setMapAlignmentStatus(liveApproximatePlane ? 'Плоскость и центр стола приблизительные'
+                      : 'Примерное размещение · плоскость стола не подтверждена', 'waiting');
+                    renderLiveFrame({ ...lastMapAlignedFrame, reset: false });
+                    renderedFrame = true;
+                  }
                   liveFrameSequence = frameSequence;
                   return;
                 }
@@ -2185,6 +2323,9 @@
   };
 
   window.CadyxScanView = { initialize, initializeLivePreview, parseTableMarkerMap, registerTableMarkers, placeCloudForPreview,
+    matchedMarkersOnPlane, placeUnalignedLiveCloud,
+    updateTableAlignmentCandidate,
+    updateLivePlaneCandidate, placePlaneAlignedLiveCloud,
     shouldRunTableMapRansac, buildTurntableDisplayModel, hasClosedTriangleTopology, transformTableDisplayPoint, placeLiveCloudInStationaryFrame,
     livePreviewSampleIndex, isScanDepthValid, buildPreviewCloudPointIndices, buildMatchedMapMarkerPointIndices };
 })();
