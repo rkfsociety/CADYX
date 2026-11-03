@@ -1543,6 +1543,8 @@ class Scan360CaptureController:
                     return {"state": "busy", "completed_frames": 0,
                             "frame_count": self._job.frame_count, "step_degrees": self._job.step_degrees}
                 return self._latest_completed_snapshot(project_directory)
+            if self._job.process.poll() is not None and not (project_directory / self._job.run_id).is_dir():
+                return self._latest_completed_snapshot(project_directory)
             return self._snapshot_locked()
 
     def is_running(self, project_id: str, *, nonblocking: bool = False) -> bool:
@@ -1877,6 +1879,8 @@ class Scan360CaptureController:
             if not match:
                 continue
             run_id = match.group(1)
+            if pose_log.parent.name == f"scan_support_{run_id}" and not (project_directory / run_id).is_dir():
+                continue
             run_directory = (project_directory / run_id if pose_log.parent.name == f"scan_support_{run_id}"
                              else pose_log.parent)
             frame_count = cls._manifest_frame_count(run_directory, run_id)

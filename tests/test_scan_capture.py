@@ -18,6 +18,21 @@ from cadyx.scan_capture import (Scan360CaptureController, _capture_log_progress,
 
 
 class Scan360CaptureTests(unittest.TestCase):
+    def test_deleted_series_clears_finished_job_and_orphaned_support(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            run_id = "revopoint_20261010T100000Z"
+            support = project / f"scan_support_{run_id}"
+            support.mkdir()
+            (support / f"{run_id}_poses.csv").write_text("poses")
+            (support / ".cadyx-scan360-20261010T100000Z.log").write_text("sweep completed: 12 steps")
+            for index in range(12):
+                (support / f"{run_id}_pose_{index:03}.raw").touch()
+            controller = Scan360CaptureController(project, project)
+            controller._job = SimpleNamespace(project_id="project", run_id=run_id,
+                                              process=SimpleNamespace(poll=lambda: 0))
+            self.assertEqual(controller.status("project", project)["state"], "idle")
+
     def test_unprocessed_preview_uses_latest_completed_pose_in_support_folder(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

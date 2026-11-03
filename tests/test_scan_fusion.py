@@ -54,6 +54,17 @@ class ScanFusionQualityTests(unittest.TestCase):
 
 
 class ScanFusionCoreTests(unittest.TestCase):
+    def test_deleted_series_clears_finished_fusion_status(self):
+        with tempfile.TemporaryDirectory() as temp:
+            core = CadyxCore(temp, kernel=object())
+            project_id = core.create_project('scan')['project']['id']
+            series = core.workspace._project_dir(project_id) / RUN
+            series.mkdir()
+            core._scan_fusion._jobs[project_id] = {'state': 'completed', 'run_id': RUN}
+            self.assertEqual(core.scan_fusion_status(project_id)['state'], 'completed')
+            series.rmdir()
+            self.assertEqual(core.scan_fusion_status(project_id)['state'], 'idle')
+
     def test_incomplete_series_is_rejected_before_launch(self):
         with tempfile.TemporaryDirectory() as temp:
             core = CadyxCore(temp, kernel=object())

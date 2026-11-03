@@ -39,9 +39,12 @@ class ScanFusionJobs:
         finally:
             self._guard.release()
 
-    def status(self, project_id: str) -> dict[str, Any]:
+    def status(self, project_id: str, project_directory: Path) -> dict[str, Any]:
         with self._guard:
-            return copy.deepcopy(self._jobs.get(project_id, {'state': 'idle'}))
+            job = self._jobs.get(project_id, {'state': 'idle'})
+            if job.get('state') in {'completed', 'failed'} and not (project_directory / job['run_id']).is_dir():
+                return {'state': 'idle'}
+            return copy.deepcopy(job)
 
     def start(self, project_id: str, project_directory: Path, run_id: str,
               lease_id: str, heartbeat: Any) -> dict[str, Any]:

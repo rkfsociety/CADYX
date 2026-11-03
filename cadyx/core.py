@@ -163,8 +163,7 @@ class CadyxCore:
         return self._lifecycle.start_scan_fusion(project_id, run_id)
 
     def scan_fusion_status(self, project_id: str) -> dict[str, Any]:
-        self.workspace._project_dir(project_id)
-        return self._scan_fusion.status(project_id)
+        return self._scan_fusion.status(project_id, self.workspace._project_dir(project_id))
 
     def scanner_devices(self) -> dict[str, list[dict[str, Any]]]:
         return self._scan_capture.list_connected_devices()
