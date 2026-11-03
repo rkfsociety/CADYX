@@ -74,8 +74,17 @@ const response = (status, type, payload) => ({
       return response(200, 'application/json', {});
     });
   }
-  await api.requestJson('/default-headers', {}, async (_url, options) => {
+  await api.requestJson('/default-headers', { method: 'POST', body: '{}' }, async (_url, options) => {
     assert.equal(options.headers.get('content-type'), 'application/json');
+    return response(200, 'application/json', {});
+  });
+  // Bodyless reads should not send a JSON content type or trigger avoidable CORS preflights.
+  await api.requestJson('/read', { method: 'GET' }, async (_url, options) => {
+    assert.equal(options.headers.has('content-type'), false);
+    return response(200, 'application/json', {});
+  });
+  await api.requestJson('/empty-post', { method: 'POST' }, async (_url, options) => {
+    assert.equal(options.headers.has('content-type'), false);
     return response(200, 'application/json', {});
   });
 
