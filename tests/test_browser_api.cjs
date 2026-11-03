@@ -88,6 +88,21 @@ const response = (status, type, payload) => ({
     return response(200, 'application/json', {});
   });
 
+  // Browser-generated multipart boundaries and binary MIME types must not be overwritten.
+  for (const body of [new URLSearchParams('q=shape'), new Uint8Array([1, 2, 3])]) {
+    await api.requestJson('/upload', { method: 'POST', body }, async (_url, options) => {
+      assert.equal(options.headers.has('content-type'), false);
+      assert.equal(options.body, body);
+      return response(200, 'application/json', {});
+    });
+  }
+  await api.requestJson('/upload', {
+    method: 'POST', body: new Uint8Array([1]), headers: { 'Content-Type': 'application/octet-stream' },
+  }, async (_url, options) => {
+    assert.equal(options.headers.get('content-type'), 'application/octet-stream');
+    return response(200, 'application/json', {});
+  });
+
   for (const field of ['expectedRevision', 'baseVersion']) {
     const args = {projectId:'part', leaseId:'lease', expectedRevision:0, baseVersion:0,
       name:'Contour', sourceImageSha256:'digest', coordinateSystem:{}};
