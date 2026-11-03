@@ -10,6 +10,13 @@ assert.equal(summary({state:'running', frame_count:12, completed_frames:4, prepr
   preprocessing_status:'running'}).detail, 'Очистка кадров выполняется');
 assert.equal(summary({state:'failed', frame_count:12, completed_frames:6, message:'Ошибка связи'}).detail, 'Ошибка связи');
 assert.equal(summary({state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:12}).title, 'Съёмка и очистка завершены');
+assert.equal(summary({state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:5,
+  preprocessing_status:'running'}).title, 'Съёмка завершена, очистка продолжается');
+assert.equal(summary({state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:0}).title,
+  'Съёмка завершена, очистка не подтверждена');
+assert.equal(summary({state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:12,
+  preprocessing_status:'completed', preprocessing_current_frame:{source_file:'stale.ply'}}).detail, '',
+  'completed cleanup must not display a stale processing filename');
 assert.equal(summary({state:'completed', frame_count:12, completed_frames:12,
   preprocessed_frames:11, preprocessing_failed_frames:1}).title,
   'Съёмка завершена, очистка с ошибками');
@@ -29,6 +36,8 @@ render(container, {state:'running', frame_count:12, completed_frames:12, preproc
   preprocessing_status:'running', preprocessing_current_frame:{frame_index:5, source_file:'frame_005.ply'}});
 assert.equal(container.children.length, 5);
 assert.equal(container.children[0].dataset.stageState, 'completed');
+assert.equal(container.children[0].role, 'group');
+assert.match(container.children[0]['aria-label'], /Съёмка: Съёмка завершена/);
 assert.equal(container.children[1].dataset.stageState, 'active');
 assert.equal(container.children[2].dataset.stageState, 'unknown');
 assert.equal(container.children[3].dataset.stageState, 'unknown');
@@ -39,6 +48,8 @@ assert.equal(container.children[0].dataset.stageState, 'failed');
 assert.equal(container.children[1].dataset.stageState, 'failed');
 render(container, {state:'busy', frame_count:12});
 assert.equal(container.children[0].dataset.stageState, 'unknown');
+assert.equal(container.children[0].children[1].children[1]['aria-hidden'], 'true',
+  'unknown progress must not be announced as a fabricated 0 / 1');
 assert.equal(container.children[1].dataset.stageState, 'unknown');
 
 const capture = {state:'completed', frame_count:12, completed_frames:12, preprocessed_frames:12,
@@ -54,6 +65,9 @@ assert.equal(container.children[2].dataset.stageState, 'completed');
 assert.equal(container.children[3].dataset.stageState, 'active');
 render(container, capture, {...job, state:'failed', phase:'cleanup', error:'Ошибка очистки'});
 assert.equal(container.children[3].dataset.stageState, 'failed');
+render(container, capture, {...job, state:'failed', phase:'completed', error:'finalization failed'});
+assert.equal(container.children[3].dataset.stageState, 'failed',
+  'failed finalization must not appear complete even with a completed phase label');
 assert.equal(container.children[4].children[2].textContent, 'Ошибка очистки');
 render(container, capture, {...job, state:'completed', phase:'completed', result:{cleaned:'result.ply'}});
 assert.equal(container.children[3].dataset.stageState, 'completed');
@@ -103,3 +117,7 @@ render(container, capture, {...job, state:'failed', phase:'publishing', error:'d
 assert.equal(container.children[2].dataset.stageState, 'completed');
 assert.equal(container.children[3].dataset.stageState, 'failed');
 assert.equal(container.children[3].children[1].children[2].textContent, 'Сохранение результата остановлено');
+
+// The desktop progress strip must lay out its stages horizontally, not as stacked blocks.
+const styles = require('node:fs').readFileSync(require('node:path').join(__dirname, '../web/style.css'), 'utf8');
+assert.match(styles, /\.scan-progress\s*\{[^}]*display:\s*flex;/);

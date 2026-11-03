@@ -6,16 +6,20 @@
     const captured = count(scan.completed_frames), cleaned = count(scan.preprocessed_frames);
     const failed = count(scan.preprocessing_failed_frames);
     const current = scan.preprocessing_current_frame;
-    const processing = current && typeof current.source_file === 'string' ? current.source_file : null;
+    const processing = scan.preprocessing_status === 'running' && current && typeof current.source_file === 'string' ? current.source_file : null;
     const running = scan.state === 'running';
     const preprocessingFailed = scan.preprocessing_status === 'failed' || failed > 0;
+    const cleanupComplete = !preprocessingFailed &&
+      ((total > 0 && cleaned === total) || (total === 0 && scan.preprocessing_status === 'completed'));
     const title = scan.state === 'failed' ? 'Сканирование остановлено с ошибкой' :
       scan.state === 'completed' && preprocessingFailed ? 'Съёмка завершена, очистка с ошибками' :
-      scan.state === 'completed' ? 'Съёмка и очистка завершены' :
+      scan.state === 'completed' && cleanupComplete ? 'Съёмка и очистка завершены' :
+      scan.state === 'completed' && ['running', 'partial'].includes(scan.preprocessing_status) ? 'Съёмка завершена, очистка продолжается' :
+      scan.state === 'completed' ? 'Съёмка завершена, очистка не подтверждена' :
       scan.state === 'busy' ? 'Сканер занят' : captured < total ? 'Съёмка и обработка' : 'Обработка кадров';
     const detail = scan.state === 'failed' ? (scan.message || 'Не удалось завершить съёмку') :
       processing ? `Обрабатывается: ${processing}` :
-      running && scan.preprocessing_status === 'running' ? 'Очистка кадров выполняется' :
+      (running || scan.state === 'completed') && scan.preprocessing_status === 'running' ? 'Очистка кадров выполняется' :
       running && captured === total ? 'Завершение съёмки и обработки' : '';
     return {title, detail, total, captured, cleaned, failed, state: scan.state};
   }
@@ -33,6 +37,8 @@
     const stage = (number, label, value, total, state, note) => {
       const section = document.createElement('div'); section.className = 'scan-progress-stage';
       section.dataset.stageState = state;
+      section.setAttribute('role', 'group');
+      section.setAttribute('aria-label', `${label}: ${note}`);
       const badge = text('span', 'scan-progress-badge', String(number));
       const body = document.createElement('div'); body.className = 'scan-progress-body';
       const heading = document.createElement('div'); heading.className = 'scan-progress-heading';
@@ -41,13 +47,15 @@
       heading.append(text('strong', '', label), text('span', 'scan-progress-count', maximum ? `${progress} / ${maximum}` : '—'));
       const bar = document.createElement('progress'); bar.max = maximum || 1; bar.value = progress;
       bar.setAttribute('aria-label', `${label}: ${note}`);
+      bar.setAttribute('aria-hidden', String(!maximum));
       body.append(heading, bar, text('small', 'scan-progress-note', note));
       section.append(badge, body); return section;
     };
     const remainingCapture = Math.max(0, data.total - data.captured);
     const remainingClean = Math.max(0, data.total - data.cleaned - data.failed);
     const captureAvailable = Boolean(data.total) && data.state !== 'busy';
-    const cleanAvailable = ['running', 'partial', 'completed', 'failed'].includes(scan.preprocessing_status);
+    const cleanAvailable = ['running', 'partial', 'completed', 'failed'].includes(scan.preprocessing_status)
+      || data.cleaned > 0 || data.failed > 0;
     const captureState = !captureAvailable ? 'unknown' : !remainingCapture ? 'completed' : data.state === 'failed' ? 'failed' : 'active';
     const cleanState = !cleanAvailable ? 'unknown' : data.failed || scan.preprocessing_status === 'failed' ? 'failed' :
       data.total && !remainingClean ? 'completed' : scan.preprocessing_status === 'running' ? 'active' : 'waiting';
@@ -61,9 +69,10 @@
     const registrationState = !hasFusion ? 'unknown' : registrationDone ? (needsReview ? 'warning' : 'completed') :
       fusion.state === 'failed' ? 'failed' : 'active';
     const publishingFailed = hasFusion && fusion.state === 'failed' && fusion.phase === 'publishing';
-    const cleanupDone = hasFusion && !publishingFailed && (fusion.state === 'completed' || ['publishing', 'completed'].includes(fusion.phase));
+    const cleanupDone = hasFusion && fusion.state !== 'failed' &&
+      (fusion.state === 'completed' || ['publishing', 'completed'].includes(fusion.phase));
     const finalState = !hasFusion ? 'unknown' : cleanupDone ? 'completed' :
-      fusion.state === 'failed' && ['cleanup', 'publishing'].includes(fusion.phase) ? 'failed' :
+      fusion.state === 'failed' && ['cleanup', 'publishing', 'completed'].includes(fusion.phase) ? 'failed' :
       fusion.phase === 'cleanup' ? 'active' : 'waiting';
     const phaseNames = {starting:'Запуск', load:'Подготовка кадров', register:'Совмещение кадров',
       loops:'Проверка замыкания', optimize:'Оптимизация', merge:'Объединение', cleanup:'Очистка облака',
