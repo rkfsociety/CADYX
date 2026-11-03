@@ -59,7 +59,8 @@
 
   async function requestJson(path, options = {}, fetchImpl = window.fetch.bind(window)) {
     const headers = new Headers(options.headers);
-    if (options.body != null && !headers.has("content-type")) headers.set("Content-Type", "application/json");
+    // Only text bodies are JSON by default; FormData and binary bodies need their native MIME handling.
+    if (typeof options.body === "string" && !headers.has("content-type")) headers.set("Content-Type", "application/json");
     const response = await fetchResponse(path, { ...options, headers }, fetchImpl);
     const value = await readJsonResponse(response);
     if (!response.ok) throw responseError(value, response.status);
