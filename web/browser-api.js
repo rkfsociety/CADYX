@@ -59,7 +59,7 @@
 
   async function requestJson(path, options = {}, fetchImpl = window.fetch.bind(window)) {
     const headers = new Headers(options.headers);
-    if (!headers.has("content-type")) headers.set("Content-Type", "application/json");
+    if (options.body != null && !headers.has("content-type")) headers.set("Content-Type", "application/json");
     const response = await fetchResponse(path, { ...options, headers }, fetchImpl);
     const value = await readJsonResponse(response);
     if (!response.ok) throw responseError(value, response.status);
