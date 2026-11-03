@@ -1401,7 +1401,10 @@
       const { positions = null, count = 0, markerIndices = [], matchedMapIndices = [],
         aligned = false, reset = false } = options;
       lastTurntableSceneOptions = { ...options, reset: false };
-      const pose = currentTurntableDisplayPose();
+      const telemetryPose = currentTurntableDisplayPose();
+      // The fitted transform maps camera coordinates into the rotating map;
+      // display its inverse so mapped markers follow camera-space geometry.
+      const pose = { ...telemetryPose, angle: -telemetryPose.angle };
       const displayedPositions = positions || (cloudPreviewOpen ? cloudPreviewPositions : null);
       const displayedCount = positions ? count : cloudPreviewPointCount;
       const moveCloudWithTable = aligned || (!positions && cloudPreviewOpen && fileCloudTablePlaced);
@@ -1502,7 +1505,7 @@
         cullBackfacesDuringOrbit: true,
         orbitCenter: [0, 0, 0], fitRadius: turntableDisplayModel.fitRadius },
       { reset: reset || !liveViewportInitialized && !staticTurntableVisible });
-      lastRenderedTurntableDisplayPose = pose;
+      lastRenderedTurntableDisplayPose = telemetryPose;
       liveViewportInitialized = true;
     };
     tableButton?.addEventListener('click', () => {
@@ -1994,7 +1997,8 @@
                       }
                       liveTableFrame = tableFrame;
                       liveMapTransform = mapTransform;
-                      liveAnchorPose = currentTurntableDisplayPose();
+                      const anchorPose = currentTurntableDisplayPose();
+                      liveAnchorPose = { ...anchorPose, angle: -anchorPose.angle };
                     }
                     matchedMapIndices = mapTransform.matches.map(match => match.targetIndex);
                     tableAligned = true;

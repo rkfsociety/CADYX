@@ -212,6 +212,17 @@ assert.deepEqual(Array.from(sandbox.window.CadyxScanView.buildMatchedMapMarkerPo
   { markerPoints: new Uint32Array([10, 11, 12]) }, [2, 0, 99])), [12, 10],
   "only confirmed correspondences highlight exact map marker locations");
 const rotatedPoint = sandbox.window.CadyxScanView.transformTableDisplayPoint([0, 10, 0], 90, 0);
+// The camera-to-map transform and telemetry advance in the same direction.
+// Its inverse is the rotation used to display the moving table in camera space.
+const mapPoint = [24, -11, 5];
+const initialMapAngle = 35, initialTelemetry = 20, currentTelemetry = 65;
+const rotate = sandbox.window.CadyxScanView.transformTableDisplayPoint;
+const cameraAtCurrentPose = rotate(mapPoint, -(initialMapAngle + currentTelemetry - initialTelemetry), 0);
+const mappedInAnchorFrame = rotate(cameraAtCurrentPose, initialMapAngle, 0);
+const cloudOnDisplay = rotate(mappedInAnchorFrame, -initialTelemetry, 0);
+const markerOnDisplay = rotate(mapPoint, -currentTelemetry, 0);
+assert.ok(Math.hypot(...cloudOnDisplay.map((value, axis) => value - markerOnDisplay[axis])) < 1e-6,
+  'the captured point and its fixed table marker stay together as telemetry changes');
 const stationaryCloud = new Float32Array([0, 10, 4, 2, 3, 5]);
 sandbox.window.CadyxScanView.placeLiveCloudInStationaryFrame(stationaryCloud, 2, { angle: 90, tilt: 0 });
 for (const [index, source] of [[0, [0, 10, 4]], [3, [2, 3, 5]]]) {
@@ -544,7 +555,7 @@ const rotatedMap = [...rotatedGeometry.positions.slice(rotatedMapLayer.points[0]
 assert.deepEqual([...rotatedGeometry.positions.slice(0, 3)],
   [...lastAlignedGeometry.positions.slice(0, 3)], "the circular lower support stays fixed while the tabletop moves");
 for (const [actual, before] of [[rotatedMap, mapBeforeDisplayRotation]]) {
-  const expected = sandbox.window.CadyxScanView.transformTableDisplayPoint(before, 15, 0);
+  const expected = sandbox.window.CadyxScanView.transformTableDisplayPoint(before, -15, 0);
   assert.ok(Math.hypot(...actual.map((value, axis) => value - expected[axis])) < 1e-4,
     "the confirmed map markers rotate together with the table display");
 }
