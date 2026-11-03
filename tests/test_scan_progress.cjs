@@ -82,6 +82,9 @@ assert.equal(container.children[3].dataset.stageState, 'failed',
 render(container, capture, {...job, state:'completed', phase:'completed', result:{cleaned:'result.ply'}});
 assert.equal(container.children[3].dataset.stageState, 'completed');
 assert.equal(container.children[4].children[2].textContent, 'Результат предварительный');
+render(container, capture, {...job, state:'completed', phase:'completed', file:'old-frame.ply', result:{cleaned:'result.ply'}});
+assert.equal(container.children[4].children[1].textContent, 'result.ply',
+  'completed fusion should display the output artifact rather than its last input frame');
 render(container, capture, {...job, run_id:'another-series'});
 assert.equal(container.children[0].dataset.stageState, 'unknown');
 
