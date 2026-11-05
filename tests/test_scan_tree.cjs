@@ -25,7 +25,7 @@ async function main() {
  vm.createContext(sandbox);vm.runInContext(code+'\nglobalThis.load=loadScanTree;',sandbox);
  await sandbox.load('p');
  assert.equal(list.children.length,2);
- assert.match(list.children[0].textContent,/combined_cloud_dense/);
+ assert.match(list.children[0].children[0].textContent,/combined_cloud_dense/);
  const group=list.children[1], title=group.children[0].children[1];
  assert.equal(title.children[1].textContent,'Сшитые серии');
  assert.equal(title.children[1].className,'cad-tree-label');
@@ -40,5 +40,8 @@ async function main() {
  assert.match(decodeURIComponent(requests[0].url),/\/folders\/Сшитые серии\/files\/delete$/);
  assert.deepEqual(JSON.parse(requests[0].options.body),{filenames:['Серия 1.ply']});
  assert.equal(requests.length,1);
+ await list.children[0].children[1].click();
+ assert.match(requests[1].url,/\/projects\/p\/files\/delete$/);
+ assert.deepEqual(JSON.parse(requests[1].options.body),{filenames:['combined_cloud_dense.ply']});
 }
 main().catch(error=>{console.error(error);process.exitCode=1});

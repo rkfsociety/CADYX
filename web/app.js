@@ -317,12 +317,18 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       let shown=0;
       for(const file of projectScanCloudFiles){
         if(query&&!file.name.toLowerCase().includes(query)&&!'сшитое облако'.includes(query))continue;
+        const leafRow=document.createElement('div');leafRow.className='cad3-scan-file-row';
         const leaf=document.createElement('button');leaf.type='button';leaf.className='cad3-model-note cad3-scan-file cad3-scan-file-button';
         leaf.setAttribute('aria-pressed',String(scanTreePreviewSelection===`project-clouds/${file.name}`));
         leaf.textContent=`Сшитое облако · ${scanFileLabel(file,'project-clouds')}`;
         leaf.setAttribute('aria-label',`Показать облако точек проекта · ${file.name}`);
         leaf.onclick=()=>previewScanFile({id:'project-clouds',folderName:null},file,leaf);
-        list.append(leaf);shown++;
+        const remove=document.createElement('button');remove.type='button';remove.className='cad3-scan-delete';remove.setAttribute('aria-label',`Удалить сшитое облако ${file.name}`);
+        const canDelete=typeof canOpenFilesView==='function'&&canOpenFilesView(state.project);
+        remove.disabled=!canDelete;
+        remove.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-.8 13H6.8L6 7m4 3v7m4-7v7"/></svg>';
+        remove.onclick=event=>{event.stopPropagation();deleteProjectCloud(file)};
+        leafRow.append(leaf,remove);list.append(leafRow);shown++;
       }
       if(stitchedSeriesFiles.length){
         const files=stitchedSeriesFiles.filter(file=>!query||'сшитые серии'.includes(query)||file.name.toLowerCase().includes(query));
@@ -557,6 +563,20 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent('Сшитые серии')}/files/delete`,{method:'POST',body:JSON.stringify({filenames:[file.name]})});
         if(scanTreePreviewSelection===`stitched-series/${file.name}`)clearScanTreePreview({restorePrevious:true});
         stitchedSeriesFiles=stitchedSeriesFiles.filter(item=>item.name!==file.name);
+        renderScanTree();
+        notify(`Сшитое облако «${file.name}» удалено.`);
+      }catch(error){notify(`Не удалось удалить сшитое облако «${file.name}»: ${error.message}`,true)}
+    }
+    async function deleteProjectCloud(file){
+      const projectId=state.project;
+      if(!projectId||typeof canOpenFilesView!=='function'||!canOpenFilesView(projectId)){
+        notify('Удаление доступно, когда проект свободен и состояние подтверждено.',true);return;
+      }
+      if(!window.confirm(`Удалить сшитое облако «${file.name}»?\n\nФайл будет удалён из корня проекта. Это действие нельзя отменить.`))return;
+      try{
+        await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/files/delete`,{method:'POST',body:JSON.stringify({filenames:[file.name]})});
+        if(scanTreePreviewSelection===`project-clouds/${file.name}`)clearScanTreePreview({restorePrevious:true});
+        projectScanCloudFiles=projectScanCloudFiles.filter(item=>item.name!==file.name);
         renderScanTree();
         notify(`Сшитое облако «${file.name}» удалено.`);
       }catch(error){notify(`Не удалось удалить сшитое облако «${file.name}»: ${error.message}`,true)}
