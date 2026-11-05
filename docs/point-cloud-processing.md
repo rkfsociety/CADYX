@@ -23,6 +23,20 @@ the edit lease. Tools are available only to the AI agent. The browser tree shows
 only operations actually executed, with their saved parameters and results;
 it does not expose a catalog or controls for unused processing tools.
 
+User-facing exception: stitched point clouds in the Scanning tree (project-root
+stitched clouds and files of the «Сшитые серии» group) carry an «Обработать»
+button. It starts a background Core job (`ScanCloudProcessingJobs`, `system`
+lease) that reads the full-resolution PLY and applies the fixed cleanup cycle
+`isolation_filter` → `remove_overlaps` with default parameters (no simplify or
+smooth). The Core verifies the `cadyx-cloud-processing-v1` report, the source
+hash and the output hash, then hard-links the result beside the untouched source
+as `<name>_processed.cadyx-<hash>.ply` plus a matching `.json` report that
+binds the source file and its hash, the stages, point counts and `provisional`
+quality. Starting requires a free project; progress and the result surface in
+the scanning status strip and the tree refreshes on completion. API:
+`POST /api/v1/agent/projects/{id}/clouds/process` with `{folder_name?, filename}`
+and `GET` on the same route for status.
+
 | Method | `parameters` | Behavior |
 | --- | --- | --- |
 | `deduplicate` | `{}` | Remove identical XYZ triples, retaining first-occurrence order. |

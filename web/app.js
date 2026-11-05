@@ -241,6 +241,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       return roots.map(body=>{const included=new Set();const visit=id=>{if(!id||included.has(id))return;included.add(id);for(const feature of byBody.get(id)||[]){visit(feature.source_body_id);visit(feature.base_body_id);visit(feature.tool_body_id)}};visit(body.id);return{body,features:features.filter(feature=>included.has(feature.body_id))}});
     }
     let scanFusionJob=null,scanFusionPending=false;
+    let cloudProcessingJob=null,cloudProcessingPending=false;
     const scanRunPattern=/^revopoint_\d{8}T\d{6}Z$/i;
     const scanFileRunId=name=>/^(revopoint_\d{8}T\d{6}Z)_/i.exec(name)?.[1]||null;
     function scanRunTitle(runId){
@@ -339,7 +340,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         remove.disabled=!canDelete;
         remove.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-.8 13H6.8L6 7m4 3v7m4-7v7"/></svg>';
         remove.onclick=event=>{event.stopPropagation();deleteProjectCloud(file)};
-        leafRow.append(leaf,remove);list.append(leafRow);shown++;
+        leafRow.append(leaf,scanProcessButton(file,null),remove);list.append(leafRow);shown++;
       }
       if(stitchedSeriesFiles.length){
         const files=stitchedSeriesFiles.filter(file=>!query||'сшитые серии'.includes(query)||file.name.toLowerCase().includes(query));
@@ -371,7 +372,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
             remove.disabled=!canDelete;
             remove.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-.8 13H6.8L6 7m4 3v7m4-7v7"/></svg>';
             remove.onclick=event=>{event.stopPropagation();deleteStitchedCloud(file)};
-            leafRow.append(leaf,remove);children.append(leafRow);
+            leafRow.append(leaf,scanProcessButton(file,'Сшитые серии'),remove);children.append(leafRow);
           }
           container.append(children);list.append(container);shown++;
         }
@@ -458,6 +459,34 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       }
       const empty=$('#cad-tree-empty');
       if(empty){empty.hidden=shown>0;empty.textContent=message||(!state.project?'Выберите проект, чтобы увидеть серии сканирования.':query?'Совпадений нет.':'В проекте пока нет сохранённых серий сканирования.');}
+    }
+    function cloudProcessingControlsDisabled(){
+      return cloudProcessingPending||cloudProcessingJob?.state==='running'
+        ||scanFusionPending||scanFusionJob?.state==='running'
+        ||typeof canOpenFilesView!=='function'||!canOpenFilesView(state.project);
+    }
+    function scanProcessButton(file,folderName){
+      const button=document.createElement('button');button.type='button';button.className='cad3-scan-process';
+      const active=cloudProcessingJob?.state==='running'&&cloudProcessingJob.file===file.name
+        &&(cloudProcessingJob.folder_name??null)===(folderName??null);
+      button.textContent=active?'Обработка…':'Обработать';
+      button.setAttribute('aria-label',`${active?'Обрабатывается облако':'Обработать облако'} ${file.name}`);
+      button.disabled=cloudProcessingControlsDisabled();
+      button.onclick=event=>{event.stopPropagation();startCloudProcessing(folderName,file)};
+      return button;
+    }
+    async function startCloudProcessing(folderName,file){
+      const id=state.project;
+      if(!id||cloudProcessingControlsDisabled())return;
+      cloudProcessingPending=true;renderScanTree();
+      try{
+        const response=await fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/clouds/process`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...(folderName?{folder_name:folderName}:{}),filename:file.name})});
+        const payload=await response.json();
+        if(!response.ok)throw new Error(payload.error?.message||payload.message||'Не удалось запустить обработку облака');
+        if(state.project!==id)return;
+        cloudProcessingJob=payload.processing;
+      }catch(error){notify(error.message,true)}
+      finally{cloudProcessingPending=false;if(state.project===id)renderScanTree()}
     }
     async function startScanFusion(run){
       const id=state.project;
@@ -1346,7 +1375,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           pollTimer=setTimeout(()=>pollScan(id),2500);return;
         }
         try{
-          const [response,fusionResponse,continuousResponse]=await Promise.all([fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{cache:'no-store'}),fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/fusion`,{cache:'no-store'}),fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/continuous`,{cache:'no-store'})]);
+          const [response,fusionResponse,continuousResponse,processingResponse]=await Promise.all([fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/360`,{cache:'no-store'}),fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/fusion`,{cache:'no-store'}),fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/scans/continuous`,{cache:'no-store'}),fetch(`/api/v1/agent/projects/${encodeURIComponent(id)}/clouds/process`,{cache:'no-store'})]);
           const continuousPayload=await continuousResponse.json();
           if(!continuousResponse.ok)throw new Error(continuousPayload.error?.message||'Не удалось получить статус непрерывного сканирования');
           const continuous=continuousPayload.scan;
@@ -1383,6 +1412,13 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
             if(scanFusionJob.state==='failed')notify(scanFusionJob.next_action||scanFusionJob.error||'Сшивка не завершилась',true);
             else if(scanFusionJob.state==='completed')notify(scanFusionJob.result?.quality==='review_required'?'Результат требует проверки совмещения.':'Сшивка и очистка завершены; результат предварительный.',scanFusionJob.result?.quality==='review_required');
           }else if(previousFusion?.state!==scanFusionJob.state){renderScanTree()}
+          const processingPayload=await processingResponse.json();
+          if(!processingResponse.ok)throw new Error(processingPayload.error?.message||'Не удалось получить статус обработки облака');
+          const previousProcessing=cloudProcessingJob;cloudProcessingJob=processingPayload.processing;
+          if(previousProcessing?.state==='running'&&cloudProcessingJob.state!=='running'){
+            if(cloudProcessingJob.state==='failed'){renderScanTree();notify(cloudProcessingJob.error||'Обработка облака не завершилась',true)}
+            else if(cloudProcessingJob.state==='completed'){await loadScanTree(id,true);renderScanTree();notify('Обработка облака завершена; результат предварительный.')}
+          }else if(previousProcessing?.state!==cloudProcessingJob.state){renderScanTree()}
           setCaptureBusy(scan.state==='running'||scan.state==='busy'||scanFusionJob?.state==='running');
           if(scan.state==='running'){
             showCapturePreview(scan,{open:captureStarted});

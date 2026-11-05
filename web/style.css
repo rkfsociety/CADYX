@@ -594,6 +594,12 @@ button.object-row.selected { border-color: #9b6038; background: #ff874012; }
 .scan-progress-file { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .scan-progress-current-note { color: #bdcdd5 !important; }
 
+.cad3-scan-file-row { display: flex; align-items: center; gap: 4px; }
+.cad3-scan-file-row > .cad3-scan-file { flex: 1 1 auto; min-width: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.cad3-scan-process { flex: 0 0 auto; min-height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: #151e25; color: var(--muted); font: 600 11px/1.2 var(--ui-font); white-space: nowrap; cursor: pointer; }
+.cad3-scan-process:hover:not(:disabled) { border-color: #2c4356; color: #d9e7f5; }
+.cad3-scan-process:disabled { opacity: .55; cursor: default; }
+.cad3-scan-delete { flex: 0 0 auto; }
 .cad3-scan-fuse { margin: 4px 8px 6px 30px; min-height: 28px; font-size: 11px; }
 .cad3-scan-rescan { margin: 4px 8px 6px 0; min-height: 28px; font-size: 11px; }
 .cad3-scan-rescan-note { margin: 2px 8px 6px 30px; color: #ffc68b; font-size: 11px; line-height: 1.4; }

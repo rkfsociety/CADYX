@@ -97,6 +97,7 @@ class ProjectLifecycleService(_CoreService):
                 any(item.get("state") == "running" for item in activities)
                 or self._scan_capture.is_running(project_id, nonblocking=nonblocking)
                 or self._scan_fusion.is_running(project_id, nonblocking=nonblocking)
+                or self._scan_cloud_processing.is_running(project_id, nonblocking=nonblocking)
             ),
         )
 
@@ -384,6 +385,83 @@ class ProjectLifecycleService(_CoreService):
                         "quality_warnings": report.get("quality_warnings", [])}
             except (KeyError, TypeError, ValueError, OSError) as exc:
                 raise ValidationError(f"Не удалось безопасно сохранить результат сшивки: {exc}") from exc
+
+    def start_cloud_processing(self, project_id: str, folder_name: str | None, filename: str) -> dict[str, Any]:
+        heartbeat = None
+        lease_id = None
+        try:
+            with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+                self._require_project_policy(project_id, "file_management",
+                                             "Обработка облака возможна только в свободном проекте.")
+                lease = self.leases.acquire(project_id, "system", "cloud-processing")
+                lease_id = lease.lease_id
+                self.events.publish("project.lock.changed", project_id, self.leases.snapshot(project_id))
+                heartbeat = LeaseHeartbeat(self._core, project_id, lease_id)
+                heartbeat.start()
+                return self._scan_cloud_processing.start(project_id, self.workspace._project_dir(project_id),
+                                                         folder_name, filename, lease_id, heartbeat)
+        except Exception:
+            if heartbeat is not None:
+                heartbeat.stop()
+            if lease_id is not None:
+                current = self.leases.get(project_id)
+                if current is not None and current.lease_id == lease_id:
+                    self.release_lease(project_id, lease_id)
+            raise
+
+    def publish_cloud_processing(self, project_id: str, folder: Path, filename: str,
+                                 staging: Path, lease_id: str) -> dict[str, Any]:
+        """Commit verified staging files beside the untouched source cloud."""
+        def digest(path: Path) -> str:
+            if path.is_symlink() or not path.is_file():
+                raise ValidationError("Файл результата отсутствует или небезопасен.")
+            with path.open("rb") as stream:
+                return hashlib.file_digest(stream, "sha256").hexdigest()
+
+        with self._project_lifecycle_lock(project_id), self._project_guard(project_id):
+            self.leases.require(project_id, lease_id)
+            try:
+                report = json.loads((staging / "report.json").read_text(encoding="utf-8"))
+                if (report.get("format") != "cadyx-cloud-processing-v1" or report.get("state") != "completed"
+                        or report.get("source_file") != filename
+                        or report.get("quality") not in ("provisional", "review_required")
+                        or digest(folder / filename) != report.get("source_sha256")):
+                    raise ValueError("invalid processing report")
+                item = report.get("output")
+                if (not isinstance(item, dict) or item.get("file") != "processed.ply"
+                        or digest(staging / "processed.ply") != item.get("sha256")):
+                    raise ValueError("artifact hash mismatch")
+                base = filename[: -len(".ply")] if filename.casefold().endswith(".ply") else filename
+                output_name = f"{base}_processed.cadyx-{item['sha256'][:12]}.ply"
+                report_bytes = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False).encode("utf-8")
+                report_hash = hashlib.sha256(report_bytes).hexdigest()
+                report_source = staging / "published-report.json"
+                with report_source.open("xb") as stream:
+                    stream.write(report_bytes)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                report_name = f"{base}_processed.cadyx-{report_hash[:12]}.json"
+                artifacts = [(staging / "processed.ply", folder / output_name),
+                             (report_source, folder / report_name)]
+                for _, target in artifacts:
+                    self.workspace._artifacts._reject_casefold_artifact_alias(folder, target.name)
+                created = []
+                try:
+                    for source, target in artifacts:
+                        os.link(source, target)
+                        created.append(target)
+                    self.leases.refresh_after_command(project_id, lease_id)
+                except Exception:
+                    for target in reversed(created):
+                        source = next(source for source, destination in artifacts if destination == target)
+                        if target.exists() and os.path.samefile(source, target):
+                            target.unlink()
+                    raise
+                return {"folder": folder.name, "file": output_name, "report": report_name,
+                        "quality": report["quality"], "input_points": report["input_points"],
+                        "output_points": report["output_points"], "removed_points": report["removed_points"]}
+            except (KeyError, TypeError, ValueError, OSError) as exc:
+                raise ValidationError(f"Не удалось безопасно сохранить результат обработки облака: {exc}") from exc
 
     def copy_project_files(self, target_project_id: str, source_project_id: str) -> dict[str, Any]:
         if target_project_id == source_project_id:

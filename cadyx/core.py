@@ -30,6 +30,7 @@ from .models import Document, OwnerType
 from .runtime_cache import RuntimeCachePolicy
 from .scan import ScanProcessor
 from .scan_capture import Scan360CaptureController
+from .scan_cloud_processing import ScanCloudProcessingJobs
 from .scan_fusion import ScanFusionJobs
 from .self_evolving import SelfEvolvingCapabilityEngine
 from .source_extension import SourceExtensionEngine
@@ -79,6 +80,10 @@ class CadyxCore:
         self._scan_fusion = ScanFusionJobs(Path(__file__).resolve().parent.parent,
                                            self.workspace.state_root, self._lifecycle.publish_scan_fusion,
                                            self.release_lease)
+        self._scan_cloud_processing = ScanCloudProcessingJobs(Path(__file__).resolve().parent.parent,
+                                                              self.workspace.state_root,
+                                                              self._lifecycle.publish_cloud_processing,
+                                                              self.release_lease)
         self._command_activity = CommandActivityService(self)
         self._rendering = RenderingCacheService(self, cache_policy=cache_policy)
         self._engineering_validation = EngineeringValidationService(self)
@@ -175,6 +180,12 @@ class CadyxCore:
 
     def scan_fusion_status(self, project_id: str) -> dict[str, Any]:
         return self._scan_fusion.status(project_id, self.workspace._project_dir(project_id))
+
+    def start_cloud_processing(self, project_id: str, folder_name: str | None, filename: str) -> dict[str, Any]:
+        return self._lifecycle.start_cloud_processing(project_id, folder_name, filename)
+
+    def cloud_processing_status(self, project_id: str) -> dict[str, Any]:
+        return self._scan_cloud_processing.status(project_id, self.workspace._project_dir(project_id))
 
     def scanner_devices(self) -> dict[str, list[dict[str, Any]]]:
         return self._scan_capture.list_connected_devices()

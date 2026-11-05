@@ -138,6 +138,8 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/scans/continuous/stop", "agent_continuous_scan_stop", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/scans/fusion", "agent_scan_fusion_start", "agent", "json"),
     RouteSpec("GET", "/api/v1/agent/projects/{project_id}/scans/fusion", "agent_scan_fusion_status", "agent"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/clouds/process", "agent_cloud_processing_start", "agent", "json"),
+    RouteSpec("GET", "/api/v1/agent/projects/{project_id}/clouds/process", "agent_cloud_processing_status", "agent"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/rename", "agent_rename", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/type", "agent_project_type", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/copy-files", "agent_copy_files", "agent", "json"),
@@ -885,6 +887,16 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         handler._json(202, {"fusion": core.start_scan_fusion(project_id, body["run_id"])})
     elif name == "agent_scan_fusion_status":
         handler._json(200, {"fusion": core.scan_fusion_status(project_id)})
+    elif name == "agent_cloud_processing_start":
+        body = _require_json(handler)
+        if not set(body) <= {"folder_name", "filename"} or not isinstance(body.get("filename"), str):
+            raise ValidationError("Для обработки облака укажите filename и, при необходимости, folder_name.")
+        folder_name = body.get("folder_name")
+        if folder_name is not None and not isinstance(folder_name, str):
+            raise ValidationError("folder_name должен быть строкой или null.")
+        handler._json(202, {"processing": core.start_cloud_processing(project_id, folder_name, body["filename"])})
+    elif name == "agent_cloud_processing_status":
+        handler._json(200, {"processing": core.cloud_processing_status(project_id)})
     elif name == "agent_inspection":
         query = parse_qs(parsed.query, keep_blank_values=True)
         allowed = {"section", "expected_revision", "kind", "body_id", "shape",
