@@ -172,7 +172,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
  .model-toolbar .cad3-tool,.model-toolbar>.button{font:600 12px/1.2 var(--ui-font)}
  @media(max-width:680px){:root{--cadyx-rail-width:48px;--cadyx-tree-width:52px}.project-detail{grid-template-columns:48px 52px minmax(0,1fr)!important}.project-detail[data-tree-collapsed=true]{grid-template-columns:48px 48px minmax(0,1fr)!important}.cad3-rail{gap:4px;padding:8px 4px}.cad3-rail button{width:36px;height:36px}}
 `;
-    style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}.cad3-scan-file{overflow-wrap:anywhere;padding-left:32px!important}.cad3-scan-file-button{width:100%;border:0;border-radius:4px;background:transparent;color:var(--muted);font:11px/1.4 var(--ui-font);text-align:left;cursor:pointer}.cad3-scan-file-button:hover{background:#ffffff08;color:var(--text)}.cad3-scan-file-button:focus-visible{outline:1px solid #ff8740;outline-offset:1px}.cad3-scan-file-button[aria-pressed="true"]{background:#ffffff0c;color:#ffe7d6;box-shadow:inset 2px 0 #ff8740}.cad3-scan-run-row{grid-template-columns:20px minmax(0,1fr) 28px}.cad3-scan-delete{display:grid;place-items:center;width:26px;height:30px;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:#f07171;cursor:pointer}.cad3-scan-delete:hover:not(:disabled){border-color:#713131;background:#351919;color:#ff8888}.cad3-scan-delete:disabled{color:#805454;cursor:not-allowed;opacity:.65}.cad3-scan-delete svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.cad3-cloud-root-row{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:2px}.cad3-cloud-disclosure{display:grid;place-items:center;width:22px;height:32px;padding:0;border:1px solid transparent;border-radius:4px;background:transparent;color:#b6c0c6;font:500 18px/1 var(--ui-font);cursor:pointer}.cad3-cloud-disclosure:hover{border-color:#51331f;background:#ffffff08;color:#ff9653}.cad3-cloud-root{min-height:34px;grid-template-columns:18px minmax(0,1fr)!important;font-weight:650;color:#e8eef1}.cad3-cloud-stages{display:grid;gap:2px;margin:2px 0 3px 24px;padding-left:6px;border-left:1px solid #32404a}.cad3-cloud-stages[hidden]{display:none!important}.cad3-cloud-stages .cad3-tree-node{grid-template-columns:minmax(0,1fr);gap:0}.cad3-tree-leaf-row{grid-column:1/-1;min-width:0}.cad3-tree-leaf-row>.cad-tree-feature{width:100%;min-height:32px;padding:5px 8px;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;font-size:11px}.cad3-cloud-stages .cad3-model-note{padding:2px 8px 5px}';
+    style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}.cad3-scan-file-row{display:grid;grid-template-columns:minmax(0,1fr) 28px;align-items:center;gap:2px}.cad3-scan-file{overflow-wrap:anywhere;padding-left:32px!important}.cad3-scan-file-button{width:100%;border:0;border-radius:4px;background:transparent;color:var(--muted);font:11px/1.4 var(--ui-font);text-align:left;cursor:pointer}.cad3-scan-file-button:hover{background:#ffffff08;color:var(--text)}.cad3-scan-file-button:focus-visible{outline:1px solid #ff8740;outline-offset:1px}.cad3-scan-file-button[aria-pressed="true"]{background:#ffffff0c;color:#ffe7d6;box-shadow:inset 2px 0 #ff8740}.cad3-scan-run-row{grid-template-columns:20px minmax(0,1fr) 28px}.cad3-scan-delete{display:grid;place-items:center;width:26px;height:30px;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:#f07171;cursor:pointer}.cad3-scan-delete:hover:not(:disabled){border-color:#713131;background:#351919;color:#ff8888}.cad3-scan-delete:disabled{color:#805454;cursor:not-allowed;opacity:.65}.cad3-scan-delete svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.cad3-cloud-root-row{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:2px}.cad3-cloud-disclosure{display:grid;place-items:center;width:22px;height:32px;padding:0;border:1px solid transparent;border-radius:4px;background:transparent;color:#b6c0c6;font:500 18px/1 var(--ui-font);cursor:pointer}.cad3-cloud-disclosure:hover{border-color:#51331f;background:#ffffff08;color:#ff9653}.cad3-cloud-root{min-height:34px;grid-template-columns:18px minmax(0,1fr) auto!important;font-weight:650;color:#e8eef1}.cad3-cloud-stages{display:grid;gap:2px;margin:2px 0 3px 24px;padding-left:6px;border-left:1px solid #32404a}.cad3-cloud-stages[hidden]{display:none!important}.cad3-cloud-stages .cad3-tree-node{grid-template-columns:minmax(0,1fr);gap:0}.cad3-tree-leaf-row{grid-column:1/-1;min-width:0}.cad3-tree-leaf-row>.cad-tree-feature{width:100%;min-height:32px;padding:5px 8px;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;font-size:11px}.cad3-cloud-stages .cad3-model-note{padding:2px 8px 5px}';
     style.textContent += '.cad3-tree-leaf-row>.cad-tree-feature{grid-template-columns:16px 22px minmax(0,1fr);gap:8px}.cad3-tree-leaf-row>.cad-tree-feature::before{content:""}';
     style.textContent += '.cad3-tree-parent-row{align-items:center}.cad3-tree-parent-row>.cad-tree-feature,.cad3-tree-disclosure{align-self:center}.cad-tree-feature>.cad3-icon{display:grid;place-items:center;align-self:center;line-height:0}.cad-tree-feature>.cad-tree-label{align-self:center;line-height:1.2}';
     style.textContent += '.cad3-assembly-tree{display:grid;gap:2px;padding:6px 0 10px;margin-bottom:7px;border-bottom:1px solid #28343b}.cad3-assembly-row{display:flex;align-items:center;gap:3px;padding-left:calc(var(--assembly-depth,0)*11px)}.cad3-assembly-select{flex:1;min-width:0;grid-template-columns:18px minmax(0,1fr)}.cad3-assembly-joint-count{min-width:34px;color:#8e9aa1;font-size:9px}.cad3-assembly-state{width:25px;height:25px;padding:0;border:1px solid #334047;border-radius:5px;background:#171f23;color:#c6d0d4;cursor:pointer}.cad3-assembly-state:hover:not(:disabled){border-color:#b75c2b;color:#ffb27e}.cad3-assembly-state:disabled{opacity:.45;cursor:not-allowed}.cad3-assembly-state[data-active="true"]{border-color:#9e4c24;color:#ffb27e;background:#422413}';
@@ -344,10 +344,17 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
           row.append(disclosure,title);container.append(row);
           const children=document.createElement('div');children.id='stitched-series-files';children.className='cad3-tree-children';children.hidden=!expanded;
           for(const file of files){
+            const leafRow=document.createElement('div');leafRow.className='cad3-scan-file-row';
             const leaf=document.createElement('button');leaf.type='button';leaf.className='cad3-model-note cad3-scan-file cad3-scan-file-button';
             leaf.setAttribute('aria-pressed',String(scanTreePreviewSelection===`stitched-series/${file.name}`));
             leaf.textContent=scanFileLabel(file,'stitched-series');leaf.setAttribute('aria-label',`Показать сшитую серию · ${file.name}`);
-            leaf.onclick=()=>previewScanFile({id:'stitched-series',folderName:'Сшитые серии'},file,leaf);children.append(leaf);
+            leaf.onclick=()=>previewScanFile({id:'stitched-series',folderName:'Сшитые серии'},file,leaf);
+            const remove=document.createElement('button');remove.type='button';remove.className='cad3-scan-delete';remove.setAttribute('aria-label',`Удалить сшитое облако ${file.name}`);
+            const canDelete=typeof canOpenFilesView==='function'&&canOpenFilesView(state.project);
+            remove.disabled=!canDelete;
+            remove.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m3 0-.8 13H6.8L6 7m4 3v7m4-7v7"/></svg>';
+            remove.onclick=event=>{event.stopPropagation();deleteStitchedCloud(file)};
+            leafRow.append(leaf,remove);children.append(leafRow);
           }
           container.append(children);list.append(container);shown++;
         }
@@ -539,6 +546,20 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         renderScanTree();
         notify(`Серия «${title}» удалена.`);
       }catch(error){notify(`Не удалось удалить серию «${title}»: ${error.message}`,true)}
+    }
+    async function deleteStitchedCloud(file){
+      const projectId=state.project;
+      if(!projectId||typeof canOpenFilesView!=='function'||!canOpenFilesView(projectId)){
+        notify('Удаление доступно, когда проект свободен и состояние подтверждено.',true);return;
+      }
+      if(!window.confirm(`Удалить сшитое облако «${file.name}»?\n\nФайл будет удалён из папки «Сшитые серии». Это действие нельзя отменить.`))return;
+      try{
+        await api(`/api/v1/agent/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent('Сшитые серии')}/files/delete`,{method:'POST',body:JSON.stringify({filenames:[file.name]})});
+        if(scanTreePreviewSelection===`stitched-series/${file.name}`)clearScanTreePreview({restorePrevious:true});
+        stitchedSeriesFiles=stitchedSeriesFiles.filter(item=>item.name!==file.name);
+        renderScanTree();
+        notify(`Сшитое облако «${file.name}» удалено.`);
+      }catch(error){notify(`Не удалось удалить сшитое облако «${file.name}»: ${error.message}`,true)}
     }
     function renderAssemblyTree(){
       if(!hasAssemblyStructure())return;
