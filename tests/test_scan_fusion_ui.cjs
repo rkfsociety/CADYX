@@ -33,7 +33,7 @@ async function main(){
   const stage = sandbox.scanTreeEntries[0];
   stage.files.push({name:`${id}_fused.cadyx-abcdef123456.ply`,size:80}, {name:`${id}_cleaned.cadyx-abcdef123456.ply`,size:60});
   vm.runInContext('renderScanTree()',sandbox);
-  const names=list.children[0].children[1].children.map(item=>item.textContent);
+  const names=list.children[0].children[1].children.flatMap(item=>item.children?.length?item.children.map(child=>child.textContent):[item.textContent]);
   assert.ok(names.some(name=>name.includes('Сшитое облако')));
   assert.ok(names.some(name=>name.includes('Очищенное облако')));
   vm.runInContext('scanFusionJob=null; renderScanTree()',sandbox);

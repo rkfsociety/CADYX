@@ -174,6 +174,7 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
 `;
     style.textContent += '.cad3-model-tabs[hidden]{display:none!important}.cad3-tree-node>.cad3-model-note{grid-column:1/-1;padding-left:32px}.cad3-scan-file-row{display:grid;grid-template-columns:minmax(0,1fr) 28px;align-items:center;gap:2px}.cad3-scan-file{overflow-wrap:anywhere;padding-left:32px!important}.cad3-scan-file-button{width:100%;border:0;border-radius:4px;background:transparent;color:var(--muted);font:11px/1.4 var(--ui-font);text-align:left;cursor:pointer}.cad3-scan-file-button:hover{background:#ffffff08;color:var(--text)}.cad3-scan-file-button:focus-visible{outline:1px solid #ff8740;outline-offset:1px}.cad3-scan-file-button[aria-pressed="true"]{background:#ffffff0c;color:#ffe7d6;box-shadow:inset 2px 0 #ff8740}.cad3-scan-run-row{grid-template-columns:20px minmax(0,1fr) 28px}.cad3-scan-delete{display:grid;place-items:center;width:26px;height:30px;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:#f07171;cursor:pointer}.cad3-scan-delete:hover:not(:disabled){border-color:#713131;background:#351919;color:#ff8888}.cad3-scan-delete:disabled{color:#805454;cursor:not-allowed;opacity:.65}.cad3-scan-delete svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.8}.cad3-cloud-root-row{display:grid;grid-template-columns:22px minmax(0,1fr);align-items:center;gap:2px}.cad3-cloud-disclosure{display:grid;place-items:center;width:22px;height:32px;padding:0;border:1px solid transparent;border-radius:4px;background:transparent;color:#b6c0c6;font:500 18px/1 var(--ui-font);cursor:pointer}.cad3-cloud-disclosure:hover{border-color:#51331f;background:#ffffff08;color:#ff9653}.cad3-cloud-root{min-height:34px;grid-template-columns:18px minmax(0,1fr) auto!important;font-weight:650;color:#e8eef1}.cad3-cloud-stages{display:grid;gap:2px;margin:2px 0 3px 24px;padding-left:6px;border-left:1px solid #32404a}.cad3-cloud-stages[hidden]{display:none!important}.cad3-cloud-stages .cad3-tree-node{grid-template-columns:minmax(0,1fr);gap:0}.cad3-tree-leaf-row{grid-column:1/-1;min-width:0}.cad3-tree-leaf-row>.cad-tree-feature{width:100%;min-height:32px;padding:5px 8px;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;font-size:11px}.cad3-cloud-stages .cad3-model-note{padding:2px 8px 5px}';
     style.textContent += '.cad3-tree-leaf-row>.cad-tree-feature{grid-template-columns:16px 22px minmax(0,1fr);gap:8px}.cad3-tree-leaf-row>.cad-tree-feature::before{content:""}';
+    style.textContent += '.cad3-tree-children:has(>.cad3-scan-fuse){grid-template-columns:minmax(0,1fr);gap:4px;padding:6px 8px 8px;margin-left:24px}.cad3-tree-children>.cad3-scan-fuse,.cad3-tree-children>.cad3-scan-rescan{width:100%;min-width:0;min-height:34px;margin:0;padding:5px 8px;border:1px solid #34434c;border-radius:6px;background:#131c21;color:#d7e0e4;font:600 11px/1.2 var(--ui-font);white-space:normal}.cad3-tree-children>.cad3-scan-fuse:hover:not(:disabled),.cad3-tree-children>.cad3-scan-rescan:hover:not(:disabled){border-color:#52616a;background:#182329;color:#fff}.cad3-scan-frame-group{display:grid;grid-column:1/-1;gap:3px;min-width:0;margin:2px 0 4px}.cad3-scan-frame-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:0;min-height:30px;padding:5px 8px;border:1px solid #303e47;border-radius:5px;background:#11191e;color:#d5dfe4;font-size:11px;text-align:left;white-space:nowrap}.cad3-scan-frame-toggle:hover{border-color:#53636d;background:#172127}.cad3-scan-frame-toggle span:last-child{flex:0 0 auto;color:#9fb0b9;font-variant-numeric:tabular-nums}.cad3-scan-frame-list{display:grid;gap:1px;max-height:260px;overflow:auto;padding:3px 0 3px 8px;border-left:1px solid #34434c}.cad3-scan-frame-list[hidden]{display:none!important}.cad3-scan-frame{min-width:0;padding:3px 8px!important;font-size:10px;line-height:1.35}.cad3-scan-run-files{display:grid;grid-column:1/-1;gap:2px;min-width:0}.cad3-scan-run-files .cad3-scan-file-button{min-height:28px;padding:5px 8px!important;color:#bdc9cf;overflow-wrap:normal;white-space:nowrap}.cad3-scan-run-files .cad3-scan-file-button:hover{background:#182127;color:#f0f4f6}';
     style.textContent += '.cad3-tree-parent-row{align-items:center}.cad3-tree-parent-row>.cad-tree-feature,.cad3-tree-disclosure{align-self:center}.cad-tree-feature>.cad3-icon{display:grid;place-items:center;align-self:center;line-height:0}.cad-tree-feature>.cad-tree-label{align-self:center;line-height:1.2}';
     style.textContent += '.cad3-assembly-tree{display:grid;gap:2px;padding:6px 0 10px;margin-bottom:7px;border-bottom:1px solid #28343b}.cad3-assembly-row{display:flex;align-items:center;gap:3px;padding-left:calc(var(--assembly-depth,0)*11px)}.cad3-assembly-select{flex:1;min-width:0;grid-template-columns:18px minmax(0,1fr)}.cad3-assembly-joint-count{min-width:34px;color:#8e9aa1;font-size:9px}.cad3-assembly-state{width:25px;height:25px;padding:0;border:1px solid #334047;border-radius:5px;background:#171f23;color:#c6d0d4;cursor:pointer}.cad3-assembly-state:hover:not(:disabled){border-color:#b75c2b;color:#ffb27e}.cad3-assembly-state:disabled{opacity:.45;cursor:not-allowed}.cad3-assembly-state[data-active="true"]{border-color:#9e4c24;color:#ffb27e;background:#422413}';
     style.textContent += '.cad3-assembly-select .cad-tree-label{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;line-height:1.25}';
@@ -266,7 +267,17 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         const payload=await semanticJson(`/api/v1/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(run.folderName)}/files`);
         if(state.project!==projectId)return;
         run.files=[...new Map([...run.files,...(payload.files||[]).filter(file=>!file.name.toLowerCase().endsWith('.json'))].map(file=>[file.name,file])).values()];
-        run.folders=payload.folders||[];run.filesLoaded=true;
+        run.folders=payload.folders||[];
+        if(run.folders.some(folder=>folder.name==='depth_frames')){
+          const nested=await semanticJson(`/api/v1/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(`${run.folderName}/depth_frames`)}/files`);
+          const csvResponse=await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(run.folderName)}/files/depth_frames.csv`,{cache:'no-store'});
+          if(!csvResponse.ok)throw new Error(`Не удалось прочитать список кадров (HTTP ${csvResponse.status}).`);
+          const rows=(await csvResponse.text()).split(/\r?\n/).slice(1).filter(Boolean);
+          const capturedNames=new Set(rows.map(row=>row.split(',')[1]).filter(name=>/^frame_\d+\.raw$/i.test(name||'')));
+          run.frameFiles=(nested.files||[]).filter(file=>capturedNames.has(file.name)).sort((a,b)=>a.name.localeCompare(b.name,'ru',{numeric:true}));
+          run.continuous=true;
+        }
+        run.filesLoaded=true;
       }catch(error){run.loadError=error.message}
       finally{run.loading=false;if(state.project===projectId)renderScanTree()}
     }
@@ -368,7 +379,9 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
       for(const run of scanTreeEntries){
         const title=scanRunTitle(run.id);
         const files=(run.files||[]).filter(file=>file.name.startsWith(`${run.id}_`)
-          && (/_pose_\d+\.ply$/i.test(file.name) || /_(?:fused|cleaned)\.cadyx-[0-9a-f]+\.ply$/i.test(file.name)));
+          && (run.continuous
+            ? /_all_frames_(?:fused|cleaned|colored_candidate)\.ply$/i.test(file.name)
+            : /_pose_\d+\.ply$/i.test(file.name) || /_(?:fused|cleaned)\.cadyx-[0-9a-f]+\.ply$/i.test(file.name)));
         const matchingFiles=files.filter(file=>!query||file.name.toLowerCase().includes(query));
         if(query&&!title.toLowerCase().includes(query)&&!matchingFiles.length)continue;
         const container=document.createElement('div');container.className='cad3-tree-node';
@@ -415,12 +428,31 @@ body:has(#primary-grid[data-view="projects"]) .section-sidebar,body:has(#primary
         }
         if(run.loading){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent='Загружаю файлы серии…';children.append(leaf)}
         else if(run.loadError){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=`Не удалось загрузить файлы серии (${run.loadError}).`;children.append(leaf)}
+        if(run.continuous&&run.frameFiles?.length){
+          const frameGroup=document.createElement('div');frameGroup.className='cad3-scan-frame-group';
+          const frameToggle=document.createElement('button');frameToggle.type='button';frameToggle.className='cad-tree-feature cad3-scan-frame-toggle';
+          frameToggle.setAttribute('aria-expanded',String(Boolean(run.framesExpanded)));
+          const frameLabel=document.createElement('span');frameLabel.textContent='Кадры непрерывной съёмки';
+          const frameCount=document.createElement('span');frameCount.textContent=String(run.frameFiles.length);
+          frameToggle.append(frameLabel,frameCount);
+          const frameList=document.createElement('div');frameList.className='cad3-scan-frame-list';frameList.hidden=!run.framesExpanded;
+          frameToggle.onclick=()=>{run.framesExpanded=!run.framesExpanded;renderScanTree()};
+          for(const file of run.frameFiles){
+            const frame=document.createElement('div');frame.className='cad3-model-note cad3-scan-file cad3-scan-frame';
+            const number=/frame_(\d+)\.raw$/i.exec(file.name)?.[1];
+            frame.textContent=`Кадр ${number||file.name} · исходный Y16 · ${scanFileSize(file.size)}`;
+            frame.title=file.name;frameList.append(frame);
+          }
+          frameGroup.append(frameToggle,frameList);children.append(frameGroup);
+        }
+        const runFiles=document.createElement('div');runFiles.className='cad3-scan-run-files';
         for(const file of matchingFiles){
           const leaf=document.createElement('button');leaf.type='button';leaf.className='cad3-model-note cad3-scan-file cad3-scan-file-button';
           leaf.setAttribute('aria-pressed',String(scanTreePreviewSelection===`${run.id}/${file.name}`));
           leaf.textContent=scanFileLabel(file,run.id);leaf.setAttribute('aria-label',`Показать облако точек · ${file.name}`);
-          leaf.onclick=()=>previewScanFile(run,file,leaf);children.append(leaf);
+          leaf.onclick=()=>previewScanFile(run,file,leaf);runFiles.append(leaf);
         }
+        if(matchingFiles.length)children.append(runFiles);
         if(expanded&&!run.loading&&!run.loadError&&!files.length){const leaf=document.createElement('div');leaf.className='cad3-model-note cad3-scan-file';leaf.textContent=run.folderName?'В серии нет облаков точек для предпросмотра.':'В серии нет облаков точек для предпросмотра.';children.append(leaf)}
         container.append(children);list.append(container);shown++;
       }
