@@ -491,7 +491,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_get_dashboard", "description": "Read the project's persisted agent workflow and task report.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_report_dashboard", "description": "Publish honest Russian workflow progress and queue state; this does not mutate the CAD document.", "inputSchema": _schema({"project_id": _STRING, "workflow": {"anyOf": [_OBJECT, {"type": "null"}]}, "tasks": {"type": "array", "items": _OBJECT}}, ["project_id", "workflow", "tasks"])},
     {"name": "cadyx_get_activity", "description": "Read recent real modeling operation states and results.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
-    {"name": "cadyx_execute_command", "description": "Execute one Command System operation with a server-managed agent lease in one HTTP request. Checks expected_revision, releases the lease, and returns a compact receipt without B-rep payloads. Never retries a command whose response was lost.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER, "command": _COMMAND}, ["project_id", "expected_revision", "command"])},
+    {"name": "cadyx_execute_command", "description": "Execute one Command System operation with a server-managed agent lease in one HTTP request. Checks expected_revision, releases the lease, and returns a compact receipt without B-rep payloads. Supports optional caller request_id for durable mutation idempotency. Never retries a command whose response was lost without a request_id.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER, "command": _COMMAND, "request_id": _STRING}, ["project_id", "expected_revision", "command"])},
     {"name": "cadyx_preview_commands", "description": "Preview an ordered batch on an isolated document copy without saving project state or publishing files; returns a revision-bound single-use proposal.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER, "commands": {"type": "array", "items": _COMMAND, "minItems": 1, "maxItems": 100}}, ["project_id", "expected_revision", "commands"])},
     {"name": "cadyx_commit_command_proposal", "description": "Atomically commit a preview proposal under a fresh agent lease and exact revision; never retry after an ambiguous response.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER, "proposal_id": _STRING}, ["project_id", "expected_revision", "proposal_id"])},
     {"name": "cadyx_stop_agent_work", "description": "Set the existing safe stop fence for work owned by this MCP session; waits for any admitted atomic command and validates the saved state.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
@@ -895,7 +895,7 @@ class MCPApplication:
             return self.api.get(self._project(args["project_id"], "/activity"))
         if name == "cadyx_execute_command":
             try:
-                result = self._execute_command(args["project_id"], args["expected_revision"], args["command"])
+                result = self._execute_command(args["project_id"], args["expected_revision"], args["command"], request_id=args.get("request_id"))
             except APIError as exc:
                 message = exc.payload.get("message") if isinstance(exc.payload, dict) else None
                 if not isinstance(message, str) or not message.startswith("Unsupported command type:"):
@@ -934,12 +934,23 @@ class MCPApplication:
                 raise ValueError("File is binary or not valid UTF-8; do not treat it as text. Use the matching CADYX import command.") from exc
         raise ValueError(f"File type {mime_type} is not exposed as text or image by this MCP adapter.")
 
-    def _execute_command(self, project_id: str, expected_revision: int, command: dict[str, Any]) -> Any:
+    def _execute_command(
+        self, project_id: str, expected_revision: int, command: dict[str, Any],
+        request_id: str | None = None,
+    ) -> Any:
         if not isinstance(command, dict) or not isinstance(command.get("type"), str):
             raise ValueError("command must be an object with a string type.")
+        if request_id is not None and (not isinstance(request_id, str) or not (1 <= len(request_id) <= 128)):
+            raise ValueError("request_id must be a non-empty string up to 128 characters.")
         with self._lease_guard:
             resumed = self._resumed_leases.get(project_id)
-        payload = {"owner_id": self.owner_id, "expected_revision": expected_revision, "command": command}
+        payload: dict[str, Any] = {
+            "owner_id": self.owner_id,
+            "expected_revision": expected_revision,
+            "command": command,
+        }
+        if request_id is not None:
+            payload["request_id"] = request_id
         if resumed:
             lease_id, resume_revision = resumed
             if expected_revision != resume_revision:
@@ -951,9 +962,15 @@ class MCPApplication:
             result = self.api.post(self._project(project_id, "/commands/execute"), payload)
             return {"command_result": result, "revision": result.get("document", {}).get("revision"), "lease_released": True}
         except Exception as exc:
-            # A lost or malformed response is ambiguous; never replay the command.
+            # A lost or malformed response is ambiguous; never replay the command without an idempotency key.
             if isinstance(exc, APIError) and exc.status in _DEFINITIVE_COMMAND_REJECTION_STATUSES:
                 raise
+            if request_id is not None:
+                try:
+                    result = self.api.post(self._project(project_id, "/commands/execute"), payload)
+                    return {"command_result": result, "revision": result.get("document", {}).get("revision"), "lease_released": True}
+                except Exception:
+                    pass
             try:
                 self._stop_agent_work(project_id)
             except Exception as stop_error:

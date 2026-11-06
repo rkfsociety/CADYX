@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import sqlite3
 import threading
@@ -9,7 +10,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Any, Callable, Iterator
 from uuid import UUID, uuid4
 
 from .errors import ConflictError, LeaseRequiredError, NotFoundError, ValidationError
@@ -74,6 +75,16 @@ class EditLeaseManager:
                 owner_type TEXT NOT NULL, owner_id TEXT NOT NULL,
                 acquired_at REAL NOT NULL, heartbeat_at REAL NOT NULL,
                 lease_id TEXT NOT NULL, timeout_seconds REAL NOT NULL
+            )""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS mutation_idempotency (
+                request_id TEXT PRIMARY KEY,
+                operation_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                command_hash TEXT NOT NULL,
+                expected_revision INTEGER,
+                outcome TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                created_at REAL NOT NULL
             )""")
             if (project_directory / ".cadyx-deleting").exists():
                 raise NotFoundError("Project is being deleted.")
@@ -358,3 +369,92 @@ class EditLeaseManager:
                 raise ConflictError("Project has no expired lease to recover.", code="LEASE_NOT_EXPIRED")
             self._local.connections[project_id].execute("DELETE FROM lease")
             return lease
+
+    def _query_idempotency(self, connection: sqlite3.Connection, request_id: str) -> dict[str, Any] | None:
+        try:
+            row = connection.execute(
+                """SELECT request_id, operation_id, revision, command_hash,
+                          expected_revision, outcome, result_json, created_at
+                   FROM mutation_idempotency WHERE request_id = ?""",
+                (request_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+        if row is None:
+            return None
+        return {
+            "request_id": row[0],
+            "operation_id": row[1],
+            "revision": row[2],
+            "command_hash": row[3],
+            "expected_revision": row[4],
+            "outcome": row[5],
+            "result": json.loads(row[6]),
+            "created_at": row[7],
+        }
+
+    def get_idempotency_record(self, project_id: str, request_id: str) -> dict[str, Any] | None:
+        connections = getattr(self._local, "connections", None)
+        conn = connections.get(project_id) if connections else None
+        if conn is not None:
+            return self._query_idempotency(conn, request_id)
+        project_directory = self._project_directory(project_id)
+        path = project_directory / ".cadyx-leases.sqlite3"
+        if not path.parent.is_dir() or not (path.parent / "project.json").is_file() or not path.is_file():
+            return None
+        if path.is_symlink():
+            raise ValidationError("Lease database must not be a symbolic link.")
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(_project_database_uri(path), uri=True, timeout=5)
+            return self._query_idempotency(connection, request_id)
+        except sqlite3.OperationalError as exc:
+            if _sqlite_contention(exc):
+                raise ConflictError("Project is busy; retry later.", code="PROJECT_BUSY") from exc
+            return None
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def record_idempotency(
+        self,
+        project_id: str,
+        request_id: str,
+        operation_id: str,
+        revision: int,
+        command_hash: str,
+        expected_revision: int | None,
+        outcome: str,
+        result: dict[str, Any],
+        *,
+        max_retained: int = 1000,
+        max_age_seconds: float = 86400 * 7,
+    ) -> None:
+        connections = getattr(self._local, "connections", None)
+        conn = connections.get(project_id) if connections else None
+        if conn is None:
+            raise RuntimeError("Cannot record idempotency without an active project transaction.")
+        now = time.time()
+        conn.execute(
+            """INSERT INTO mutation_idempotency
+               (request_id, operation_id, revision, command_hash, expected_revision, outcome, result_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                request_id,
+                operation_id,
+                revision,
+                command_hash,
+                expected_revision,
+                outcome,
+                json.dumps(result, separators=(",", ":")),
+                now,
+            ),
+        )
+        cutoff = now - max_age_seconds
+        conn.execute("DELETE FROM mutation_idempotency WHERE created_at < ?", (cutoff,))
+        conn.execute(
+            """DELETE FROM mutation_idempotency WHERE request_id NOT IN (
+                   SELECT request_id FROM mutation_idempotency ORDER BY created_at DESC LIMIT ?
+               )""",
+            (max_retained,),
+        )

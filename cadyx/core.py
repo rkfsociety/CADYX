@@ -799,15 +799,24 @@ class CadyxCore:
         *,
         expected_owner_type: OwnerType | None = None,
         expected_revision: int | None = None,
+        compact_receipt: bool = False,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
-        return self._command_activity.execute_command(project_id, lease_id, command, expected_owner_type=expected_owner_type, expected_revision=expected_revision)
+        return self._command_activity.execute_command(
+            project_id, lease_id, command,
+            expected_owner_type=expected_owner_type, expected_revision=expected_revision,
+            compact_receipt=compact_receipt, request_id=request_id,
+        )
 
     def execute_agent_command(
         self, project_id: str, owner_id: str, expected_revision: int, command: dict[str, Any],
         lease_id: str | None = None,
+        *,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         return self._command_activity.execute_agent_command(
             project_id, owner_id, expected_revision, command, lease_id,
+            request_id=request_id,
         )
 
     def preview_commands(self, project_id: str, expected_revision: int, commands: list[dict[str, Any]]) -> dict[str, Any]:

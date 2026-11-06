@@ -1054,10 +1054,12 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         handler._json(200, result)
     elif name == "agent_command_execute":
         body = _require_json(handler)
-        if not {"owner_id", "expected_revision", "command"}.issubset(body) or set(body) - {"owner_id", "expected_revision", "command", "lease_id"}:
-            raise ValidationError("Atomic agent command requires owner_id, expected_revision and command, with optional lease_id.")
+        allowed_keys = {"owner_id", "expected_revision", "command", "lease_id", "request_id"}
+        if not {"owner_id", "expected_revision", "command"}.issubset(body) or set(body) - allowed_keys:
+            raise ValidationError("Atomic agent command requires owner_id, expected_revision and command, with optional lease_id and request_id.")
         handler._json(200, core.execute_agent_command(
             project_id, body["owner_id"], body["expected_revision"], body["command"], body.get("lease_id"),
+            request_id=body.get("request_id"),
         ))
     elif name in {"agent_lease", "agent_command", "agent_lease_recover", "agent_lease_heartbeat", "agent_lease_release"}:
         _dispatch_project_control(handler, core, route, agent_api=True)
@@ -1075,7 +1077,11 @@ def _dispatch_project_control(handler: Any, core: CadyxCore, route: RouteMatch, 
     elif name == "command":
         body = _require_json(handler)
         expected = OwnerType.AGENT if agent_api else OwnerType.HUMAN
-        handler._json(200, core.execute_command(project_id, body.get("lease_id"), body.get("command"), expected_owner_type=expected, expected_revision=body.get("expected_revision")))
+        handler._json(200, core.execute_command(
+            project_id, body.get("lease_id"), body.get("command"),
+            expected_owner_type=expected, expected_revision=body.get("expected_revision"),
+            request_id=body.get("request_id"),
+        ))
     elif name == "lease_recover":
         handler._read_json()
         handler._json(200, core.recover_expired_lease(project_id))

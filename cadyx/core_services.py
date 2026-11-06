@@ -780,15 +780,46 @@ class ProjectLifecycleService(_CoreService):
                 "assembly_kinematics": inspect_assembly_mates(document.assembly),
             }
 
+
+def _compute_command_hash(command: Any) -> str:
+    if not isinstance(command, dict):
+        raise ValidationError("command must be an object.")
+    serialized = json.dumps(command, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+def _validate_request_id(request_id: Any) -> str:
+    if not isinstance(request_id, str) or not (1 <= len(request_id) <= 128):
+        raise ValidationError("request_id must be a non-empty string up to 128 characters.")
+    return request_id
+
 class CommandActivityService(_CoreService):
     """Coordinate leases, commands, dashboards, and activity."""
 
     def execute_agent_command(
         self, project_id: str, owner_id: str, expected_revision: int, command: dict[str, Any],
         lease_id: str | None = None,
+        *,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
         """Run one agent command under a server-managed, single-request lease."""
+        if request_id is not None:
+            _validate_request_id(request_id)
         with self._project_lifecycle_lock(project_id):
+            if request_id is not None:
+                existing = self.leases.get_idempotency_record(project_id, request_id)
+                if existing is not None:
+                    command_hash = _compute_command_hash(command)
+                    if existing["command_hash"] != command_hash or existing.get("expected_revision") != expected_revision:
+                        raise ConflictError(
+                            f"request_id '{request_id}' has already been used with different command or revision parameters.",
+                            code="IDEMPOTENCY_CONFLICT",
+                        )
+                    payload = existing["result"]
+                    return {
+                        "document": payload["document_summary"],
+                        "history_entry": payload["compact_history_entry"],
+                        "lease_released": True,
+                    }
             lease = (self.acquire_lease(project_id, "agent", owner_id) if lease_id is None
                      else self.leases.require(project_id, lease_id).as_dict())
             if lease.get("owner_id") != owner_id or lease.get("owner_type") != OwnerType.AGENT.value:
@@ -801,6 +832,7 @@ class CommandActivityService(_CoreService):
                     project_id, lease["lease_id"], command,
                     expected_owner_type=OwnerType.AGENT, expected_revision=expected_revision,
                     compact_receipt=True,
+                    request_id=request_id,
                 )
                 document = result.get("document", {})
                 objects = document.get("objects", []) if isinstance(document, dict) else []
@@ -830,14 +862,16 @@ class CommandActivityService(_CoreService):
                             return [compact_value(item, key) for item in value]
                         return value
 
-                    history_entry = {
+                    compact_history = {
                         key: value for key, value in history_entry.items()
                         if key != "command"
                     }
-                    history_entry = compact_value(history_entry)
+                    compact_history = compact_value(compact_history)
+                else:
+                    compact_history = history_entry
                 return {
                     "document": document_summary,
-                    "history_entry": history_entry,
+                    "history_entry": compact_history,
                     "lease_released": True,
                 }
             finally:
@@ -1186,8 +1220,30 @@ class CommandActivityService(_CoreService):
         expected_owner_type: OwnerType | None = None,
         expected_revision: int | None = None,
         compact_receipt: bool = False,
+        request_id: str | None = None,
     ) -> dict[str, Any]:
+        if request_id is not None:
+            _validate_request_id(request_id)
         with self._admitted_command_guard(project_id, lease_id) as admit:
+            if request_id is not None:
+                existing = self.leases.get_idempotency_record(project_id, request_id)
+                if existing is not None:
+                    command_hash = _compute_command_hash(command)
+                    if existing["command_hash"] != command_hash or existing.get("expected_revision") != expected_revision:
+                        raise ConflictError(
+                            f"request_id '{request_id}' has already been used with different command or revision parameters.",
+                            code="IDEMPOTENCY_CONFLICT",
+                        )
+                    payload = existing["result"]
+                    if compact_receipt:
+                        return {
+                            "document": payload["document_summary"],
+                            "history_entry": payload["history_entry"],
+                        }
+                    return {
+                        "document": payload["document"],
+                        "history_entry": payload["history_entry"],
+                    }
             command_name = command.get("type") if isinstance(command, dict) else None
             lease = self.leases.require(project_id, lease_id)
             if expected_owner_type is not None and lease.owner_type is not expected_owner_type:
@@ -1266,6 +1322,8 @@ class CommandActivityService(_CoreService):
                     "result": copy.deepcopy(result),
                     "revision": document.revision,
                 }
+                if request_id is not None:
+                    history_entry["request_id"] = request_id
                 next_project = dict(project)
                 validated_history_prefix = project.get("_history_count", 0) + len(project["history"])
                 next_project["document"] = document.to_dict(copy_objects=False)
@@ -1346,17 +1404,59 @@ class CommandActivityService(_CoreService):
             # The command held the SQLite lease transaction, preventing the
             # background heartbeat from renewing it until this guard exits.
             self.leases.refresh_after_command(project_id, lease.lease_id)
+            object_counts: dict[str, int] = {}
+            for item in document.objects:
+                object_type = item.get("type")
+                if isinstance(object_type, str):
+                    object_counts[object_type] = object_counts.get(object_type, 0) + 1
+            document_summary = {
+                "id": document.id, "version": document.version,
+                "revision": document.revision,
+                "object_count": len(document.objects),
+                "object_counts": object_counts,
+            }
+
+            def _compact_val(value: Any, key: str | None = None) -> Any:
+                if isinstance(value, dict):
+                    if key == "geometry":
+                        return {name: value[name] for name in ("kernel", "kind", "volume", "plane") if name in value}
+                    return {
+                        name: _compact_val(item, name) for name, item in value.items()
+                        if name not in {"data", "triangles", "positions", "point_ids", "line_ids", "circle_ids"}
+                    }
+                if isinstance(value, list):
+                    return [_compact_val(item, key) for item in value]
+                return value
+
+            compact_history = {
+                key: value for key, value in history_entry.items()
+                if key != "command"
+            }
+            compact_history = _compact_val(compact_history)
+
+            if request_id is not None:
+                idempotency_payload = {
+                    "operation_id": operation_id,
+                    "revision": document.revision,
+                    "document": document.to_dict(),
+                    "document_summary": document_summary,
+                    "history_entry": history_entry,
+                    "compact_history_entry": compact_history,
+                }
+                self.leases.record_idempotency(
+                    project_id=project_id,
+                    request_id=request_id,
+                    operation_id=operation_id,
+                    revision=document.revision,
+                    command_hash=_compute_command_hash(command),
+                    expected_revision=expected_revision,
+                    outcome="completed",
+                    result=idempotency_payload,
+                )
+
             if compact_receipt:
-                object_counts: dict[str, int] = {}
-                for item in document.objects:
-                    object_type = item.get("type")
-                    if isinstance(object_type, str):
-                        object_counts[object_type] = object_counts.get(object_type, 0) + 1
                 return {
-                    "document": {"id": document.id, "version": document.version,
-                                 "revision": document.revision,
-                                 "object_count": len(document.objects),
-                                 "object_counts": object_counts},
+                    "document": document_summary,
                     "history_entry": history_entry,
                 }
             return {"document": document.to_dict(), "history_entry": history_entry}

@@ -53,6 +53,10 @@ def _classification(code: str, message: str, diagnostics: dict[str, Any]) -> tup
         category = category or "topology_selection"
         failed = failed or "the requested selector must resolve uniquely against current topology"
         hint = hint or "Inspect topology at the current revision and choose a unique current selector."
+    elif code.startswith("IDEMPOTENCY_"):
+        category = category or "idempotency_conflict"
+        failed = failed or "the request_id must not be reused with different command or revision parameters"
+        hint = hint or "Use a unique request_id for distinct commands, or reuse the exact original payload to retrieve its result."
     elif code.startswith("REVISION_"):
         category = category or "stale_state"
         failed = failed or "the saved document must match expected_revision"

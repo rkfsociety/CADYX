@@ -696,6 +696,58 @@ class CadyxMCPServerTests(unittest.TestCase):
         self.assertEqual(len(detail["history"]), 1)
         self.assertEqual(detail["lock"]["state"], "FREE")
 
+    def test_idempotent_command_recovers_dropped_response_when_request_id_supplied(self) -> None:
+        project_id = self._create_project()
+        original_post = self.app.api.post
+        dropped = False
+
+        def drop_command_response(path: str, body: dict):
+            nonlocal dropped
+            result = original_post(path, body)
+            if path.endswith("/commands/execute") and not dropped:
+                dropped = True
+                raise RuntimeError("simulated lost command response")
+            return result
+
+        with patch.object(self.app.api, "post", side_effect=drop_command_response):
+            result = self.app.call_tool("cadyx_execute_command", {
+                "project_id": project_id,
+                "expected_revision": 0,
+                "command": {"type": "create_box", "width": 10, "height": 8, "depth": 4},
+                "request_id": "req-mcp-recover",
+            })
+        self.assertFalse(result.get("isError", False))
+        payload = json.loads(result["content"][0]["text"])
+        self.assertEqual(payload["revision"], 1)
+        self.assertTrue(payload["lease_released"])
+
+        detail = self._tool_value("cadyx_inspect_project_full", {"project_id": project_id})
+        self.assertEqual(detail["document"]["revision"], 1)
+        self.assertEqual(len(detail["history"]), 1)
+        self.assertEqual(detail["history"][0]["request_id"], "req-mcp-recover")
+        self.assertEqual(detail["lock"]["state"], "FREE")
+
+        # Calling again with identical request_id and command retrieves existing outcome
+        replay = self.app.call_tool("cadyx_execute_command", {
+            "project_id": project_id,
+            "expected_revision": 0,
+            "command": {"type": "create_box", "width": 10, "height": 8, "depth": 4},
+            "request_id": "req-mcp-recover",
+        })
+        self.assertFalse(replay.get("isError", False))
+        replay_payload = json.loads(replay["content"][0]["text"])
+        self.assertEqual(replay_payload["revision"], 1)
+
+        # Calling with same request_id but different command rejects as conflict
+        conflict = self.app.call_tool("cadyx_execute_command", {
+            "project_id": project_id,
+            "expected_revision": 0,
+            "command": {"type": "create_box", "width": 99, "height": 8, "depth": 4},
+            "request_id": "req-mcp-recover",
+        })
+        self.assertTrue(conflict["isError"])
+        self.assertIn("IDEMPOTENCY_CONFLICT", conflict["content"][0]["text"])
+
     def test_server_error_still_fences_ambiguous_command(self) -> None:
         project_id = self._create_project()
         original_post = self.app.api.post
