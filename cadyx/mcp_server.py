@@ -13,9 +13,10 @@ import struct
 import sys
 import threading
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
+import re
+from concurrent.futures import CancelledError as ConcurrentCancelledError, ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from uuid import uuid4
 
 from .api_contracts import VALIDATION_OPERATIONS
@@ -23,6 +24,8 @@ from .errors import public_data, public_text
 
 _PROTOCOL_VERSION = "2025-11-25"
 _MAX_FILE_BYTES = 64 * 1024 * 1024
+_MAX_FRAME_BYTES = 64 * 1024 * 1024
+_DEFAULT_MAX_OUTSTANDING_CALLS = 32
 _MAX_RESPONSE_BYTES = _MAX_FILE_BYTES
 _JSON_RESPONSE_BYTES = 16 * 1024 * 1024
 _FULL_JSON_RESPONSE_BYTES = 64 * 1024 * 1024
@@ -57,6 +60,112 @@ class TransportError(RuntimeError):
 
 class OutcomeUncertainError(RuntimeError):
     """A mutation response was ambiguous and requires inspection before retry."""
+
+
+class CancelledError(RuntimeError):
+    """Raised when a tool call or MCP request is cooperatively cancelled."""
+
+
+_MUTATING_TOOLS = frozenset({
+    "cadyx_select_resource",
+    "cadyx_create_project",
+    "cadyx_rename_project",
+    "cadyx_set_project_type",
+    "cadyx_copy_project_files",
+    "cadyx_prune_project_files",
+    "cadyx_delete_project",
+    "cadyx_propose_capability",
+    "cadyx_execute_capability",
+    "cadyx_rollback_capability",
+    "cadyx_develop_source_extension",
+    "cadyx_rollback_source_extension",
+    "cadyx_remove_project_files",
+    "cadyx_remove_project_folder",
+    "cadyx_move_project_files",
+    "cadyx_start_scan_360",
+    "cadyx_rescan_360",
+    "cadyx_start_continuous_scan",
+    "cadyx_stop_continuous_scan",
+    "cadyx_start_scan_fusion",
+    "cadyx_control_turntable",
+    "cadyx_start_scanner_live_preview",
+    "cadyx_stop_scanner_live_preview",
+    "cadyx_upload_project_step",
+    "cadyx_upload_project_scan",
+    "cadyx_remove_staged_step",
+    "cadyx_report_dashboard",
+    "cadyx_execute_command",
+    "cadyx_commit_command_proposal",
+    "cadyx_stop_agent_work",
+    "cadyx_resume_agent_work",
+    "cadyx_recover_expired_lease",
+})
+
+
+def is_mutating_tool(name: str | None) -> bool:
+    if not name:
+        return True
+    return name in _MUTATING_TOOLS
+
+
+_REQUEST_ID_REGEX = re.compile(r'"id"\s*:\s*("(?:[^"\\]|\\.)*"|-?\d+)')
+
+
+def _extract_request_id(chunk: str) -> Any:
+    match = _REQUEST_ID_REGEX.search(chunk[:2048])
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except Exception:
+            return None
+    return None
+
+
+def read_bounded_frames(
+    stream: Any,
+    max_frame_bytes: int = _MAX_FRAME_BYTES,
+) -> Iterator[tuple[str | None, str | None]]:
+    """Yield (valid_line, oversized_prefix) tuples from stream with bounded memory.
+
+    For frames up to max_frame_bytes, yields (valid_line, None).
+    For frames exceeding max_frame_bytes, the remainder of the line is drained
+    and (None, oversized_prefix) is yielded.
+    Empty/whitespace lines are skipped.
+    """
+    while True:
+        chunk = stream.readline(max_frame_bytes + 1)
+        if not chunk:
+            break
+
+        is_oversized = False
+        if len(chunk) > max_frame_bytes:
+            is_oversized = True
+        elif len(chunk.encode("utf-8", errors="replace")) > max_frame_bytes:
+            is_oversized = True
+
+        if is_oversized:
+            if not chunk.endswith("\n"):
+                while True:
+                    discard = stream.readline(65536)
+                    if not discard or discard.endswith("\n"):
+                        break
+            yield (None, chunk)
+            continue
+
+        if not chunk.strip():
+            continue
+
+        yield (chunk, None)
+
+
+class ActiveToolCall:
+    def __init__(self, request_id: Any, tool_name: str, is_mutating: bool) -> None:
+        self.request_id = request_id
+        self.tool_name = tool_name
+        self.is_mutating = is_mutating
+        self.cancel_event = threading.Event()
+        self.future: Any = None
+        self.started = False
 
 
 class ResponseTooLargeError(RuntimeError):
@@ -408,9 +517,16 @@ class MCPApplication:
     def _project_summary(self, project_id: str) -> dict[str, Any]:
         return self.api.get(self._project(project_id, "/inspection?section=summary"))
 
-    def call_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+    def call_tool(
+        self,
+        name: str,
+        args: dict[str, Any],
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        if cancel_event and cancel_event.is_set() and not is_mutating_tool(name):
+            raise CancelledError("Request cancelled")
         try:
-            value = self._dispatch(name, args)
+            value = self._dispatch(name, args, cancel_event=cancel_event)
             if isinstance(value, tuple) and value and value[0] == "image":
                 return {"content": [
                     {"type": "text", "text": value[1]},
@@ -463,6 +579,8 @@ class MCPApplication:
                                      "correction_hint": "Inspect the current revision and command history before deciding whether to retry."}}
             return {"content": [{"type": "text", "text": json.dumps(error, ensure_ascii=False, separators=(",", ":"))}],
                     "structuredContent": error, "isError": True}
+        except CancelledError:
+            raise
         except (ValueError, TypeError) as exc:
             error = {"error": "VALIDATION_ERROR", "message": public_text(str(exc)),
                      "diagnostics": {"category": "validation", "failed_precondition":
@@ -476,7 +594,14 @@ class MCPApplication:
             return {"content": [{"type": "text", "text": json.dumps(error, ensure_ascii=False, separators=(",", ":"))}],
                     "structuredContent": error, "isError": True}
 
-    def _dispatch(self, name: str, args: dict[str, Any]) -> Any:
+    def _dispatch(
+        self,
+        name: str,
+        args: dict[str, Any],
+        cancel_event: threading.Event | None = None,
+    ) -> Any:
+        if cancel_event and cancel_event.is_set() and not is_mutating_tool(name):
+            raise CancelledError("Request cancelled")
         if name == "cadyx_health":
             return self.api.get("/api/v1/health")
         if name == "cadyx_list_workspace":
@@ -927,7 +1052,11 @@ def _error(request_id: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
 
 
-def handle_message(message: dict[str, Any], app: MCPApplication) -> dict[str, Any] | None:
+def handle_message(
+    message: dict[str, Any],
+    app: MCPApplication,
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any] | None:
     request_id = message.get("id")
     method = message.get("method")
     if not isinstance(method, str):
@@ -946,63 +1075,165 @@ def handle_message(message: dict[str, Any], app: MCPApplication) -> dict[str, An
             result = {"tools": TOOLS}
         elif method == "tools/call":
             name = params.get("name")
+            if cancel_event and cancel_event.is_set() and not is_mutating_tool(name):
+                return _error(request_id, -32800, "Request cancelled") if request_id is not None else None
             args = params.get("arguments") or {}
             if not isinstance(args, dict):
                 return _error(request_id, -32602, "Tool arguments must be an object")
-            result = app.call_tool(name, args)
+            result = app.call_tool(name, args, cancel_event=cancel_event)
         else:
             return _error(request_id, -32601, f"Method not found: {method}") if request_id is not None else None
         return _response(request_id, result) if request_id is not None else None
+    except CancelledError as exc:
+        return _error(request_id, -32800, public_text(str(exc))) if request_id is not None else None
     except Exception as exc:
         return _error(request_id, -32603, public_text(str(exc))) if request_id is not None else None
 
 
-def main() -> int:
+def main(
+    input_stream: Any = None,
+    output_stream: Any = None,
+    *,
+    max_frame_bytes: int = _MAX_FRAME_BYTES,
+    max_outstanding: int = _DEFAULT_MAX_OUTSTANDING_CALLS,
+    pool_workers: int = 8,
+    app: MCPApplication | None = None,
+) -> int:
     """Serve newline-framed JSON-RPC on stdio; stdout is reserved for protocol frames."""
-    app = MCPApplication()
-    write_lock = threading.Lock()
-    pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="cadyx-mcp")
+    if input_stream is None:
+        input_stream = sys.stdin
+    if output_stream is None:
+        output_stream = sys.stdout
+    if app is None:
+        app = MCPApplication()
 
-    def send(future: Any, request_id: Any) -> None:
+    write_lock = threading.Lock()
+    pool = ThreadPoolExecutor(max_workers=pool_workers, thread_name_prefix="cadyx-mcp")
+
+    active_lock = threading.RLock()
+    active_requests: dict[Any, ActiveToolCall] = {}
+    active_calls_count = 0
+
+    def send(future: Any, request_id: Any, active_call: ActiveToolCall | None = None) -> None:
+        nonlocal active_calls_count
         try:
-            value = future.result()
+            if future.cancelled() or (active_call and active_call.cancel_event.is_set() and not active_call.is_mutating):
+                value = _error(request_id, -32800, "Request cancelled")
+            else:
+                value = future.result()
+        except (ConcurrentCancelledError, CancelledError):
+            value = _error(request_id, -32800, "Request cancelled")
         except Exception as exc:
             value = _error(request_id, -32603, public_text(str(exc)))
-        if value is not None:
+        finally:
+            with active_lock:
+                active_calls_count -= 1
+                if request_id is not None:
+                    active_requests.pop(request_id, None)
+
+        if value is not None and request_id is not None:
             with write_lock:
-                sys.stdout.write(json.dumps(value, ensure_ascii=False, allow_nan=False) + "\n")
-                sys.stdout.flush()
+                output_stream.write(json.dumps(value, ensure_ascii=False, allow_nan=False) + "\n")
+                output_stream.flush()
+
+    def run_tool(active_call: ActiveToolCall, message: dict[str, Any]) -> dict[str, Any] | None:
+        with active_lock:
+            active_call.started = True
+        if active_call.cancel_event.is_set() and not active_call.is_mutating:
+            return _error(active_call.request_id, -32800, "Request cancelled")
+        return handle_message(message, app, cancel_event=active_call.cancel_event)
 
     try:
-        for line in sys.stdin:
-            if not line.strip():
+        for valid_line, oversized_chunk in read_bounded_frames(input_stream, max_frame_bytes=max_frame_bytes):
+            if valid_line is None:
+                request_id = _extract_request_id(oversized_chunk or "")
+                response = _error(
+                    request_id,
+                    -32700,
+                    f"Parse error: Input frame exceeds maximum size of {max_frame_bytes} bytes",
+                )
+                with write_lock:
+                    output_stream.write(json.dumps(response, ensure_ascii=False, allow_nan=False) + "\n")
+                    output_stream.flush()
                 continue
+
             try:
-                message = json.loads(line)
+                message = json.loads(valid_line)
                 if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
-                    response = _error(message.get("id") if isinstance(message, dict) else None, -32600, "Invalid JSON-RPC request")
+                    response = _error(
+                        message.get("id") if isinstance(message, dict) else None,
+                        -32600,
+                        "Invalid JSON-RPC request",
+                    )
                     with write_lock:
-                        sys.stdout.write(json.dumps(response) + "\n")
-                        sys.stdout.flush()
+                        output_stream.write(json.dumps(response) + "\n")
+                        output_stream.flush()
                     continue
-                if message.get("method") == "tools/call":
+
+                method = message.get("method")
+                if method == "notifications/cancelled":
+                    params = message.get("params") or {}
+                    target_id = params.get("requestId") if "requestId" in params else params.get("request_id")
+                    future_to_cancel = None
+                    if target_id is not None:
+                        with active_lock:
+                            target_call = active_requests.get(target_id)
+                            if target_call is not None:
+                                target_call.cancel_event.set()
+                                if not target_call.is_mutating and not target_call.started:
+                                    future_to_cancel = target_call.future
+                        if future_to_cancel is not None:
+                            future_to_cancel.cancel()
+                    continue
+
+                if method == "tools/call":
                     request_id = message.get("id")
-                    future = pool.submit(handle_message, message, app)
-                    future.add_done_callback(lambda completed, rid=request_id: send(completed, rid))
+                    params = message.get("params") or {}
+                    tool_name = params.get("name") if isinstance(params, dict) else ""
+                    is_mutating = is_mutating_tool(tool_name)
+
+                    with active_lock:
+                        if active_calls_count >= max_outstanding:
+                            if request_id is not None:
+                                response = _error(
+                                    request_id,
+                                    -32000,
+                                    "Server overloaded: maximum outstanding tool calls reached",
+                                )
+                                with write_lock:
+                                    output_stream.write(
+                                        json.dumps(response, ensure_ascii=False, allow_nan=False) + "\n"
+                                    )
+                                    output_stream.flush()
+                            continue
+
+                        active_calls_count += 1
+                        active_call = ActiveToolCall(request_id, tool_name, is_mutating)
+                        if request_id is not None:
+                            active_requests[request_id] = active_call
+
+                    future = pool.submit(run_tool, active_call, message)
+                    active_call.future = future
+                    future.add_done_callback(
+                        lambda completed, rid=request_id, ac=active_call: send(completed, rid, ac)
+                    )
                 else:
                     response = handle_message(message, app)
                     if response is not None:
                         with write_lock:
-                            sys.stdout.write(json.dumps(response, ensure_ascii=False, allow_nan=False) + "\n")
-                            sys.stdout.flush()
+                            output_stream.write(
+                                json.dumps(response, ensure_ascii=False, allow_nan=False) + "\n"
+                            )
+                            output_stream.flush()
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 response = _error(None, -32700, f"Parse error: {exc}")
                 with write_lock:
-                    sys.stdout.write(json.dumps(response) + "\n")
-                    sys.stdout.flush()
+                    output_stream.write(json.dumps(response) + "\n")
+                    output_stream.flush()
     finally:
-        pool.shutdown(wait=True)
-        app.api.close()
+        pool.shutdown(wait=True, cancel_futures=True)
+        if getattr(app, "api", None) is not None and hasattr(app.api, "close"):
+            app.api.close()
     return 0
 
 

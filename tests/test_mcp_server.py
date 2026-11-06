@@ -1010,5 +1010,221 @@ class CadyxMCPResponseLimitsTests(unittest.TestCase):
                 thread.join(timeout=2)
 
 
+
+
+class CadyxMCPFrameLimitsAndConcurrencyTests(unittest.TestCase):
+    def test_frame_reading_boundary_unicode_valid(self) -> None:
+        valid_msg = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+        raw_valid = json.dumps(valid_msg) + "\n"
+        input_stream = io.StringIO(raw_valid)
+        output_stream = io.StringIO()
+        from cadyx.mcp_server import main
+        ret = main(input_stream, output_stream, max_frame_bytes=len(raw_valid.encode("utf-8")))
+        self.assertEqual(ret, 0)
+        lines = [json.loads(line) for line in output_stream.getvalue().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0], {"jsonrpc": "2.0", "id": 1, "result": {}})
+
+    def test_frame_reading_oversized_frame_rejection_and_recovery(self) -> None:
+        oversized = '{"jsonrpc":"2.0","id":101,"method":"ping","extra":"' + ("x" * 200) + '"}\n'
+        next_valid = '{"jsonrpc":"2.0","id":102,"method":"ping"}\n'
+        input_stream = io.StringIO(oversized + next_valid)
+        output_stream = io.StringIO()
+        from cadyx.mcp_server import main
+        ret = main(input_stream, output_stream, max_frame_bytes=100)
+        self.assertEqual(ret, 0)
+        lines = [json.loads(line) for line in output_stream.getvalue().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 2)
+        # First request rejected as oversized with recovered ID
+        self.assertEqual(lines[0]["id"], 101)
+        self.assertEqual(lines[0]["error"]["code"], -32700)
+        self.assertIn("exceeds maximum size of 100 bytes", lines[0]["error"]["message"])
+        # Second request successfully processed without desynchronization
+        self.assertEqual(lines[1], {"jsonrpc": "2.0", "id": 102, "result": {}})
+
+    def test_frame_reading_unterminated_oversized_frame_fails_safely(self) -> None:
+        unterminated = '{"jsonrpc":"2.0","id":201,"method":"ping","extra":"' + ("y" * 150)
+        input_stream = io.StringIO(unterminated)
+        output_stream = io.StringIO()
+        from cadyx.mcp_server import main
+        ret = main(input_stream, output_stream, max_frame_bytes=50)
+        self.assertEqual(ret, 0)
+        lines = [json.loads(line) for line in output_stream.getvalue().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0]["id"], 201)
+        self.assertEqual(lines[0]["error"]["code"], -32700)
+
+    def test_outstanding_tool_call_concurrency_limit_and_release(self) -> None:
+        from cadyx.mcp_server import main, MCPApplication
+        started_event_1 = threading.Event()
+        release_event = threading.Event()
+
+        class MockApp(MCPApplication):
+            def __init__(self):
+                pass
+            def call_tool(self, name: str, args: dict, cancel_event=None):
+                if name == "slow_tool":
+                    started_event_1.set()
+                    release_event.wait(timeout=5)
+                    return {"done": True}
+                return {"done": True}
+
+        input_data = (
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slow_tool","arguments":{}}}\n'
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"slow_tool","arguments":{}}}\n'
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"slow_tool","arguments":{}}}\n'
+            '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"slow_tool","arguments":{}}}\n'
+        )
+
+        class CustomStream:
+            def __init__(self, text):
+                self._lines = text.splitlines(True)
+                self._idx = 0
+            def readline(self, size=-1):
+                if self._idx < len(self._lines):
+                    line = self._lines[self._idx]
+                    self._idx += 1
+                    return line
+                return ""
+
+        stream = CustomStream(input_data)
+        out = io.StringIO()
+        app = MockApp()
+
+        def unblock():
+            started_event_1.wait(timeout=2)
+            # Give main time to process requests 1, 2, 3 and notification
+            threading.Event().wait(0.1)
+            release_event.set()
+
+        unblock_thread = threading.Thread(target=unblock, daemon=True)
+        unblock_thread.start()
+
+        main(stream, out, max_outstanding=2, pool_workers=2, app=app)
+        unblock_thread.join(timeout=2)
+
+        lines = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+        by_id = {item.get("id"): item for item in lines if "id" in item}
+        # Requests 1 and 2 succeeded
+        self.assertIn(1, by_id)
+        self.assertIn(2, by_id)
+        self.assertEqual(by_id[1]["result"], {"done": True})
+        self.assertEqual(by_id[2]["result"], {"done": True})
+        # Request 3 was rejected with -32000 overload error
+        self.assertIn(3, by_id)
+        self.assertEqual(by_id[3]["error"]["code"], -32000)
+        self.assertIn("Server overloaded", by_id[3]["error"]["message"])
+        # Notification produced no response frame
+        self.assertEqual(len(lines), 3)
+
+    def test_cancellation_of_pending_read_tool_avoids_host_work(self) -> None:
+        from cadyx.mcp_server import main, MCPApplication
+        worker_1_started = threading.Event()
+        worker_1_release = threading.Event()
+        read_tool_invoked = False
+
+        class MockApp(MCPApplication):
+            def __init__(self):
+                pass
+            def call_tool(self, name: str, args: dict, cancel_event=None):
+                nonlocal read_tool_invoked
+                if name == "slow_gate":
+                    worker_1_started.set()
+                    worker_1_release.wait(timeout=5)
+                    return {"gate": "open"}
+                if name == "cadyx_health":
+                    read_tool_invoked = True
+                    return {"healthy": True}
+                return {}
+
+        app = MockApp()
+        lines_input = [
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slow_gate","arguments":{}}}\n',
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"cadyx_health","arguments":{}}}\n',
+            '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}}\n',
+        ]
+
+        class SteppedStream:
+            def __init__(self, parts):
+                self._parts = list(parts)
+            def readline(self, size=-1):
+                if self._parts:
+                    return self._parts.pop(0)
+                return ""
+
+        stream = SteppedStream(lines_input)
+        out = io.StringIO()
+
+        def release_worker():
+            worker_1_started.wait(timeout=2)
+            threading.Event().wait(0.1)
+            worker_1_release.set()
+
+        t = threading.Thread(target=release_worker, daemon=True)
+        t.start()
+
+        main(stream, out, max_outstanding=8, pool_workers=1, app=app)
+        t.join(timeout=2)
+
+        results = {item.get("id"): item for item in [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]}
+        self.assertIn(1, results)
+        self.assertEqual(results[1]["result"], {"gate": "open"})
+        self.assertIn(2, results)
+        self.assertEqual(results[2]["error"]["code"], -32800)
+        self.assertEqual(results[2]["error"]["message"], "Request cancelled")
+        self.assertFalse(read_tool_invoked, "Cancelled read tool must not execute host work")
+
+    def test_cancellation_of_mutating_tool_does_not_abort_midway(self) -> None:
+        from cadyx.mcp_server import main, MCPApplication
+        mutation_invoked = False
+        mutation_started = threading.Event()
+        mutation_release = threading.Event()
+
+        class MockApp(MCPApplication):
+            def __init__(self):
+                pass
+            def call_tool(self, name: str, args: dict, cancel_event=None):
+                nonlocal mutation_invoked
+                if name == "cadyx_execute_command":
+                    mutation_started.set()
+                    mutation_release.wait(timeout=5)
+                    mutation_invoked = True
+                    return {"status": "committed", "revision": 1}
+                return {}
+
+        app = MockApp()
+        lines_input = [
+            '{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"cadyx_execute_command","arguments":{}}}\n',
+            '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":10}}\n',
+        ]
+
+        class SteppedStream:
+            def __init__(self, parts):
+                self._parts = list(parts)
+            def readline(self, size=-1):
+                if self._parts:
+                    return self._parts.pop(0)
+                return ""
+
+        stream = SteppedStream(lines_input)
+        out = io.StringIO()
+
+        def release_mutation():
+            mutation_started.wait(timeout=2)
+            threading.Event().wait(0.1)
+            mutation_release.set()
+
+        t = threading.Thread(target=release_mutation, daemon=True)
+        t.start()
+
+        main(stream, out, max_outstanding=8, pool_workers=2, app=app)
+        t.join(timeout=2)
+
+        results = {item.get("id"): item for item in [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]}
+        self.assertIn(10, results)
+        self.assertEqual(results[10]["result"], {"status": "committed", "revision": 1})
+        self.assertTrue(mutation_invoked, "Mutating tool must execute to completion and never claim rollback")
+
+
 if __name__ == "__main__":
     unittest.main()
