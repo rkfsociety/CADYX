@@ -147,3 +147,151 @@ class AgentControlTests(unittest.TestCase):
             self.core.execute_command(self.project, self.token, BOX, request_id=123)  # type: ignore[arg-type]
         with self.assertRaises(ValidationError):
             self.core.execute_command(self.project, self.token, BOX, request_id="x" * 129)
+
+    def test_command_burst_executes_sequentially_and_advances_revisions(self):
+        self.core.release_lease(self.project, self.token)
+        commands = [
+            {"type": "create_box", "width": 1, "height": 2, "depth": 3},
+            {"type": "create_box", "width": 4, "height": 5, "depth": 6},
+            {"type": "create_box", "width": 7, "height": 8, "depth": 9},
+        ]
+        burst_result = self.core.execute_agent_command_burst(
+            self.project, "agent", expected_revision=0, commands=commands,
+        )
+        self.assertEqual(burst_result["completed_count"], 3)
+        self.assertEqual(burst_result["total_count"], 3)
+        self.assertEqual(burst_result["initial_revision"], 0)
+        self.assertEqual(burst_result["final_revision"], 3)
+        self.assertTrue(burst_result["lease_released"])
+        self.assertEqual(len(burst_result["results"]), 3)
+        self.assertEqual([r["revision"] for r in burst_result["results"]], [1, 2, 3])
+        self.assertEqual(burst_result["document"]["revision"], 3)
+
+        project_state = self.core.inspect_project(self.project)
+        self.assertEqual(project_state["document"]["revision"], 3)
+        self.assertEqual(len(project_state["history"]), 3)
+        self.assertEqual(project_state["lock"]["state"], "FREE")
+
+    def test_command_burst_emits_distinct_events(self):
+        import queue
+        self.core.release_lease(self.project, self.token)
+        commands = [
+            {"type": "create_box", "width": 1, "height": 1, "depth": 1},
+            {"type": "create_box", "width": 2, "height": 2, "depth": 2},
+        ]
+        events_received = []
+        sub_id, sub_queue = self.core.events.subscribe(self.project)
+        try:
+            self.core.execute_agent_command_burst(
+                self.project, "agent", expected_revision=0, commands=commands,
+            )
+            while True:
+                try:
+                    ev = sub_queue.get(timeout=0.1)
+                    events_received.append(ev)
+                except queue.Empty:
+                    break
+        finally:
+            self.core.events.unsubscribe(sub_id)
+
+        event_names = [e.event for e in events_received]
+        self.assertEqual(event_names.count("command.started"), 2)
+        self.assertEqual(event_names.count("document.changed"), 2)
+        self.assertEqual(event_names.count("command.completed"), 2)
+
+    def test_command_burst_failure_commits_prefix_and_halts(self):
+        self.core.release_lease(self.project, self.token)
+        commands = [
+            {"type": "create_box", "width": 1, "height": 2, "depth": 3},
+            {"type": "create_box", "width": -5, "height": 2, "depth": 3},
+            {"type": "create_box", "width": 7, "height": 8, "depth": 9},
+        ]
+        with self.assertRaises(ValidationError) as ctx:
+            self.core.execute_agent_command_burst(
+                self.project, "agent", expected_revision=0, commands=commands,
+            )
+        diag = ctx.exception.diagnostics
+        self.assertEqual(diag.get("burst_failed_index"), 1)
+        self.assertEqual(diag.get("burst_completed_count"), 1)
+        self.assertEqual(diag.get("burst_total_count"), 3)
+        self.assertEqual(diag.get("burst_committed_revision"), 1)
+
+        project_state = self.core.inspect_project(self.project)
+        self.assertEqual(project_state["document"]["revision"], 1)
+        self.assertEqual(len(project_state["history"]), 1)
+        self.assertEqual(project_state["lock"]["state"], "FREE")
+
+    def test_command_burst_stop_fence_halts_execution(self):
+        self.core.release_lease(self.project, self.token)
+        commands = [
+            {"type": "create_box", "width": 1, "height": 1, "depth": 1},
+            {"type": "create_box", "width": 2, "height": 2, "depth": 2},
+        ]
+        original_execute = self.core._command_activity.execute_command
+
+        def intercept_and_fence(*args, **kwargs):
+            result = original_execute(*args, **kwargs)
+            with self.core._server_agent_lease_guard:
+                active = self.core._server_agent_leases.get(self.project)
+            if active is not None:
+                self.core.leases.request_agent_stop(self.project, active[0])
+            return result
+
+        object.__setattr__(self.core._command_activity, "execute_command", intercept_and_fence)
+        try:
+            with self.assertRaises(ConflictError) as ctx:
+                self.core.execute_agent_command_burst(
+                    self.project, "agent", expected_revision=0, commands=commands,
+                )
+            self.assertEqual(ctx.exception.code, "AGENT_STOPPING")
+        finally:
+            object.__setattr__(self.core._command_activity, "execute_command", original_execute)
+
+        project_state = self.core.inspect_project(self.project)
+        self.assertEqual(project_state["document"]["revision"], 1)
+        self.assertEqual(len(project_state["history"]), 1)
+        self.assertEqual(project_state["lock"]["state"], "FREE")
+
+    def test_command_burst_idempotency_retry(self):
+        self.core.release_lease(self.project, self.token)
+        commands = [
+            {"type": "create_box", "width": 1, "height": 1, "depth": 1},
+            {"type": "create_box", "width": 2, "height": 2, "depth": 2},
+        ]
+        burst1 = self.core.execute_agent_command_burst(
+            self.project, "agent", expected_revision=0, commands=commands, request_id="burst-idem-1",
+        )
+        self.assertEqual(burst1["final_revision"], 2)
+        self.assertEqual(len(self.core.inspect_project(self.project)["history"]), 2)
+
+        burst2 = self.core.execute_agent_command_burst(
+            self.project, "agent", expected_revision=0, commands=commands, request_id="burst-idem-1",
+        )
+        self.assertEqual(burst2["final_revision"], 2)
+        self.assertEqual(burst2["completed_count"], 2)
+        self.assertEqual(len(self.core.inspect_project(self.project)["history"]), 2)
+
+        diff_commands = [
+            {"type": "create_box", "width": 10, "height": 10, "depth": 10},
+        ]
+        with self.assertRaises(ConflictError) as ctx:
+            self.core.execute_agent_command_burst(
+                self.project, "agent", expected_revision=0, commands=diff_commands, request_id="burst-idem-1",
+            )
+        self.assertEqual(ctx.exception.code, "IDEMPOTENCY_CONFLICT")
+
+    def test_command_burst_per_command_request_ids(self):
+        self.core.release_lease(self.project, self.token)
+        commands = [
+            {"type": "create_box", "width": 1, "height": 1, "depth": 1},
+            {"type": "create_box", "width": 2, "height": 2, "depth": 2},
+        ]
+        request_ids = ["cmd-id-1", "cmd-id-2"]
+        burst = self.core.execute_agent_command_burst(
+            self.project, "agent", expected_revision=0, commands=commands, request_ids=request_ids,
+        )
+        self.assertEqual(burst["final_revision"], 2)
+        history = self.core.inspect_project(self.project)["history"]
+        self.assertEqual(len(history), 2)
+        self.assertEqual(history[0]["request_id"], "cmd-id-1")
+        self.assertEqual(history[1]["request_id"], "cmd-id-2")

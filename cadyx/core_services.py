@@ -792,6 +792,25 @@ def _validate_request_id(request_id: Any) -> str:
         raise ValidationError("request_id must be a non-empty string up to 128 characters.")
     return request_id
 
+def _compact_history_dict(history_entry: Any) -> Any:
+    if not isinstance(history_entry, dict):
+        return history_entry
+
+    def _compact_val(value: Any, key: str | None = None) -> Any:
+        if isinstance(value, dict):
+            if key == "geometry":
+                return {name: value[name] for name in ("kernel", "kind", "volume", "plane") if name in value}
+            return {
+                name: _compact_val(item, name) for name, item in value.items()
+                if name not in {"data", "triangles", "positions", "point_ids", "line_ids", "circle_ids"}
+            }
+        if isinstance(value, list):
+            return [_compact_val(item, key) for item in value]
+        return value
+
+    compacted = {k: v for k, v in history_entry.items() if k != "command"}
+    return _compact_val(compacted)
+
 class CommandActivityService(_CoreService):
     """Coordinate leases, commands, dashboards, and activity."""
 
@@ -849,31 +868,173 @@ class CommandActivityService(_CoreService):
                         "object_counts": object_counts,
                     }
                 history_entry = result.get("history_entry")
-                if isinstance(history_entry, dict):
-                    def compact_value(value: Any, key: str | None = None) -> Any:
-                        if isinstance(value, dict):
-                            if key == "geometry":
-                                return {name: value[name] for name in ("kernel", "kind", "volume", "plane") if name in value}
-                            return {
-                                name: compact_value(item, name) for name, item in value.items()
-                                if name not in {"data", "triangles", "positions", "point_ids", "line_ids", "circle_ids"}
-                            }
-                        if isinstance(value, list):
-                            return [compact_value(item, key) for item in value]
-                        return value
-
-                    compact_history = {
-                        key: value for key, value in history_entry.items()
-                        if key != "command"
-                    }
-                    compact_history = compact_value(compact_history)
-                else:
-                    compact_history = history_entry
+                compact_history = _compact_history_dict(history_entry)
                 return {
                     "document": document_summary,
                     "history_entry": compact_history,
                     "lease_released": True,
                 }
+            finally:
+                try:
+                    self.release_lease(project_id, lease["lease_id"])
+                finally:
+                    with self._core._server_agent_lease_guard:
+                        if self._core._server_agent_leases.get(project_id) == active_lease:
+                            self._core._server_agent_leases.pop(project_id, None)
+
+    def execute_agent_command_burst(
+        self,
+        project_id: str,
+        owner_id: str,
+        expected_revision: int,
+        commands: list[dict[str, Any]],
+        lease_id: str | None = None,
+        *,
+        request_id: str | None = None,
+        request_ids: list[str | None] | None = None,
+    ) -> dict[str, Any]:
+        """Run an ordered burst of agent commands under a server-managed, single-request lease."""
+        if not isinstance(commands, list) or not commands or len(commands) > 100:
+            raise ValidationError("commands must contain between 1 and 100 command objects.")
+        for idx, cmd in enumerate(commands):
+            if not isinstance(cmd, dict) or not isinstance(cmd.get("type"), str):
+                raise ValidationError(f"Command at index {idx} must be a JSON object with a string 'type'.")
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValidationError("expected_revision must be a non-negative integer.")
+        if not isinstance(owner_id, str) or not owner_id.strip():
+            raise ValidationError("owner_id must be a non-empty string.")
+
+        if request_id is not None:
+            _validate_request_id(request_id)
+        if request_ids is not None:
+            if not isinstance(request_ids, list) or len(request_ids) != len(commands):
+                raise ValidationError("request_ids must be a list matching the length of commands.")
+            for rid in request_ids:
+                if rid is not None:
+                    _validate_request_id(rid)
+
+        with self._project_lifecycle_lock(project_id):
+            if request_id is not None:
+                existing = self.leases.get_idempotency_record(project_id, request_id)
+                if existing is not None:
+                    burst_hash = hashlib.sha256(
+                        json.dumps(commands, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+                    ).hexdigest()
+                    if existing["command_hash"] != burst_hash or existing.get("expected_revision") != expected_revision:
+                        raise ConflictError(
+                            f"request_id '{request_id}' has already been used with different command or revision parameters.",
+                            code="IDEMPOTENCY_CONFLICT",
+                        )
+                    return dict(existing["result"])
+
+            lease = (self.acquire_lease(project_id, "agent", owner_id) if lease_id is None
+                     else self.leases.require(project_id, lease_id).as_dict())
+            if lease.get("owner_id") != owner_id or lease.get("owner_type") != OwnerType.AGENT.value:
+                raise ConflictError("The agent lease does not belong to this MCP session.", code="PROJECT_LOCKED")
+            active_lease = (lease["lease_id"], owner_id)
+            with self._core._server_agent_lease_guard:
+                self._core._server_agent_leases[project_id] = active_lease
+
+            results: list[dict[str, Any]] = []
+            history_entries: list[dict[str, Any]] = []
+            current_revision = expected_revision
+            final_document_summary: dict[str, Any] = {}
+
+            try:
+                for idx, cmd in enumerate(commands):
+                    self.leases.check_agent_command(project_id, lease["lease_id"])
+
+                    cmd_rid: str | None = None
+                    if request_ids is not None and request_ids[idx] is not None:
+                        cmd_rid = request_ids[idx]
+                    elif isinstance(cmd.get("request_id"), str) and cmd["request_id"].strip():
+                        cmd_rid = cmd["request_id"].strip()
+                    elif request_id is not None:
+                        candidate_rid = f"{request_id}:{idx}"
+                        if len(candidate_rid) <= 128:
+                            cmd_rid = candidate_rid
+
+                    cmd_to_run = {k: v for k, v in cmd.items() if k != "request_id"}
+
+                    try:
+                        step_result = self.execute_command(
+                            project_id,
+                            lease["lease_id"],
+                            cmd_to_run,
+                            expected_owner_type=OwnerType.AGENT,
+                            expected_revision=current_revision,
+                            compact_receipt=True,
+                            request_id=cmd_rid,
+                        )
+                    except Exception as exc:
+                        if isinstance(exc, CadyxError):
+                            exc.add_diagnostics(
+                                burst_failed_index=idx,
+                                burst_completed_count=len(results),
+                                burst_total_count=len(commands),
+                                burst_initial_revision=expected_revision,
+                                burst_committed_revision=current_revision,
+                            )
+                        raise
+
+                    doc_summary = step_result.get("document", {})
+                    hist_entry = step_result.get("history_entry")
+                    compact_hist = _compact_history_dict(hist_entry)
+
+                    if isinstance(doc_summary, dict) and "object_count" in doc_summary:
+                        step_doc_summary = doc_summary
+                    else:
+                        objects = doc_summary.get("objects", []) if isinstance(doc_summary, dict) else []
+                        object_counts: dict[str, int] = {}
+                        for item in objects if isinstance(objects, list) else []:
+                            if isinstance(item, dict) and isinstance(item.get("type"), str):
+                                object_counts[item["type"]] = object_counts.get(item["type"], 0) + 1
+                        step_doc_summary = {
+                            "id": doc_summary.get("id"), "version": doc_summary.get("version"),
+                            "revision": doc_summary.get("revision"), "object_count": len(objects),
+                            "object_counts": object_counts,
+                        }
+
+                    final_document_summary = step_doc_summary
+                    current_revision = step_doc_summary.get("revision", current_revision + 1)
+                    history_entries.append(compact_hist)
+                    results.append({
+                        "index": idx,
+                        "command": cmd_to_run.get("type"),
+                        "revision": current_revision,
+                        "document": step_doc_summary,
+                        "history_entry": compact_hist,
+                    })
+
+                burst_payload = {
+                    "document": final_document_summary,
+                    "history_entries": history_entries,
+                    "results": results,
+                    "completed_count": len(results),
+                    "total_count": len(commands),
+                    "initial_revision": expected_revision,
+                    "final_revision": current_revision,
+                    "lease_released": True,
+                }
+
+                if request_id is not None:
+                    burst_operation_id = str(uuid4())
+                    burst_hash = hashlib.sha256(
+                        json.dumps(commands, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+                    ).hexdigest()
+                    with self.leases.guard(project_id):
+                        self.leases.record_idempotency(
+                            project_id=project_id,
+                            request_id=request_id,
+                            operation_id=burst_operation_id,
+                            revision=current_revision,
+                            command_hash=burst_hash,
+                            expected_revision=expected_revision,
+                            outcome="completed",
+                            result=burst_payload,
+                        )
+
+                return burst_payload
             finally:
                 try:
                     self.release_lease(project_id, lease["lease_id"])

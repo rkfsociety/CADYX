@@ -819,6 +819,19 @@ class CadyxCore:
             request_id=request_id,
         )
 
+    def execute_agent_command_burst(
+        self, project_id: str, owner_id: str, expected_revision: int, commands: list[dict[str, Any]],
+        lease_id: str | None = None,
+        *,
+        request_id: str | None = None,
+        request_ids: list[str | None] | None = None,
+    ) -> dict[str, Any]:
+        return self._command_activity.execute_agent_command_burst(
+            project_id, owner_id, expected_revision, commands, lease_id,
+            request_id=request_id,
+            request_ids=request_ids,
+        )
+
     def preview_commands(self, project_id: str, expected_revision: int, commands: list[dict[str, Any]]) -> dict[str, Any]:
         """Validate an ordered command batch on an isolated copy without saving it."""
         if not isinstance(commands, list) or not commands or len(commands) > 100:

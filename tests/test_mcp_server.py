@@ -850,6 +850,81 @@ class CadyxMCPServerTests(unittest.TestCase):
         no_recovery = self.app.call_tool("cadyx_recover_expired_lease", {"project_id": project_id})
         self.assertTrue(no_recovery["isError"])
 
+    def test_mcp_command_burst_execution(self) -> None:
+        project_id = self._create_project()
+        commands = [
+            {"type": "create_box", "width": 1, "height": 2, "depth": 3},
+            {"type": "create_box", "width": 4, "height": 5, "depth": 6},
+        ]
+        result = self._tool_value("cadyx_execute_command_burst", {
+            "project_id": project_id,
+            "expected_revision": 0,
+            "commands": commands,
+        })
+        self.assertEqual(result["revision"], 2)
+        self.assertEqual(result["completed_count"], 2)
+        self.assertTrue(result["lease_released"])
+        inspect_res = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(inspect_res["lock"]["state"], "FREE")
+        self.assertEqual(inspect_res["document"]["revision"], 2)
+
+    def test_mcp_command_burst_failure_propagates_without_safe_stop(self) -> None:
+        project_id = self._create_project()
+        commands = [
+            {"type": "create_box", "width": 1, "height": 2, "depth": 3},
+            {"type": "create_box", "width": -5, "height": 2, "depth": 3},
+        ]
+        resp = self.app.call_tool("cadyx_execute_command_burst", {
+            "project_id": project_id,
+            "expected_revision": 0,
+            "commands": commands,
+        })
+        self.assertTrue(resp["isError"])
+        inspect_res = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(inspect_res["lock"]["state"], "FREE")
+        self.assertEqual(inspect_res["document"]["revision"], 1)
+
+    def test_mcp_command_burst_idempotent_retry_on_dropped_response(self) -> None:
+        project_id = self._create_project()
+        commands = [
+            {"type": "create_box", "width": 1, "height": 1, "depth": 1},
+            {"type": "create_box", "width": 2, "height": 2, "depth": 2},
+        ]
+        res1 = self._tool_value("cadyx_execute_command_burst", {
+            "project_id": project_id,
+            "expected_revision": 0,
+            "commands": commands,
+            "request_id": "burst-net-1",
+        })
+        self.assertEqual(res1["revision"], 2)
+
+        res2 = self._tool_value("cadyx_execute_command_burst", {
+            "project_id": project_id,
+            "expected_revision": 0,
+            "commands": commands,
+            "request_id": "burst-net-1",
+        })
+        self.assertEqual(res2["revision"], 2)
+        self.assertEqual(res2["completed_count"], 2)
+        inspect_res = self._tool_value("cadyx_inspect_project", {"project_id": project_id})
+        self.assertEqual(inspect_res["document"]["revision"], 2)
+
+    def test_mcp_command_burst_consumes_resumed_lease(self) -> None:
+        project_id = self._create_project()
+        resumed = self._tool_value("cadyx_resume_agent_work", {"project_id": project_id, "expected_revision": 0})
+        self.assertTrue(resumed["resumed"])
+        commands = [
+            {"type": "create_box", "width": 1, "height": 1, "depth": 1},
+            {"type": "create_box", "width": 2, "height": 2, "depth": 2},
+        ]
+        result = self._tool_value("cadyx_execute_command_burst", {
+            "project_id": project_id,
+            "expected_revision": 0,
+            "commands": commands,
+        })
+        self.assertEqual(result["revision"], 2)
+        self.assertEqual(self._tool_value("cadyx_inspect_project", {"project_id": project_id})["lock"]["state"], "FREE")
+
     def test_stop_fences_an_admitted_command_and_resolves_lease(self) -> None:
         project_id = self._create_project()
         entered = threading.Event()

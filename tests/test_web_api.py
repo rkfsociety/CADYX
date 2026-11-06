@@ -758,6 +758,23 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(error["error"], "PROPOSAL_STALE")
         self.core.release_lease(project_id, lease_id)
 
+    def test_agent_command_burst_route(self) -> None:
+        _, created = self.request("/api/v1/agent/projects", {"name": "Burst Route Test"})
+        project_id = created["project"]["id"]
+        commands = [
+            {"type": "create_box", "width": 1, "height": 2, "depth": 3},
+            {"type": "create_box", "width": 4, "height": 5, "depth": 6},
+        ]
+        status, response = self.request(f"/api/v1/agent/projects/{project_id}/commands/burst", {
+            "owner_id": "agent-test",
+            "expected_revision": 0,
+            "commands": commands,
+        })
+        self.assertEqual(status, 200)
+        self.assertEqual(response["completed_count"], 2)
+        self.assertEqual(response["final_revision"], 2)
+        self.assertTrue(response["lease_released"])
+
     def test_invalid_command_batch_preview_never_changes_saved_project(self) -> None:
         _, created = self.request("/api/v1/agent/projects", {"name": "Rejected batch preview"})
         project_id = created["project"]["id"]

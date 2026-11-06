@@ -95,6 +95,7 @@ _MUTATING_TOOLS = frozenset({
     "cadyx_remove_staged_step",
     "cadyx_report_dashboard",
     "cadyx_execute_command",
+    "cadyx_execute_command_burst",
     "cadyx_commit_command_proposal",
     "cadyx_stop_agent_work",
     "cadyx_resume_agent_work",
@@ -199,7 +200,7 @@ def _response_budget(method: str, path: str) -> tuple[int, str, str]:
             "Request a smaller section/page with cadyx_inspect_compact (limit/offset).",
         )
     if (
-        route.endswith(("/viewport", "/topology", "/commands", "/commands/execute",
+        route.endswith(("/viewport", "/topology", "/commands", "/commands/execute", "/commands/burst",
                        "/commands/preview", "/commands/commit"))
         or (route.startswith("/api/v1/agent/projects/") and route.count("/") == 5)
     ):
@@ -492,6 +493,7 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "cadyx_report_dashboard", "description": "Publish honest Russian workflow progress and queue state; this does not mutate the CAD document.", "inputSchema": _schema({"project_id": _STRING, "workflow": {"anyOf": [_OBJECT, {"type": "null"}]}, "tasks": {"type": "array", "items": _OBJECT}}, ["project_id", "workflow", "tasks"])},
     {"name": "cadyx_get_activity", "description": "Read recent real modeling operation states and results.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
     {"name": "cadyx_execute_command", "description": "Execute one Command System operation with a server-managed agent lease in one HTTP request. Checks expected_revision, releases the lease, and returns a compact receipt without B-rep payloads. Supports optional caller request_id for durable mutation idempotency. Never retries a command whose response was lost without a request_id.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER, "command": _COMMAND, "request_id": _STRING}, ["project_id", "expected_revision", "command"])},
+    {"name": "cadyx_execute_command_burst", "description": "Execute an ordered burst of Command System operations under one server-managed agent lease in one HTTP request. Verifies expected_revision initially, advances revision sequentially after each command, emits distinct events and history entries per step, and terminates before the first failing or stop-fenced command, returning completed command receipts. Supports optional request_id or per-command request_ids for idempotency.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER, "commands": {"type": "array", "items": _COMMAND, "minItems": 1, "maxItems": 100}, "request_id": _STRING, "request_ids": {"type": "array", "items": {"anyOf": [_STRING, {"type": "null"}]}}}, ["project_id", "expected_revision", "commands"])},
     {"name": "cadyx_preview_commands", "description": "Preview an ordered batch on an isolated document copy without saving project state or publishing files; returns a revision-bound single-use proposal.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER, "commands": {"type": "array", "items": _COMMAND, "minItems": 1, "maxItems": 100}}, ["project_id", "expected_revision", "commands"])},
     {"name": "cadyx_commit_command_proposal", "description": "Atomically commit a preview proposal under a fresh agent lease and exact revision; never retry after an ambiguous response.", "inputSchema": _schema({"project_id": _STRING, "expected_revision": _INTEGER, "proposal_id": _STRING}, ["project_id", "expected_revision", "proposal_id"])},
     {"name": "cadyx_stop_agent_work", "description": "Set the existing safe stop fence for work owned by this MCP session; waits for any admitted atomic command and validates the saved state.", "inputSchema": _schema({"project_id": _STRING}, ["project_id"])},
@@ -905,6 +907,14 @@ class MCPApplication:
                     {"command_type": args["command"].get("type")},
                 )
             return result
+        if name == "cadyx_execute_command_burst":
+            return self._execute_command_burst(
+                args["project_id"],
+                args["expected_revision"],
+                args["commands"],
+                request_id=args.get("request_id"),
+                request_ids=args.get("request_ids"),
+            )
         if name == "cadyx_preview_commands":
             return self.api.post(self._project(args["project_id"], "/commands/preview"),
                                  {"expected_revision": args["expected_revision"], "commands": args["commands"]})
@@ -979,6 +989,76 @@ class MCPApplication:
                     "Inspect the current revision, history and lock before any retry."
                 ) from exc
             raise OutcomeUncertainError(f"{exc}. The atomic command response was not confirmed; inspect the current revision, history and lock before any retry.") from exc
+
+    def _execute_command_burst(
+        self,
+        project_id: str,
+        expected_revision: int,
+        commands: list[dict[str, Any]],
+        request_id: str | None = None,
+        request_ids: list[str | None] | None = None,
+    ) -> Any:
+        if not isinstance(commands, list) or not commands:
+            raise ValueError("commands must be a non-empty list of command objects.")
+        for cmd in commands:
+            if not isinstance(cmd, dict) or not isinstance(cmd.get("type"), str):
+                raise ValueError("each command must be an object with a string type.")
+        if request_id is not None and (not isinstance(request_id, str) or not (1 <= len(request_id) <= 128)):
+            raise ValueError("request_id must be a non-empty string up to 128 characters.")
+        if request_ids is not None:
+            if not isinstance(request_ids, list) or len(request_ids) != len(commands):
+                raise ValueError("request_ids must match the length of commands.")
+            for rid in request_ids:
+                if rid is not None and (not isinstance(rid, str) or not (1 <= len(rid) <= 128)):
+                    raise ValueError("each request_id in request_ids must be a non-empty string up to 128 characters.")
+        with self._lease_guard:
+            resumed = self._resumed_leases.get(project_id)
+        payload: dict[str, Any] = {
+            "owner_id": self.owner_id,
+            "expected_revision": expected_revision,
+            "commands": commands,
+        }
+        if request_id is not None:
+            payload["request_id"] = request_id
+        if request_ids is not None:
+            payload["request_ids"] = request_ids
+        if resumed:
+            lease_id, resume_revision = resumed
+            if expected_revision != resume_revision:
+                raise APIError(409, {"error": "REVISION_CONFLICT", "message": "The resumed lease is bound to a different revision; inspect the project before editing."})
+            payload["lease_id"] = lease_id
+            with self._lease_guard:
+                self._resumed_leases.pop(project_id, None)
+        try:
+            result = self.api.post(self._project(project_id, "/commands/burst"), payload)
+            return {
+                "burst_result": result,
+                "revision": result.get("final_revision", result.get("document", {}).get("revision")),
+                "completed_count": result.get("completed_count"),
+                "lease_released": True,
+            }
+        except Exception as exc:
+            if isinstance(exc, APIError) and exc.status in _DEFINITIVE_COMMAND_REJECTION_STATUSES:
+                raise
+            if request_id is not None or request_ids is not None:
+                try:
+                    result = self.api.post(self._project(project_id, "/commands/burst"), payload)
+                    return {
+                        "burst_result": result,
+                        "revision": result.get("final_revision", result.get("document", {}).get("revision")),
+                        "completed_count": result.get("completed_count"),
+                        "lease_released": True,
+                    }
+                except Exception:
+                    pass
+            try:
+                self._stop_agent_work(project_id)
+            except Exception as stop_error:
+                raise OutcomeUncertainError(
+                    f"{exc}. Safe stop could not be confirmed: {stop_error}. "
+                    "Inspect the current revision, history and lock before any retry."
+                ) from exc
+            raise OutcomeUncertainError(f"{exc}. The command burst response was not confirmed; inspect the current revision, history and lock before any retry.") from exc
 
     def _commit_command_proposal(self, project_id: str, expected_revision: int, proposal_id: str) -> Any:
         lease_result = self.api.post(self._project(project_id, "/leases"), {"owner_id": self.owner_id})

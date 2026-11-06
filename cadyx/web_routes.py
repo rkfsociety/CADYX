@@ -150,6 +150,7 @@ _ROUTE_SPECS = (
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands", "agent_command", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands/preview", "agent_commands_preview", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands/execute", "agent_command_execute", "agent", "json"),
+    RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands/burst", "agent_command_burst", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/commands/commit", "agent_commands_commit", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities", "agent_capability_develop", "agent", "json"),
     RouteSpec("POST", "/api/v1/agent/projects/{project_id}/capabilities/check", "agent_capability_check", "agent", "json"),
@@ -1060,6 +1061,16 @@ def _dispatch_agent(handler: Any, core: CadyxCore, route: RouteMatch, parsed: Sp
         handler._json(200, core.execute_agent_command(
             project_id, body["owner_id"], body["expected_revision"], body["command"], body.get("lease_id"),
             request_id=body.get("request_id"),
+        ))
+    elif name == "agent_command_burst":
+        body = _require_json(handler)
+        allowed_keys = {"owner_id", "expected_revision", "commands", "lease_id", "request_id", "request_ids"}
+        if not {"owner_id", "expected_revision", "commands"}.issubset(body) or set(body) - allowed_keys:
+            raise ValidationError("Atomic agent command burst requires owner_id, expected_revision and commands, with optional lease_id, request_id and request_ids.")
+        handler._json(200, core.execute_agent_command_burst(
+            project_id, body["owner_id"], body["expected_revision"], body["commands"], body.get("lease_id"),
+            request_id=body.get("request_id"),
+            request_ids=body.get("request_ids"),
         ))
     elif name in {"agent_lease", "agent_command", "agent_lease_recover", "agent_lease_heartbeat", "agent_lease_release"}:
         _dispatch_project_control(handler, core, route, agent_api=True)
