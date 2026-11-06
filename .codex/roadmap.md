@@ -407,3 +407,67 @@ Reviewed against existing roadmap items 1–106 at current `main`; these are dis
 117. **Use compact JSON for high-frequency HTTP and SSE transport payloads** — **P2**, **impact/effort:** Low-Medium / Low. **Evidence:** `cadyx/web.py:245–260,400–404`. **Problem:** Default `json.dumps` separators insert spaces in all API JSON responses and SSE envelopes. This sends avoidable bytes on every operation/status poll and event, especially when data contains many fields. **Proposed fix / status:** Pass `separators=(',', ':')` for HTTP JSON and SSE event serialization while preserving Unicode, finiteness checks, headers and parsed structure. **Implemented in this commit**. **Expected effect / metric:** Track JSON body byte count and serialization time for typical `/updates`, command and event fixtures; expect smaller payloads but do not claim measured p95 savings. **Risks:** Clients must parse JSON, not compare literal whitespace; preserve SSE framing and Content-Length correctness.
 
 **Sequence:** ship the deterministic 4xx/error and compact wire-format changes first (108, 113, 117); instrument 107/109/110, then address correctness of connection/event recovery (112, 114), storage amplification (111), snapshot encoding (115), and lifecycle-retention hygiene (116). No further runtime refactors in this commit; verify using representative measurements and regression suites before marking any other candidate complete.
+
+## AI autonomous execution queue — 2026-11-06 (sorted by implementation velocity)
+
+The following queue consolidates open architectural, transport, scanning, and geometry capability gaps into an operational sequence prioritized specifically for AI autonomous development velocity (fastest-to-implement, lowest-risk pure-Python tasks first, progressing through kernel C++ modifications up to multi-module engineering deliverables).
+
+### Velocity Tier 1: Fastest AI wins (Pure Python / scoped MCP & Core boundaries; 1–2 agent turns)
+
+118. **MCP input frame and outstanding-call limits with cancellation (combines 69, 70, 95)** — **Velocity: High**.
+   - **Problem:** `mcp_server.py` reads unbounded lines via stdio, queues unlimited tasks into `ThreadPoolExecutor`, and ignores incoming `notifications/cancelled`.
+   - **AI Implementation:** Pure Python in `cadyx/mcp_server.py`. Introduce bounded line reading (drain oversized frames up to a safe 64 MiB cap with explicit JSON-RPC error), wrap tool dispatch in an explicit pending-task queue budget (returning standard overload errors), and track active request IDs to cooperatively cancel pending/un-started read operations without risking partial mutation state.
+   - **Acceptance:** Unit tests in `tests/test_mcp_server.py` verify frame limits, overload rejection under artificial concurrency, and cancellation of pending reads.
+
+119. **Durable mutation idempotency keys (`request_id`, item 85)** — **Velocity: High**.
+   - **Problem:** When an HTTP connection drops after an atomic command is committed, the agent cannot distinguish whether the write succeeded without entering safe-stop, recovering leases, and inspecting history.
+   - **AI Implementation:** Accept an optional caller-generated `request_id` in Agent API and MCP execute requests. Persist `(request_id, operation_id, revision, outcome)` atomically within the project's committed command transaction. A re-sent request with the same ID immediately returns the stored outcome without re-executing or altering history.
+   - **Acceptance:** Regression tests in `tests/test_agent_control.py` simulate dropped responses and retry loops; mismatched payloads with identical request IDs reject as conflicts; legacy requests without request IDs remain supported.
+
+120. **Bounded command bursts for planned agent turns (item 84)** — **Velocity: High**.
+   - **Problem:** When an AI model plans 5–10 deterministic sketch or modeling steps in a single inference turn, executing each via separate round-trip HTTP/MCP calls incurs repeated RTT, lease-handling, and preflight checks.
+   - **AI Implementation:** Add a burst execution endpoint (`/api/v1/agent/projects/{id}/commands/burst`) and corresponding MCP tool. It accepts an ordered list of commands and the initial expected revision, acquiring one server-side lease, verifying sequential revisions, and emitting distinct events and history entries per step while terminating before the first failing command.
+   - **Acceptance:** N valid commands execute in 1 network request, generating N history records and N live viewer animations; an error on step K commits steps 1..K-1 atomically and halts.
+
+### Velocity Tier 2: Fast Core & Cache optimizations (Pure Python & rendering; 2–3 agent turns)
+
+121. **Cross-revision B-rep tessellation cache by geometry hash (item 39)** — **Velocity: Medium-High**.
+   - **Problem:** Currently `RenderingCacheService` invalidates the entire scene on every project revision change. A non-geometric update (metadata, parameter edit on another body, or adding a sketch) triggers full OCCT re-tessellation of unchanged bodies.
+   - **AI Implementation:** In `cadyx/rendering.py` and `cadyx/runtime_cache.py`, maintain an LRU cache of immutable vertex/triangle buffers keyed by `(geometry_hash, deflection, angular_deflection)`. In `render_project`, unchanged bodies copy pre-tessellated arrays, invoking native `kernel.tessellate` only for new or modified geometry descriptors.
+   - **Acceptance:** Benchmark in `tests/test_runtime_cache.py` verifies zero native tessellation calls on unchanged bodies across revisions; mesh positions remain immutable or safely copied for edge overlays.
+
+122. **Parametric fastener catalog series (ISO/DIN/ГОСТ standard parts — item 12 expansion)** — **Velocity: Medium-High**.
+   - **Problem:** `cadyx/standard_parts.py` provides only abstract stock shapes (stud, hex bar, bearing envelope, rectangular bar). Common engineering models frequently require standard bolts, screws, nuts, and washers.
+   - **AI Implementation:** Add declarative, content-addressed presets for metric fasteners (hex head bolts ISO 4014 / DIN 933, socket head cap screws ISO 4762 / DIN 912, hex nuts ISO 4032, flat washers ISO 7089) by parametrically composing existing cylinder, hex, bore, and external/internal metric thread features into native OCCT B-reps.
+   - **Acceptance:** Canonical manifest validation, tests in `tests/test_standard_parts.py`, verifiable thread pitch/length bounds, and correct mass/volume computation.
+
+123. **DepthCam empirical scale calibration utility (Revopoint tools)** — **Velocity: Medium-High**.
+   - **Problem:** The DepthCam Y16 scale factor `0.005 Q` remains provisional, risking uncalibrated CAD dimensions when modeling from raw point clouds.
+   - **AI Implementation:** Create `tools/revopoint/calibrate_depth_scale.py` to analyze a scan of an artifact with known ground-truth dimensions (e.g., precision cylinder or step block on the turntable). The script fits geometric primitives (RANSAC cylinder/planes), computes the empirical scale multiplier against known metric dimensions, and outputs a validated calibration config to `%LOCALAPPDATA%\CADYX\scanner-calibration\`.
+   - **Acceptance:** Deterministic synthetic test fixture in `tests/test_revopoint_calibration.py` verifying error convergence, residual reporting, and fallback bounds.
+
+### Velocity Tier 3: Native bridge & geometry kernel enhancements (C++ / OCCT ABI; 3–5 agent turns)
+
+124. **Batch same-depth hole cuts in native kernel (item 59)** — **Velocity: Medium**.
+   - **Problem:** `OCCTKernelAdapter.create_extruded_profile_with_holes` sequentially executes H individual `BRepAlgoAPI_Cut` operations, generating intermediate B-rep allocations that scale poorly with hole count.
+   - **AI Implementation:** Update `native/kernel_profiles.cpp` / `native/kernel.cpp` to build a single composite face with inner wire loops (`BRepBuilderAPI_MakeFace` + inner `TopoDS_Wire` for each hole loop) prior to prism extrusion when holes are non-intersecting and through-depth, or use a compound cutter tool in a single Boolean cut pass.
+   - **Acceptance:** Constant-time/single-pass native cut invocation; identical volume, bounds, and topology orientation verified in `tests/test_profile_features.py`.
+
+125. **General sketch work plane support for revolve and loft operations** — **Velocity: Medium**.
+   - **Problem:** Document Model v12 introduced `YZ`, `CUSTOM`, and `FACE` work planes, but `revolve_sketch` and `loft_sketches` still mandate XY/XZ planes due to historical coordinate assumptions.
+   - **AI Implementation:** In `cadyx/command_profiles.py` and `cadyx/kernel_profiles.py`, transform sketch profile geometry and rotation axes from the sketch's local right-handed coordinate frame (`origin`, `x_axis`, `y_axis`, `normal`) into the target 3D Cartesian coordinates before invoking OCCT revolution/loft builders, preserving parametric rebuild bindings.
+   - **Acceptance:** Tests creating revolved solids and multi-section lofts on tilted CUSTOM and FACE planes, with dependent rebuild and parameter update verification.
+
+### Velocity Tier 4: Substantive engineering capabilities (Multi-module deliverables & metrology; 5+ agent turns)
+
+126. **Revision-bound 2D orthographic drawing views and BOM generation (item 15)** — **Velocity: Medium-Low**.
+   - **Problem:** Downstream engineering workflows lack automated 2D deliverables (drawings/views) and bill-of-materials from the v17/assembly v8 model graph.
+   - **AI Implementation:**
+     1. Add `generate_drawing_views` Agent API / MCP command utilizing OCCT's `HLRBRep_Algo` (hidden line removal) to project part/assembly solids onto primary orthographic planes (Front, Top, Right, Isometric), exporting clean SVG and DXF vector files.
+     2. Add `generate_bill_of_materials` generating structured JSON/CSV tables resolving nested part quantities, material names, density, mass, and bounding dimensions with revision and geometry hash provenance.
+   - **Acceptance:** New contract in `docs/technical-drawings.md`, verified DXF/SVG vector output tests, and BOM item aggregation tests covering multi-instance assemblies.
+
+127. **Multi-scan geometric registration and loop-closure ICP (item 16)** — **Velocity: Low (Research-grade)**.
+   - **Problem:** Currently, scanning creates isolated series (`Сшитые серии`), but assembling a complete closed 3D model of an object requires combining multiple sweeps (e.g., top and inverted bottom orientations) without turntable marker assistance.
+   - **AI Implementation:** Implement `tools/revopoint/register_multi_series.py` using Open3D feature-based coarse registration (FPFH + RANSAC) followed by point-to-plane Generalized ICP, global pose graph optimization, and conservative overlap/residual thresholds to reject misalignments before fusing.
+   - **Acceptance:** Synthetic multi-view test fixtures, quantitative overlap reporting, rejection of under-constrained alignments, and non-destructive publishing beside source scans.
